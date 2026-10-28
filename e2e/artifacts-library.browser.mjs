@@ -159,8 +159,11 @@ try {
     const back = async () => { await page.getByRole("button", { name: "All artifacts", exact: true }).click(); await list.waitFor() }
     const openItem = async (name, kind) => {
       await list.getByRole("button", { name: `Open ${name}` }).click()
-      await page.getByRole("heading", { level: 1, name }).waitFor()
-      assert.ok((await page.getByRole("heading", { level: 1, name }).locator("xpath=..").innerText()).includes(kind), `${name} is a ${kind}`)
+      // Exactly one title: the library's h1, or the viewer's own header where it opens in the viewer.
+      const title = page.getByRole("heading", { level: 1, name }).or(page.locator('section[aria-label="Artifact viewer"]').getByRole("heading", { level: 2, name }))
+      await title.waitFor()
+      assert.equal(await page.getByRole("heading", { name, exact: true }).count(), 1, `${name} is titled once`)
+      assert.ok((await title.locator("xpath=..").innerText()).includes(kind), `${name} is a ${kind}`)
     }
     const viewer = page.locator('section[aria-label="Artifact viewer"]')
 

@@ -206,15 +206,19 @@ function ArtifactDetail({ workspaceId, item, onBack }: { workspaceId: string; it
   const projectPreview = item.projectBacked && (item.kind === "project" || item.kind === "dashboard" && artifactDashboards() || item.kind === "slides" && artifactSlides()) && projects
   const target = useMemo(() => ({ slug: item.slug, tab: "preview" as const }), [item.slug])
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
-    <div><Button type="button" variant="ghost" size="sm" className="-ml-2 coarse:min-h-[44px]" onClick={onBack}><ArrowLeft aria-hidden />All artifacts</Button></div>
-    <header className="flex min-w-0 flex-wrap items-center gap-3">
+    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+      <Button type="button" variant="ghost" size="sm" className="-ml-2 coarse:min-h-[44px]" onClick={onBack}><ArrowLeft aria-hidden />All artifacts</Button>
+      {/* The viewer names the artifact, its kind and version itself; here only what it does not say. */}
+      {projectPreview && meta(item) && <span className="ml-auto truncate text-xs text-muted-foreground">{meta(item)}</span>}
+    </div>
+    {!projectPreview && <header className="flex min-w-0 flex-wrap items-center gap-3">
       <KindTile kind={item.kind} large />
       <div className="grid min-w-0 flex-[1_1_220px] gap-1">
         <h1 className="truncate text-xl font-semibold">{item.name}</h1>
         <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><KindBadge kind={item.kind} /><StateChips item={item} /><span>{meta(item)}</span></p>
       </div>
-      {!projectPreview && <OpenInPages workspaceId={workspaceId} item={item} />}
-    </header>
+      <OpenInPages workspaceId={workspaceId} item={item} />
+    </header>}
     {projectPreview
       ? <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
         <div className="flex min-h-[520px] flex-1 overflow-hidden rounded-card border"><ArtifactViewerPanel variant="library" /></div>
@@ -293,7 +297,7 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
   useLibraryKeys(contentRef, item !== null, () => onSelect(null))
 
   const subBar = <SubBar icon={Library} title="Artifacts" ariaLabel="Artifacts" heading={false}
-    section={selected ? <span className="font-normal text-muted-foreground"> › {selected.name}</span> : undefined}
+    section={selected ? selected.name : undefined}
     actions={creatable.length > 0 ? <SubBarPrimary icon={Plus} aria-label="New artifact" onClick={() => setNewKind(null)}>
       <span className="hidden sm:inline">New artifact</span>
     </SubBarPrimary> : undefined} />

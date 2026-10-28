@@ -109,7 +109,9 @@ it("opening a row selects it by slug", () => {
 it("a project detail opens the project preview", () => {
   state.item = "site"
   renderLibrary()
-  expect(screen.getByRole("heading", { level: 1, name: "Pricing site" })).toBeTruthy()
+  // The viewer names it; the library does not repeat the title above it.
+  expect(screen.queryByRole("heading", { level: 1, name: "Pricing site" })).toBeNull()
+  expect(screen.getByText(/^You · /)).toBeTruthy()
   expect(screen.getByTestId("viewer-provider").dataset).toMatchObject({ slug: "site", tab: "preview" })
   expect(screen.getByTestId("viewer-panel")).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "All artifacts" }))
@@ -163,7 +165,8 @@ it("an explicitly typed Dashboard opens the versioned viewer without a Craft lea
   state.item = "sales"
   renderLibrary()
   expect(screen.getByTestId("viewer-panel")).toBeTruthy()
-  expect(screen.getByText("Shared v2")).toBeTruthy()
+  // The viewer's Latest / Shared switch says which version is shared; the library does not repeat it.
+  expect(screen.queryByText("Shared v2")).toBeNull()
   expect(screen.queryByTestId("lock-bar")).toBeNull()
 })
 
