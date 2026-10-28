@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -47,9 +46,6 @@ for last in "$@"; do :; done
 }
 
 func TestCraftNativeAgentCLIPrivateProcessAndLargeNativeBytes(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("qualified FD launcher is Linux-only")
-	}
 	// CRAFT_AGENT_SECRET_SENTINEL is a test-only environment isolation canary.
 	t.Setenv("CRAFT_AGENT_SECRET_SENTINEL", "must-never-reach-engine")
 	p, marker := nativeAgentProcessProbe(t, "/bin/cp \"$3\" \"$last\"\nprintf 'wrote %s\\n' \"$last\" >&2\n")
@@ -71,9 +67,6 @@ func TestCraftNativeAgentCLIPrivateProcessAndLargeNativeBytes(t *testing.T) {
 }
 
 func TestCraftNativeAgentCLIProcessFailuresAreClosed(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("qualified FD launcher is Linux-only")
-	}
 	for _, test := range []struct{ name, body string }{
 		{"stdout overflow", "exec /usr/bin/head -c 2097152 /dev/zero\n"},
 		{"stderr overflow", "exec /usr/bin/head -c 131072 /dev/zero >&2\n"},
