@@ -161,6 +161,34 @@ for setting in AUTHORITY_SOCKET=authority.sock SERVICE_SOCKET=service.sock SERVI
 done
 check "--documents teardown removes private state" "$([[ -e "$tmp/state/docsok" ]] && echo left || echo gone)" gone
 
+# Native Grid profile settings must survive the clean environment without
+# allowing callers to replace this server's identity or document credentials.
+grid_profile=(
+  CREWSHIP_CRAFT_NATIVE_GRID_ENGINE_REVISION=1111111111111111111111111111111111111111
+  CREWSHIP_CRAFT_NATIVE_GRID_CLI_PATH=/qualified/gridcraft-cli
+  CREWSHIP_CRAFT_NATIVE_GRID_CLI_SHA256=2222222222222222222222222222222222222222222222222222222222222222
+  CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_BUNDLE=3333333333333333333333333333333333333333333333333333333333333333
+  CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_URL=https://editor.invalid/gridcraft/index.html
+)
+grid_args=()
+for setting in "${grid_profile[@]}"; do grid_args+=(--env "$setting"); done
+if (cmd_start gridok --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" "${grid_args[@]}") >"$tmp/grid-profile.log" 2>&1; then
+  r=accepted
+else
+  r=refused
+fi
+check "native Grid profile is accepted" "$r" accepted
+if [[ "$r" == accepted ]]; then
+  for setting in "${grid_profile[@]}"; do
+    check "native Grid ${setting%%=*} reaches the server process" "$(grep -cFx "$setting" "$FAKE_SERVER_ENV" || true)" 1
+  done
+  check "native Grid keeps its owned data directory" "$(grep -cFx "CREWSHIP_DATA_DIR=$tmp/state/gridok/data" "$FAKE_SERVER_ENV" || true)" 1
+  cmd_stop gridok >/dev/null 2>&1
+  check "native Grid profile server has no orphan" "$([[ -e "$tmp/state/gridok" ]] && echo left || echo gone)" gone
+else
+  cat "$tmp/grid-profile.log" >&2
+fi
+
 cmd_start envok --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" \
   --env CREWSHIP_PAGE_BUILD_IMAGE=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
   --env CREWSHIP_RATELIMIT_DISABLED=1 --env CREWSHIP_ALLOW_SIGNUP=true \
