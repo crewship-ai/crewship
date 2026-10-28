@@ -48,12 +48,19 @@ export function nativeDialogCalls(src: string): string[] {
 }
 
 describe("no native browser dialogs", () => {
+  it("rejects actual native calls inside ternary branches", () => {
+    expect(nativeDialogCalls('const result = ok ? confirm("x") : false')).toHaveLength(1)
+    expect(nativeDialogCalls('const result = ok ? alert("x") : false')).toHaveLength(1)
+  })
   it("recognises native calls and local bindings", () => {
     expect(nativeDialogCalls("if (!window.confirm('x')) return")).toHaveLength(1)
     expect(nativeDialogCalls("if (!confirm('x')) return")).toHaveLength(1)
     expect(nativeDialogCalls("alert('x')")).toHaveLength(1)
     expect(nativeDialogCalls("const confirm = f(); confirm(1)")).toHaveLength(0)
     expect(nativeDialogCalls("// window.confirm('x')\n/* alert('y') */")).toHaveLength(0)
+    expect(nativeDialogCalls("const api = { confirm: async (draft) => { await journal.confirm(draft) } }")).toHaveLength(0)
+    expect(nativeDialogCalls("interface J { confirm: (draft: Draft) => Promise<void> }")).toHaveLength(0)
+    expect(nativeDialogCalls("const ok = confirm('x') && go()")).toHaveLength(1)
   })
 
   it("production code calls confirm()/alert() only where allowed", () => {
