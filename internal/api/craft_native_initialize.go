@@ -115,7 +115,7 @@ func (d *craftNativeDocumentsHTTP) initialize(w http.ResponseWriter, r *http.Req
 		return
 	}
 	var extra any
-	if decoder.Decode(&extra) != io.EOF || body.ApplicationID != "wordcraft" && body.ApplicationID != "gridcraft" {
+	if decoder.Decode(&extra) != io.EOF || body.ApplicationID != "wordcraft" && body.ApplicationID != "gridcraft" && body.ApplicationID != "deckcraft" {
 		replyError(w, 400, "invalid native initialization request")
 		return
 	}

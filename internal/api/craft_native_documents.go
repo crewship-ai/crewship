@@ -96,8 +96,9 @@ func (d *craftNativeDocumentsHTTP) readSnapshot(w http.ResponseWriter, r *http.R
 		craftNativeDocumentError(w, err)
 		return
 	}
-	file, ok := state.Manifest.Files["document.json"]
-	if !ok || len(state.Manifest.Files) != 1 || state.Manifest.EntryPoint != "document.json" || file.MediaType != "application/json" {
+	entryPoint, mediaType, supported := mooring.NativeDocumentFormat(entry.application)
+	file, ok := state.Manifest.Files[entryPoint]
+	if !supported || !ok || len(state.Manifest.Files) != 1 || state.Manifest.EntryPoint != entryPoint || file.MediaType != mediaType {
 		craftNativeDocumentError(w, mooring.ErrNativeProfile)
 		return
 	}

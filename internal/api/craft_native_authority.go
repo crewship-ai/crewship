@@ -65,7 +65,7 @@ func (m *craftNativeHTTP) pageAuthority(ctx context.Context, tx *sql.Tx, source 
 	if err = tx.QueryRowContext(ctx, `SELECT d.application_id,CAST(w.authority_revision AS TEXT),wm.id,wm.access_revision FROM craft_native_documents d JOIN workspaces w ON w.id=d.workspace_id JOIN workspace_members wm ON wm.workspace_id=w.id WHERE d.page_id=? AND d.workspace_id=? AND wm.user_id=? AND w.deleted_at IS NULL`, scope.ArtifactID, scope.WorkspaceID, source.UserID).Scan(&result.application, &result.workspaceEpoch, &result.memberID, &result.memberRevision); err != nil {
 		return result, err
 	}
-	if result.application != "wordcraft" && result.application != "gridcraft" {
+	if result.application != "wordcraft" && result.application != "gridcraft" && result.application != "deckcraft" {
 		return result, errCraftNativeAccess
 	}
 	if result.memberID == "" || result.memberRevision < 1 || result.workspaceEpoch == "" || !expiry.IsZero() && !time.Now().Before(expiry) {
