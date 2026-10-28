@@ -366,6 +366,14 @@ func buildDocument(routes []route) map[string]any {
 	for _, name := range []string{"ArtifactProjectCreateRequest", "ArtifactProjectFileInput", "ArtifactProjectCreateResponse", "ArtifactProjectAvailability", "ArtifactProjectError", "ArtifactProjectFile", "ArtifactProjectManifest", "ArtifactProjectVersion", "ArtifactProjectQuota", "ArtifactProjectPublishRequest", "ArtifactProjectMutationResponse", "ArtifactProjectVersionRequest", "ArtifactProjectShareResponse"} {
 		schemas[name] = artifactCore[name]
 	}
+	_, artifactSlidesComponents := artifactSlidesSchemaCatalog()
+	for name, schema := range artifactSlidesComponents {
+		schemas[name] = schema
+	}
+	_, dashboardDataComponents := artifactDashboardDataSchemaCatalog()
+	for name, schema := range dashboardDataComponents {
+		schemas[name] = schema
+	}
 	artifactFeedback := artifactProjectFeedbackComponents()
 	for _, name := range []string{"ArtifactProjectOrigin", "ArtifactProjectReply", "ArtifactProjectComment", "ArtifactProjectSnapshot", "ArtifactProjectCommentRequest", "ArtifactProjectReplyRequest"} {
 		schemas[name] = artifactFeedback[name]
@@ -423,6 +431,9 @@ func buildDocument(routes []route) map[string]any {
 				"required": true,
 				"schema":   map[string]any{"type": "string"},
 			})
+		}
+		if rt.method == "GET" && (rt.path == "/api/v1/pages/{slug}/artifact/data" || rt.path == "/api/v1/pages/{slug}/artifact/data/{collection}") {
+			info.query["version"] = queryParam{typ: "integer", required: true}
 		}
 		for name, param := range info.query {
 			schema := map[string]any{"type": param.typ}
@@ -561,6 +572,14 @@ func buildDocument(routes []route) map[string]any {
 
 func routeSchemaCatalog() map[string]DomainSchema {
 	result := map[string]DomainSchema{}
+	artifactSlidesRoutes, _ := artifactSlidesSchemaCatalog()
+	for key, schema := range artifactSlidesRoutes {
+		result[key] = schema
+	}
+	dashboardDataRoutes, _ := artifactDashboardDataSchemaCatalog()
+	for key, schema := range dashboardDataRoutes {
+		result[key] = schema
+	}
 	outboxRoutes, _ := issueOutboxFailedSchemaCatalog()
 	for key, schema := range outboxRoutes {
 		result[key] = schema

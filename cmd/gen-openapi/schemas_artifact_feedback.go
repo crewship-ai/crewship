@@ -28,9 +28,11 @@ func artifactProjectFeedbackComponents() map[string]any {
 		"id": str(), "version": integer(1), "path": path(), "selector": str(), "quote": str(), "text": str(), "author": str(), "author_kind": map[string]any{"type": "string", "enum": []string{"human", "agent"}}, "task_id": str(), "created_at": stamp(),
 		"status":           map[string]any{"type": "string", "enum": []string{"comment", "pending", "working", "answered", "needs_clarification"}},
 		"answered_version": integer(1), "replies": array(ref("ArtifactProjectReply")),
-	}, "id", "version", "path", "selector", "quote", "text", "author", "created_at", "status", "replies")
+		"delivery_retryable": map[string]any{"type": "boolean", "description": "Owner-only eligibility for manual retry of the exact undelivered pending task at the selected latest version. False for readers, missing authority, claimed tasks or any already accepted delivery intent. Not an execution grant; fresh read and existing admission are still required."},
+	}, "id", "version", "path", "selector", "quote", "text", "author", "created_at", "status", "replies", "delivery_retryable")
 	schemas["ArtifactProjectSnapshot"] = object(map[string]any{
-		"page_id": str(), "name": str(), "slug": str(), "origin": map[string]any{"oneOf": []any{ref("ArtifactProjectOrigin"), map[string]any{"type": "null"}}},
+		"artifact_kind": map[string]any{"type": "string", "enum": []string{"slides"}},
+		"page_id":       str(), "name": str(), "slug": str(), "origin": map[string]any{"oneOf": []any{ref("ArtifactProjectOrigin"), map[string]any{"type": "null"}}},
 		"enabled": boolean(), "can_write": boolean(), "latest_version": integer(1), "shared_version": integer(0), "manifest": ref("ArtifactProjectManifest"),
 		"versions": array(ref("ArtifactProjectVersion")), "quota": ref("ArtifactProjectQuota"), "comments": array(ref("ArtifactProjectComment")),
 	}, "page_id", "name", "slug", "origin", "enabled", "can_write", "latest_version", "shared_version", "manifest", "versions", "quota", "comments")

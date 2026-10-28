@@ -168,7 +168,10 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"color": map[string]any{"type": "string", "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none."},
 	}
 
+	kindMetadata := map[string]any{"type": "string", "enum": []string{"project", "dashboard", "slides", "word", "sheet"}, "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends."}
+	sharedMetadata := map[string]any{"type": "integer", "minimum": 1, "description": "Current shared code pin; omitted when nothing has been shared."}
 	page := obj(map[string]any{
+		"artifact_kind": kindMetadata, "artifact_shared_version": sharedMetadata,
 		"has_document": boolean(),
 		"has_workbook": map[string]any{"type": "boolean", "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels."},
 		"has_project":  map[string]any{"type": "boolean", "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for."}, "has_application": boolean(), "publication_version": integer(),
@@ -184,6 +187,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	})
 
 	pageRow := obj(map[string]any{
+		"artifact_kind": kindMetadata, "artifact_shared_version": sharedMetadata,
 		"private_audience":       map[string]any{"type": "boolean", "readOnly": true, "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience."},
 		"has_document":           boolean(),
 		"has_workbook":           map[string]any{"type": "boolean", "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels."},

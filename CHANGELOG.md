@@ -12,28 +12,38 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Native Craft editing can continue past access-token expiry.** The browser refreshes its cookie before admitting or renewing the same editing connection and replaces only its authenticated metadata stream. Unsaved work, the lease generation and in-flight saves remain in place; document mutations are never replayed.
 - **Workspace backups now preserve experimental workbooks.** Encrypted portable restore and forks retain snapshots, published audience and immutable mutation receipts; recovery fences unfinished edits and requires fresh editor sessions and run permissions.
 - Add a disabled dashboard dataset storage foundation with atomic document version checks, bounded JSON batches, server attribution, portable backups and Page lifetime cleanup; code versions remain in the existing artifact VersionStore.
+- Accept valid near-limit Dashboard data batches by counting their exact metadata and original value bytes, preserving document limits and atomic version conflicts.
+- Add default-off Dashboard collection reads and atomic JSON document batches through authenticated Page API, CLI and original-run MCP tools. Shared readers use the current shared code manifest; data changes preserve code history and document conflicts never overwrite newer data.
+- Classify Dashboard artifacts from the authorized code manifest in Page lists and detail: owners use the latest code, shared readers use the current shared pin. The disabled Dashboard data flag preserves the ordinary Project classification.
 - Require actual Chromium execution of native document privacy regressions in frontend CI while preserving the strict browser-dialog guard.
 
 - Add an opt-in Artifacts library at `/artifacts` (`NEXT_PUBLIC_ARTIFACTS_LIBRARY`): a gallery or table of projects, Word, Sheet, Slides and dashboards with kind and shared version, a project detail on its version history and the edit lock of a native Word; the Pages list reports `artifact_kind` and `artifact_shared_version`.
+- Add opt-in inert Dashboard previews (`NEXT_PUBLIC_ARTIFACT_DASHBOARDS`): authorized collection data refreshes numbers, tables and native meter charts without publishing new code; shared readers stay on their shared manifest and data has source and freshness labels.
 - Add Preview, History and Comments tabs to the opt-in Artifacts library; sending an anchored comment starts the source agent, with delivery confirmation and retry of the saved task.
 - Add a bounded Slides artifact import adapter for a closed `deck.json` and authored HTML profile, reusing the existing slide schema and static comment anchors without enabling a new editor or preview.
+- Open backend-typed artifacts in their versioned viewer from library links and ordinary Page URLs, preserving workspace and selected versions without falling back to an empty panels view.
 - **Artifact comments could report that the agent did not start after it answered.** Persisted chat acknowledgements now confirm the exact artifact request, and verified task progress clears stale delivery warnings and their retry action.
 - Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
+- **Saved artifact comments could lose Retry when their viewer was closed.** Reopening now offers Retry for an undelivered task, rereads its current delivery state and reuses the same saved comment; accepted or running tasks are not sent again.
 - Add an opt-in private native-document draft journal and whole-snapshot save coordinator. Recovery offers compare or copy, stale generations cannot replay drafts, and only an exact durable receipt confirms a save. Existing editor profiles remain unchanged.
 
 - Open an artifact card in a side viewer (full screen on phones) with screens, element select and anchored comments, the agent comment queue, version history and restore; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
+- Add a default-off typed artifact Slides preview (`NEXT_PUBLIC_ARTIFACT_SLIDES`) with existing slide canvases, thumbnails, presentation, authored comment anchors and authorized PDF download; requires the backend Slides capability.
 - Show the Craft edit-lock bar, agent proposal cards (Compare / Accept / Reject) and recovered local drafts in chat, and a "+ New artifact" composer menu offering only kinds with a backend; off by default behind `NEXT_PUBLIC_CHAT_CRAFT_LEASE` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 - **Opening a new conversation logged three 404s.** A draft session no longer requests its execution profile, messages or participants before the first send creates it.
 - **Artifact authoring clients support complete project versions.** Add pilot MCP tools and `page artifact` commands for atomic manifests, explicit version conflicts, restore and anchored feedback on servers that enable the artifact project backend.
 - Artifact project feedback exposes verified human/agent attribution, occupied addresses have a distinct error, and authoring tools require stable selection IDs.
+- Add default-off authored Slides projections and vector PDF export with explicit version pins and current Page/run authority rechecked after rendering. Existing artifact history and comments remain authoritative.
 
 - Add authenticated artifact project creation and workspace availability endpoints behind the disabled artifact projects flag.
 
 - Artifact creation and publication tools now request stable element IDs so generated screens support precise element comments.
+- Version the bundled Project, Dashboard and Slides authoring packages and preserve their release in agent skill files, with immutable compiled type metadata and unchanged content versions.
 
 - Clear copied-command feedback timers when onboarding unmounts.
 
 - **Saved Slides pages could look empty.** Page detail and list responses now include native Slides presence and schema metadata, allowing the existing opt-in Slides viewer to recognize saved presentations.
+- Add a standalone, bounded Slides-to-PDF foundation with a fixed embedded font, vector shapes and tables, and explicit text overflow errors; product export entrypoints are not enabled yet.
 
 - **Native single-editor documents gain a default-off edit lease boundary.** SQL-backed holder generations fence expired, handed-off and revoked writers; workspace erasure and user deletion remove retained holder identities while preserving the fence. Lease acknowledgements recheck authority after SQL; recovery retires source holders while retaining generations, and portable replacement refuses issued target fences. A target-local workspace issuance marker preserves restore protection after Page deletion. Runtime editor and version-store wiring remain disabled.
 
