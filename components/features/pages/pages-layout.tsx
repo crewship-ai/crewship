@@ -291,6 +291,10 @@ export function PagesLayout({ workspaceId, slug, initialArtifactVersion, now }: 
   // Resolve only the selected Page already admitted by the existing route guard.
   // Native readers keep their original producers and take precedence below.
   const artifactKind: unknown = detail.raw?.artifact_kind ?? detail.page?.artifactKind
+  // Any typed artifact, also one whose detail read lost its kind but still has a version head:
+  // it never falls through to the panels empty state.
+  const typedArtifactKind = artifactKind === "project" || artifactKind === "dashboard" || artifactKind === "slides" || artifactKind === "word" || artifactKind === "sheet" ? artifactKind
+    : detail.raw?.has_artifact_project === true ? "project" : undefined
   const selectedArtifactVersion = selectedSlug === slug && Number.isSafeInteger(initialArtifactVersion) && (initialArtifactVersion ?? 0) > 0 ? initialArtifactVersion : undefined
   const versionedArtifact = chatArtifactProjects() && !nativeDocument && !nativeSlides && !nativeCollaboration && !nativeMooring && !nativeWorkbook && (artifactKind === "project" || artifactKind === "dashboard" || artifactKind === "slides")
   const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null && !detail.loading && !detail.error && !nativeDocument && !nativeSlides && !nativeWorkbook && !nativeMooring && !nativeCollaboration && !versionedArtifact
@@ -357,6 +361,7 @@ export function PagesLayout({ workspaceId, slug, initialArtifactVersion, now }: 
       error={detail.error}
       notFound={detail.notFound}
       onBack={closePage}
+      artifactKind={typedArtifactKind}
       now={now}
       workspaceId={workspaceId}
       mayEditAvatar={capabilities.mayEditMetadata}
