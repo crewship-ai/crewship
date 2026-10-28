@@ -71,5 +71,5 @@ func IsSlidesArtifactIndex(rawManifest, index []byte) bool {
 		}
 	}
 	_, ok = manifest.Files[manifest.EntryPoint]
-	return ok && manifest.EntryPoint != "deck.json"
+	return ok
 }
