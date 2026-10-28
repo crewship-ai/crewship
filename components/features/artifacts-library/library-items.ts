@@ -103,23 +103,24 @@ export interface ItemSeries {
   items: LibraryItem[]
 }
 
-/** A trailing run marker: "#12", "12", "run 4", "v3", "(2)", a date or a time stamp. */
-const RUN_MARKER = /(?:[\s_-]*(?:#?\d+|run\s*\d+|v\d+|\(\d+\)|\d{4}-\d{2}-\d{2}(?:[t\s_]\d{2}[:.]?\d{2}(?:[:.]?\d{2})?z?)?))+$/i
+/** A trailing run marker: "#12", "12", "run 4", "v3", "(2)", a date or a time stamp, a UUID or a long hex id, always set apart from the name: "Q3" keeps its 3. */
+const RUN_MARKER = /(?:[\s_-]+(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|(?=[0-9a-f]*\d)[0-9a-f]{10,}|#?\d+|run\s*\d+|v\d+|\(\d+\)|\d{4}-\d{2}-\d{2}(?:[t\s_]\d{2}[:.]?\d{2}(?:[:.]?\d{2})?z?)?))+$/i
 
 export function seriesStem(name: string): string {
   return name.trim().replace(RUN_MARKER, "").trim()
 }
 
 /**
- * Repeated runs of the same thing — "Smoke test 1 … Smoke test 9" — so the
- * owner can tidy them up. Only a suggestion for a view: it never archives or
- * deletes, and a series needs `min` items of one kind with one stem.
+ * Repeated runs of the same thing — "Smoke test 1 … Smoke test 9", or one
+ * name made again and again — so the owner can tidy them up. Only a
+ * suggestion for a view: it never archives or deletes, and a series needs
+ * `min` items of one kind with one stem.
  */
 export function repeatedSeries(items: LibraryItem[], min = 3): ItemSeries[] {
   const groups = new Map<string, ItemSeries>()
   for (const item of items) {
     const stem = seriesStem(item.name)
-    if (!stem || stem === item.name.trim()) continue
+    if (!stem) continue
     const key = `${item.kind}\u0000${stem.toLowerCase()}`
     const group = groups.get(key) ?? { stem, kind: item.kind, items: [] }
     group.items.push(item)
