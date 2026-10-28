@@ -54,6 +54,51 @@ class APIRaceShards(unittest.TestCase):
         expanded = self.manifests([f'TestNew{i}' for i in range(89)])
         self.assertEqual(shard.validate_manifests(expanded, 4)[1], 89)
 
+    def test_api_binary_builds_share_anchor_without_changing_other_membership(self):
+        anchor = 'TestDocumentCreationSubmissionReplayThroughWebSocketAndBinary'
+        peer = 'TestPrivateArtifactConversationAudienceThroughBinary'
+        names = sorted([anchor, peer] + [f'TestFiller{i}' for i in range(12)])
+        for count in [1, 2, 3, 4]:
+            with self.subTest(count=count):
+                expected = [names[i::count] for i in range(count)]
+                inventory, parts = shard.partition('\n'.join(names), count)
+                self.assertEqual(inventory, names)
+                self.assertEqual(sorted(n for part in parts for n in part), names)
+                self.assertEqual(sum(part.count(peer) for part in parts), 1)
+                anchor_index = names.index(anchor) % count
+                self.assertIn(peer, parts[anchor_index])
+                for index, original in enumerate(expected):
+                    self.assertEqual([n for n in parts[index] if n != peer],
+                                     [n for n in original if n != peer])
+                    self.assertEqual(parts[index], sorted(parts[index]))
+                self.assertEqual(shard.partition('\n'.join(reversed(names)), count),
+                                 (inventory, parts))
+
+        self.assertEqual(shard.validate_manifests(self.manifests(names), 4)[1], len(names))
+        result, manifest = self.invoke(inventory='\n'.join(names))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(anchor, manifest['selected'])
+        self.assertIn(peer, manifest['selected'])
+
+    def test_binary_affinity_absence_and_other_package_keep_round_robin(self):
+        anchor = 'TestDocumentCreationSubmissionReplayThroughWebSocketAndBinary'
+        peer = 'TestPrivateArtifactConversationAudienceThroughBinary'
+        filler = [f'TestFiller{i}' for i in range(12)]
+        for selected in [filler, filler + [anchor], filler + [peer]]:
+            names = sorted(selected)
+            self.assertEqual(shard.partition('\n'.join(reversed(names)), 4),
+                             (names, [names[i::4] for i in range(4)]))
+        cli = load_for('github.com/crewship-ai/crewship/cmd/crewship')
+        names = sorted(filler + [anchor, peer])
+        self.assertEqual(cli.partition('\n'.join(names), 4),
+                         (names, [names[i::4] for i in range(4)]))
+
+    def test_binary_affinity_cannot_silently_empty_a_shard(self):
+        names = ['TestDocumentCreationSubmissionReplayThroughWebSocketAndBinary',
+                 'TestPrivateArtifactConversationAudienceThroughBinary']
+        with self.assertRaisesRegex(ValueError, 'empty'):
+            shard.partition('\n'.join(names), 2)
+
     def test_invalid_empty_duplicate_inventory_and_argv_growth_fail(self):
         for inventory, count in [('', 4), ('TestOne', 4), ('TestOne\nTestOne', 1), ('TestOne', 0)]:
             with self.assertRaises(ValueError):
