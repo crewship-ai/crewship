@@ -85,6 +85,15 @@ reauthorization accepts only a separately authenticated newer expiry for the sam
 still-live identity and epoch. It never extends an already exhausted boot-time
 cap or adopts another source identity.
 
+The browser obtains a fresh cookie before initial admission and proactively refreshes
+it while the document remains mounted. A successful same-identity reauthorization
+replaces the metadata GET with a newly authenticated connection, retaining the
+private admission, lease generation, editor and local journal. The previous HTTP
+request still expires at its original JWT horizon. A short, bounded retry of a
+409 metadata GET only waits for the previous connection to close; saves, custody
+mutations and ambiguous outcomes are never replayed. Bearer credentials do not
+enter the cookie-refresh flow.
+
 ## Whole-document configuration and receipts
 
 `craft_native.editor_bundle_dir` names the operator-owned bundle directory.

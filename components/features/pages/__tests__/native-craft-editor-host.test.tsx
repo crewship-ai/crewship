@@ -187,3 +187,24 @@ describe('native Word executable URL binding',()=>{
  it('accepts only the native same-host prefix or exact dedicated pinned path with four noncredential queries',async()=>{const snapshot=await client.read(new AbortController().signal);const host='https://crew.example';expect(new URL(nativeWordFrameURL({...snapshot,editorURL:`${host}/_editor/b/${'b'.repeat(64)}/index.html`},host)!)).toMatchObject({pathname:`/_editor/b/${'b'.repeat(64)}/index.html`});const url=new URL(nativeWordFrameURL(snapshot,host)!);expect([...url.searchParams.keys()].sort()).toEqual(['host','parent_origin','readonly','save']);expect(url.searchParams.get('host')).toBe('port');expect(url.searchParams.get('readonly')).toBe('1')})
  it.each(['https://user:secret@native.example/b/H/index.html','https://native.example/b/H/index.html?','https://native.example/b/H/index.html#','https://native.example/b/H/index.html?token=secret','https://crew.example/workbook-editor/b/H/index.html','https://native.example/b/OTHER/index.html','http://native.example/b/H/index.html','//native.example/b/H/index.html'])('rejects alternative paths, credentials or preexisting runtime query %s',async(raw)=>{const snapshot=await client.read(new AbortController().signal);expect(nativeWordFrameURL({...snapshot,editorURL:raw.replace('H','b'.repeat(64))},'https://crew.example')).toBeNull()})
 })
+
+it('preserves the exact writer, private journal and pending save during successful credential rotation',async()=>{
+ vi.useFakeTimers({shouldAdvanceTime:true})
+ try{
+  const rotation=deferred<boolean>(),pendingSave=deferred<ReturnType<typeof receipt>>()
+  client.reauthorize.mockReturnValue(rotation.promise);client.save.mockReturnValueOnce(pendingSave.promise)
+  mount();await ready();await acquire();const frame=document.querySelector('iframe'),port=ports.at(-1)!,ownedJournal=journal
+  await act(async()=>{await vi.advanceTimersByTimeAsync(29500)})
+  act(()=>portOptions.at(-1)!.onChanged('pending-before-cookie-rotation','doc'))
+  await waitFor(()=>expect(client.save).toHaveBeenCalledOnce());expect(ownedJournal.persist).toHaveBeenCalledOnce()
+  const captured=client.save.mock.calls[0][0]
+  await act(async()=>{await vi.advanceTimersByTimeAsync(1000)})
+  expect(client.reauthorize).toHaveBeenCalledOnce();expect(document.querySelector('iframe')).toBe(frame)
+  expect(client.close).not.toHaveBeenCalled();expect(port.close).not.toHaveBeenCalled();expect(ownedJournal.close).not.toHaveBeenCalled();expect(ownedJournal.revokeRead).not.toHaveBeenCalled()
+  expect(screen.queryByText('Uloženo')).toBeNull()
+  await act(async()=>rotation.resolve(true))
+  expect(document.querySelector('iframe')).toBe(frame);expect(client.save).toHaveBeenCalledOnce();expect(client.leaseAction.mock.calls.filter(call=>call[0]==='acquire')).toHaveLength(1)
+  await act(async()=>pendingSave.resolve(receipt(captured)));await screen.findByText('Uloženo')
+  expect(client.save).toHaveBeenCalledOnce();expect(ownedJournal.revokeRead).not.toHaveBeenCalled()
+ }finally{vi.useRealTimers()}
+})
