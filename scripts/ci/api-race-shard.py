@@ -44,6 +44,18 @@ def partition(inventory, count):
         raise ValueError('duplicate top-level test in Go inventory')
     names.sort()
     shards = [names[i::count] for i in range(count)]
+    # These API parents build the same real CLI. Keep their build/cache reuse
+    # within one measured shard even when unrelated tests change sorted ranks.
+    # Every other test keeps its original round-robin assignment.
+    anchor = 'TestDocumentCreationSubmissionReplayThroughWebSocketAndBinary'
+    peer = 'TestPrivateArtifactConversationAudienceThroughBinary'
+    if PACKAGE == MODULE + '/internal/api' and anchor in names and peer in names:
+        anchor_index = names.index(anchor) % count
+        peer_index = names.index(peer) % count
+        if anchor_index != peer_index:
+            shards[peer_index].remove(peer)
+            shards[anchor_index].append(peer)
+            shards[anchor_index].sort()
     if not names or any(not shard for shard in shards):
         raise ValueError('empty API test inventory or partition')
     return names, shards
