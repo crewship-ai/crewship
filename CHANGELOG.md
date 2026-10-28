@@ -9,8 +9,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Saved artifact comments could lose Retry when their viewer was closed.** Reopening now offers Retry for an undelivered task, rereads its current delivery state and reuses the same saved comment; accepted or running tasks are not sent again.
-
 - **Workspace backups now preserve experimental workbooks.** Encrypted portable restore and forks retain snapshots, published audience and immutable mutation receipts; recovery fences unfinished edits and requires fresh editor sessions and run permissions.
 - Add a disabled dashboard dataset storage foundation with atomic document version checks, bounded JSON batches, server attribution, portable backups and Page lifetime cleanup; code versions remain in the existing artifact VersionStore.
 - Accept valid near-limit Dashboard data batches by counting their exact metadata and original value bytes, preserving document limits and atomic version conflicts.
@@ -22,6 +20,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add Preview, History and Comments tabs to the opt-in Artifacts library; sending an anchored comment starts the source agent, with delivery confirmation and retry of the saved task.
 - **Artifact comments could report that the agent did not start after it answered.** Persisted chat acknowledgements now confirm the exact artifact request, and verified task progress clears stale delivery warnings and their retry action.
 - Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
+- **Saved artifact comments could lose Retry when their viewer was closed.** Reopening now offers Retry for an undelivered task, rereads its current delivery state and reuses the same saved comment; accepted or running tasks are not sent again.
 - Add an opt-in private native-document draft journal and whole-snapshot save coordinator. Recovery offers compare or copy, stale generations cannot replay drafts, and only an exact durable receipt confirms a save. Existing editor profiles remain unchanged.
 
 - Open an artifact card in a side viewer (full screen on phones) with screens, element select and anchored comments, the agent comment queue, version history and restore; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
