@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   dispatch: vi.fn(),
   dispatchHook: vi.fn(),
   comment: vi.fn(),
+  refetch: vi.fn(),
   version: undefined as number | undefined,
 }))
 
@@ -28,7 +29,7 @@ vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-proje
   useArtifactProjectsAvailable: () => true,
   useArtifactProjectSnapshot: (_workspace: string, _slug: string | null, version?: number) => {
     state.version = version
-    return { data: state.snapshot, error: state.error, isError: Boolean(state.error), isLoading: false, refetch: vi.fn() }
+    return { data: state.snapshot, error: state.error, isError: Boolean(state.error), isLoading: false, refetch: state.refetch }
   },
   useArtifactProjectMutations: () => ({
     restore: { mutate: vi.fn(), isPending: false },
@@ -59,6 +60,7 @@ beforeEach(() => {
   state.version = undefined
   state.dispatch.mockReset().mockResolvedValue(true)
   state.dispatchHook.mockReset()
+  state.refetch.mockReset().mockImplementation(async () => ({ data: state.snapshot, error: state.error }))
   state.comment.mockReset().mockImplementation((_body: unknown, callbacks: { onSuccess: (comment: ArtifactComment) => void }) => callbacks.onSuccess(saved))
 })
 afterEach(cleanup)
@@ -119,11 +121,28 @@ it("retries delivery of the saved task without creating a second comment", async
   compose()
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   expect(await screen.findByText("The agent did not start")).toBeInTheDocument()
+  const current = { ...saved, author: "owner", status: "pending" as const, delivery_retryable: true }
+  state.snapshot!.comments = [current]
   fireEvent.click(screen.getByRole("button", { name: "Retry" }))
   expect(await screen.findByText("Comment sent to the agent")).toBeInTheDocument()
+  expect(state.refetch).toHaveBeenCalledTimes(1)
   expect(state.dispatch).toHaveBeenNthCalledWith(1, saved)
-  expect(state.dispatch).toHaveBeenNthCalledWith(2, saved)
+  expect(state.dispatch).toHaveBeenNthCalledWith(2, current)
   expect(state.comment).toHaveBeenCalledTimes(1)
+})
+
+it.each([false, undefined])("refuses a library Retry when fresh delivery eligibility is %s", async deliveryRetryable => {
+  state.dispatch.mockResolvedValue(false)
+  open()
+  compose()
+  fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
+  expect(await screen.findByText("The agent did not start")).toBeInTheDocument()
+  state.snapshot!.comments = [{ ...saved, author: "owner", status: "pending", delivery_retryable: deliveryRetryable }]
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Retry" })) })
+  expect(state.refetch).toHaveBeenCalledTimes(1)
+  expect(state.dispatch).toHaveBeenCalledTimes(1)
+  expect(state.comment).toHaveBeenCalledTimes(1)
+  expect(screen.queryByText("Comment sent to the agent")).toBeNull()
 })
 
 it("never reports agent delivery when the server provides no source chat", async () => {
