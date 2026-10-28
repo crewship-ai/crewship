@@ -2677,3 +2677,14 @@ batch; there is no delete operation.
 CLI commands are `crewship page artifact data collections`, `data get` and
 `data batch`. Original-run MCP tools are `artifact_data_collections`,
 `artifact_data_read` and `artifact_data_batch`.
+## Artifact kind metadata
+
+Page lists and authenticated detail responses include `artifact_kind` for a
+versioned artifact (`project`, `dashboard`, `word`, `sheet`) and
+`artifact_shared_version` when a shared pin exists. Dashboard classification
+requires the enabled Dashboard data backend and a valid bounded `dashboard.json`
+declaration in the selected code manifest. The current human owner uses latest
+code; other Page readers use only the current shared pin. A private latest
+Dashboard therefore does not change the kind shown to a shared Project reader.
+No artifact kind is inferred from Page names or addresses. Classification does
+not change the artifact's version storage, data authority or editor profile.
