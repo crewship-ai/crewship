@@ -11,6 +11,13 @@ import (
 // It describes a format, not permissions or runtime availability; existing
 // authorization fences still control every adapter operation.
 type ContentTypeDescriptor struct {
+	// Optional package metadata describes shipped code/instructions, never an
+	// ACL grant or current runtime availability. Legacy formats omit it.
+	Release           string   `json:"release,omitempty"`
+	ContractVersion   int      `json:"contract_version,omitempty"`
+	ContentLocations  []string `json:"content_locations,omitempty"`
+	RequiredFeatures  []string `json:"required_features,omitempty"`
+	MCPTools          []string `json:"mcp_tools,omitempty"`
 	TypeID            string   `json:"type_id"`
 	SchemaVersion     int      `json:"schema_version"`
 	Viewer            string   `json:"viewer"`
@@ -60,6 +67,9 @@ func ContentTypes() []ContentTypeDescriptor {
 	for i, descriptor := range contentTypeRegistry {
 		descriptor.AnchorKinds = append([]string{}, descriptor.AnchorKinds...)
 		descriptor.ExportFormats = append([]string{}, descriptor.ExportFormats...)
+		descriptor.ContentLocations = append([]string(nil), descriptor.ContentLocations...)
+		descriptor.RequiredFeatures = append([]string(nil), descriptor.RequiredFeatures...)
+		descriptor.MCPTools = append([]string(nil), descriptor.MCPTools...)
 		result[i] = descriptor
 	}
 	return result

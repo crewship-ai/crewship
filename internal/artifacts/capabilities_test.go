@@ -33,6 +33,16 @@ func TestCapabilitiesFailClosed(t *testing.T) {
 	}
 }
 
+func TestArtifactPackageMetadataDoesNotGrantGenericOperations(t *testing.T) {
+	for _, id := range []string{"artifact-project", "artifact-dashboard", "artifact-slides"} {
+		for _, capability := range Capabilities(id, 1, EnabledTypes{id: true}) {
+			if capability.Supported || capability.Available {
+				t.Fatalf("package metadata enabled an unregistered generic operation: %s %+v", id, capability)
+			}
+		}
+	}
+}
+
 func TestEveryCompiledFormatHasExplicitOperationDeclarations(t *testing.T) {
 	for _, descriptor := range pages.ContentTypes() {
 		capabilities := Capabilities(descriptor.TypeID, descriptor.SchemaVersion, EnabledTypes{descriptor.TypeID: true})

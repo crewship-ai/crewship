@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePages } from "@/hooks/use-pages"
 import { formatRelativeShort } from "@/lib/time"
+import { artifactDashboards, artifactSlides } from "@/lib/feature-flags"
 import { cn } from "@/lib/utils"
 import { ArtifactViewerProvider } from "@/components/features/chat/artifact-context/projects/artifact-viewer-context"
 import { useArtifactProjectsAvailable } from "@/components/features/chat/artifact-context/projects/use-artifact-project-data"
@@ -15,9 +16,8 @@ import { kindCounts, kindLabel, LIBRARY_KINDS, libraryItems, type LibraryItem, t
 const KIND_ICON: Record<LibraryKind, LucideIcon> = { project: AppWindow, word: FileText, sheet: Sheet, slides: Presentation, dashboard: LayoutDashboard }
 const CHIP = "inline-flex items-center gap-1 rounded-full px-1.5 text-micro font-semibold leading-[1.6]"
 
-const pagesHref = (workspaceId: string, slug: string) => `/pages/${encodeURIComponent(slug)}?${new URLSearchParams({ workspace_id: workspaceId })}`
 /** Project, and Word or Sheet stored natively, carry a version head; only they can say what is shared. */
-const versioned = (item: LibraryItem) => item.kind === "project" || item.native
+const versioned = (item: LibraryItem) => item.projectBacked || item.native
 
 function KindTile({ kind, large }: { kind: LibraryKind; large?: boolean }) {
   const Icon = KIND_ICON[kind]
@@ -79,15 +79,20 @@ function LibraryTable({ items, onOpen }: { items: LibraryItem[]; onOpen: (slug: 
   </div>
 }
 
-function OpenInPages({ workspaceId, slug }: { workspaceId: string; slug: string }) {
+function OpenInPages({ workspaceId, item }: { workspaceId: string; item: LibraryItem }) {
+  const query = new URLSearchParams({ workspace_id: workspaceId })
+  if (item.projectBacked) query.set("artifact", "1")
+  const reference = item.projectBacked && item.pageId ? "@" + item.pageId : item.slug
+  const href = `/pages/${encodeURIComponent(reference)}?${query}`
   return <Button asChild size="sm" variant="outline" className="coarse:min-h-[44px]">
-    <a href={pagesHref(workspaceId, slug)}>Open in Pages<ExternalLink aria-hidden /></a>
+    <a href={href}>Open in Pages<ExternalLink aria-hidden /></a>
   </Button>
 }
 
 /** One artifact: a project shows its history in the project viewer, a native Word or Sheet its edit lock. */
 function ArtifactDetail({ workspaceId, item, onBack }: { workspaceId: string; item: LibraryItem; onBack: () => void }) {
   const projects = useArtifactProjectsAvailable(workspaceId)
+  const projectPreview = item.projectBacked && (item.kind === "project" || item.kind === "dashboard" && artifactDashboards() || item.kind === "slides" && artifactSlides()) && projects
   const target = useMemo(() => ({ slug: item.slug, tab: "preview" as const }), [item.slug])
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
     <div><Button type="button" variant="ghost" size="sm" className="-ml-2 coarse:min-h-[44px]" onClick={onBack}><ArrowLeft aria-hidden />All artifacts</Button></div>
@@ -97,9 +102,9 @@ function ArtifactDetail({ workspaceId, item, onBack }: { workspaceId: string; it
         <h1 className="truncate text-xl font-semibold">{item.name}</h1>
         <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><KindBadge kind={item.kind} /><StateChips item={item} /><span>{meta(item)}</span></p>
       </div>
-      {!(item.kind === "project" && projects) && <OpenInPages workspaceId={workspaceId} slug={item.slug} />}
+      {!projectPreview && <OpenInPages workspaceId={workspaceId} item={item} />}
     </header>
-    {item.kind === "project" && projects
+    {projectPreview
       ? <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
         <div className="flex min-h-[520px] flex-1 overflow-hidden rounded-card border"><ArtifactViewerPanel variant="library" /></div>
       </ArtifactViewerProvider>
@@ -109,7 +114,7 @@ function ArtifactDetail({ workspaceId, item, onBack }: { workspaceId: string; it
             onEdit={() => window.open(craftEditorHref(workspaceId, "@" + item.pageId), "_blank", "noopener,noreferrer")} />
         </div>
         : null}
-    {item.kind !== "project" && <p className="text-sm text-muted-foreground">
+    {!projectPreview && item.kind !== "project" && <p className="text-sm text-muted-foreground">
       {item.kind === "word" || item.kind === "sheet" ? "Read and edit it in its editor; Open in Pages shows the saved document." : "Open in Pages shows it with everything it contains."}
     </p>}
   </div>

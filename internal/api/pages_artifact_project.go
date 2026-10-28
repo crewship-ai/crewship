@@ -548,7 +548,13 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 		artifactProjectError(w, err)
 		return
 	}
-	writeJSON(w, 200, artifactProjectSnapshotResponse{PageID: k.PageID, Name: name, Slug: slug, Origin: origin, Enabled: true, CanWrite: canWrite, LatestVersion: view.State.LatestVersion, SharedVersion: view.State.SharedVersion, Manifest: artifactProjectManifest(view.State.Manifest), Versions: artifactProjectVersionInfos(view.Versions), Quota: view.State.Quota, Comments: comments})
+	kind := ""
+	if h.artifactSlidesEnabled(r.Context()) {
+		if _, err := artifacts.ParseSlidesArtifact(k.PageID, view.State.Manifest.Files); err == nil {
+			kind = "slides"
+		}
+	}
+	writeJSON(w, 200, artifactProjectSnapshotResponse{ArtifactKind: kind, PageID: k.PageID, Name: name, Slug: slug, Origin: origin, Enabled: true, CanWrite: canWrite, LatestVersion: view.State.LatestVersion, SharedVersion: view.State.SharedVersion, Manifest: artifactProjectManifest(view.State.Manifest), Versions: artifactProjectVersionInfos(view.Versions), Quota: view.State.Quota, Comments: comments})
 }
 
 func (h *PageHandler) artifactProjectAttached(ctx context.Context, page string) (bool, error) {

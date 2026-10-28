@@ -557,3 +557,12 @@ it("preserves a true native descriptor independently of stable identity availabi
   expect(toPageView({id:"legacy",slug:"page"}).hasDocument).toBe(false)
   expect(toPageView({id:"legacy",slug:"page",has_document:"true" as unknown as boolean}).hasDocument).toBe(false)
 })
+
+describe("server-authorized Dashboard classification", () => {
+  it("preserves explicit Dashboard metadata without inferring from its name", () => {
+    expect(toPageView(wirePage({ artifact_kind: "dashboard", artifact_shared_version: 2 })).artifactKind).toBe("dashboard")
+    expect(toPageView(wirePage({ artifact_kind: "dashboard", artifact_shared_version: 2 })).artifactSharedVersion).toBe(2)
+    expect(toPageView(wirePage({ name: "Dashboard", slug: "dashboard" })).artifactKind).toBeUndefined()
+    expect(toPageView(wirePage({ artifact_kind: "unknown" })).artifactKind).toBeUndefined()
+  })
+})

@@ -5,6 +5,15 @@ registry. This package adds operation availability over that registry; it does
 not introduce another format registry or storage model. Stable Page and
 workspace identifiers remain the object identity.
 
+The compiled `artifact-project`, `artifact-dashboard` and `artifact-slides`
+entries additionally describe a package release, runtime contract, content
+locations, required features and authoring MCP tools. They reference the shared
+bundled `crewship-artifacts` playbook. These fields describe shipped sources;
+they do not enable a feature, register a generic operation or authorize a tool.
+Existing Page derivation and native format identifiers remain unchanged.
+Bundled skill upgrades keep the same skill ID and explicit agent assignments,
+while instance manifests and datasets retain their independent versions.
+
 `Capabilities(typeID, schema, enabledTypes)` declares create, read, apply,
 versions, restore, snapshot and export separately. Every operation has an
 explicit supported/available result. Missing type enablement is false. Unknown

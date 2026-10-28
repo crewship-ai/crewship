@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/webhook"
@@ -44,7 +45,13 @@ var schemaKeyContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "ArtifactProjectComment", pointer: "/components/schemas/ArtifactProjectComment", value: artifactProjectComment{}},
 
+	{name: "ArtifactSlidesProjection", pointer: "/components/schemas/ArtifactSlidesProjection", value: artifacts.ArtifactSlidesProjection{}},
+	{name: "ArtifactSlideAnchor", pointer: "/components/schemas/ArtifactSlideAnchor", value: artifacts.ArtifactSlideAnchor{}},
+	{name: "ArtifactDataCollections", pointer: "/components/schemas/ArtifactDataCollections", value: artifactDataCollectionsResponse{}},
+	{name: "ArtifactDataResponse", pointer: "/components/schemas/ArtifactDataResponse", value: artifactDataResponse{}},
+	{name: "ArtifactDataDocument", pointer: "/components/schemas/ArtifactDataDocument", value: artifactDataDocumentResponse{}},
 	{name: "NativeCraftInitializeReceipt", pointer: "/components/schemas/NativeCraftInitializeReceipt", value: craftNativeInitializeResponse{}},
 	{name: "NativeCraftDocument", pointer: "/components/schemas/NativeCraftDocument", value: craftNativeDocumentResponse{}},
 	{name: "NativeCraftDocumentQuota", pointer: "/components/schemas/NativeCraftDocumentQuota", value: craftNativeDocumentQuotaResponse{}},

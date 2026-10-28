@@ -5,7 +5,9 @@ const state = vi.hoisted(() => ({ user: "owner", token: "", comment: vi.fn(), da
 vi.mock("@/hooks/use-artifact-agent-dispatch", () => ({ useArtifactAgentDispatch: () => ({ dispatch: vi.fn(), ready: false }) }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: state.user } } }) }))
 vi.mock("@/hooks/use-artifact-project", () => ({ useArtifactProject: () => ({ query: { data: state.data }, restore: { mutate: state.restore }, share: { mutate: state.share }, comment: { mutate: state.comment } }) }))
-vi.mock("@/lib/pages/artifact-project-preview", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/pages/artifact-project-preview")>(), artifactProjectDocument: (_files: unknown, _path: string, token: string) => { state.token = token; return "safe document" } }))
+vi.mock("@/lib/pages/artifact-project-preview", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/pages/artifact-project-preview")>(), artifactProjectDocument: vi.fn((_files: unknown, _path: string, token: string) => { state.token = token; return "safe document" }) }))
+vi.mock("@/components/features/chat/artifact-context/viewer/artifact-slides-preview", () => ({ ArtifactSlidesPreview: () => <div>Typed Page Slides</div> }))
+import { artifactProjectDocument } from "@/lib/pages/artifact-project-preview"
 import { ArtifactProject } from "../artifact-project"
 afterEach(() => { cleanup(); vi.clearAllMocks(); state.data.can_write = true; state.user = "owner"; localStorage.clear() })
 it("switches screens, restores with the latest base and shares only the selected version", () => {
@@ -51,4 +53,29 @@ it("retains 500 Unicode codepoints in a normalized selected quote sent to the ag
  fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
  const expected = Array.from("\ufeffŽluťoučký kůň pěl ďábelské ódy " + "🙂".repeat(520)).slice(0,500).join("")
  expect(state.comment.mock.calls[0][0].quote).toBe(expected)
+})
+
+it("keeps the Page Project preview when the Dashboard flag is off and dashboard.json is only an asset", () => {
+ vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", "false")
+ state.data.manifest.files.push({ path: "dashboard.json", media_type: "application/json", content: '{"schema_version":1,"collections":["sales"]}' })
+ try {
+  render(<ArtifactProject workspaceId="w" slug="demo" />)
+  expect(screen.getByTitle("Artifact preview")).toHaveAttribute("srcdoc", "safe document")
+  expect(screen.queryByText("Dashboard preview is unavailable.")).toBeNull()
+ } finally { state.data.manifest.files.pop(); vi.unstubAllEnvs() }
+})
+
+it.each([["true", "slides", "typed"], ["true", undefined, "unsupported"], ["false", "slides", "legacy"]] as const)("keeps the Pages Slides route safe with flag %s", (flag, kind, mode) => {
+ vi.stubEnv("NEXT_PUBLIC_ARTIFACT_SLIDES", flag)
+ const previous = state.data
+ state.data = Object.assign({}, previous, { artifact_kind: kind, page_id: "page", manifest: { ...previous.manifest, files: [...previous.manifest.files, { path: "deck.json", media_type: "application/json", content: '{}' }] } })
+ try {
+  render(<ArtifactProject workspaceId="w" slug="demo" />)
+  if (mode === "legacy") expect(screen.getByTitle("Artifact preview")).toHaveAttribute("srcdoc", "safe document")
+  else {
+   expect(screen.getByText(mode === "typed" ? "Typed Page Slides" : "This Slides format is unsupported.")).toBeInTheDocument()
+   expect(screen.queryByTitle("Artifact preview")).toBeNull()
+   expect(artifactProjectDocument).not.toHaveBeenCalled()
+  }
+ } finally { state.data = previous; vi.unstubAllEnvs() }
 })
