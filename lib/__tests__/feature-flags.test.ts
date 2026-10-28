@@ -1,5 +1,26 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { crewsUnifiedUI, legacyMcpIntegrations } from "@/lib/feature-flags"
+import { readFileSync } from "node:fs"
+import { parseEnv } from "node:util"
+import { artifactsLibrary, chatArtifactProjects, chatCraftLease, crewsUnifiedUI, legacyMcpIntegrations } from "@/lib/feature-flags"
+
+describe.each([
+  ["NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", chatArtifactProjects],
+  ["NEXT_PUBLIC_CHAT_CRAFT_LEASE", chatCraftLease],
+  ["NEXT_PUBLIC_ARTIFACTS_LIBRARY", artifactsLibrary],
+] as const)("production %s", (name, enabled) => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it("stays off with the checked-in production build configuration", () => {
+    const defaults = parseEnv(readFileSync(".env.production", "utf8"))
+    vi.stubEnv(name, defaults[name])
+    expect(enabled()).toBe(false)
+  })
+
+  it("allows an explicit build-time opt-in", () => {
+    vi.stubEnv(name, "true")
+    expect(enabled()).toBe(true)
+  })
+})
 
 describe("crewsUnifiedUI", () => {
   afterEach(() => {
