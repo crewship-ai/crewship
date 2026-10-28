@@ -39,6 +39,21 @@ licensed under Apache-2.0. Copyright 2021–2026 Bret Jordan & Benedikt Thoma;
 copyright 2006–2019 WebPKI.org. The [exact upstream license](internal/mooring/licenses/jcs-v1.0.2-LICENSE.txt)
 is retained with the [version and parser audit](internal/mooring/licenses/README.md).
 
+## Offline Slides PDF foundation
+
+The standalone Slides PDF renderer uses
+[`github.com/signintech/gopdf` v0.38.3](https://github.com/signintech/gopdf/tree/v0.38.3)
+(tag `072bc5c7fe48b44210dc81e1f029fd7bd2d710e0`, MIT, copyright 2015 signintech),
+with transitive [`github.com/phpdave11/gofpdi`](https://github.com/phpdave11/gofpdi/tree/1f10f9844311)
+(MIT, copyright 2019–2020 David Barnes and 2017 Setasign – Jan Slabon).
+Exact upstream notices are retained in
+[`internal/artifacts/slidespdf/licenses/`](internal/artifacts/slidespdf/licenses/).
+The fixed embedded Go Regular font comes from `golang.org/x/image` v0.47.0,
+copyright 2016 Bigelow & Holmes Inc., under its BSD-style Go font license;
+that exact font notice is retained in the same directory.
+This foundation is not yet linked into a product entrypoint; the generated
+binary dependency inventory includes it once a shipped entrypoint imports it.
+
 ## Go dependencies
 
 Sections below list every direct + transitive Go dependency of the `crewship`
