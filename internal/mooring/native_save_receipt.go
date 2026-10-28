@@ -80,7 +80,7 @@ func (s *NativeStore) SaveSnapshot(ctx context.Context, l EditLease, base int64,
 	if "sha256:"+hex.EncodeToString(hash[:]) != contentHash {
 		return NativeSaveReceipt{}, ErrInvalid
 	}
-	request := nativeManifest(base, b)
+	request := s.nativeManifest(base, b)
 	request.Message = message
 	receipt, err := s.versions.Apply(ctx, nativeVersionKey(l.Scope), request, a)
 	if err != nil {
@@ -107,9 +107,10 @@ func (s *NativeStore) ReconcileSnapshot(ctx context.Context, l EditLease, base i
 	if err != nil {
 		return NativeSaveReceipt{}, err
 	}
-	file, ok := m.Files["document.json"]
+	name, media, _ := NativeDocumentFormat(s.config.Application)
+	file, ok := m.Files[name]
 	hash := sha256.Sum256(file.Content)
-	if m.Message != message || m.Actor != l.Holder.ActorID || m.EntryPoint != "document.json" || len(m.Files) != 1 || !ok || file.MediaType != "application/json" || "sha256:"+hex.EncodeToString(hash[:]) != contentHash {
+	if m.Message != message || m.Actor != l.Holder.ActorID || m.EntryPoint != name || len(m.Files) != 1 || !ok || file.MediaType != media || "sha256:"+hex.EncodeToString(hash[:]) != contentHash {
 		return NativeSaveReceipt{}, ErrNativeUnconfirmed
 	}
 	return s.snapshotReceipt(l, base, editorRevision, contentHash, m.Version), nil

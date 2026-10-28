@@ -63,7 +63,8 @@ func (s *NativeStore) ready() error {
 		return ErrNativeDisabled
 	}
 	c := s.config
-	if s.db == nil || c.Leases == nil || c.Authorize == nil || c.Validate == nil || c.Application != "wordcraft" && c.Application != "gridcraft" || !nativeHex(c.EngineRevision, 40) || !nativeHex(c.EngineSHA256, 64) || !nativeHex(c.EditorBundle, 64) {
+	_, _, known := NativeDocumentFormat(c.Application)
+	if s.db == nil || c.Leases == nil || c.Authorize == nil || c.Validate == nil || !known || !nativeHex(c.EngineRevision, 40) || !nativeHex(c.EngineSHA256, 64) || !nativeHex(c.EditorBundle, 64) {
 		return ErrInvalid
 	}
 	return nil
@@ -107,7 +108,7 @@ func (s *NativeStore) candidate(ctx context.Context, raw []byte) ([]byte, error)
 	}
 	b := append([]byte(nil), raw...)
 	trimmed := bytes.TrimSpace(b)
-	if len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(b) {
+	if s.config.Application != "deckcraft" && (len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(b)) {
 		return nil, ErrInvalid
 	}
 	if err := s.config.Validate(ctx, append([]byte(nil), b...)); err != nil {
@@ -115,8 +116,9 @@ func (s *NativeStore) candidate(ctx context.Context, raw []byte) ([]byte, error)
 	}
 	return b, nil
 }
-func nativeManifest(base int64, b []byte) artifacts.VersionRequest {
-	return artifacts.VersionRequest{BaseVersion: base, EntryPoint: "document.json", Files: map[string]artifacts.VersionFile{"document.json": {Content: b, MediaType: "application/json"}}}
+func (s *NativeStore) nativeManifest(base int64, b []byte) artifacts.VersionRequest {
+	name, media, _ := NativeDocumentFormat(s.config.Application)
+	return artifacts.VersionRequest{BaseVersion: base, EntryPoint: name, Files: map[string]artifacts.VersionFile{name: {Content: b, MediaType: media}}}
 }
 
 // Initialize only attaches a NEW explicitly selected profile to an authorized
@@ -164,7 +166,7 @@ func (s *NativeStore) Initialize(ctx context.Context, k EditLeaseScope, p EditLe
 		initialized = true
 		return actor, nil
 	}
-	r, err := s.versions.Apply(ctx, nativeVersionKey(k), nativeManifest(0, b), a)
+	r, err := s.versions.Apply(ctx, nativeVersionKey(k), s.nativeManifest(0, b), a)
 	if err != nil {
 		return EditLease{}, artifacts.VersionReceipt{}, err
 	}
@@ -182,7 +184,7 @@ func (s *NativeStore) Save(ctx context.Context, l EditLease, base int64, raw []b
 	if err != nil {
 		return artifacts.VersionReceipt{}, err
 	}
-	return s.versions.Apply(ctx, nativeVersionKey(l.Scope), nativeManifest(base, b), a)
+	return s.versions.Apply(ctx, nativeVersionKey(l.Scope), s.nativeManifest(base, b), a)
 }
 func (s *NativeStore) Read(ctx context.Context, k EditLeaseScope) (artifacts.VersionState, error) {
 	if err := s.ready(); err != nil {
@@ -199,11 +201,12 @@ func (s *NativeStore) Restore(ctx context.Context, l EditLease, base, target int
 	if err != nil {
 		return artifacts.VersionReceipt{}, err
 	}
-	if m.EntryPoint != "document.json" || len(m.Files) != 1 {
+	name, media, _ := NativeDocumentFormat(s.config.Application)
+	if m.EntryPoint != name || len(m.Files) != 1 {
 		return artifacts.VersionReceipt{}, ErrNativeProfile
 	}
-	file, ok := m.Files["document.json"]
-	if !ok || file.MediaType != "application/json" {
+	file, ok := m.Files[name]
+	if !ok || file.MediaType != media {
 		return artifacts.VersionReceipt{}, ErrNativeProfile
 	}
 	if _, err = s.candidate(ctx, file.Content); err != nil {

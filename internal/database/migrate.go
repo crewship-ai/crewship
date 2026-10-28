@@ -2082,6 +2082,7 @@ END;
 		restoreBackfill: restoreBackfillPinLegacyAvatarStyle},
 	{version: 20261025233100, name: "crew_resource_grants", fn: migrationCrewResourceGrants},
 	{version: 20261026111927, name: "crew_manage_grants", fn: migrationCrewManageGrants},
+	{version: deckNativeMigrationVersion, name: "deck_native_family", fnNoTx: migrationDeckNativeKinds},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the
