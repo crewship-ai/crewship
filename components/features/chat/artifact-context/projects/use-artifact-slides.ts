@@ -34,7 +34,6 @@ export function useArtifactSlides({ workspaceId, pageId, codeVersion, artifactKi
   const [retired, setRetired] = useState<string | null>(null)
   const enabled = artifactSlides() && artifactKind === "slides" && Boolean(user && workspaceId && pageId) && Number.isSafeInteger(codeVersion) && codeVersion > 0 && retired !== scope
   const key = useMemo(() => ["artifact-slides", scope], [scope])
-  const url = (suffix: string) => `/api/v1/pages/${encodeURIComponent("@" + pageId)}/artifact/${suffix}?${new URLSearchParams({ workspace_id: workspaceId, version: String(codeVersion) })}`
   const retire = useCallback(() => {
     generation.retired = true
     for (const controller of generation.downloads) controller.abort()
@@ -45,7 +44,7 @@ export function useArtifactSlides({ workspaceId, pageId, codeVersion, artifactKi
   const query = useQuery({
     queryKey: key, enabled, retry: false, gcTime: 0, staleTime: 0, refetchInterval: 5000, refetchIntervalInBackground: false,
     queryFn: async ({ signal }) => {
-      const response = await apiFetch(url("slides"), { method: "GET", cache: "no-store", signal })
+      const response = await apiFetch(`/api/v1/pages/${encodeURIComponent("@" + pageId)}/artifact/slides?${new URLSearchParams({ workspace_id: workspaceId, version: String(codeVersion) })}`, { method: "GET", cache: "no-store", signal })
       if (signal.aborted || generation.retired) throw aborted()
       if (!response.ok) throw Object.assign(new Error("Slides preview is unavailable. Reload to check access."), { status: response.status })
       const bytes = await boundedBody(response, 16 << 20, signal)
@@ -73,7 +72,7 @@ export function useArtifactSlides({ workspaceId, pageId, codeVersion, artifactKi
     const controller = new AbortController()
     generation.downloads.add(controller)
     try {
-      const response = await apiFetch(url("export.pdf"), { method: "GET", cache: "no-store", signal: controller.signal })
+      const response = await apiFetch(`/api/v1/pages/${encodeURIComponent("@" + pageId)}/artifact/export.pdf?${new URLSearchParams({ workspace_id: workspaceId, version: String(codeVersion) })}`, { method: "GET", cache: "no-store", signal: controller.signal })
       if (!response.ok) throw Object.assign(new Error("PDF is unavailable. Reload to check access."), { status: response.status })
       const bytes = await boundedBody(response, 8 << 20, controller.signal)
       if (controller.signal.aborted || generation.retired) return null
