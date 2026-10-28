@@ -42,6 +42,10 @@ export interface LibraryItem {
   /** Unfiled is null; a server without folders sends nothing and that is null too. */
   folder: PageFolderRef | null
   updatedAt: Date | null
+  /** Hidden from every view but Archive; nothing is deleted. */
+  archived?: boolean
+  /** Made by a test or probe (the server's `origin: "test"`); only the Test items view shows it. */
+  test?: boolean
 }
 
 /** The version head names projects, dashboards, slides, Word and Sheet; older storage names the rest. */
@@ -85,6 +89,17 @@ export function libraryItems(pages: PageView[]): LibraryItem[] {
   })
   // The server already orders by last edit; keep a stable newest-first order if it did not.
   return items.sort((a, b) => (b.updatedAt?.getTime() ?? 0) - (a.updatedAt?.getTime() ?? 0))
+}
+
+/** Archive, test origin and a pending move, from the server's fields or the sharing mock. */
+export function withLibraryState(items: LibraryItem[], state: {
+  archived: ReadonlySet<string>; test: ReadonlySet<string>; moved?: ReadonlyMap<string, { slug: string; name: string } | null>
+}): LibraryItem[] {
+  return items.map(item => {
+    const moved = state.moved?.get(item.slug)
+    const folder = moved === undefined ? item.folder : moved && { slug: moved.slug, name: moved.name, icon: null, color: null }
+    return { ...item, folder, archived: state.archived.has(item.slug), test: state.test.has(item.slug) }
+  })
 }
 
 /** The default views leave empty items out; the Empty view shows only them. Nothing is deleted. */

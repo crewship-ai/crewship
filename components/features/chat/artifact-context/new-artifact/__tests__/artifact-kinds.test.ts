@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { toPageView, type WirePage } from "@/hooks/use-pages"
 import { ARTIFACT_KINDS, artifactKind, artifactKindOfPage, comingKinds, creatableKinds, NO_CAPABILITIES, type ArtifactCapabilities } from "../artifact-kinds"
 
-const ALL: ArtifactCapabilities = { projects: true, dashboards: true, documents: true, sheets: true, pages: true }
+const ALL: ArtifactCapabilities = { projects: true, dashboards: true, slides: true, documents: true, sheets: true, pages: true }
 
 describe("artifact kind registry", () => {
   it("is one ordered list with the library's keys and families", () => {
@@ -23,15 +23,17 @@ describe("artifact kind registry", () => {
   })
 
   it("creates only kinds that work today, in registry order", () => {
-    expect(creatableKinds(ALL).map(k => k.key)).toEqual(["project", "dashboard", "page", "word", "sheet"])
+    expect(creatableKinds(ALL).map(k => k.key)).toEqual(["project", "dashboard", "page", "word", "sheet", "slides"])
     expect(creatableKinds(NO_CAPABILITIES)).toEqual([])
     expect(creatableKinds({ ...NO_CAPABILITIES, documents: true, pages: true }).map(k => k.key)).toEqual(["page", "word"])
   })
 
-  it("never creates Slides, which waits for live acceptance", () => {
-    expect(artifactKind("slides").live(ALL)).toBe(false)
-    expect(creatableKinds(ALL).some(k => k.key === "slides")).toBe(false)
-    expect(comingKinds(ALL).map(k => k.key)).toEqual(["slides"])
+  it("creates Slides through an agent only with projects and the Slides flag", () => {
+    expect(artifactKind("slides").make).toBe("agent")
+    expect(artifactKind("slides").live(ALL)).toBe(true)
+    expect(artifactKind("slides").live({ ...ALL, slides: false })).toBe(false)
+    expect(artifactKind("slides").live({ ...ALL, projects: false })).toBe(false)
+    expect(comingKinds({ ...ALL, slides: false }).map(k => k.key)).toEqual(["slides"])
   })
 
   it("needs page creation for every direct kind and the server's project availability for agent kinds", () => {

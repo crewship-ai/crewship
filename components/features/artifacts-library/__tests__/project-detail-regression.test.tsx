@@ -22,7 +22,7 @@ vi.mock("@/hooks/use-user-preference", async () => {
 })
 vi.mock("@/hooks/use-page-folders", () => ({ usePageFolders: () => ({ folders: [], loading: false, error: null, supported: true, refresh: () => {}, reread: async () => {} }) }))
 vi.mock("@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities", () => ({
-  useArtifactCapabilities: () => ({ projects: true, dashboards: false, documents: false, sheets: false, pages: false }),
+  useArtifactCapabilities: () => ({ projects: true, dashboards: false, slides: false, documents: false, sheets: false, pages: false }),
 }))
 vi.mock("@/components/layout/secondary-panel", async importOriginal => ({ ...(await importOriginal<typeof import("@/components/layout/secondary-panel")>()), SecondaryPanel: ({ label, children }: { label: string; children: React.ReactNode }) => <aside aria-label={label}>{children}</aside> }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "owner" } } }) }))
@@ -51,7 +51,9 @@ vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-proje
 }))
 
 import { toPageView } from "@/hooks/use-pages"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ArtifactsLibrary } from "../artifacts-library"
+const withQuery = (ui: React.ReactElement) => <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>
 
 const saved: ArtifactComment = {
   id: "comment-1", task_id: "task-1", version: 3, path: "index.html",
@@ -77,7 +79,7 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 
-const open = () => render(<ArtifactsLibrary workspaceId="workspace-1" item="launch" onSelect={vi.fn()} />)
+const open = () => render(withQuery(<ArtifactsLibrary workspaceId="workspace-1" item="launch" onSelect={vi.fn()} />))
 
 function compose() {
   fireEvent.click(screen.getByRole("button", { name: "Select" }))

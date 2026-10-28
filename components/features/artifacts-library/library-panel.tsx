@@ -1,5 +1,5 @@
 "use client"
-import { AlertCircle, Clock, Copy, Folder, FolderOpen, Home, Inbox, Library, Star, User } from "lucide-react"
+import { AlertCircle, Archive, Clock, Copy, FlaskConical, Folder, FolderOpen, Home, Inbox, Library, Star, User } from "lucide-react"
 import { PanelSpaces } from "@/components/layout/panel-spaces"
 import {
   SidebarActiveChip, SidebarActiveChips, SidebarFilterButton, SidebarRow, SidebarSearch, SidebarSection, SidebarToolbar,
@@ -27,12 +27,18 @@ const SPACES = [
 ] as const
 const isSpace = (view: LibraryView): view is Spaces => SPACES.some(space => space.key === view)
 
-/** Mine and Favorites always show, so a star has somewhere to go; the tidy-up views only when they hold something. */
+/**
+ * Mine and Favorites always show, so a star has somewhere to go; the tidy-up
+ * views only when they hold something. Test items follow the server's flag;
+ * Clean up is only a suggestion from repeated names, acted on after a preview.
+ */
 const VIEWS = [
   { key: "mine", label: "Mine", icon: User, always: true },
   { key: "favorites", label: "Favorites", icon: Star, always: true },
-  { key: "series", label: "Repeated runs", icon: Copy, always: false },
+  { key: "series", label: "Clean up", icon: Copy, always: false },
+  { key: "test", label: "Test items", icon: FlaskConical, always: false },
   { key: "empty", label: "Empty", icon: Inbox, always: false },
+  { key: "archive", label: "Archive", icon: Archive, always: false },
 ] as const
 
 const meta = (n: number) => <span className="shrink-0 text-micro tabular-nums text-muted-foreground">{n}</span>
@@ -59,7 +65,7 @@ export function LibraryPanel({ items, folders, filters, personal, onFiltersChang
   const narrow = (patch: Partial<LibraryFilters>) => set({ ...patch, ...(filters.view === "home" ? { view: "all" as const } : {}) })
   const counts = facetCounts(items, filters.view === "home" ? { ...filters, view: "all" } : filters, personal)
   const viewCount = (view: LibraryView) => inView(items, view, personal).length
-  const folderCount = (slug: string) => items.filter(item => !item.empty && (item.folder?.slug ?? "") === slug).length
+  const folderCount = (slug: string) => inView(items, "all").filter(item => (item.folder?.slug ?? "") === slug).length
   const unfiled = folderCount("")
   const active = activeFacetCount(filters)
 

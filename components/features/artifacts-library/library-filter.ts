@@ -1,7 +1,7 @@
 import { LIBRARY_KINDS, repeatedSeries, type LibraryItem, type LibraryKind } from "./library-items"
 
-/** The places the panel offers. Empty and Repeated runs only show; nothing is archived or deleted. */
-export type LibraryView = "home" | "all" | "attention" | "opened" | "mine" | "favorites" | "empty" | "series"
+/** The places the panel offers. Empty, Clean up, Test items and Archive only show; changes go through a previewed bulk action, and nothing is deleted. */
+export type LibraryView = "home" | "all" | "attention" | "opened" | "mine" | "favorites" | "empty" | "series" | "test" | "archive"
 
 /** What only this person knows: when they last opened each item, and what they starred. Kept per user. */
 export interface Personal {
@@ -97,11 +97,14 @@ export function matches(item: LibraryItem, filters: LibraryFilters, skip?: "kind
   return true
 }
 
-/** What a view holds before filters: empty items only in Empty, repeated runs only in their view. */
+/** What a view holds before filters: empty, test and archived items each only in their own view. */
 export function inView(items: LibraryItem[], view: LibraryView, personal: Personal = {}): LibraryItem[] {
-  const live = items.filter(item => !item.empty)
+  const kept = items.filter(item => !item.archived)
+  const live = kept.filter(item => !item.empty && !item.test)
   switch (view) {
-    case "empty": return items.filter(item => item.empty)
+    case "archive": return items.filter(item => item.archived)
+    case "test": return kept.filter(item => item.test)
+    case "empty": return kept.filter(item => item.empty && !item.test)
     case "series": return repeatedSeries(live).flatMap(series => series.items)
     case "attention": return live.filter(needsAttention)
     case "mine": return live.filter(item => item.ownerLabel === "You")
@@ -169,7 +172,7 @@ export function facetCounts(items: LibraryItem[], filters: LibraryFilters, perso
 export const activeFacetCount = (filters: LibraryFilters) =>
   filters.kinds.length + filters.access.length + filters.version.length + filters.owners.length + (filters.folder !== null ? 1 : 0)
 
-const VIEWS: readonly LibraryView[] = ["home", "all", "attention", "opened", "mine", "favorites", "empty", "series"]
+const VIEWS: readonly LibraryView[] = ["home", "all", "attention", "opened", "mine", "favorites", "empty", "series", "test", "archive"]
 const UNFILED = "~unfiled"
 const list = (value: string | null) => (value ? value.split(",").map(entry => entry.trim()).filter(Boolean) : [])
 

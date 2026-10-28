@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { toPageView, type PageView, type WirePage } from "@/hooks/use-pages"
 
-const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error: null as string | null, refresh: vi.fn(), projectsOn: true, item: null as string | null, select: vi.fn(), folders: [] as { id: string; slug: string; name: string; pageCount: number }[], reads: [] as { target: { pageId: string } | null; enabled: boolean; chatId: string }[] }))
+const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error: null as string | null, refresh: vi.fn(), projectsOn: true, item: null as string | null, select: vi.fn(), folders: [] as { id: string; slug: string; name: string; pageCount: number }[], reads: [] as { target: { pageId: string } | null; enabled: boolean; chatId: string }[], readStatus: "ready" as string }))
 vi.mock("@/hooks/use-pages", async importOriginal => ({
   ...(await importOriginal<typeof import("@/hooks/use-pages")>()),
   usePages: () => ({ pages: state.pages, loading: state.loading, error: state.error, refresh: state.refresh }),
@@ -17,7 +17,7 @@ vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id
 vi.mock("@/hooks/use-document-viewer-read", () => ({
   useDocumentViewerRead: (input: { target: { pageId: string } | null; enabled: boolean; chatId: string }) => {
     state.reads.push(input)
-    return { scopeKey: "k", refresh: vi.fn(), read: input.enabled ? { status: "ready", title: "Partner brief", content: { schema: 3, rev: 2, content: { type: "doc" } } } : { status: "unavailable" } }
+    return { scopeKey: "k", refresh: vi.fn(), read: input.enabled && state.readStatus !== "ready" ? { status: state.readStatus } : input.enabled ? { status: "ready", title: "Partner brief", content: { schema: 3, rev: 2, content: { type: "doc" } } } : { status: "unavailable" } }
   },
 }))
 vi.mock("@/components/features/pages/document-readonly/document-readonly", () => ({
@@ -30,7 +30,7 @@ vi.mock("@/hooks/use-user-preference", async () => {
 })
 vi.mock("@/hooks/use-page-folders", () => ({ usePageFolders: () => ({ folders: state.folders, loading: false, error: null, supported: true, refresh: vi.fn(), reread: vi.fn() }) }))
 vi.mock("@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities", () => ({
-  useArtifactCapabilities: () => ({ projects: true, dashboards: false, documents: true, sheets: false, pages: true }),
+  useArtifactCapabilities: () => ({ projects: true, dashboards: false, slides: false, documents: true, sheets: false, pages: true }),
 }))
 vi.mock("../new-artifact-dialog", () => ({
   NewArtifactDialog: ({ defaultKind, defaultFolderSlug }: { defaultKind?: string; defaultFolderSlug?: string }) =>
@@ -42,7 +42,20 @@ vi.mock("@/components/features/chat/artifact-context/craft/craft-lock-bar", () =
   craftEditorHref: (ws: string, slug: string) => `/editor?${ws}&${slug}`,
 }))
 
+vi.mock("../sharing/share-dialog", () => ({ ShareDialog: ({ item }: { item: { name: string } }) => <div role="dialog" aria-label={`Share ${item.name}`} /> }))
+vi.mock("../sharing/access-tab", () => ({ AccessTab: ({ item }: { item: { name: string } }) => <section aria-label={`Access to ${item.name}`} /> }))
+vi.mock("../sharing/folder-settings-dialog", () => ({ FolderSettingsDialog: ({ folder }: { folder: { name: string } }) => <div role="dialog" aria-label={`Settings for ${folder.name}`} /> }))
+vi.mock("../sharing/bulk-actions", () => ({
+  BulkBar: ({ selected, archivedView }: { selected: { slug: string }[]; archivedView?: boolean }) =>
+    <div role="toolbar" aria-label="Bulk actions" data-slugs={selected.map(item => item.slug).join(",")} data-archived={String(Boolean(archivedView))} />,
+  MoveToFolderDialog: ({ item }: { item: { name: string } }) => <div role="dialog" aria-label={`Move ${item.name}`} />,
+}))
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ArtifactsLibrary } from "../artifacts-library"
+let client = new QueryClient()
+beforeEach(() => { client = new QueryClient({ defaultOptions: { queries: { retry: false } } }) })
+const withQuery = (ui: React.ReactElement) => <QueryClientProvider client={client}>{ui}</QueryClientProvider>
 
 const wire = (over: Partial<WirePage>): PageView => toPageView({ id: over.slug, owner: "user/u1", updated_at: "2026-10-27T10:00:00Z", reach: ["owner"], ...over } as WirePage)
 beforeEach(() => {
@@ -53,11 +66,11 @@ beforeEach(() => {
     wire({ slug: "weekly", id: "page-weekly", name: "Weekly report", panel_count: 2 } as Partial<WirePage>),
     wire({ slug: "calc", id: "page-calc", name: "Calculator", has_application: true } as Partial<WirePage>),
   ]
-  state.folders = []; state.reads = []; state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.select.mockReset(); state.refresh.mockReset()
+  state.folders = []; state.reads = []; state.readStatus = "ready"; state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.select.mockReset(); state.refresh.mockReset()
 })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
-const renderLibrary = () => render(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />)
+const renderLibrary = () => render(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
 
 const openAll = () => fireEvent.click(screen.getByRole("tab", { name: /All artifacts/ }))
 
@@ -154,6 +167,24 @@ it("a Word detail shows the saved document read-only, never an editor", () => {
   expect(state.reads.at(-1)).toMatchObject({ enabled: true, target: { pageId: "page-brief", type: "document", mode: "latest", workspaceId: "ws1" } })
 })
 
+it.each(["unavailable", "error"])("an old-editor Word that answers %s says so plainly, and the list still works", status => {
+  state.pages.push(wire({ slug: "old", id: "page-old", name: "Old contract", has_document: true }))
+  state.readStatus = status
+  state.item = "old"
+  renderLibrary()
+  expect(screen.getByRole("status")).toHaveTextContent("This document is from an older version of the editor and does not open here.")
+  expect(screen.getByRole("status").textContent).not.toMatch(/engine|503|service/i)
+  fireEvent.click(screen.getByRole("button", { name: /All artifacts/ }))
+  expect(state.select).toHaveBeenCalledWith(null)
+})
+
+it("a native Word whose service is down says the service is down", () => {
+  state.readStatus = "unavailable"
+  state.item = "brief"
+  renderLibrary()
+  expect(screen.getByRole("status")).toHaveTextContent("The document service is not answering right now")
+})
+
 it("other kinds do not read a document", () => {
   state.item = "model"
   renderLibrary()
@@ -179,10 +210,10 @@ it("empty, loading and error states say what to do", () => {
   const { rerender } = renderLibrary()
   expect(screen.getByText(/No artifacts yet/)).toBeTruthy()
   state.loading = true
-  rerender(<ArtifactsLibrary workspaceId="ws1" item={null} onSelect={state.select} />)
+  rerender(withQuery(<ArtifactsLibrary workspaceId="ws1" item={null} onSelect={state.select} />))
   expect(screen.getByLabelText("Loading artifacts")).toBeTruthy()
   state.loading = false; state.error = "boom"
-  rerender(<ArtifactsLibrary workspaceId="ws1" item={null} onSelect={state.select} />)
+  rerender(withQuery(<ArtifactsLibrary workspaceId="ws1" item={null} onSelect={state.select} />))
   fireEvent.click(screen.getByRole("button", { name: "Try again" }))
   expect(state.refresh).toHaveBeenCalled()
 })
@@ -212,7 +243,7 @@ it.each(["project", "dashboard", "slides"] as const)("keeps %s routed through it
   fireEvent.click(screen.getByRole("button", { name: "Owner artifact" }))
   expect(state.select).toHaveBeenLastCalledWith("ordinary-owner-page")
   state.item = "ordinary-owner-page"
-  view.rerender(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />)
+  view.rerender(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
   expect(screen.getByRole("link", { name: "Open in Pages" })).toHaveAttribute("href", "/pages/%40owner-page?workspace_id=ws1&artifact=1")
   expect(screen.queryByTestId("viewer-panel")).toBeNull()
 })
@@ -247,7 +278,7 @@ it("J and K move between items, Enter opens, Escape leaves the detail, never fro
   fireEvent.keyDown(search, { key: "j" })
   expect(document.activeElement).toBe(search)
   state.item = "brief"
-  view.rerender(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />)
+  view.rerender(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
   fireEvent.keyDown(document.body, { key: "Escape" })
   expect(state.select).toHaveBeenLastCalledWith(null)
 })
@@ -258,7 +289,7 @@ it("remembers what was opened and starred, per person, in Recently opened and Fa
   fireEvent.click(screen.getByRole("button", { name: "Add to favorites" }))
   expect(screen.getByRole("button", { name: "Remove from favorites" }).getAttribute("aria-pressed")).toBe("true")
   state.item = null
-  view.rerender(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />)
+  view.rerender(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
   expect(screen.getByRole("heading", { name: /Recently opened/ })).toBeTruthy()
   fireEvent.click(screen.getByRole("tab", { name: /Recently opened/ }))
   expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(item => item.textContent)).toEqual([expect.stringContaining("Partner brief")])
@@ -272,4 +303,31 @@ it("each kind wears its colour and the gallery draws a thumbnail per kind", () =
   fireEvent.click(screen.getByRole("radio", { name: "Gallery" }))
   const thumbs = [...document.querySelectorAll("[data-thumb]")].map(node => node.getAttribute("data-thumb"))
   expect(thumbs).toEqual(["project", "word", "sheet", "page"])
+})
+
+it("selecting rows in the list opens the bulk bar with exactly those items", () => {
+  state.item = null
+  render(withQuery(<ArtifactsLibrary workspaceId="ws1" item={null} onSelect={state.select} filters={{ view: "all", q: "", kinds: [], access: [], version: [], owners: [], folder: null }} />))
+  expect(screen.queryByRole("toolbar", { name: "Bulk actions" })).toBeNull()
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select Partner brief" }))
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select Pricing site" }))
+  expect(screen.getByRole("toolbar", { name: "Bulk actions" }).dataset.slugs).toBe("site,brief")
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select Pricing site" }))
+  expect(screen.getByRole("toolbar", { name: "Bulk actions" }).dataset.slugs).toBe("brief")
+})
+
+it("a detail offers Share, Move and an Access tab", () => {
+  state.item = "model"
+  renderLibrary()
+  fireEvent.click(screen.getByRole("radio", { name: "Access" }))
+  expect(screen.getByRole("region", { name: "Access to Price model" })).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Share" }))
+  expect(screen.getByRole("dialog", { name: "Share Price model" })).toBeTruthy()
+})
+
+it("a chosen folder has its settings", () => {
+  state.folders = [{ id: "f1", slug: "sales", name: "Sales", pageCount: 1 }]
+  render(withQuery(<ArtifactsLibrary workspaceId="ws1" item={null} onSelect={state.select} filters={{ view: "all", q: "", kinds: [], access: [], version: [], owners: [], folder: "sales" }} />))
+  fireEvent.click(screen.getByRole("button", { name: "Folder settings" }))
+  expect(screen.getByRole("dialog", { name: "Settings for Sales" })).toBeTruthy()
 })
