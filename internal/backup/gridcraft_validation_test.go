@@ -195,3 +195,80 @@ func seedGridCraftRestoreValidationWorkspace(t *testing.T, db *sql.DB, suffix st
 	}
 	return ws
 }
+
+func TestGridCraftRestoreRefusesExistingPublicPageBeforeSharingPrivateContent(t *testing.T) {
+	source := openMigratedDBCov(t)
+	ws := seedGridCraftRestoreValidationWorkspace(t, source, "gridcraft-public-collision")
+	if _, err := source.Exec(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,private_audience,spec_json) SELECT 'private-workbook-collision',?,'private-workbook-collision','Workbook',id,1,'{}' FROM users LIMIT 1`, ws); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.Exec(`INSERT INTO gridcraft_heads(page_id,workspace_id,schema_version,head_rev,generation,snapshot) VALUES('private-workbook-collision',?,1,1,1,'{"sheets":[]}')`, ws); err != nil {
+		t.Fatal(err)
+	}
+	dump, err := DumpWorkspace(t.Context(), source, ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := openMigratedDBCov(t)
+	seedGridCraftRestoreValidationWorkspace(t, target, "gridcraft-public-collision")
+	if _, err := target.Exec(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,private_audience,spec_json) SELECT 'private-workbook-collision',?,'private-workbook-collision','Public Page',id,0,'{}' FROM users LIMIT 1`, ws); err != nil {
+		t.Fatal(err)
+	}
+	if err := RestoreDump(t.Context(), target, dump); err == nil || !strings.Contains(err.Error(), "workbook history merge") {
+		t.Fatalf("private workbook merged into existing public Page: %v", err)
+	}
+	var count, private int
+	if err := target.QueryRow(`SELECT count(*) FROM gridcraft_heads`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("private content inserted: %d %v", count, err)
+	}
+	if err := target.QueryRow(`SELECT private_audience FROM pages WHERE id='private-workbook-collision'`).Scan(&private); err != nil || private != 0 {
+		t.Fatalf("existing audience changed: %d %v", private, err)
+	}
+}
+
+func TestGridCraftPublishedRestoreFailureRollsBackAudienceAndAuthority(t *testing.T) {
+	for _, scenario := range []string{"head-ignored", "epoch-exhausted"} {
+		t.Run(scenario, func(t *testing.T) {
+			source := openMigratedDBCov(t)
+			ws := seedGridCraftRestoreValidationWorkspace(t, source, "gridcraft-public-rollback")
+			if _, err := source.Exec(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,private_audience,spec_json) SELECT 'public-workbook-rollback',?,'public-workbook-rollback','Workbook',id,1,'{}' FROM users LIMIT 1`, ws); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := source.Exec(`INSERT INTO gridcraft_heads(page_id,workspace_id,schema_version,head_rev,generation,snapshot) VALUES('public-workbook-rollback',?,1,1,1,'{"sheets":[]}')`, ws); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := source.Exec(`UPDATE pages SET private_audience=0 WHERE id='public-workbook-rollback'`); err != nil {
+				t.Fatal(err)
+			}
+			dump, err := DumpWorkspace(t.Context(), source, ws)
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := openMigratedDBCov(t)
+			seedGridCraftRestoreValidationWorkspace(t, target, "gridcraft-public-rollback")
+			want := "workbook head did not insert"
+			if scenario == "head-ignored" {
+				dump.Tables["gridcraft_heads"][0]["schema_version"] = int64(2)
+			} else {
+				want = "authority epoch exhausted"
+				if _, err := target.Exec(`UPDATE workspaces SET authority_revision=? WHERE id=?`, int64(math.MaxInt64-3), ws); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var before, after int64
+			if err := target.QueryRow(`SELECT authority_revision FROM workspaces WHERE id=?`, ws).Scan(&before); err != nil {
+				t.Fatal(err)
+			}
+			if err := RestoreDump(t.Context(), target, dump); err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("expected %q, got %v", want, err)
+			}
+			var count int
+			if err := target.QueryRow(`SELECT count(*) FROM pages WHERE id='public-workbook-rollback'`).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("temporary audience escaped rollback: %d %v", count, err)
+			}
+			if err := target.QueryRow(`SELECT authority_revision FROM workspaces WHERE id=?`, ws).Scan(&after); err != nil || after != before {
+				t.Fatalf("authority escaped rollback: %d -> %d %v", before, after, err)
+			}
+		})
+	}
+}

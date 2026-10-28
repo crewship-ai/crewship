@@ -1282,6 +1282,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		}
 		tableInserted := 0
 		for _, originalRow := range rows {
+			restoreWorkbookAudience := false
 			// main's conversation sanitiser runs FIRST: it rebuilds the row
 			// from the original, so the held-work override below — which
 			// copies whatever row is current — has to come after it or its
@@ -1292,6 +1293,10 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				return stats, err
 			}
 			if table == "gridcraft_heads" {
+				restoreWorkbookAudience, err = prepareRestoredGridCraftAudience(ctx, tx, row)
+				if err != nil {
+					return stats, err
+				}
 				if err = fenceGridCraftTarget(ctx, tx, row["workspace_id"].(string), row["page_id"].(string), false); err != nil {
 					return stats, err
 				}
@@ -1460,6 +1465,16 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				stats.RowsInserted += int(n)
 				tableInserted += int(n)
 				landed = n > 0
+			}
+			if table == "gridcraft_heads" {
+				if !landed {
+					return stats, fmt.Errorf("backup: workbook head did not insert")
+				}
+				if restoreWorkbookAudience {
+					if err := finishRestoredGridCraftAudience(ctx, tx, row); err != nil {
+						return stats, err
+					}
+				}
 			}
 			if landed && table == "hooks_config" && row["handler_kind"] == "shell" {
 				receipt, err := tx.ExecContext(ctx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at)

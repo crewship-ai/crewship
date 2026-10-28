@@ -23,6 +23,15 @@ func (backupWorkbookEngine) Prepare(_ context.Context, b appengine.Binding, _ ap
 	return appengine.NewCandidate(b, c.Snapshot, []string{"*"}), nil
 }
 func TestGridCraftBackupWorkspaceRoundtripFencesRuntimeAndForkReplay(t *testing.T) {
+	testGridCraftBackupWorkspaceRoundtrip(t, false)
+}
+
+func TestGridCraftPublishedBackupWorkspaceRoundtripPreservesAudienceAndContent(t *testing.T) {
+	testGridCraftBackupWorkspaceRoundtrip(t, true)
+}
+
+func testGridCraftBackupWorkspaceRoundtrip(t *testing.T, published bool) {
+	t.Helper()
 	source := workbookBackupDB(t)
 	ws := seedWorkspace(t, source)
 	if _, err := source.Exec(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,private_audience,spec_json) VALUES('workbook-backup-page',?,'workbook-backup','Workbook','u_admin',1,'{}')`, ws); err != nil {
@@ -46,6 +55,11 @@ func TestGridCraftBackupWorkspaceRoundtripFencesRuntimeAndForkReplay(t *testing.
 	if _, err = source.Exec(`INSERT INTO gridcraft_sessions(session_id,workspace_id,page_id,user_id,credential,generation,created_at,expires_at) VALUES('old-session',?,'workbook-backup-page','u_admin','old-credential',1,1,4102444800000)`, ws); err != nil {
 		t.Fatal(err)
 	}
+	if published {
+		if _, err := source.Exec(`UPDATE pages SET private_audience=0 WHERE id='workbook-backup-page'`); err != nil {
+			t.Fatal(err)
+		}
+	}
 	actor := backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"}
 	bundle, err := backup.CreateBackup(t.Context(), source, backup.CreateOptions{Scope: backup.ScopeWorkspace, WorkspaceID: ws, OutputDir: t.TempDir(), Passphrase: "workbook roundtrip test passphrase", Actor: actor})
 	if err != nil {
@@ -60,6 +74,10 @@ func TestGridCraftBackupWorkspaceRoundtripFencesRuntimeAndForkReplay(t *testing.
 			}
 			if _, err := backup.RestoreBackup(t.Context(), target, options); err != nil {
 				t.Fatal(err)
+			}
+			var private int
+			if err := target.QueryRow(`SELECT private_audience FROM pages WHERE slug='workbook-backup'`).Scan(&private); err != nil || private != map[bool]int{false: 1, true: 0}[published] {
+				t.Fatalf("restored audience=%d published=%v err=%v", private, published, err)
 			}
 			var restored appengine.Key
 			var generation int64
@@ -160,5 +178,24 @@ func TestGridCraftPhysicalRecoveryDropsIntentsAndFencesCandidates(t *testing.T) 
 	}
 	if !strings.Contains(strings.Join(report.RuntimeReset, "\n"), "workbook") {
 		t.Fatal("workbook fencing was not reported")
+	}
+}
+
+func TestGridCraftPublicPageStillRefusesOrdinaryInitialization(t *testing.T) {
+	db := workbookBackupDB(t)
+	ws := seedWorkspace(t, db)
+	if _, err := db.Exec(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,private_audience,spec_json) VALUES('public-workbook-init',?,'public-workbook-init','Public Page','u_admin',0,'{}')`, ws); err != nil {
+		t.Fatal(err)
+	}
+	auth := func(context.Context, *sql.Tx) (appengine.Principal, error) {
+		return appengine.Principal{AuthorityID: "user:u_admin", MandateID: "human-import", Targets: []string{"*"}}, nil
+	}
+	_, err := appengine.New(db, appengine.Options{Enabled: true}).Execute(t.Context(), appengine.Key{WorkspaceID: ws, PageID: "public-workbook-init"}, appengine.Request{MutationID: "ordinary-public-import", MandateID: "human-import", Command: appengine.Command{Kind: "import", Snapshot: json.RawMessage(`{"sheets":[]}`)}}, auth, backupWorkbookEngine{})
+	if err == nil {
+		t.Fatal("ordinary initialization on public Page was enabled")
+	}
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM gridcraft_heads`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("public initialization left content: %d %v", count, err)
 	}
 }

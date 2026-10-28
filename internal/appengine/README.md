@@ -21,7 +21,7 @@ Portable backup and fork preserve native workbook snapshots and immutable mutati
 receipts. Restore and physical recovery advance writer generations, fence unfinished
 candidates and discard source editor sessions and run intents. Forked receipts retain
 source provenance and cannot be replayed as mutations against the new Page.
-Portable history merging into an existing workbook is refused before replacement
+Portable history merging into an existing Page is refused before replacement
 can erase its writer fences; use an empty destination or a fork.
 
 Each mutation is bound to artifact, authority and mutation ID. The canonical

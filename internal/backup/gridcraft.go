@@ -199,12 +199,67 @@ func rejectGridCraftHistoryCollision(ctx context.Context, q collabRestoreQuerier
 			return fmt.Errorf("backup: malformed workbook scope")
 		}
 		var exists bool
-		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=?)`, page).Scan(&exists); err != nil {
+		if err := q.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages WHERE id=?)`, page).Scan(&exists); err != nil {
 			return err
 		}
 		if exists {
-			return fmt.Errorf("backup: workbook history merge is not qualified; restore into an empty workbook destination or fork")
+			return fmt.Errorf("backup: workbook history merge is not qualified; restore into an empty Page destination or fork")
 		}
+	}
+	return nil
+}
+
+// Published workbooks were created privately and published afterward. The
+// shipped insertion trigger intentionally still requires a private personal
+// Page for ordinary initialization. During authorized restore only, satisfy
+// that initial-state guard and put the original audience back in the SAME
+// transaction before hooks or commit can expose the Page. Any failure rolls
+// back the whole change. Authority triggers remain enabled and monotonic.
+func prepareRestoredGridCraftAudience(ctx context.Context, tx *sql.Tx, row map[string]any) (bool, error) {
+	var private int
+	if err := tx.QueryRowContext(ctx, `SELECT private_audience FROM pages WHERE id=? AND workspace_id=? AND owner_user_id IS NOT NULL AND owner_crew_id IS NULL AND folder_id IS NULL`, row["page_id"], row["workspace_id"]).Scan(&private); err != nil {
+		return false, fmt.Errorf("backup: workbook requires a personal restore Page: %w", err)
+	}
+	if private == 1 {
+		return false, nil
+	}
+	if private != 0 {
+		return false, fmt.Errorf("backup: invalid workbook audience")
+	}
+	// Both Page updates fire old/new authority triggers: reserve all four
+	// increments rather than letting SQLite promote an exhausted epoch to REAL.
+	var epoch int64
+	var kind string
+	if err := tx.QueryRowContext(ctx, `SELECT authority_revision,typeof(authority_revision) FROM workspaces WHERE id=?`, row["workspace_id"]).Scan(&epoch, &kind); err != nil {
+		return false, err
+	}
+	if kind != "integer" || epoch > math.MaxInt64-4 {
+		return false, fmt.Errorf("backup: workbook restore authority epoch exhausted")
+	}
+	var exhausted bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM mooring_authority_generations WHERE workspace_id=? AND scope_kind='page' AND scope_id=? AND (revision>? OR typeof(revision)!='integer'))`, row["workspace_id"], row["page_id"], int64(math.MaxInt64-4)).Scan(&exhausted); err != nil {
+		return false, err
+	}
+	if exhausted {
+		return false, fmt.Errorf("backup: workbook restore Page authority exhausted")
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE pages SET private_audience=1 WHERE id=? AND workspace_id=? AND private_audience=0`, row["page_id"], row["workspace_id"])
+	if err != nil {
+		return false, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return false, fmt.Errorf("backup: workbook audience preparation did not update one Page")
+	}
+	return true, nil
+}
+
+func finishRestoredGridCraftAudience(ctx context.Context, tx *sql.Tx, row map[string]any) error {
+	res, err := tx.ExecContext(ctx, `UPDATE pages SET private_audience=0 WHERE id=? AND workspace_id=? AND private_audience=1`, row["page_id"], row["workspace_id"])
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n != 1 {
+		return fmt.Errorf("backup: original workbook audience was not restored")
 	}
 	return nil
 }

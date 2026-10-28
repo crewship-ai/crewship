@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Workspace backups now preserve experimental workbooks.** Encrypted portable restore and forks retain snapshots and immutable mutation receipts; recovery fences unfinished edits and requires fresh editor sessions and run permissions.
+- **Workspace backups now preserve experimental workbooks.** Encrypted portable restore and forks retain snapshots, published audience and immutable mutation receipts; recovery fences unfinished edits and requires fresh editor sessions and run permissions.
 
 - Add an opt-in Artifacts library at `/artifacts` (`NEXT_PUBLIC_ARTIFACTS_LIBRARY`): a gallery or table of projects, Word, Sheet, Slides and dashboards with kind and shared version, a project detail on its version history and the edit lock of a native Word; the Pages list reports `artifact_kind` and `artifact_shared_version`.
 - Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
