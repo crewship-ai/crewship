@@ -9,8 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Native document exports did not download.** Word and spreadsheet export copies now download through the host browser while retaining the isolated editor and separate server save confirmation.
-
+- Add a disabled dashboard dataset storage foundation with atomic document version checks, bounded JSON batches, server attribution, portable backups and Page lifetime cleanup; code versions remain in the existing artifact VersionStore.
+- Require actual Chromium execution of native document privacy regressions in frontend CI while preserving the strict browser-dialog guard.
 
 - Add an opt-in Artifacts library at `/artifacts` (`NEXT_PUBLIC_ARTIFACTS_LIBRARY`): a gallery or table of projects, Word, Sheet, Slides and dashboards with kind and shared version, a project detail on its version history and the edit lock of a native Word; the Pages list reports `artifact_kind` and `artifact_shared_version`.
 - Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
@@ -65,6 +65,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Keep idle WordCraft editors connected through standard WebSocket ping/pong while preserving the existing response and inactivity limits.
 - Show the Crewship page name in attached WordCraft chrome and hide its standalone Discord, Share and Zotero controls.
+- **Native document exports did not download.** Word and spreadsheet export copies now download through the host browser while retaining the isolated editor and separate server save confirmation.
 
 - Open document links in their accessible workspace before requesting document content, preserving unsaved-work navigation guards.
 
