@@ -6,6 +6,7 @@ import {
 } from "@/components/layout/sidebar-kit"
 import { SidebarFacetBlock, SidebarInlineFacet, useSidebarFacets } from "@/components/layout/sidebar-facets"
 import type { PageFolderView } from "@/hooks/use-page-folders"
+import { FolderGlyph } from "@/components/features/pages/folder-glyph"
 import { KIND_ACCENT, KIND_ICON } from "@/components/features/chat/artifact-context/new-artifact/artifact-kinds"
 import { kindLabel, LIBRARY_KINDS, type LibraryItem } from "./library-items"
 import {
@@ -119,10 +120,12 @@ export function LibraryPanel({ items, folders, filters, personal, onFiltersChang
       {(folders.length > 0 || unfiled > 0) && <SidebarSection label="Folders" count={folders.length || undefined}>
         {folders.map(folder => {
           const on = filters.folder === folder.slug
-          const Icon = on ? FolderOpen : Folder
           return <SidebarRow key={folder.slug} selected={on} aria-current={on ? "page" : undefined}
             onSelect={() => narrow({ folder: on ? null : folder.slug })}>
-            <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            {/* The folder's own icon and colour, as Pages draws it. */}
+            {folder.icon || folder.color
+              ? <FolderGlyph icon={folder.icon} color={folder.color} className="size-3.5 shrink-0" />
+              : on ? <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" aria-hidden /> : <Folder className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
             <span className="min-w-0 flex-1 truncate">{folder.name}</span>{meta(folderCount(folder.slug))}
           </SidebarRow>
         })}
