@@ -66,6 +66,14 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   if (path === "/api/v1/me/preferences" && method === "GET") return json({})
   if (path.startsWith("/api/v1/me/preferences/") && method === "PUT") return json({ ok: true })
   if (path === "/api/v1/documents/status" && method === "GET") return json({ enabled: true })
+  // The Word detail's read-only preview: current metadata, then the saved document (schema 3).
+  if (path === "/api/v1/pages/%40page-brief" && method === "GET") return json({ id: "page-brief", slug: "partner-brief", name: "Partner brief", has_document: true })
+  if (path === "/api/v1/pages/%40page-brief/document" && method === "GET") return json({ page_id: "page-brief", schema: 3, rev: 4, content: {
+    type: "doc", content: [
+      // Schema 3 blocks carry a unique id.
+      { type: "paragraph", attrs: { id: "p1" }, content: [{ type: "text", text: "Partner brief" }] },
+      { type: "paragraph", attrs: { id: "p2" }, content: [{ type: "text", text: "Three partners, one launch date and the open questions for each." }] },
+    ] } })
   const slug = /^\/api\/v1\/pages\/([^/]+)\/(?:artifact|craft)\b/.exec(path)?.[1]
   const mock = slug ? mocks[decodeURIComponent(slug)] : path === "/api/v1/pages/artifacts/availability" ? project : undefined
   const response = mock?.handle(url, init)

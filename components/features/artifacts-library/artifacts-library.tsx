@@ -9,6 +9,9 @@ import { SecondaryPanel } from "@/components/layout/secondary-panel"
 import { PageEmpty, PageError, PageLoading, PageNoResults } from "@/components/layout/page-state"
 import { usePages } from "@/hooks/use-pages"
 import { usePageFolders } from "@/hooks/use-page-folders"
+import { useSessionSafe } from "@/hooks/use-auth"
+import { useDocumentViewerRead } from "@/hooks/use-document-viewer-read"
+import { DocumentReadonly } from "@/components/features/pages/document-readonly/document-readonly"
 import { formatRelativeShort } from "@/lib/time"
 import { artifactDashboards, artifactSlides } from "@/lib/feature-flags"
 import { cn } from "@/lib/utils"
@@ -194,8 +197,27 @@ function OpenInPages({ workspaceId, item }: { workspaceId: string; item: Library
   </Button>
 }
 
+/**
+ * The saved Word document, read-only: the same current-version read the chat
+ * viewer uses. It never opens an editor, a CRDT or a lease, and writes nothing;
+ * editing stays in the Craft editor behind the lock bar.
+ */
+function WordPreview({ workspaceId, item }: { workspaceId: string; item: LibraryItem }) {
+  const userId = useSessionSafe()?.data?.user?.id ?? null
+  const target = useMemo(() => item.pageId ? { workspaceId, pageId: item.pageId, type: "document" as const, mode: "latest" as const } : null, [workspaceId, item.pageId])
+  // chatId and activationKey only scope the read; the library is its own scope, one per opened item.
+  const { read } = useDocumentViewerRead({ workspaceId, chatId: "artifacts-library", currentUserId: userId, activationKey: `library:${item.slug}`, target, enabled: target !== null })
+  if (read.status === "loading") return <div aria-busy="true" className="h-40 animate-pulse rounded-card border bg-muted/40" />
+  if (read.status !== "ready") return <p role="status" className="rounded-card border border-dashed p-4 text-sm text-muted-foreground">
+    {read.status === "denied" ? "You can't read this document." : "The document preview is unavailable. Open in Pages shows it."}
+  </p>
+  return <div className="bg-card">
+    <DocumentReadonly schema={read.content.schema} content={read.content.content} accessibleLabel={`${item.name}, saved version`} />
+  </div>
+}
+
 const DETAIL_HINT: Partial<Record<LibraryKind, string>> = {
-  word: "Read and edit it in its editor; Open in Pages shows the saved document.",
+  word: "This is the saved version. Edit it in its editor from Open in Pages.",
   sheet: "Read and edit it in its editor; Open in Pages shows the saved document.",
   page: "Its panels open on the page, where crews keep them filled.",
 }
@@ -229,6 +251,7 @@ function ArtifactDetail({ workspaceId, item, onBack }: { workspaceId: string; it
             onEdit={() => window.open(craftEditorHref(workspaceId, "@" + item.pageId), "_blank", "noopener,noreferrer")} />
         </div>
         : null}
+    {item.kind === "word" && !item.empty && item.pageId && <WordPreview workspaceId={workspaceId} item={item} />}
     {!projectPreview && item.kind !== "project" && <p className="text-sm text-muted-foreground">
       {DETAIL_HINT[item.kind] ?? "Open in Pages shows it with everything it contains."}
     </p>}
