@@ -2,6 +2,7 @@
 
 
 import { useSearchParams } from "next/navigation"
+import { useState } from "react"
 import { ArtifactProject } from "@/components/features/pages/artifact-project"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useUrlSegment } from "@/lib/use-url-segment"
@@ -64,6 +65,10 @@ export function PageDetailClient() {
  * turn VersionStore artifacts into the legacy panels surface. */
 function PageBackendReader({ workspaceId, slug, initialVersion }: { workspaceId: string; slug: string; initialVersion?: number }) {
   const detail = usePage(workspaceId, slug)
+  const [legacyReader, setLegacyReader] = useState(false)
+  // Route selection is not content authority. Once admitted, the existing
+  // reader owns access retirement and must retain its original draft producer.
+  if (legacyReader) return <PagesLayout workspaceId={workspaceId} slug={slug} />
   if (detail.loading) return <Skeleton className="m-6 h-12" />
   if (detail.accessDenied || !detail.page && !detail.error) return <p role="alert" className="p-6">Document unavailable.</p>
   if (detail.error) return <p role="alert" className="p-6">Document could not be loaded.</p>
@@ -71,5 +76,6 @@ function PageBackendReader({ workspaceId, slug, initialVersion }: { workspaceId:
   if (kind === "project" || kind === "dashboard" || kind === "slides") {
     return <ArtifactProject key={`${workspaceId}:${slug}:${initialVersion ?? "latest"}`} workspaceId={workspaceId} slug={slug} initialVersion={initialVersion} />
   }
+  setLegacyReader(true)
   return <PagesLayout workspaceId={workspaceId} slug={slug} />
 }

@@ -1,9 +1,9 @@
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
-const state = vi.hoisted(() => ({ kind: undefined as string | undefined, rawKind: undefined as string | undefined, error: null as string | null, loading: false, denied: false, query: "", read: vi.fn() }))
+const state = vi.hoisted(() => ({ kind: undefined as string | undefined, rawKind: undefined as string | undefined, error: null as string | null, loading: false, denied: false, query: "", workspace: "real-owner-workspace", slug: "ordinary-demo-owner-page", read: vi.fn() }))
 vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(state.query) }))
-vi.mock("@/lib/use-url-segment", () => ({ useUrlSegment: () => "ordinary-demo-owner-page" }))
-vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ workspaceId: "real-owner-workspace", loading: false }) }))
+vi.mock("@/lib/use-url-segment", () => ({ useUrlSegment: () => state.slug }))
+vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ workspaceId: state.workspace, loading: false }) }))
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => "full" }))
 vi.mock("@/components/features/restricted/access-notice", () => ({ useAccessContext: () => ({}) }))
 vi.mock("@/components/features/pages/restricted-pages", () => ({ RestrictedPages: () => null }))
@@ -14,7 +14,7 @@ vi.mock("@/hooks/use-pages", () => ({ usePage: (...args: unknown[]) => {
   return { loading: state.loading, accessDenied: state.denied, error: state.denied ? "denied" : state.error, page: { artifactKind: state.kind }, raw: state.rawKind ? { artifact_kind: state.rawKind } : null }
 } }))
 import { PageDetailClient } from "../page-client"
-beforeEach(() => { state.kind = undefined; state.rawKind = undefined; state.error = null; state.loading = false; state.denied = false; state.query = ""; state.read.mockClear(); vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true") })
+beforeEach(() => { state.kind = undefined; state.rawKind = undefined; state.error = null; state.loading = false; state.denied = false; state.query = ""; state.workspace = "real-owner-workspace"; state.slug = "ordinary-demo-owner-page"; state.read.mockClear(); vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true") })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 it.each(["project", "dashboard", "slides"])("routes a normal owner Page URL for backend %s without an artifact query", kind => {
   state.kind = kind
@@ -71,4 +71,36 @@ it("shows a load error without either content reader after a current request fai
   expect(screen.queryByText("Legacy Page reader")).toBeNull()
   expect(screen.getByRole("alert")).toHaveTextContent("Document could not be loaded.")
   expect(screen.queryByText(state.error)).toBeNull()
+})
+
+it.each(["word", "sheet", undefined])("does not remount an admitted native/legacy reader %s when its own access lifecycle must retire content", kind => {
+  state.kind = kind
+  const view = render(<PageDetailClient />)
+  const reader = screen.getByText("Legacy Page reader")
+  state.error = "temporary current Page refresh error"
+  view.rerender(<PageDetailClient />)
+  expect(reader.isConnected).toBe(true)
+  expect(screen.getByText("Legacy Page reader")).toBe(reader)
+  state.denied = true
+  view.rerender(<PageDetailClient />)
+  expect(screen.getByText("Legacy Page reader")).toBe(reader)
+})
+
+it.each(["workspace", "slug"] as const)("does not carry a legacy-reader selection across %s changes", field => {
+  state.kind = "word"
+  const view = render(<PageDetailClient />)
+  const reader = screen.getByText("Legacy Page reader")
+  state[field] = "next-authorized-scope"; state.kind = "dashboard"
+  view.rerender(<PageDetailClient />)
+  expect(reader.isConnected).toBe(false)
+  expect(screen.getByTestId("artifact-reader")).toHaveAttribute(field === "workspace" ? "data-workspace" : "data-page", "next-authorized-scope")
+})
+it.each(["workspace", "slug"] as const)("requires fresh authority after a legacy-reader %s changes", field => {
+  state.kind = "word"
+  const view = render(<PageDetailClient />)
+  state[field] = "denied-next-scope"; state.denied = true
+  view.rerender(<PageDetailClient />)
+  expect(screen.queryByText("Legacy Page reader")).toBeNull()
+  expect(screen.queryByTestId("artifact-reader")).toBeNull()
+  expect(screen.getByRole("alert")).toHaveTextContent("Document unavailable.")
 })
