@@ -107,6 +107,11 @@ type artifactDataDocumentResponse struct {
 	SourceLabel string          `json:"source_label"`
 	SourceKind  string          `json:"source_kind"`
 }
+type artifactDataCollectionsResponse struct {
+	CodeVersion int64                      `json:"code_version"`
+	Collections []artifacts.DataCollection `json:"collections"`
+}
+
 type artifactDataResponse struct {
 	Collection  string                         `json:"collection"`
 	CodeVersion int64                          `json:"code_version"`
@@ -201,7 +206,7 @@ func (h *PageHandler) ListArtifactData(w http.ResponseWriter, r *http.Request) {
 			visible = append(visible, collection)
 		}
 	}
-	writeArtifactData(w, map[string]any{"code_version": version, "collections": visible})
+	writeArtifactData(w, artifactDataCollectionsResponse{CodeVersion: version, Collections: visible})
 }
 func (h *PageHandler) BatchArtifactData(w http.ResponseWriter, r *http.Request) {
 	k, ok := h.artifactDataStart(w, r)
