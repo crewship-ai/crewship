@@ -61,6 +61,14 @@ var artifactProjectPathID = regexp.MustCompile(`^@?[A-Za-z0-9][A-Za-z0-9_-]{0,12
 // DecodeDocumentDraft rejects duplicate keys at EVERY depth and invalid UTF8.
 // Identity never comes from these arguments: the sidecar forwards the original
 // run bearer and the host independently checks the current immutable mandate.
+func artifactDataMCPTool(name string) bool {
+	switch name {
+	case "artifact_data_batch", "artifact_data_read", "artifact_data_collections":
+		return true
+	}
+	return false
+}
+
 func artifactProjectMCPPacket(name string, raw []byte) ([]byte, bool, error) {
 	var definition *artifactProjectTool
 	for i := range artifactProjectTools {
@@ -77,7 +85,11 @@ func artifactProjectMCPPacket(name string, raw []byte) ([]byte, bool, error) {
 	if strings.HasPrefix(name, "artifact_data_") {
 		decode = func() error { return artifacts.DecodeDataJSON(raw, &fields, definition.fields...) }
 	}
-	if len(raw) > 1<<20 || decode() != nil || fields == nil {
+	limitRequest := 1 << 20
+	if artifactDataMCPTool(name) {
+		limitRequest = artifacts.MaxDataToolRequestBytes
+	}
+	if len(raw) > limitRequest || decode() != nil || fields == nil {
 		return nil, true, fmt.Errorf("arguments must be a bounded closed object without duplicate fields")
 	}
 	allowed := map[string]bool{}

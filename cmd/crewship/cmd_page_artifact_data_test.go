@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -70,5 +71,41 @@ func TestArtifactDataCLIOriginalRunPreservesUnicodeBudget(t *testing.T) {
 	})
 	if err != nil || calls != 1 {
 		t.Fatalf("protected CLI: %v calls%d", err, calls)
+	}
+}
+
+func TestArtifactDataCLIOriginalRunKeepsBatchMetadataHeadroom(t *testing.T) {
+	t.Setenv("CREWSHIP_AGENT_TOKEN", "agtv2.test")
+	cmd := &cobra.Command{}
+	cmd.SetContext(t.Context())
+	body := artifacts.DataBatch{BaseVersion: 1}
+	for i := 0; i < 4; i++ {
+		body.Documents = append(body.Documents, artifacts.DataWrite{ID: fmt.Sprintf("row%d", i), Value: json.RawMessage(`{"x":""}`)})
+	}
+	empty, _ := artifacts.MarshalDataJSON(body)
+	remaining := artifacts.MaxDataBatchBytes - 8 - len(empty)
+	for i := range body.Documents {
+		n := remaining / (len(body.Documents) - i)
+		remaining -= n
+		body.Documents[i].Value = json.RawMessage(`{"x":"` + strings.Repeat("a", n) + `"}`)
+	}
+	raw, _ := artifacts.MarshalDataJSON(body)
+	if _, err := artifacts.DecodeDataBatch(raw); err != nil {
+		t.Fatalf("invalid bounded batch fixture: %v", err)
+	}
+	calls := 0
+	transport := artifactAgentRoundTripper(func(r *http.Request) (*http.Response, error) {
+		calls++
+		packet, _ := io.ReadAll(r.Body)
+		if len(packet) <= artifacts.MaxDataBatchBytes {
+			t.Fatal("fixture did not cross outer metadata boundary")
+		}
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"{}"}]}}`))}, nil
+	})
+	_, err := captureStdoutCov(t, func() error {
+		return artifactCLIRequestWithTransport(cmd, "POST", "/api/v1/pages/demo/artifact/data/sales", body, transport)
+	})
+	if err != nil || calls != 1 {
+		t.Fatalf("valid%d-byte batch lost metadata headroom: %v calls%d", len(raw), err, calls)
 	}
 }
