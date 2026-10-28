@@ -12,7 +12,7 @@ export interface NativeDraft {
 export interface NativeRecovery { draft: NativeDraft; actions: readonly ["compare", "copy"] }
 export interface NativeDraftJournal {
   persist(draft: NativeDraft): Promise<void>
-  confirm(draft: NativeDraft): Promise<void>
+  confirm: (draft: NativeDraft) => Promise<void>
   recovery(): Promise<NativeRecovery[]>
   onRetire(listener: () => void): () => void
   close(): Promise<void>
@@ -101,7 +101,7 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
         current = snapshot
       })
     },
-    confirm(draft) {
+    confirm: (draft) => {
       if (!active) return Promise.reject(fail())
       const snapshot = encode(draft)
       return enqueue(async () => { if (current === snapshot) { await journal.remove(id); current = undefined } })
