@@ -1967,3 +1967,35 @@ Agent tools `artifact_data_batch`, `artifact_data_read` and
 Page mandate. Protected CLI runs use that sidecar transport and cannot fall back
 to human credentials. Code restore/share/comments retain the existing artifact
 version and comment operations; restoring code does not rewind mutable data.
+
+### `crewship page artifact slides <slug-or-id>`
+
+Read the authorized Slides projection and authored comment anchors. Both
+`artifact_projects` and `artifact_slides` must be enabled for the workspace.
+The required `--version` selects an exact positive immutable code version
+(at most 9007199254740991); it never follows the latest version implicitly.
+Owners can read retained versions; shared readers can read only the current
+shared pin.
+
+```bash
+crewship page artifact slides @PAGE_ID --version 2 --format json
+```
+
+### `crewship page artifact export-pdf <slug-or-id>`
+
+Export an authorized Slides snapshot with the same feature and version access
+rules. The required `--version` is an exact positive immutable code pin. The
+required `--out` names a local file and is never sent to the server or used as a
+host output path. Standard output contains a receipt, rather than PDF bytes.
+
+```bash
+crewship page artifact export-pdf @PAGE_ID --version 2 --out slides.pdf --format json
+```
+
+The receipt contains `path`, `media_type`, `code_version`, `byte_length` and
+`sha256`. The CLI validates the PDF media type, magic bytes and 8 MiB limit
+before atomically replacing the local output. Protected agent runs retain their
+original run identity and also verify the selected pin, base64, byte length and
+SHA-256 of the host response before writing; they never use human credentials
+as a fallback. The MCP tools `artifact_slides_read` and `artifact_export_pdf`
+accept only `slug` and the required positive `version`, without an output path.
