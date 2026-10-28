@@ -22,6 +22,9 @@ import { ArtifactViewerProvider } from "@/components/features/chat/artifact-cont
 import { useArtifactProjectsAvailable } from "@/components/features/chat/artifact-context/projects/use-artifact-project-data"
 import { ArtifactViewerPanel } from "@/components/features/chat/artifact-context/viewer/artifact-viewer-panel"
 import { CraftLockBar, craftEditorHref } from "@/components/features/chat/artifact-context/craft/craft-lock-bar"
+import { useCraftLeaseState } from "@/components/features/chat/artifact-context/craft/use-craft-lease"
+import { readLocalDraft, type LocalDraft } from "@/components/features/chat/artifact-context/craft/local-draft"
+import { LocalDraftBanner } from "@/components/features/chat/artifact-context/craft/local-draft-banner"
 import { KIND_ACCENT, KIND_ICON, ARTIFACT_KINDS, type ArtifactKindKey } from "@/components/features/chat/artifact-context/new-artifact/artifact-kinds"
 import { useArtifactCapabilities } from "@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities"
 import { NewArtifactDialog } from "./new-artifact-dialog"
@@ -250,6 +253,36 @@ function WordPreview({ workspaceId, item }: { workspaceId: string; item: Library
   </div>
 }
 
+/**
+ * Lost Craft lock: edits this browser kept as a local draft come back for
+ * compare or copy, never saved over whoever holds the lock now. Reads the
+ * lease only when such a draft exists.
+ */
+function LockLostDraft({ workspaceId, slug }: { workspaceId: string; slug: string }) {
+  const userId = useSessionSafe()?.data?.user?.id ?? ""
+  const [present, setPresent] = useState(false)
+  // Read after mount: storage does not exist during prerender.
+  useEffect(() => { setPresent(Boolean(userId && readLocalDraft(userId, workspaceId, slug))) }, [userId, workspaceId, slug])
+  return present ? <RecoveredDraft userId={userId} workspaceId={workspaceId} slug={slug} /> : null
+}
+
+function RecoveredDraft({ userId, workspaceId, slug }: { userId: string; workspaceId: string; slug: string }) {
+  const lease = useCraftLeaseState(workspaceId, slug)
+  const holder = lease.status?.holder
+  const [compare, setCompare] = useState<LocalDraft | null>(null)
+  return <>
+    <LocalDraftBanner userId={userId} workspaceId={workspaceId} slug={slug} holderName={holder && !lease.heldByMe ? holder.display_name : null} onCompare={setCompare} />
+    {compare && <section aria-label="Your local draft" className="grid gap-2 rounded-card border bg-card p-3 text-sm">
+      <div className="flex items-center gap-2">
+        <b className="font-semibold">Your local draft</b>
+        <span className="text-xs text-muted-foreground">based on v{compare.baseVersion}; the saved version is below</span>
+        <Button type="button" size="sm" variant="ghost" className="ml-auto coarse:min-h-[44px]" onClick={() => setCompare(null)}>Hide</Button>
+      </div>
+      <p className="whitespace-pre-wrap">{compare.content}</p>
+    </section>}
+  </>
+}
+
 const DETAIL_HINT: Partial<Record<LibraryKind, string>> = {
   word: "This is the saved version. Edit it in its editor from Open in Pages.",
   sheet: "Read and edit it in its editor; Open in Pages shows the saved document.",
@@ -304,6 +337,7 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
             onEdit={() => window.open(craftEditorHref(workspaceId, "@" + item.pageId), "_blank", "noopener,noreferrer")} />
         </div>
         : null}
+    {!projectPreview && item.native && item.kind === "word" && item.pageId && <LockLostDraft workspaceId={workspaceId} slug={"@" + item.pageId} />}
     {item.kind === "word" && !item.empty && item.pageId && <WordPreview workspaceId={workspaceId} item={item} />}
     {!projectPreview && item.kind !== "project" && <p className="text-sm text-muted-foreground">
       {DETAIL_HINT[item.kind] ?? "Open in Pages shows it with everything it contains."}
