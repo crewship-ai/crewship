@@ -236,6 +236,10 @@ try {
         assert.equal(await page.getByRole("button", { name: "Edit", exact: true }).count(), 0)
         await page.getByRole("button", { name: "Request edit" }).click()
         await page.getByText("Request sent to Jana Nováková · they can hand over or decline").waitFor()
+        // The saved version reads in place, never as an editor.
+        const body = page.getByRole("region", { name: "Partner brief, saved version" })
+        await body.getByText("Three partners, one launch date").waitFor()
+        assert.equal(await body.locator("[contenteditable=true]").count(), 0, "the preview is read-only")
       }
       await noSideways(entry.name)
       await shot(`07-${entry.kind.toLowerCase()}`)
