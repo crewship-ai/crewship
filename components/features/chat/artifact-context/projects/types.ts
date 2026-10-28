@@ -44,6 +44,8 @@ export interface ArtifactComment {
   quote: string
   text: string
   author?: string
+  /** Server-derived delivery metadata; never an execution grant. */
+  delivery_retryable?: boolean
   task_id?: string
   created_at?: string
   /** proposed */

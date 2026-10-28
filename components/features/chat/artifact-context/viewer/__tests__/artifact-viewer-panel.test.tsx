@@ -4,6 +4,7 @@ import type { ArtifactComment, ArtifactProjectSnapshot } from "../../projects/ty
 import type { ArtifactViewerTarget } from "../../projects/artifact-viewer-context"
 
 const state = vi.hoisted(() => ({
+  userId: "user-me",
   target: null as ArtifactViewerTarget | null,
   close: vi.fn(),
   snapshot: { data: undefined as unknown, isLoading: false, error: null as unknown, refetch: vi.fn() },
@@ -12,7 +13,7 @@ const state = vi.hoisted(() => ({
   sendToAgent: undefined as undefined | ((request: unknown) => Promise<boolean>),
 }))
 
-vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "user-me" } } }) }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: state.userId } } }) }))
 vi.mock("../../projects/artifact-viewer-context", () => ({
   useArtifactViewer: () => ({ workspaceId: "ws1", target: state.target, open: vi.fn(), close: state.close, sendToAgent: state.sendToAgent }),
 }))
@@ -47,6 +48,7 @@ function snap(patch: Partial<ArtifactProjectSnapshot> = {}): ArtifactProjectSnap
 const err = (status: number, code: string) => Object.assign(new Error(code), { status, code })
 
 beforeEach(() => {
+  state.userId = "user-me"
   state.target = { slug: "launch" }
   state.snapshot = { data: snap(), isLoading: false, error: null, refetch: vi.fn() }
   state.versionArg = []
@@ -252,6 +254,7 @@ it("names the reader's own comments You and never shows a raw account id", () =>
 it("Send to agent starts the agent in this chat for the saved comment and offers a retry when it does not start", async () => {
   const sendToAgent = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
   state.sendToAgent = sendToAgent
+  state.snapshot.data=snap({origin:{chat_id:"origin-chat",agent_id:"origin-agent"}})
   render(<ArtifactViewerPanel />)
   selectHero()
   fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
@@ -260,6 +263,10 @@ it("Send to agent starts the agent in this chat for the saved comment and offers
   await act(async () => { state.comment.mock.calls.at(-1)![1].onSuccess(saved) })
   expect(sendToAgent).toHaveBeenCalledWith({ pageId: "p1", comment: saved })
   expect(await screen.findByText(/agent did not start/i)).toBeInTheDocument()
+  state.snapshot.data = snap({origin:{chat_id:"origin-chat",agent_id:"origin-agent"}})
+  state.snapshot.refetch.mockResolvedValue({data:snap({origin:{chat_id:"origin-chat",agent_id:"origin-agent"},comments:[{...saved,author:"user-me",status:"pending",delivery_retryable:true}]}),error:null})
+  // A real snapshot update preserves the original failed delivery state.
+  // The fresh read then authorizes retry of that same saved task.
   await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Retry" })) })
   expect(sendToAgent).toHaveBeenCalledTimes(2)
   expect(await screen.findByText("Comment sent to the agent")).toBeInTheDocument()
@@ -431,11 +438,11 @@ it.each([["true", true, "Dashboard"], ["false", true, "Project"], ["true", false
 it.each([false, undefined])("keeps reader controls inert when can_write is %s", canWrite => {
   state.snapshot.data = snap({ can_write: canWrite, comments: [comment({ text: "Existing feedback" })] })
   render(<ArtifactViewerPanel />)
-  expect(screen.queryByRole("button", { name: "Select", exact: true })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Select" })).toBeNull()
   expect(screen.queryByRole("form", { name: "New comment" })).toBeNull()
-  expect(screen.queryByRole("button", { name: "Send to agent", exact: true })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Send to agent" })).toBeNull()
   expect(screen.getByText("Existing feedback")).toBeInTheDocument()
-  fireEvent.click(screen.getByRole("button", { name: "History", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "History" }))
   expect(screen.getByRole("region", { name: "Version history" })).toBeInTheDocument()
   expect(state.comment).not.toHaveBeenCalled()
 })
@@ -454,7 +461,7 @@ it("retires a lost writer's anchor and selection while preserving the unsent dra
   const frame = screen.getByTitle(/Preview of/) as HTMLIFrameElement
   state.snapshot.data = snap({ can_write: false })
   view.rerender(<ArtifactViewerPanel />)
-  expect(screen.queryByRole("button", { name: "Select", exact: true })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Select" })).toBeNull()
   expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull()
   act(() => window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow, data: { type: "crewship-artifact-select", selector: "#hero", quote: "Big idea" } })))
   state.snapshot.data = snap()
@@ -462,7 +469,7 @@ it("retires a lost writer's anchor and selection while preserving the unsent dra
   expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Keep my draft")
   expect(screen.getByRole("button", { name: "Save comment" })).toBeDisabled()
   expect(screen.getByRole("button", { name: "Send to agent" })).toBeDisabled()
-  expect(screen.getByRole("button", { name: "Select", exact: true })).toHaveAttribute("aria-pressed", "false")
+  expect(screen.getByRole("button", { name: "Select" })).toHaveAttribute("aria-pressed", "false")
   expect(state.comment).not.toHaveBeenCalled()
 })
 
@@ -494,10 +501,10 @@ it("removes agent retry mutations when the writer becomes a reader", async () =>
   fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Retry later" } })
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   await act(async () => state.comment.mock.calls.at(-1)![1].onSuccess({ id: "saved", version: 3 }))
-  expect(screen.getByRole("button", { name: "Retry", exact: true })).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
   state.snapshot.data = snap({ can_write: false })
   view.rerender(<ArtifactViewerPanel />)
-  expect(screen.queryByRole("button", { name: "Retry", exact: true })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull()
   expect(send).toHaveBeenCalledTimes(1)
 })
 
@@ -514,7 +521,7 @@ it.each([false, true])("fences a pending comment only when refresh loses authori
   state.snapshot.data = snap({ latest_version: 4 })
   state.snapshot.error = queryError ? err(0, "unavailable") : null
   view.rerender(<ArtifactViewerPanel />)
-  if (queryError) expect(screen.queryByRole("button", { name: "Select", exact: true })).toBeNull()
+  if (queryError) expect(screen.queryByRole("button", { name: "Select" })).toBeNull()
   return act(async () => {
     callbacks.onSuccess({ id: "pending-refresh", version: 3, path: "home.html", selector: "#hero", quote: "Big idea", text: "Pending refresh" })
     if (queryError) expect(send).not.toHaveBeenCalled()
@@ -551,4 +558,114 @@ it("refuses ambiguous deck and dashboard source without either preview", () => {
     expect(screen.queryByText("Bound dashboard")).toBeNull()
     expect(screen.queryByTitle(/Preview of/)).toBeNull()
   } finally { vi.unstubAllEnvs() }
+})
+
+function retrySnapshot(): ArtifactProjectSnapshot {
+ return snap({origin:{chat_id:"origin-chat",agent_id:"origin-agent"},comments:[{id:"waiting-c1",task_id:"waiting-t1",author:"user-me",version:3,path:"home.html",selector:"#hero",quote:"Big idea",text:"Saved busy comment",status:"pending",delivery_retryable:true}]})
+}
+
+it("recovers an exact persisted Waiting task after close/reopen without creating another comment", async()=>{
+ state.snapshot.data=retrySnapshot()
+ state.snapshot.refetch.mockResolvedValue({data:retrySnapshot(),error:null})
+ state.sendToAgent=vi.fn().mockResolvedValue(true)
+ const view=render(<ArtifactViewerPanel />)
+ expect(screen.getByRole("button",{name:"Retry"})).toBeInTheDocument()
+ state.target=null;view.rerender(<ArtifactViewerPanel />)
+ state.target={slug:"launch"};view.rerender(<ArtifactViewerPanel />)
+ await act(async()=>fireEvent.click(screen.getByRole("button",{name:"Retry"})))
+ expect(state.snapshot.refetch).toHaveBeenCalledTimes(1)
+ expect(state.sendToAgent).toHaveBeenCalledWith({pageId:"p1",comment:retrySnapshot().comments[0]})
+ expect(state.comment).not.toHaveBeenCalled()
+ expect(screen.queryByRole("button",{name:"Retry"})).toBeNull()
+})
+
+it.each(["accepted", "missing eligibility", "claimed", "new head", "changed origin", "lost write"])("fresh Retry read fences %s without another dispatch", async change=>{
+ state.snapshot.data=retrySnapshot()
+ const fresh=retrySnapshot()
+ if(change==="accepted")fresh.comments[0].delivery_retryable=false
+ if(change==="missing eligibility")delete fresh.comments[0].delivery_retryable
+ if(change==="claimed"){fresh.comments[0].status="working";fresh.comments[0].delivery_retryable=false}
+ if(change==="new head")fresh.latest_version=4
+ if(change==="changed origin")fresh.origin={chat_id:"different-chat",agent_id:"origin-agent"}
+ if(change==="lost write")fresh.can_write=false
+ state.snapshot.refetch.mockResolvedValue({data:fresh,error:null})
+ state.sendToAgent=vi.fn().mockResolvedValue(true)
+ render(<ArtifactViewerPanel />)
+ await act(async()=>fireEvent.click(screen.getByRole("button",{name:"Retry"})))
+ expect(state.sendToAgent).not.toHaveBeenCalled()
+ expect(state.comment).not.toHaveBeenCalled()
+})
+
+it("fences a late Retry refresh after Page rescope",async()=>{
+ state.snapshot.data=retrySnapshot()
+ let settle!: (value:unknown)=>void
+ state.snapshot.refetch.mockImplementation(()=>new Promise(resolve=>{settle=resolve}))
+ state.sendToAgent=vi.fn().mockResolvedValue(true)
+ const view=render(<ArtifactViewerPanel />)
+ fireEvent.click(screen.getByRole("button",{name:"Retry"}))
+ state.target={slug:"other"};view.rerender(<ArtifactViewerPanel />)
+ await act(async()=>settle({data:retrySnapshot(),error:null}))
+ expect(state.sendToAgent).not.toHaveBeenCalled()
+})
+
+it("disables a duplicate Retry click while its fresh delivery read is pending",async()=>{
+ state.snapshot.data=retrySnapshot()
+ let settle!: (value:unknown)=>void
+ state.snapshot.refetch.mockImplementation(()=>new Promise(resolve=>{settle=resolve}))
+ state.sendToAgent=vi.fn().mockResolvedValue(true)
+ render(<ArtifactViewerPanel />)
+ const button=screen.getByRole("button",{name:"Retry"})
+ fireEvent.click(button)
+ expect(button).toBeDisabled()
+ fireEvent.click(button)
+ expect(state.snapshot.refetch).toHaveBeenCalledTimes(1)
+ await act(async()=>settle({data:retrySnapshot(),error:null}))
+ expect(state.sendToAgent).toHaveBeenCalledTimes(1)
+ expect(state.comment).not.toHaveBeenCalled()
+})
+
+ it("fences a late Retry refresh across a human identity change on the same Page",async()=>{
+ state.snapshot.data=retrySnapshot()
+ let settle!: (value:unknown)=>void
+ state.snapshot.refetch.mockImplementation(()=>new Promise(resolve=>{settle=resolve}))
+ state.sendToAgent=vi.fn().mockResolvedValue(true)
+ const view=render(<ArtifactViewerPanel />)
+ fireEvent.click(screen.getByRole("button",{name:"Retry"}))
+ state.userId="different-human"
+ view.rerender(<ArtifactViewerPanel />)
+ await act(async()=>settle({data:retrySnapshot(),error:null}))
+ expect(state.sendToAgent).not.toHaveBeenCalled()
+ })
+
+it("restores usable Retry after write authority leaves and returns during an old refresh",async()=>{
+ state.snapshot.data=retrySnapshot()
+ const reads: ((value:unknown)=>void)[]=[]
+ state.snapshot.refetch.mockImplementation(()=>new Promise(resolve=>reads.push(resolve)))
+ state.sendToAgent=vi.fn().mockResolvedValue(true)
+ const view=render(<ArtifactViewerPanel />)
+ fireEvent.click(screen.getByRole("button",{name:"Retry"}))
+ state.snapshot.data={...retrySnapshot(),can_write:false};view.rerender(<ArtifactViewerPanel />)
+ state.snapshot.data=retrySnapshot();view.rerender(<ArtifactViewerPanel />)
+ const renewed=screen.getByRole("button",{name:"Retry"})
+ expect(renewed).toBeEnabled()
+ fireEvent.click(renewed)
+ expect(reads).toHaveLength(2)
+ await act(async()=>reads[0]({data:retrySnapshot(),error:null}))
+ expect(screen.getByRole("button",{name:"Retry"})).toBeDisabled()
+ expect(state.sendToAgent).not.toHaveBeenCalled()
+ await act(async()=>reads[1]({data:retrySnapshot(),error:null}))
+ expect(state.sendToAgent).toHaveBeenCalledTimes(1)
+})
+
+it.each(["another-origin",null])("fences an old Retry refresh after origin changes to %s",async next=>{
+ state.snapshot.data=retrySnapshot()
+ let settle!: (value:unknown)=>void
+ state.snapshot.refetch.mockImplementation(()=>new Promise(resolve=>{settle=resolve}))
+ state.sendToAgent=vi.fn().mockResolvedValue(true)
+ const view=render(<ArtifactViewerPanel />)
+ fireEvent.click(screen.getByRole("button",{name:"Retry"}))
+ state.snapshot.data={...retrySnapshot(),origin:next?{chat_id:next,agent_id:"origin-agent"}:null}
+ view.rerender(<ArtifactViewerPanel />)
+ await act(async()=>settle({data:retrySnapshot(),error:null}))
+ expect(state.sendToAgent).not.toHaveBeenCalled()
 })

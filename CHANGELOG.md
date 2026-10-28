@@ -18,6 +18,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Require actual Chromium execution of native document privacy regressions in frontend CI while preserving the strict browser-dialog guard.
 - **Artifact comments could report that the agent did not start after it answered.** Persisted chat acknowledgements now confirm the exact artifact request, and verified task progress clears stale delivery warnings and their retry action.
+- **Saved artifact comments could lose Retry when their viewer was closed.** Reopening now offers Retry for an undelivered task, rereads its current delivery state and reuses the same saved comment; accepted or running tasks are not sent again.
 - Add a default-off typed artifact Slides preview (`NEXT_PUBLIC_ARTIFACT_SLIDES`) with existing slide canvases, thumbnails, presentation, authored comment anchors and authorized PDF download; requires the backend Slides capability.
 
 - Add opt-in inert Dashboard previews (`NEXT_PUBLIC_ARTIFACT_DASHBOARDS`): authorized collection data refreshes numbers, tables and native meter charts without publishing new code; shared readers stay on their shared manifest and data has source and freshness labels.

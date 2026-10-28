@@ -2621,6 +2621,19 @@ retained version; `needs_clarification:true` may address the original version
 without claiming an edit. Readers cannot inspect unpublished reply metadata
 or request another private version through the comments endpoint.
 
+Snapshot comments include the required boolean `delivery_retryable`. It is true
+only for the current human owner's exact pending task on the selected latest
+version, with current Page write access and a readable private source chat,
+when no delivery message has already been accepted. Shared readers always see
+false. Claimed, answered, stale-version and already accepted tasks are not
+retryable, including the interval before an accepted message starts its run.
+The creation response conservatively returns false until a fresh snapshot read.
+
+Retry rereads this metadata before sending the same saved comment and stable
+submission ID through the existing chat admission. It does not create another
+comment or grant execution rights. Clients treat an absent field as false;
+old cached responses cannot authorize a resend.
+
 All requests use the existing Page authentication and workspace context.
 Responses include `400` for invalid input, `401` for missing authentication,
 `403` for a known reader's write, and `404` for disabled or inaccessible projects.

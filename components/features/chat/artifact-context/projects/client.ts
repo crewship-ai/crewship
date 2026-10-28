@@ -121,6 +121,7 @@ export function parseArtifactComment(raw: unknown): ArtifactComment | null {
     selector: str(raw.selector) ? raw.selector : "", quote: str(raw.quote) ? raw.quote : "", text: raw.text,
     ...(str(raw.author) ? { author: raw.author } : {}),
     ...(str(raw.task_id) ? { task_id: raw.task_id } : {}),
+    ...(typeof raw.delivery_retryable === "boolean" ? { delivery_retryable: raw.delivery_retryable } : {}),
     ...(str(raw.created_at) ? { created_at: raw.created_at } : {}),
     ...(STATUSES.includes(raw.status as ArtifactCommentStatus) ? { status: raw.status as ArtifactCommentStatus } : {}),
     ...(int(raw.answered_version) ? { answered_version: raw.answered_version } : {}),
