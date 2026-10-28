@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/admission"
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/askforms"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/chataudience"
@@ -718,6 +719,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 		if documentIteration != nil {
 			metadata["document_iteration_intent"] = *documentIteration
+		}
+		if artifactProject != nil {
+			// The recorder accepted this typed purpose before the saved echo.
+			metadata[artifacts.ProjectIntentMetadataKey] = *artifactProject
 		}
 		if pageContext != nil {
 			// This event is emitted only after Append succeeds. Echo the
