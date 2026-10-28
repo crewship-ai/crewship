@@ -333,8 +333,10 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	// normal 15s lease and every run/original-human fence remain unchanged.
 	active, cancel := context.WithTimeout(ctx, 65*time.Second)
 	done := make(chan struct{})
+	finish := beginBackgroundWork()
 	go func() {
 		defer close(done)
+		defer finish()
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for {

@@ -6,7 +6,7 @@ package orchestrator
 const nativeCraftMCP = `{"mcpServers":{"crewship-craft":{"type":"http","url":"http://127.0.0.1:9119/mcp/craft-native","headers":{"Authorization":"Bearer ${CREWSHIP_AGENT_TOKEN}"},"alwaysLoad":true}}}`
 
 func (r AgentRunRequest) WithNativeCraftTools() (AgentRunRequest, error) {
-	if r.mooringDocumentTools {
+	if r.mooringDocumentTools || !ValidRunID(r.RunID) {
 		return AgentRunRequest{}, ErrPrivateRunUnqualified
 	}
 	selected, err := r.WithMooringDocumentTools()

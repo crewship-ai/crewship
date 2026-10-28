@@ -130,3 +130,25 @@ func TestCraftNativeAgentCancelNeverRevokesHumanHolder(t *testing.T) {
 		t.Fatal("human lost custody", read.Code, read.Body)
 	}
 }
+
+func TestCraftNativeAgentCancelRejectsAnotherCurrentPageWriter(t *testing.T) {
+	f, m, _, call, _ := nativeAgentToolFixture(t)
+	e := m.runs[f.a.RunID]
+	nativeAgentRetirementRuntime(m, e, false)
+	m.dispatcher = &dispatch.Dispatcher{} // Unit readiness only, not a genuine run.
+	if got := call(`{"operation":"acquire"}`); got.Code != 200 {
+		t.Fatal(got.Code, got.Body)
+	}
+	mustExec(t, f.rig.db, `UPDATE pages SET owner_user_id=? WHERE id='native-agent-page'`, f.rig.adminID)
+	other, source := nativeAgentStatusFreshHuman(t, f, f.rig.adminID, f.rig.wsID)
+	nativeAgentStatusProveWrite(t, m, other, source, f.rig.wsID, "native-agent-page")
+	if got := nativeAgentCancelCall(m, other); got.Code != 403 {
+		t.Fatal("another current writer stopped original human task", got.Code, got.Body)
+	}
+	m.mu.Lock()
+	closed := e.closed
+	m.mu.Unlock()
+	if closed {
+		t.Fatal("denied stop revoked the original grant")
+	}
+}

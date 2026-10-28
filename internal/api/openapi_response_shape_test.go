@@ -51,6 +51,10 @@ var responseShapeContracts = []struct {
 	value any
 }{
 
+	{name: "NativeCraftAgentTaskReceipt", pointer: "/components/schemas/NativeCraftAgentTaskReceipt", value: craftNativeAgentTaskReceipt{}},
+	{name: "NativeCraftAgentStopReceipt", pointer: "/components/schemas/NativeCraftAgentStopReceipt", value: craftNativeAgentStopReceipt{}},
+	{name: "NativeCraftAgentTaskStatus", pointer: "/components/schemas/NativeCraftAgentTaskStatus", value: craftNativeAgentTaskStatus{}},
+	{name: "NativeCraftAgentToolEvent", pointer: "/components/schemas/NativeCraftAgentToolEvent", value: craftNativeAgentToolEvent{}},
 	{name: "NativeCraftAvailability", pointer: "/components/schemas/NativeCraftAvailability", value: craftNativeAvailabilityResponse{}},
 	{name: "NativeCraftRenewal", pointer: "/components/schemas/NativeCraftRenewal", value: craftNativeRenewalResponse{}},
 	{name: "NativeCraftLease", pointer: "/components/schemas/NativeCraftLease", value: craftNativeLeaseResponse{}},

@@ -13,6 +13,14 @@ import (
 	"github.com/crewship-ai/crewship/internal/work"
 )
 
+type craftNativeAgentStopReceipt struct {
+	GrantRevoked    bool `json:"grant_revoked"`
+	LeaseRetired    bool `json:"lease_retired"`
+	CancelRequested bool `json:"cancel_requested"`
+	Stopped         bool `json:"stopped"`
+	StopPending     bool `json:"stop_pending"`
+}
+
 type craftNativeAgentCancelKey struct{}
 type craftNativeAgentCancelProof struct {
 	manager     *craftNativeAgentManager
@@ -146,7 +154,7 @@ func (m *craftNativeAgentManager) cancelTask(w http.ResponseWriter, r *http.Requ
 	if stopped && stopErr == nil && cancelErr == nil {
 		status = http.StatusOK
 	}
-	writeJSON(w, status, map[string]bool{"grant_revoked": true, "lease_retired": true, "cancel_requested": cancelErr == nil, "stopped": stopped && stopErr == nil, "stop_pending": !stopped || stopErr != nil})
+	writeJSON(w, status, craftNativeAgentStopReceipt{GrantRevoked: true, LeaseRetired: true, CancelRequested: cancelErr == nil, Stopped: stopped && stopErr == nil, StopPending: !stopped || stopErr != nil})
 }
 
 func (m *craftNativeAgentManager) canStop(ctx context.Context, human *craftNativeSession, l mooring.EditLease) bool {

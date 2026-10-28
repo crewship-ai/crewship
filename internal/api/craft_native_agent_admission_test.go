@@ -105,3 +105,29 @@ func TestCraftNativeAgentTaskRejectsSourceProjectionAndPartialConsent(t *testing
 		t.Fatal("denial published work", count, err)
 	}
 }
+
+func TestCraftNativeAgentTaskRejectsReadOnlyOriginalCredentialBeforeAccept(t *testing.T) {
+	f, m, human := nativeAgentAdmissionFixture(t)
+	bearer := mintIngressScopedToken(t, f.rig.db, f.a.HumanUserID, "native-task-read-only", "pages:read")
+	user := &AuthUser{ID: f.a.HumanUserID, TokenID: "clt-ingress-scoped-native-task-read-only"}
+	source, err := captureOriginalHumanCredential(t.Context(), f.rig.db, user, AuthKindCLIToken, bearer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user.OriginalCredential = source
+	readOnly := auth.WithOriginalCredential(context.WithValue(context.WithValue(context.WithValue(t.Context(), ctxUser, user), ctxAuthKind, AuthKindCLIToken), ctxWorkspaceID, f.rig.wsID), *source)
+	if _, err := validateOriginalHumanCredential(readOnly, f.rig.db, *source, "pages:read"); err != nil {
+		t.Fatal("reader positive calibration", err)
+	}
+	input := craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true}
+	if _, err := m.produceTask(readOnly, "@native-agent-page", input); err == nil {
+		t.Fatal("read-only original credential accepted edit task")
+	}
+	var count int
+	if err := f.rig.db.QueryRow(`SELECT count(*) FROM work_items WHERE domain_kind=?`, craftNativeAgentDomain).Scan(&count); err != nil || count != 0 {
+		t.Fatal("denied credential queued task", count, err)
+	}
+	if _, err := m.produceTask(human, "@native-agent-page", input); err != nil {
+		t.Fatal("original writable human calibration", err)
+	}
+}

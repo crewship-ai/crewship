@@ -64,9 +64,9 @@ func craftAgentStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	body := struct {
-		ChatID        string `json:"chat_id"`
-		MessageID     string `json:"message_id"`
-		WholeDocument bool   `json:"whole_document"`
+		ChatID        string `json:"chat_id" yaml:"chat_id"`
+		MessageID     string `json:"message_id" yaml:"message_id"`
+		WholeDocument bool   `json:"whole_document" yaml:"whole_document"`
 	}{chat, message, consent}
 	response, err := c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/tasks", body)
 	return craftResponse(cmd, response, err, "")

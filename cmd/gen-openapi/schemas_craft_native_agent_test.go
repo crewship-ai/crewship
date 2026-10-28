@@ -36,3 +36,23 @@ func TestCraftNativeAgentContractKeepsExplicitConsentSeparateFromHumanAdmission(
 		}
 	}
 }
+
+func TestCraftNativeAgentPublicSchemaExcludesPrivateMCPWire(t *testing.T) {
+	routes, schemas := craftNativeAgentSchemaCatalog()
+	if len(routes) != 3 {
+		t.Fatalf("public task route catalog changed: %d", len(routes))
+	}
+	if _, exists := routes["POST /api/v1/internal/craft-native/task"]; exists {
+		t.Fatal("private MCP route in public schema catalog")
+	}
+	for _, name := range []string{"NativeCraftAgentLeaseReceipt", "NativeCraftAgentReadReceipt", "NativeCraftAgentToolRequest"} {
+		if _, exists := schemas[name]; exists {
+			t.Fatalf("private MCP schema %s published", name)
+		}
+	}
+	for _, name := range []string{"NativeCraftAgentTaskRequest", "NativeCraftAgentTaskReceipt", "NativeCraftAgentStopReceipt", "NativeCraftAgentTaskStatus", "NativeCraftAgentToolEvent"} {
+		if schemas[name] == nil {
+			t.Fatalf("public task schema %s lost", name)
+		}
+	}
+}
