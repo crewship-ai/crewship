@@ -127,7 +127,13 @@ func DashboardCollectionsTx(ctx context.Context, tx *sql.Tx, key VersionKey, ver
 	if err != nil {
 		return nil, err
 	}
-	if !validDataObject(raw) {
+	return ParseDashboardCollections(raw)
+}
+
+// ParseDashboardCollections validates the bounded code declaration shared by
+// authorized data reads and Page kind metadata.
+func ParseDashboardCollections(raw []byte) ([]string, error) {
+	if len(raw) > 16384 || !validDataObject(raw) {
 		return nil, ErrVersionInvalid
 	}
 	var declaration struct {
