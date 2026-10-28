@@ -6,3 +6,9 @@ const encoded = "UEsDBAoAAAAAAAAAIQBQk3A2KQAAACkAAAAIAAAAbWltZXR5cGVhcHBsaWNhdGl
 export function emptyDeckCraftNativeDocument(): Uint8Array {
   return Uint8Array.from(atob(encoded), c => c.charCodeAt(0))
 }
+
+/** Only the request payload: the existing frozen New Doc flow owns admission,
+ * ambiguous initialization, exact custody release and navigation. */
+export function createNativeDeckInitializationRequest(): {application_id: 'deckcraft'; bytes: string} {
+  return {application_id: 'deckcraft', bytes: encoded}
+}
