@@ -1381,7 +1381,10 @@ this does not introduce Page folder ACL mutation auditing or change its atomicit
 ### Design canvases (opt-in)
 
 Design uses the same Page identity, grants and retained artifact versions. The
-server Design flag and `NEXT_PUBLIC_ARTIFACTS_DESIGN` are disabled by default.
+server `CREWSHIP_ARTIFACTS_DESIGN_ENABLED` flag and browser
+`NEXT_PUBLIC_ARTIFACTS_DESIGN` flag are disabled by default. The server also
+accepts the workspace-scoped `artifacts_design` feature flag. The embedded Yjs
+engine uses an existing Node runtime; no additional service is started.
 The browser uses standard Yjs sync and awareness; frame, rectangle, text and
 image nodes have stable IDs. Live operations also work without an open browser.
 
