@@ -77,8 +77,8 @@ type RestoreOptions struct {
 	// REASSERT the bundle's identity over whatever the target has.
 	Replace bool
 	// DiscardWorkbooks acknowledges that Replace destroys the target
-	// workspace's experimental workbooks. A bundle never carries them, so
-	// without it Replace refuses a target holding any workbook
+	// workspace's experimental workbooks. Their target-only history may not
+	// appear in the incoming bundle; Replace refuses a target holding any workbook
 	// (ErrWorkbookTargetReplacement) and names the workbook Pages.
 	DiscardWorkbooks bool
 	// Logger, if set, receives human-readable progress/warning
@@ -1279,7 +1279,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 					return err
 				}
 				if opts.Logger != nil && deleted["gridcraft_heads"] > 0 {
-					opts.Logger(fmt.Sprintf("--replace --discard-workbooks: destroyed %d workbook(s) the bundle does not contain", deleted["gridcraft_heads"]))
+					opts.Logger(fmt.Sprintf("--replace --discard-workbooks: discarded %d target workbook(s) before restoring bundle content", deleted["gridcraft_heads"]))
 				}
 				if opts.Logger != nil && len(deleted) > 0 {
 					opts.Logger(fmt.Sprintf("--replace: wiped target workspace state before restore (%d tables touched)", len(deleted)))

@@ -362,3 +362,40 @@ it("keeps the last project through a transient refresh failure", () => {
   render(<ArtifactViewerPanel />)
   expect(screen.getByTitle(/Preview of/)).toBeInTheDocument()
 })
+
+for (const phase of ["working", "answered"] as const) {
+ it(`removes stale delivery Retry for exact authoritative ${phase} task, including a late timeout`, async () => {
+  let resolveDispatch!: (ok: boolean) => void
+  state.sendToAgent = vi.fn(() => new Promise<boolean>(resolve => { resolveDispatch = resolve }))
+  const view = render(<ArtifactViewerPanel />)
+  selectHero()
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
+  fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
+  const saved: ArtifactComment = { id: "cm9", version: 3, path: "home.html", selector: "#hero", quote: "Big idea", text: "Bolder", task_id: "t9", status: "pending" }
+  await act(async () => { state.comment.mock.calls.at(-1)![1].onSuccess(saved) })
+  state.snapshot.data = snap({ comments: [{ ...saved, status: phase }] })
+  view.rerender(<ArtifactViewerPanel />)
+  await act(async () => { resolveDispatch(false) })
+  expect(screen.queryByText(/agent did not start/i)).toBeNull()
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull()
+  expect(state.sendToAgent).toHaveBeenCalledTimes(1)
+ })
+}
+
+it("keeps a failed pending delivery Retry when another task is answered, then clears only its exact task", async () => {
+ state.sendToAgent = vi.fn().mockResolvedValue(false)
+ const view = render(<ArtifactViewerPanel />)
+ selectHero()
+ fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
+ fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
+ const saved: ArtifactComment = { id: "cm9", version: 3, path: "home.html", selector: "#hero", quote: "Big idea", text: "Bolder", task_id: "t9", status: "pending" }
+ await act(async () => { state.comment.mock.calls.at(-1)![1].onSuccess(saved) })
+ expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+ state.snapshot.data = snap({ comments: [saved, { ...saved, id: "other", task_id: "other-task", status: "answered" }] })
+ view.rerender(<ArtifactViewerPanel />)
+ expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+ state.snapshot.data = snap({ comments: [{ ...saved, status: "answered", answered_version: 4 }] })
+ view.rerender(<ArtifactViewerPanel />)
+ expect(screen.queryByRole("button", { name: "Retry" })).toBeNull()
+ expect(state.sendToAgent).toHaveBeenCalledTimes(1)
+})

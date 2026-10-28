@@ -133,9 +133,9 @@ func rejectPrivateArtifactWorkspaceReplacement(ctx context.Context, db *sql.DB, 
 }
 
 // ErrWorkbookTargetReplacement refuses a replacement that would destroy
-// experimental workbooks. No bundle contains a workbook, so the loss would be
-// permanent; the operator acknowledges it with --discard-workbooks.
-var ErrWorkbookTargetReplacement = errors.New("backup: target holds workbooks, which backups never contain")
+// experimental workbooks. Target-only history may be absent from the bundle;
+// the operator acknowledges discarding it with --discard-workbooks.
+var ErrWorkbookTargetReplacement = errors.New("backup: target holds workbook history that replacement would discard")
 
 type workbookTargetQuerier interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
