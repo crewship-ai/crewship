@@ -1,6 +1,24 @@
 package main
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
+
+func TestPageNativeCraftApplicationMetadataContract(t *testing.T) {
+	catalog := pagesSchemaCatalog()
+	for _, key := range []string{"GET /api/v1/pages/{slug}", "GET /api/v1/pages"} {
+		schema := catalog[key].Response
+		if key == "GET /api/v1/pages" {
+			schema = schema["items"].(map[string]any)
+		}
+		properties := schema["properties"].(map[string]any)
+		field := properties["native_craft_application"].(map[string]any)
+		if field["type"] != "string" || !reflect.DeepEqual(field["enum"], []string{"wordcraft", "gridcraft", "deckcraft"}) {
+			t.Errorf("%s native Craft metadata must admit exactly the known application IDs: %v", key, field)
+		}
+	}
+}
 
 func TestPageDocumentStagingContract(t *testing.T) {
 	catalog := pagesSchemaCatalog()
