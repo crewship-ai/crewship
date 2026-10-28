@@ -87,6 +87,20 @@ describe("repeated series", () => {
       .toEqual(["Smoke test", "Smoke test", "Smoke test", "Smoke test", "Smoke test", "Smoke test", "Board deck", "Board deck"])
   })
 
+  it("takes a trailing id off: a UUID or a long hex run", () => {
+    expect(["TAG05 d72fa378-102d-4805-a1ee-d119ba0341fa", "Document smoke 293d4eed-0aee-4e11-be36-b517a13499c6", "Build a1b2c3d4e5f6", "Plan Q3"].map(seriesStem))
+      .toEqual(["TAG05", "Document smoke", "Build", "Plan Q3"])
+  })
+
+  it("counts the same name made three times as a series, two as a coincidence", () => {
+    const items = libraryItems([
+      ...["a", "b", "c"].map(n => page({ slug: `t-${n}`, name: `TAG05 ${n}0000000-0000-4000-8000-000000000000`, artifact_kind: "word" })),
+      ...["a", "b", "c"].map(n => page({ slug: `g-${n}`, name: "Garden guide", artifact_kind: "word" })),
+      ...["a", "b"].map(n => page({ slug: `o-${n}`, name: "Ověření", artifact_kind: "word" })),
+    ].map(toPageView))
+    expect(repeatedSeries(items).map(s => [s.stem, s.items.length])).toEqual([["TAG05", 3], ["Garden guide", 3]])
+  })
+
   it("suggests three or more runs of one kind and never touches the rest", () => {
     const items = libraryItems([
       ...[1, 2, 3, 4].map(n => page({ slug: `s${n}`, name: `Smoke test ${n}`, artifact_kind: "project" })),
