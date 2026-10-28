@@ -14,6 +14,12 @@ const state = vi.hoisted(() => ({
   version: undefined as number | undefined,
 }))
 
+// The library's own data around the detail; the detail itself stays real.
+vi.mock("@/hooks/use-page-folders", () => ({ usePageFolders: () => ({ folders: [], loading: false, error: null, supported: true, refresh: () => {}, reread: async () => {} }) }))
+vi.mock("@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities", () => ({
+  useArtifactCapabilities: () => ({ projects: true, dashboards: false, documents: false, sheets: false, pages: false }),
+}))
+vi.mock("@/components/layout/secondary-panel", async importOriginal => ({ ...(await importOriginal<typeof import("@/components/layout/secondary-panel")>()), SecondaryPanel: ({ label, children }: { label: string; children: React.ReactNode }) => <aside aria-label={label}>{children}</aside> }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "owner" } } }) }))
 vi.mock("@/components/features/chat/artifact-context/viewer/artifact-slides-preview", () => ({ ArtifactSlidesPreview: ({ selectMode }: { selectMode: boolean }) => <div data-testid="library-slides" data-select-mode={String(selectMode)}>Library typed Slides</div> }))
 vi.mock("@/hooks/use-pages", async importOriginal => ({

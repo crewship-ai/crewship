@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { toPageView, type PageView, type WirePage } from "@/hooks/use-pages"
 
-const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error: null as string | null, refresh: vi.fn(), projectsOn: true, item: null as string | null, select: vi.fn() }))
+const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error: null as string | null, refresh: vi.fn(), projectsOn: true, item: null as string | null, select: vi.fn(), folders: [] as { id: string; slug: string; name: string; pageCount: number }[] }))
 vi.mock("@/hooks/use-pages", async importOriginal => ({
   ...(await importOriginal<typeof import("@/hooks/use-pages")>()),
   usePages: () => ({ pages: state.pages, loading: state.loading, error: state.error, refresh: state.refresh }),
@@ -13,6 +13,15 @@ vi.mock("@/components/features/chat/artifact-context/projects/artifact-viewer-co
     <div data-testid="viewer-provider" data-slug={target?.slug} data-tab={target?.tab}>{children}</div>,
 }))
 vi.mock("@/components/features/chat/artifact-context/viewer/artifact-viewer-panel", () => ({ ArtifactViewerPanel: () => <div data-testid="viewer-panel" /> }))
+vi.mock("@/hooks/use-page-folders", () => ({ usePageFolders: () => ({ folders: state.folders, loading: false, error: null, supported: true, refresh: vi.fn(), reread: vi.fn() }) }))
+vi.mock("@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities", () => ({
+  useArtifactCapabilities: () => ({ projects: true, dashboards: false, documents: true, sheets: false, pages: true }),
+}))
+vi.mock("../new-artifact-dialog", () => ({
+  NewArtifactDialog: ({ defaultKind, defaultFolderSlug }: { defaultKind?: string; defaultFolderSlug?: string }) =>
+    <div role="dialog" aria-label="New artifact" data-kind={defaultKind ?? ""} data-folder={defaultFolderSlug ?? ""} />,
+}))
+vi.mock("@/components/layout/secondary-panel", async importOriginal => ({ ...(await importOriginal<typeof import("@/components/layout/secondary-panel")>()), SecondaryPanel: ({ label, children }: { label: string; children: React.ReactNode }) => <aside aria-label={label}>{children}</aside> }))
 vi.mock("@/components/features/chat/artifact-context/craft/craft-lock-bar", () => ({
   CraftLockBar: ({ slug }: { slug: string }) => <div data-testid="lock-bar" data-slug={slug} />,
   craftEditorHref: (ws: string, slug: string) => `/editor?${ws}&${slug}`,
@@ -29,37 +38,70 @@ beforeEach(() => {
     wire({ slug: "weekly", id: "page-weekly", name: "Weekly report", panel_count: 2 } as Partial<WirePage>),
     wire({ slug: "calc", id: "page-calc", name: "Calculator", has_application: true } as Partial<WirePage>),
   ]
-  state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.select.mockReset(); state.refresh.mockReset()
+  state.folders = []; state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.select.mockReset(); state.refresh.mockReset()
 })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
 const renderLibrary = () => render(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />)
 
-it("shows a gallery of kinds with a backend only, with kind and shared state", () => {
+const openAll = () => fireEvent.click(screen.getByRole("tab", { name: /All artifacts/ }))
+
+it("lists every kind with something in it, a panel Page as Page, and keeps empty items in their own view", () => {
   renderLibrary()
-  const gallery = screen.getByRole("list", { name: "Artifacts" })
-  const cards = within(gallery).getAllByRole("listitem")
+  openAll()
+  fireEvent.click(screen.getByRole("radio", { name: "Gallery" }))
+  const cards = within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem")
   expect(cards.map(card => within(card).getByRole("heading").textContent)).toEqual(["Pricing site", "Partner brief", "Price model", "Weekly report"])
   expect(within(cards[0]).getByText("Project")).toBeTruthy()
   expect(within(cards[0]).getByText("Shared v2")).toBeTruthy()
   expect(within(cards[1]).getByText("Not shared")).toBeTruthy()
   expect(within(cards[2]).queryByText(/shared/i)).toBeNull()
+  expect(within(cards[3]).getByText("Page")).toBeTruthy()
   expect(screen.queryByText("Calculator")).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: /Empty/ }))
+  expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(item => item.textContent)).toEqual([expect.stringContaining("Calculator")])
 })
 
-it("filters by kind with counts and switches to a table", () => {
+it("Home offers what can be made, what is not shared yet and what changed last, each once", () => {
   renderLibrary()
-  fireEvent.click(screen.getByRole("button", { name: "Projects 1" }))
+  expect(screen.getByRole("heading", { level: 1, name: "Artifacts" })).toBeTruthy()
+  expect(screen.getByRole("button", { name: "New Project" })).toBeTruthy()
+  expect(screen.getByRole("button", { name: "New Word document" })).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "New Slides" })).toBeNull()
+  expect(screen.getAllByRole("button", { name: "Open Partner brief" })).toHaveLength(1)
+  fireEvent.click(screen.getByRole("button", { name: "New Word document" }))
+  expect(screen.getByRole("dialog", { name: "New artifact" }).dataset.kind).toBe("word")
+})
+
+it("New artifact in the bar opens the dialog in the folder being looked at", () => {
+  state.folders = [{ id: "f1", slug: "sales", name: "Sales", pageCount: 1 }]
+  state.pages = [wire({ slug: "site", name: "Pricing site", artifact_kind: "project", folder: { slug: "sales", name: "Sales" } } as Partial<WirePage>)]
+  renderLibrary()
+  fireEvent.click(screen.getByRole("button", { name: /Sales/ }))
+  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  const dialog = screen.getByRole("dialog", { name: "New artifact" })
+  expect([dialog.dataset.kind, dialog.dataset.folder]).toEqual(["", "sales"])
+})
+
+it("searches with operators, filters by kind with counts and switches to a table", () => {
+  renderLibrary()
+  fireEvent.change(screen.getByRole("textbox", { name: "Search artifacts" }), { target: { value: "kind:project" } })
   expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem")).toHaveLength(1)
-  fireEvent.click(screen.getByRole("button", { name: "All 4" }))
+  fireEvent.change(screen.getByRole("textbox", { name: "Search artifacts" }), { target: { value: "" } })
+  fireEvent.click(screen.getByRole("button", { name: /^Filter/ }))
+  fireEvent.click(screen.getByRole("button", { name: /^Kind/, expanded: false }))
+  fireEvent.click(screen.getByRole("button", { name: /Sheets/ }))
+  expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(item => item.textContent)).toEqual([expect.stringContaining("Price model")])
+  fireEvent.click(screen.getByRole("button", { name: "Clear all filters" }))
   fireEvent.click(screen.getByRole("radio", { name: "Table" }))
   const rows = within(screen.getByRole("table")).getAllByRole("row")
   expect(rows).toHaveLength(5)
   expect(within(rows[1]).getByText("v2")).toBeTruthy()
 })
 
-it("opening a card selects it by slug", () => {
+it("opening a row selects it by slug", () => {
   renderLibrary()
+  openAll()
   fireEvent.click(screen.getByRole("button", { name: /Open Partner brief/ }))
   expect(state.select).toHaveBeenCalledWith("brief")
 })
@@ -88,11 +130,11 @@ it("a native Word detail shows its edit lock by Page reference", () => {
   expect(screen.getByTestId("lock-bar").dataset.slug).toBe("@page-brief")
 })
 
-it("other kinds open in Pages", () => {
+it("a panel Page opens on its page", () => {
   state.item = "weekly"
   renderLibrary()
   expect(screen.queryByTestId("lock-bar")).toBeNull()
-  expect(screen.getByRole("link", { name: "Open in Pages" }).getAttribute("href")).toBe("/pages/weekly?workspace_id=ws1")
+  expect(screen.getByRole("link", { name: "Open page" }).getAttribute("href")).toBe("/pages/weekly?workspace_id=ws1")
 })
 
 it("an unknown or removed item falls back to the gallery", () => {
@@ -131,6 +173,7 @@ it.each(["project", "dashboard", "slides"] as const)("keeps %s routed through it
   state.pages = [wire({ id: "owner-page", slug: "ordinary-owner-page", name: "Owner artifact", artifact_kind })]
   state.projectsOn = false
   const view = renderLibrary()
+  openAll()
   fireEvent.click(screen.getByRole("button", { name: "Open Owner artifact" }))
   expect(state.select).toHaveBeenLastCalledWith("ordinary-owner-page")
   fireEvent.click(screen.getByRole("radio", { name: "Table" }))
