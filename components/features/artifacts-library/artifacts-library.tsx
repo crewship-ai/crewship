@@ -1,6 +1,7 @@
 "use client"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ArrowLeft, ExternalLink, LayoutGrid, Library, List, Lock, Plus, Star, Table2 } from "lucide-react"
+import { useQuery } from "@tanstack/react-query"
+import { ArrowLeft, ExternalLink, FolderInput, LayoutGrid, Library, List, Lock, Plus, Settings2, Share2, Star, Table2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Segmented } from "@/components/ui/segmented"
 import { StatusPill } from "@/components/ui/status-pill"
@@ -23,7 +24,12 @@ import { CraftLockBar, craftEditorHref } from "@/components/features/chat/artifa
 import { KIND_ACCENT, KIND_ICON, ARTIFACT_KINDS, type ArtifactKindKey } from "@/components/features/chat/artifact-context/new-artifact/artifact-kinds"
 import { useArtifactCapabilities } from "@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities"
 import { NewArtifactDialog } from "./new-artifact-dialog"
-import { kindLabel, libraryItems, type LibraryItem, type LibraryKind } from "./library-items"
+import { kindLabel, libraryItems, withLibraryState, type LibraryItem, type LibraryKind } from "./library-items"
+import { sharingKeys, useSharingApi } from "./sharing/sharing-api"
+import { ShareDialog } from "./sharing/share-dialog"
+import { AccessTab } from "./sharing/access-tab"
+import { FolderSettingsDialog } from "./sharing/folder-settings-dialog"
+import { BulkBar, MoveToFolderDialog } from "./sharing/bulk-actions"
 import {
   applyFilters, EMPTY_FILTERS, groupItems, inView, needsAttention, sortItems, versioned,
   type GroupKey, type LibraryFilters, type Personal, type SortKey,
@@ -51,6 +57,8 @@ function StateChips({ item }: { item: LibraryItem }) {
       : <StatusPill tone="muted" label="Not shared" />)}
     {item.private && <StatusPill tone="muted" label="Private" icon={<Lock aria-hidden className="size-2.5" />} />}
     {item.empty && <StatusPill tone="muted" label="Empty" />}
+    {item.test && <StatusPill tone="muted" label="Test" />}
+    {item.archived && <StatusPill tone="muted" label="Archived" />}
   </>
 }
 
@@ -75,8 +83,14 @@ function GalleryCard({ item, onOpen }: { item: LibraryItem; onOpen: () => void }
   </li>
 }
 
-function ListRow({ item, onOpen }: { item: LibraryItem; onOpen: () => void }) {
-  return <li className="min-w-0 border-t first:border-t-0">
+type Selection = { has: (slug: string) => boolean; toggle: (slug: string) => void }
+
+function ListRow({ item, onOpen, selection }: { item: LibraryItem; onOpen: () => void; selection?: Selection }) {
+  return <li className="flex min-w-0 items-center border-t first:border-t-0">
+    {selection && <label className="flex shrink-0 cursor-pointer items-center self-stretch pl-3 coarse:min-w-[44px] coarse:justify-center coarse:pl-0">
+      <input type="checkbox" className="size-4 accent-primary" aria-label={`Select ${item.name}`}
+        checked={selection.has(item.slug)} onChange={() => selection.toggle(item.slug)} />
+    </label>}
     <button type="button" aria-label={`Open ${item.name}`} onClick={onOpen} data-library-item=""
       className="row-interactive row-hover flex w-full min-w-0 items-center gap-3 px-3 py-2 text-left coarse:min-h-[44px]">
       <KindTile kind={item.kind} />
@@ -114,13 +128,13 @@ function LibraryTable({ items, onOpen }: { items: LibraryItem[]; onOpen: (slug: 
 
 type Layout = "list" | "gallery" | "table"
 
-function ItemsView({ items, layout, onOpen }: { items: LibraryItem[]; layout: Layout; onOpen: (slug: string) => void }) {
+function ItemsView({ items, layout, onOpen, selection }: { items: LibraryItem[]; layout: Layout; onOpen: (slug: string) => void; selection?: Selection }) {
   if (layout === "table") return <LibraryTable items={items} onOpen={onOpen} />
   if (layout === "gallery") return <ul aria-label="Artifacts" className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] gap-3">
     {items.map(entry => <GalleryCard key={entry.slug} item={entry} onOpen={() => onOpen(entry.slug)} />)}
   </ul>
   return <ul aria-label="Artifacts" className="overflow-hidden rounded-card border bg-card">
-    {items.map(entry => <ListRow key={entry.slug} item={entry} onOpen={() => onOpen(entry.slug)} />)}
+    {items.map(entry => <ListRow key={entry.slug} item={entry} onOpen={() => onOpen(entry.slug)} selection={selection} />)}
   </ul>
 }
 
@@ -218,8 +232,10 @@ function WordPreview({ workspaceId, item }: { workspaceId: string; item: Library
   if (read.status === "loading") return <div aria-busy="true" className="h-40 animate-pulse rounded-card border bg-muted/40" />
   if (read.status !== "ready") return <p role="status" className="rounded-card border border-dashed p-4 text-sm text-muted-foreground">
     {read.status === "denied" ? "You can't read this document."
-      : read.status === "unavailable" ? "The document service is not answering right now, so there is no preview. Nothing was changed."
-        : "The document preview could not be loaded. Open in Pages shows it."}
+      // A Word without a version head is from the old editor, which this environment no longer runs.
+      : !item.native ? "This document is from an older version of the editor and does not open here. Nothing was changed."
+        : read.status === "unavailable" ? "The document service is not answering right now, so there is no preview. Nothing was changed."
+          : "The document preview could not be loaded. Open in Pages shows it."}
   </p>
   return <div className="bg-card">
     <DocumentReadonly schema={read.content.schema} content={read.content.content} accessibleLabel={`${item.name}, saved version`} />
@@ -233,9 +249,11 @@ const DETAIL_HINT: Partial<Record<LibraryKind, string>> = {
 }
 
 /** One artifact: a project shows its history in the project viewer, a native Word or Sheet its edit lock. */
-function ArtifactDetail({ workspaceId, item, onBack, favorite, onFavorite }: {
-  workspaceId: string; item: LibraryItem; onBack: () => void; favorite: boolean; onFavorite: () => void
+function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavorite }: {
+  workspaceId: string; item: LibraryItem; folders: { slug: string; name: string }[]; onBack: () => void; favorite: boolean; onFavorite: () => void
 }) {
+  const [tab, setTab] = useState<"content" | "access">("content")
+  const [dialog, setDialog] = useState<"share" | "move" | null>(null)
   const projects = useArtifactProjectsAvailable(workspaceId)
   const projectPreview = item.projectBacked && (item.kind === "project" || item.kind === "dashboard" && artifactDashboards() || item.kind === "slides" && artifactSlides()) && projects
   const target = useMemo(() => ({ slug: item.slug, tab: "preview" as const }), [item.slug])
@@ -244,7 +262,14 @@ function ArtifactDetail({ workspaceId, item, onBack, favorite, onFavorite }: {
       <Button type="button" variant="ghost" size="sm" className="-ml-2 coarse:min-h-[44px]" onClick={onBack}><ArrowLeft aria-hidden />All artifacts</Button>
       {/* The viewer names the artifact, its kind and version itself; here only what it does not say. */}
       {projectPreview && meta(item) && <span className="ml-auto truncate text-xs text-muted-foreground">{meta(item)}</span>}
-      <Button type="button" variant="ghost" size="icon-sm" aria-pressed={favorite} className={cn("coarse:min-h-[44px] coarse:min-w-[44px]", !(projectPreview && meta(item)) && "ml-auto")}
+      <Segmented<"content" | "access"> ariaLabel="Detail" value={tab} onChange={setTab} className={cn(!(projectPreview && meta(item)) && "ml-auto")} options={[
+        { value: "content", label: "Content" }, { value: "access", label: "Access" },
+      ]} />
+      <Button type="button" variant="outline" size="sm" className="coarse:min-h-[44px]" onClick={() => setDialog("share")}><Share2 aria-hidden />Share</Button>
+      <Button type="button" variant="ghost" size="icon-sm" aria-label="Move to folder" title="Move to folder" className="coarse:min-h-[44px] coarse:min-w-[44px]" onClick={() => setDialog("move")}>
+        <FolderInput aria-hidden className="size-4" />
+      </Button>
+      <Button type="button" variant="ghost" size="icon-sm" aria-pressed={favorite} className="coarse:min-h-[44px] coarse:min-w-[44px]"
         aria-label={favorite ? "Remove from favorites" : "Add to favorites"} title={favorite ? "Remove from favorites" : "Add to favorites"} onClick={onFavorite}>
         <Star aria-hidden className={cn("size-4", favorite && "fill-current text-warn")} />
       </Button>
@@ -257,6 +282,10 @@ function ArtifactDetail({ workspaceId, item, onBack, favorite, onFavorite }: {
       </div>
       <OpenInPages workspaceId={workspaceId} item={item} />
     </header>}
+    {dialog === "share" && <ShareDialog workspaceId={workspaceId} item={item} open onOpenChange={open => { if (!open) setDialog(null) }} />}
+    {dialog === "move" && <MoveToFolderDialog workspaceId={workspaceId} item={item} folders={folders} open
+      onOpenChange={open => { if (!open) setDialog(null) }} onDone={() => setDialog(null)} />}
+    {tab === "access" ? <AccessTab workspaceId={workspaceId} item={item} onShare={() => setDialog("share")} /> : <>
     {projectPreview
       ? <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
         <div className="flex min-h-[520px] flex-1 overflow-hidden rounded-card border"><ArtifactViewerPanel variant="library" /></div>
@@ -271,7 +300,16 @@ function ArtifactDetail({ workspaceId, item, onBack, favorite, onFavorite }: {
     {!projectPreview && item.kind !== "project" && <p className="text-sm text-muted-foreground">
       {DETAIL_HINT[item.kind] ?? "Open in Pages shows it with everything it contains."}
     </p>}
+    </>}
   </div>
+}
+
+/** What a tidy-up view is, said where it is chosen; acting on it is a previewed bulk action. */
+const VIEW_NOTE: Partial<Record<LibraryFilters["view"], string>> = {
+  series: "Suggested clean-up: runs of the same thing with a number or date in the name. Select what you no longer need and archive it after a preview. Nothing is deleted.",
+  test: "Made by tests and probes. Hidden from every other view; archive them after a preview. Nothing is deleted.",
+  empty: "Nothing in these yet. Archive them after a preview; nothing is deleted.",
+  archive: "Archived artifacts are hidden everywhere else. Select them to restore.",
 }
 
 /**
@@ -322,7 +360,16 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
   const { pages, loading, error, refresh } = usePages(workspaceId)
   const { folders } = usePageFolders(workspaceId)
   const caps = useArtifactCapabilities(workspaceId)
-  const items = useMemo(() => libraryItems(pages), [pages])
+  const sharing = useSharingApi(workspaceId)
+  // Archive, test origin and mock moves; re-read whenever a sharing write settles.
+  const stateTick = useQuery({ queryKey: sharingKeys.state(workspaceId), queryFn: () => Date.now(), staleTime: Infinity }).data
+  const items = useMemo(() => {
+    const base = libraryItems(pages)
+    return withLibraryState(base, sharing.libraryState(base))
+  }, [pages, sharing, stateTick]) // eslint-disable-line react-hooks/exhaustive-deps -- stateTick is the re-read signal
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
+  const [folderSettings, setFolderSettings] = useState<{ slug: string; name: string } | null>(null)
+  const folderChoices = useMemo(() => folders.map(folder => ({ slug: folder.slug, name: folder.name })), [folders])
   const [own, setOwn] = useState<LibraryFilters>(EMPTY_FILTERS)
   const filters = controlled ?? own
   const setFilters = (next: LibraryFilters) => { setOwn(next); onFiltersChange?.(next) }
@@ -351,6 +398,8 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
     setFavorites(list.includes(slug) ? list.filter(entry => entry !== slug) : [slug, ...list])
   }
   useLibraryKeys(contentRef, item !== null, () => onSelect(null))
+  // A selection belongs to the list it was made in.
+  useEffect(() => { setPicked(new Set()) }, [filters.view, filters.folder, item])
 
   const subBar = <SubBar icon={Library} title="Artifacts" ariaLabel="Artifacts" heading={false}
     section={selected ? selected.name : undefined}
@@ -362,13 +411,13 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
   if (loading) content = <div aria-label="Loading artifacts"><PageLoading variant="cards" /></div>
   else if (error && !items.length) content = <PageError title="Artifacts could not be loaded" onRetry={refresh} retryLabel="Try again" />
   else if (item !== null) {
-    content = selected ? <ArtifactDetail workspaceId={workspaceId} item={selected} onBack={() => onSelect(null)}
+    content = selected ? <ArtifactDetail key={selected.slug} workspaceId={workspaceId} item={selected} folders={folderChoices} onBack={() => onSelect(null)}
       favorite={personal.favorites?.has(selected.slug) ?? false} onFavorite={() => toggleFavorite(selected.slug)} />
       : <div className="grid gap-2 text-sm">
         <p>This artifact is not available.</p>
         <div><Button type="button" size="sm" variant="outline" onClick={() => onSelect(null)}><ArrowLeft aria-hidden />All artifacts</Button></div>
       </div>
-  } else if (!items.some(entry => !entry.empty) && filters.view !== "empty") {
+  } else if (!inView(items, "all").length && !VIEW_NOTE[filters.view]) {
     content = <PageEmpty icon={Library} title="No artifacts yet"
       description="Ask an agent in Chat to make a project or a dashboard, or start a document here."
       primary={creatable.length ? { label: "New artifact", icon: Plus, onClick: () => setNewKind(null) } : undefined} />
@@ -379,14 +428,32 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
     const filtered = applyFilters(items, filters, personal)
     // Recently opened keeps its own order until another sort is chosen.
     const shown = filters.view === "opened" && sort === "updated" ? filtered : sortItems(filtered, sort)
+    const chosen = shown.filter(entry => picked.has(entry.slug))
+    const selection: Selection = {
+      has: slug => picked.has(slug),
+      toggle: slug => setPicked(prev => { const next = new Set(prev); if (next.has(slug)) next.delete(slug); else next.add(slug); return next }),
+    }
+    const folder = filters.folder ? folders.find(entry => entry.slug === filters.folder) : undefined
+    const note = VIEW_NOTE[filters.view]
     content = <div className="grid content-start gap-3">
+      {folder && <div className="flex min-w-0 items-center gap-2">
+        <h1 className="truncate text-lg font-semibold">{folder.name}</h1>
+        <Button type="button" variant="outline" size="sm" className="ml-auto coarse:min-h-[44px]" onClick={() => setFolderSettings({ slug: folder.slug, name: folder.name })}>
+          <Settings2 aria-hidden />Folder settings
+        </Button>
+      </div>}
       <DisplayRow count={shown.length} sort={sort} group={group} layout={layout} onSort={setSort} onGroup={setGroup} onLayout={setLayout} />
-      {filters.view === "series" && <p className="text-sm text-muted-foreground">Runs of the same thing with a number or date in the name. Nothing here is archived or deleted.</p>}
+      {note && <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-card border border-dashed p-3 text-sm text-muted-foreground">
+        <span className="min-w-0 flex-[1_1_260px]">{note}</span>
+        {shown.length > 0 && <Button type="button" size="sm" variant="outline" onClick={() => setPicked(new Set(shown.map(entry => entry.slug)))}>Select all {shown.length}</Button>}
+      </div>}
+      {chosen.length > 0 && <BulkBar workspaceId={workspaceId} selected={chosen} folders={folderChoices} archivedView={filters.view === "archive"}
+        onClear={() => setPicked(new Set())} onDone={() => setPicked(new Set())} />}
       {shown.length === 0
         ? <PageNoResults onClear={() => setFilters({ ...EMPTY_FILTERS, view: filters.view })} />
         : groupItems(shown, group).map(entry => <section key={entry.key} aria-label={entry.label || undefined} className="grid gap-2">
           {entry.label && <h2 className="text-xs font-semibold text-muted-foreground">{entry.label} <span className="tabular-nums">{entry.items.length}</span></h2>}
-          <ItemsView items={entry.items} layout={layout} onOpen={onSelect} />
+          <ItemsView items={entry.items} layout={layout} onOpen={onSelect} selection={layout === "list" ? selection : undefined} />
         </section>)}
     </div>
   }
@@ -406,6 +473,7 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
         <div className={cn("mx-auto flex w-full max-w-6xl flex-col p-4 md:p-6", selected && "min-h-full")}>{content}</div>
       </div>
     </div>
+    {folderSettings && <FolderSettingsDialog workspaceId={workspaceId} folder={folderSettings} open onOpenChange={open => { if (!open) setFolderSettings(null) }} />}
     {newKind !== undefined && <NewArtifactDialog workspaceId={workspaceId} open onOpenChange={open => { if (!open) setNewKind(undefined) }}
       defaultKind={newKind ?? undefined} defaultFolderSlug={filters.folder || undefined}
       onCreated={slug => { setNewKind(undefined); refresh(); if (slug) onSelect(slug) }} />}

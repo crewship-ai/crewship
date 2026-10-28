@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { toPageView, type WirePage } from "@/hooks/use-pages"
-import { libraryItems } from "../library-items"
+import { libraryItems, withLibraryState } from "../library-items"
 import { applyFilters, EMPTY_FILTERS, facetCounts, filtersFromParams, filtersToParams, groupItems, parseQuery, sortItems, type LibraryFilters } from "../library-filter"
 
 const page = (over: Partial<WirePage>): WirePage => ({ id: over.slug ?? "p", slug: "p", name: "P", owner: "user/u1", updated_at: "2026-10-27T10:00:00Z", reach: ["owner"], ...over } as WirePage)
@@ -22,6 +22,19 @@ describe("library filters", () => {
     expect(filter({ view: "empty" })).toEqual(["blank"])
   })
 
+  it("shows archived items only in Archive and test items only in Test items, deleting nothing", () => {
+    const state = withLibraryState(items, { archived: new Set(["site", "blank"]), test: new Set(["smoke-1", "smoke-2"]), moved: new Map([["brief", { slug: "sales", name: "Sales" }]]) })
+    const view = (v: LibraryFilters["view"]) => applyFilters(state, { ...EMPTY_FILTERS, view: v }).map(item => item.slug)
+    expect(view("all")).toEqual(["draft", "brief", "weekly", "smoke-3"])
+    expect(view("archive")).toEqual(["site", "blank"])
+    expect(view("test")).toEqual(["smoke-2", "smoke-1"])
+    expect(view("empty")).toEqual([])
+    expect(state).toHaveLength(items.length)
+    expect(state.find(item => item.slug === "brief")?.folder).toMatchObject({ slug: "sales", name: "Sales" })
+    expect(filtersFromParams(new URLSearchParams("view=test")).view).toBe("test")
+    expect(filtersFromParams(new URLSearchParams("view=archive")).view).toBe("archive")
+  })
+
   it("parses kind:, is: and owner: operators and leaves the rest as text", () => {
     expect(parseQuery("kind:Word is:private owner:you budget plan")).toEqual({ text: "budget plan", kinds: ["word"], is: ["private"], owner: ["you"] })
     expect(parseQuery("kind:nonsense")).toMatchObject({ text: "kind:nonsense", kinds: [] })
@@ -41,7 +54,7 @@ describe("library filters", () => {
     expect(filter({ folder: "", kinds: ["word"] })).toEqual(["brief"])
   })
 
-  it("Needs attention lists made-but-unshared versioned items, Repeated runs the series", () => {
+  it("Needs attention lists made-but-unshared versioned items, Clean up the series", () => {
     expect(filter({ view: "attention" })).toEqual(["draft", "brief"])
     expect(filter({ view: "series" })).toEqual(["smoke-3", "smoke-2", "smoke-1"])
   })

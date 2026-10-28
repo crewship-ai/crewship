@@ -142,6 +142,16 @@ export function artifactsLibrary(): boolean {
   return true // Demo branch only: artifact library acceptance.
 }
 
+/**
+ * Runs Share, Access, folder settings, archive and bulk actions in the
+ * Artifacts library against an in-browser mock of the agreed interface,
+ * until the server serves `/pages/{slug}/access`, `/pages/bulk`, the
+ * `comment` level and `default_audience`. Default OFF.
+ */
+export function artifactsSharingMock(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACTS_SHARING_MOCK === "true"
+}
+
 /** Inert live-data Dashboard previews. Opt-in at build time; no data requests while off. */
 export function artifactDashboards(): boolean {
   return true // Demo branch only: live Dashboard acceptance.
