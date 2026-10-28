@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - Add a standalone, bounded Slides-to-PDF foundation with a fixed embedded font, vector shapes and tables, and explicit text overflow errors; product export entrypoints are not enabled yet.
+- Add a bounded Slides artifact import adapter for a closed `deck.json` and authored HTML profile, reusing the existing slide schema and static comment anchors without enabling a new editor or preview.
 
 - Require actual Chromium execution of native document privacy regressions in frontend CI while preserving the strict browser-dialog guard.
 
