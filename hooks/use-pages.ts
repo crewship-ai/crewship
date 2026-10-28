@@ -129,6 +129,7 @@ export interface WirePanel {
 }
 
 export interface WirePage {
+  native_craft_application?: string
   /** Explicit server classification, independent of folder or owner. */
   private_audience?: boolean
   has_document?: boolean
@@ -486,6 +487,7 @@ function emptyTally(): PanelTally {
 
 /** A page as every Pages surface consumes it. */
 export interface PageView {
+  nativeCraftApplication?: "wordcraft" | "gridcraft"
   /** Actual validated wire ID only; never the legacy slug-derived row key. */
   immutablePageId?: string
   /** Unknown on legacy servers; never infer from ownership or folder. */
@@ -653,6 +655,7 @@ export function toPageView(raw: WirePage): PageView {
     privateAudience: typeof raw.private_audience === "boolean" ? raw.private_audience : undefined,
     hasSlides: raw.has_slides === true,
     hasWorkbook: raw.has_workbook === true,
+    ...(raw.native_craft_application === "wordcraft" || raw.native_craft_application === "gridcraft" ? { nativeCraftApplication: raw.native_craft_application } : {}),
     ...(raw.artifact_kind === "project" || raw.artifact_kind === "word" || raw.artifact_kind === "sheet" || raw.artifact_kind === "dashboard" || raw.artifact_kind === "slides" ? { artifactKind: raw.artifact_kind } : {}),
     ...(Number.isSafeInteger(raw.artifact_shared_version) && raw.artifact_shared_version! > 0 ? { artifactSharedVersion: raw.artifact_shared_version } : {}),
     hasMooring: raw.has_mooring === true,

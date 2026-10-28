@@ -252,12 +252,13 @@ type pageSealedPanelWire struct {
 // Panels is []any because it is heterogeneous by design: a full panel or a
 // sealed placeholder, decided per panel and per viewer.
 type pageWire struct {
-	ArtifactKind          string `json:"artifact_kind,omitempty"`
-	ArtifactSharedVersion int    `json:"artifact_shared_version,omitempty"`
-	HasDocument           bool   `json:"has_document"`
-	HasArtifactProject    bool   `json:"has_artifact_project,omitempty"`
-	HasSlides             bool   `json:"has_slides"`
-	SlidesSchema          int    `json:"slides_schema"`
+	ArtifactKind           string `json:"artifact_kind,omitempty"`
+	ArtifactSharedVersion  int    `json:"artifact_shared_version,omitempty"`
+	NativeCraftApplication string `json:"native_craft_application,omitempty"`
+	HasDocument            bool   `json:"has_document"`
+	HasArtifactProject     bool   `json:"has_artifact_project,omitempty"`
+	HasSlides              bool   `json:"has_slides"`
+	SlidesSchema           int    `json:"slides_schema"`
 	// HasWorkbook marks a Page holding a GridCraft workbook, viewed read-only.
 	HasWorkbook bool `json:"has_workbook,omitempty"`
 	HasMooring  bool `json:"has_mooring,omitempty"`
@@ -330,6 +331,7 @@ type pageWire struct {
 // whose data last arrived a week ago would read as "updated today" if the two
 // were conflated. They answer different questions.
 type pageListWire struct {
+	NativeCraftApplication string `json:"native_craft_application,omitempty"`
 	// Explicit audience classification; unfiled human ownership is not privacy.
 	PrivateAudience bool `json:"private_audience"`
 	HasDocument     bool `json:"has_document"`
@@ -426,10 +428,11 @@ type pageWriteRequest struct {
 // ── Internal records ───────────────────────────────────────────────────────
 
 type pageRecord struct {
-	PrivateAudience bool
-	HasDocument     bool
-	HasSlides       bool
-	SlidesSchema    int
+	NativeCraftApplication string
+	PrivateAudience        bool
+	HasDocument            bool
+	HasSlides              bool
+	SlidesSchema           int
 	// ArtifactContentType and ArtifactSharedVersion come from the version head
 	// (artifact_version_heads); empty and 0 for a Page without one.
 	ArtifactDashboardDeclaration []byte
@@ -591,7 +594,8 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
  EXISTS(SELECT 1 FROM documents WHERE page_id=p.id), p.private_audience,
  EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=p.id), COALESCE((SELECT format_profile FROM mooring_collab_documents WHERE page_id=p.id),''),
  EXISTS(SELECT 1 FROM slides_heads WHERE page_id=p.id AND workspace_id=p.workspace_id), COALESCE((SELECT schema_version FROM slides_heads WHERE page_id=p.id AND workspace_id=p.workspace_id),0),
- COALESCE(h.content_type,''), COALESCE(h.shared_version,0), COALESCE(ab.content,''),COALESCE(sb.content,''), CASE WHEN ?=1 AND length(CAST(av.manifest_json AS BLOB))<=131072 THEN CAST(av.manifest_json AS BLOB) ELSE '' END
+ COALESCE(h.content_type,''), COALESCE(h.shared_version,0), COALESCE(ab.content,''),COALESCE(sb.content,''), CASE WHEN ?=1 AND length(CAST(av.manifest_json AS BLOB))<=131072 THEN CAST(av.manifest_json AS BLOB) ELSE '' END,
+ COALESCE((SELECT application_id FROM craft_native_documents WHERE page_id=p.id AND workspace_id=p.workspace_id),'')
 		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
 		LEFT JOIN artifact_version_heads h ON h.workspace_id=p.workspace_id AND h.page_id=p.id
  LEFT JOIN artifact_versions av ON av.workspace_id=h.workspace_id AND av.page_id=h.page_id AND av.version=CASE WHEN p.owner_user_id=? THEN h.latest_version ELSE h.shared_version END
@@ -610,7 +614,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
 			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
 			&p.Icon, &p.Color,
-			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration, &p.CollaborationFormat, &p.HasSlides, &p.SlidesSchema, &p.ArtifactContentType, &p.ArtifactSharedVersion, &p.ArtifactDashboardDeclaration, &p.ArtifactSlidesDeclaration, &p.ArtifactSelectedManifest); err != nil {
+			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration, &p.CollaborationFormat, &p.HasSlides, &p.SlidesSchema, &p.ArtifactContentType, &p.ArtifactSharedVersion, &p.ArtifactDashboardDeclaration, &p.ArtifactSlidesDeclaration, &p.ArtifactSelectedManifest, &p.NativeCraftApplication); err != nil {
 			return nil, err
 		}
 		p.ArtifactSlidesEnabled = slidesEnabled
@@ -730,7 +734,7 @@ func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFol
 		PrivateAudience: rec.PrivateAudience,
 		HasSlides:       rec.HasSlides, SlidesSchema: rec.SlidesSchema,
 		ArtifactKind: artifactSelectedMetadataKind(rec.ArtifactContentType, rec.ArtifactDashboardDeclaration, true, rec.ArtifactSelectedManifest, rec.ArtifactSlidesDeclaration, rec.ArtifactSlidesEnabled), ArtifactSharedVersion: rec.ArtifactSharedVersion,
-		HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasCollaboration: rec.HasCollaboration, CollaborationFormat: rec.CollaborationFormat, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		NativeCraftApplication: rec.NativeCraftApplication, HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasCollaboration: rec.HasCollaboration, CollaborationFormat: rec.CollaborationFormat, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:                  rec.ID,
 		Slug:                rec.Slug,
 		Name:                rec.Name,
@@ -1504,11 +1508,12 @@ func (h *PageHandler) loadPageWithPrivateAudience(ctx context.Context, wsID, slu
  COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0),
  EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id), private_audience,
  EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=pages.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=pages.id), EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=pages.id), COALESCE((SELECT format_profile FROM mooring_collab_documents WHERE page_id=pages.id),''),
- EXISTS(SELECT 1 FROM slides_heads WHERE page_id=pages.id AND workspace_id=pages.workspace_id), COALESCE((SELECT schema_version FROM slides_heads WHERE page_id=pages.id AND workspace_id=pages.workspace_id),0)
+ EXISTS(SELECT 1 FROM slides_heads WHERE page_id=pages.id AND workspace_id=pages.workspace_id), COALESCE((SELECT schema_version FROM slides_heads WHERE page_id=pages.id AND workspace_id=pages.workspace_id),0),
+ COALESCE((SELECT application_id FROM craft_native_documents WHERE page_id=pages.id AND workspace_id=pages.workspace_id),'')
 		FROM pages WHERE workspace_id = ? AND `+column+` = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
 		&p.FolderID, &p.PagesVersion, &p.Icon, &p.Color,
-		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration, &p.CollaborationFormat, &p.HasSlides, &p.SlidesSchema)
+		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration, &p.CollaborationFormat, &p.HasSlides, &p.SlidesSchema, &p.NativeCraftApplication)
 	if err != nil {
 		return nil, err
 	}
@@ -1925,7 +1930,7 @@ func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, pane
 		ArtifactKind: kind, ArtifactSharedVersion: shared,
 		HasArtifactProject: attached,
 		HasSlides:          rec.HasSlides, SlidesSchema: rec.SlidesSchema,
-		HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasCollaboration: rec.HasCollaboration, CollaborationFormat: rec.CollaborationFormat, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		NativeCraftApplication: rec.NativeCraftApplication, HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasCollaboration: rec.HasCollaboration, CollaborationFormat: rec.CollaborationFormat, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:          rec.ID,
 		Slug:        rec.Slug,
 		Name:        rec.Name,

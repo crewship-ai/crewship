@@ -22,8 +22,9 @@ vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
   useWorkspace: () => ({...access, workspaceId: "ws-1", workspaces: [{id:"ws-1",currentUserRole:access.role}], workspace:{id:"ws-1"}}),
 }))
 const push = vi.fn()
+const replace = vi.fn()
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push, replace: vi.fn(), prefetch: vi.fn(), back: vi.fn() }),
+  useRouter: () => ({ push, replace, prefetch: vi.fn(), back: vi.fn() }),
   usePathname: () => "/pages",
   useSearchParams: () => new URLSearchParams(),
   useParams: () => ({}),
@@ -550,5 +551,22 @@ it("offers New Doc and WordCraft when native collaboration is available without 
  fireEvent.click(await screen.findByRole("button",{name:"New Doc"}))
  expect(await screen.findByLabelText("Format")).toHaveValue("wordcraft")
  expect(screen.queryByText("Document creation is unavailable.")).not.toBeInTheDocument()
+ view.qc.clear()
+})
+
+it.each(["wordcraft","gridcraft"])("reopens an explicit native %s Page in the full editor instead of an empty legacy view",async(application)=>{
+ cleanup();window.history.replaceState(null,"","/pages/native-word")
+ const {qc}=renderLayout([{id:"native-id",slug:"native-word",name:"Native Word",panels:[],native_craft_application:application} as WirePage],"native-word")
+ await waitFor(()=>expect(replace).toHaveBeenCalledWith("/pages/craft/editor?workspace_id=ws-1&page_id=native-id"))
+ qc.clear()
+})
+
+it('offers New Doc when only the independently qualified native Sheet is available',async()=>{
+ cleanup();window.history.replaceState(null,'','/pages')
+ Object.assign(access,{role:'OWNER',capabilities:[],loading:false,error:false})
+ const view=renderLayout([],undefined,{enabled:false,wordcraft_native:false,gridcraft_native:true})
+ fireEvent.click(await screen.findByRole('button',{name:'New Doc'}))
+ expect(await screen.findByLabelText('Format')).toHaveValue('sheet')
+ expect(screen.getByRole('option',{name:'Sheet'})).toBeInTheDocument()
  view.qc.clear()
 })

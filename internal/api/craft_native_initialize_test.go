@@ -88,66 +88,70 @@ func TestCraftNativeInitializeDisabledProfileFailsClosed(t *testing.T) {
 // The private clock/validator are synthetic authority fixtures only. Production
 // Router/CLI/whole-engine qualification is exercised by the Linux TCP tests.
 func TestCraftNativeInitializeDeterministicOwnerAndRollbackAuthority(t *testing.T) {
-	for _, scenario := range []string{"owner", "nonowner-writer", "legacy", "c1-causal", "c1-command", "final-revoke"} {
-		t.Run(scenario, func(t *testing.T) {
-			f, h, ctx := craftNativeHTTPFixture(t)
-			const page = "native-init-synthetic"
-			owner := f.userID
-			if scenario == "nonowner-writer" {
-				owner = f.adminID
-			}
-			f.seedPage(t, page, page, "Synthetic initializer authority", owner, "")
-			if scenario == "nonowner-writer" {
-				mustExec(t, f.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'user',?,'write',?)`, page, f.userID, f.adminID)
-			}
-			if scenario == "legacy" {
-				f.seedCrew(t, "native-synthetic-crew", "Native synthetic", "native-synthetic-crew")
-				f.seedPanel(t, "native-synthetic-panel", page, "native-synthetic-crew")
-			}
-			if strings.HasPrefix(scenario, "c1-") {
-				craftNativeSeedCollaboration(t, f, page, scenario == "c1-command")
-			}
-			if scenario == "final-revoke" {
-				mustExec(t, f.db, `CREATE TRIGGER native_init_synthetic_revoke AFTER INSERT ON artifact_versions WHEN NEW.page_id='native-init-synthetic' BEGIN DELETE FROM workspace_members WHERE workspace_id=NEW.workspace_id AND user_id=(SELECT owner_user_id FROM pages WHERE id=NEW.page_id); END`)
-			}
-			cfg := mooring.NativeStoreConfig{Application: "wordcraft", EngineRevision: strings.Repeat("a", 40), EngineSHA256: strings.Repeat("b", 64), EditorBundle: strings.Repeat("c", 64), Validate: func(_ context.Context, raw []byte) error {
-				if !json.Valid(raw) {
-					return mooring.ErrNativeValidation
-				}
-				return nil
-			}}
-			d := newCraftNativeDocumentsHTTP(h, map[string]craftNativeApplication{"wordcraft": {Store: cfg, EditorURL: "/_editor/b/" + cfg.EditorBundle + "/index.html"}})
-			raw, err := json.Marshal(map[string]any{"application_id": "wordcraft", "bytes": []byte(`{"v":1}`)})
-			if err != nil {
-				t.Fatal(err)
-			}
-			req := httptest.NewRequest("POST", "/api/v1/pages/@"+page+"/craft/initialize", bytes.NewReader(raw)).WithContext(ctx)
-			req.SetPathValue("slug", "@"+page)
-			out := httptest.NewRecorder()
-			d.initialize(out, req)
-			expected := 201
-			if scenario == "nonowner-writer" || scenario == "final-revoke" {
-				expected = 403
-			}
-			if scenario == "legacy" || strings.HasPrefix(scenario, "c1-") {
-				expected = 409
-			}
-			if out.Code != expected {
-				t.Fatalf("synthetic %s expected%d got%d", scenario, expected, out.Code)
-			}
-			if expected != 201 {
-				craftNativeInitializeNoPartial(t, f, &Router{craftNativeHTTP: h}, page)
-			} else {
-				var receipt craftNativeInitializeResponse
-				if err = json.Unmarshal(out.Body.Bytes(), &receipt); err != nil || receipt.Version != "1" || receipt.Generation == "" || receipt.SessionID == "" || receipt.Token == receipt.SessionID {
-					t.Fatal("synthetic initializer lost committed version/admission")
-				}
-			}
-			if scenario == "final-revoke" {
-				var exists int
-				if err = f.db.QueryRow(`SELECT count(*) FROM workspace_members WHERE workspace_id=? AND user_id=?`, f.wsID, f.userID).Scan(&exists); err != nil || exists != 1 {
-					t.Fatalf("synthetic final-authority rollback lost membership %d %v", exists, err)
-				}
+	for _, application := range []string{"wordcraft", "gridcraft"} {
+		t.Run(application, func(t *testing.T) {
+			for _, scenario := range []string{"owner", "nonowner-writer", "legacy", "c1-causal", "c1-command", "final-revoke"} {
+				t.Run(scenario, func(t *testing.T) {
+					f, h, ctx := craftNativeHTTPFixture(t)
+					const page = "native-init-synthetic"
+					owner := f.userID
+					if scenario == "nonowner-writer" {
+						owner = f.adminID
+					}
+					f.seedPage(t, page, page, "Synthetic initializer authority", owner, "")
+					if scenario == "nonowner-writer" {
+						mustExec(t, f.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'user',?,'write',?)`, page, f.userID, f.adminID)
+					}
+					if scenario == "legacy" {
+						f.seedCrew(t, "native-synthetic-crew", "Native synthetic", "native-synthetic-crew")
+						f.seedPanel(t, "native-synthetic-panel", page, "native-synthetic-crew")
+					}
+					if strings.HasPrefix(scenario, "c1-") {
+						craftNativeSeedCollaboration(t, f, page, scenario == "c1-command")
+					}
+					if scenario == "final-revoke" {
+						mustExec(t, f.db, `CREATE TRIGGER native_init_synthetic_revoke AFTER INSERT ON artifact_versions WHEN NEW.page_id='native-init-synthetic' BEGIN DELETE FROM workspace_members WHERE workspace_id=NEW.workspace_id AND user_id=(SELECT owner_user_id FROM pages WHERE id=NEW.page_id); END`)
+					}
+					cfg := mooring.NativeStoreConfig{Application: application, EngineRevision: strings.Repeat("a", 40), EngineSHA256: strings.Repeat("b", 64), EditorBundle: strings.Repeat("c", 64), Validate: func(_ context.Context, raw []byte) error {
+						if !json.Valid(raw) {
+							return mooring.ErrNativeValidation
+						}
+						return nil
+					}}
+					d := newCraftNativeDocumentsHTTP(h, map[string]craftNativeApplication{application: {Store: cfg, EditorURL: "/_editor/b/" + cfg.EditorBundle + "/index.html"}})
+					raw, err := json.Marshal(map[string]any{"application_id": application, "bytes": []byte(`{"v":1}`)})
+					if err != nil {
+						t.Fatal(err)
+					}
+					req := httptest.NewRequest("POST", "/api/v1/pages/@"+page+"/craft/initialize", bytes.NewReader(raw)).WithContext(ctx)
+					req.SetPathValue("slug", "@"+page)
+					out := httptest.NewRecorder()
+					d.initialize(out, req)
+					expected := 201
+					if scenario == "nonowner-writer" || scenario == "final-revoke" {
+						expected = 403
+					}
+					if scenario == "legacy" || strings.HasPrefix(scenario, "c1-") {
+						expected = 409
+					}
+					if out.Code != expected {
+						t.Fatalf("synthetic %s expected%d got%d", scenario, expected, out.Code)
+					}
+					if expected != 201 {
+						craftNativeInitializeNoPartial(t, f, &Router{craftNativeHTTP: h}, page)
+					} else {
+						var receipt craftNativeInitializeResponse
+						if err = json.Unmarshal(out.Body.Bytes(), &receipt); err != nil || receipt.ApplicationID != application || receipt.Version != "1" || receipt.Generation == "" || receipt.SessionID == "" || receipt.Token == receipt.SessionID {
+							t.Fatal("synthetic initializer lost committed version/admission")
+						}
+					}
+					if scenario == "final-revoke" {
+						var exists int
+						if err = f.db.QueryRow(`SELECT count(*) FROM workspace_members WHERE workspace_id=? AND user_id=?`, f.wsID, f.userID).Scan(&exists); err != nil || exists != 1 {
+							t.Fatalf("synthetic final-authority rollback lost membership %d %v", exists, err)
+						}
+					}
+				})
 			}
 		})
 	}

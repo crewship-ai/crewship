@@ -32,6 +32,7 @@ func newCraftCommand() *cobra.Command {
 	initialize.Flags().String("file", "", "Native Word document file (or - for stdin, without subsequent actions)")
 	_ = initialize.MarkFlagRequired("file")
 	craft.AddCommand(initialize)
+	craft.AddCommand(newCraftAgentTaskCommand())
 	return craft
 }
 
