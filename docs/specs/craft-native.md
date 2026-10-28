@@ -134,17 +134,18 @@ final authorization. It publishes the private admission only after commit;
 validation or final authorization failure leaves no partial native state.
 Ordinary Page creation remains separate.
 
-The native-only operator override `CREWSHIP_CRAFT_NATIVE_EDITOR_BUNDLE_DIR`
-selects the bundle directory. Per-application release bindings are explicit:
-
-| Binding | Word | Sheet |
-| --- | --- | --- |
-| Engine revision | `CREWSHIP_CRAFT_NATIVE_WORD_ENGINE_REVISION` | `CREWSHIP_CRAFT_NATIVE_GRID_ENGINE_REVISION` |
-| CLI path | `CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH` | `CREWSHIP_CRAFT_NATIVE_GRID_CLI_PATH` |
-| CLI SHA256 | `CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256` | `CREWSHIP_CRAFT_NATIVE_GRID_CLI_SHA256` |
-| Editor bundle | `CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_BUNDLE` | `CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_BUNDLE` |
-| Editor URL | `CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL` | `CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_URL` |
-
+The native-only operator environment overrides are
+`CREWSHIP_CRAFT_NATIVE_EDITOR_BUNDLE_DIR`,
+`CREWSHIP_CRAFT_NATIVE_WORD_ENGINE_REVISION`,
+`CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH`,
+`CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256`,
+`CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_BUNDLE` and
+`CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL`. The corresponding Sheet overrides are
+`CREWSHIP_CRAFT_NATIVE_GRID_ENGINE_REVISION`,
+`CREWSHIP_CRAFT_NATIVE_GRID_CLI_PATH`,
+`CREWSHIP_CRAFT_NATIVE_GRID_CLI_SHA256`,
+`CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_BUNDLE` and
+`CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_URL`.
 These override corresponding YAML
 fields without enabling the product flag or any legacy profile. Explicit empty
 values remain empty and fail qualification; every startup/manifest/hash check
@@ -177,6 +178,13 @@ requires its erasure.
 ## Current implementation boundary
 
 The backend has direct-handler and real-Router two-human regression coverage.
+Whole-document routes require an already explicit native Page and a trusted
+qualified profile; only the explicit owner-only native initializer may create
+that profile on an existing empty Page. Page creation, full editor mounting,
+proposals and agent execution,
+one-hour browser acceptance and 2,000 changing saves are separate integration
+capabilities; coverage of one does not establish the others.
+
 New Doc offers Word and Sheet only when their independent `wordcraft_native` and
 `gridcraft_native` status capabilities are literal true. These capabilities
 advertise live, qualified profiles without enabling the older Docs engine.
@@ -185,8 +193,6 @@ canonical blank bytes for a fresh Page. Creation releases only its exact lease
 generation; an ambiguous release can reopen the confirmed document with fresh
 read-only admission, while an ambiguous initialize is never repeated. Existing
 native Pages retain their application descriptor when opened from the Pages list.
-Proposals, agent execution, one-hour browser acceptance and 2,000 changing saves
-remain separate work.
 
 The native blank Word asset is serialized by the original engine separately from
 the older checkpoint blank. For explicit qualification, set
