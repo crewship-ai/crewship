@@ -2,7 +2,6 @@
 
 
 import { useSearchParams } from "next/navigation"
-import { useState } from "react"
 import { ArtifactProject } from "@/components/features/pages/artifact-project"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useUrlSegment } from "@/lib/use-url-segment"
@@ -11,8 +10,6 @@ import { PagesLayout } from "@/components/features/pages/pages-layout"
 import { useAccessContext } from "@/components/features/restricted/access-notice"
 import { RestrictedPages } from "@/components/features/pages/restricted-pages"
 import { useAccessMode } from "@/hooks/use-access-mode"
-import { usePage } from "@/hooks/use-pages"
-import { chatArtifactProjects } from "@/lib/feature-flags"
 
 // /pages/<slug> — one page's panel grid (docs/specs/pages.md §9).
 //
@@ -57,25 +54,5 @@ export function PageDetailClient() {
   if (search.get("artifact") === "1") {
     return <ArtifactProject key={`${workspaceId}:${slug}:${initialVersion ?? "latest"}`} workspaceId={workspaceId} slug={slug} initialVersion={initialVersion} />
   }
-  if (!chatArtifactProjects()) return <PagesLayout workspaceId={workspaceId} slug={slug} />
-  return <PageBackendReader key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} initialVersion={initialVersion} />
-}
-
-/** A current authorized Page type chooses its reader; missing URL hints never
- * turn VersionStore artifacts into the legacy panels surface. */
-function PageBackendReader({ workspaceId, slug, initialVersion }: { workspaceId: string; slug: string; initialVersion?: number }) {
-  const detail = usePage(workspaceId, slug)
-  const [legacyReader, setLegacyReader] = useState(false)
-  // Route selection is not content authority. Once admitted, the existing
-  // reader owns access retirement and must retain its original draft producer.
-  if (legacyReader) return <PagesLayout workspaceId={workspaceId} slug={slug} />
-  if (detail.loading) return <Skeleton className="m-6 h-12" />
-  if (detail.accessDenied || !detail.page && !detail.error) return <p role="alert" className="p-6">Document unavailable.</p>
-  if (detail.error) return <p role="alert" className="p-6">Document could not be loaded.</p>
-  const kind: unknown = detail.raw?.artifact_kind ?? detail.page?.artifactKind
-  if (kind === "project" || kind === "dashboard" || kind === "slides") {
-    return <ArtifactProject key={`${workspaceId}:${slug}:${initialVersion ?? "latest"}`} workspaceId={workspaceId} slug={slug} initialVersion={initialVersion} />
-  }
-  setLegacyReader(true)
-  return <PagesLayout workspaceId={workspaceId} slug={slug} />
+  return <PagesLayout workspaceId={workspaceId} slug={slug} {...(initialVersion === undefined ? {} : { initialArtifactVersion: initialVersion })} />
 }
