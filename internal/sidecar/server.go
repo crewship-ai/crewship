@@ -654,6 +654,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 				// writes used to land in sam's directory).
 				s.handleMemoryMCPForAgent(w, r, strings.TrimPrefix(r.URL.Path, "/mcp/memory/"))
 				return
+			case r.Method == http.MethodPost && r.URL.Path == "/mcp/craft-native":
+				s.handleNativeCraftMCP(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/mcp/mooring":
 				s.handleMooringMCP(w, r)
 				return

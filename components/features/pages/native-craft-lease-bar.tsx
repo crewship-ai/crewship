@@ -5,6 +5,7 @@ import { validNativeVersion } from "@/lib/mooring/native-draft"
 
 export interface NativeCraftLeaseView {
   holder: { actor_id: string; display_name: string; kind: "human" | "agent" } | null
+  can_stop_agent?: boolean
   mine: boolean
   generation: string | null
   can_write: boolean
@@ -16,7 +17,7 @@ type ActionBody = { generation?: string; request_id?: string }
 
 /** Advisory controls only. Every action is still authorized and fenced by the
  * server; the status never contains the private admission bearer. */
-export function NativeCraftLeaseBar({ view, mayEdit, pending = false, onAction }: { view: NativeCraftLeaseView; mayEdit: boolean; pending?: boolean; onAction(action: NativeCraftLeaseAction, body: ActionBody): void }) {
+export function NativeCraftLeaseBar({ view, mayEdit, pending = false, onAction, onStopAgent }: { view: NativeCraftLeaseView; mayEdit: boolean; pending?: boolean; onStopAgent?(): void; onAction(action: NativeCraftLeaseAction, body: ActionBody): void }) {
   const generation = validNativeVersion(view.generation) && view.generation !== "0" ? view.generation : undefined
   const mine = mayEdit && view.mine && view.can_write && generation !== undefined
   const name = view.holder?.display_name.trim() || (view.holder?.kind === "agent" ? "Agent" : "Někdo")
@@ -26,6 +27,7 @@ export function NativeCraftLeaseBar({ view, mayEdit, pending = false, onAction }
     {!mayEdit && <span className="text-muted-foreground">Pouze čtení</span>}
     {mayEdit && !view.holder && <Button size="sm" disabled={pending} onClick={() => onAction("acquire", {})}>Převzít úpravy</Button>}
     {mayEdit && view.holder && !view.mine && <Button size="sm" variant="outline" disabled={pending} onClick={() => onAction("request-handoff", {})}>Požádat o předání</Button>}
+    {mayEdit && view.holder?.kind === "agent" && view.can_stop_agent === true && onStopAgent && <Button size="sm" variant="outline" disabled={pending} onClick={onStopAgent}>Zastavit agenta</Button>}
     {mine && <>
       <Button size="sm" variant="outline" disabled={pending} onClick={() => onAction("release", { generation })}>Uvolnit úpravy</Button>
       {view.handoff_requested_by.map(request => <Button key={request.request_id} size="sm" disabled={pending} onClick={() => onAction("handoff", { generation, request_id: request.request_id })}>Předat uživateli {request.display_name.trim() || (request.kind === "agent" ? "Agent" : "Uživatel")}</Button>)}

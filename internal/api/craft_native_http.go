@@ -27,6 +27,7 @@ type craftNativeRequest struct {
 	generation int64
 }
 type craftNativeHTTP struct {
+	agents         *craftNativeAgentManager
 	pages          *PageHandler
 	enabled        bool
 	clock          mooring.OwnerClock

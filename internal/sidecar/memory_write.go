@@ -1251,6 +1251,11 @@ func (s *Server) sendBoundedHostRequest(r *http.Request, method, path string, bo
 		// The workbook lease is 30s; retain time for commit and its receipt.
 		budget = 35 * time.Second
 	}
+	if path == "/api/v1/internal/craft-native/task" {
+		// A pinned original-engine apply and final native validation each have
+		// a 30s bound. The host renews only this live authorized request's lease.
+		budget = 65 * time.Second
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), budget)
 	defer cancel()
 

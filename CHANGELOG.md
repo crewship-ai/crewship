@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Add separately opt-in native Word/Sheet agent tasks with explicit original-human consent, confirmed run identity, shared edit leases, original-engine edits and receipt-backed whole-document saves. Human holders are refused; the original human can inspect actual task outcomes and stop the agent without lending a human editor session.
+
 - Add an opt-in Artifacts library at `/artifacts` (`NEXT_PUBLIC_ARTIFACTS_LIBRARY`): a gallery or table of projects, Word, Sheet, Slides and dashboards with kind and shared version, a project detail on its version history and the edit lock of a native Word; the Pages list reports `artifact_kind` and `artifact_shared_version`.
 - Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 - Add an opt-in private native-document draft journal and whole-snapshot save coordinator. Recovery offers compare or copy, stale generations cannot replay drafts, and only an exact durable receipt confirms a save. Existing editor profiles remain unchanged.

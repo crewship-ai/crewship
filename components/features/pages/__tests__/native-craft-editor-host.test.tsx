@@ -5,7 +5,8 @@ import type {NativeEditorPortOptions} from "@/lib/mooring/native-editor-port"
 import {NativeSaveError,type NativeSaveRequest} from "@/lib/mooring/single-editor-save"
 import {NativeCraftEditorHost,nativeWordFrameURL} from "../native-craft-editor-host"
 
-const m=vi.hoisted(()=>({createClient:vi.fn(),openJournal:vi.fn(),createPort:vi.fn(),registerPrivacy:vi.fn(),purge:vi.fn()}))
+const m=vi.hoisted(()=>({apiFetch:vi.fn(),createClient:vi.fn(),openJournal:vi.fn(),createPort:vi.fn(),registerPrivacy:vi.fn(),purge:vi.fn()}))
+vi.mock("@/lib/api-fetch",()=>({apiFetch:m.apiFetch}))
 vi.mock("@/lib/mooring/native-document-client",()=>({createNativeDocumentClient:m.createClient}))
 vi.mock("@/lib/mooring/native-editor-port",()=>({createNativeEditorPort:m.createPort}))
 vi.mock("@/lib/mooring/native-draft",async()=>({...await vi.importActual("@/lib/mooring/native-draft"),openNativeDraftJournal:m.openJournal}))
@@ -27,6 +28,23 @@ async function ready(){await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenC
 async function acquire(){fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(ports.at(-1)?.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)))}
 
 describe('native Word host authority and persistence',()=>{
+ it('stops only the current agent mandate with one H1 request and reloads its fresh version without acquiring',async()=>{
+  const agent={...ownedLease,mine:false,can_write:false,can_stop_agent:true,holder:{actor_id:'agent:actual',display_name:'Jamie',kind:'agent'}}
+  client.lease.mockResolvedValue(agent)
+  const stopped=deferred<Response>();m.apiFetch.mockReturnValueOnce(stopped.promise)
+  mount();await screen.findByRole('button',{name:'Zastavit agenta'});await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled())
+  fireEvent.click(screen.getByRole('button',{name:'Zastavit agenta'}))
+  expect(screen.getByRole('button',{name:'Zastavit agenta'})).toBeDisabled()
+  expect(m.apiFetch).toHaveBeenCalledWith('/api/v1/pages/%40p/craft/tasks/cancel?workspace_id=w',expect.objectContaining({method:'POST',body:'{}',skipRefresh:true,redirect:'error',signal:expect.any(AbortSignal)}))
+  const fresh={...await client.read(),version:'2',bytes:new TextEncoder().encode('{"body":["agent"]}')}
+  client.read.mockResolvedValue(fresh);client.lease.mockResolvedValue(emptyLease)
+  await act(async()=>stopped.resolve(new Response(JSON.stringify({stop_pending:true}),{status:202})))
+  await waitFor(()=>expect(ports).toHaveLength(2))
+  expect(ports[1].bootstrap).toHaveBeenCalledWith(fresh.bytes,expect.any(AbortSignal))
+  expect(m.apiFetch).toHaveBeenCalledOnce();expect(client.leaseAction).not.toHaveBeenCalled();expect(client.save).not.toHaveBeenCalled();expect(m.openJournal).not.toHaveBeenCalled()
+  expect(screen.queryByText('Agent zastaven')).not.toBeInTheDocument();expect(screen.queryByText('Uloženo')).not.toBeInTheDocument()
+ })
+
  it('is default-off and never admits or mounts an editor',()=>{render(<NativeCraftEditorHost workspaceId="w" pageId="p" humanId="human"/>);expect(m.createClient).not.toHaveBeenCalled();expect(document.querySelector('iframe')).toBeNull()})
  it('opens one shared human session, boots an isolated read-only Word frame and never auto-acquires',async()=>{mount();await ready();expect(client.open).toHaveBeenCalledOnce();expect(m.createClient).toHaveBeenCalledOnce();expect(client.leaseAction).not.toHaveBeenCalled();expect(portOptions[0].requireAccessProtocol).toBe(true);expect(portOptions[0].applicationId).toBe('wordcraft');expect(document.querySelector('iframe')).toHaveAttribute('sandbox','allow-scripts');expect(document.querySelector('iframe')).toHaveAttribute('credentialless');expect(document.querySelector('iframe')?.src).toContain('readonly=1');expect(journal.persist).not.toHaveBeenCalled();expect(client.save).not.toHaveBeenCalled()})
  it('shows the exact named editor to another human without acquiring a write',async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false});mount();await screen.findByText('Upravuje Pavel');expect(screen.getByRole('button',{name:'Požádat o předání'})).toBeEnabled();expect(client.leaseAction).not.toHaveBeenCalled();expect(m.openJournal).not.toHaveBeenCalled();expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false)})

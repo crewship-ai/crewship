@@ -214,6 +214,18 @@ if (STATE_ROOT="$tmp/state/../state" cmd_start docreject --binary /bin/true --do
 check "--documents refuses unclean paths" "$r" refused
 check "unclean paths create no instance state" "$([[ -e "$tmp/state/docreject" ]] && echo created || echo absent)" absent
 
+# Native-agent launch needs one exact operator opt-in; no generic prefix.
+if (cmd_start agentenv --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" --env CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true) >/dev/null 2>"$tmp/agent-env.err"; then agent_started=yes; else agent_started=no; fi
+check "native agent exact opt-in is accepted" "$agent_started" yes
+if [[ "$agent_started" == yes ]]; then
+  check "native agent exact opt-in reaches isolated child" "$(grep -Fxc 'CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true' "$FAKE_SERVER_ENV" || true)" 1
+  cmd_stop agentenv >/dev/null 2>&1 || true
+fi
+for bad_agent in CREWSHIP_CRAFT_NATIVE_AGENTS_ACTOR_ID=forged CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED_EXTRA=true; do
+  if (cmd_start agentbad --binary /bin/true --env "$bad_agent") >/dev/null 2>&1; then r=started; else r=refused; fi
+  check "native agent prefix refuses ${bad_agent%%=*}" "$r" refused
+done
+
 # --- native qualification env: exactly seven operator bindings, no identity ---
 # Transport fixture only: real native server startup still verifies CLI/bundles.
 native_bindings=(

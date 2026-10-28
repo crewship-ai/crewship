@@ -1,4 +1,4 @@
-# Native Craft human sessions, leases and whole-document API
+# Native Craft sessions, leases, agent tasks and whole-document API
 
 The separate whole-native WordCraft/GridCraft profile is experimental and off by
 default. `craft_native.enabled: true` or `CREWSHIP_CRAFT_NATIVE_ENABLED=true`
@@ -23,7 +23,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 
 | Method | Path | Request | Response / success status |
 |---|---|---|---|
-| GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean}`, 200. |
+| GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean, agents_enabled: boolean}`, 200. |
 | POST | `/api/v1/pages/{slug}/craft/sessions` | `{}`. | `session_token`, public `session_id`, `application_id`, `page_id`, 201. |
 | POST | `/api/v1/pages/{slug}/craft/sessions/reauthorize` | Separately refreshed original authentication; no body consumed. | `{renewed: boolean}`, 200. |
 | GET | `/api/v1/pages/{slug}/craft/lease` | Craft admission header. | Lease status described below, 200. |
@@ -41,7 +41,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Exact original snapshot binding and hash; no blind retry. | Original pinned commit receipt,200; never an arbitrary latest head. |
 | POST | `/api/v1/pages/{slug}/craft/document/restore` | Current binding and targetVersion. | New committed version and node durability, 200. |
 
-Except availability, initialization and initial session creation, send `X-Craft-Session` as well
+Except availability, agent task controls, initialization and initial session creation, send `X-Craft-Session` as well
 as ordinary authentication. Session creation returns `session_token`, the distinct
 public `session_id`, `application_id`, and `page_id`. Keep the token only in the
 mounted host closure, never in editor messages, local drafts, URLs or public DTOs.
@@ -55,9 +55,9 @@ numbers. Before the first acquisition, the status generation is `null`.
 
 A lease status has `holder: {actor_id, display_name, kind} | null`, `mine`,
 `generation`, `expires_at`, `can_write`, `acquired_at`,
-`handoff_requested_kind`, and `handoff_requested_by`. Requests are an **array**
+`handoff_requested_kind`, `handoff_requested_by`, and `can_stop_agent`. An agent holder also has public `agent_id` and `run_id`; its `kind` is `agent`. Requests are an **array**
 of `{request_id, actor_id, display_name, kind}`, visible to the holder. Current
-admissions are human-only. `acquired_at` is presently `null`: the lease does not
+editor admissions are human-only; an agent uses the separate confirmed task binding below. `acquired_at` is presently `null`: the lease does not
 persist acquisition wall time, and renewal time must not impersonate it.
 
 Competing acquisition and stale generations return 409. A handoff advances the
@@ -124,7 +124,12 @@ The native-only operator environment overrides are
 `CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH`,
 `CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256`,
 `CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_BUNDLE` and
-`CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL`. These override corresponding YAML
+`CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL`. The corresponding Sheet overrides are
+`CREWSHIP_CRAFT_NATIVE_GRID_ENGINE_REVISION`,
+`CREWSHIP_CRAFT_NATIVE_GRID_CLI_PATH`,
+`CREWSHIP_CRAFT_NATIVE_GRID_CLI_SHA256`,
+`CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_BUNDLE` and
+`CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_URL`. These override corresponding YAML
 fields without enabling the product flag or any legacy profile. Explicit empty
 values remain empty and fail qualification; every startup/manifest/hash check
 still applies.
@@ -153,11 +158,107 @@ conflict or stale custody 409; invalid native data 422. Existing versions remain
 available. Generic denied writes retain the local draft; only proven read loss
 requires its erasure.
 
+## Native agent tasks
+
+`craft_native.agents_enabled` or `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true`
+separately enables this pilot. Both native documents and agent tasks are off by
+default. Enabling the human editor alone grants no agent access. The operator
+must configure the qualified original CLI and the supported private Claude Code
+runtime with its current sidecar. Unsupported or unavailable runtimes refuse
+admission before accepting work.
+
+An authenticated human with current Page write access may send
+`POST /api/v1/pages/{slug}/craft/tasks?workspace_id=…` with exactly
+`{chat_id, message_id, whole_document: true}`. The message must be that human's
+persisted original user message in the actual registered agent's chat. The host
+captures original credential/authority epochs, the whole-document consent and
+immutable work input. A confirmed original provider exec and matching current
+work attempt are required before the actual run credential can access the
+native document. An ordinary run, a database row, an old grant, or a claimed
+actor/mandate is insufficient. Repeating the same message/Page/agent cannot
+launch another task; a new task needs a new original message and consent.
+
+The normal human CLI uses the same explicit consent and Page authority:
+
+```sh
+crewship craft task start @PAGE --chat-id CHAT --message-id MESSAGE --whole-document --workspace WORKSPACE
+crewship craft task status @PAGE WORK_ID --workspace WORKSPACE
+crewship craft task stop @PAGE --workspace WORKSPACE
+```
+
+`craft task start` requires a true `--whole-document`; it never supplies consent
+by default. These human commands do not use the native editor session or agent
+credentials. Stop reports the actual cancellation/termination fields, rather
+than assuming the process has stopped. Mutations are not replayed on failure.
+
+The accepted response is `{work_id, status: "queued"}`, HTTP 202. It is not proof
+of execution or a save. The same original human can inspect
+`GET /api/v1/pages/{slug}/craft/tasks/{workID}?workspace_id=…` under fresh current
+Page write rights. This read-only projection contains actual bounded tool
+outcomes and `last_committed_receipt`, never prompt or command bodies, native document
+bytes or credentials. The last receipt is explicitly historical; an uncertain
+or in-flight later attempt is not Saved. Append `craft_task_id=<work_id>` to the
+normal native editor URL to inspect this task in the editor. That selector is
+not authority and never starts or resumes a run.
+
+The task's original agent calls the fixed sidecar MCP tools `craft_read`,
+`craft_acquire`, `craft_renew`, `craft_apply` and `craft_release`. They forward the
+actual run credential and crew IPC identity to the fixed private native-task
+RPC endpoint. Requests cannot select a Page, actor,
+run, executable or profile. The host binds every call to the one captured task
+and rechecks current original rights and epochs at the final SQL writer.
+
+Acquisition uses the same EditLease as the human editor. A human holder returns
+409 with `holder_kind: "human"`; no engine mutation or version is published.
+Generations and base versions remain canonical positive decimal strings.
+Apply requires the current `generation`, exact `base_version`, a new bounded
+`request_id` and structured `commands`. The original engine performs the edit;
+the existing NativeStore validates the complete returned native document and
+publishes through the same lease/CAS/VersionStore path. There is one publication
+attempt. An exact repeated request only reconciles its original snapshot; it
+never reruns the engine. A changed packet with the same ID conflicts, and a
+historical receipt cannot clear another attempt's uncertainty or downgrade the
+last confirmed version.
+
+The initial command surface is deliberately narrow: Word supports
+`caret.docStart`, `caret.docEnd` and plaintext `text.insert`; Sheet supports
+scalar/literal `cell.set`. Word `text` and Sheet `cell.get` provide bounded
+original-engine reads. File/system commands and formulas supplied through this
+initial agent tool are refused. This does not restrict the human editor's
+original feature surface. Executables are operator-pinned and rehashed before
+executing the same file descriptor; document paths are private host-generated
+files, with no shell interpretation or inherited host credentials.
+
+The normal fifteen-second lease is unchanged. A live authenticated apply renews
+its exact lease every five seconds only while that bounded request remains
+alive. Between calls the agent must explicitly renew. The holder is
+`agent:<actual-agent-id>` with public session correlation
+`native-agent:<actual-run-id>`; the immutable version retains that actor and run
+alongside the captured work/run provenance. Detailed original consent auditing
+also depends on the existing work/run ledger retention. No human session is
+borrowed and no separate version ledger is introduced.
+
+Only the original human, with fresh current Page write rights, can send
+`POST /api/v1/pages/{slug}/craft/tasks/cancel` with `{}`. The host retires only
+that registered agent's exact lease and permanently closes the grant under the
+SQL writer before acknowledging. It cannot force a human holder. The response
+reports `grant_revoked`, `lease_retired`, `cancel_requested`, `stopped` and
+`stop_pending`; physical process termination is not assumed from cancellation.
+The human editor exposes Stop only when `can_stop_agent` is true. A stopped
+process is successful only with a qualified actual Node receipt and retired
+custody; no-receipt and uncertain outcomes remain distinct.
+
+This pilot retains at most 128 captured task entries per process and at most 64
+apply IDs per task. It refuses further work instead of evicting uncertain
+authority. The private status timeline retains the last 64 actual completed tool
+responses and is explicitly `current-host-only`; a restart cannot reconstruct a
+grant or its timeline from SQL. Durable native versions and original receipt
+metadata remain in VersionStore. Existing documents are never migrated.
+
 ## Current implementation boundary
 
-The backend has direct-handler and real-Router two-human regression coverage.
-Whole-document routes require an already explicit native Page and a trusted
-qualified profile; only the explicit owner-only Word initializer may create
-that profile on an existing empty Page. Page creation, full editor mounting,
-proposals and agent execution,
-one-hour browser acceptance and 2,000 changing saves remain separate work.
+The human and agent transport boundaries have targeted API, original-engine,
+private-process, retirement, cancellation and receipt regressions. Live editor
+and genuine dispatched-agent acceptance must still qualify the exact release;
+unit provider/model fixtures are not live agent evidence. Proposals and complete
+visible-editor feature acceptance remain separate work.

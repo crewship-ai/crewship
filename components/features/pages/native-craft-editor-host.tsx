@@ -3,6 +3,8 @@
 import * as React from "react"
 import {registerDocumentDraftWriter} from "@/lib/document-queue"
 import {Button} from "@/components/ui/button"
+import {apiFetch} from "@/lib/api-fetch"
+import {NativeCraftAgentTaskStatus} from "./native-craft-agent-task-status"
 import {useLeaveGuard} from "@/lib/editor-lifecycle/use-leave-guard"
 import {createNativeDocumentClient,type NativeDocumentSnapshot} from "@/lib/mooring/native-document-client"
 import {createNativeEditorPort,type NativeEditorPort} from "@/lib/mooring/native-editor-port"
@@ -19,6 +21,7 @@ function leaseView(raw:unknown):Lease {
  if(!object(raw)||typeof raw.mine!=='boolean'||typeof raw.can_write!=='boolean'||!(raw.generation===null||validNativeVersion(raw.generation)&&raw.generation!=='0')||!(raw.acquired_at===null||text(raw.acquired_at))||!(raw.expires_at===null||text(raw.expires_at))||!Array.isArray(raw.handoff_requested_by)||raw.handoff_requested_by.length>128)throw Error('invalid_lease')
  const actor=(v:unknown)=>object(v)&&text(v.actor_id)&&text(v.display_name)&&(v.kind==='human'||v.kind==='agent')
  if(raw.holder!==null&&!actor(raw.holder)||raw.handoff_requested_by.some(v=>!actor(v)||!object(v)||!text(v.request_id)))throw Error('invalid_lease')
+ if(raw.can_stop_agent!==undefined&&typeof raw.can_stop_agent!=='boolean')throw Error('invalid_lease')
  if(raw.mine&&(!raw.holder||!raw.generation))throw Error('invalid_lease')
  return raw as unknown as Lease
 }
@@ -43,6 +46,7 @@ interface Runtime {port:NativeEditorPort;frame:HTMLIFrameElement;abort:AbortCont
 
 /** One authenticated client/session owns both lease controls and the isolated full Word editor. */
 export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}:Props){
+ const stopAgent=React.useRef<()=>void>(()=>{})
  const compare=React.useRef<(draft:NativeDraft)=>void>(()=>{}),reconcile=React.useRef<()=>void>(()=>{}),[uncertain,setUncertain]=React.useState(false)
  const mount=React.useRef<HTMLDivElement>(null),control=React.useRef<(action:NativeCraftLeaseAction,body:{generation?:string;request_id?:string})=>void>(()=>{})
  const [view,setView]=React.useState<Lease>(vacant),[busy,setBusy]=React.useState(false),[label,setLabel]=React.useState('Připojuji…'),[savedVersion,setSavedVersion]=React.useState<string>(),[error,setError]=React.useState<string>(),[dirty,setDirty]=React.useState(false),[recoveries,setRecoveries]=React.useState<NativeRecovery[]>([]),[comparison,setComparison]=React.useState<Comparison>(),[ownsEditor,setOwnsEditor]=React.useState(false),[connectionRetired,setConnectionRetired]=React.useState(false),[quota,setQuota]=React.useState<NativeDocumentSnapshot['quota']>()
@@ -64,6 +68,21 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    setSavedVersion(saved?r.ackedVersion:undefined)
    setLabel(saved?'Uloženo':phase==='uncertain'?'Výsledek nepotvrzen':phase==='saving'?'Ukládám…':r.blocked?'Koncept zůstává v tomto editoru':r.phase?.dirty?'Neuložený koncept':r.writable?'Připraveno k úpravám':'Pouze čtení')
   }
+  stopAgent.current=()=>{void(async()=>{
+   if(dead||networkRetired||transition||viewNow.holder?.kind!=='agent'||viewNow.can_stop_agent!==true)return
+   transition=true;setBusy(true);setError(undefined)
+   try{
+    const query=new URLSearchParams({workspace_id:workspaceId})
+    const response=await apiFetch(`/api/v1/pages/${encodeURIComponent('@'+pageId)}/craft/tasks/cancel?${query}`,{method:'POST',cache:'no-store',redirect:'error',skipRefresh:true,signal:lifetime.signal,headers:{'Content-Type':'application/json'},body:'{}'})
+    const result:unknown=await response.json()
+    if(!response.ok||!object(result)||typeof result.stop_pending!=='boolean')throw Error('native_agent_stop_unconfirmed')
+    if(dead||lifetime.signal.aborted)return
+    setLabel(result.stop_pending?'Zápis agenta zastaven · ukončení běhu se ověřuje':'Agent zastaven')
+    transition=false
+    await observeLease(await client.lease(lifetime.signal));await refreshReader()
+   }catch{if(!dead&&!lifetime.signal.aborted)setError('Zastavení agenta se nepotvrdilo. Stav úprav se ověřuje na serveru.')}
+   finally{transition=false;if(!dead)setBusy(false)}
+  })()}
   function freezeInput(r:Runtime){r.frame.setAttribute('inert','');r.frame.tabIndex=-1;r.frame.style.pointerEvents='none';r.frame.blur();mount.current?.focus();setBusy(true)}
   function resumeViewing(r:Runtime){if(live(r)&&(r.nativeReadOnly||!r.blocked)){r.frame.removeAttribute('inert');r.frame.removeAttribute('tabindex');r.frame.style.pointerEvents=''}setBusy(false)}
   function detach(r:Runtime){r.abort.abort();r.port.close();r.frame.remove()}
@@ -285,12 +304,13 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     void observeLease(value).catch(()=>stop('Aktuální přístup nelze potvrdit. Koncept zachován.'))
    }).catch(()=>{if(!dead)void retireConnection('Spojení přerušeno. Zápis není potvrzen.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})
   })().catch(()=>{if(!dead)stop('Dokument nelze bezpečně otevřít.')})
-  return()=>{unregisterPrivacy();window.removeEventListener('message',windowMessage);control.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};stop('Editor uzavřen · koncept zachován',true)}
+  return()=>{unregisterPrivacy();window.removeEventListener('message',windowMessage);control.current=()=>{};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};stop('Editor uzavřen · koncept zachován',true)}
  },[enabled,humanId,workspaceId,pageId])
  function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='wordcraft-recovery.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
  if(!enabled)return <p className="p-6">Nativní editor není zapnutý.</p>
  return <section className="flex h-full min-h-[600px] flex-col" aria-label="WordCraft dokument">
-  <NativeCraftLeaseBar view={view} mayEdit={Boolean(humanId)&&!connectionRetired} pending={busy} onAction={(action,body)=>control.current(action,body)}/>
+  <NativeCraftLeaseBar view={view} mayEdit={Boolean(humanId)&&!connectionRetired} pending={busy} onAction={(action,body)=>control.current(action,body)} onStopAgent={()=>stopAgent.current()}/>
+  <NativeCraftAgentTaskStatus workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled={!connectionRetired}/>
   {!connectionRetired&&view.mine&&view.can_write&&!ownsEditor&&<Button disabled={busy} onClick={()=>control.current('acquire',{})}>Převzít úpravy</Button>}
   <div role="status" className="px-3 py-2"><span>{label}</span>{savedVersion&&<span> · verze {savedVersion}</span>}{quota&&<span className="ml-3 text-muted-foreground">Historie {quota.usedBytes} / {quota.limitBytes} B{quota.warning?' · blíží se limit':''}</span>}</div>
   {uncertain&&<Button variant="outline" onClick={()=>reconcile.current()}>Ověřit výsledek</Button>}
