@@ -13,6 +13,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add opt-in inert Dashboard previews (`NEXT_PUBLIC_ARTIFACT_DASHBOARDS`): authorized collection data refreshes numbers, tables and native meter charts without publishing new code; shared readers stay on their shared manifest and data has source and freshness labels.
 
 - Add Preview, History and Comments tabs to the opt-in Artifacts library; sending an anchored comment starts the source agent, with delivery confirmation and retry of the saved task.
+- Accept valid near-limit Dashboard data batches by counting their exact metadata and original value bytes, preserving document limits and atomic version conflicts.
+
 - Add default-off Dashboard collection reads and atomic JSON document batches through authenticated Page API, CLI and original-run MCP tools. Shared readers use the current shared code manifest; data changes preserve code history and document conflicts never overwrite newer data.
 - Classify Dashboard artifacts from the authorized code manifest in Page lists and detail: owners use the latest code, shared readers use the current shared pin. The disabled Dashboard data flag preserves the ordinary Project classification.
 
