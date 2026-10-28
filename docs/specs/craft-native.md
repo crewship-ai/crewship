@@ -180,9 +180,14 @@ requires its erasure.
 The backend has direct-handler and real-Router two-human regression coverage.
 Whole-document routes require an already explicit native Page and a trusted
 qualified profile; only the explicit owner-only native initializer may create
-that profile on an existing empty Page. New Doc uses that initializer for a
-fresh personal Word Page. Proposals and agent execution,
+that profile on an existing empty Page. Page creation, full editor mounting,
+proposals and agent execution,
 one-hour browser acceptance and 2,000 changing saves remain separate work.
+
+The qualified native Word profile additionally supports New Doc: it uses that
+initializer for a fresh personal Word Page and opens the full editor after
+releasing creation custody. This Word creation flow does not qualify native
+Sheet creation or the separate acceptance work above.
 
 The native blank Word asset is serialized by the original engine separately from
 the older checkpoint blank. To qualify it against a real binary, set
