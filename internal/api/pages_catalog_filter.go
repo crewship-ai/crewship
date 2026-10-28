@@ -21,6 +21,11 @@ func pageCatalogRows(r *http.Request, index *pageIndex, human string) ([]pageInd
 			}
 		}
 	}
+	rows, err := pageCatalogVisibilityRows(r, rows)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	total := len(rows)
 	// Preserve the established unpaged array when neither parameter is present.
 	// Counts and windows are computed after authorization and audience filtering.
@@ -32,4 +37,25 @@ func pageCatalogRows(r *http.Request, index *pageIndex, human string) ([]pageInd
 		rows = rows[start:end]
 	}
 	return rows, total, nil
+}
+
+// Catalog classification narrows already-authorized rows, never Page access.
+// Keep this separate from pagination so folder counts use the same predicate.
+func pageCatalogVisibilityRows(r *http.Request, rows []pageIndexRow) ([]pageIndexRow, error) {
+	testItems, archived := r.URL.Query().Get("test_items"), r.URL.Query().Get("archived")
+	for name, value := range map[string]string{"test_items": testItems, "archived": archived} {
+		if value != "" && value != "exclude" && value != "only" && value != "include" {
+			return nil, errors.New(name + " must be exclude, only or include")
+		}
+	}
+	matches := func(value string, marked bool) bool {
+		return value == "include" || value == "only" && marked || (value == "" || value == "exclude") && !marked
+	}
+	result := make([]pageIndexRow, 0, len(rows))
+	for _, row := range rows {
+		if matches(testItems, row.rec.CreatedByTest) && matches(archived, row.rec.ArchivedAt != "") {
+			result = append(result, row)
+		}
+	}
+	return result, nil
 }

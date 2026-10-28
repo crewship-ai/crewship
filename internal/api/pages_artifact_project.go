@@ -58,12 +58,13 @@ type artifactProjectPublish struct {
 	Message     string                `json:"message"`
 }
 type artifactProjectCreate struct {
-	Slug        string                `json:"slug"`
-	Name        string                `json:"name"`
-	BaseVersion *int64                `json:"base_version,omitempty"`
-	EntryPoint  string                `json:"entrypoint"`
-	Files       []artifactProjectFile `json:"files"`
-	Message     string                `json:"message"`
+	CreatedByTest bool                  `json:"created_by_test,omitempty"`
+	Slug          string                `json:"slug"`
+	Name          string                `json:"name"`
+	BaseVersion   *int64                `json:"base_version,omitempty"`
+	EntryPoint    string                `json:"entrypoint"`
+	Files         []artifactProjectFile `json:"files"`
+	Message       string                `json:"message"`
 }
 
 func artifactProjectsEnabled() bool { return os.Getenv("CREWSHIP_ARTIFACT_PROJECTS_ENABLED") == "true" }
@@ -152,7 +153,7 @@ func (h *PageHandler) artifactProjectAuthority(r *http.Request, k artifacts.Vers
 			return "", artifacts.ErrVersionNotFound
 		}
 		rec, err := h.loadPageForRead(ctx, k.WorkspaceID, "@"+k.PageID)
-		if err != nil || rec.OwnerUserID == "" || rec.OwnerCrewID != "" || rec.FolderID != "" {
+		if err != nil || rec.OwnerUserID == "" || rec.OwnerCrewID != "" {
 			return "", artifacts.ErrVersionNotFound
 		}
 		if run, _ := ctx.Value(artifactRunKey{}).(*artifactRunAuthority); run != nil {
@@ -240,6 +241,13 @@ func (h *PageHandler) CreateArtifactProject(w http.ResponseWriter, r *http.Reque
 	if !artifactProjectDecode(w, r, &p) {
 		return
 	}
+	if p.CreatedByTest {
+		agent, _ := pageGrantCallerIsAgent(r)
+		if r.Context().Value(artifactRunKey{}) == nil && (agent || projectAgentFrom(r.Context()) != nil) {
+			artifactProjectError(w, errArtifactProjectAccess)
+			return
+		}
+	}
 	spec := pages.Document{APIVersion: pages.DocumentAPIVersion, Kind: pages.DocumentKind, Metadata: pages.Metadata{Slug: p.Slug, Name: p.Name}}
 	if spec.ValidateEmpty() != nil || len(p.Name) > 200 || p.BaseVersion != nil && *p.BaseVersion != 0 {
 		artifactProjectError(w, artifacts.ErrVersionInvalid)
@@ -259,6 +267,7 @@ func (h *PageHandler) CreateArtifactProject(w http.ResponseWriter, r *http.Reque
 	k := artifacts.VersionKey{WorkspaceID: WorkspaceIDFromContext(r.Context()), PageID: generateCUID()}
 	raw, _ := json.Marshal(spec)
 	staged := false
+	createdByTest := p.CreatedByTest
 	auth := func(ctx context.Context, tx *sql.Tx) (string, error) {
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
 		if !h.artifactProjectEnabled(ctx) {
@@ -277,6 +286,11 @@ func (h *PageHandler) CreateArtifactProject(w http.ResponseWriter, r *http.Reque
 			if h.checkArtifactProjectRunConsent(ctx, a, expectedPage) != nil {
 				return "", errArtifactProjectAccess
 			}
+			recordedTestOrigin, e := h.artifactProjectCreationTestOrigin(ctx, a)
+			if e != nil || p.CreatedByTest && !recordedTestOrigin {
+				return "", errArtifactProjectAccess
+			}
+			createdByTest = recordedTestOrigin
 			actor = "agent:" + a.AgentID + ":" + a.RunID
 		} else {
 			agent, _ := pageGrantCallerIsAgent(r)
@@ -304,13 +318,13 @@ func (h *PageHandler) CreateArtifactProject(w http.ResponseWriter, r *http.Reque
 		}
 		if staged {
 			var valid int
-			if tx.QueryRowContext(ctx, `SELECT count(*) FROM pages WHERE id=? AND workspace_id=? AND owner_user_id=? AND slug=? AND name=? AND spec_json=? AND private_audience=1 AND owner_crew_id IS NULL AND folder_id IS NULL`, k.PageID, k.WorkspaceID, user.ID, p.Slug, p.Name, string(raw)).Scan(&valid) != nil || valid != 1 {
+			if tx.QueryRowContext(ctx, `SELECT count(*) FROM pages WHERE id=? AND workspace_id=? AND owner_user_id=? AND slug=? AND name=? AND spec_json=? AND private_audience=1 AND owner_crew_id IS NULL AND folder_id IS NULL AND created_by_test=?`, k.PageID, k.WorkspaceID, user.ID, p.Slug, p.Name, string(raw), createdByTest).Scan(&valid) != nil || valid != 1 {
 				return "", errArtifactProjectAccess
 			}
 			return actor, nil
 		}
 		stamp := tsformat.Format(h.clock.Now())
-		if _, e = tx.ExecContext(ctx, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at,private_audience) VALUES(?,?,?,?,?,?,?,?,1)`, k.PageID, k.WorkspaceID, p.Slug, p.Name, user.ID, string(raw), stamp, stamp); e != nil {
+		if _, e = tx.ExecContext(ctx, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at,private_audience,created_by_test) VALUES(?,?,?,?,?,?,?,?,1,?)`, k.PageID, k.WorkspaceID, p.Slug, p.Name, user.ID, string(raw), stamp, stamp, createdByTest); e != nil {
 			if isUniqueViolation(e) {
 				var taken bool
 				if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages WHERE workspace_id=? AND slug=?)`, k.WorkspaceID, p.Slug).Scan(&taken); err != nil {
@@ -554,7 +568,7 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 			kind = "slides"
 		}
 	}
-	writeJSON(w, 200, artifactProjectSnapshotResponse{ArtifactKind: kind, PageID: k.PageID, Name: name, Slug: slug, Origin: origin, Enabled: true, CanWrite: canWrite, LatestVersion: view.State.LatestVersion, SharedVersion: view.State.SharedVersion, Manifest: artifactProjectManifest(view.State.Manifest), Versions: artifactProjectVersionInfos(view.Versions), Quota: view.State.Quota, Comments: comments})
+	writeJSON(w, 200, artifactProjectSnapshotResponse{ArtifactKind: kind, PageID: k.PageID, Name: name, Slug: slug, Origin: origin, Enabled: true, CanWrite: canWrite, CanComment: h.artifactProjectCanComment(r, k, view.State.Manifest.Version), LatestVersion: view.State.LatestVersion, SharedVersion: view.State.SharedVersion, Manifest: artifactProjectManifest(view.State.Manifest), Versions: artifactProjectVersionInfos(view.Versions), Quota: view.State.Quota, Comments: comments})
 }
 
 func (h *PageHandler) artifactProjectAttached(ctx context.Context, page string) (bool, error) {

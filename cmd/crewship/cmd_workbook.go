@@ -129,12 +129,18 @@ func newWorkbookCommandWithTransport(transport http.RoundTripper) *cobra.Command
 		if err != nil {
 			return err
 		}
-		response, err := client.Post("/api/v1/workbooks", map[string]string{"slug": args[0], "name": name})
+		body := map[string]any{"slug": args[0], "name": name}
+		if cmd.Flags().Changed("test-item") {
+			value, _ := cmd.Flags().GetBool("test-item")
+			body["created_by_test"] = value
+		}
+		response, err := client.Post("/api/v1/workbooks", body)
 		if err != nil {
 			return err
 		}
 		return printPageArtifactResponse(cmd, response)
 	}}
+	create.Flags().Bool("test-item", false, "Explicitly mark this new human-created workbook Page as a test item")
 	create.Flags().String("name", "", "Page name; repeat the same slug and name to retry safely")
 	_ = create.MarkFlagRequired("name")
 	root.AddCommand(create)

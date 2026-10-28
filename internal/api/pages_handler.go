@@ -252,6 +252,9 @@ type pageSealedPanelWire struct {
 // Panels is []any because it is heterogeneous by design: a full panel or a
 // sealed placeholder, decided per panel and per viewer.
 type pageWire struct {
+	CreatedByTest          bool   `json:"created_by_test"`
+	Archived               bool   `json:"archived"`
+	ArchivedAt             string `json:"archived_at,omitempty"`
 	ArtifactKind           string `json:"artifact_kind,omitempty"`
 	ArtifactSharedVersion  int    `json:"artifact_shared_version,omitempty"`
 	NativeCraftApplication string `json:"native_craft_application,omitempty"`
@@ -331,6 +334,9 @@ type pageWire struct {
 // whose data last arrived a week ago would read as "updated today" if the two
 // were conflated. They answer different questions.
 type pageListWire struct {
+	CreatedByTest          bool   `json:"created_by_test"`
+	Archived               bool   `json:"archived"`
+	ArchivedAt             string `json:"archived_at,omitempty"`
 	NativeCraftApplication string `json:"native_craft_application,omitempty"`
 	// Explicit audience classification; unfiled human ownership is not privacy.
 	PrivateAudience bool `json:"private_audience"`
@@ -408,13 +414,14 @@ func zeroPanelStates() map[string]int {
 // arrives. The server rebuilds a pages.Document from it and validates again —
 // the client's validation is a courtesy, this one is the gate (§10b.1).
 type pageWriteRequest struct {
-	AllowEmpty  bool             `json:"allow_empty"`
-	Slug        *string          `json:"slug"`
-	Name        *string          `json:"name"`
-	Description *string          `json:"description"`
-	Panels      []pagePanelWire  `json:"panels"`
-	Owner       *string          `json:"owner"`
-	Spec        *json.RawMessage `json:"spec"`
+	CreatedByTest *bool            `json:"created_by_test,omitempty"`
+	AllowEmpty    bool             `json:"allow_empty"`
+	Slug          *string          `json:"slug"`
+	Name          *string          `json:"name"`
+	Description   *string          `json:"description"`
+	Panels        []pagePanelWire  `json:"panels"`
+	Owner         *string          `json:"owner"`
+	Spec          *json.RawMessage `json:"spec"`
 	// Icon and Color are the page's avatar (#2563): a crew icon name and a
 	// crew palette key, the folder's vocabulary exactly (pages_folder_icons.go).
 	// Pointers for the same reason every other field is one — on a PATCH an
@@ -428,6 +435,8 @@ type pageWriteRequest struct {
 // ── Internal records ───────────────────────────────────────────────────────
 
 type pageRecord struct {
+	CreatedByTest          bool
+	ArchivedAt             string
 	NativeCraftApplication string
 	PrivateAudience        bool
 	HasDocument            bool
@@ -595,7 +604,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
  EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=p.id), COALESCE((SELECT format_profile FROM mooring_collab_documents WHERE page_id=p.id),''),
  EXISTS(SELECT 1 FROM slides_heads WHERE page_id=p.id AND workspace_id=p.workspace_id), COALESCE((SELECT schema_version FROM slides_heads WHERE page_id=p.id AND workspace_id=p.workspace_id),0),
  COALESCE(h.content_type,''), COALESCE(h.shared_version,0), COALESCE(ab.content,''),COALESCE(sb.content,''), CASE WHEN ?=1 AND length(CAST(av.manifest_json AS BLOB))<=131072 THEN CAST(av.manifest_json AS BLOB) ELSE '' END,
- COALESCE((SELECT application_id FROM craft_native_documents WHERE page_id=p.id AND workspace_id=p.workspace_id),'')
+ COALESCE((SELECT application_id FROM craft_native_documents WHERE page_id=p.id AND workspace_id=p.workspace_id),''), p.created_by_test, COALESCE(p.archived_at,'')
 		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
 		LEFT JOIN artifact_version_heads h ON h.workspace_id=p.workspace_id AND h.page_id=p.id
  LEFT JOIN artifact_versions av ON av.workspace_id=h.workspace_id AND av.page_id=h.page_id AND av.version=CASE WHEN p.owner_user_id=? THEN h.latest_version ELSE h.shared_version END
@@ -614,7 +623,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
 			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
 			&p.Icon, &p.Color,
-			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration, &p.CollaborationFormat, &p.HasSlides, &p.SlidesSchema, &p.ArtifactContentType, &p.ArtifactSharedVersion, &p.ArtifactDashboardDeclaration, &p.ArtifactSlidesDeclaration, &p.ArtifactSelectedManifest, &p.NativeCraftApplication); err != nil {
+			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration, &p.CollaborationFormat, &p.HasSlides, &p.SlidesSchema, &p.ArtifactContentType, &p.ArtifactSharedVersion, &p.ArtifactDashboardDeclaration, &p.ArtifactSlidesDeclaration, &p.ArtifactSelectedManifest, &p.NativeCraftApplication, &p.CreatedByTest, &p.ArchivedAt); err != nil {
 			return nil, err
 		}
 		p.ArtifactSlidesEnabled = slidesEnabled
@@ -731,6 +740,7 @@ func artifactListKind(contentType string) string {
 func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFolderRecord, viewer *pageViewer) pageListWire {
 	rec := &row.rec
 	out := pageListWire{
+		CreatedByTest: rec.CreatedByTest, Archived: rec.ArchivedAt != "", ArchivedAt: rec.ArchivedAt,
 		PrivateAudience: rec.PrivateAudience,
 		HasSlides:       rec.HasSlides, SlidesSchema: rec.SlidesSchema,
 		ArtifactKind: artifactSelectedMetadataKind(rec.ArtifactContentType, rec.ArtifactDashboardDeclaration, true, rec.ArtifactSelectedManifest, rec.ArtifactSlidesDeclaration, rec.ArtifactSlidesEnabled), ArtifactSharedVersion: rec.ArtifactSharedVersion,
@@ -891,6 +901,11 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	createdByTest := req.CreatedByTest != nil && *req.CreatedByTest
+	if agent, _ := pageGrantCallerIsAgent(r); createdByTest && (agent || projectAgentFrom(r.Context()) != nil) {
+		replyError(w, http.StatusForbidden, "test origin requires explicit human creation")
+		return
+	}
 	if req.AllowEmpty {
 		agent, _ := pageGrantCallerIsAgent(r)
 		if agent {
@@ -1000,10 +1015,10 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(r.Context(), `
-		INSERT INTO pages (id, workspace_id, slug, name, description, owner_user_id, owner_crew_id, spec_json, icon, color, created_at, updated_at)
-		VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?)`,
+		INSERT INTO pages (id, workspace_id, slug, name, description, owner_user_id, owner_crew_id, spec_json, icon, color, created_at, updated_at, created_by_test)
+		VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)`,
 		pageID, wsID, doc.Metadata.Slug, doc.Metadata.Name, doc.Metadata.Description,
-		ownerUserID, ownerCrewID, string(specJSON), icon, color, now, now); err != nil {
+		ownerUserID, ownerCrewID, string(specJSON), icon, color, now, now, createdByTest); err != nil {
 		if isUniqueViolation(err) {
 			replyError(w, http.StatusConflict, fmt.Sprintf("a page with slug %q already exists in this workspace", doc.Metadata.Slug))
 			return
@@ -1099,6 +1114,10 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	req, ok := h.decodeWrite(w, r)
 	if !ok {
+		return
+	}
+	if req.CreatedByTest != nil {
+		replyError(w, http.StatusBadRequest, "created_by_test is create-only")
 		return
 	}
 	// The slug is the page's identity and its URL; renaming it through a PATCH
@@ -1509,11 +1528,11 @@ func (h *PageHandler) loadPageWithPrivateAudience(ctx context.Context, wsID, slu
  EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id), private_audience,
  EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=pages.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=pages.id), EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=pages.id), COALESCE((SELECT format_profile FROM mooring_collab_documents WHERE page_id=pages.id),''),
  EXISTS(SELECT 1 FROM slides_heads WHERE page_id=pages.id AND workspace_id=pages.workspace_id), COALESCE((SELECT schema_version FROM slides_heads WHERE page_id=pages.id AND workspace_id=pages.workspace_id),0),
- COALESCE((SELECT application_id FROM craft_native_documents WHERE page_id=pages.id AND workspace_id=pages.workspace_id),'')
+ COALESCE((SELECT application_id FROM craft_native_documents WHERE page_id=pages.id AND workspace_id=pages.workspace_id),''), created_by_test, COALESCE(archived_at,'')
 		FROM pages WHERE workspace_id = ? AND `+column+` = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
 		&p.FolderID, &p.PagesVersion, &p.Icon, &p.Color,
-		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration, &p.CollaborationFormat, &p.HasSlides, &p.SlidesSchema, &p.NativeCraftApplication)
+		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration, &p.CollaborationFormat, &p.HasSlides, &p.SlidesSchema, &p.NativeCraftApplication, &p.CreatedByTest, &p.ArchivedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1927,6 +1946,7 @@ func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, pane
 	attached, _ := h.artifactProjectAttached(ctx, rec.ID)
 	kind, shared := h.artifactPageMetadata(ctx, WorkspaceIDFromContext(ctx), rec.ID)
 	out := pageWire{
+		CreatedByTest: rec.CreatedByTest, Archived: rec.ArchivedAt != "", ArchivedAt: rec.ArchivedAt,
 		ArtifactKind: kind, ArtifactSharedVersion: shared,
 		HasArtifactProject: attached,
 		HasSlides:          rec.HasSlides, SlidesSchema: rec.SlidesSchema,

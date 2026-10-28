@@ -310,3 +310,125 @@ func TestArtifactProjectIntentRecorderFinalSealRevocation(t *testing.T) {
 		})
 	}
 }
+
+func TestArtifactProjectOwnerExplicitHandoffOfSharedComment(t *testing.T) {
+	t.Setenv("CREWSHIP_ARTIFACT_PROJECTS_ENABLED", "true")
+	f := artifactProjectOriginalRunFixture(t)
+	token := mintTokenFor(t, f.rig.db, f.a.HumanUserID, "artifact-task-owner")
+	human := func(body string, slug string, handler func(http.ResponseWriter, *http.Request)) *httptest.ResponseRecorder {
+		r := pagesRequest(t, "POST", "/api/v1/pages/"+slug, f.a.WorkspaceID, f.a.HumanUserID, "OWNER", body)
+		r = r.WithContext(context.WithValue(r.Context(), ctxAuthKind, AuthKindCLIToken))
+		r.Header.Set("Authorization", "Bearer "+token)
+		r.SetPathValue("slug", slug)
+		w := httptest.NewRecorder()
+		handler(w, r)
+		return w
+	}
+	create := `{"slug":"task-project","name":"Task project",` + strings.TrimPrefix(artifactProjectBody(0, "First"), "{")
+	if w := human(create, "task-project", f.pages.CreateArtifactProject); w.Code != 201 {
+		t.Fatalf("project %d %s", w.Code, w.Body)
+	}
+	if w := human(`{"base_version":1,"version":1}`, "task-project", f.pages.ShareArtifactProject); w.Code != 200 {
+		t.Fatalf("share %d %s", w.Code, w.Body)
+	}
+	if w := human(artifactProjectBody(1, "Private two"), "task-project", f.pages.PublishArtifactProject); w.Code != 200 {
+		t.Fatalf("publish private %d %s", w.Code, w.Body)
+	}
+	commenter := "explicit-commenter"
+	mustExec(t, f.rig.db, `INSERT INTO users(id,email,full_name) VALUES(?, 'explicit-commenter@example.test','Commenter')`, commenter)
+	mustExec(t, f.rig.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, generateCUID(), f.a.WorkspaceID, commenter)
+	var ownedPage string
+	if err := f.rig.db.QueryRow(`SELECT id FROM pages WHERE slug='task-project'`).Scan(&ownedPage); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'user',?,'comment',?)`, ownedPage, commenter, f.a.HumanUserID)
+	commenterToken := mintTokenFor(t, f.rig.db, commenter, "explicit-commenter")
+	commenterRequest := pagesRequest(t, "POST", "/api/v1/pages/task-project/artifact/comments", f.a.WorkspaceID, commenter, "MEMBER", `{"version":1,"path":"index.html","selector":"#hero","quote":"First","text":"Feedback on shared content","send_to_agent":true}`)
+	commenterRequest = commenterRequest.WithContext(context.WithValue(commenterRequest.Context(), ctxAuthKind, AuthKindCLIToken))
+	commenterRequest.Header.Set("Authorization", "Bearer "+commenterToken)
+	commenterRequest.SetPathValue("slug", "task-project")
+	comment := httptest.NewRecorder()
+	f.pages.CreateArtifactProjectComment(comment, commenterRequest)
+	if comment.Code != 201 {
+		t.Fatalf("comment %d %s", comment.Code, comment.Body)
+	}
+	var c struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(comment.Body.Bytes(), &c) != nil || c.ID == "" {
+		t.Fatal("comment ID absent")
+	}
+	var page string
+	if f.rig.db.QueryRow(`SELECT id FROM pages WHERE slug='task-project'`).Scan(&page) != nil {
+		t.Fatal("project ID absent")
+	}
+	var savedAuthor string
+	var savedVersion, intents int
+	if err := f.rig.db.QueryRow(`SELECT author,version FROM artifact_project_comments WHERE id=?`, c.ID).Scan(&savedAuthor, &savedVersion); err != nil || savedAuthor != commenter || savedVersion != 1 {
+		t.Fatalf("feedback provenance %q/%d: %v", savedAuthor, savedVersion, err)
+	}
+	if err := f.rig.db.QueryRow(`SELECT count(*) FROM artifact_project_message_intents WHERE page_id=?`, page).Scan(&intents); err != nil || intents != 0 {
+		t.Fatalf("commenter triggered intent %d %v", intents, err)
+	}
+	mustExec(t, f.rig.db, `DELETE FROM page_grants WHERE page_id=? AND subject_id=?`, page, commenter)
+	intent := artifacts.ProjectIntent{SubmissionID: "original-comment-request", PageID: page, CommentID: c.ID, BaseVersion: 2}
+	if err := f.pages.RecordArtifactProjectIntent(t.Context(), f.receipt, f.a.MessageID, intent); err != nil {
+		t.Fatal("record original task", err)
+	}
+	keys, err := journal.LoadSigningKeysFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := journal.NewWriter(f.rig.db, newTestLogger(), journal.WriterOptions{SigningKeys: keys, FlushSize: 1})
+	t.Cleanup(func() { _ = writer.Close() })
+	h := NewInternalHandler(f.rig.db, "synthetic-task-master", newTestLogger())
+	h.SetJournal(writer)
+	call := func(run, message string, purpose artifacts.ProjectIntent) *httptest.ResponseRecorder {
+		raw, _ := json.Marshal(map[string]any{"id": run, "workspace_id": f.a.WorkspaceID, "agent_id": f.a.AgentID, "chat_id": f.a.ChatID, "trigger_type": "USER", "human_authority": f.receipt, "trigger_message_id": message, "artifact_project_intent": purpose})
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("POST", "/api/v1/internal/runs", bytes.NewReader(raw))
+		r = r.WithContext(journal.WithSigningKeys(r.Context(), keys))
+		h.CreateRun(w, r)
+		return w
+	}
+	// Correlated task/comment changes still violate the captured feedback tuple.
+	mustExec(t, f.rig.db, `CREATE TRIGGER feedback_rebase_during_claim AFTER UPDATE OF status ON artifact_project_comment_tasks WHEN NEW.status='working' BEGIN UPDATE artifact_project_comments SET version=2 WHERE id=NEW.comment_id; UPDATE artifact_project_comment_tasks SET base_version=2 WHERE id=NEW.id; END`)
+	if w := call(f.a.RunID, f.a.MessageID, intent); w.Code != 403 {
+		t.Fatalf("feedback identity changed during bind: %d %s", w.Code, w.Body)
+	}
+	mustExec(t, f.rig.db, `DROP TRIGGER feedback_rebase_during_claim`)
+	var starts int
+	if err := f.rig.db.QueryRow(`SELECT count(*) FROM journal_entries WHERE trace_id=? AND entry_type='run.started'`, f.a.RunID).Scan(&starts); err != nil || starts != 0 {
+		t.Fatalf("denied claim leaked run ACK: %d %v", starts, err)
+	}
+	for i := 0; i < 2; i++ {
+		if w := call(f.a.RunID, f.a.MessageID, intent); w.Code != 201 {
+			t.Fatalf("original admission/retry %d %s", w.Code, w.Body)
+		}
+	}
+	var status, active string
+	if f.rig.db.QueryRow(`SELECT status,active_run_id FROM artifact_project_comment_tasks WHERE comment_id=?`, c.ID).Scan(&status, &active) != nil || status != "working" || active != f.a.RunID {
+		t.Fatal("task was not atomically bound", status, active)
+	}
+	var taskBase int
+	if err := f.rig.db.QueryRow(`SELECT base_version FROM artifact_project_comment_tasks WHERE comment_id=?`, c.ID).Scan(&taskBase); err != nil || taskBase != 1 {
+		t.Fatalf("feedback task base rewritten %d: %v", taskBase, err)
+	}
+	next := intent
+	next.SubmissionID = "explicit-recovery-request"
+	if err := f.pages.RecordArtifactProjectIntent(t.Context(), f.receipt, "principal-next-message", next); err == nil {
+		t.Fatal("live task stolen by another human send")
+	}
+	if _, err := writer.EmitSync(t.Context(), journal.Entry{ID: "artifact-task-failed", WorkspaceID: f.a.WorkspaceID, CrewID: f.a.CrewID, AgentID: f.a.AgentID, TraceID: f.a.RunID, Type: journal.EntryRunFailed, ActorType: journal.ActorSystem, Summary: "synthetic terminal proof"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.pages.RecordArtifactProjectIntent(t.Context(), f.receipt, "principal-next-message", next); err != nil {
+		t.Fatal("explicit retry after terminal proof", err)
+	}
+	if w := call("recovered-task-run", "principal-next-message", next); w.Code != 201 {
+		t.Fatalf("recovered task admission %d %s", w.Code, w.Body)
+	}
+	if f.rig.db.QueryRow(`SELECT status,active_run_id FROM artifact_project_comment_tasks WHERE comment_id=?`, c.ID).Scan(&status, &active) != nil || status != "working" || active != "recovered-task-run" {
+		t.Fatal("terminal task was not rebound", status, active)
+	}
+}

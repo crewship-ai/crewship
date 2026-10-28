@@ -45,11 +45,13 @@ package api
 // reaches the PAGE only.
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -105,6 +107,7 @@ type pageGrantsWire struct {
 type pageGrantWriteRequest struct {
 	SubjectType string   `json:"subject_type"`
 	Subject     string   `json:"subject"`
+	SubjectID   string   `json:"subject_id"`
 	Level       string   `json:"level"`
 	Panels      []string `json:"panels"`
 }
@@ -184,9 +187,24 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req pageGrantWriteRequest
-	if err := json.Unmarshal(body, &req); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		replyError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	req.SubjectID = strings.TrimSpace(req.SubjectID)
+	req.Subject = strings.TrimSpace(req.Subject)
+	if req.SubjectID != "" {
+		if req.Subject != "" && req.Subject != req.SubjectID {
+			replyError(w, http.StatusBadRequest, "subject and subject_id conflict")
+			return
+		}
+		req.Subject = req.SubjectID
 	}
 	req.SubjectType = strings.ToLower(strings.TrimSpace(req.SubjectType))
 	req.Level = strings.ToLower(strings.TrimSpace(req.Level))
@@ -203,14 +221,18 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	if !validPageGrantLevel(req.Level) {
 		replyError(w, http.StatusBadRequest,
-			`level must be "read", "produce" or "write" (§7.1b: three verbs — see the page, push into named panels, edit the spec)`)
+			`level must be "read", "comment", "produce" or "write"`)
+		return
+	}
+	if req.Level == pageGrantComment && req.SubjectType == pageSubjectAgent {
+		replyError(w, http.StatusBadRequest, "comment grants name people, never agents")
 		return
 	}
 	// The workspace subject reads or writes, never produces (#2533 §3/14):
 	// produce names a producer, and "everyone in the workspace" is not one.
 	if req.SubjectType == pageSubjectWorkspace && !workspaceSubjectLevelAllowed(req.Level) {
 		replyError(w, http.StatusBadRequest,
-			`a grant to everyone in the workspace carries "read" or "write", never "produce": a producer is one named subject, and everyone is not one`)
+			`a grant to everyone in the workspace carries "read", "comment" or "write", never "produce": a producer is one named subject, and everyone is not one`)
 		return
 	}
 	// A workbook editor is named only by its owner through `workbook share`,

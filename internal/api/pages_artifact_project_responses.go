@@ -16,6 +16,7 @@ type artifactProjectSnapshotResponse struct {
 	Slug          string                   `json:"slug"`
 	Origin        any                      `json:"origin"`
 	Enabled       bool                     `json:"enabled"`
+	CanComment    bool                     `json:"can_comment"`
 	CanWrite      bool                     `json:"can_write"`
 	LatestVersion int64                    `json:"latest_version"`
 	SharedVersion int64                    `json:"shared_version"`

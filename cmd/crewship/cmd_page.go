@@ -152,21 +152,27 @@ func jsonArrayLen(raw json.RawMessage) int {
 }
 
 type pageJSON struct {
-	ID          string          `json:"id" yaml:"id"`
-	Slug        string          `json:"slug" yaml:"slug"`
-	Name        string          `json:"name" yaml:"name"`
-	Description string          `json:"description" yaml:"description"`
-	Owner       string          `json:"owner" yaml:"owner"`
-	Icon        string          `json:"icon" yaml:"icon"`
-	Color       string          `json:"color" yaml:"color"`
-	Panels      []pagePanelJSON `json:"panels" yaml:"panels"`
-	UpdatedAt   string          `json:"updated_at" yaml:"updated_at"`
+	CreatedByTest bool            `json:"created_by_test" yaml:"created_by_test"`
+	Archived      bool            `json:"archived" yaml:"archived"`
+	ArchivedAt    string          `json:"archived_at,omitempty" yaml:"archived_at,omitempty"`
+	ID            string          `json:"id" yaml:"id"`
+	Slug          string          `json:"slug" yaml:"slug"`
+	Name          string          `json:"name" yaml:"name"`
+	Description   string          `json:"description" yaml:"description"`
+	Owner         string          `json:"owner" yaml:"owner"`
+	Icon          string          `json:"icon" yaml:"icon"`
+	Color         string          `json:"color" yaml:"color"`
+	Panels        []pagePanelJSON `json:"panels" yaml:"panels"`
+	UpdatedAt     string          `json:"updated_at" yaml:"updated_at"`
 }
 
 // pageListRowJSON is one index row. `panel_count` is what the server sends;
 // `panels` is read as a number too, because a list that carries a count under
 // the plural noun is the other reasonable shape and reading both costs a line.
 type pageListRowJSON struct {
+	CreatedByTest       bool           `json:"created_by_test" yaml:"created_by_test"`
+	Archived            bool           `json:"archived" yaml:"archived"`
+	ArchivedAt          string         `json:"archived_at,omitempty" yaml:"archived_at,omitempty"`
 	CanMove             bool           `json:"can_move" yaml:"can_move"`
 	CanRemoveFromFolder bool           `json:"can_remove_from_folder" yaml:"can_remove_from_folder"`
 	Slug                string         `json:"slug" yaml:"slug"`
@@ -218,11 +224,12 @@ func (r pageListRowJSON) panelCount() int {
 // the document verbatim as a string would leave the server holding an opaque
 // blob it is required by §10b.1 to validate.
 type pageWriteJSON struct {
-	AllowEmpty  bool                 `json:"allow_empty,omitempty" yaml:"allow_empty,omitempty"`
-	Slug        string               `json:"slug" yaml:"slug"`
-	Name        string               `json:"name" yaml:"name"`
-	Description string               `json:"description,omitempty" yaml:"description,omitempty"`
-	Panels      []pageWritePanelJSON `json:"panels" yaml:"panels"`
+	CreatedByTest *bool                `json:"created_by_test,omitempty"`
+	AllowEmpty    bool                 `json:"allow_empty,omitempty" yaml:"allow_empty,omitempty"`
+	Slug          string               `json:"slug" yaml:"slug"`
+	Name          string               `json:"name" yaml:"name"`
+	Description   string               `json:"description,omitempty" yaml:"description,omitempty"`
+	Panels        []pageWritePanelJSON `json:"panels" yaml:"panels"`
 	// Owner hands the page to a crew instead of to whoever ran the command.
 	//
 	// It is NOT part of the page document, and that is the decision rather than
@@ -316,6 +323,15 @@ var pageListCmd = &cobra.Command{
 				return errors.New("audience must be all or personal")
 			}
 			query.Set("audience", audience)
+		}
+		for _, flag := range []string{"test-items", "archived"} {
+			value, _ := cmd.Flags().GetString(flag)
+			if value != "exclude" && value != "only" && value != "include" {
+				return fmt.Errorf("%s must be exclude, only or include", flag)
+			}
+			if cmd.Flags().Changed(flag) {
+				query.Set(strings.ReplaceAll(flag, "-", "_"), value)
+			}
 		}
 		for _, flag := range []string{"limit", "offset"} {
 			if cmd.Flags().Changed(flag) {
@@ -542,6 +558,10 @@ var pageCreateCmd = &cobra.Command{
 		}
 		body := pageWriteFrom(doc)
 		body.AllowEmpty = allowEmpty
+		if cmd.Flags().Changed("test-item") {
+			value, _ := cmd.Flags().GetBool("test-item")
+			body.CreatedByTest = &value
+		}
 		body.Owner = owner
 		body.Icon, body.Color = pageAvatarFromFlags(cmd)
 		resp, err := client.Post("/api/v1/pages", body)
@@ -964,6 +984,7 @@ func pageDash(s string) string {
 }
 
 func init() {
+	pageCreateCmd.Flags().Bool("test-item", false, "Explicitly mark this new human-created Page as a test item")
 	pageCreateCmd.Flags().Bool("allow-empty", false, "Create an empty human-owned Page before document initialization; no panels or crew owner")
 	pageCreateCmd.Flags().String("file", "", "Page document to author from (YAML or JSON; - for stdin)")
 	// Create only. `update` re-applies a spec, and ownership is not part of the
@@ -978,6 +999,8 @@ func init() {
 	pageSetCmd.Flags().String("data", "-", `Payload: "-" for stdin, "@path" for a file, or a literal JSON document`)
 	pageSetCmd.Flags().String("state", "", `The producer's own verdict: "ok" (default) or "failed"`)
 
+	pageListCmd.Flags().String("test-items", "exclude", "Test item filter (exclude|only|include)")
+	pageListCmd.Flags().String("archived", "exclude", "Archive filter (exclude|only|include)")
 	pageListCmd.Flags().String("audience", "", "List all accessible Pages or only your explicitly private Pages (all|personal)")
 	pageListCmd.Flags().Int("limit", 100, "Maximum rows after authorization and audience filtering (1-500; unpaged when omitted)")
 	pageListCmd.Flags().Int("offset", 0, "Rows to skip after authorization and audience filtering")

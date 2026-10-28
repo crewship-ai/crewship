@@ -18,6 +18,7 @@ func newPageArtifactCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "artifact", Short: "Create, version and discuss a multi-screen Page artifact"}
 	cmd.AddCommand(newArtifactDataCommand())
 	cmd.AddCommand(newArtifactSlidesCommands()...)
+	cmd.AddCommand(newPageArchiveCommands()...)
 	for _, action := range []string{"create", "publish"} {
 		action := action
 		child := &cobra.Command{Use: action + " <slug>", Args: cobra.ExactArgs(1), Short: "Save a complete atomic file manifest", RunE: func(cmd *cobra.Command, args []string) error {
@@ -32,6 +33,10 @@ func newPageArtifactCommand() *cobra.Command {
 					return fmt.Errorf("--name is required")
 				}
 				body["slug"], body["name"] = args[0], name
+				if cmd.Flags().Changed("test-item") {
+					value, _ := cmd.Flags().GetBool("test-item")
+					body["created_by_test"] = value
+				}
 				endpoint = "/api/v1/pages/artifacts"
 			} else {
 				base, _ := cmd.Flags().GetInt64("base-version")
@@ -45,6 +50,7 @@ func newPageArtifactCommand() *cobra.Command {
 		child.Flags().String("file", "", "JSON complete manifest {entrypoint,files,message}; - reads stdin")
 		if action == "create" {
 			child.Flags().String("name", "", "Artifact title")
+			child.Flags().Bool("test-item", false, "Explicitly mark this new human-created artifact as a test item")
 		} else {
 			child.Flags().Int64("base-version", -1, "Exact latest version read before editing")
 		}
