@@ -21,6 +21,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 - Add an opt-in private native-document draft journal and whole-snapshot save coordinator. Recovery offers compare or copy, stale generations cannot replay drafts, and only an exact durable receipt confirms a save. Existing editor profiles remain unchanged.
 
+- **Native Sheet documents can use the full GridCraft editor.** The experimental, default-off native profile now initializes qualified Grid workbooks with the same edit lease, local draft and confirmed whole-document save flow as Word.
+
 - Open an artifact card in a side viewer (full screen on phones) with screens, element select and anchored comments, the agent comment queue, version history and restore; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 - Show the Craft edit-lock bar, agent proposal cards (Compare / Accept / Reject) and recovered local drafts in chat, and a "+ New artifact" composer menu offering only kinds with a backend; off by default behind `NEXT_PUBLIC_CHAT_CRAFT_LEASE` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 - **Opening a new conversation logged three 404s.** A draft session no longer requests its execution profile, messages or participants before the first send creates it.
@@ -74,6 +76,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Keep idle WordCraft editors connected through standard WebSocket ping/pong while preserving the existing response and inactivity limits.
 - Show the Crewship page name in attached WordCraft chrome and hide its standalone Discord, Share and Zotero controls.
 - **Native document exports did not download.** Word and spreadsheet export copies now download through the host browser while retaining the isolated editor and separate server save confirmation.
+- **New Doc was unavailable with only the native Word profile enabled.** The qualified, default-off native profile now offers Word creation through the existing whole-document initializer and opens the full editor after releasing creation custody. Ambiguous initialization never creates another Page or blindly retries a write.
 
 - Open document links in their accessible workspace before requesting document content, preserving unsaved-work navigation guards.
 

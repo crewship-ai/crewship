@@ -45,6 +45,9 @@ func (r *Router) registerDocumentRoutes() {
 // operation continue through the existing Page and original-source authority.
 func (r *Router) documentAvailability(req *http.Request) DocumentAvailability {
 	status := DocumentAvailability{Enabled: r.pages.documentCall != nil}
+	if d := r.craftNativeDocuments; d != nil && d.human != nil && d.human.enabled {
+		_, status.WordCraftNative = d.applications["wordcraft"]
+	}
 	if m := r.mooringHTTP; m != nil && m.commandFactory != nil && m.commandFactory.editorBundle != nil {
 		f := m.commandFactory
 		f.mu.Lock()

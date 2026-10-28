@@ -3,8 +3,14 @@
 The separate whole-native WordCraft/GridCraft profile is experimental and off by
 default. `craft_native.enabled: true` or `CREWSHIP_CRAFT_NATIVE_ENABLED=true`
 enables its human session and EditLease HTTP API. It requires a Linux boot-aware
-clock. This does not activate New Doc, convert existing documents, enable agent
-proposals, or qualify the complete editor acceptance.
+clock. A qualified Word profile is advertised as `wordcraft_native` by the authenticated
+workspace document status endpoint. New Doc then creates a fresh empty personal
+Page, initializes its native Word model and releases the initial lease before
+opening the full editor. An ambiguous initialization is never blindly replayed. Native format metadata on
+Page reads reopens an existing native Page through that same fresh admission.
+A lost creation-release response cannot erase or reinitialize its confirmed data.
+This does not convert existing documents, enable agent proposals, or qualify the
+complete editor acceptance.
 
 Availability requires a readable Page with an explicit `craft_native_documents`
 profile. Other profiles, inaccessible Pages and absent Pages report disabled.
@@ -34,7 +40,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | POST | `/api/v1/pages/{slug}/craft/lease/request-handoff` | `{}`. | `{request_id, generation}`, 201. |
 | POST | `/api/v1/pages/{slug}/craft/lease/handoff` | `{generation: "1", request_id: "public-request-id"}`. | New holder's lease status, 200. |
 | GET | `/api/v1/pages/{slug}/craft/events` | Craft admission header; keep the connection open. | `text/event-stream`: `lease` status or `session_retired` metadata; 200. |
-| POST | `/api/v1/pages/{slug}/craft/initialize` | Existing empty personal Page owner, original human `pages:write`; Word native bytes only. | Atomic native profile, lease and version1, with private admission, 201. |
+| POST | `/api/v1/pages/{slug}/craft/initialize` | Existing empty personal Page owner, original human `pages:write`; Qualified Word or Grid native bytes. | Atomic native profile, lease and version1, with private admission, 201. |
 | GET | `/api/v1/pages/{slug}/craft/document` | Craft admission header. | Complete base64 native bytes, version and pinned editor/engine metadata, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/save` | Bound whole snapshot described below. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Same whole snapshot contract; existing explicit native Page only. | Exact committed snapshot receipt, 200. |
@@ -117,7 +123,8 @@ descriptor again, and rejects repair warnings or lossy roundtrips. Requests neve
 choose an executable, validator callback or profile. A missing application
 profile returns 503. Availability never converts an old Page into this profile.
 
-Initialization accepts only `application_id: "wordcraft"` and base64 `bytes`.
+Initialization accepts `application_id: "wordcraft"` or `"gridcraft"` and base64
+`bytes`; the selected application must have an operator-qualified profile.
 It requires an existing empty personal Page owned by the authenticated human,
 current folder policy and live membership. Crew-owned Pages, existing content,
 read-only credentials, reinitialization and client-supplied pins are refused.
@@ -133,7 +140,13 @@ The native-only operator environment overrides are
 `CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH`,
 `CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256`,
 `CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_BUNDLE` and
-`CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL`. These override corresponding YAML
+`CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL`. The corresponding Sheet overrides are
+`CREWSHIP_CRAFT_NATIVE_GRID_ENGINE_REVISION`,
+`CREWSHIP_CRAFT_NATIVE_GRID_CLI_PATH`,
+`CREWSHIP_CRAFT_NATIVE_GRID_CLI_SHA256`,
+`CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_BUNDLE` and
+`CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_URL`.
+These override corresponding YAML
 fields without enabling the product flag or any legacy profile. Explicit empty
 values remain empty and fail qualification; every startup/manifest/hash check
 still applies.
@@ -166,7 +179,20 @@ requires its erasure.
 
 The backend has direct-handler and real-Router two-human regression coverage.
 Whole-document routes require an already explicit native Page and a trusted
-qualified profile; only the explicit owner-only Word initializer may create
+qualified profile; only the explicit owner-only native initializer may create
 that profile on an existing empty Page. Page creation, full editor mounting,
 proposals and agent execution,
 one-hour browser acceptance and 2,000 changing saves remain separate work.
+
+The qualified native Word profile additionally supports New Doc: it uses that
+initializer for a fresh personal Word Page and opens the full editor after
+releasing creation custody. This Word creation flow does not qualify native
+Sheet creation or the separate acceptance work above.
+
+The native blank Word asset is serialized by the original engine separately from
+the older checkpoint blank. To qualify it against a real binary, set
+`CRAFT_QUALIFICATION_ENGINE` and `CRAFT_QUALIFICATION_SHA256`, then run
+`crewship-heavy go test -tags craft_native_engine_qualification ./internal/mooring -run ^TestNativeCLIValidatorCanonicalWordCreation$`.
+These are qualification-only inputs, not server configuration. The explicit run
+must execute and pass; absent inputs fail it. Ordinary unit builds exclude it.
+It also verifies that the old lossy float promotion is still rejected.
