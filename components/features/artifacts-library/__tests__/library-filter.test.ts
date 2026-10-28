@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { toPageView, type WirePage } from "@/hooks/use-pages"
 import { libraryItems } from "../library-items"
-import { applyFilters, EMPTY_FILTERS, facetCounts, groupItems, parseQuery, sortItems, type LibraryFilters } from "../library-filter"
+import { applyFilters, EMPTY_FILTERS, facetCounts, filtersFromParams, filtersToParams, groupItems, parseQuery, sortItems, type LibraryFilters } from "../library-filter"
 
 const page = (over: Partial<WirePage>): WirePage => ({ id: over.slug ?? "p", slug: "p", name: "P", owner: "user/u1", updated_at: "2026-10-27T10:00:00Z", reach: ["owner"], ...over } as WirePage)
 
@@ -55,5 +55,20 @@ describe("library filters", () => {
   it("sorts and groups", () => {
     expect(sortItems(items.filter(item => !item.empty), "name").map(item => item.slug).slice(0, 3)).toEqual(["brief", "draft", "site"])
     expect(groupItems(items.filter(item => item.slug === "site" || item.slug === "brief"), "folder").map(group => [group.label, group.items.length])).toEqual([["Sales", 1], ["Unfiled", 1]])
+  })
+})
+
+describe("filters in the URL", () => {
+  it("round-trips every filter and leaves defaults and other parameters alone", () => {
+    const filters: LibraryFilters = { view: "all", q: "kind:word plan", kinds: ["word", "page"], access: ["private"], version: ["unshared"], owners: ["You"], folder: "" }
+    const params = filtersToParams(filters, new URLSearchParams("workspace_id=ws1&item=brief"))
+    expect(params.get("workspace_id")).toBe("ws1")
+    expect(params.get("item")).toBe("brief")
+    expect(filtersFromParams(params)).toEqual(filters)
+    expect(filtersToParams(EMPTY_FILTERS, new URLSearchParams("workspace_id=ws1&view=all&q=x")).toString()).toBe("workspace_id=ws1")
+  })
+
+  it("drops unknown values instead of guessing", () => {
+    expect(filtersFromParams(new URLSearchParams("view=trash&kind=word,bogus&access=public&version=old"))).toEqual({ ...EMPTY_FILTERS, kinds: ["word"] })
   })
 })

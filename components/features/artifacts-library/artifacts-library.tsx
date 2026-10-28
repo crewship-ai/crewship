@@ -236,6 +236,9 @@ interface ArtifactsLibraryProps {
   /** The open artifact's slug, or null for the library. Kept in the URL by the route. */
   item: string | null
   onSelect: (slug: string | null) => void
+  /** Controlled filters, when the route keeps them in the URL; otherwise the library holds them. */
+  filters?: LibraryFilters
+  onFiltersChange?: (next: LibraryFilters) => void
 }
 
 /**
@@ -244,12 +247,14 @@ interface ArtifactsLibraryProps {
  * searches, filters and switches views; Home offers what can be made. Empty
  * items and repeated runs have their own views and are never deleted here.
  */
-export function ArtifactsLibrary({ workspaceId, item, onSelect }: ArtifactsLibraryProps) {
+export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: controlled, onFiltersChange }: ArtifactsLibraryProps) {
   const { pages, loading, error, refresh } = usePages(workspaceId)
   const { folders } = usePageFolders(workspaceId)
   const caps = useArtifactCapabilities(workspaceId)
   const items = useMemo(() => libraryItems(pages), [pages])
-  const [filters, setFilters] = useState<LibraryFilters>(EMPTY_FILTERS)
+  const [own, setOwn] = useState<LibraryFilters>(EMPTY_FILTERS)
+  const filters = controlled ?? own
+  const setFilters = (next: LibraryFilters) => { setOwn(next); onFiltersChange?.(next) }
   const [sort, setSort] = useState<SortKey>("updated")
   const [group, setGroup] = useState<GroupKey>("none")
   const [layout, setLayout] = useState<Layout>("list")
@@ -298,7 +303,11 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect }: ArtifactsLibra
     <div className="relative flex min-h-0 flex-1 overflow-hidden">
       {!loading && !(error && !items.length) && <SecondaryPanel id="artifacts" label="Artifacts">
         <LibraryPanel items={items} folders={folders} filters={filters}
-          onFiltersChange={next => { setFilters(next); if (item !== null) onSelect(null) }} />
+          onFiltersChange={next => {
+            setFilters(next)
+            // The route drops ?item= with its own replace; a second navigation would race it.
+            if (item !== null && !onFiltersChange) onSelect(null)
+          }} />
       </SecondaryPanel>}
       <div className={cn("min-w-0 flex-1", selected ? "flex min-h-0 flex-col overflow-y-auto" : "overflow-y-auto")}>
         <div className={cn("mx-auto flex w-full max-w-6xl flex-col p-4 md:p-6", selected && "min-h-full")}>{content}</div>
