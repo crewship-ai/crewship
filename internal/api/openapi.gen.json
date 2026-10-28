@@ -6917,6 +6917,574 @@
         },
         "type": "object"
       },
+      "DesignActor": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "DesignAgentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "chat_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "chat_id"
+        ],
+        "type": "object"
+      },
+      "DesignAgentResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "origin": {
+            "$ref": "#/components/schemas/ArtifactProjectOrigin"
+          }
+        },
+        "required": [
+          "origin"
+        ],
+        "type": "object"
+      },
+      "DesignCheckpointRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "maxLength": 4096,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "DesignCommentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "enum": [
+              "design.json"
+            ],
+            "type": "string"
+          },
+          "quote": {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "selector": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "send_to_agent": {
+            "type": "boolean"
+          },
+          "text": {
+            "maxLength": 10000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "path",
+          "selector",
+          "text"
+        ],
+        "type": "object"
+      },
+      "DesignCommentsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactProjectComment"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "comments"
+        ],
+        "type": "object"
+      },
+      "DesignCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "slug": {
+            "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name"
+        ],
+        "type": "object"
+      },
+      "DesignCreateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "page_id": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "page_id",
+          "slug",
+          "version"
+        ],
+        "type": "object"
+      },
+      "DesignNode": {
+        "additionalProperties": true,
+        "properties": {
+          "fill": {
+            "type": "string"
+          },
+          "height": {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parentId": {
+            "type": "string"
+          },
+          "src": {
+            "maxLength": 2000000,
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 100000,
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "frame",
+              "rect",
+              "text",
+              "image"
+            ],
+            "type": "string"
+          },
+          "width": {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "x": {
+            "maximum": 1000000,
+            "minimum": -1000000,
+            "type": "number"
+          },
+          "y": {
+            "maximum": 1000000,
+            "minimum": -1000000,
+            "type": "number"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "type": "object"
+      },
+      "DesignNodePatch": {
+        "additionalProperties": true,
+        "description": "Partial fields merge into an existing Y.Map. A new node also requires type, x, y, width and height. The server validates the complete resulting document; maximum2000 nodes and4MiB encoded Yjs state.",
+        "properties": {
+          "fill": {
+            "type": "string"
+          },
+          "height": {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "parentId": {
+            "type": "string"
+          },
+          "src": {
+            "maxLength": 2000000,
+            "type": "string"
+          },
+          "text": {
+            "maxLength": 100000,
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "frame",
+              "rect",
+              "text",
+              "image"
+            ],
+            "type": "string"
+          },
+          "width": {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "number"
+          },
+          "x": {
+            "maximum": 1000000,
+            "minimum": -1000000,
+            "type": "number"
+          },
+          "y": {
+            "maximum": 1000000,
+            "minimum": -1000000,
+            "type": "number"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "DesignOperation": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "node": {
+                "$ref": "#/components/schemas/DesignNodePatch"
+              },
+              "op": {
+                "enum": [
+                  "upsert"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "op",
+              "node"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "op": {
+                "enum": [
+                  "delete"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "op",
+              "id"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "op": {
+                "enum": [
+                  "reorder"
+                ],
+                "type": "string"
+              },
+              "order": {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 4000,
+                "type": "array"
+              }
+            },
+            "required": [
+              "op",
+              "order"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DesignOperationsRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "operations": {
+            "items": {
+              "$ref": "#/components/schemas/DesignOperation"
+            },
+            "maxItems": 500,
+            "type": "array"
+          }
+        },
+        "required": [
+          "operations"
+        ],
+        "type": "object"
+      },
+      "DesignOperationsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/DesignNode"
+            },
+            "type": "array"
+          },
+          "order": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "nodes",
+          "order",
+          "version"
+        ],
+        "type": "object"
+      },
+      "DesignShareResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "shared_version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "shared_version"
+        ],
+        "type": "object"
+      },
+      "DesignSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "$ref": "#/components/schemas/DesignActor"
+          },
+          "can_comment": {
+            "type": "boolean"
+          },
+          "can_edit": {
+            "type": "boolean"
+          },
+          "latest_version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/DesignNode"
+            },
+            "type": "array"
+          },
+          "order": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "origin": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ArtifactProjectOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "page_id": {
+            "type": "string"
+          },
+          "shared_version": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "page_id",
+          "origin",
+          "can_edit",
+          "can_comment",
+          "nodes",
+          "order",
+          "version",
+          "latest_version",
+          "shared_version",
+          "actor"
+        ],
+        "type": "object"
+      },
+      "DesignVersion": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "entry_point": {
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "restored_from": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "entry_point",
+          "actor",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "DesignVersionList": {
+        "additionalProperties": false,
+        "properties": {
+          "latest_version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "shared_version": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/DesignVersion"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "versions",
+          "latest_version",
+          "shared_version"
+        ],
+        "type": "object"
+      },
+      "DesignVersionReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "actor"
+        ],
+        "type": "object"
+      },
+      "DesignVersionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
       "DocumentAvailability": {
         "properties": {
           "enabled": {
@@ -125559,31 +126127,33 @@
       "post": {
         "description": "Submit pages design (POST /api/v1/pages/design).",
         "operationId": "post_api_v1_pages_design",
+        "parameters": [
+          {
+            "description": "Workspace ID or slug; the workspace header is also accepted.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/DesignCreateRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/DesignCreateResponse"
                 }
               }
             },
@@ -125593,15 +126163,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -125611,15 +126173,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -125629,15 +126183,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -125647,15 +126193,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -125665,15 +126203,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -125683,15 +126213,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -125701,15 +126223,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -125719,15 +126233,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -132858,6 +133364,26 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Workspace ID or slug; the workspace header is also accepted.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Historical checkpoint. Read-only callers may select only the shared pin; omit to follow the live canvas.",
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -132865,7 +133391,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/DesignSnapshot"
                 }
               }
             },
@@ -132875,15 +133401,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -132893,15 +133411,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -132911,15 +133421,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -132929,33 +133431,37 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "500": {
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -132965,15 +133471,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133010,23 +133508,33 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Workspace ID or slug; the workspace header is also accepted.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/DesignAgentRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/DesignAgentResponse"
                 }
               }
             },
@@ -133036,15 +133544,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133054,15 +133554,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133072,15 +133564,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133090,37 +133574,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "500": {
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -133162,6 +133660,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Workspace ID or slug; the workspace header is also accepted.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -133169,7 +133676,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/DesignCommentsResponse"
                 }
               }
             },
@@ -133179,15 +133686,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133197,15 +133696,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133215,15 +133706,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133233,37 +133716,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "500": {
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -133294,33 +133791,33 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Workspace ID or slug; the workspace header is also accepted.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/DesignCommentRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object"
-                }
-              }
-            },
-            "description": "OK"
-          },
           "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectComment"
                 }
               }
             },
@@ -133330,15 +133827,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133348,15 +133837,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133366,15 +133847,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133384,15 +133857,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133402,37 +133867,41 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "500": {
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -133465,23 +133934,33 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Workspace ID or slug; the workspace header is also accepted.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/DesignOperationsRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/DesignOperationsResponse"
                 }
               }
             },
@@ -133491,15 +133970,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133509,15 +133980,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133527,15 +133990,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133545,15 +134000,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133563,15 +134010,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133581,15 +134020,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133599,15 +134030,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133617,15 +134040,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133662,23 +134077,33 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Workspace ID or slug; the workspace header is also accepted.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/DesignVersionRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/DesignVersionReceipt"
                 }
               }
             },
@@ -133688,15 +134113,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133706,15 +134123,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133724,15 +134133,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133742,15 +134143,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133760,15 +134153,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133778,15 +134163,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133796,15 +134173,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133814,15 +134183,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133859,23 +134220,33 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Workspace ID or slug; the workspace header is also accepted.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/DesignVersionRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/DesignShareResponse"
                 }
               }
             },
@@ -133885,15 +134256,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133903,15 +134266,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133921,15 +134276,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133939,15 +134286,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -133957,37 +134296,41 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "500": {
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -134020,23 +134363,33 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Workspace ID or slug; the workspace header is also accepted.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/DesignCheckpointRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/DesignVersionReceipt"
                 }
               }
             },
@@ -134046,15 +134399,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -134064,15 +134409,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -134082,15 +134419,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -134100,15 +134429,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -134118,15 +134439,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -134136,15 +134449,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -134154,15 +134459,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -134172,15 +134469,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -134226,6 +134515,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Workspace ID or slug; the workspace header is also accepted.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -134233,7 +134531,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/DesignVersionList"
                 }
               }
             },
@@ -134243,15 +134541,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -134261,15 +134551,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -134279,15 +134561,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -134297,37 +134571,51 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "500": {
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -134369,35 +134657,36 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
           "101": {
-            "description": "Switching Protocols"
-          },
-          "200": {
-            "content": {
-              "application/json": {
+            "description": "Switching Protocols",
+            "headers": {
+              "Upgrade": {
+                "description": "Binary standard y-protocols sync and awareness frames follow the upgrade; Read sends only syncStep1 and awareness. Edit may send updates. Rights are rechecked for every delivery and write.",
                 "schema": {
-                  "type": "object"
+                  "enum": [
+                    "websocket"
+                  ],
+                  "type": "string"
                 }
               }
-            },
-            "description": "OK"
+            }
           },
           "400": {
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -134407,15 +134696,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -134425,15 +134706,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -134443,15 +134716,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -134461,15 +134726,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },
@@ -134479,15 +134736,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  "$ref": "#/components/schemas/ArtifactProjectError"
                 }
               }
             },

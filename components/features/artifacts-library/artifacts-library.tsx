@@ -134,7 +134,7 @@ interface ArtifactsLibraryProps {
  */
 export function ArtifactsLibrary({ workspaceId, item, onSelect }: ArtifactsLibraryProps) {
   const { pages, loading, error, refresh } = usePages(workspaceId)
-  const items = useMemo(() => libraryItems(pages), [pages])
+  const items = useMemo(() => libraryItems(pages).filter(entry => entry.kind !== "design" || artifactsDesign()), [pages])
   const [kind, setKind] = useState<LibraryKind | "all">("all")
   const [view, setView] = useState<"gallery" | "table">("gallery")
 

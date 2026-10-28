@@ -172,8 +172,7 @@ func TestDesignCredentialPreflightDoesNotRevealPageExistence(t *testing.T) {
 	if w := call(owner, "create", `{"slug":"board","name":"Board"}`); w.Code != 201 {
 		t.Fatal(w.Code, w.Body)
 	}
-	token := mintTokenFor(t, h.db, owner, "design-prescope")
-	mustExec(t, h.db, `UPDATE cli_tokens SET scopes='["agents:write"]' WHERE user_id=?`, owner)
+	token := mintIngressScopedToken(t, h.db, owner, "design-prescope", "agents:write")
 	var first string
 	for _, slug := range []string{"board", "absent"} {
 		r := httptest.NewRequest("GET", "/api/v1/pages/"+slug+"/design", nil)

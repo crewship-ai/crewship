@@ -10,7 +10,7 @@ func TestDesignRouterUsesPageWriteScopeAndRejectsReadWrites(t *testing.T) {
 	h, workspace, owner, _ := designFixture(t)
 	writer := mintIngressScopedToken(t, h.db, owner, "design-route-writer", "pages:write")
 	reader := mintIngressScopedToken(t, h.db, owner, "design-route-reader", "pages:read")
-	router, err := NewRouter(h.db, "synthetic-design-route-secret", newTestLogger())
+	router, err := NewRouter(h.db, "synthetic-design-route-secret-at-least-32-chars", newTestLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
