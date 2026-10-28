@@ -6931,7 +6931,8 @@
           }
         },
         "required": [
-          "enabled"
+          "enabled",
+          "wordcraft_native"
         ],
         "type": "object"
       },

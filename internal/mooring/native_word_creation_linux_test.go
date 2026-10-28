@@ -1,3 +1,5 @@
+//go:build craft_native_engine_qualification
+
 package mooring
 
 import (
@@ -8,14 +10,14 @@ import (
 	"testing"
 )
 
-// This optional qualification uses the original application executable. Ordinary
-// unit tests do not require a private binary or any external service.
+// Explicit release qualification uses the original pinned executable.
+// A requested qualification must fail when its required inputs are absent.
 func TestNativeCLIValidatorCanonicalWordCreation(t *testing.T) {
-	binary := os.Getenv("CREWSHIP_TEST_WORDCRAFT_CLI")
+	binary := os.Getenv("CRAFT_QUALIFICATION_ENGINE")
 	if binary == "" {
-		t.Skip("set CREWSHIP_TEST_WORDCRAFT_CLI and its pinned SHA256 to qualify original-engine creation")
+		t.Fatal("set CRAFT_QUALIFICATION_ENGINE and its pinned SHA256 to qualify original-engine creation")
 	}
-	hash := os.Getenv("CREWSHIP_TEST_WORDCRAFT_CLI_SHA256")
+	hash := os.Getenv("CRAFT_QUALIFICATION_SHA256")
 	if len(hash) != 64 {
 		t.Fatal("explicit pinned CLI SHA256 required")
 	}

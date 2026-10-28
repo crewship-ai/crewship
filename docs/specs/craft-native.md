@@ -170,7 +170,8 @@ one-hour browser acceptance and 2,000 changing saves remain separate work.
 
 The native blank Word asset is serialized by the original engine separately from
 the older checkpoint blank. To qualify it against a real binary, set
-`CREWSHIP_TEST_WORDCRAFT_CLI` and `CREWSHIP_TEST_WORDCRAFT_CLI_SHA256`, then run
-`go test ./internal/mooring -run ^TestNativeCLIValidatorCanonicalWordCreation$`.
-The explicit run must pass; ordinary unit runs skip it when no binary is supplied.
+`CRAFT_QUALIFICATION_ENGINE` and `CRAFT_QUALIFICATION_SHA256`, then run
+`crewship-heavy go test -tags craft_native_engine_qualification ./internal/mooring -run ^TestNativeCLIValidatorCanonicalWordCreation$`.
+These are qualification-only inputs, not server configuration. The explicit run
+must execute and pass; absent inputs fail it. Ordinary unit builds exclude it.
 It also verifies that the old lossy float promotion is still rejected.
