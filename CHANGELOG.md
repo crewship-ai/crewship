@@ -13,6 +13,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add a bounded Slides artifact import adapter for a closed `deck.json` and authored HTML profile, reusing the existing slide schema and static comment anchors without enabling a new editor or preview.
 
 - Require actual Chromium execution of native document privacy regressions in frontend CI while preserving the strict browser-dialog guard.
+- Add default-off Dashboard collection reads and atomic JSON document batches through authenticated Page API, CLI and original-run MCP tools. Shared readers use the current shared code manifest; data changes preserve code history and document conflicts never overwrite newer data.
+- Classify Dashboard artifacts from the authorized code manifest in Page lists and detail: owners use the latest code, shared readers use the current shared pin. The disabled Dashboard data flag preserves the ordinary Project classification.
+
+- Add a disabled dashboard dataset storage foundation with atomic document version checks, bounded JSON batches, server attribution, portable backups and Page lifetime cleanup; code versions remain in the existing artifact VersionStore.
 
 - Add an opt-in Artifacts library at `/artifacts` (`NEXT_PUBLIC_ARTIFACTS_LIBRARY`): a gallery or table of projects, Word, Sheet, Slides and dashboards with kind and shared version, a project detail on its version history and the edit lock of a native Word; the Pages list reports `artifact_kind` and `artifact_shared_version`.
 - Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.

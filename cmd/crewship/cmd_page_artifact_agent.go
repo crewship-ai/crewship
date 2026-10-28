@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/crewship-ai/crewship/internal/artifacts"
 )
 
 func artifactCLIRequest(cmd *cobra.Command, method, path string, body any) error {
@@ -25,6 +27,9 @@ func artifactCLIRequest(cmd *cobra.Command, method, path string, body any) error
 func artifactCLIRequestWithTransport(cmd *cobra.Command, method, path string, body any, transport http.RoundTripper) error {
 	token := os.Getenv("CREWSHIP_AGENT_TOKEN")
 	if token == "" {
+		if strings.Contains(path, "/artifact/data") {
+			return artifactDataHumanRequest(cmd, method, path, body)
+		}
 		return projectCLIRequest(cmd, method, path, body)
 	}
 	if !strings.HasPrefix(token, "agtv2.") || len(token) > 2048 || strings.ContainsAny(token, " \r\n\t") {
@@ -42,12 +47,31 @@ func artifactCLIRequestWithTransport(cmd *cobra.Command, method, path string, bo
 	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
 	arguments := map[string]any{}
 	if body != nil {
-		raw, e := json.Marshal(body)
+		marshal := json.Marshal
+		if strings.Contains(parsed.Path, "/artifact/data") {
+			marshal = artifacts.MarshalDataJSON
+		}
+		raw, e := marshal(body)
 		if e != nil {
 			return e
 		}
-		if json.Unmarshal(raw, &arguments) != nil {
-			return errors.New("artifact request object required")
+		if strings.Contains(parsed.Path, "/artifact/data") {
+			// Data values must remain opaque JSON: decoding strings into any
+			// and re-encoding expands literal U+2028/U+2029 even with HTML
+			// escaping disabled, rejecting otherwise valid byte budgets.
+			var fields map[string]json.RawMessage
+			if artifacts.DecodeDataJSON(raw, &fields, "base_version", "documents") != nil {
+				return errors.New("dashboard data request object required")
+			}
+			for key, value := range fields {
+				arguments[key] = value
+			}
+		} else {
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.UseNumber()
+			if decoder.Decode(&arguments) != nil {
+				return errors.New("artifact request object required")
+			}
 		}
 	}
 	operation := ""
@@ -57,6 +81,15 @@ func artifactCLIRequestWithTransport(cmd *cobra.Command, method, path string, bo
 		arguments["slug"] = parts[3]
 		suffix := strings.Join(parts[5:], "/")
 		switch {
+		case method == "GET" && suffix == "data":
+			operation = "artifact_data_collections"
+		case len(parts) == 7 && parts[5] == "data":
+			arguments["collection"] = parts[6]
+			if method == "GET" {
+				operation = "artifact_data_read"
+			} else if method == "POST" {
+				operation = "artifact_data_batch"
+			}
 		case method == "GET" && suffix == "":
 			operation = "artifact_versions"
 		case method == "GET" && suffix == "comments":
@@ -80,7 +113,11 @@ func artifactCLIRequestWithTransport(cmd *cobra.Command, method, path string, bo
 		}
 		arguments["version"] = number
 	}
-	packet, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": operation, "arguments": arguments}})
+	marshal := json.Marshal
+	if strings.HasPrefix(operation, "artifact_data_") {
+		marshal = artifacts.MarshalDataJSON
+	}
+	packet, err := marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": operation, "arguments": arguments}})
 	if err != nil || len(packet) > 1<<20 {
 		return errors.New("artifact tool request exceeds 1 MiB")
 	}
@@ -103,8 +140,12 @@ func artifactCLIRequestWithTransport(cmd *cobra.Command, method, path string, bo
 		return errors.New("artifact outcome unavailable; preserve candidate and inspect before retrying")
 	}
 	defer response.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(response.Body, (3<<20)+1))
-	if err != nil || len(raw) > 3<<20 {
+	limit := 3 << 20
+	if strings.HasPrefix(operation, "artifact_data_") {
+		limit = 32 << 20
+	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, int64(limit)+1))
+	if err != nil || len(raw) > limit {
 		return errors.New("artifact tool response exceeds limit")
 	}
 	raw = bytes.ReplaceAll(raw, []byte(token), []byte("[REDACTED]"))
@@ -129,6 +170,9 @@ func artifactCLIRequestWithTransport(cmd *cobra.Command, method, path string, bo
 	}
 	if !json.Valid(result) {
 		return errors.New("artifact tool returned invalid JSON")
+	}
+	if strings.HasPrefix(operation, "artifact_data_") {
+		return emitArtifactData(cmd, result)
 	}
 	return pageEmitMachine(resolvedFormatter(cmd), result, "{}")
 }

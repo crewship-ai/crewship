@@ -2626,3 +2626,65 @@ Responses include `400` for invalid input, `401` for missing authentication,
 `403` for a known reader's write, and `404` for disabled or inaccessible projects.
 Restore quota refusal is `413` and preserves retained versions. Human CLI
 commands are `page artifact comments`, `comment`, `reply`, `restore` and `share`.
+
+
+## Dashboard JSON collections (disabled by default)
+
+These routes require both `artifact_projects` and `artifact_dashboard_data`.
+Select the workspace with `workspace_id`; `{slug}` also accepts `@page_id`.
+
+| Method | Route | Request / result |
+| --- | --- | --- |
+| GET | `/api/v1/pages/{slug}/artifact/data` | Required `version` query; returns `{code_version,collections}` for initialized collections declared by that code manifest. |
+| GET | `/api/v1/pages/{slug}/artifact/data/{collection}` | Required `version` query; returns `{collection,code_version,documents}`. |
+| POST | `/api/v1/pages/{slug}/artifact/data/{collection}` | `{base_version,documents:[{id,ifVersion,value}]}`; returns the changed documents with their new versions. |
+
+A project code manifest declares up to 32 unique collections with
+`dashboard.json`: `{"schema_version":1,"collections":["sales"]}`. Collection and
+document IDs are 1–128 ASCII letters, digits, `_` or `-`, starting with a letter
+or digit. `value` is a JSON object. Each document response includes `id`,
+`version`, `value`, `updated_at`, `source_label` and `source_kind`; private
+account and run IDs are omitted for every reader, including owners.
+
+**Authority:** reads require current Page read access and `pages:read` scope.
+Owners may select retained code versions. Other readers must select the current
+shared pin and can read only collections declared there. Pin selection,
+declaration and current ACL are checked together in the data transaction and
+again before commit. Writes require the current human owner or an admitted
+original signed agent run with the exact Page mandate and `pages:write` scope.
+The supplied `base_version` must still be the latest code version. Clients
+cannot set attribution or timestamps.
+
+**Concurrency:** `ifVersion:0` creates a new document; otherwise it must equal
+the current document version. Counters are exact integers no greater than
+9007199254740991. A conflict rolls back the entire batch. Data changes do not
+publish code versions, change shared pins or append comment versions. Restoring
+code preserves the independently mutable datasets.
+
+**Limits:** 256 KiB JSON per document; 50 writes / 1 MiB per batch; 4096 documents
+and 8 MiB stored JSON per collection; 32 collections per Page. GET responses are
+bounded at 16 MiB, including metadata. Duplicate keys, case aliases of transport
+fields, invalid UTF-8 and excessive nesting fail closed. JSON scalar numbers in
+values are carried without conversion through floating point.
+
+**Statuses:** 200 success; 400 invalid body or version; 401 unauthenticated;
+403 current write authority denied; 404 disabled, inaccessible, missing or
+undeclared collection; 409 stale document/code base or shared pin; 413 byte/count
+limit; 500 internal failure; 503 durable transaction unavailable. Existing data
+is retained after a rejection. A collection is created by its first successful
+batch; there is no delete operation.
+
+CLI commands are `crewship page artifact data collections`, `data get` and
+`data batch`. Original-run MCP tools are `artifact_data_collections`,
+`artifact_data_read` and `artifact_data_batch`.
+## Artifact kind metadata
+
+Page lists and authenticated detail responses include `artifact_kind` for a
+versioned artifact (`project`, `dashboard`, `word`, `sheet`) and
+`artifact_shared_version` when a shared pin exists. Dashboard classification
+requires the enabled Dashboard data backend and a valid bounded `dashboard.json`
+declaration in the selected code manifest. The current human owner uses latest
+code; other Page readers use only the current shared pin. A private latest
+Dashboard therefore does not change the kind shown to a shared Project reader.
+No artifact kind is inferred from Page names or addresses. Classification does
+not change the artifact's version storage, data authority or editor profile.
