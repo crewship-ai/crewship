@@ -1,0 +1,107 @@
+package api
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/mooring"
+)
+
+func TestCraftNativeAgentExplicitWholeDocumentRequest(t *testing.T) {
+	if _, err := parseCraftNativeAgentTask([]byte(`{"chat_id":"chat","message_id":"message","whole_document":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range []string{
+		`{"chat_id":"chat","message_id":"message"}`,
+		`{"chat_id":"chat","message_id":"message","whole_document":false}`,
+		`{"chat_id":"chat","message_id":"message","whole_document":true,"run_id":"claimed"}`,
+		`{"chat_id":"chat","message_id":"message","whole_document":true,"agent_id":"claimed"}`,
+		`{"chat_id":"chat","message_id":"message","whole_document":true,"whole_document":true}`,
+	} {
+		if _, err := parseCraftNativeAgentTask([]byte(raw)); err == nil {
+			t.Fatalf("unqualified consent accepted: %s", raw)
+		}
+	}
+}
+
+func nativeAgentAdmissionFixture(t *testing.T) (*artifactPrincipalFixture, *craftNativeAgentManager, context.Context) {
+	t.Helper()
+	f, source := originalSessionFixture(t)
+	f.rig.seedPage(t, "native-agent-page", "native-agent-page", "Native", source.UserID, "")
+	mustExec(t, f.rig.db, `INSERT INTO craft_native_documents(page_id,workspace_id,application_id,engine_revision,engine_sha256,editor_bundle) VALUES('native-agent-page',?,'wordcraft',?,?,?)`, f.rig.wsID, strings.Repeat("a", 40), strings.Repeat("b", 64), strings.Repeat("c", 64))
+	u := &AuthUser{ID: source.UserID, SessionID: source.ID, OriginalCredential: source}
+	ctx := auth.WithOriginalCredential(context.WithValue(context.WithValue(context.WithValue(t.Context(), ctxUser, u), ctxAuthKind, AuthKindSession), ctxWorkspaceID, f.rig.wsID), *source)
+	h := newCraftNativeHTTP(f.pages, true, &collaborationAdmissionTestClock{boot: "native-agent-admission", now: time.Second})
+	d := newCraftNativeDocumentsHTTP(h, map[string]craftNativeApplication{"wordcraft": {Store: mooring.NativeStoreConfig{Application: "wordcraft"}}})
+	m := newCraftNativeAgentManager(h, d, CraftNativeHTTPConfig{AgentsEnabled: true})
+	return f, m, ctx
+}
+
+func TestCraftNativeAgentTaskCapturesNativeConsentWithoutD1Subject(t *testing.T) {
+	f, m, ctx := nativeAgentAdmissionFixture(t)
+	input := craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true}
+	accepted, err := m.produceTask(ctx, "@native-agent-page", input)
+	if err != nil || accepted.WorkID == "" {
+		t.Fatalf("actual original human native consent not accepted: receipt=%+v err=%v", accepted, err)
+	}
+	var domain, app, scope string
+	if err = f.rig.db.QueryRow(`SELECT domain_kind,domain_id,authorized_scope FROM work_items WHERE id=?`, accepted.WorkID).Scan(&domain, &app, &scope); err != nil || domain != craftNativeAgentDomain || app != "native-agent-page" || scope != "pages:write" {
+		t.Fatal("native work binding", domain, app, scope, err)
+	}
+	var collab int
+	if err = f.rig.db.QueryRow(`SELECT count(*) FROM mooring_collab_documents WHERE page_id='native-agent-page'`).Scan(&collab); err != nil || collab != 0 {
+		t.Fatal("native task incorrectly depends on D1", collab, err)
+	}
+	if _, err = m.produceTask(ctx, "@native-agent-page", input); err == nil {
+		t.Fatal("same message/document silently launched twice")
+	}
+}
+
+func TestCraftNativeAgentCapturedGrantNeverRefreshesChangedEpochOrRegistry(t *testing.T) {
+	f, m, ctx := nativeAgentAdmissionFixture(t)
+	accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := m.entries[accepted.WorkID]
+	check := func(store *craftNativeAgentManager, want bool) {
+		t.Helper()
+		tx, err := f.rig.db.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		err = store.checkGrant(ctx, tx, e)
+		if (err == nil) != want {
+			t.Fatalf("grant allowed=%v want=%v err=%v", err == nil, want, err)
+		}
+	}
+	check(m, true)
+	restarted := newCraftNativeAgentManager(m.human, m.documents, m.config)
+	// Even copying database/lookup DATA cannot reconstruct the original seal.
+	restarted.entries[accepted.WorkID] = e
+	check(restarted, false)
+	mustExec(t, f.rig.db, `UPDATE pages SET owner_user_id=? WHERE id='native-agent-page'`, f.rig.adminID)
+	mustExec(t, f.rig.db, `UPDATE pages SET owner_user_id=? WHERE id='native-agent-page'`, f.rig.userID)
+	check(m, false)
+}
+
+func TestCraftNativeAgentTaskRejectsSourceProjectionAndPartialConsent(t *testing.T) {
+	f, m, ctx := nativeAgentAdmissionFixture(t)
+	input := craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true}
+	projected := context.WithValue(ctx, artifactRunKey{}, &artifactRunAuthority{RunID: "not-human"})
+	if _, err := m.produceTask(projected, "@native-agent-page", input); err == nil {
+		t.Fatal("projected agent became human consent")
+	}
+	input.WholeDocument = false
+	if _, err := m.produceTask(ctx, "@native-agent-page", input); err == nil {
+		t.Fatal("partial/implicit consent accepted")
+	}
+	var count int
+	if err := f.rig.db.QueryRow(`SELECT count(*) FROM work_items WHERE domain_kind=?`, craftNativeAgentDomain).Scan(&count); err != nil || count != 0 {
+		t.Fatal("denial published work", count, err)
+	}
+}

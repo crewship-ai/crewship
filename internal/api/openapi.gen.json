@@ -13120,14 +13120,414 @@
         ],
         "type": "object"
       },
+      "NativeCraftAgentLeaseReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "generation": {
+            "description": "Canonical positive int64 decimal string; range checked by the host.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "holder_kind": {
+            "enum": [
+              "agent"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "generation",
+          "expires_at",
+          "holder_kind"
+        ],
+        "type": "object"
+      },
+      "NativeCraftAgentReadReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "application": {
+            "enum": [
+              "wordcraft",
+              "gridcraft"
+            ],
+            "type": "string"
+          },
+          "engine_pin": {
+            "type": "string"
+          },
+          "version": {
+            "description": "Canonical positive int64 decimal string; range checked by the host.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "view": {
+            "description": "Bounded original-engine query result; no arbitrary native document export.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "application",
+          "version",
+          "engine_pin"
+        ],
+        "type": "object"
+      },
+      "NativeCraftAgentStopReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "cancel_requested": {
+            "type": "boolean"
+          },
+          "grant_revoked": {
+            "type": "boolean"
+          },
+          "lease_retired": {
+            "type": "boolean"
+          },
+          "stop_pending": {
+            "type": "boolean"
+          },
+          "stopped": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "grant_revoked",
+          "lease_retired",
+          "cancel_requested",
+          "stopped",
+          "stop_pending"
+        ],
+        "type": "object"
+      },
+      "NativeCraftAgentTaskReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "queued"
+            ],
+            "type": "string"
+          },
+          "work_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_id",
+          "status"
+        ],
+        "type": "object"
+      },
+      "NativeCraftAgentTaskRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "chat_id": {
+            "type": "string"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "whole_document": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "chat_id",
+          "message_id",
+          "whole_document"
+        ],
+        "type": "object"
+      },
+      "NativeCraftAgentTaskStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "application": {
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/NativeCraftAgentToolEvent"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "grant_closed": {
+            "type": "boolean"
+          },
+          "last_committed_receipt": {
+            "$ref": "#/components/schemas/NativeCraftSnapshotReceipt"
+          },
+          "operation_inflight": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "timeline_durability": {
+            "enum": [
+              "current-host-only"
+            ],
+            "type": "string"
+          },
+          "uncertain": {
+            "type": "boolean"
+          },
+          "work_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "work_id",
+          "state",
+          "application",
+          "agent_id",
+          "run_id",
+          "grant_closed",
+          "operation_inflight",
+          "uncertain",
+          "timeline_durability",
+          "events"
+        ],
+        "type": "object"
+      },
+      "NativeCraftAgentToolEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "holder_kind": {
+            "enum": [
+              "human",
+              "agent",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "read",
+              "acquire",
+              "renew",
+              "apply",
+              "release"
+            ],
+            "type": "string"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/NativeCraftSnapshotReceipt"
+          },
+          "status": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "operation",
+          "status",
+          "at"
+        ],
+        "type": "object"
+      },
+      "NativeCraftAgentToolRequest": {
+        "description": "Fixed run-bound RPC. No Page, actor, run, profile or executable selectors. Repeating an apply can reconcile only the exact original request; it never reruns the engine.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "operation": {
+                "enum": [
+                  "read"
+                ],
+                "type": "string"
+              },
+              "query": {
+                "additionalProperties": false,
+                "properties": {
+                  "command": {
+                    "enum": [
+                      "caret.docStart",
+                      "caret.docEnd",
+                      "text.insert",
+                      "cell.set",
+                      "text",
+                      "cell.get"
+                    ],
+                    "type": "string"
+                  },
+                  "params": {
+                    "description": "Closed original-engine parameter allowlist: caret {}, text.insert {text}, cell.set {cell,input} scalar literals, text {}, or cell.get {cell}.",
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "command",
+                  "params"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "operation"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "operation": {
+                "enum": [
+                  "acquire"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "operation"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "generation": {
+                "description": "Canonical positive int64 decimal string; range checked by the host.",
+                "maxLength": 19,
+                "pattern": "^[1-9][0-9]{0,18}$",
+                "type": "string"
+              },
+              "operation": {
+                "enum": [
+                  "renew"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "operation",
+              "generation"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "base_version": {
+                "description": "Canonical positive int64 decimal string; range checked by the host.",
+                "maxLength": 19,
+                "pattern": "^[1-9][0-9]{0,18}$",
+                "type": "string"
+              },
+              "commands": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "command": {
+                      "enum": [
+                        "caret.docStart",
+                        "caret.docEnd",
+                        "text.insert",
+                        "cell.set",
+                        "text",
+                        "cell.get"
+                      ],
+                      "type": "string"
+                    },
+                    "params": {
+                      "description": "Closed original-engine parameter allowlist: caret {}, text.insert {text}, cell.set {cell,input} scalar literals, text {}, or cell.get {cell}.",
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "command",
+                    "params"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 64,
+                "minItems": 1,
+                "type": "array"
+              },
+              "generation": {
+                "description": "Canonical positive int64 decimal string; range checked by the host.",
+                "maxLength": 19,
+                "pattern": "^[1-9][0-9]{0,18}$",
+                "type": "string"
+              },
+              "operation": {
+                "enum": [
+                  "apply"
+                ],
+                "type": "string"
+              },
+              "request_id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_.:-]+$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "operation",
+              "generation",
+              "base_version",
+              "request_id",
+              "commands"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "generation": {
+                "description": "Canonical positive int64 decimal string; range checked by the host.",
+                "maxLength": 19,
+                "pattern": "^[1-9][0-9]{0,18}$",
+                "type": "string"
+              },
+              "operation": {
+                "enum": [
+                  "release"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "operation",
+              "generation"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "NativeCraftAvailability": {
         "properties": {
+          "agents_enabled": {
+            "type": "boolean"
+          },
           "enabled": {
             "type": "boolean"
           }
         },
         "required": [
-          "enabled"
+          "enabled",
+          "agents_enabled"
         ],
         "type": "object"
       },
@@ -13274,13 +13674,20 @@
           "actor_id": {
             "type": "string"
           },
+          "agent_id": {
+            "type": "string"
+          },
           "display_name": {
             "type": "string"
           },
           "kind": {
             "enum": [
-              "human"
+              "human",
+              "agent"
             ],
+            "type": "string"
+          },
+          "run_id": {
             "type": "string"
           }
         },
@@ -13365,6 +13772,9 @@
             "nullable": true,
             "type": "string"
           },
+          "can_stop_agent": {
+            "type": "boolean"
+          },
           "can_write": {
             "type": "boolean"
           },
@@ -13411,6 +13821,7 @@
           "mine",
           "generation",
           "expires_at",
+          "can_stop_agent",
           "can_write",
           "acquired_at",
           "handoff_requested_kind",
@@ -132736,6 +133147,473 @@
           "pages"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/craft/tasks": {
+      "post": {
+        "description": "Create page craft tasks (POST /api/v1/pages/{slug}/craft/tasks).",
+        "operationId": "post_api_v1_pages_slug_craft_tasks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeCraftAgentTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftAgentTaskReceipt"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Create page craft tasks",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/craft/tasks/cancel": {
+      "post": {
+        "description": "Cancel page craft tasks (POST /api/v1/pages/{slug}/craft/tasks/cancel).",
+        "operationId": "post_api_v1_pages_slug_craft_tasks_cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeCraftEmptyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftAgentStopReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftAgentStopReceipt"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Cancel page craft tasks",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/craft/tasks/{workID}": {
+      "get": {
+        "description": "Get page craft task (GET /api/v1/pages/{slug}/craft/tasks/{workID}).",
+        "operationId": "get_api_v1_pages_slug_craft_tasks_workID",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "workID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftAgentTaskStatus"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page craft task",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/pages/{slug}/document": {

@@ -13,7 +13,8 @@ import (
 )
 
 type craftNativeAvailabilityResponse struct {
-	Enabled bool `json:"enabled"`
+	Enabled       bool `json:"enabled"`
+	AgentsEnabled bool `json:"agents_enabled"`
 }
 type craftNativeRenewalResponse struct {
 	Renewed bool `json:"renewed"`
@@ -22,6 +23,8 @@ type craftNativeHolderResponse struct {
 	ActorID     string `json:"actor_id"`
 	DisplayName string `json:"display_name"`
 	Kind        string `json:"kind"`
+	AgentID     string `json:"agent_id,omitempty"`
+	RunID       string `json:"run_id,omitempty"`
 }
 type craftNativeRequestResponse struct {
 	RequestID   string `json:"request_id"`
@@ -30,6 +33,7 @@ type craftNativeRequestResponse struct {
 	Kind        string `json:"kind"`
 }
 type craftNativeLeaseResponse struct {
+	CanStopAgent         bool                         `json:"can_stop_agent"`
 	Draft                string                       `json:"draft,omitempty"`
 	Holder               *craftNativeHolderResponse   `json:"holder"`
 	Mine                 bool                         `json:"mine"`
@@ -55,6 +59,7 @@ func craftNativeGeneration(raw string) (int64, error) {
 }
 func (m *craftNativeHTTP) availability(w http.ResponseWriter, r *http.Request) {
 	enabled := false
+	agentsEnabled := false
 	if m.enabled && m.pages != nil {
 		source, err := craftNativeHuman(r.Context())
 		if err == nil {
@@ -67,12 +72,16 @@ func (m *craftNativeHTTP) availability(w http.ResponseWriter, r *http.Request) {
 				if e == nil {
 					_, e = m.pageAuthority(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, false)
 					enabled = e == nil
+					if enabled && m.agents != nil && m.agents.runtimeReady() {
+						_, writeErr := m.pageAuthority(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, true)
+						agentsEnabled = writeErr == nil
+					}
 				}
 			}
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, craftNativeAvailabilityResponse{Enabled: enabled})
+	writeJSON(w, 200, craftNativeAvailabilityResponse{Enabled: enabled, AgentsEnabled: agentsEnabled})
 }
 func craftNativeHTTPError(w http.ResponseWriter, err error) {
 	if errors.Is(err, mooring.ErrEditLeaseBusy) || errors.Is(err, mooring.ErrEditLeaseStale) {
@@ -85,8 +94,15 @@ func (m *craftNativeHTTP) leaseView(r *http.Request, entry *craftNativeSession, 
 	var holder *craftNativeHolderResponse
 	if l.Holder.ActorID != "" {
 		var name string
-		_ = m.pages.db.QueryRowContext(r.Context(), `SELECT COALESCE(NULLIF(full_name,''),'User') FROM users WHERE id=?`, strings.TrimPrefix(l.Holder.ActorID, "user:")).Scan(&name)
-		holder = &craftNativeHolderResponse{ActorID: l.Holder.ActorID, DisplayName: name, Kind: "human"}
+		if strings.HasPrefix(l.Holder.ActorID, "agent:") {
+			agent := strings.TrimPrefix(l.Holder.ActorID, "agent:")
+			name = "Agent"
+			_ = m.pages.db.QueryRowContext(r.Context(), `SELECT COALESCE(NULLIF(name,''),'Agent') FROM agents WHERE id=? AND workspace_id=?`, agent, l.Scope.WorkspaceID).Scan(&name)
+			holder = &craftNativeHolderResponse{ActorID: l.Holder.ActorID, DisplayName: name, Kind: "agent", AgentID: agent, RunID: strings.TrimPrefix(l.Holder.SessionID, "native-agent:")}
+		} else {
+			_ = m.pages.db.QueryRowContext(r.Context(), `SELECT COALESCE(NULLIF(full_name,''),'User') FROM users WHERE id=?`, strings.TrimPrefix(l.Holder.ActorID, "user:")).Scan(&name)
+			holder = &craftNativeHolderResponse{ActorID: l.Holder.ActorID, DisplayName: name, Kind: "human"}
+		}
 	}
 	mine := l.Holder == craftNativePrincipal(entry)
 	requests := make([]craftNativeRequestResponse, 0)
@@ -132,7 +148,8 @@ func (m *craftNativeHTTP) leaseView(r *http.Request, entry *craftNativeSession, 
 	}
 	// The lease core has no durable acquisition timestamp. Renewal time would
 	// falsely describe custody age, so the dormant API reports unknown explicitly.
-	return craftNativeLeaseResponse{Holder: holder, Mine: mine, Generation: generation, ExpiresAt: expiry, CanWrite: mine, HandoffRequestedKind: requestedKind, HandoffRequestedBy: requests}
+	canStop := m.agents != nil && m.agents.canStop(r.Context(), entry, l)
+	return craftNativeLeaseResponse{Holder: holder, Mine: mine, Generation: generation, ExpiresAt: expiry, CanWrite: mine, HandoffRequestedKind: requestedKind, HandoffRequestedBy: requests, CanStopAgent: canStop}
 }
 func (m *craftNativeHTTP) lease(w http.ResponseWriter, r *http.Request) {
 	entry, err := m.bound(r)

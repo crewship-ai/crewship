@@ -12,6 +12,11 @@ import (
 
 func nativeCraftHTTPConfig(cfg *config.Config, editor *editororigin.Handler) (goapi.CraftNativeHTTPConfig, error) {
 	out := goapi.CraftNativeHTTPConfig{Enabled: cfg.CraftNative.Enabled, Profiles: make(map[string]goapi.CraftNativeDocumentProfile, len(cfg.CraftNative.Profiles))}
+	out.AgentsEnabled = cfg.CraftNative.AgentsEnabled
+	if out.AgentsEnabled {
+		engine := goapi.NewCraftNativeAgentCLIAdapter()
+		out.AgentApply, out.AgentInspect = engine.Apply, engine.Inspect
+	}
 	for key, p := range cfg.CraftNative.Profiles {
 		if cfg.CraftNative.Enabled && (editor == nil || !editor.HasBundle(p.EditorBundle) || editor.IndexURL(p.EditorBundle) != p.EditorURL) {
 			return goapi.CraftNativeHTTPConfig{}, errors.New("qualified native editor bundle is not served at its exact pin")

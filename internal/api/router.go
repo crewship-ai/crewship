@@ -1081,6 +1081,9 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // reference to the DB handle or the Docker client.
 
 func (r *Router) Shutdown() {
+	if r.craftNativeHTTP != nil && r.craftNativeHTTP.agents != nil {
+		r.craftNativeHTTP.agents.Close()
+	}
 	if r.mooringHTTP != nil {
 		r.mooringHTTP.Close()
 	}
