@@ -58,8 +58,8 @@ func ReplaceWorkspaceContents(ctx context.Context, tx *sql.Tx, bundleWorkspaceID
 
 // ReplaceOptions are explicit acknowledgements a replacement may need.
 type ReplaceOptions struct {
-	// DiscardWorkbooks permits destroying the target's workbooks, which no
-	// bundle contains. The zero value refuses (ErrWorkbookTargetReplacement).
+	// DiscardWorkbooks permits destroying target workbook history that may be
+	// absent from the bundle. The zero value refuses (ErrWorkbookTargetReplacement).
 	DiscardWorkbooks bool
 }
 
