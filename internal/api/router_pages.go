@@ -103,7 +103,7 @@ func (r *Router) registerPageRoutes() {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-pages", authed(wsCtx(http.HandlerFunc(p.RestrictedCatalog))))
 
 	// Catalog filters and paging run after existing per-object authorization.
-	// openapi: query audience:string limit:integer offset:integer
+	// openapi: query audience:string test_items:string archived:string limit:integer offset:integer
 	// openapi: responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/pages", authed(wsCtx(http.HandlerFunc(p.List))))
 	r.mux.Handle("GET /api/v1/pages/{slug}", authed(wsCtx(http.HandlerFunc(p.Get))))
@@ -120,6 +120,10 @@ func (r *Router) registerPageRoutes() {
 	r.authedMut("POST", "/api/v1/pages", roleInline, p.Create)
 	r.authedMut("PATCH", "/api/v1/pages/{slug}", roleSelf, p.Update)
 	r.authedMut("DELETE", "/api/v1/pages/{slug}", roleSelf, p.Delete)
+	// openapi: responses 200,400,401,403,404,409,413,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/archive", roleSelf, p.ArchivePage)
+	// openapi: responses 200,400,401,403,404,409,413,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/unarchive", roleSelf, p.UnarchivePage)
 	r.authedMut("PUT", "/api/v1/pages/{slug}/panels/{panelId}/data", roleSelf, p.PushData)
 	r.authedMut("PUT", "/api/v1/pages/{slug}/grants", roleSelf, p.PutGrant)
 	r.authedMut("DELETE", "/api/v1/pages/{slug}/grants", roleSelf, p.DeleteGrant)
@@ -133,8 +137,10 @@ func (r *Router) registerPageRoutes() {
 	// admin) declare roleCreate so the middleware refuses a MEMBER before the
 	// handler decides crew membership; remove is the page owner's, who may
 	// be a MEMBER, so it is roleSelf.
+	// openapi: query test_items:string archived:string
 	// openapi: responses 200,400,401,500
 	r.mux.Handle("GET /api/v1/page-folders", authed(wsCtx(http.HandlerFunc(p.ListFolders))))
+	// openapi: query test_items:string archived:string
 	// openapi: responses 200,400,401,404,500
 	r.mux.Handle("GET /api/v1/page-folders/{slug}", authed(wsCtx(http.HandlerFunc(p.GetFolder))))
 	// openapi: responses 201,400,401,403,409,413,500

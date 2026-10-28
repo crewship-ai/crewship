@@ -418,12 +418,47 @@ into three independent verbs:
 | Verb | Means | Typical holder |
 |---|---|---|
 | `read` | may see the page and its panels | humans, crews, an agent that summarises it |
+| `comment` | may read the shared artifact and submit feedback, without edit or execution rights | humans and human crew/workspace members |
 | `produce` | may push payloads **into named panels** | the routine or script that owns those panels |
 | `write` | may edit the page spec — add, remove and re-arrange panels | the agent in charge of the page; a human owner |
 
 `page_grants.subject_type` therefore becomes `{user, crew, agent}` and `level` becomes
-`{read, produce, write}`. `produce` additionally carries the panel ids it covers, so an agent
+`{read, comment, produce, write}`. Human feedback follows Read < Comment < Edit;
+`comment` is accepted only for user, crew and workspace subjects. It permits
+feedback on the currently shared artifact version, without changing content,
+versions, restoration, sharing, editor leases or agent write authority. A plain
+reader cannot submit feedback. Revocation and issuer standing are rechecked in
+the final feedback transaction. `produce` remains an independent capability.
+`produce` additionally carries the panel ids it covers, so an agent
 granted `produce` on one panel cannot overwrite another agent's panel on the same page.
+
+Artifact comments retain their actual human author and immutable shared-version
+anchor. Creating feedback does not dispatch an owner run or borrow the owner's
+credentials. Processing another member's feedback requires a fresh explicit
+owner message in the owner's private chat and the existing live run admission.
+Native Craft comment-only observer access remains denied until its independent
+shared snapshot and feedback contract is implemented; ordinary native read and
+write paths retain their existing semantics.
+
+Catalog state is independent of content and access. `created_by_test` is an
+explicit server-stored, creation-only boolean with no name-based backfill;
+`test_items=exclude|only|include` defaults to `exclude`. `archived` and optional
+`archived_at` describe discovery state; `archived=exclude|only|include` also
+defaults to `exclude`. Filters run after authorization and before pagination and
+folder counts. Direct authorized reads and version history remain available.
+QA creates marked items only in a dedicated QA workspace.
+
+Archive/unarchive requests first use `dry_run=true` with `pages_version`.
+Confirmation requires `confirm=true`, the matching `review_token` and the same
+version and live authority. Preview does not mutate; archive retains content,
+ACLs and history. Folder filing supports the same review fields plus the target
+`acl_version`, with before/after effective access and changes. Changed versions,
+authority or access invalidate the token. Hidden ACL identities remain withheld.
+The existing legacy fenced folder request remains supported; unsupported bulk
+preview fields are rejected rather than silently ignored. Access responses keep
+`page`, `subjects` and pagination and add `page_id`, `pages_version`, per-subject
+`effective_permissions` and permission `sources`. No guest or expiry mechanism
+is offered.
 
 **The invariant that makes this safe: an agent's authority is a subset of the authorising human's,
 never a superset.** A grant to an agent is evaluated against the granting human's own rights at
@@ -1116,6 +1151,8 @@ Repo rule: every endpoint gets a CLI command, and the acceptance test drives the
 | `POST /api/v1/pages` | `crewship page create` |
 | `PATCH /api/v1/pages/{slug}` | `crewship page update <slug>` |
 | `DELETE /api/v1/pages/{slug}` | `crewship page delete <slug>` |
+| `POST /api/v1/pages/{slug}/archive` | `crewship page archive <slug>` |
+| `POST /api/v1/pages/{slug}/unarchive` | `crewship page unarchive <slug>` |
 | `PUT /api/v1/pages/{slug}/panels/{id}/data` | `crewship page set <slug>/<panel> --data -` |
 | `GET/PUT/DELETE …/grants` | `crewship page grant` / `revoke` |
 | `PUT /api/v1/internal/pages/{slug}/data` | sidecar path for container scripts (panel is a body field, not a path segment — `internal/api/pages_internal.go`) |
