@@ -201,7 +201,12 @@ func (h *PageHandler) ArtifactProjectTool(w http.ResponseWriter, r *http.Request
 	var operation string
 	_ = json.Unmarshal(envelope["operation"], &operation)
 	dataOperation := operation == "artifact_data_batch" || operation == "artifact_data_read" || operation == "artifact_data_collections"
-	if dataOperation {
+	slidesOperation := operation == "artifact_slides_read" || operation == "artifact_export_pdf"
+	if slidesOperation && len(raw) > 1<<20 {
+		replyError(w, 413, "Slides request exceeds limit")
+		return
+	}
+	if dataOperation || slidesOperation {
 		for key := range envelope {
 			if key != "operation" && key != "slug" && key != "payload" {
 				replyError(w, 400, "invalid closed artifact request")
@@ -228,6 +233,8 @@ func (h *PageHandler) ArtifactProjectTool(w http.ResponseWriter, r *http.Request
 	forward.Header = r.Header.Clone()
 	forward.Header.Set("Content-Type", "application/json")
 	switch body.Operation {
+	case "artifact_slides_read", "artifact_export_pdf":
+		h.forwardArtifactSlidesTool(w, forward, body.Operation, body.Payload)
 	case "artifact_create":
 		var payload map[string]json.RawMessage
 		if decodeArtifactProjectJSONBytes(body.Payload, &payload) != nil {

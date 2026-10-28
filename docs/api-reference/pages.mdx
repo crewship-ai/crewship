@@ -2688,3 +2688,43 @@ code; other Page readers use only the current shared pin. A private latest
 Dashboard therefore does not change the kind shown to a shared Project reader.
 No artifact kind is inferred from Page names or addresses. Classification does
 not change the artifact's version storage, data authority or editor profile.
+
+### Authored Slides and PDF export
+
+The `artifact_slides` workspace flag is disabled by default and requires
+`artifact_projects`. `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true` enables the backend
+explicitly; the separate build-time UI flag is `NEXT_PUBLIC_ARTIFACT_SLIDES=true`.
+The existing artifact VersionStore and CommentQueue retain code, sharing pins,
+restores and anchored comments. No native Slides editor or storage is created.
+
+| Method | Path | Result |
+| --- | --- | --- |
+| GET | `/api/v1/pages/{slug}/artifact/slides?version=N` | `{deck,anchors}` read-only projection; at most 16 MiB. |
+| GET | `/api/v1/pages/{slug}/artifact/export.pdf?version=N` | Vector `application/pdf` attachment; at most 8 MiB. |
+
+Both operations require an explicit canonical positive version at most
+9007199254740991. Owners can select retained code versions; readers can select
+only the current shared version. Current Page credentials, workspace rights,
+run consent, feature flags, selection mode and selected source bytes are checked
+again after parsing, rendering and response encoding, before delivery. Missing
+or private reader pins return 404. Unsupported source and text overflow return
+422; resource caps return 413. Failed exports never return a partial PDF.
+
+The closed authoring profile uses `deck.json` with
+`{"schema_version":1,"order":["intro"]}` and exactly the referenced
+`slides/intro.html` files. Each authored slide has a matching section ID and
+stable element IDs. The projection uses the existing schema-1 1920×1080 deck,
+fixed embedded Go Regular font, text, rectangle, ellipse and table elements.
+Scripts, external assets, imported PDFs and supplied fonts are unsupported.
+The bounds are 100 slides, 200 elements per slide, 1000 elements total and
+2 MiB of source. Selected snapshots emit `artifact_kind:"slides"` only after
+full profile validation. Page list/detail classification reads only the bounded
+selected index and manifest references; invalid or ambiguous source retains
+ordinary Project metadata and cannot authorize a Slides preview.
+
+Original signed-run tools `artifact_slides_read` and `artifact_export_pdf` take
+only `{slug:"@pageID",version:N}` and retain the exact original human/run Page
+mandate. Requests remain bounded to 1 MiB. The PDF tool returns
+`{media_type:"application/pdf",encoding:"base64",code_version,byte_length,sha256,data}`;
+only these two tools allow the bounded 32 MiB outer response. A caller-local CLI
+output path is never forwarded to the host.

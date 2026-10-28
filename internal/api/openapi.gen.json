@@ -2047,6 +2047,12 @@
       "ArtifactProjectSnapshot": {
         "additionalProperties": false,
         "properties": {
+          "artifact_kind": {
+            "enum": [
+              "slides"
+            ],
+            "type": "string"
+          },
           "can_write": {
             "type": "boolean"
           },
@@ -2174,6 +2180,52 @@
         "required": [
           "base_version",
           "version"
+        ],
+        "type": "object"
+      },
+      "ArtifactSlideAnchor": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "selector": {
+            "type": "string"
+          },
+          "slide_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slide_id",
+          "path",
+          "selector",
+          "quote"
+        ],
+        "type": "object"
+      },
+      "ArtifactSlidesProjection": {
+        "additionalProperties": false,
+        "properties": {
+          "anchors": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ArtifactSlideAnchor"
+            },
+            "maxProperties": 1000,
+            "type": "object"
+          },
+          "deck": {
+            "additionalProperties": true,
+            "description": "Existing Slides schema version1;1920×1080;fixed Go Regular font; bounded100slides/1000elements/2MiB canonical deck.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "deck",
+          "anchors"
         ],
         "type": "object"
       },
@@ -121893,10 +121945,11 @@
                       "items": {
                         "properties": {
                           "artifact_kind": {
-                            "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                            "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                             "enum": [
                               "project",
                               "dashboard",
+                              "slides",
                               "word",
                               "sheet"
                             ],
@@ -123222,10 +123275,11 @@
                     "page": {
                       "properties": {
                         "artifact_kind": {
-                          "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                          "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                           "enum": [
                             "project",
                             "dashboard",
+                            "slides",
                             "word",
                             "sheet"
                           ],
@@ -123579,10 +123633,11 @@
                     "page": {
                       "properties": {
                         "artifact_kind": {
-                          "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                          "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                           "enum": [
                             "project",
                             "dashboard",
+                            "slides",
                             "word",
                             "sheet"
                           ],
@@ -123948,10 +124003,11 @@
                       "items": {
                         "properties": {
                           "artifact_kind": {
-                            "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                            "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                             "enum": [
                               "project",
                               "dashboard",
+                              "slides",
                               "word",
                               "sheet"
                             ],
@@ -124401,10 +124457,11 @@
                   "items": {
                     "properties": {
                       "artifact_kind": {
-                        "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                        "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                         "enum": [
                           "project",
                           "dashboard",
+                          "slides",
                           "word",
                           "sheet"
                         ],
@@ -124824,10 +124881,11 @@
                 "schema": {
                   "properties": {
                     "artifact_kind": {
-                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                       "enum": [
                         "project",
                         "dashboard",
+                        "slides",
                         "word",
                         "sheet"
                       ],
@@ -125062,10 +125120,11 @@
                 "schema": {
                   "properties": {
                     "artifact_kind": {
-                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                       "enum": [
                         "project",
                         "dashboard",
+                        "slides",
                         "word",
                         "sheet"
                       ],
@@ -126138,10 +126197,11 @@
                 "schema": {
                   "properties": {
                     "artifact_kind": {
-                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                       "enum": [
                         "project",
                         "dashboard",
+                        "slides",
                         "word",
                         "sheet"
                       ],
@@ -126376,10 +126436,11 @@
                 "schema": {
                   "properties": {
                     "artifact_kind": {
-                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                       "enum": [
                         "project",
                         "dashboard",
+                        "slides",
                         "word",
                         "sheet"
                       ],
@@ -127097,10 +127158,11 @@
                 "schema": {
                   "properties": {
                     "artifact_kind": {
-                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                       "enum": [
                         "project",
                         "dashboard",
+                        "slides",
                         "word",
                         "sheet"
                       ],
@@ -127597,10 +127659,11 @@
                 "schema": {
                   "properties": {
                     "artifact_kind": {
-                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                       "enum": [
                         "project",
                         "dashboard",
+                        "slides",
                         "word",
                         "sheet"
                       ],
@@ -130247,6 +130310,152 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/pages/{slug}/artifact/export.pdf": {
+      "get": {
+        "description": "Get page artifact export.pdf (GET /api/v1/pages/{slug}/artifact/export.pdf).",
+        "operationId": "get_api_v1_pages_slug_artifact_export.pdf",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact selected immutable code version; required for both owner and current shared reader.",
+            "in": "query",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/pdf": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page artifact export.pdf",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/pages/{slug}/artifact/restore": {
       "post": {
         "description": "Restore page artifact (POST /api/v1/pages/{slug}/artifact/restore).",
@@ -130513,6 +130722,151 @@
           "pages"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/artifact/slides": {
+      "get": {
+        "description": "List page artifact slides (GET /api/v1/pages/{slug}/artifact/slides).",
+        "operationId": "get_api_v1_pages_slug_artifact_slides",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact selected immutable code version; required for both owner and current shared reader.",
+            "in": "query",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactSlidesProjection"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List page artifact slides",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/pages/{slug}/artifact/versions": {
@@ -144219,10 +144573,11 @@
                     "page": {
                       "properties": {
                         "artifact_kind": {
-                          "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                          "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                           "enum": [
                             "project",
                             "dashboard",
+                            "slides",
                             "word",
                             "sheet"
                           ],

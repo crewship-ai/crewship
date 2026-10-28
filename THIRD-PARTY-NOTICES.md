@@ -51,8 +51,9 @@ Exact upstream notices are retained in
 The fixed embedded Go Regular font comes from `golang.org/x/image` v0.47.0,
 copyright 2016 Bigelow & Holmes Inc., under its BSD-style Go font license;
 that exact font notice is retained in the same directory.
-This foundation is not yet linked into a product entrypoint; the generated
-binary dependency inventory includes it once a shipped entrypoint imports it.
+The authored Slides read/export entrypoints link this renderer into the binary.
+Runtime access remains disabled by default behind `artifact_slides`; the Go
+dependency inventory below includes its linked dependencies.
 
 ## Go dependencies
 
@@ -225,9 +226,16 @@ image processor before `pnpm build` — no source-code surgery in
 
 ## Manually verified
 
+The existing `go-licenses` scanner cannot load standard-library module metadata
+with the current Go toolchain. The newly linked PDF dependencies below were
+verified against their exact upstream license texts, retained in the Slides PDF
+license directory; the preceding generated inventory is preserved.
+
 | Package | License | Source URL |
 |---------|---------|------------|
 | `modernc.org/mathutil` | BSD-3-Clause | https://gitlab.com/cznic/mathutil |
+| `github.com/signintech/gopdf` v0.38.3 | MIT | https://github.com/signintech/gopdf/blob/v0.38.3/LICENSE |
+| `github.com/phpdave11/gofpdi` v1.0.14-0.20211212211723-1f10f9844311 | MIT | https://github.com/phpdave11/gofpdi/blob/1f10f9844311/LICENSE |
 
 ## Known accepted vulnerabilities
 
