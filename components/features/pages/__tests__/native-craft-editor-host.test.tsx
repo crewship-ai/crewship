@@ -5,7 +5,8 @@ import type {NativeEditorPortOptions} from "@/lib/mooring/native-editor-port"
 import {NativeSaveError,type NativeSaveRequest} from "@/lib/mooring/single-editor-save"
 import {NativeCraftEditorHost,nativeCraftFrameURL} from "../native-craft-editor-host"
 
-const m=vi.hoisted(()=>({createClient:vi.fn(),openJournal:vi.fn(),createPort:vi.fn(),registerPrivacy:vi.fn(),purge:vi.fn()}))
+const m=vi.hoisted(()=>({apiFetch:vi.fn(),createClient:vi.fn(),openJournal:vi.fn(),createPort:vi.fn(),registerPrivacy:vi.fn(),purge:vi.fn()}))
+vi.mock("@/lib/api-fetch",()=>({apiFetch:m.apiFetch}))
 vi.mock("@/lib/mooring/native-document-client",()=>({createNativeDocumentClient:m.createClient}))
 vi.mock("@/lib/mooring/native-editor-port",()=>({createNativeEditorPort:m.createPort}))
 vi.mock("@/lib/mooring/native-draft",async()=>({...await vi.importActual("@/lib/mooring/native-draft"),openNativeDraftJournal:m.openJournal}))
@@ -44,6 +45,23 @@ describe('native Word host authority and persistence',()=>{
   await waitFor(()=>expect(client.save).toHaveBeenCalledOnce())
   expect(client.save.mock.calls[0][0].applicationId).toBe('gridcraft')
   await screen.findByText('Uloženo')
+ })
+
+ it('stops only the current agent mandate with one H1 request and reloads its fresh version without acquiring',async()=>{
+  const agent={...ownedLease,mine:false,can_write:false,can_stop_agent:true,holder:{actor_id:'agent:actual',display_name:'Jamie',kind:'agent'}}
+  client.lease.mockResolvedValue(agent)
+  const stopped=deferred<Response>();m.apiFetch.mockReturnValueOnce(stopped.promise)
+  mount();await screen.findByRole('button',{name:'Zastavit agenta'});await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled())
+  fireEvent.click(screen.getByRole('button',{name:'Zastavit agenta'}))
+  expect(screen.getByRole('button',{name:'Zastavit agenta'})).toBeDisabled()
+  expect(m.apiFetch).toHaveBeenCalledWith('/api/v1/pages/%40p/craft/tasks/cancel?workspace_id=w',expect.objectContaining({method:'POST',body:'{}',skipRefresh:true,redirect:'error',signal:expect.any(AbortSignal)}))
+  const fresh={...await client.read(),version:'2',bytes:new TextEncoder().encode('{"body":["agent"]}')}
+  client.read.mockResolvedValue(fresh);client.lease.mockResolvedValue(emptyLease)
+  await act(async()=>stopped.resolve(new Response(JSON.stringify({stop_pending:true}),{status:202})))
+  await waitFor(()=>expect(ports).toHaveLength(2))
+  expect(ports[1].bootstrap).toHaveBeenCalledWith(fresh.bytes,expect.any(AbortSignal))
+  expect(m.apiFetch).toHaveBeenCalledOnce();expect(client.leaseAction).not.toHaveBeenCalled();expect(client.save).not.toHaveBeenCalled();expect(m.openJournal).not.toHaveBeenCalled()
+  expect(screen.queryByText('Agent zastaven')).not.toBeInTheDocument();expect(screen.queryByText('Uloženo')).not.toBeInTheDocument()
  })
 
  it.each(['free','handed'])('disables takeover while a newer readonly snapshot bootstraps, then acquires on one click (%s)',async(leaseState)=>{

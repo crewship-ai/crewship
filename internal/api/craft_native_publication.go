@@ -14,6 +14,18 @@ type craftNativeContextKey struct{}
 // authorizeNative is the single binding for the native manifest publication
 // callback. Only a successfully bound HTTP request may install this context.
 func (m *craftNativeHTTP) authorizeNative(ctx context.Context, tx *sql.Tx, scope mooring.EditLeaseScope, intent string) (mooring.EditLeasePrincipal, error) {
+	if ctx.Value(craftNativeAgentStoppedKey{}) != nil || ctx.Value(craftNativeAgentCancelKey{}) != nil {
+		return mooring.EditLeasePrincipal{}, errCraftNativeAgentDenied
+	}
+	if _, ok := ctx.Value(craftNativeAgentContextKey{}).(*craftNativeAgentCall); ok {
+		if m.agents == nil {
+			return mooring.EditLeasePrincipal{}, errCraftNativeAgentDenied
+		}
+		if intent != "read" && intent != "write" {
+			return mooring.EditLeasePrincipal{}, errCraftNativeAgentDenied
+		}
+		return m.agents.authorize(ctx, tx, scope, intent)
+	}
 	entry, _ := ctx.Value(craftNativeContextKey{}).(*craftNativeSession)
 	if entry == nil || entry.scope != scope {
 		return mooring.EditLeasePrincipal{}, errCraftNativeAccess

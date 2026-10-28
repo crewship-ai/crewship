@@ -9,8 +9,13 @@ import (
 // CraftNativeHTTPConfig is trusted startup policy for the separate native profile.
 // Its zero value keeps the profile and every lease mutation unavailable.
 type CraftNativeHTTPConfig struct {
-	Enabled  bool
-	Profiles map[string]CraftNativeDocumentProfile
+	Enabled       bool
+	Profiles      map[string]CraftNativeDocumentProfile
+	AgentsEnabled bool
+	AgentApply    CraftNativeAgentApply
+	AgentInspect  CraftNativeAgentInspect
+	// Package-private trusted clock injection; server configuration uses the native boot clock.
+	newOwnerClock func() (mooring.OwnerClock, error)
 }
 
 func WithCraftNativeHTTP(c CraftNativeHTTPConfig) RouterOption {
@@ -31,7 +36,11 @@ func (r *Router) registerCraftNativeRoutes() {
 			r.craftNativeStartupErr = err
 			return
 		}
-		clock, err = mooring.NewBootOwnerClock()
+		factory := r.craftNativeHTTPConfig.newOwnerClock
+		if factory == nil {
+			factory = mooring.NewBootOwnerClock
+		}
+		clock, err = factory()
 		if err != nil {
 			r.craftNativeStartupErr = err
 			return
@@ -41,6 +50,8 @@ func (r *Router) registerCraftNativeRoutes() {
 	r.craftNativeHTTP = m
 	d := newCraftNativeDocumentsHTTP(m, applications)
 	r.craftNativeDocuments = d
+	m.agents = newCraftNativeAgentManager(m, d, r.craftNativeHTTPConfig)
+	_ = m.agents.start(r.webhookHandler)
 	authed, wsCtx := r.authMw.RequireAuth, r.authMw.RequireWorkspace
 	// Availability is Page-scoped and never treats an old profile as native.
 	// openapi: responses 200,401,403
@@ -49,6 +60,12 @@ func (r *Router) registerCraftNativeRoutes() {
 	// original credentials and Page rights, including CLI read/write scopes.
 	// openapi: responses 201,400,401,403,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/sessions", roleSelf, m.sessions)
+	// openapi: responses 202,400,401,403,409,413,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/craft/tasks", roleSelf, m.agents.task)
+	// openapi: responses 200,401,403,404,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/craft/tasks/{workID}", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(m.agents.taskStatus)))))
+	// openapi: responses 200,202,400,401,403,409,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/craft/tasks/cancel", roleSelf, m.agents.cancelTask)
 	// openapi: responses 200,400,401,403,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/sessions/reauthorize", roleSelf, m.reauthorize)
 	// openapi: responses 200,401,403

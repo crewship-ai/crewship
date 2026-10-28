@@ -14,6 +14,7 @@ import (
 // Existing document formats remain unchanged when enabled.
 type CraftNativeConfig struct {
 	Enabled         bool                                  `yaml:"enabled"`
+	AgentsEnabled   bool                                  `yaml:"agents_enabled"`
 	Profiles        map[string]CraftNativeDocumentProfile `yaml:"profiles"`
 	EditorBundleDir string                                `yaml:"editor_bundle_dir"`
 }
@@ -80,6 +81,9 @@ func (c CraftNativeConfig) ResolveEditorBundles(g GridCraftConfig, legacyEnabled
 // Only operator startup environment may choose these release bindings. Presence,
 // including an empty value, overrides YAML; qualification remains fail-closed.
 func applyCraftNativeEnv(c *CraftNativeConfig) {
+	if value, ok := os.LookupEnv("CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED"); ok {
+		c.AgentsEnabled = value == "true" || value == "1"
+	}
 	if value, ok := os.LookupEnv("CREWSHIP_CRAFT_NATIVE_EDITOR_BUNDLE_DIR"); ok {
 		c.EditorBundleDir = value
 	}

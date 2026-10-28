@@ -362,6 +362,8 @@ POST /api/v1/pages/{slug}/craft/lease/renew roleSelf
 POST /api/v1/pages/{slug}/craft/lease/request-handoff roleSelf
 POST /api/v1/pages/{slug}/craft/sessions roleSelf
 POST /api/v1/pages/{slug}/craft/sessions/reauthorize roleSelf
+POST /api/v1/pages/{slug}/craft/tasks roleSelf
+POST /api/v1/pages/{slug}/craft/tasks/cancel roleSelf
 POST /api/v1/pages/{slug}/document/initialize roleInline
 POST /api/v1/pages/{slug}/document/patch roleInline
 POST /api/v1/pages/{slug}/document/restore roleInline
