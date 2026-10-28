@@ -6922,6 +6922,9 @@
           "enabled": {
             "type": "boolean"
           },
+          "gridcraft_native": {
+            "type": "boolean"
+          },
           "wordcraft_native": {
             "type": "boolean"
           },
@@ -6932,7 +6935,8 @@
         },
         "required": [
           "enabled",
-          "wordcraft_native"
+          "wordcraft_native",
+          "gridcraft_native"
         ],
         "type": "object"
       },

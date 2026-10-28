@@ -182,17 +182,30 @@ Whole-document routes require an already explicit native Page and a trusted
 qualified profile; only the explicit owner-only native initializer may create
 that profile on an existing empty Page. Page creation, full editor mounting,
 proposals and agent execution,
-one-hour browser acceptance and 2,000 changing saves remain separate work.
+one-hour browser acceptance and 2,000 changing saves are separate integration
+capabilities; coverage of one does not establish the others.
 
-The qualified native Word profile additionally supports New Doc: it uses that
-initializer for a fresh personal Word Page and opens the full editor after
-releasing creation custody. This Word creation flow does not qualify native
-Sheet creation or the separate acceptance work above.
+New Doc offers Word and Sheet only when their independent `wordcraft_native` and
+`gridcraft_native` status capabilities are literal true. These capabilities
+advertise live, qualified profiles without enabling the older Docs engine.
+The owner-only native initializer receives the selected original engine's
+canonical blank bytes for a fresh Page. Creation releases only its exact lease
+generation; an ambiguous release can reopen the confirmed document with fresh
+read-only admission, while an ambiguous initialize is never repeated. Existing
+native Pages retain their application descriptor when opened from the Pages list.
 
 The native blank Word asset is serialized by the original engine separately from
-the older checkpoint blank. To qualify it against a real binary, set
-`CRAFT_QUALIFICATION_ENGINE` and `CRAFT_QUALIFICATION_SHA256`, then run
+the older checkpoint blank. For explicit qualification, set
+`CRAFT_QUALIFICATION_ENGINE` and `CRAFT_QUALIFICATION_SHA256` to the original
+pinned Word executable and hash, then run
 `crewship-heavy go test -tags craft_native_engine_qualification ./internal/mooring -run ^TestNativeCLIValidatorCanonicalWordCreation$`.
-These are qualification-only inputs, not server configuration. The explicit run
-must execute and pass; absent inputs fail it. Ordinary unit builds exclude it.
-It also verifies that the old lossy float promotion is still rejected.
+The run must execute and pass, including refusal of the old lossy float promotion.
+
+The canonical Sheet asset is the qualified GridCraft CLI's native output, used
+without model conversion. Set the same two qualification inputs to the original
+pinned Grid executable and hash, then run it separately:
+`crewship-heavy go test -tags craft_native_engine_qualification ./internal/mooring -run ^TestNativeCLIValidatorCanonicalSheetCreation$`.
+It must accept the actual creation bytes and reject an authored extension that
+the engine would discard. Both are qualification-only inputs, not server
+configuration. These explicit runs fail when inputs are absent; ordinary unit
+builds exclude them. Default CI is not evidence that either engine executed.

@@ -35,7 +35,7 @@ func documentSchemaComponents() map[string]any {
 		"DocumentCheckpointList":      history,
 		"DocumentCheckpoint":          selected,
 		"DocumentChatResults":         obj(map[string]any{"results": map[string]any{"type": "array", "maxItems": 20, "items": result}}, "results"),
-		"DocumentAvailability":        obj(map[string]any{"enabled": boolean(), "wordcraft_native": boolean(), "wordcraft_sdk_prefix": map[string]any{"type": "string", "pattern": "^/mooring-sdk/generated/[0-9a-f]{64}$"}}, "enabled", "wordcraft_native"),
+		"DocumentAvailability":        obj(map[string]any{"enabled": boolean(), "wordcraft_native": boolean(), "gridcraft_native": boolean(), "wordcraft_sdk_prefix": map[string]any{"type": "string", "pattern": "^/mooring-sdk/generated/[0-9a-f]{64}$"}}, "enabled", "wordcraft_native", "gridcraft_native"),
 		"DocumentInitializationState": obj(map[string]any{"schema": integer(), "rev": integer(), "epoch": integer(), "generation": integer(), "incarnation": str(), "snapshot": str(), "snapshotRev": integer(), "updates": arr(str()), "blocks": arr(block)}, "schema", "rev", "epoch", "generation", "incarnation", "snapshot", "snapshotRev", "updates", "blocks"),
 		"DocumentInitializeReceipt":   obj(map[string]any{"id": str(), "rev": integer(), "epoch": integer(), "actor": str(), "kind": str(), "found": boolean(), "duplicate": boolean()}, "id", "rev", "epoch", "actor", "kind", "found", "duplicate"),
 		"DocumentNode":                node, "DocumentState": state, "DocumentReceipt": receipt,
