@@ -22,14 +22,19 @@ type nativeAgentStatusWriter struct {
 }
 
 func (w *nativeAgentStatusWriter) WriteHeader(status int) {
-	if w.status == 0 {
-		w.status = status
+	if w.status != 0 {
+		return
 	}
+	w.ResponseWriter.Header().Set("Content-Type", "application/json")
+	w.ResponseWriter.Header().Set("X-Content-Type-Options", "nosniff")
+	w.status = status
 	w.ResponseWriter.WriteHeader(status)
 }
 func (w *nativeAgentStatusWriter) Write(raw []byte) (int, error) {
+	w.ResponseWriter.Header().Set("Content-Type", "application/json")
+	w.ResponseWriter.Header().Set("X-Content-Type-Options", "nosniff")
 	if w.status == 0 {
-		w.status = 200
+		w.WriteHeader(http.StatusOK)
 	}
 	return w.ResponseWriter.Write(raw)
 }
