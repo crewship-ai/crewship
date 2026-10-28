@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { toPageView, type PageView, type WirePage } from "@/hooks/use-pages"
 
-const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error: null as string | null, refresh: vi.fn(), projectsOn: true, item: null as string | null, select: vi.fn(), folders: [] as { id: string; slug: string; name: string; pageCount: number }[] }))
+const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error: null as string | null, refresh: vi.fn(), projectsOn: true, item: null as string | null, select: vi.fn(), folders: [] as { id: string; slug: string; name: string; pageCount: number }[], reads: [] as { target: { pageId: string } | null; enabled: boolean; chatId: string }[] }))
 vi.mock("@/hooks/use-pages", async importOriginal => ({
   ...(await importOriginal<typeof import("@/hooks/use-pages")>()),
   usePages: () => ({ pages: state.pages, loading: state.loading, error: state.error, refresh: state.refresh }),
@@ -13,6 +13,16 @@ vi.mock("@/components/features/chat/artifact-context/projects/artifact-viewer-co
     <div data-testid="viewer-provider" data-slug={target?.slug} data-tab={target?.tab}>{children}</div>,
 }))
 vi.mock("@/components/features/chat/artifact-context/viewer/artifact-viewer-panel", () => ({ ArtifactViewerPanel: () => <div data-testid="viewer-panel" /> }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "u1" } } }) }))
+vi.mock("@/hooks/use-document-viewer-read", () => ({
+  useDocumentViewerRead: (input: { target: { pageId: string } | null; enabled: boolean; chatId: string }) => {
+    state.reads.push(input)
+    return { scopeKey: "k", refresh: vi.fn(), read: input.enabled ? { status: "ready", title: "Partner brief", content: { schema: 3, rev: 2, content: { type: "doc" } } } : { status: "unavailable" } }
+  },
+}))
+vi.mock("@/components/features/pages/document-readonly/document-readonly", () => ({
+  DocumentReadonly: ({ accessibleLabel }: { accessibleLabel: string }) => <div role="region" aria-label={accessibleLabel}>document body</div>,
+}))
 vi.mock("@/hooks/use-page-folders", () => ({ usePageFolders: () => ({ folders: state.folders, loading: false, error: null, supported: true, refresh: vi.fn(), reread: vi.fn() }) }))
 vi.mock("@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities", () => ({
   useArtifactCapabilities: () => ({ projects: true, dashboards: false, documents: true, sheets: false, pages: true }),
@@ -38,7 +48,7 @@ beforeEach(() => {
     wire({ slug: "weekly", id: "page-weekly", name: "Weekly report", panel_count: 2 } as Partial<WirePage>),
     wire({ slug: "calc", id: "page-calc", name: "Calculator", has_application: true } as Partial<WirePage>),
   ]
-  state.folders = []; state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.select.mockReset(); state.refresh.mockReset()
+  state.folders = []; state.reads = []; state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.select.mockReset(); state.refresh.mockReset()
 })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
@@ -130,6 +140,20 @@ it("a native Word detail shows its edit lock by Page reference", () => {
   state.item = "brief"
   renderLibrary()
   expect(screen.getByTestId("lock-bar").dataset.slug).toBe("@page-brief")
+})
+
+it("a Word detail shows the saved document read-only, never an editor", () => {
+  state.item = "brief"
+  renderLibrary()
+  expect(screen.getByRole("region", { name: "Partner brief, saved version" })).toBeTruthy()
+  expect(state.reads.at(-1)).toMatchObject({ enabled: true, target: { pageId: "page-brief", type: "document", mode: "latest", workspaceId: "ws1" } })
+})
+
+it("other kinds do not read a document", () => {
+  state.item = "model"
+  renderLibrary()
+  expect(screen.queryByRole("region", { name: /saved version/ })).toBeNull()
+  expect(state.reads.every(read => !read.enabled)).toBe(true)
 })
 
 it("a panel Page opens on its page", () => {
