@@ -6934,7 +6934,9 @@
           }
         },
         "required": [
-          "enabled"
+          "enabled",
+          "wordcraft_native",
+          "gridcraft_native"
         ],
         "type": "object"
       },
