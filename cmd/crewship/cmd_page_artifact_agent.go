@@ -55,10 +55,23 @@ func artifactCLIRequestWithTransport(cmd *cobra.Command, method, path string, bo
 		if e != nil {
 			return e
 		}
-		decoder := json.NewDecoder(bytes.NewReader(raw))
-		decoder.UseNumber()
-		if decoder.Decode(&arguments) != nil {
-			return errors.New("artifact request object required")
+		if strings.Contains(parsed.Path, "/artifact/data") {
+			// Data values must remain opaque JSON: decoding strings into any
+			// and re-encoding expands literal U+2028/U+2029 even with HTML
+			// escaping disabled, rejecting otherwise valid byte budgets.
+			var fields map[string]json.RawMessage
+			if artifacts.DecodeDataJSON(raw, &fields, "base_version", "documents") != nil {
+				return errors.New("dashboard data request object required")
+			}
+			for key, value := range fields {
+				arguments[key] = value
+			}
+		} else {
+			decoder := json.NewDecoder(bytes.NewReader(raw))
+			decoder.UseNumber()
+			if decoder.Decode(&arguments) != nil {
+				return errors.New("artifact request object required")
+			}
 		}
 	}
 	operation := ""

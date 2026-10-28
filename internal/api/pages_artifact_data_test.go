@@ -101,9 +101,11 @@ func TestDashboardDataMaximumRowsAndValueBytesFitResponse(t *testing.T) {
 		t.Fatalf("maximum rows truncated: status%d rows%d", w.Code, len(body.Documents))
 	}
 	mustExec(t, h.db, `DELETE FROM artifact_data_documents WHERE page_id=?`, page)
-	seed(32, `{"x":"`+strings.Repeat("<", artifacts.MaxDataDocumentBytes-8)+`"}`)
+	value := strings.Repeat(string([]rune{'<', 0x2028, 0x2029}), (artifacts.MaxDataDocumentBytes-8)/7)
+	value += strings.Repeat("<", artifacts.MaxDataDocumentBytes-8-len(value))
+	seed(32, `{"x":"`+value+`"}`)
 	w = dashboardRequest(t, h, ws, owner, "GET", "sales", "?version=1", "")
-	if w.Code != 200 || w.Body.Len() > artifacts.MaxDataResponseBytes || strings.Contains(w.Body.String(), "private-agent") || strings.Contains(w.Body.String(), `\u003c`) {
+	if w.Code != 200 || w.Body.Len() > artifacts.MaxDataResponseBytes || strings.Contains(w.Body.String(), "private-agent") || strings.Contains(w.Body.String(), `\u003c`) || !strings.Contains(w.Body.String(), string(rune(0x2028))) {
 		t.Fatalf("valid8MiB dataset response: status%d bytes%d", w.Code, w.Body.Len())
 	}
 }

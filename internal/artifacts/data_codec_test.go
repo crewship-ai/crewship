@@ -1,6 +1,7 @@
 package artifacts
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -26,5 +27,22 @@ func TestDataBatchCodecRejectsAmbiguousCountersAndPreservesValues(t *testing.T) 
 		if _, err := DecodeDataBatch([]byte(raw)); err == nil {
 			t.Errorf("accepted ambiguous input: %s", raw)
 		}
+	}
+}
+
+func TestDataJSONPreservesLiteralUnicodeBudget(t *testing.T) {
+	value := json.RawMessage(`{"n":9007199254740993,"huge":1e400,"label":"` + strings.Repeat(string([]rune{0x2028, 0x2029}), 25000) + `"}`)
+	batch := DataBatch{BaseVersion: 1, Documents: []DataWrite{{ID: "row", Value: value}}}
+	raw, err := MarshalDataJSON(batch)
+	if err != nil || len(raw) > len(value)+1024 || !strings.Contains(string(raw), "9007199254740993") || !strings.Contains(string(raw), "1e400") {
+		t.Fatal("typed encoding expanded")
+	}
+	decoded, err := DecodeDataBatch(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := MarshalDataJSON(decoded)
+	if err != nil || len(second) > len(raw)+1024 || !strings.Contains(string(second), "9007199254740993") || !strings.Contains(string(second), "1e400") {
+		t.Fatal("decoded encoding expanded")
 	}
 }
