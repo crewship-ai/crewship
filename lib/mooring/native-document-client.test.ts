@@ -34,7 +34,7 @@ describe("native mounted lifecycle",()=>{
  it("captures scope before asynchronous admission",async()=>{
   let finish!:(r:Response)=>void
   const options={workspaceId:"ws",pageId:"page",fetch:vi.fn().mockImplementationOnce(()=>new Promise<Response>(resolve=>finish=resolve)).mockResolvedValue(new Response('{}'))}
-  const client=createNativeDocumentClient(options);const opened=client.open(signal());options.pageId="other";options.workspaceId="other";finish(admission());await opened
+  const client=createNativeDocumentClient(options);const opened=client.open(signal());options.pageId="other";options.workspaceId="other";await vi.waitFor(()=>expect(finish).toBeTypeOf("function"));finish(admission());await opened
   await expect(client.save(request,signal())).resolves.toEqual({})
  })
  it("does not deliver an in-flight response after closing",async()=>{
@@ -135,5 +135,5 @@ it('does not refresh and automatically replay a native mutation through the defa
  const origin=await listening(server),realFetch=globalThis.fetch.bind(globalThis)
  vi.stubGlobal('fetch',((input:RequestInfo|URL,init?:RequestInit)=>realFetch(new URL(String(input),origin),init)) satisfies typeof fetch)
  const client=createNativeDocumentClient({workspaceId:'ws',pageId:'page'})
- try{await client.open(signal());await expect(client.save(request,signal())).rejects.toBeInstanceOf(NativeSaveError);expect(mutations).toBe(1);expect(refreshes).toBe(0)}finally{client.close();vi.unstubAllGlobals();await stopped(server)}
+ try{await client.open(signal());const initialRefreshes=refreshes;expect(initialRefreshes).toBe(1);await expect(client.save(request,signal())).rejects.toBeInstanceOf(NativeSaveError);expect(mutations).toBe(1);expect(refreshes).toBe(initialRefreshes)}finally{client.close();vi.unstubAllGlobals();await stopped(server)}
 })

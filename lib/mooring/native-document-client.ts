@@ -1,8 +1,13 @@
-import { apiFetch } from "../api-fetch"
+import { apiFetch,tryRefresh,type RefreshResult } from "../api-fetch"
+import {getAuthMode} from "../server-base"
 import {validNativeDraft,validNativeVersion} from "./native-draft"
 import {NativeSaveError,type NativeSaveRequest} from "./single-editor-save"
 
-export interface NativeDocumentClientOptions { workspaceId: string; pageId: string; fetch?: typeof fetch }
+export interface NativeDocumentClientOptions {
+ workspaceId:string;pageId:string;fetch?:typeof fetch
+ /** Transport fixtures supply their own credential rotation; production uses tryRefresh. */
+ refresh?:()=>Promise<RefreshResult>;bearer?:()=>boolean
+}
 export interface NativeDocumentSnapshot {
  version:string;bytes:Uint8Array;applicationId:"wordcraft"|"gridcraft";enginePin:string;editorBundle:string;editorURL:string
  quota:{usedBytes:string;limitBytes:string;warning:boolean;retention:string}
@@ -34,7 +39,28 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
  const base=`/api/v1/pages/${encodeURIComponent("@"+options.pageId)}/craft/`
  const query=new URLSearchParams({workspace_id:options.workspaceId}).toString()
  let active=true,token:string|undefined,sessionId:string|undefined,applicationId:string|undefined
- let opening:Promise<{sessionId:string;applicationId:string}>|undefined
+ let opening:Promise<{sessionId:string;applicationId:string}>|undefined,reauthorizing:Promise<boolean>|undefined
+ const refresh=options.refresh??(options.fetch?undefined:tryRefresh),bearer=options.bearer??(()=>getAuthMode()==='bearer')
+ let cookieRefreshedAt:number|undefined,rotation=0,eventRunning=false,eventAbort:AbortController|undefined
+ const rotationReason=new Error('native_credential_rotated')
+ async function freshCookie(signal:AbortSignal){
+  if(!refresh||bearer())return
+  const now=Date.now()
+  // Refresh well before the 15-minute access horizon, including the FIRST
+  // admission. A clock correction must not postpone the next refresh forever.
+  if(cookieRefreshedAt!==undefined&&now>=cookieRefreshedAt&&now-cookieRefreshedAt<5*60*1000)return
+  const result=await refresh()
+  if(!active||signal.aborted)throw new Error('native_client_unavailable')
+  if(result!=='ok')throw new Error('native_auth_refresh_unconfirmed')
+  cookieRefreshedAt=Date.now()
+ }
+ async function reconnectPause(signal:AbortSignal){
+  await new Promise<void>((resolve,reject)=>{
+   const done=()=>{signal.removeEventListener('abort',abort);resolve()},timer=setTimeout(done,100)
+   const abort=()=>{clearTimeout(timer);signal.removeEventListener('abort',abort);reject(signal.reason??new Error('native_stream_aborted'))}
+   signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort()
+  })
+ }
  const ready=()=>{if(!active||!token||!sessionId||!applicationId)throw new Error("native_client_unavailable")}
  async function mutate(operation:"save"|"reconcile",request:NativeSaveRequest,signal:AbortSignal):Promise<unknown>{
   ready()
@@ -53,6 +79,8 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
   open(signal){
    if(!active)return Promise.reject(new Error("native_client_unavailable"))
    if(!opening)opening=(async()=>{
+    await freshCookie(signal)
+    if(!active||signal.aborted)throw new Error('native_client_unavailable')
     const response=await send(`${base}sessions?${query}`,{method:"POST",cache:"no-store",signal,headers:{"Content-Type":"application/json"},body:"{}"})
     if(!active||!response.ok)throw new Error("native_session_unavailable")
     const value:unknown=await response.json()
@@ -80,47 +108,83 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    const value:unknown=await response.json();ready();return value
   },
   async reauthorize(signal){
-   ready()
+   ready();if(reauthorizing)return reauthorizing
+   const pending=(async()=>{
+   ready();await freshCookie(signal);ready()
    const response=await send(`${base}sessions/reauthorize?${query}`,{method:"POST",cache:"no-store",signal,headers:{"Content-Type":"application/json","X-Craft-Session":token!},body:"{}"})
    ready();if(!response.ok)throw new Error("native_session_unavailable")
    const value:unknown=await response.json();ready()
    if(!value||typeof value!=="object"||typeof (value as Record<string,unknown>).renewed!=="boolean")throw new Error("invalid_native_session")
-   return (value as {renewed:boolean}).renewed
+   const renewed=(value as {renewed:boolean}).renewed
+   if(renewed){
+    // The HTTP middleware correctly retains the old request's JWT horizon.
+    // Replace ONLY that GET after fresh same-identity admission renewal.
+    rotation++;eventAbort?.abort(rotationReason)
+   }
+   return renewed
+
+   })()
+   reauthorizing=pending
+   try{return await pending}finally{if(reauthorizing===pending)reauthorizing=undefined}
   },
   async events(signal,onEvent){
    ready()
-   const response=await send(`${base}events?${query}`,{method:"GET",cache:"no-store",signal,headers:{Accept:"text/event-stream","X-Craft-Session":token!}})
-   ready()
-   if(!response.ok||!response.headers.get("Content-Type")?.startsWith("text/event-stream")||!response.body)throw new Error("native_stream_unavailable")
-   const reader=response.body.getReader(),decoder=new TextDecoder("utf-8",{fatal:true});let buffer="",retired=false
-   try {
-    while(true){
-     const {done,value}=await reader.read();ready();if(signal.aborted)throw new Error("native_stream_aborted")
-     if(value&&value.byteLength>65536)throw new Error("invalid_native_stream")
-     buffer+=(done?decoder.decode():decoder.decode(value,{stream:true}));buffer=buffer.replace(/\r\n/g,"\n")
-     if(buffer.length>65536)throw new Error("invalid_native_stream")
-     let boundary:number
-     while((boundary=buffer.indexOf("\n\n"))>=0){
-      const block=buffer.slice(0,boundary);buffer=buffer.slice(boundary+2)
-      if(!block||block.startsWith(":"))continue
-      let event="",data=""
-      for(const line of block.split("\n")){
-       if(line.startsWith(":"))continue
-       if(line.startsWith("event: ")&&!event)event=line.slice(7)
-       else if(line.startsWith("data: ")&&!data)data=line.slice(6)
-       else throw new Error("invalid_native_stream")
+   if(eventRunning)throw new Error('native_stream_already_active')
+   eventRunning=true
+   let reconnecting=false,retries=0
+   try{
+    while(active&&!signal.aborted){
+     const controller=new AbortController(),startedRotation=rotation
+     eventAbort=controller
+     const abort=()=>controller.abort(signal.reason)
+     signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort()
+     try{
+      const response=await send(`${base}events?${query}`,{method:'GET',cache:'no-store',signal:controller.signal,headers:{Accept:'text/event-stream','X-Craft-Session':token!}})
+      ready();if(controller.signal.aborted)throw controller.signal.reason
+      // Closing the old fetch can precede the server's live-stream cleanup.
+      // Only a planned credential rotation permits bounded duplicate-GET retries.
+      if(response.status===409&&reconnecting&&retries<8){
+       retries++;await response.body?.cancel().catch(()=>{});await reconnectPause(controller.signal);continue
       }
-      if(event!=="lease"&&event!=="session_retired")throw new Error("invalid_native_stream")
-      const v:unknown=JSON.parse(data)
-      if(!v||typeof v!=="object"||Array.isArray(v))throw new Error("invalid_native_stream")
-      const record=v as Record<string,unknown>
-      if(event==="session_retired"&&(record.delivery!=="stopped"||!['purge','retain'].includes(String(record.draft))||typeof record.reason!=="string"))throw new Error("invalid_native_stream")
-      ready();onEvent(event,record)
-      if(event==="session_retired"){retired=true;return}
-     }
-     if(done){if(buffer.trim())throw new Error("invalid_native_stream");if(!retired)throw new Error("native_stream_disconnected");return}
+      if(!response.ok||!response.headers.get('Content-Type')?.startsWith('text/event-stream')||!response.body)throw new Error('native_stream_unavailable')
+      retries=0;reconnecting=false
+      const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{fatal:true});let buffer=''
+      try{
+       while(true){
+        const {done,value}=await reader.read();ready();if(controller.signal.aborted)throw controller.signal.reason
+        if(value&&value.byteLength>65536)throw new Error('invalid_native_stream')
+        buffer+=(done?decoder.decode():decoder.decode(value,{stream:true}));buffer=buffer.replace(/\r\n/g,'\n')
+        if(buffer.length>65536)throw new Error('invalid_native_stream')
+        let boundary:number
+        while((boundary=buffer.indexOf('\n\n'))>=0){
+         const block=buffer.slice(0,boundary);buffer=buffer.slice(boundary+2)
+         if(!block||block.startsWith(':'))continue
+         let event='',data=''
+         for(const line of block.split('\n')){
+          if(line.startsWith(':'))continue
+          if(line.startsWith('event: ')&&!event)event=line.slice(7)
+          else if(line.startsWith('data: ')&&!data)data=line.slice(6)
+          else throw new Error('invalid_native_stream')
+         }
+         if(event!=='lease'&&event!=='session_retired')throw new Error('invalid_native_stream')
+         const v:unknown=JSON.parse(data)
+         if(!v||typeof v!=='object'||Array.isArray(v))throw new Error('invalid_native_stream')
+         const record=v as Record<string,unknown>
+         if(event==='session_retired'&&(record.delivery!=='stopped'||!['purge','retain'].includes(String(record.draft))||typeof record.reason!=='string'))throw new Error('invalid_native_stream')
+         ready();onEvent(event,record)
+         if(event==='session_retired')return
+        }
+        if(done){if(buffer.trim())throw new Error('invalid_native_stream');throw new Error('native_stream_disconnected')}
+       }
+      }finally{await reader.cancel().catch(()=>{});reader.releaseLock()}
+     }catch(error){
+      const aborted=error===rotationReason||typeof error==='object'&&error!==null&&'name'in error&&error.name==='AbortError'
+      if(active&&!signal.aborted&&controller.signal.reason===rotationReason&&rotation!==startedRotation&&aborted){reconnecting=true;retries=0;continue}
+      throw error
+     }finally{signal.removeEventListener('abort',abort);if(eventAbort===controller)eventAbort=undefined}
     }
-   }finally{await reader.cancel().catch(()=>{});reader.releaseLock()}
+    ready();throw new Error('native_stream_aborted')
+   }finally{eventRunning=false}
   },
   async read(signal){
    ready()
@@ -137,6 +201,6 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
   },
   save:(request,signal)=>mutate("save",request,signal),
   reconcile:(request,signal)=>mutate("reconcile",request,signal),
-  close(){active=false;token=undefined;sessionId=undefined;applicationId=undefined},
+  close(){active=false;eventAbort?.abort(new Error('native_client_unavailable'));token=undefined;sessionId=undefined;applicationId=undefined},
  }
 }
