@@ -36,6 +36,8 @@ func designFixture(t *testing.T) (*PageHandler, string, string, func(string, str
 			h.CreateDesignComment(w, r)
 		case "share":
 			h.ShareDesign(w, r)
+		case "agent":
+			h.ConnectDesignAgent(w, r)
 		case "get":
 			h.GetDesign(w, r)
 		case "apply":

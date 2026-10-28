@@ -285,7 +285,7 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 		designError(w, err)
 		return
 	}
-	writeJSON(w, 201, map[string]any{"page_id": k.PageID, "slug": p.Slug, "version": receipt.Version})
+	writeJSON(w, 201, designCreateResponse{PageID: k.PageID, Slug: p.Slug, Version: receipt.Version})
 }
 func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 	k, ok := h.designKey(w, r)
@@ -301,7 +301,7 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 	canComment := false
 	actor := ""
 	displayName := ""
-	var origin any
+	var origin *designOriginResponse
 	var selected int64
 	if value := r.URL.Query().Get("version"); value != "" {
 		var e error
@@ -352,7 +352,7 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 			var chat, agent sql.NullString
 			e = tx.QueryRowContext(ctx, `SELECT chat_id,agent_id FROM artifact_project_origins WHERE workspace_id=? AND page_id=? AND human_user_id=?`, k.WorkspaceID, k.PageID, a).Scan(&chat, &agent)
 			if e == nil && chat.Valid && agent.Valid {
-				origin = map[string]string{"chat_id": chat.String, "agent_id": agent.String}
+				origin = &designOriginResponse{ChatID: chat.String, AgentID: agent.String}
 			}
 		}
 		var err error
@@ -363,7 +363,7 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 		designError(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"page_id": k.PageID, "origin": origin, "can_comment": canComment, "nodes": result.Nodes, "order": result.Order, "can_edit": canEdit, "version": version, "latest_version": version, "shared_version": shared, "actor": map[string]string{"id": actor, "name": displayName}})
+	writeJSON(w, 200, designSnapshotResponse{PageID: k.PageID, Origin: origin, CanComment: canComment, Nodes: result.Nodes, Order: result.Order, CanEdit: canEdit, Version: version, LatestVersion: version, SharedVersion: shared, Actor: designActorResponse{ID: actor, Name: displayName}})
 }
 func (h *PageHandler) designApplyLocked(r *http.Request, k artifacts.VersionKey, input design.Request) (design.Result, error) {
 	var result design.Result
@@ -413,7 +413,7 @@ func (h *PageHandler) ApplyDesign(w http.ResponseWriter, r *http.Request) {
 		designError(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"nodes": result.Nodes, "order": result.Order, "version": receipt.Version})
+	writeJSON(w, 200, designOperationsResponse{Nodes: result.Nodes, Order: result.Order, Version: receipt.Version})
 }
 func (h *PageHandler) designSnapshotLocked(r *http.Request, k artifacts.VersionKey, message string) (artifacts.VersionReceipt, error) {
 	var state []byte
@@ -468,7 +468,7 @@ func (h *PageHandler) DesignVersions(w http.ResponseWriter, r *http.Request) {
 		designError(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"versions": view.Versions, "latest_version": view.State.LatestVersion, "shared_version": view.State.SharedVersion})
+	writeJSON(w, 200, designVersionListResponse{Versions: view.Versions, LatestVersion: view.State.LatestVersion, SharedVersion: view.State.SharedVersion})
 }
 
 func (h *PageHandler) RestoreDesign(w http.ResponseWriter, r *http.Request) {

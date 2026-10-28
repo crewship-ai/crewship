@@ -12,6 +12,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/appengine"
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/costvis"
 	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
@@ -51,6 +52,17 @@ var responseShapeContracts = []struct {
 	value any
 }{
 
+	{name: "DesignCreateResponse", pointer: "/components/schemas/DesignCreateResponse", value: designCreateResponse{}},
+	{name: "DesignSnapshot", pointer: "/components/schemas/DesignSnapshot", value: designSnapshotResponse{}},
+	{name: "DesignActor", pointer: "/components/schemas/DesignActor", value: designActorResponse{}},
+	{name: "DesignOrigin", pointer: "/components/schemas/ArtifactProjectOrigin", value: designOriginResponse{}},
+	{name: "DesignOperationsResponse", pointer: "/components/schemas/DesignOperationsResponse", value: designOperationsResponse{}},
+	{name: "DesignVersionList", pointer: "/components/schemas/DesignVersionList", value: designVersionListResponse{}},
+	{name: "DesignVersion", pointer: "/components/schemas/DesignVersion", value: artifacts.VersionInfo{}},
+	{name: "DesignVersionReceipt", pointer: "/components/schemas/DesignVersionReceipt", value: artifacts.VersionReceipt{}},
+	{name: "DesignCommentsResponse", pointer: "/components/schemas/DesignCommentsResponse", value: designCommentsResponse{}},
+	{name: "DesignShareResponse", pointer: "/components/schemas/DesignShareResponse", value: designShareResponse{}},
+	{name: "DesignAgentResponse", pointer: "/components/schemas/DesignAgentResponse", value: designAgentResponse{}},
 	{name: "NativeCraftAgentTaskReceipt", pointer: "/components/schemas/NativeCraftAgentTaskReceipt", value: craftNativeAgentTaskReceipt{}},
 	{name: "NativeCraftAgentStopReceipt", pointer: "/components/schemas/NativeCraftAgentStopReceipt", value: craftNativeAgentStopReceipt{}},
 	{name: "NativeCraftAgentTaskStatus", pointer: "/components/schemas/NativeCraftAgentTaskStatus", value: craftNativeAgentTaskStatus{}},

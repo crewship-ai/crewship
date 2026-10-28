@@ -18,7 +18,8 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
  const [version, setVersion] = useState(initialVersion)
  const design = useDesign(workspaceId, slug, version)
  const session = useSessionSafe()
- const commentKey = session?.data?.user?.id ? `design-comment:${session.data.user.id}:${workspaceId}:${slug}` : null
+ const commentPageId = design.query.data?.page_id
+ const commentKey = session?.data?.user?.id && commentPageId ? `design-comment:v2:${session.data.user.id}:${workspaceId}:${commentPageId}` : null
  const [draft, setDraft] = useState("")
  const [delivery, setDelivery] = useState<Record<string, string>>({})
  const [commentError, setCommentError] = useState("")
@@ -123,7 +124,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
    <aside className="flex max-h-40 shrink-0 flex-col overflow-auto border-b md:max-h-none md:w-48 md:border-b-0 md:border-r" aria-label="Layers">
     <div className="flex items-center gap-2 px-3 py-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Screens <span className="ml-auto">{frames.length}</span></div>
     {frames.length === 0 && <p className="px-3 pb-3 text-xs text-muted-foreground">Add a screen to start designing.</p>}
-    {design.nodes.map(node => <button key={node.id} onClick={() => setSelectedId(node.id)} className={`flex min-h-9 items-center gap-2 px-3 text-left text-xs coarse:min-h-12 ${selectedId === node.id ? "bg-accent text-accent-foreground" : "hover:bg-muted"} ${node.parentId ? "pl-7" : "font-medium"}`}>
+    {design.nodes.map(node => <button key={node.id} onClick={() => setSelectedId(node.id)} className={`flex min-h-9 items-center gap-2 px-3 text-left text-xs coarse:min-h-[44px] ${selectedId === node.id ? "bg-accent text-accent-foreground" : "hover:bg-muted"} ${node.parentId ? "pl-7" : "font-medium"}`}>
      {node.type === "frame" ? <Frame className="size-3.5 shrink-0" /> : node.type === "text" ? <Type className="size-3.5 shrink-0" /> : <Square className="size-3.5 shrink-0" />}<span className="truncate">{node.name || node.text || node.type}</span>
     </button>)}
    </aside>
@@ -163,10 +164,10 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
      {selected ? <div className="space-y-3">
       <Field label="Name"><Input aria-label="Layer name" value={selected.name ?? ""} disabled={!design.editable} onChange={event => patch({ name: event.target.value })} /></Field>
       <div className="grid grid-cols-2 gap-2">{(["x", "y", "width", "height"] as const).map(field => <Field key={field} label={field === "width" ? "W" : field === "height" ? "H" : field.toUpperCase()}><Input type="number" aria-label={field} value={selected[field] ?? 0} disabled={!design.editable} min={field === "width" || field === "height" ? 1 : undefined} onChange={event => { const value = Number(event.target.value); if (Number.isFinite(value) && Math.abs(value) <= 1000000 && (!(field === "width" || field === "height") || value >= 1)) patch({ [field]: value }) }} /></Field>)}</div>
-      <Field label={selected.type === "text" ? "Text color" : "Fill"}><div className="flex gap-2"><input aria-label="Fill color" type="color" className="h-9 w-10 rounded border bg-background p-1 coarse:h-12" value={/^#[0-9a-f]{6}$/i.test(selected.fill) ? selected.fill : "#ffffff"} disabled={!design.editable} onChange={event => patch({ fill: event.target.value })} /><Input aria-label="Fill value" value={selected.fill ?? ""} disabled={!design.editable} onChange={event => patch({ fill: event.target.value })} /></div></Field>
+      <Field label={selected.type === "text" ? "Text color" : "Fill"}><div className="flex gap-2"><input aria-label="Fill color" type="color" className="h-9 w-10 rounded border bg-background p-1 coarse:h-[44px]" value={/^#[0-9a-f]{6}$/i.test(selected.fill) ? selected.fill : "#ffffff"} disabled={!design.editable} onChange={event => patch({ fill: event.target.value })} /><Input aria-label="Fill value" value={selected.fill ?? ""} disabled={!design.editable} onChange={event => patch({ fill: event.target.value })} /></div></Field>
       {selected.type === "text" && <Field label="Text"><textarea aria-label="Text content" maxLength={100000} className="min-h-24 w-full rounded border bg-background p-2 text-sm" value={selected.text ?? ""} disabled={!design.editable} onChange={event => patch({ text: event.target.value })} /></Field>}
       {selected.type === "image" && <Field label="Image URL"><Input aria-label="Image URL" placeholder="https://…" value={selected.src ?? ""} disabled={!design.editable} onChange={event => { setImageURL(event.target.value); patch({ src: event.target.value }) }} /><p className="mt-1 text-xs text-muted-foreground">HTTPS image or embedded PNG, JPEG, WebP, GIF.</p></Field>}
-      {selected.type !== "frame" && <Field label="Screen"><select aria-label="Parent screen" className="h-9 w-full rounded border bg-background px-2 text-sm coarse:h-12" value={selected.parentId ?? ""} disabled={!design.editable} onChange={event => patch({ parentId: event.target.value })}><option value="">On canvas</option>{frames.map(frame => <option key={frame.id} value={frame.id}>{frame.name || "Screen"}</option>)}</select></Field>}
+      {selected.type !== "frame" && <Field label="Screen"><select aria-label="Parent screen" className="h-9 w-full rounded border bg-background px-2 text-sm coarse:h-[44px]" value={selected.parentId ?? ""} disabled={!design.editable} onChange={event => patch({ parentId: event.target.value })}><option value="">On canvas</option>{frames.map(frame => <option key={frame.id} value={frame.id}>{frame.name || "Screen"}</option>)}</select></Field>}
       {design.editable && <Button variant="ghost" className="w-full text-destructive" onClick={() => { if (design.doc) removeDesignNode(design.doc, selected.id); setSelectedId(null) }}><Trash2 className="size-4" />Delete {selected.type === "frame" ? "screen and layers" : "layer"}</Button>}
      </div> : <p className="text-sm text-muted-foreground">Select a screen or layer to see its properties.{design.editable && " Add your first screen using the toolbar."}</p>}
     </>}

@@ -5,7 +5,7 @@ import { MutationCache, QueryClient, QueryClientProvider, useQueryClient } from 
 import { useSessionSafe } from "@/hooks/use-auth"
 import { usePageGrants } from "@/hooks/use-page-grants"
 import { AccessCard } from "@/components/features/pages/page-settings"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceHeader } from "@/components/layout/create-surface"
 
 interface Props { workspaceId: string; slug: string; onClose: () => void }
 
@@ -30,8 +30,10 @@ function AccessScope({ humanId, ...props }: Props & { humanId?: string }) {
 function AccessBody({ workspaceId, slug, onClose, humanId }: Props & { humanId?: string }) {
  const grants = usePageGrants(workspaceId, slug, Boolean(humanId))
  const canManage = Boolean(humanId) && !grants.loading && !grants.refusal && !grants.error
- return <Dialog open onOpenChange={open => { if (!open) onClose() }}><DialogContent className="max-h-[85dvh] overflow-auto sm:max-w-2xl">
-  <DialogHeader><DialogTitle>Design access</DialogTitle><DialogDescription>Invite people to view or edit the live canvas. Agent task permissions stay separate.</DialogDescription></DialogHeader>
+ return <CreateSurface open size="md" restoreOpenerFocus onOpenChange={open => { if (!open) onClose() }}>
+  <CreateSurfaceHeader title="Design access" description="Invite people to view or edit the live canvas. Agent task permissions stay separate." onClose={onClose} />
+  <CreateSurfaceBody>
   {!canManage ? <p role={grants.loading ? "status" : "alert"} className="text-sm">{grants.loading ? "Checking sharing permissions…" : grants.refusal ?? grants.error ?? "Sharing permissions are unavailable."}</p> : <AccessCard workspaceId={workspaceId} slug={slug} panelIDs={[]} documentContent canManage manageRefusal="Only the owner or a workspace administrator may change sharing." footer="Read follows changes live. Edit can change the canvas. Changes take effect immediately." />}
- </DialogContent></Dialog>
+  </CreateSurfaceBody>
+ </CreateSurface>
 }

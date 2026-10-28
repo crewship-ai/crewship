@@ -429,9 +429,10 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 		}
 	}
 	remapGridCraft(dump, idMap)
-	// Dataset document IDs are authored keys within a Page; preserve them and
-	// rewrite their composite anchors, which reference heads rather than pages.
-	for _, table := range []string{"artifact_data_collections", "artifact_data_documents"} {
+	// Dataset keys and live Design state belong to a Page. Rewrite their
+	// composite anchors, which reference heads rather than pages; authored node
+	// IDs and opaque Yjs bytes remain unchanged.
+	for _, table := range []string{"artifact_data_collections", "artifact_data_documents", "artifact_design_documents"} {
 		for _, row := range dump.Tables[table] {
 			for column, anchor := range map[string]string{"workspace_id": "workspaces", "page_id": "pages"} {
 				if old, ok := row[column].(string); ok {

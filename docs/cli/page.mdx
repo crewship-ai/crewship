@@ -1924,3 +1924,109 @@ crewship page artifact comment demo --version 1 --path index.html --selector '#a
 Omit `--send-to-agent` to store only the comment. Queuing a task does not confirm
 agent delivery. A protected agent invocation cannot fall back to a saved human
 profile to create the comment. `page artifact comments` remains the read command.
+
+## Design canvases (disabled by default)
+
+Design requires the server `artifacts_design` feature. Commands use current Page
+permissions. Agent runs use the original scoped MCP capability for read, apply,
+snapshot, versions and restore; human-only operations never fall back from an
+agent token to a saved human profile.
+
+### `crewship page design create <slug>`
+
+Create an empty Design Page. `--name` is the required title. Creation requires
+human authentication and Page creation permission.
+
+```bash
+crewship page design create checkout --name "Checkout"
+```
+
+### `crewship page design get <slug>`
+
+Read the live nodes and order. Optional `--version` selects a positive retained
+snapshot; zero reads the live canvas. A reader can select only its shared pin.
+
+```bash
+crewship page design get checkout --version 1
+```
+
+### `crewship page design versions <slug>`
+
+List authorized retained snapshots. Editors see history; readers see their
+shared version. This command has no additional flags.
+
+### `crewship page design apply <slug>`
+
+Apply node changes to the live Yjs document, including with no browser open.
+Required `--file` names a JSON object containing `operations` and optional
+`message`; `--file -` reads stdin. Operations are `upsert`, `delete` and `reorder`.
+Keep stable node IDs when changing existing content. The returned receipt
+acknowledges the committed retained version.
+
+```bash
+crewship page design apply checkout --file changes.json
+```
+
+### `crewship page design snapshot <slug>`
+
+Save the live document as a retained version. Optional `--message` describes the
+version. The `save` alias performs the same operation.
+
+```bash
+crewship page design snapshot checkout --message "Cart layout"
+```
+
+### `crewship page design restore <slug>`
+
+Required `--version` selects a positive retained snapshot. Restore creates a new
+version without deleting history or changing the shared pin.
+
+```bash
+crewship page design restore checkout --version 1
+```
+
+### `crewship page design share <slug>`
+
+The Page owner pins the positive retained `--version` for readers. Page grants
+remain necessary; sharing a version grants no edit permission.
+
+```bash
+crewship page design share checkout --version 2
+```
+
+### `crewship page design comments <slug>`
+
+Read authorized node-anchored comments and replies. Readers receive feedback
+for the shared pin. This command has no additional flags.
+
+### `crewship page design comment <slug>`
+
+Required `--version`, `--node` and `--text` select an exact retained version,
+stable node ID and feedback text. Optional `--quote` matches the node name or
+text. `--send-to-agent` queues a version-bound task; it does not by itself prove
+agent delivery. A changed version or element returns a conflict without retry.
+
+```bash
+crewship page design comment checkout --version 2 --node cart-title --quote "Cart" --text "Use brand colors" --send-to-agent
+```
+
+### `crewship page design agent <slug>`
+
+Required `--chat-id` connects an existing private chat owned by the same human.
+A fresh explicit message intent and original live-run mandate are still required
+before that agent can edit this Page.
+
+```bash
+crewship page design agent checkout --chat-id private-chat-id
+```
+
+### `crewship page design watch <slug>`
+
+Watch standard binary Yjs frames encoded as base64 rows. Optional `--count`
+stops after that many binary frames; zero watches until interrupted. JSON and
+NDJSON output use one row per frame; YAML uses one document per frame. This
+stream requires human authentication and the normal server-host credential guard.
+
+```bash
+crewship page design watch checkout --count 1
+```

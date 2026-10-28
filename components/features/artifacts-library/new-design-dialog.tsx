@@ -7,7 +7,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader } from "@/components/layout/create-surface"
 
 export function NewDesignDialog({ workspaceId, onCreated }: { workspaceId: string; onCreated: (slug: string) => void }) {
   const [open, setOpen] = useState(false)
@@ -26,17 +26,20 @@ export function NewDesignDialog({ workspaceId, onCreated }: { workspaceId: strin
     },
     onSuccess: slug => { setOpen(false); setName(""); onCreated(slug) },
   })
-  return <Dialog open={open} onOpenChange={setOpen}>
-    <DialogTrigger asChild><Button type="button" className="coarse:min-h-[44px]"><Plus aria-hidden />New artifact</Button></DialogTrigger>
-    <DialogContent>
-      <form onSubmit={event => { event.preventDefault(); if (name.trim()) create.mutate() }} className="grid gap-4">
-        <DialogHeader><DialogTitle>New artifact</DialogTitle><DialogDescription>Create a Design to edit together with people and agents.</DialogDescription></DialogHeader>
-        <div className="flex items-center gap-3 rounded-lg border border-primary p-3"><Frame aria-hidden /><div><b>Design</b><p className="text-sm text-muted-foreground">A shared canvas with screens, text, shapes and images</p></div></div>
-        <div className="grid gap-2"><Label htmlFor="design-name">Name</Label><Input id="design-name" autoFocus value={name} maxLength={120} onChange={event => setName(event.target.value)} placeholder="Checkout flow" required /></div>
-        <p className="text-sm text-muted-foreground">Starts as an empty canvas. Only you and workspace administrators can open it until you grant Page access.</p>
-        {create.error && <p role="alert" className="text-sm text-destructive">{create.error.message}</p>}
-        <DialogFooter><Button type="submit" disabled={create.isPending || !name.trim()}>{create.isPending ? "Creating…" : "Create Design"}</Button></DialogFooter>
+  const submit = () => { if (name.trim() && !create.isPending) create.mutate() }
+  return <>
+    <Button type="button" className="coarse:min-h-[44px]" onClick={() => setOpen(true)}><Plus aria-hidden />New artifact</Button>
+    <CreateSurface open={open} onOpenChange={setOpen} size="md" restoreOpenerFocus onSubmit={submit}>
+      <form onSubmit={event => { event.preventDefault(); submit() }} className="flex min-h-0 flex-1 flex-col">
+        <CreateSurfaceHeader title="New artifact" description="Create a Design to edit together with people and agents." onClose={() => setOpen(false)} />
+        <CreateSurfaceBody className="grid gap-4">
+          <div className="flex items-center gap-3 rounded-lg border border-primary p-3"><Frame aria-hidden /><div><b>Design</b><p className="text-sm text-muted-foreground">A shared canvas with screens, text, shapes and images</p></div></div>
+          <div className="grid gap-2"><Label htmlFor="design-name">Name</Label><Input id="design-name" autoFocus value={name} maxLength={120} onChange={event => setName(event.target.value)} placeholder="Checkout flow" required /></div>
+          <p className="text-sm text-muted-foreground">Starts as an empty canvas. Only you and workspace administrators can open it until you grant Page access.</p>
+          {create.error && <p role="alert" className="text-sm text-destructive">{create.error.message}</p>}
+        </CreateSurfaceBody>
+        <CreateSurfaceFooter primaryLabel={create.isPending ? "Creating…" : "Create Design"} primaryDisabled={!name.trim()} busy={create.isPending} onPrimary={submit} onCancel={() => setOpen(false)} />
       </form>
-    </DialogContent>
-  </Dialog>
+    </CreateSurface>
+  </>
 }

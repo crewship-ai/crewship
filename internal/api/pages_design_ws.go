@@ -45,6 +45,9 @@ func (room *designRoom) broadcast(frame []byte, except *designClient) {
 	}
 }
 
+// The standard JavaScript peers represent protocol integers exactly through 2^53-1.
+const designMaxSafeUint uint64 = 1<<53 - 1
+
 func designUint(raw []byte, index *int) (uint64, error) {
 	var n uint64
 	for shift := uint(0); shift < 56; shift += 7 {
@@ -54,6 +57,9 @@ func designUint(raw []byte, index *int) (uint64, error) {
 		b := raw[*index]
 		*index++
 		n |= uint64(b&127) << shift
+		if n > designMaxSafeUint {
+			return 0, errors.New("protocol integer exceeds JavaScript safe range")
+		}
 		if b < 128 {
 			return n, nil
 		}
@@ -167,7 +173,13 @@ func designAwareness(raw []byte, client *designClient, room *designRoom) ([]byte
 func designAwarenessGone(c *designClient) []byte {
 	p := designAppendUint(nil, 1)
 	p = designAppendUint(p, c.clientID)
-	p = designAppendUint(p, c.clock+1)
+	clock := c.clock
+	// y-protocols permits a null removal at the current clock. At the maximum
+	// safe clock, use that rule instead of emitting an unrepresentable value.
+	if clock < designMaxSafeUint {
+		clock++
+	}
+	p = designAppendUint(p, clock)
 	p = designAppendUint(p, 4)
 	p = append(p, []byte("null")...)
 	out := designAppendUint(nil, 1)

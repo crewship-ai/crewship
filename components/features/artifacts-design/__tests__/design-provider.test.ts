@@ -15,7 +15,7 @@ class Socket {
  onerror: (() => void) | null = null
  onclose: ((event: { code: number }) => void) | null = null
  sent: Uint8Array[] = []
- constructor(_url: string) { Socket.instances.push(this) }
+ constructor(readonly url: string) { Socket.instances.push(this) }
  send(bytes: ArrayBuffer) { this.sent.push(new Uint8Array(bytes)) }
  close(code = 1000) { this.onclose?.({ code }) }
  receive(doc: Y.Doc, step = 1) {
@@ -29,11 +29,11 @@ class Socket {
  }
 }
 const active: DesignProvider[] = []
-afterEach(() => { active.splice(0).forEach(provider => provider.destroy()); vi.unstubAllGlobals(); Socket.instances = [] })
-function setup(editable: boolean) {
+afterEach(() => { active.splice(0).forEach(provider => provider.destroy()); vi.unstubAllGlobals(); vi.useRealTimers(); Socket.instances = [] })
+function setup(editable: boolean, url = "ws://localhost/design/ws") {
  vi.stubGlobal("WebSocket", Socket)
  const doc = new Y.Doc(), status = vi.fn(), dirty = vi.fn()
- const provider = new DesignProvider(doc, "ws://localhost/design/ws", editable, { name: "Test", color: "#2563eb" }, status, dirty)
+ const provider = new DesignProvider(doc, url, editable, { name: "Test", color: "#2563eb" }, status, dirty)
  active.push(provider)
  const socket = Socket.instances.at(-1)!
  socket.onopen?.()
@@ -43,6 +43,15 @@ function documentFrames(socket: Socket) {
  return socket.sent.flatMap(bytes => { const decoder = decoding.createDecoder(bytes); return decoding.readVarUint(decoder) === 0 ? [decoding.readVarUint(decoder)] : [] })
 }
 describe("Design standard sync provider", () => {
+ it("keeps the immutable Page target during an offline reconnect", () => {
+  vi.useFakeTimers()
+  const url = "ws://localhost/api/v1/pages/@old-private-page/design/ws?workspace_id=workspace"
+  const { socket } = setup(true, url)
+  socket.close(1006)
+  vi.advanceTimersByTime(2000)
+  expect(Socket.instances).toHaveLength(2)
+  expect(Socket.instances[1].url).toBe(url)
+ })
  it("read-only clients receive updates and awareness without sending document writes", () => {
   const { doc, socket, dirty } = setup(false)
   const server = new Y.Doc(); server.getMap("nodes").set("hello", "world")

@@ -112,7 +112,7 @@ func (h *PageHandler) GetDesignComments(w http.ResponseWriter, r *http.Request) 
 		designError(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"comments": out})
+	writeJSON(w, 200, designCommentsResponse{Comments: out})
 }
 func (h *PageHandler) CreateDesignComment(w http.ResponseWriter, r *http.Request) {
 	k, ok := h.designKey(w, r)
@@ -228,7 +228,7 @@ func (h *PageHandler) ShareDesign(w http.ResponseWriter, r *http.Request) {
 		designError(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"version": p.Version, "shared_version": p.Version})
+	writeJSON(w, 200, designShareResponse{Version: p.Version, SharedVersion: p.Version})
 }
 func (h *PageHandler) ConnectDesignAgent(w http.ResponseWriter, r *http.Request) {
 	k, ok := h.designKey(w, r)
@@ -266,5 +266,5 @@ func (h *PageHandler) ConnectDesignAgent(w http.ResponseWriter, r *http.Request)
 		designError(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"origin": map[string]string{"chat_id": p.ChatID, "agent_id": agent}})
+	writeJSON(w, 200, designAgentResponse{Origin: designOriginResponse{ChatID: p.ChatID, AgentID: agent}})
 }
