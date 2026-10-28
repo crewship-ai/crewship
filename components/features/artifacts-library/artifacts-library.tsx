@@ -217,7 +217,9 @@ function WordPreview({ workspaceId, item }: { workspaceId: string; item: Library
   const { read } = useDocumentViewerRead({ workspaceId, chatId: "artifacts-library", currentUserId: userId, activationKey: `library:${item.slug}`, target, enabled: target !== null })
   if (read.status === "loading") return <div aria-busy="true" className="h-40 animate-pulse rounded-card border bg-muted/40" />
   if (read.status !== "ready") return <p role="status" className="rounded-card border border-dashed p-4 text-sm text-muted-foreground">
-    {read.status === "denied" ? "You can't read this document." : "The document preview is unavailable. Open in Pages shows it."}
+    {read.status === "denied" ? "You can't read this document."
+      : read.status === "unavailable" ? "The document service is not answering right now, so there is no preview. Nothing was changed."
+        : "The document preview could not be loaded. Open in Pages shows it."}
   </p>
   return <div className="bg-card">
     <DocumentReadonly schema={read.content.schema} content={read.content.content} accessibleLabel={`${item.name}, saved version`} />
