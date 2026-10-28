@@ -5,6 +5,11 @@ import (
 	"net/http"
 )
 
+type craftNativeAgentTaskReceipt struct {
+	WorkID string `json:"work_id"`
+	Status string `json:"status"`
+}
+
 func (m *craftNativeAgentManager) task(w http.ResponseWriter, r *http.Request) {
 	// No SQL work may be accepted without an actual configured private runtime.
 	if m == nil || !m.enabled || m.config.AgentApply == nil || m.config.AgentInspect == nil {
@@ -37,7 +42,7 @@ func (m *craftNativeAgentManager) task(w http.ResponseWriter, r *http.Request) {
 	}
 	m.hint(accepted.WorkID)
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusAccepted, map[string]string{"work_id": accepted.WorkID, "status": "queued"})
+	writeJSON(w, http.StatusAccepted, craftNativeAgentTaskReceipt{WorkID: accepted.WorkID, Status: "queued"})
 }
 
 // These remain closed until the actual dispatcher/runtime is attached.

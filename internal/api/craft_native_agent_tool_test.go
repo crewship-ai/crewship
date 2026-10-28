@@ -287,3 +287,54 @@ func TestCraftNativeAgentToolRevocationDuringOriginalEngineNeverPublishes(t *tes
 		t.Fatal("revoked result claimed receipt")
 	}
 }
+
+func TestCraftNativeAgentApplyRenewalRegistersAndJoinsOnRequestCancellation(t *testing.T) {
+	f, m, _, call, _ := nativeAgentToolFixture(t)
+	acquired := call(`{"operation":"acquire"}`)
+	var lease struct {
+		Generation string `json:"generation"`
+	}
+	if acquired.Code != 200 || json.Unmarshal(acquired.Body.Bytes(), &lease) != nil {
+		t.Fatal(acquired.Code, acquired.Body)
+	}
+	entered := make(chan bool, 1)
+	m.config.AgentApply = func(ctx context.Context, _ CraftNativeDocumentProfile, _ []byte, _ json.RawMessage) ([]byte, error) {
+		entered <- backgroundWorkInFlight.Load() > 0
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	body := fmt.Sprintf(`{"operation":"apply","generation":%q,"base_version":"1","request_id":"cancel-renewal","commands":[{"command":"text.insert","params":{"text":"never published"}}]}`, lease.Generation)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/craft-native/task", strings.NewReader(body))
+	token := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(f.pages.artifactMasterToken, f.a.WorkspaceID, f.a.CrewID), f.a.WorkspaceID, f.a.AgentID, f.a.RunID)
+	req.Header.Set("Authorization", "Bearer "+token)
+	ctx = context.WithValue(context.WithValue(ctx, ctxInternalTokenWS, f.a.WorkspaceID), ctxInternalTokenCrew, f.a.CrewID)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() { w := httptest.NewRecorder(); m.toolCall(w, req.WithContext(ctx)); done <- w }()
+	select {
+	case registered := <-entered:
+		cancel()
+		if !registered {
+			t.Error("apply renewal was not registered before engine execution")
+		}
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("engine did not enter")
+	}
+	select {
+	case w := <-done:
+		if w.Code == 200 {
+			t.Fatal("cancelled engine claimed a committed save", w.Body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("request cancellation did not join renewal")
+	}
+	if !waitForBackgroundWork(5 * time.Second) {
+		t.Fatal("renewal outlived cancelled apply")
+	}
+	var version int64
+	if err := f.rig.db.QueryRow(`SELECT latest_version FROM artifact_version_heads WHERE page_id='native-agent-page'`).Scan(&version); err != nil || version != 1 {
+		t.Fatal("cancelled apply published", version, err)
+	}
+}

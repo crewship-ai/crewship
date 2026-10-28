@@ -16,6 +16,20 @@ type craftNativeAgentToolEvent struct {
 	Receipt    *mooring.NativeSaveReceipt `json:"receipt,omitempty"`
 }
 
+type craftNativeAgentTaskStatus struct {
+	WorkID               string                      `json:"work_id"`
+	State                string                      `json:"state"`
+	Application          string                      `json:"application"`
+	AgentID              string                      `json:"agent_id"`
+	RunID                string                      `json:"run_id"`
+	GrantClosed          bool                        `json:"grant_closed"`
+	OperationInflight    bool                        `json:"operation_inflight"`
+	Uncertain            bool                        `json:"uncertain"`
+	TimelineDurability   string                      `json:"timeline_durability"`
+	Events               []craftNativeAgentToolEvent `json:"events"`
+	LastCommittedReceipt *mooring.NativeSaveReceipt  `json:"last_committed_receipt,omitempty"`
+}
+
 type nativeAgentStatusWriter struct {
 	http.ResponseWriter
 	status int
@@ -88,13 +102,13 @@ func (m *craftNativeAgentManager) taskStatus(w http.ResponseWriter, r *http.Requ
 		replyError(w, 404, "native task unavailable")
 		return
 	}
-	result := map[string]any{"work_id": id, "state": state, "application": e.grant.Application, "agent_id": e.grant.AgentID, "events": []craftNativeAgentToolEvent{}, "operation_inflight": true, "uncertain": true, "timeline_durability": "current-host-only"}
+	result := craftNativeAgentTaskStatus{WorkID: id, State: state, Application: e.grant.Application, AgentID: e.grant.AgentID, Events: []craftNativeAgentToolEvent{}, OperationInflight: true, Uncertain: true, TimelineDurability: "current-host-only"}
 	// A long engine call must not block a human's observation or stop control.
 	if e.callMu.TryLock() {
-		result["operation_inflight"] = false
-		result["uncertain"] = false
+		result.OperationInflight = false
+		result.Uncertain = false
 		if e.tool != nil {
-			result["uncertain"] = e.tool.uncertain
+			result.Uncertain = e.tool.uncertain
 			events := make([]craftNativeAgentToolEvent, len(e.tool.events))
 			copy(events, e.tool.events)
 			for i := range events {
@@ -103,17 +117,17 @@ func (m *craftNativeAgentManager) taskStatus(w http.ResponseWriter, r *http.Requ
 					events[i].Receipt = &receipt
 				}
 			}
-			result["events"] = events
+			result.Events = events
 			if e.tool.lastReceipt != nil {
 				receipt := *e.tool.lastReceipt
-				result["last_committed_receipt"] = &receipt
+				result.LastCommittedReceipt = &receipt
 			}
 		}
 		e.callMu.Unlock()
 	}
 	m.mu.Lock()
-	result["run_id"] = e.attempt.runID
-	result["grant_closed"] = e.closed
+	result.RunID = e.attempt.runID
+	result.GrantClosed = e.closed
 	m.mu.Unlock()
 	if _, err = m.human.pageAuthority(ctx, tx, source, scope, true); err != nil {
 		replyError(w, 403, "native task status denied")
