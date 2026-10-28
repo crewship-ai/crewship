@@ -28,22 +28,23 @@ async function ready(){await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenC
 async function acquire(){fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(ports.at(-1)?.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)))}
 
 describe('native Word host authority and persistence',()=>{
- it('opens Grid with the same read-only lease gate, isolated port and matching draft namespace',async()=>{
-  client.open.mockResolvedValueOnce({sessionId:'private-session',applicationId:'gridcraft'})
+ it.each(['gridcraft','deckcraft'])('opens %s with the same read-only lease gate, isolated port and matching draft namespace',async(application)=>{
+  client.open.mockResolvedValueOnce({sessionId:'private-session',applicationId:application})
   const base=await client.read(new AbortController().signal)
-  client.read.mockResolvedValue({...base,applicationId:'gridcraft',bytes:new TextEncoder().encode('{"sheets":[]}')})
+  client.read.mockResolvedValue({...base,applicationId:application,bytes:application==='deckcraft'?new Uint8Array([80,75,0,255]):new TextEncoder().encode('{"sheets":[]}')})
   mount();await ready()
-  expect(portOptions[0].applicationId).toBe('gridcraft')
+  expect(portOptions[0].applicationId).toBe(application)
   expect(portOptions[0].requireAccessProtocol).toBe(true)
-  expect(document.querySelector('iframe')?.title).toBe('GridCraft editor')
+  expect(document.querySelector('iframe')?.title).toBe(application==='deckcraft'?'DeckCraft editor':'GridCraft editor')
   expect(client.leaseAction).not.toHaveBeenCalled()
   expect(m.openJournal).not.toHaveBeenCalled()
   await acquire()
-  expect(m.openJournal).toHaveBeenCalledWith({human:'human',workspace:'w',page:'p',applicationId:'gridcraft'})
-  ports.at(-1)!.snapshot.mockResolvedValue({bytes:new TextEncoder().encode('{"sheets":[1]}'),editorRevision:'grid:2',documentId:'doc'})
+  expect(m.openJournal).toHaveBeenCalledWith({human:'human',workspace:'w',page:'p',applicationId:application})
+  ports.at(-1)!.snapshot.mockResolvedValue({bytes:application==='deckcraft'?new Uint8Array([80,75,1,255]):new TextEncoder().encode('{"sheets":[1]}'),editorRevision:'grid:2',documentId:'doc'})
   act(()=>portOptions.at(-1)!.onSaveRequest({documentId:'doc',editorRevision:'grid:2'}))
   await waitFor(()=>expect(client.save).toHaveBeenCalledOnce())
-  expect(client.save.mock.calls[0][0].applicationId).toBe('gridcraft')
+  expect(client.save.mock.calls[0][0].applicationId).toBe(application)
+  expect(client.save.mock.calls[0][0].bytes).toEqual(application==='deckcraft'?new Uint8Array([80,75,1,255]):new TextEncoder().encode('{"sheets":[1]}'))
   await screen.findByText('Uloženo')
  })
 
@@ -62,6 +63,25 @@ describe('native Word host authority and persistence',()=>{
   expect(ports[1].bootstrap).toHaveBeenCalledWith(fresh.bytes,expect.any(AbortSignal))
   expect(m.apiFetch).toHaveBeenCalledOnce();expect(client.leaseAction).not.toHaveBeenCalled();expect(client.save).not.toHaveBeenCalled();expect(m.openJournal).not.toHaveBeenCalled()
   expect(screen.queryByText('Agent zastaven')).not.toBeInTheDocument();expect(screen.queryByText('Uloženo')).not.toBeInTheDocument()
+ })
+
+ it('offers a byte-exact Deck recovery copy without a misleading content comparison',async()=>{
+  const binary=new Uint8Array([80,75,3,4,0,255,128])
+  client.open.mockResolvedValueOnce({sessionId:'private-session',applicationId:'deckcraft'})
+  const base=await client.read(new AbortController().signal);client.read.mockResolvedValue({...base,applicationId:'deckcraft',bytes:binary})
+  journal.recovery.mockResolvedValueOnce([{draft:{applicationId:'deckcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'1',editorRevision:'old',bytes:binary},actions:['compare','copy']}])
+  const originalCreate=Object.getOwnPropertyDescriptor(URL,'createObjectURL'),originalRevoke=Object.getOwnPropertyDescriptor(URL,'revokeObjectURL')
+  const blob=vi.fn((_value:Blob)=> 'blob:deck-copy'),revoke=vi.fn(),click=vi.spyOn(HTMLAnchorElement.prototype,'click').mockImplementation(()=>{})
+  Object.defineProperty(URL,'createObjectURL',{configurable:true,value:blob});Object.defineProperty(URL,'revokeObjectURL',{configurable:true,value:revoke})
+  try{
+   mount();await ready();await acquire()
+   expect(screen.queryByRole('button',{name:'Porovnat'})).toBeNull()
+   fireEvent.click(screen.getByRole('button',{name:'Kopie konceptu'}))
+   expect(blob).toHaveBeenCalledOnce();expect(blob.mock.calls[0][0].type).toBe('application/vnd.storyteller.deckcraft+zip')
+   const copyBytes=await new Promise<ArrayBuffer>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result as ArrayBuffer);reader.onerror=()=>reject(reader.error);reader.readAsArrayBuffer(blob.mock.calls[0][0])});expect(new Uint8Array(copyBytes)).toEqual(binary)
+   expect((click.mock.instances[0] as HTMLAnchorElement).download).toBe('deckcraft-recovery.deckcraft')
+   expect(client.save).not.toHaveBeenCalled();expect(ports.at(-1)!.ack).not.toHaveBeenCalled()
+  }finally{click.mockRestore();if(originalCreate)Object.defineProperty(URL,'createObjectURL',originalCreate);else Reflect.deleteProperty(URL,'createObjectURL');if(originalRevoke)Object.defineProperty(URL,'revokeObjectURL',originalRevoke);else Reflect.deleteProperty(URL,'revokeObjectURL')}
  })
 
  it.each(['free','handed'])('disables takeover while a newer readonly snapshot bootstraps, then acquires on one click (%s)',async(leaseState)=>{
