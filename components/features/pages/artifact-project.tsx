@@ -7,6 +7,8 @@ import { useSessionSafe } from "@/hooks/use-auth"
 import { Button } from "@/components/ui/button"
 import { useArtifactProject, type ArtifactAnchor } from "@/hooks/use-artifact-project"
 import { artifactProjectDocument, artifactProjectQuote } from "@/lib/pages/artifact-project-preview"
+import { artifactDashboards } from "@/lib/feature-flags"
+import { ArtifactDashboardPreview } from "@/components/features/chat/artifact-context/viewer/artifact-dashboard-preview"
 
 export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspaceId: string; slug: string; initialVersion?: number }) {
  const session = useSessionSafe()
@@ -70,7 +72,10 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
   <div className="flex min-h-0 flex-1 flex-col md:flex-row">
    <section aria-label="Project screens" className="flex min-h-0 flex-1 flex-col">
     <nav aria-label="Screens" className="flex flex-wrap gap-2 border-b p-3">{manifest?.files.filter(file => file.media_type === "text/html" || /\.html?$/.test(file.path)).map(file => <Button key={file.path} variant={file.path === path ? "secondary" : "ghost"} onClick={() => { setScreenPath(file.path); setAnchor(undefined) }}>{file.path}</Button>)}{data.can_write && <Button className="ml-auto" variant={selecting ? "secondary" : "outline"} aria-pressed={selecting} onClick={() => setSelecting(!selecting)}>{selecting ? "Cancel selection" : "Select an element"}</Button>}</nav>
-    <iframe ref={frame} key={`${manifest?.version}:${path}:${token}`} title="Artifact preview" data-screen={path} className="min-h-72 w-full flex-1 border-0 bg-white" sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={source} />
+    {artifactDashboards() && manifest?.files.some(file => file.path === "dashboard.json")
+     ? <ArtifactDashboardPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={manifest.version} files={manifest.files} path={path} title="Artifact preview" selectMode={selecting && data.can_write}
+       className="min-h-72 flex-1" onSelect={selection => { setAnchor({ version: manifest.version, path, ...selection }); setSelecting(false) }} onNavigate={next => { setScreenPath(next); setAnchor(undefined) }} />
+     : <iframe ref={frame} key={`${manifest?.version}:${path}:${token}`} title="Artifact preview" data-screen={path} className="min-h-72 w-full flex-1 border-0 bg-white" sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={source} />}
    </section>
    <aside className="w-full overflow-auto border-t p-4 md:w-80 md:border-l md:border-t-0" aria-label="Comments">
     <h2 className="mb-3 font-semibold">Comments</h2>

@@ -25,6 +25,8 @@ vi.mock("../../projects/use-artifact-project-data", () => ({
   }),
 }))
 
+vi.mock("../artifact-dashboard-preview", () => ({ ArtifactDashboardPreview: () => <div>Bound dashboard</div> }))
+
 import { ArtifactViewerPanel, commentQueueChip } from "../artifact-viewer-panel"
 
 const html = (name: string) => ({ path: name, content: `<body><h1 id="hero">Big  idea</h1>${name}</body>`, media_type: "text/html" })
@@ -398,4 +400,29 @@ it("keeps a failed pending delivery Retry when another task is answered, then cl
  view.rerender(<ArtifactViewerPanel />)
  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull()
  expect(state.sendToAgent).toHaveBeenCalledTimes(1)
+})
+
+it("preserves a legacy Project's ordinary preview with a dashboard.json asset when Dashboard is off", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", "false")
+  try {
+    const snapshot = snap()
+    snapshot.manifest.files.push({ path: "dashboard.json", content: '{"schema_version":1,"collections":["sales"]}', media_type: "application/json" })
+    snapshot.manifest.files.find(file => file.path === "home.html")!.content += '<script>window.ordinaryProject=true</script>'
+    state.snapshot.data = snapshot
+    render(<ArtifactViewerPanel />)
+    expect(screen.getByTitle(/Preview of/)).toHaveAttribute("srcdoc", expect.stringContaining("window.ordinaryProject=true"))
+    expect(screen.queryByText("Dashboard preview is unavailable.")).toBeNull()
+  } finally { vi.unstubAllEnvs() }
+})
+
+
+it.each([["true", true, "Dashboard"], ["false", true, "Project"], ["true", false, "Project"]] as const)("labels only the opted-in selected valid Dashboard (%s/%s)", (flag, valid, label) => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", flag)
+  try {
+    const snapshot = snap()
+    snapshot.manifest.files.push({ path: "dashboard.json", media_type: "application/json", content: valid ? '{"schema_version":1,"collections":["sales"]}' : '{}' })
+    state.snapshot.data = snapshot
+    render(<ArtifactViewerPanel />)
+    expect(screen.getByText(label, { exact: true })).toBeInTheDocument()
+  } finally { vi.unstubAllEnvs() }
 })

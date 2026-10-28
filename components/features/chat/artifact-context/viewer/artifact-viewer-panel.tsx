@@ -14,10 +14,13 @@ import { timeAgo } from "@/lib/time"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { cn } from "@/lib/utils"
+import { artifactDashboards } from "@/lib/feature-flags"
+import { parseDashboardManifest } from "@/lib/pages/artifact-dashboard"
 import { useArtifactViewer, type ArtifactViewerTarget } from "../projects/artifact-viewer-context"
 import { useArtifactProjectMutations, useArtifactProjectSnapshot } from "../projects/use-artifact-project-data"
 import type { ArtifactComment, ArtifactProjectSnapshot } from "../projects/types"
 import { ArtifactPreviewFrame, type PreviewSelection } from "./artifact-preview-frame"
+import { ArtifactDashboardPreview } from "./artifact-dashboard-preview"
 import { isValidAnchorSelector, screenLabel, screenLabels } from "./element-select"
 
 export type ArtifactViewerVariant = "pane" | "fullscreen" | "library"
@@ -262,7 +265,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
 
   const header = <>
     <h2 className="min-w-0 truncate text-sm font-semibold">{data.name ?? data.slug ?? target.slug}</h2>
-    <Badge variant="outline" className="shrink-0">Project</Badge>
+    <Badge variant="outline" className="shrink-0">{artifactDashboards() && parseDashboardManifest(data.manifest.files) ? "Dashboard" : "Project"}</Badge>
     <StatusPill tone={isShared ? "success" : "muted"} label={isShared ? "Shared" : "Draft"} />
     <div className="flex-1" />
   </>
@@ -374,8 +377,10 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
 
   const canvas = <div ref={canvasRef} className="relative rounded-card bg-muted p-3.5">
     <div className={cn("overflow-hidden rounded-md border bg-white", fullscreen ? "h-[max(320px,calc(100dvh-14rem))]" : "h-[min(70vh,560px)] min-h-[320px]")}>
-      <ArtifactPreviewFrame html={html} files={data.manifest.files} screens={screens} path={screen} selectMode={selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`}
-        highlight={highlight} onSelect={select} onNavigate={setScreenPath} />
+      {artifactDashboards() && data.manifest.files.some(file => file.path === "dashboard.json")
+        ? <ArtifactDashboardPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} files={data.manifest.files} path={screen} selectMode={selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`} onSelect={select} onNavigate={setScreenPath} />
+        : <ArtifactPreviewFrame html={html} files={data.manifest.files} screens={screens} path={screen} selectMode={selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`}
+          highlight={highlight} onSelect={select} onNavigate={setScreenPath} />}
     </div>
     {pinCard}
   </div>
