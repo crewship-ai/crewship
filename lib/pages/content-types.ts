@@ -1,6 +1,12 @@
 import compiledDescriptors from "../../internal/pages/content_types.json" with { type: "json" }
 
 export interface ContentTypeDescriptor {
+  /** Shipped package metadata; never a permission or runtime availability claim. */
+  release?: string
+  contract_version?: number
+  content_locations?: string[]
+  required_features?: string[]
+  mcp_tools?: string[]
   type_id: string
   schema_version: number
   viewer: string

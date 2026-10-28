@@ -1014,12 +1014,12 @@ func TestCovOHCResolveContainerResources(t *testing.T) {
 func TestCovOHCReconstructSKILLMD(t *testing.T) {
 	// Body already has frontmatter → returned verbatim.
 	withFM := "---\nname: foo\n---\nbody"
-	if got := reconstructSKILLMD("foo", "anthropic", "Foo", "desc", withFM); got != withFM {
+	if got := reconstructSKILLMD("foo", "anthropic", "Foo", "desc", withFM, ""); got != withFM {
 		t.Errorf("frontmatter body should pass through verbatim, got %q", got)
 	}
 
 	// Body without frontmatter → synthesised header.
-	got := reconstructSKILLMD("rev", "custom", "Review", "Line1\nLine2", "## content")
+	got := reconstructSKILLMD("rev", "custom", "Review", "Line1\nLine2", "## content", "")
 	if !strings.HasPrefix(got, "---\n") {
 		t.Errorf("synthesised SKILL.md missing frontmatter: %q", got)
 	}

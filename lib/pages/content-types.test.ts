@@ -1,6 +1,26 @@
 import { describe, expect, it } from "vitest"
 import fixtures from "../../internal/pages/content_types_cases.json"
 import { contentTypes, lookupContentType, resolveContentReference, deriveContentTypes, resolvePageContent } from "./content-types"
+
+describe("artifact type packages", () => {
+  it.each(["project", "dashboard", "slides"])("exposes the immutable %s package contract", kind => {
+    const descriptor = lookupContentType(`artifact-${kind}`, 1)
+    expect(descriptor).toMatchObject({release: "1.1.0", contract_version: 1, authoring_skill: "crewship-artifacts"})
+    expect(descriptor?.required_features).toContain("artifact_projects")
+    expect(descriptor?.content_locations).toContain("version-store")
+    expect(descriptor?.mcp_tools).toContain("artifact_publish")
+  })
+
+  it("returns owned package metadata rather than mutable type sources", () => {
+    const original = structuredClone(lookupContentType("artifact-dashboard", 1))
+    const descriptor = lookupContentType("artifact-dashboard", 1)!
+    descriptor.content_locations![0] = "other-store"
+    descriptor.required_features![0] = "no-auth-required"
+    descriptor.mcp_tools![0] = "arbitrary-tool"
+    expect(lookupContentType("artifact-dashboard", 1)).toEqual(original)
+  })
+})
+
 describe("compiled Page content contract", () => {
  for (const content_descriptor of [undefined, {type_id:"slides",schema_version:1,supported:true}]) it(`resolves known Slides format ${JSON.stringify(content_descriptor)}`, () => {
   const result=resolvePageContent({human_owned:true,has_slides:true,...(content_descriptor===undefined?{}:{content_descriptor})});expect(result.supported).toBe(true);expect(result.primary?.viewer).toBe("page-slides");expect(result.canInitializeContent).toBe(false)
