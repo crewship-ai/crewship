@@ -52,6 +52,8 @@ function toggle<T extends string>(list: T[], value: T): T[] {
  * spaces, then Views and Folders. Facets open inside the panel under the
  * toolbar; chips say what is set while the block is closed.
  */
+const HIDDEN_VIEWS = new Set<LibraryView>(["home", "series", "test", "empty", "archive"])
+
 export function LibraryPanel({ items, folders, filters, personal, onFiltersChange }: {
   items: LibraryItem[]
   personal: Personal
@@ -63,6 +65,9 @@ export function LibraryPanel({ items, folders, filters, personal, onFiltersChang
   const set = (patch: Partial<LibraryFilters>) => onFiltersChange({ ...filters, ...patch })
   // Home has no list to narrow; choosing a facet there shows everything it matches.
   const narrow = (patch: Partial<LibraryFilters>) => set({ ...patch, ...(filters.view === "home" ? { view: "all" as const } : {}) })
+  // A folder counts what All artifacts holds; from a view of hidden items
+  // (Clean up, Test items, Empty, Archive) it opens All artifacts in that folder.
+  const narrowFolder = (folder: string | null) => set({ folder, ...(HIDDEN_VIEWS.has(filters.view) ? { view: "all" as const } : {}) })
   const counts = facetCounts(items, filters.view === "home" ? { ...filters, view: "all" } : filters, personal)
   const viewCount = (view: LibraryView) => inView(items, view, personal).length
   const folderCount = (slug: string) => inView(items, "all").filter(item => (item.folder?.slug ?? "") === slug).length
@@ -127,7 +132,7 @@ export function LibraryPanel({ items, folders, filters, personal, onFiltersChang
         {folders.map(folder => {
           const on = filters.folder === folder.slug
           return <SidebarRow key={folder.slug} selected={on} aria-current={on ? "page" : undefined}
-            onSelect={() => narrow({ folder: on ? null : folder.slug })}>
+            onSelect={() => narrowFolder(on ? null : folder.slug)}>
             {/* The folder's own icon and colour, as Pages draws it. */}
             {folder.icon || folder.color
               ? <FolderGlyph icon={folder.icon} color={folder.color} className="size-3.5 shrink-0" />
@@ -136,7 +141,7 @@ export function LibraryPanel({ items, folders, filters, personal, onFiltersChang
           </SidebarRow>
         })}
         {folders.length > 0 && unfiled > 0 && <SidebarRow selected={filters.folder === ""} aria-current={filters.folder === "" ? "page" : undefined}
-          onSelect={() => narrow({ folder: filters.folder === "" ? null : "" })}>
+          onSelect={() => narrowFolder(filters.folder === "" ? null : "")}>
           <Folder className="size-3.5 shrink-0 text-muted-foreground-soft" aria-hidden />
           <span className="min-w-0 flex-1 truncate text-muted-foreground">Unfiled</span>{meta(unfiled)}
         </SidebarRow>}
