@@ -204,16 +204,17 @@ func (s *Server) respondArtifactProjectMCPToolCall(w http.ResponseWriter, r *htt
 // text envelope. The result is JSON content, never HTML or executable markup.
 func (s *Server) writeArtifactDataMCPResult(w http.ResponseWriter, req memoryMCPRequest, status int, body []byte) {
 	out := memoryMCPToolCallResult{Content: []memoryMCPToolCallContent{{Type: "text", Text: string(body)}}, IsError: status >= 400}
-	var result bytes.Buffer
-	encoder := json.NewEncoder(&result)
-	encoder.SetEscapeHTML(false)
-	if encoder.Encode(out) != nil {
+	result, err := artifacts.MarshalDataJSON(out)
+	if err != nil {
+		http.Error(w, "cannot encode data result", 500)
+		return
+	}
+	body, err = artifacts.MarshalDataJSON(memoryMCPResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(result)})
+	if err != nil {
 		http.Error(w, "cannot encode data result", 500)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	encoder = json.NewEncoder(w)
-	encoder.SetEscapeHTML(false)
-	_ = encoder.Encode(memoryMCPResponse{JSONRPC: "2.0", ID: req.ID, Result: json.RawMessage(bytes.TrimSpace(result.Bytes()))})
+	_, _ = w.Write(body)
 }
