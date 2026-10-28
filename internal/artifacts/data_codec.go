@@ -13,6 +13,10 @@ import (
 
 const MaxDataResponseBytes = 16 << 20
 
+// The immutable tool/RPC metadata has a fixed allowance outside the batch.
+// DecodeDataBatch still enforces the original 1 MiB document batch bound.
+const MaxDataToolRequestBytes = MaxDataBatchBytes + 8192
+
 // MarshalDataJSON preserves the stored JSON byte budget across JSON-only
 // transports: HTML escaping would expand a valid '<' value up to sixfold.
 func MarshalDataJSON(value any) ([]byte, error) {
@@ -30,7 +34,7 @@ type DataBatch struct {
 // DecodeDataJSON checks duplicate keys and bounded nesting without restricting
 // user document keys or scalar values. Transport structs remain closed.
 func DecodeDataJSON(raw []byte, out any, fields ...string) error {
-	if len(raw) > MaxDataBatchBytes+8192 || !validDataObject(raw) {
+	if len(raw) > MaxDataToolRequestBytes || !validDataObject(raw) {
 		return ErrDataInvalid
 	}
 	if !canonicalDataFields(raw, fields...) {
