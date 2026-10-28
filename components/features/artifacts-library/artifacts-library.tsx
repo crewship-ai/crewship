@@ -1,5 +1,5 @@
 "use client"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, ExternalLink, LayoutGrid, Library, List, Lock, Plus, Table2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Segmented } from "@/components/ui/segmented"
@@ -52,7 +52,7 @@ const meta = (item: LibraryItem) => [item.ownerLabel, item.folder?.name, item.up
 
 function GalleryCard({ item, onOpen }: { item: LibraryItem; onOpen: () => void }) {
   return <li className="min-w-0">
-    <button type="button" aria-label={`Open ${item.name}`} onClick={onOpen}
+    <button type="button" aria-label={`Open ${item.name}`} onClick={onOpen} data-library-item=""
       className="grid h-full w-full min-w-0 content-start gap-2.5 rounded-card border bg-card p-3 text-left transition-colors hover:border-foreground/20 focus-visible:outline-2 focus-visible:outline-primary">
       <span className="flex min-w-0 items-center gap-2.5">
         <KindTile kind={item.kind} large />
@@ -68,7 +68,7 @@ function GalleryCard({ item, onOpen }: { item: LibraryItem; onOpen: () => void }
 
 function ListRow({ item, onOpen }: { item: LibraryItem; onOpen: () => void }) {
   return <li className="min-w-0 border-t first:border-t-0">
-    <button type="button" aria-label={`Open ${item.name}`} onClick={onOpen}
+    <button type="button" aria-label={`Open ${item.name}`} onClick={onOpen} data-library-item=""
       className="row-interactive row-hover flex w-full min-w-0 items-center gap-3 px-3 py-2 text-left coarse:min-h-[44px]">
       <KindTile kind={item.kind} />
       <span className="grid min-w-0 flex-1">
@@ -89,7 +89,7 @@ function LibraryTable({ items, onOpen }: { items: LibraryItem[]; onOpen: (slug: 
       <tbody>
         {items.map(item => <tr key={item.slug} className="border-t">
           <td className="max-w-[320px] px-3 py-2">
-            <button type="button" className="flex min-w-0 items-center gap-2 font-medium hover:underline" onClick={() => onOpen(item.slug)}>
+            <button type="button" data-library-item="" className="flex min-w-0 items-center gap-2 font-medium hover:underline" onClick={() => onOpen(item.slug)}>
               <KindTile kind={item.kind} /><span className="truncate">{item.name}</span>
             </button>
           </td>
@@ -231,6 +231,34 @@ function ArtifactDetail({ workspaceId, item, onBack }: { workspaceId: string; it
   </div>
 }
 
+/**
+ * J and K move between the items on screen and Enter opens the focused one;
+ * Escape leaves a detail. Keys meant for a field, a chord or an open dialog
+ * are left alone.
+ */
+function useLibraryKeys(root: React.RefObject<HTMLElement | null>, detailOpen: boolean, onBack: () => void) {
+  const latest = useRef({ detailOpen, onBack })
+  useEffect(() => { latest.current = { detailOpen, onBack } })
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target as HTMLElement | null
+      if (target?.closest?.("input, textarea, select, [contenteditable=''], [contenteditable=true], [role=dialog], [role=alertdialog]")) return
+      if (document.querySelector("[role=dialog][data-state=open], [role=alertdialog][data-state=open]")) return
+      if (event.key === "Escape" && latest.current.detailOpen) { event.preventDefault(); latest.current.onBack(); return }
+      if (latest.current.detailOpen || (event.key !== "j" && event.key !== "k")) return
+      const items = [...(root.current?.querySelectorAll<HTMLElement>("[data-library-item]") ?? [])]
+      if (!items.length) return
+      event.preventDefault()
+      const at = items.indexOf(document.activeElement as HTMLElement)
+      const next = at < 0 ? 0 : Math.min(items.length - 1, Math.max(0, at + (event.key === "j" ? 1 : -1)))
+      items[next].focus()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [root])
+}
+
 interface ArtifactsLibraryProps {
   workspaceId: string
   /** The open artifact's slug, or null for the library. Kept in the URL by the route. */
@@ -261,6 +289,8 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
   const [newKind, setNewKind] = useState<ArtifactKindKey | null | undefined>(undefined)
   const creatable = ARTIFACT_KINDS.filter(kind => kind.live(caps)).map(kind => kind.key)
   const selected = item !== null ? items.find(entry => entry.slug === item) ?? null : null
+  const contentRef = useRef<HTMLDivElement>(null)
+  useLibraryKeys(contentRef, item !== null, () => onSelect(null))
 
   const subBar = <SubBar icon={Library} title="Artifacts" ariaLabel="Artifacts" heading={false}
     section={selected ? <span className="font-normal text-muted-foreground"> › {selected.name}</span> : undefined}
@@ -309,7 +339,7 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
             if (item !== null && !onFiltersChange) onSelect(null)
           }} />
       </SecondaryPanel>}
-      <div className={cn("min-w-0 flex-1", selected ? "flex min-h-0 flex-col overflow-y-auto" : "overflow-y-auto")}>
+      <div ref={contentRef} className={cn("min-w-0 flex-1", selected ? "flex min-h-0 flex-col overflow-y-auto" : "overflow-y-auto")}>
         <div className={cn("mx-auto flex w-full max-w-6xl flex-col p-4 md:p-6", selected && "min-h-full")}>{content}</div>
       </div>
     </div>
