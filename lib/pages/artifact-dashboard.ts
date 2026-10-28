@@ -9,7 +9,9 @@ export interface DashboardCollection { collection: string; code_version: number;
 export interface DashboardPreviewOptions { hostOrigin: string; codeVersion: number; collections: string[] }
 export const DASHBOARD_DATA_MESSAGE = "crewship-dashboard-data"
 const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value)
-export const dashboardName = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value) && value !== "constructor" && value !== "prototype" && value !== "__proto__"
+export const dashboardName = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)
+/** Business keys are literal own-property names, never JavaScript paths. */
+export const dashboardField = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 128 && !/[\u0000-\u001f\u007f-\u009f]/.test(value)
 const version = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) > 0
 
 /** A closed, bounded declaration in the authorized code manifest, never a URL or script. */
@@ -42,7 +44,8 @@ export function parseDashboardCollection(raw: unknown, collection: string, codeV
 
 /** Closure-free, host-owned code serialized into the opaque frame after sanitization. */
 export function installDashboardBindings(config: DashboardPreviewOptions & { token: string }): void {
-  const validName = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value) && !["constructor", "prototype", "__proto__"].includes(value)
+  const validName = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)
+  const validField = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 128 && !/[\u0000-\u001f\u007f-\u009f]/.test(value)
   let last = 0, failed = false
   const meterStatuses = new WeakMap<HTMLMeterElement, HTMLSpanElement>()
   function meter(element: HTMLMeterElement, value?: number) {
@@ -103,7 +106,7 @@ export function installDashboardBindings(config: DashboardPreviewOptions & { tok
     for (const element of document.querySelectorAll("[data-field]")) {
       const collection = element.closest("[data-source]")?.getAttribute("data-source"), row = element.closest("[data-row]")?.getAttribute("data-row"), field = element.getAttribute("data-field")
       const doc = collection && validName(row) ? feeds.get(collection)?.documents.find(item => item.id === row) : undefined
-      const value = doc && validName(field) && doc.value && Object.hasOwn(doc.value, field) ? doc.value[field] : undefined
+      const value = doc && validField(field) && doc.value && Object.hasOwn(doc.value, field) ? doc.value[field] : undefined
       const numeric = typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER && (!Number.isInteger(value) || Number.isSafeInteger(value))
       const text = typeof value === "string" ? value : numeric || typeof value === "boolean" ? String(value) : value === null ? "—" : "Unavailable"
       if (element instanceof HTMLMeterElement) {
