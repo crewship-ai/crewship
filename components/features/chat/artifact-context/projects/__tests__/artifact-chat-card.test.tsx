@@ -13,7 +13,7 @@ vi.mock("../use-artifact-project-data", () => ({
 import { ArtifactChatCard } from "../artifact-chat-card"
 import { ArtifactViewerProvider, useArtifactViewer } from "../artifact-viewer-context"
 
-afterEach(() => { cleanup(); h.calls = [] })
+afterEach(() => { cleanup(); h.calls = []; vi.unstubAllEnvs() })
 
 function Target() {
   const viewer = useArtifactViewer()!
@@ -105,4 +105,19 @@ it("refetches when the step reports a newer version than the cached snapshot", (
   h.result = query({ data: snapshot({ latest_version: 1 }), refetch })
   renderCard(<ArtifactChatCard slug="onboarding" activity={{ tool: "publish", state: "done", slug: "onboarding", version: 2 }} />)
   expect(refetch).toHaveBeenCalledTimes(1)
+})
+
+
+it.each([
+  ["true", "valid", "Dashboard"],
+  ["true", "ordinary", "Project"],
+  ["false", "valid", "Project"],
+  ["true", "invalid", "Project"],
+] as const)("labels the actual authorized manifest with Dashboard flag %s and %s files", (flag, kind, label) => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", flag)
+  const data = snapshot({ name: "Dashboard from tool text" })
+  if (kind !== "ordinary") data.manifest.files.push({ path: "dashboard.json", media_type: "application/json", content: kind === "valid" ? '{"schema_version":1,"collections":["sales"]}' : '{}' })
+  h.result = query({ data })
+  renderCard(<ArtifactChatCard slug="onboarding" fallbackName="Dashboard" />)
+  expect(screen.getByTestId("artifact-card-kind").textContent).toBe(`${label}Draft`)
 })

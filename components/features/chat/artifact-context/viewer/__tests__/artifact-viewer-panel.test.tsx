@@ -25,6 +25,8 @@ vi.mock("../../projects/use-artifact-project-data", () => ({
   }),
 }))
 
+vi.mock("../artifact-dashboard-preview", () => ({ ArtifactDashboardPreview: () => <div>Bound dashboard</div> }))
+
 import { ArtifactViewerPanel, commentQueueChip } from "../artifact-viewer-panel"
 
 const html = (name: string) => ({ path: name, content: `<body><h1 id="hero">Big  idea</h1>${name}</body>`, media_type: "text/html" })
@@ -398,4 +400,123 @@ it("keeps a failed pending delivery Retry when another task is answered, then cl
  view.rerender(<ArtifactViewerPanel />)
  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull()
  expect(state.sendToAgent).toHaveBeenCalledTimes(1)
+})
+
+it("preserves a legacy Project's ordinary preview with a dashboard.json asset when Dashboard is off", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", "false")
+  try {
+    const snapshot = snap()
+    snapshot.manifest.files.push({ path: "dashboard.json", content: '{"schema_version":1,"collections":["sales"]}', media_type: "application/json" })
+    snapshot.manifest.files.find(file => file.path === "home.html")!.content += '<script>window.ordinaryProject=true</script>'
+    state.snapshot.data = snapshot
+    render(<ArtifactViewerPanel />)
+    expect(screen.getByTitle(/Preview of/)).toHaveAttribute("srcdoc", expect.stringContaining("window.ordinaryProject=true"))
+    expect(screen.queryByText("Dashboard preview is unavailable.")).toBeNull()
+  } finally { vi.unstubAllEnvs() }
+})
+
+
+it.each([["true", true, "Dashboard"], ["false", true, "Project"], ["true", false, "Project"]] as const)("labels only the opted-in selected valid Dashboard (%s/%s)", (flag, valid, label) => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", flag)
+  try {
+    const snapshot = snap()
+    snapshot.manifest.files.push({ path: "dashboard.json", media_type: "application/json", content: valid ? '{"schema_version":1,"collections":["sales"]}' : '{}' })
+    state.snapshot.data = snapshot
+    render(<ArtifactViewerPanel />)
+    expect(screen.getByText(label, { exact: true })).toBeInTheDocument()
+  } finally { vi.unstubAllEnvs() }
+})
+
+it.each([false, undefined])("keeps reader controls inert when can_write is %s", canWrite => {
+  state.snapshot.data = snap({ can_write: canWrite, comments: [comment({ text: "Existing feedback" })] })
+  render(<ArtifactViewerPanel />)
+  expect(screen.queryByRole("button", { name: "Select" })).toBeNull()
+  expect(screen.queryByRole("form", { name: "New comment" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Send to agent" })).toBeNull()
+  expect(screen.getByText("Existing feedback")).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "History" }))
+  expect(screen.getByRole("region", { name: "Version history" })).toBeInTheDocument()
+  expect(state.comment).not.toHaveBeenCalled()
+})
+
+it("does not invite a read-only reader to select an element in an empty queue", () => {
+  state.snapshot.data = snap({ can_write: false })
+  render(<ArtifactViewerPanel />)
+  expect(screen.getByText("No comments yet.", { exact: true })).toBeInTheDocument()
+  expect(screen.queryByText(/Turn on Select/)).toBeNull()
+})
+
+it("retires a lost writer's anchor and selection while preserving the unsent draft", () => {
+  const view = render(<ArtifactViewerPanel />)
+  selectHero()
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Keep my draft" } })
+  const frame = screen.getByTitle(/Preview of/) as HTMLIFrameElement
+  state.snapshot.data = snap({ can_write: false })
+  view.rerender(<ArtifactViewerPanel />)
+  expect(screen.queryByRole("button", { name: "Select" })).toBeNull()
+  expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull()
+  act(() => window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow, data: { type: "crewship-artifact-select", selector: "#hero", quote: "Big idea" } })))
+  state.snapshot.data = snap()
+  view.rerender(<ArtifactViewerPanel />)
+  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Keep my draft")
+  expect(screen.getByRole("button", { name: "Save comment" })).toBeDisabled()
+  expect(screen.getByRole("button", { name: "Send to agent" })).toBeDisabled()
+  expect(screen.getByRole("button", { name: "Select" })).toHaveAttribute("aria-pressed", "false")
+  expect(state.comment).not.toHaveBeenCalled()
+})
+
+it("never dispatches a saved comment callback after write authority has changed", async () => {
+  const send = vi.fn().mockResolvedValue(true)
+  state.sendToAgent = send
+  const view = render(<ArtifactViewerPanel />)
+  selectHero()
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Preserve pending draft" } })
+  fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
+  const callbacks = state.comment.mock.calls.at(-1)![1]
+  const saved = { id: "pending-comment", version: 3, path: "home.html", selector: "#hero", quote: "Big idea", text: "Preserve pending draft" }
+  state.snapshot.data = snap({ can_write: false })
+  view.rerender(<ArtifactViewerPanel />)
+  await act(async () => callbacks.onSuccess(saved))
+  expect(send).not.toHaveBeenCalled()
+  state.snapshot.data = snap()
+  view.rerender(<ArtifactViewerPanel />)
+  await act(async () => callbacks.onSuccess(saved))
+  expect(send).not.toHaveBeenCalled()
+  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Preserve pending draft")
+})
+
+it("removes agent retry mutations when the writer becomes a reader", async () => {
+  const send = vi.fn().mockResolvedValue(false)
+  state.sendToAgent = send
+  const view = render(<ArtifactViewerPanel />)
+  selectHero()
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Retry later" } })
+  fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
+  await act(async () => state.comment.mock.calls.at(-1)![1].onSuccess({ id: "saved", version: 3 }))
+  expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+  state.snapshot.data = snap({ can_write: false })
+  view.rerender(<ArtifactViewerPanel />)
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull()
+  expect(send).toHaveBeenCalledTimes(1)
+})
+
+
+it.each([false, true])("fences a pending comment only when refresh loses authority (query error: %s)", queryError => {
+  const send = vi.fn().mockResolvedValue(true)
+  state.sendToAgent = send
+  const view = render(<ArtifactViewerPanel />)
+  selectHero()
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Pending refresh" } })
+  fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
+  const callbacks = state.comment.mock.calls.at(-1)![1]
+  // A new ordinary snapshot object and newer private version are not a permission change.
+  state.snapshot.data = snap({ latest_version: 4 })
+  state.snapshot.error = queryError ? err(0, "unavailable") : null
+  view.rerender(<ArtifactViewerPanel />)
+  if (queryError) expect(screen.queryByRole("button", { name: "Select" })).toBeNull()
+  return act(async () => {
+    callbacks.onSuccess({ id: "pending-refresh", version: 3, path: "home.html", selector: "#hero", quote: "Big idea", text: "Pending refresh" })
+    if (queryError) expect(send).not.toHaveBeenCalled()
+    else expect(send).toHaveBeenCalledTimes(1)
+  })
 })

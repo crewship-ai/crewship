@@ -14,10 +14,13 @@ import { timeAgo } from "@/lib/time"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { cn } from "@/lib/utils"
+import { artifactDashboards } from "@/lib/feature-flags"
+import { parseDashboardManifest } from "@/lib/pages/artifact-dashboard"
 import { useArtifactViewer, type ArtifactViewerTarget } from "../projects/artifact-viewer-context"
 import { useArtifactProjectMutations, useArtifactProjectSnapshot } from "../projects/use-artifact-project-data"
 import type { ArtifactComment, ArtifactProjectSnapshot } from "../projects/types"
 import { ArtifactPreviewFrame, type PreviewSelection } from "./artifact-preview-frame"
+import { ArtifactDashboardPreview } from "./artifact-dashboard-preview"
 import { isValidAnchorSelector, screenLabel, screenLabels } from "./element-select"
 
 export type ArtifactViewerVariant = "pane" | "fullscreen" | "library"
@@ -84,7 +87,7 @@ export function ArtifactViewerPanel({ className, variant = "pane" }: { className
   const target = viewer?.target
   if (!viewer || !target) return null
   // A new target starts clean: no draft, banner or old version carries over to another project.
-  return <ViewerBody key={`${target.slug}:${target.version ?? ""}`} workspaceId={viewer.workspaceId} target={target} onClose={viewer.close} className={className} variant={variant} />
+  return <ViewerBody key={`${viewer.workspaceId}:${target.slug}:${target.version ?? ""}`} workspaceId={viewer.workspaceId} target={target} onClose={viewer.close} className={className} variant={variant} />
 }
 
 interface BodyProps { workspaceId: string; target: ArtifactViewerTarget; onClose: () => void; className?: string; variant: ArtifactViewerVariant }
@@ -126,9 +129,9 @@ function ViewerBody({ workspaceId, target, onClose, className, variant }: BodyPr
       <Skeleton className="h-8 w-full" /><Skeleton className="min-h-40 flex-1" />
     </div>)
   }
-  const props = { data, target, setViewing, refetch: () => void snapshot.refetch(), workspaceId, shell, fullscreen }
+  const props = { data, target, setViewing, refetch: () => void snapshot.refetch(), workspaceId, shell, fullscreen, writeEnabled: !snapshot.error && data.can_write === true }
   return variant === "library"
-    ? <LibraryLoadedViewer {...props} dispatchEnabled={!snapshot.error && data.can_write} />
+    ? <LibraryLoadedViewer {...props} dispatchEnabled={props.writeEnabled} />
     : <LoadedViewer {...props} />
 }
 
@@ -140,6 +143,7 @@ interface LoadedProps {
   workspaceId: string
   shell: Shell
   fullscreen: boolean
+  writeEnabled: boolean
   library?: boolean
   sendToOrigin?: (request: { pageId: string; comment: ArtifactComment }) => Promise<boolean>
 }
@@ -151,8 +155,18 @@ function LibraryLoadedViewer(props: LoadedProps & { dispatchEnabled: boolean }) 
   return <LoadedViewer {...props} library sendToOrigin={data.origin && dispatchEnabled ? request => agent.dispatch(request.comment) : undefined} />
 }
 
-function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, fullscreen, library = false, sendToOrigin }: LoadedProps) {
+function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, fullscreen, writeEnabled, library = false, sendToOrigin }: LoadedProps) {
   const me = useSessionSafe()?.data?.user?.id
+  const canWrite = writeEnabled && data.can_write === true
+  const scope = JSON.stringify([workspaceId, data.page_id])
+  const permission = useRef({ scope, allowed: canWrite, epoch: 0 })
+  if (permission.current.scope !== scope || permission.current.allowed !== canWrite) permission.current = { scope, allowed: canWrite, epoch: permission.current.epoch + 1 }
+  const epoch = permission.current.epoch
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  // Keep ordinary polls/code updates from cancelling an acknowledged comment,
+  // while stale callbacks from an old Page or write epoch cannot mutate or dispatch.
+  const writeAllowed = () => mounted.current && permission.current.allowed && permission.current.epoch === epoch
   const chatDispatch = useArtifactViewer()?.sendToAgent
   const sendToAgent = library ? sendToOrigin : chatDispatch
   const { restore, share, comment } = useArtifactProjectMutations(workspaceId, target.slug)
@@ -172,6 +186,9 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
   const [notice, setNotice] = useState<{ text: string; commentOn?: number }>({ text: "" })
   const [highlight, setHighlight] = useState<{ selector: string; seq: number } | null>(null)
   const [confirmShare, setConfirmShare] = useState(false)
+  useEffect(() => {
+    if (!canWrite) { setSelectMode(false); setAnchor(null); setUndispatched(null); setConfirmShare(false) }
+  }, [canWrite])
   const historyRef = useRef<HTMLDivElement>(null)
   const queueRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
@@ -203,6 +220,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
   const clearCommentNotice = () => { if (notice.commentOn !== undefined) setNotice({ text: "" }) }
 
   const fail = (error: unknown) => {
+    if (!writeAllowed()) return
     const { status, code } = errorOf(error)
     if (code === "artifact_version_conflict") setBanner("conflict")
     else if (code === "artifact_history_quota" || status === 413) setBanner("quota_full")
@@ -211,6 +229,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
   }
 
   const select = (selection: PreviewSelection) => {
+    if (!writeAllowed() || !selectMode || viewingOld) return
     setAnchor({ ...selection, version: shown, path: screen })
     clearCommentNotice()
     if (banner === "anchor") setBanner(null)
@@ -219,9 +238,10 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
   // B's API dispatches to the agent only at creation (send_to_agent) and has no later "send queued" route,
   // so the choice is made per comment here instead of a batch "Send n to agent".
   const submit = (send: boolean) => {
-    if (!anchor || !draft.trim()) return
+    if (!writeAllowed() || viewingOld || !anchor || !draft.trim()) return
     comment.mutate({ version: anchor.version, path: anchor.path, selector: anchor.selector, quote: anchor.quote, text: draft.trim(), send_to_agent: send }, {
       onSuccess: saved => {
+        if (!writeAllowed()) return
         resetComposer(); setBanner(null)
         if (send && sendToAgent) void dispatch(saved)
         // Without a chat to start it, a comment for the agent waits as its task.
@@ -239,9 +259,10 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
   // the old failure before it paints, so Retry cannot launch an answered task.
   if (undispatched && deliveryConfirmed(undispatched)) setUndispatched(null)
   const dispatch = async (saved: ArtifactComment) => {
-    if (deliveryConfirmed(saved)) return
+    if (!writeAllowed() || deliveryConfirmed(saved)) return
     setUndispatched(null)
     const started = sendToAgent ? await sendToAgent({ pageId: data.page_id, comment: saved }).catch(() => false) : false
+    if (!writeAllowed()) return
     if (started) setNotice({ text: "Comment sent to the agent", commentOn: saved.version })
     else setUndispatched(saved)
   }
@@ -251,18 +272,24 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
     if (isValidAnchorSelector(c.selector)) setHighlight(prev => ({ selector: c.selector, seq: (prev?.seq ?? 0) + 1 }))
     canvasRef.current?.scrollIntoView?.({ block: "nearest" })
   }
-  const doRestore = (version: number) => restore.mutate({ base_version: latest, version }, {
-    onSuccess: result => { setNotice({ text: `Restored v${version} as v${result.version} · nothing deleted` }); setViewing(undefined) },
-    onError: fail,
-  })
-  const doShare = (version: number) => share.mutate({ base_version: latest, version }, {
-    onSuccess: result => { setConfirmShare(false); setNotice({ text: `Shared v${result.shared_version}` }) },
-    onError: error => { setConfirmShare(false); fail(error) },
-  })
+  const doRestore = (version: number) => {
+    if (!writeAllowed()) return
+    restore.mutate({ base_version: latest, version }, {
+      onSuccess: result => { if (!writeAllowed()) return; setNotice({ text: `Restored v${version} as v${result.version} · nothing deleted` }); setViewing(undefined) },
+      onError: fail,
+    })
+  }
+  const doShare = (version: number) => {
+    if (!writeAllowed()) return
+    share.mutate({ base_version: latest, version }, {
+      onSuccess: result => { if (!writeAllowed()) return; setConfirmShare(false); setNotice({ text: `Shared v${result.shared_version}` }) },
+      onError: error => { if (!writeAllowed()) return; setConfirmShare(false); fail(error) },
+    })
+  }
 
   const header = <>
     <h2 className="min-w-0 truncate text-sm font-semibold">{data.name ?? data.slug ?? target.slug}</h2>
-    <Badge variant="outline" className="shrink-0">Project</Badge>
+    <Badge variant="outline" className="shrink-0">{artifactDashboards() && parseDashboardManifest(data.manifest.files) ? "Dashboard" : "Project"}</Badge>
     <StatusPill tone={isShared ? "success" : "muted"} label={isShared ? "Shared" : "Draft"} />
     <div className="flex-1" />
   </>
@@ -275,7 +302,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
     ...(viewingOld && shown !== sharedVersion ? [{ value: `v${shown}`, label: `v${shown}` }] : []),
   ]
   const shareTarget = shown
-  const canShare = data.can_write && shareTarget !== sharedVersion
+  const canShare = canWrite && shareTarget !== sharedVersion
 
   const toolbar = <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b px-3 py-2">
     <Segmented ariaLabel="Version" size="xs" value={versionValue} options={versionOptions}
@@ -311,7 +338,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
       </select>}
     </>}
     <div className="flex-1" />
-    {!viewingOld && <Button type="button" size="sm" variant={selectMode ? "secondary" : "ghost"} className="h-7 gap-1.5" aria-pressed={selectMode}
+    {canWrite && !viewingOld && <Button type="button" size="sm" variant={selectMode ? "secondary" : "ghost"} className="h-7 gap-1.5" aria-pressed={selectMode}
       onClick={() => { if (selectMode) setAnchor(null); else clearCommentNotice(); setSelectMode(on => !on) }}>
       <MousePointerClick className="size-3.5" aria-hidden />Select
     </Button>}
@@ -332,10 +359,10 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
     </ViewerBanner>}
     {banner === "anchor" && <ViewerBanner tone="info">This element changed. Select it again.</ViewerBanner>}
     {banner === "failed" && <ViewerBanner tone="bad">That did not go through. Nothing was changed; try again.</ViewerBanner>}
-    {undispatched && <ViewerBanner tone="warn" title="The agent did not start" action={<Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" onClick={() => void dispatch(undispatched)}>Retry</Button>}>
+    {canWrite && undispatched && <ViewerBanner tone="warn" title="The agent did not start" action={<Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" onClick={() => void dispatch(undispatched)}>Retry</Button>}>
       The comment is saved. Sending it to the agent in this chat did not go through.</ViewerBanner>}
     {viewingOld && shown === sharedVersion && <ViewerBanner tone="info" icon={Eye}
-      action={data.can_write && <Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" disabled={share.isPending} onClick={() => doShare(latest)}>Share v{latest}</Button>}>
+      action={canWrite && <Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" disabled={share.isPending} onClick={() => doShare(latest)}>Share v{latest}</Button>}>
       You see the shared version v{shown}, the one people with the link get. Latest is v{latest}.
     </ViewerBanner>}
     {viewingOld && shown !== sharedVersion && <ViewerBanner tone="info" icon={Eye} action={<Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" onClick={() => setViewing(undefined)}>Back to latest</Button>}>
@@ -353,12 +380,12 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
       {v.version === latest && <StatusPill tone="muted" label="Latest" />}
       {v.version === sharedVersion && <StatusPill tone="success" label="Shared" />}
       {v.version !== shown && <Button type="button" size="sm" variant="ghost" className="h-7" onClick={() => setViewing(v.version === latest ? undefined : v.version)}>View</Button>}
-      {data.can_write && v.version !== latest && <Button type="button" size="sm" variant="ghost" className="h-7" disabled={restore.isPending} onClick={() => doRestore(v.version)}>Restore as new version</Button>}
+      {canWrite && v.version !== latest && <Button type="button" size="sm" variant="ghost" className="h-7" disabled={restore.isPending} onClick={() => doRestore(v.version)}>Restore as new version</Button>}
     </li>)}</ul>
   </div>
 
   const pinNumber = data.comments.length + 1
-  const pinCard = (anchor || draft) && !viewingOld && <form aria-label="New comment" onSubmit={event => { event.preventDefault(); submit(true) }}
+  const pinCard = canWrite && (anchor || draft) && !viewingOld && <form aria-label="New comment" onSubmit={event => { event.preventDefault(); submit(true) }}
     className="z-[2] mt-2.5 flex flex-wrap items-start gap-2 rounded-card border bg-card px-2.5 py-2 shadow-md @md:absolute @md:right-[18px] @md:top-[18px] @md:mt-0 @md:max-w-[min(320px,calc(100%-36px))]">
     <span aria-hidden className={cn(PIN, "size-6 bg-primary text-xs text-primary-foreground")}>{pinNumber}</span>
     <div className="grid min-w-0 flex-[1_1_160px] gap-1.5">
@@ -374,8 +401,10 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
 
   const canvas = <div ref={canvasRef} className="relative rounded-card bg-muted p-3.5">
     <div className={cn("overflow-hidden rounded-md border bg-white", fullscreen ? "h-[max(320px,calc(100dvh-14rem))]" : "h-[min(70vh,560px)] min-h-[320px]")}>
-      <ArtifactPreviewFrame html={html} files={data.manifest.files} screens={screens} path={screen} selectMode={selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`}
-        highlight={highlight} onSelect={select} onNavigate={setScreenPath} />
+      {artifactDashboards() && data.manifest.files.some(file => file.path === "dashboard.json")
+        ? <ArtifactDashboardPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} files={data.manifest.files} path={screen} selectMode={canWrite && selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`} onSelect={select} onNavigate={setScreenPath} />
+        : <ArtifactPreviewFrame html={html} files={data.manifest.files} screens={screens} path={screen} selectMode={canWrite && selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`}
+          highlight={highlight} onSelect={select} onNavigate={setScreenPath} />}
     </div>
     {pinCard}
   </div>
@@ -387,7 +416,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
       <span className="text-xs tabular-nums text-muted-foreground">{data.comments.length}</span>
     </div>
     {data.comments.length === 0
-      ? <p className="px-3 py-2.5 text-sm text-muted-foreground">No comments yet. Turn on Select and click a part of the screen.</p>
+      ? <p className="px-3 py-2.5 text-sm text-muted-foreground">{canWrite ? "No comments yet. Turn on Select and click a part of the screen." : "No comments yet."}</p>
       : <ul>{data.comments.map((c, index) => {
         const chip = commentQueueChip(c)
         return <li key={c.id} className="border-t first:border-t-0">
@@ -428,13 +457,13 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
         <p role="status" aria-live="polite" className="text-xs text-muted-foreground empty:hidden">{notice.text}</p>
         <div hidden={library && activeTab !== "versions"} {...(library ? { role: "tabpanel", id: "artifact-detail-panel-versions", "aria-labelledby": "artifact-detail-tab-versions" } : {})}>{history}</div>
         <div hidden={library && activeTab !== "preview"} {...(library ? { role: "tabpanel", id: "artifact-detail-panel-preview", "aria-labelledby": "artifact-detail-tab-preview" } : {})}>
-        {selectMode && !anchor && !viewingOld && (anchorable
+        {canWrite && selectMode && !anchor && !viewingOld && (anchorable
           ? <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><MousePointerClick className="size-3.5" aria-hidden />Click a part of the screen. The comment stays anchored to that element and version.</p>
           : <p role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground"><Info className="size-3.5" aria-hidden />Nothing on this screen can take a comment yet: comments anchor to parts with an id, and this screen has none. Ask the agent in chat to add them.</p>)}
         {canvas}
         </div>
         <div hidden={library && activeTab !== "comments"} {...(library ? { role: "tabpanel", id: "artifact-detail-panel-comments", "aria-labelledby": "artifact-detail-tab-comments" } : {})}>{queue}</div>
-        <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Info className="size-3.5 shrink-0" aria-hidden />A comment starts the agent only when you choose Send to agent.</p>
+        {canWrite && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Info className="size-3.5 shrink-0" aria-hidden />A comment starts the agent only when you choose Send to agent.</p>}
       </div>
     </div>
   </>)
