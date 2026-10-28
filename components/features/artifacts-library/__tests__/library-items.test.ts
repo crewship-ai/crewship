@@ -45,3 +45,10 @@ describe("library items", () => {
     expect(kindCounts(items)).toEqual([["project", 2], ["sheet", 1]])
   })
 })
+
+ it("recognizes Design version heads without treating them as a Craft", () => {
+ const [item] = libraryItems([toPageView(page({ artifact_kind: "design", artifact_shared_version: 2 }))])
+ expect(item.kind).toBe("design")
+ expect(item.native).toBe(false)
+ expect(item.sharedVersion).toBe(2)
+ })

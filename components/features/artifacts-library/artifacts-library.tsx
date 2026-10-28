@@ -1,6 +1,9 @@
 "use client"
+import dynamic from "next/dynamic"
+import { artifactsDesign } from "@/lib/feature-flags"
+import { NewDesignDialog } from "./new-design-dialog"
 import { useMemo, useState } from "react"
-import { AppWindow, ArrowLeft, ExternalLink, FileText, LayoutDashboard, Lock, Presentation, Sheet, type LucideIcon } from "lucide-react"
+import { AppWindow, ArrowLeft, ExternalLink, FileText, Frame, LayoutDashboard, Lock, Presentation, Sheet, type LucideIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePages } from "@/hooks/use-pages"
@@ -12,12 +15,14 @@ import { ArtifactViewerPanel } from "@/components/features/chat/artifact-context
 import { CraftLockBar, craftEditorHref } from "@/components/features/chat/artifact-context/craft/craft-lock-bar"
 import { kindCounts, kindLabel, LIBRARY_KINDS, libraryItems, type LibraryItem, type LibraryKind } from "./library-items"
 
-const KIND_ICON: Record<LibraryKind, LucideIcon> = { project: AppWindow, word: FileText, sheet: Sheet, slides: Presentation, dashboard: LayoutDashboard }
+const DesignEditor = dynamic(() => import("@/components/features/artifacts-design/design-editor").then(module => module.DesignEditor), { ssr: false })
+
+const KIND_ICON: Record<LibraryKind, LucideIcon> = { project: AppWindow, word: FileText, sheet: Sheet, slides: Presentation, dashboard: LayoutDashboard, design: Frame }
 const CHIP = "inline-flex items-center gap-1 rounded-full px-1.5 text-micro font-semibold leading-[1.6]"
 
 const pagesHref = (workspaceId: string, slug: string) => `/pages/${encodeURIComponent(slug)}?${new URLSearchParams({ workspace_id: workspaceId })}`
 /** Project, and Word or Sheet stored natively, carry a version head; only they can say what is shared. */
-const versioned = (item: LibraryItem) => item.kind === "project" || item.native
+const versioned = (item: LibraryItem) => item.kind === "project" || item.kind === "design" || item.native
 
 function KindTile({ kind, large }: { kind: LibraryKind; large?: boolean }) {
   const Icon = KIND_ICON[kind]
@@ -97,9 +102,9 @@ function ArtifactDetail({ workspaceId, item, onBack }: { workspaceId: string; it
         <h1 className="truncate text-xl font-semibold">{item.name}</h1>
         <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><KindBadge kind={item.kind} /><StateChips item={item} /><span>{meta(item)}</span></p>
       </div>
-      {!(item.kind === "project" && projects) && <OpenInPages workspaceId={workspaceId} slug={item.slug} />}
+      {item.kind !== "design" && !(item.kind === "project" && projects) && <OpenInPages workspaceId={workspaceId} slug={item.slug} />}
     </header>
-    {item.kind === "project" && projects
+    {item.kind === "design" && artifactsDesign() ? <DesignEditor workspaceId={workspaceId} slug={item.slug} /> : item.kind === "project" && projects
       ? <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
         <div className="flex min-h-[520px] flex-1 overflow-hidden rounded-card border"><ArtifactViewerPanel variant="library" /></div>
       </ArtifactViewerProvider>
@@ -109,7 +114,7 @@ function ArtifactDetail({ workspaceId, item, onBack }: { workspaceId: string; it
             onEdit={() => window.open(craftEditorHref(workspaceId, "@" + item.pageId), "_blank", "noopener,noreferrer")} />
         </div>
         : null}
-    {item.kind !== "project" && <p className="text-sm text-muted-foreground">
+    {item.kind !== "project" && item.kind !== "design" && <p className="text-sm text-muted-foreground">
       {item.kind === "word" || item.kind === "sheet" ? "Read and edit it in its editor; Open in Pages shows the saved document." : "Open in Pages shows it with everything it contains."}
     </p>}
   </div>
@@ -160,10 +165,10 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect }: ArtifactsLibra
   const counts = kindCounts(items)
   const shown = kind === "all" ? items : items.filter(entry => entry.kind === kind)
   return <div className="grid content-start gap-4 p-4 sm:p-6">
-    <header className="grid gap-1">
+    <header className="flex flex-wrap items-center justify-between gap-3"><div className="grid gap-1">
       <h1 className="text-xl font-semibold">Artifacts</h1>
       <p className="text-sm text-muted-foreground">Projects, documents and dashboards people and agents published, newest first.</p>
-    </header>
+    </div>{artifactsDesign() && <NewDesignDialog workspaceId={workspaceId} onCreated={slug => { refresh(); onSelect(slug) }} />}</header>
     {!items.length
       ? <p className="rounded-card border border-dashed p-6 text-sm text-muted-foreground">No artifacts yet. Ask an agent in Chat to make a project, or create a document in Pages.</p>
       : <>

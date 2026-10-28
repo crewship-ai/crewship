@@ -1,6 +1,6 @@
-import { AppWindow, FileText, type LucideIcon } from "lucide-react"
+import { AppWindow, FileText, Frame, type LucideIcon } from "lucide-react"
 
-export type ArtifactKindId = "project" | "word"
+export type ArtifactKindId = "project" | "word" | "design"
 
 export interface ArtifactKind {
   id: ArtifactKindId
@@ -32,9 +32,10 @@ const WORD: ArtifactKind = {
  * Kinds without a backend (dashboards, slides, docs, sheets, design systems)
  * are left out entirely rather than shown as planned or disabled tiles.
  */
-export function availableArtifactKinds(caps: { projects: boolean; documents: boolean }): ArtifactKind[] {
+export function availableArtifactKinds(caps: { projects: boolean; documents: boolean; designs?: boolean }): ArtifactKind[] {
   const kinds: ArtifactKind[] = []
   if (caps.projects) kinds.push(PROJECT)
   if (caps.documents) kinds.push(WORD)
+  if (caps.designs) kinds.push({ id: "design", name: "Design", description: "A shared canvas with screens", icon: Frame, starterPrompts: ["Add a Cart screen and unify the colors on this Design"] })
   return kinds
 }

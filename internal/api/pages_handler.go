@@ -43,6 +43,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/documents"
@@ -60,6 +61,9 @@ import (
 // freshness verdict is arithmetic against it, and "a panel goes stale exactly
 // at its SLA" is only testable if the test owns the clock.
 type PageHandler struct {
+	designOnce sync.Once
+	design     *designHTTP
+
 	artifactMasterToken              string
 	documentStoreOptions             documents.Options
 	documentCall                     func(context.Context, string, string, string, string, any) ([]byte, int, error)
@@ -709,6 +713,8 @@ func artifactListKind(contentType string) string {
 		return "word"
 	case "gridcraft":
 		return "sheet"
+	case "design":
+		return "design"
 	}
 	return ""
 }
@@ -1118,7 +1124,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Panels != nil {
-		attached, e := h.artifactProjectAttached(r.Context(), rec.ID)
+		attached, e := h.artifactContentAttached(r.Context(), rec.ID)
 		if e != nil {
 			replyInternalError(w, h.logger, "check artifact content", e)
 			return

@@ -136,3 +136,8 @@ export function chatCraftLease(): boolean {
 export function artifactsLibrary(): boolean {
   return process.env.NEXT_PUBLIC_ARTIFACTS_LIBRARY === "true"
 }
+
+/** Collaborative Design canvas. Default off. */
+export function artifactsDesign(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN === "true"
+}

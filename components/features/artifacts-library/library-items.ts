@@ -1,13 +1,14 @@
 import type { PageView } from "@/hooks/use-pages"
 
 /** The kinds the library shows: each has a backend that stores and opens it. */
-export type LibraryKind = "project" | "word" | "sheet" | "slides" | "dashboard"
+export type LibraryKind = "project" | "word" | "sheet" | "slides" | "dashboard" | "design"
 
 export const LIBRARY_KINDS: { kind: LibraryKind; label: string; plural: string }[] = [
   { kind: "project", label: "Project", plural: "Projects" },
   { kind: "word", label: "Word", plural: "Word" },
   { kind: "sheet", label: "Sheet", plural: "Sheet" },
   { kind: "slides", label: "Slides", plural: "Slides" },
+  { kind: "design", label: "Design", plural: "Designs" },
   { kind: "dashboard", label: "Dashboard", plural: "Dashboards" },
 ]
 
@@ -53,7 +54,7 @@ export function libraryItems(pages: PageView[]): LibraryItem[] {
       slug: page.slug, name: page.name, kind,
       ...(page.immutablePageId ? { pageId: page.immutablePageId } : {}),
       sharedVersion: page.artifactSharedVersion ?? null,
-      native: Boolean(page.artifactKind) && kind !== "project",
+      native: Boolean(page.artifactKind) && (kind === "word" || kind === "sheet"),
       // Only the server's explicit classification; ownership or a missing folder is not privacy.
       private: page.privateAudience === true,
       ownerLabel: ownerOf(page),

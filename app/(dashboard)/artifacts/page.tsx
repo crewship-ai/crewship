@@ -4,8 +4,11 @@ import { Suspense, useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePageWorkspace } from "@/hooks/use-page-workspace"
-import { artifactsLibrary } from "@/lib/feature-flags"
+import dynamic from "next/dynamic"
+import { artifactsDesign, artifactsLibrary } from "@/lib/feature-flags"
 import { ArtifactsLibrary } from "@/components/features/artifacts-library/artifacts-library"
+
+const DesignEditor = dynamic(() => import("@/components/features/artifacts-design/design-editor").then(module => module.DesignEditor), { ssr: false })
 
 // /artifacts — the Artifacts library behind its flag. The open artifact lives
 // in ?item= next to the workspace, so a detail survives reload and can be shared.
@@ -16,7 +19,8 @@ export default function ArtifactsPage() {
 function ArtifactsEntry() {
   const params = useSearchParams()
   const router = useRouter()
-  const enabled = artifactsLibrary()
+  const design = artifactsDesign()
+  const enabled = artifactsLibrary() || design
   const { workspaceId, loading, linkUnavailable } = usePageWorkspace()
   const workspaceQuery = new URLSearchParams()
   const linked = params?.get("workspace_id")
@@ -36,5 +40,6 @@ function ArtifactsEntry() {
     if (slug) next.set("item", slug)
     router.push(`/artifacts${next.size ? `?${next}` : ""}`)
   }
+  if (design && params?.get("design") === "1" && params.get("item")) return <div className="h-full p-4"><DesignEditor workspaceId={workspaceId} slug={params.get("item")!} initialVersion={Number.isSafeInteger(Number(params.get("version"))) && Number(params.get("version")) > 0 ? Number(params.get("version")) : undefined} /></div>
   return <ArtifactsLibrary workspaceId={workspaceId} item={params?.get("item") || null} onSelect={select} />
 }

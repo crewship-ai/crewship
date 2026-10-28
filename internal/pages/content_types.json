@@ -168,5 +168,20 @@
     "export_formats": [],
     "execution_profile": "host-json",
     "authoring_skill": ""
+  },
+  {
+    "type_id": "design",
+    "schema_version": 1,
+    "viewer": "page-design",
+    "editor": "page-design",
+    "storage_adapter": "design-yjs-v1",
+    "projection_adapter": "design-scene-v1",
+    "anchor_kinds": [
+      "frame",
+      "element"
+    ],
+    "export_formats": [],
+    "execution_profile": "none",
+    "authoring_skill": "crewship-artifacts"
   }
 ]

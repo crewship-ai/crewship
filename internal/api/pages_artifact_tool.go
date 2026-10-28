@@ -19,7 +19,7 @@ import (
 // The exact Page mandate is checked again in VersionStore's writer transaction.
 // Captured chat provenance and an administrative policy alone grant no access.
 func (h *PageHandler) checkArtifactProjectRunConsent(ctx context.Context, a *artifactRunAuthority, page string) error {
-	if a == nil || !h.artifactProjectEnabled(ctx) || h.checkOriginalUserArtifactRunPrincipal(ctx, a) != nil || !h.artifactAgentPolicyAllows(ctx, a.WorkspaceID, a.CrewID) {
+	if a == nil || !h.artifactRunFamilyEnabled(ctx, a.WorkspaceID, page) || h.checkOriginalUserArtifactRunPrincipal(ctx, a) != nil || !h.artifactAgentPolicyAllows(ctx, a.WorkspaceID, a.CrewID) {
 		return errors.New("original live artifact authority required")
 	}
 	if _, err := h.validateArtifactPrincipalOriginalCredential(ctx, a, "pages:write"); err != nil {
