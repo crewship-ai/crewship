@@ -35,7 +35,7 @@ func craftNativePin(value string, size int) bool {
 func qualifyCraftNativeProfiles(input map[string]CraftNativeDocumentProfile) (map[string]craftNativeApplication, error) {
 	profiles := make(map[string]craftNativeApplication, len(input))
 	for key, p := range input {
-		if key != p.Application || (key != "wordcraft" && key != "gridcraft") || !craftNativePin(p.EngineRevision, 40) || !craftNativePin(p.CLISHA256, 64) || !craftNativePin(p.EditorBundle, 64) || !filepath.IsAbs(p.CLIPath) || filepath.Clean(p.CLIPath) != p.CLIPath || strings.ContainsRune(p.CLIPath, 0) {
+		if key != p.Application || (key != "wordcraft" && key != "gridcraft" && key != "deckcraft") || !craftNativePin(p.EngineRevision, 40) || !craftNativePin(p.CLISHA256, 64) || !craftNativePin(p.EditorBundle, 64) || !filepath.IsAbs(p.CLIPath) || filepath.Clean(p.CLIPath) != p.CLIPath || strings.ContainsRune(p.CLIPath, 0) {
 			return nil, errors.New("invalid native document release profile")
 		}
 		u, err := url.Parse(p.EditorURL)
@@ -67,4 +67,10 @@ func checkCraftNativeCLI(p CraftNativeDocumentProfile) error {
 		return errors.New("native document CLI pin mismatch")
 	}
 	return nil
+}
+
+// Native agent commands are qualified separately from human document profiles.
+// Deck admits human ZIP documents only until its original CLI adapter is qualified.
+func craftNativeAgentApplicationSupported(application string) bool {
+	return application == "wordcraft" || application == "gridcraft"
 }

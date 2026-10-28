@@ -6919,6 +6919,9 @@
       },
       "DocumentAvailability": {
         "properties": {
+          "deckcraft_native": {
+            "type": "boolean"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -6936,7 +6939,8 @@
         "required": [
           "enabled",
           "wordcraft_native",
-          "gridcraft_native"
+          "gridcraft_native",
+          "deckcraft_native"
         ],
         "type": "object"
       },
@@ -13308,7 +13312,8 @@
           "applicationId": {
             "enum": [
               "wordcraft",
-              "gridcraft"
+              "gridcraft",
+              "deckcraft"
             ],
             "type": "string"
           },
@@ -13475,7 +13480,8 @@
           "application_id": {
             "enum": [
               "wordcraft",
-              "gridcraft"
+              "gridcraft",
+              "deckcraft"
             ],
             "type": "string"
           },
@@ -13519,7 +13525,8 @@
           "application_id": {
             "enum": [
               "wordcraft",
-              "gridcraft"
+              "gridcraft",
+              "deckcraft"
             ],
             "type": "string"
           },
@@ -13606,7 +13613,8 @@
           "applicationId": {
             "enum": [
               "wordcraft",
-              "gridcraft"
+              "gridcraft",
+              "deckcraft"
             ],
             "type": "string"
           },
@@ -13750,7 +13758,8 @@
           "applicationId": {
             "enum": [
               "wordcraft",
-              "gridcraft"
+              "gridcraft",
+              "deckcraft"
             ],
             "type": "string"
           },
@@ -13819,7 +13828,8 @@
           "application_id": {
             "enum": [
               "wordcraft",
-              "gridcraft"
+              "gridcraft",
+              "deckcraft"
             ],
             "type": "string"
           },
@@ -13849,7 +13859,8 @@
           "applicationId": {
             "enum": [
               "wordcraft",
-              "gridcraft"
+              "gridcraft",
+              "deckcraft"
             ],
             "type": "string"
           },
@@ -13941,7 +13952,8 @@
           "applicationId": {
             "enum": [
               "wordcraft",
-              "gridcraft"
+              "gridcraft",
+              "deckcraft"
             ],
             "type": "string"
           },

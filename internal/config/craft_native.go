@@ -64,7 +64,7 @@ func (c CraftNativeConfig) ResolveEditorBundles(g GridCraftConfig, legacyEnabled
 	sort.Strings(keys)
 	for _, key := range keys {
 		p := c.Profiles[key]
-		if (key != "wordcraft" && key != "gridcraft") || key != p.Application || !editororigin.IsDigest(p.EditorBundle) || p.EditorURL != editorBase+editororigin.BundlePrefix+p.EditorBundle+"/index.html" {
+		if (key != "wordcraft" && key != "gridcraft" && key != "deckcraft") || key != p.Application || !editororigin.IsDigest(p.EditorBundle) || p.EditorURL != editorBase+editororigin.BundlePrefix+p.EditorBundle+"/index.html" {
 			return "", nil, errors.New("native application bundle pin or server-owned URL is invalid")
 		}
 		if !seen[p.EditorBundle] {
@@ -95,6 +95,7 @@ func applyCraftNativeEnv(c *CraftNativeConfig) {
 	}{
 		{"wordcraft", [5]string{"CREWSHIP_CRAFT_NATIVE_WORD_ENGINE_REVISION", "CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH", "CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256", "CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_BUNDLE", "CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL"}},
 		{"gridcraft", [5]string{"CREWSHIP_CRAFT_NATIVE_GRID_ENGINE_REVISION", "CREWSHIP_CRAFT_NATIVE_GRID_CLI_PATH", "CREWSHIP_CRAFT_NATIVE_GRID_CLI_SHA256", "CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_BUNDLE", "CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_URL"}},
+		{"deckcraft", [5]string{"CREWSHIP_CRAFT_NATIVE_DECK_ENGINE_REVISION", "CREWSHIP_CRAFT_NATIVE_DECK_CLI_PATH", "CREWSHIP_CRAFT_NATIVE_DECK_CLI_SHA256", "CREWSHIP_CRAFT_NATIVE_DECK_EDITOR_BUNDLE", "CREWSHIP_CRAFT_NATIVE_DECK_EDITOR_URL"}},
 	} {
 		profile := c.Profiles[app.application]
 		changed := false

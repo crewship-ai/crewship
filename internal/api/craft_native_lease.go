@@ -70,9 +70,9 @@ func (m *craftNativeHTTP) availability(w http.ResponseWriter, r *http.Request) {
 				ws := WorkspaceIDFromContext(ctx)
 				rec, e := m.pages.loadPageForRead(ctx, ws, r.PathValue("slug"))
 				if e == nil {
-					_, e = m.pageAuthority(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, false)
-					enabled = e == nil
-					if enabled && m.agents != nil && m.agents.runtimeReady() {
+					proof, authorityErr := m.pageAuthority(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, false)
+					enabled = authorityErr == nil
+					if enabled && craftNativeAgentApplicationSupported(proof.application) && m.agents != nil && m.agents.runtimeReady() {
 						_, writeErr := m.pageAuthority(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, true)
 						agentsEnabled = writeErr == nil
 					}

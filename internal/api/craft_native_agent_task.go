@@ -63,7 +63,7 @@ func (m *craftNativeAgentManager) produceTask(ctx context.Context, slug string, 
 	if err != nil {
 		return zero, err
 	}
-	if _, ok := m.documents.applications[proof.application]; !ok {
+	if _, ok := m.documents.applications[proof.application]; !ok || !craftNativeAgentApplicationSupported(proof.application) {
 		return zero, mooring.ErrNativeDisabled
 	}
 	original, err := chataudience.CaptureTrustedQuery(ctx, tx, input.ChatID, source.UserID, nil)
