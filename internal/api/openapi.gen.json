@@ -121892,6 +121892,21 @@
                       "description": "The pages in this folder the caller reaches, as index rows.",
                       "items": {
                         "properties": {
+                          "artifact_kind": {
+                            "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                            "enum": [
+                              "project",
+                              "dashboard",
+                              "word",
+                              "sheet"
+                            ],
+                            "type": "string"
+                          },
+                          "artifact_shared_version": {
+                            "description": "Current shared code pin; omitted when nothing has been shared.",
+                            "minimum": 1,
+                            "type": "integer"
+                          },
                           "can_move": {
                             "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
                             "type": "boolean"
@@ -123206,6 +123221,21 @@
                   "properties": {
                     "page": {
                       "properties": {
+                        "artifact_kind": {
+                          "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                          "enum": [
+                            "project",
+                            "dashboard",
+                            "word",
+                            "sheet"
+                          ],
+                          "type": "string"
+                        },
+                        "artifact_shared_version": {
+                          "description": "Current shared code pin; omitted when nothing has been shared.",
+                          "minimum": 1,
+                          "type": "integer"
+                        },
                         "can_move": {
                           "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
                           "type": "boolean"
@@ -123548,6 +123578,21 @@
                   "properties": {
                     "page": {
                       "properties": {
+                        "artifact_kind": {
+                          "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                          "enum": [
+                            "project",
+                            "dashboard",
+                            "word",
+                            "sheet"
+                          ],
+                          "type": "string"
+                        },
+                        "artifact_shared_version": {
+                          "description": "Current shared code pin; omitted when nothing has been shared.",
+                          "minimum": 1,
+                          "type": "integer"
+                        },
                         "can_move": {
                           "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
                           "type": "boolean"
@@ -123902,6 +123947,21 @@
                     "pages": {
                       "items": {
                         "properties": {
+                          "artifact_kind": {
+                            "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                            "enum": [
+                              "project",
+                              "dashboard",
+                              "word",
+                              "sheet"
+                            ],
+                            "type": "string"
+                          },
+                          "artifact_shared_version": {
+                            "description": "Current shared code pin; omitted when nothing has been shared.",
+                            "minimum": 1,
+                            "type": "integer"
+                          },
                           "can_move": {
                             "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
                             "type": "boolean"
@@ -124340,6 +124400,21 @@
                 "schema": {
                   "items": {
                     "properties": {
+                      "artifact_kind": {
+                        "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                        "enum": [
+                          "project",
+                          "dashboard",
+                          "word",
+                          "sheet"
+                        ],
+                        "type": "string"
+                      },
+                      "artifact_shared_version": {
+                        "description": "Current shared code pin; omitted when nothing has been shared.",
+                        "minimum": 1,
+                        "type": "integer"
+                      },
                       "can_move": {
                         "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
                         "type": "boolean"
@@ -124748,6 +124823,21 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "artifact_kind": {
+                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                      "enum": [
+                        "project",
+                        "dashboard",
+                        "word",
+                        "sheet"
+                      ],
+                      "type": "string"
+                    },
+                    "artifact_shared_version": {
+                      "description": "Current shared code pin; omitted when nothing has been shared.",
+                      "minimum": 1,
+                      "type": "integer"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
@@ -124971,6 +125061,21 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "artifact_kind": {
+                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                      "enum": [
+                        "project",
+                        "dashboard",
+                        "word",
+                        "sheet"
+                      ],
+                      "type": "string"
+                    },
+                    "artifact_shared_version": {
+                      "description": "Current shared code pin; omitted when nothing has been shared.",
+                      "minimum": 1,
+                      "type": "integer"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
@@ -126032,6 +126137,21 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "artifact_kind": {
+                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                      "enum": [
+                        "project",
+                        "dashboard",
+                        "word",
+                        "sheet"
+                      ],
+                      "type": "string"
+                    },
+                    "artifact_shared_version": {
+                      "description": "Current shared code pin; omitted when nothing has been shared.",
+                      "minimum": 1,
+                      "type": "integer"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
@@ -126255,6 +126375,21 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "artifact_kind": {
+                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                      "enum": [
+                        "project",
+                        "dashboard",
+                        "word",
+                        "sheet"
+                      ],
+                      "type": "string"
+                    },
+                    "artifact_shared_version": {
+                      "description": "Current shared code pin; omitted when nothing has been shared.",
+                      "minimum": 1,
+                      "type": "integer"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
@@ -126961,6 +127096,21 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "artifact_kind": {
+                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                      "enum": [
+                        "project",
+                        "dashboard",
+                        "word",
+                        "sheet"
+                      ],
+                      "type": "string"
+                    },
+                    "artifact_shared_version": {
+                      "description": "Current shared code pin; omitted when nothing has been shared.",
+                      "minimum": 1,
+                      "type": "integer"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
@@ -127446,6 +127596,21 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "artifact_kind": {
+                      "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                      "enum": [
+                        "project",
+                        "dashboard",
+                        "word",
+                        "sheet"
+                      ],
+                      "type": "string"
+                    },
+                    "artifact_shared_version": {
+                      "description": "Current shared code pin; omitted when nothing has been shared.",
+                      "minimum": 1,
+                      "type": "integer"
+                    },
                     "color": {
                       "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                       "type": "string"
@@ -144053,6 +144218,21 @@
                     },
                     "page": {
                       "properties": {
+                        "artifact_kind": {
+                          "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend.",
+                          "enum": [
+                            "project",
+                            "dashboard",
+                            "word",
+                            "sheet"
+                          ],
+                          "type": "string"
+                        },
+                        "artifact_shared_version": {
+                          "description": "Current shared code pin; omitted when nothing has been shared.",
+                          "minimum": 1,
+                          "type": "integer"
+                        },
                         "color": {
                           "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
                           "type": "string"

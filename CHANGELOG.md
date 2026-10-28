@@ -14,6 +14,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Add Preview, History and Comments tabs to the opt-in Artifacts library; sending an anchored comment starts the source agent, with delivery confirmation and retry of the saved task.
 - Add default-off Dashboard collection reads and atomic JSON document batches through authenticated Page API, CLI and original-run MCP tools. Shared readers use the current shared code manifest; data changes preserve code history and document conflicts never overwrite newer data.
+- Classify Dashboard artifacts from the authorized code manifest in Page lists and detail: owners use the latest code, shared readers use the current shared pin. The disabled Dashboard data flag preserves the ordinary Project classification.
 
 - Add a disabled dashboard dataset storage foundation with atomic document version checks, bounded JSON batches, server attribution, portable backups and Page lifetime cleanup; code versions remain in the existing artifact VersionStore.
 
