@@ -21,6 +21,10 @@ async function rejection(promise: Promise<unknown>): Promise<ArtifactRequestErro
 }
 
 describe("artifact project client", () => {
+  it("preserves only an exact selected Slides classification without guessing from names", () => {
+    expect(parseArtifactProject({ ...snapshot, artifact_kind: "slides" })?.artifact_kind).toBe("slides")
+    for (const kind of ["Slides", "unsupported", true, null]) expect(parseArtifactProject({ ...snapshot, name: "Slides", artifact_kind: kind })?.artifact_kind).toBeUndefined()
+  })
   it("reads the snapshot with the workspace, an encoded slug and no cache", async () => {
     const spy = respond(200, snapshot)
     await fetchArtifactProject("w 1", "a/b", 2)

@@ -9,6 +9,11 @@ export function crewsUnifiedUI(): boolean {
   return process.env.NEXT_PUBLIC_CREWS_UNIFIED_UI === "true"
 }
 
+/** Typed VersionStore Slides previews; requires the backend artifact_slides capability. */
+export function artifactSlides(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACT_SLIDES === "true"
+}
+
 /**
  * Gates the legacy self-hosted MCP-server Integrations UI.
  *

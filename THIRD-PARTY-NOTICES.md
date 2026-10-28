@@ -39,6 +39,13 @@ licensed under Apache-2.0. Copyright 2021–2026 Bret Jordan & Benedikt Thoma;
 copyright 2006–2019 WebPKI.org. The [exact upstream license](internal/mooring/licenses/jcs-v1.0.2-LICENSE.txt)
 is retained with the [version and parser audit](internal/mooring/licenses/README.md).
 
+## Artifact Slides font
+
+The packaged Go Regular font in `public/fonts/go-regular/Go-Regular.ttf` is
+identical to `golang.org/x/image/font/gofont/goregular` v0.47.0, copyright
+2016 Bigelow & Holmes Inc. Its BSD-style Go font notice is retained in
+[`public/fonts/go-regular/LICENSE.txt`](public/fonts/go-regular/LICENSE.txt).
+
 ## Go dependencies
 
 Sections below list every direct + transitive Go dependency of the `crewship`

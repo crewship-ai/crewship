@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
 }))
 
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "owner" } } }) }))
+vi.mock("@/components/features/chat/artifact-context/viewer/artifact-slides-preview", () => ({ ArtifactSlidesPreview: ({ selectMode }: { selectMode: boolean }) => <div data-testid="library-slides" data-select-mode={String(selectMode)}>Library typed Slides</div> }))
 vi.mock("@/hooks/use-pages", async importOriginal => ({
   ...(await importOriginal<typeof import("@/hooks/use-pages")>()),
   usePages: () => ({ pages: state.pages, loading: false, error: null, refresh: vi.fn() }),
@@ -134,4 +135,25 @@ it("never reports agent delivery when the server provides no source chat", async
   expect(await screen.findByText("Comment saved for the agent")).toBeInTheDocument()
   expect(state.dispatch).not.toHaveBeenCalled()
   expect(screen.queryByText("Comment sent to the agent")).toBeNull()
+})
+
+it.each(["true", "false"])("routes explicit server-typed Slides with flag %s while keeping a reader inert", flag => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_SLIDES", flag)
+  try {
+    state.pages = [toPageView({ id: "page-1", slug: "launch", name: "Launch", owner: "user/owner", artifact_kind: "slides", artifact_shared_version: 2 })]
+    state.snapshot!.artifact_kind = "slides"
+    state.snapshot!.can_write = false
+    state.snapshot!.versions = []
+    state.snapshot!.manifest.version = 2
+    state.snapshot!.manifest.files.push({ path: "deck.json", media_type: "application/json", content: '{"schema_version":1,"order":["intro"]}' })
+    open()
+    if (flag === "true") {
+      expect(screen.getByTestId("library-slides")).toHaveAttribute("data-select-mode", "false")
+      expect(screen.queryByRole("button", { name: "Select", exact: true })).toBeNull()
+      expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull()
+    } else {
+      expect(screen.queryByTestId("library-slides")).toBeNull()
+      expect(screen.getByRole("link", { name: "Open in Pages" })).toBeInTheDocument()
+    }
+  } finally { vi.unstubAllEnvs() }
 })

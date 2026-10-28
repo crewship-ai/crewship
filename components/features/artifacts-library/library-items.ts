@@ -50,14 +50,14 @@ export function libraryItems(pages: PageView[]): LibraryItem[] {
   const items: LibraryItem[] = []
   for (const page of pages) {
     const kind = kindOf(page)
-    const typedKind = page.artifactKind as LibraryKind | undefined
+    const typedKind = page.artifactKind
     if (!kind) continue
     items.push({
       slug: page.slug, name: page.name, kind,
       ...(page.immutablePageId ? { pageId: page.immutablePageId } : {}),
       sharedVersion: page.artifactSharedVersion ?? null,
       native: typedKind === "word" || typedKind === "sheet",
-      projectBacked: typedKind === "project" || typedKind === "dashboard",
+      projectBacked: typedKind === "project" || typedKind === "dashboard" || typedKind === "slides",
       // Only the server's explicit classification; ownership or a missing folder is not privacy.
       private: page.privateAudience === true,
       ownerLabel: ownerOf(page),

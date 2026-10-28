@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePages } from "@/hooks/use-pages"
 import { formatRelativeShort } from "@/lib/time"
-import { artifactDashboards } from "@/lib/feature-flags"
+import { artifactDashboards, artifactSlides } from "@/lib/feature-flags"
 import { cn } from "@/lib/utils"
 import { ArtifactViewerProvider } from "@/components/features/chat/artifact-context/projects/artifact-viewer-context"
 import { useArtifactProjectsAvailable } from "@/components/features/chat/artifact-context/projects/use-artifact-project-data"
@@ -89,7 +89,7 @@ function OpenInPages({ workspaceId, slug }: { workspaceId: string; slug: string 
 /** One artifact: a project shows its history in the project viewer, a native Word or Sheet its edit lock. */
 function ArtifactDetail({ workspaceId, item, onBack }: { workspaceId: string; item: LibraryItem; onBack: () => void }) {
   const projects = useArtifactProjectsAvailable(workspaceId)
-  const projectPreview = item.projectBacked && (item.kind === "project" || artifactDashboards()) && projects
+  const projectPreview = item.projectBacked && (item.kind === "project" || item.kind === "dashboard" && artifactDashboards() || item.kind === "slides" && artifactSlides()) && projects
   const target = useMemo(() => ({ slug: item.slug, tab: "preview" as const }), [item.slug])
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
     <div><Button type="button" variant="ghost" size="sm" className="-ml-2 coarse:min-h-[44px]" onClick={onBack}><ArrowLeft aria-hidden />All artifacts</Button></div>

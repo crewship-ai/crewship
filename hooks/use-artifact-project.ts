@@ -10,6 +10,7 @@ export type ArtifactAuthorKind = "human" | "agent"
 export interface ArtifactComment { id: string; version: number; path: string; selector: string; quote: string; text: string; author_kind?: ArtifactAuthorKind; task_id?: string; replies?: { text: string; version: number; author_kind?: ArtifactAuthorKind }[] }
 export interface ArtifactProjectSnapshot {
  page_id: string
+ artifact_kind?: "slides"
  origin?: ArtifactOrigin
  can_write: boolean
  latest_version: number
