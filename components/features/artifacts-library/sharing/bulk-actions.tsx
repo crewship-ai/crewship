@@ -1,10 +1,13 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { Archive, ArchiveRestore, FolderInput, Share2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { StatusPill } from "@/components/ui/status-pill"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader, type SurfaceIcon,
+} from "@/components/layout/create-surface"
 import type { LibraryItem } from "../library-items"
 import { LevelSelect, SELECT, SubjectSelect, useSubjects, type Subject } from "./share-controls"
 import {
@@ -68,6 +71,7 @@ export interface BulkPreviewDialogProps {
 const TITLE: Record<BulkAction, string> = { move: "Move", share: "Share", archive: "Archive", unarchive: "Unarchive" }
 const WILL: Record<BulkAction, string> = { move: "will move", share: "will be shared", archive: "will be archived", unarchive: "will be restored" }
 const DID: Record<BulkAction, string> = { move: "moved", share: "shared", archive: "archived", unarchive: "restored" }
+const ICON: Record<BulkAction, SurfaceIcon> = { move: FolderInput, share: Share2, archive: Archive, unarchive: ArchiveRestore }
 const UNFILED = "__unfiled"
 
 const listEntries = (entries: AccessEntry[]) => entries.map(e => `${e.label} (${SHARE_LEVEL_LABEL[e.level]})`).join(", ")
@@ -117,7 +121,7 @@ export function BulkPreviewDialog({ workspaceId, action, items, folders, open, o
   const nameOf = (slug: string) => items.find(i => i.slug === slug)?.name ?? slug
 
   const confirm = () => {
-    if (!base || !ok.length) return
+    if (!base || !ok.length || apply.isPending) return
     const slugs = new Set(ok.map(r => r.slug))
     apply.mutate({ ...base, items: items.filter(i => slugs.has(i.slug)), dryRun: false }, {
       onSuccess: result => {
@@ -134,13 +138,17 @@ export function BulkPreviewDialog({ workspaceId, action, items, folders, open, o
     : action === "move" ? "Moving changes who can open an artifact to match the folder. Check the preview before you confirm."
     : "Shares within this workspace. Check the preview before you confirm."
 
-  return <Dialog open={open} onOpenChange={next => { if (!apply.isPending) onOpenChange(next) }}>
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle>{TITLE[action]} {count}</DialogTitle>
-        <DialogDescription>{description}</DialogDescription>
-      </DialogHeader>
+  const close = () => onOpenChange(false)
+  const done = Boolean(applied || tooMany)
+
+  // A CreateSurface, not a ConfirmDialog: the preview is chosen (a folder, a person and level) and read
+  // before anything is confirmed, which is a form with a result rather than a yes/no question.
+  return <CreateSurface open={open} onOpenChange={next => { if (!apply.isPending) onOpenChange(next) }} size="md" onSubmit={done ? undefined : confirm}>
+    <CreateSurfaceHeader icon={ICON[action]} title={`${TITLE[action]} ${count}`} onClose={apply.isPending ? undefined : close} />
+    <CreateSurfaceBody>
       <div className="flex flex-col gap-3 text-xs">
+        {/* In the body, not the header: the header's description is one truncated line, and this is what the person decides on. */}
+        <p className="text-muted-foreground">{description}</p>
         {tooMany ? <p role="alert" className="text-destructive">{items.length} selected. At most {BULK_LIMIT} artifacts at once; select fewer.</p>
           : applied ? <Outcome action={action} result={applied} nameOf={nameOf} />
           : <>
@@ -174,18 +182,12 @@ export function BulkPreviewDialog({ workspaceId, action, items, folders, open, o
             {apply.error && <p role="alert" className="text-destructive">Nothing was confirmed: {apply.error.message}</p>}
           </>}
       </div>
-      <DialogFooter>
-        {applied || tooMany
-          ? <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-          : <>
-            <Button size="sm" variant="outline" onClick={() => onOpenChange(false)} disabled={apply.isPending}>Cancel</Button>
-            <Button size="sm" onClick={confirm} disabled={!ok.length || apply.isPending}>
-              {apply.isPending ? "Applying…" : `${TITLE[action]} ${ok.length || ""}`.trim()}
-            </Button>
-          </>}
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
+    </CreateSurfaceBody>
+    {done
+      ? <CreateSurfaceFooter hint={null} onCancel={close} cancelLabel="Done" />
+      : <CreateSurfaceFooter hint={null} onCancel={close} busy={apply.isPending} onPrimary={confirm} primaryDisabled={!ok.length}
+        primaryLabel={apply.isPending ? "Applying…" : `${TITLE[action]} ${ok.length || ""}`.trim()} />}
+  </CreateSurface>
 }
 
 function ImpactLines({ action, gains, loses }: { action: BulkAction; gains: AccessEntry[]; loses: AccessEntry[] }) {

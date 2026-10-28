@@ -1,9 +1,11 @@
 "use client"
 
 import { useState } from "react"
-import { Lock } from "lucide-react"
+import { Lock, Share2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { StatusPill } from "@/components/ui/status-pill"
 import { useIssuePeople } from "@/hooks/use-issue-people"
 import type { LibraryItem } from "../library-items"
@@ -23,16 +25,16 @@ export interface ShareDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
+/** The kit's form surface (dialogs-through-kit guard): each change saves as it is made, so the footer only closes. */
 export function ShareDialog({ workspaceId, item, open, onOpenChange }: ShareDialogProps) {
-  return <Dialog open={open} onOpenChange={onOpenChange}>
-    <DialogContent className="sm:max-w-lg">
-      <DialogHeader>
-        <DialogTitle>Share “{item.name}”</DialogTitle>
-        <DialogDescription className="text-xs">Choose who in this workspace can open it, and how.</DialogDescription>
-      </DialogHeader>
+  const close = () => onOpenChange(false)
+  return <CreateSurface open={open} onOpenChange={onOpenChange} size="md">
+    <CreateSurfaceHeader icon={Share2} title={`Share “${item.name}”`} description="Choose who in this workspace can open it, and how." onClose={close} />
+    <CreateSurfaceBody>
       {open && <ShareBody key={item.slug} workspaceId={workspaceId} item={item} />}
-    </DialogContent>
-  </Dialog>
+    </CreateSurfaceBody>
+    <CreateSurfaceFooter hint={null} lead={<p className="mr-auto text-micro text-muted-foreground-soft">Only people in this workspace. No public links.</p>} onCancel={close} cancelLabel="Done" />
+  </CreateSurface>
 }
 
 type RowChange = { entry: AccessEntry; level: ShareLevel | null }
@@ -107,7 +109,5 @@ function ShareBody({ workspaceId, item }: { workspaceId: string; item: LibraryIt
         </ul>}
       {change.error && <p role="alert" className="text-xs text-destructive">{change.error.message}</p>}
     </section>
-
-    <p className="text-micro text-muted-foreground-soft">Only people in this workspace. No public links.</p>
   </div>
 }

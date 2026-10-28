@@ -1,9 +1,12 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { FolderCog } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader,
+} from "@/components/layout/create-surface"
 import { LevelSelect, SubjectSelect, useSubjects, type Subject } from "./share-controls"
 import {
   entryKey, useFolderSettings, useSharingMutation,
@@ -29,17 +32,20 @@ export function FolderSettingsDialog({ workspaceId, folder, open, onOpenChange }
   const [seed, setSeed] = useState<FolderSettings | null>(null)
   const settled = open && settings.data && !settings.isFetching ? settings.data : null
   useEffect(() => { if (!open) setSeed(null); else if (settled) setSeed(current => current ?? settled) }, [open, settled])
-  return <Dialog open={open} onOpenChange={onOpenChange}>
-    <DialogContent>
-      <DialogHeader>
-        <DialogTitle>Folder settings</DialogTitle>
-        <DialogDescription>{folder.name}</DialogDescription>
-      </DialogHeader>
-      {settings.error ? <p role="alert" className="text-xs text-destructive">The settings could not be read: {settings.error.message}</p>
-        : !seed ? <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground"><Spinner className="size-3.5" />Reading settings…</p>
-        : <SettingsForm key={folder.slug} workspaceId={workspaceId} folder={folder} initial={seed} onClose={() => onOpenChange(false)} />}
-    </DialogContent>
-  </Dialog>
+  const close = () => onOpenChange(false)
+  // The kit's form surface (dialogs-through-kit guard). The form owns the body and the footer once the read has settled.
+  return <CreateSurface open={open} onOpenChange={onOpenChange} size="md">
+    <CreateSurfaceHeader icon={FolderCog} title="Folder settings" description={folder.name} onClose={close} />
+    {seed && !settings.error
+      ? <SettingsForm key={folder.slug} workspaceId={workspaceId} folder={folder} initial={seed} onClose={close} />
+      : <>
+        <CreateSurfaceBody className="text-xs">
+          {settings.error ? <p role="alert" className="text-destructive">The settings could not be read: {settings.error.message}</p>
+            : <p role="status" className="flex items-center gap-2 text-muted-foreground"><Spinner className="size-3.5" />Reading settings…</p>}
+        </CreateSurfaceBody>
+        <CreateSurfaceFooter hint={null} onCancel={close} />
+      </>}
+  </CreateSurface>
 }
 
 function SettingsForm({ workspaceId, folder, initial, onClose }: { workspaceId: string; folder: { slug: string }; initial: FolderSettings; onClose: () => void }) {
@@ -61,7 +67,10 @@ function SettingsForm({ workspaceId, folder, initial, onClose }: { workspaceId: 
 
   const summary = `${entries.length} ${entries.length === 1 ? "entry" : "entries"} · new artifacts ${audience === "private" ? "private" : "shared like the folder"}`
 
-  return <form className="flex flex-col gap-4 text-xs" onSubmit={event => { event.preventDefault(); save.mutate({ defaultAudience: audience, entries }, { onSuccess: onClose }) }}>
+  const submit = () => { if (!save.isPending) save.mutate({ defaultAudience: audience, entries }, { onSuccess: onClose }) }
+
+  return <>
+  <CreateSurfaceBody className="flex flex-col gap-4 text-xs">
     <fieldset className="flex flex-col gap-1.5">
       <legend className="mb-1.5 font-medium">New artifacts in this folder</legend>
       {AUDIENCE.map(option => <label key={option.value} className="flex items-start gap-2">
@@ -90,9 +99,7 @@ function SettingsForm({ workspaceId, folder, initial, onClose }: { workspaceId: 
 
     <p role="status" data-slot="folder-settings-summary" className="text-muted-foreground">{summary}</p>
     {save.error && <p role="alert" className="text-destructive">Not saved: {save.error.message}</p>}
-    <DialogFooter>
-      <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={save.isPending}>Cancel</Button>
-      <Button type="submit" size="sm" disabled={save.isPending}>{save.isPending ? "Saving…" : "Save"}</Button>
-    </DialogFooter>
-  </form>
+  </CreateSurfaceBody>
+  <CreateSurfaceFooter hint={null} onCancel={onClose} primaryLabel={save.isPending ? "Saving…" : "Save"} onPrimary={submit} busy={save.isPending} />
+  </>
 }

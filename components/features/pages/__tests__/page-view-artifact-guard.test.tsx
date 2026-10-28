@@ -17,7 +17,7 @@ vi.mock("@/lib/feature-flags", async (importOriginal) => ({
 
 const NOW = new Date("2026-10-28T12:00:00Z")
 
-function renderView(wire: Parameters<typeof toPageView>[0], over: Partial<React.ComponentProps<typeof PageView>> = {}) {
+function renderView(wire: Parameters<typeof toPageView>[0] & { slug: string }, over: Partial<React.ComponentProps<typeof PageView>> = {}) {
   return render(<PageView page={toPageView(wire)} slug={wire.slug} loading={false} error={null} notFound={false} onBack={() => {}} now={NOW} workspaceId="ws1" {...over} />)
 }
 
