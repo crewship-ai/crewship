@@ -12,6 +12,7 @@ import type { StatusTone } from "@/lib/format-status"
 import { fmtSize } from "@/lib/file-format"
 import { timeAgo } from "@/lib/time"
 import { useSessionSafe } from "@/hooks/use-auth"
+import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { cn } from "@/lib/utils"
 import { useArtifactViewer, type ArtifactViewerTarget } from "../projects/artifact-viewer-context"
 import { useArtifactProjectMutations, useArtifactProjectSnapshot } from "../projects/use-artifact-project-data"
@@ -19,7 +20,7 @@ import type { ArtifactComment, ArtifactProjectSnapshot } from "../projects/types
 import { ArtifactPreviewFrame, type PreviewSelection } from "./artifact-preview-frame"
 import { isValidAnchorSelector, screenLabel, screenLabels } from "./element-select"
 
-export type ArtifactViewerVariant = "pane" | "fullscreen"
+export type ArtifactViewerVariant = "pane" | "fullscreen" | "library"
 
 /** Queue state of a comment. Derived only from what the server sent: no status, no reply, no task → no chip. */
 export function commentQueueChip(comment: ArtifactComment): { label: string; tone: StatusTone; live?: boolean } | null {
@@ -125,7 +126,10 @@ function ViewerBody({ workspaceId, target, onClose, className, variant }: BodyPr
       <Skeleton className="h-8 w-full" /><Skeleton className="min-h-40 flex-1" />
     </div>)
   }
-  return <LoadedViewer data={data} target={target} setViewing={setViewing} refetch={() => void snapshot.refetch()} workspaceId={workspaceId} shell={shell} fullscreen={fullscreen} />
+  const props = { data, target, setViewing, refetch: () => void snapshot.refetch(), workspaceId, shell, fullscreen }
+  return variant === "library"
+    ? <LibraryLoadedViewer {...props} dispatchEnabled={!snapshot.error && data.can_write} />
+    : <LoadedViewer {...props} />
 }
 
 interface LoadedProps {
@@ -136,18 +140,29 @@ interface LoadedProps {
   workspaceId: string
   shell: Shell
   fullscreen: boolean
+  library?: boolean
+  sendToOrigin?: (request: { pageId: string; comment: ArtifactComment }) => Promise<boolean>
 }
 
-function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, fullscreen }: LoadedProps) {
+/** Only the library connects to the source chat; chat panes already own their live dispatcher. */
+function LibraryLoadedViewer(props: LoadedProps & { dispatchEnabled: boolean }) {
+  const { data, workspaceId, dispatchEnabled } = props
+  const agent = useArtifactAgentDispatch(workspaceId, data.page_id, data.origin ?? undefined, dispatchEnabled)
+  return <LoadedViewer {...props} library sendToOrigin={data.origin && dispatchEnabled ? request => agent.dispatch(request.comment) : undefined} />
+}
+
+function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, fullscreen, library = false, sendToOrigin }: LoadedProps) {
   const me = useSessionSafe()?.data?.user?.id
-  const sendToAgent = useArtifactViewer()?.sendToAgent
+  const chatDispatch = useArtifactViewer()?.sendToAgent
+  const sendToAgent = library ? sendToOrigin : chatDispatch
   const { restore, share, comment } = useArtifactProjectMutations(workspaceId, target.slug)
   // A comment saved for the agent whose chat message did not go out; Retry sends it again.
   const [undispatched, setUndispatched] = useState<ArtifactComment | null>(null)
   const [historyOpen, setHistoryOpen] = useState(target.tab === "versions")
+  const [activeTab, setActiveTab] = useState(target.tab ?? "preview")
   // A card asking for another section of the same project keeps the viewer (and an unsent comment).
   const [seenTab, setSeenTab] = useState(target.tab)
-  if (seenTab !== target.tab) { setSeenTab(target.tab); if (target.tab === "versions") setHistoryOpen(true) }
+  if (seenTab !== target.tab) { setSeenTab(target.tab); setActiveTab(target.tab ?? "preview"); if (target.tab === "versions") setHistoryOpen(true) }
   const [screenPath, setScreenPath] = useState<string | null>(null)
   const [selectMode, setSelectMode] = useState(false)
   const [anchor, setAnchor] = useState<Anchor | null>(null)
@@ -216,13 +231,22 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
     })
   }
   // The comment is saved as the agent's task; the run starts with a chat message bound to it.
+  const deliveryConfirmed = (saved: ArtifactComment) => Boolean(saved.task_id && data.comments.some(current =>
+    current.id === saved.id && current.task_id === saved.task_id && current.version === saved.version &&
+    (current.status === "working" || current.status === "answered" || current.status === "needs_clarification" || current.replies?.some(reply => /^agent:/.test(reply.author ?? ""))),
+  ))
+  // Authoritative task progress wins over a missing or late socket ACK. Clear
+  // the old failure before it paints, so Retry cannot launch an answered task.
+  if (undispatched && deliveryConfirmed(undispatched)) setUndispatched(null)
   const dispatch = async (saved: ArtifactComment) => {
+    if (deliveryConfirmed(saved)) return
     setUndispatched(null)
-    const started = await sendToAgent!({ pageId: data.page_id, comment: saved }).catch(() => false)
+    const started = sendToAgent ? await sendToAgent({ pageId: data.page_id, comment: saved }).catch(() => false) : false
     if (started) setNotice({ text: "Comment sent to the agent", commentOn: saved.version })
     else setUndispatched(saved)
   }
   const jumpTo = (c: ArtifactComment) => {
+    if (library) setActiveTab("preview")
     if (screens.includes(c.path)) setScreenPath(c.path)
     if (isValidAnchorSelector(c.selector)) setHighlight(prev => ({ selector: c.selector, seq: (prev?.seq ?? 0) + 1 }))
     canvasRef.current?.scrollIntoView?.({ block: "nearest" })
@@ -256,7 +280,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
   const toolbar = <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b px-3 py-2">
     <Segmented ariaLabel="Version" size="xs" value={versionValue} options={versionOptions}
       onChange={value => setViewing(value === "latest" ? undefined : value === "shared" ? sharedVersion : Number(value.slice(1)))} />
-    {versions.length > 0 && <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5" aria-pressed={historyOpen} onClick={() => setHistoryOpen(open => !open)}>
+    {!library && versions.length > 0 && <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5" aria-pressed={historyOpen} onClick={() => setHistoryOpen(open => !open)}>
       <Clock className="size-3.5" aria-hidden />History
     </Button>}
     <div className="flex-1" />
@@ -319,7 +343,7 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
     </ViewerBanner>}
   </>
 
-  const history = historyOpen && versions.length > 0 && <div ref={historyRef} tabIndex={-1} role="region" aria-label="Version history" className="rounded-card border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+  const history = (library || historyOpen) && versions.length > 0 && <div ref={historyRef} tabIndex={-1} role="region" aria-label="Version history" className="rounded-card border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
     <ul>{versions.map(v => <li key={v.version} className="flex flex-wrap items-center gap-2.5 border-t px-3 py-2 first:border-t-0">
       <span data-slot="version-number" className="shrink-0 rounded-sm border bg-muted px-[5px] font-mono text-micro font-semibold text-foreground/80">v{v.version}</span>
       <div className="grid min-w-0 flex-[1_1_180px] grid-cols-[minmax(0,1fr)]">
@@ -383,18 +407,33 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
   </div>
 
   return shell(header, <>
+    {library && <div role="tablist" aria-label="Artifact detail" className="flex gap-1 border-b px-3 py-2" onKeyDown={event => {
+      const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
+      const index = tabs.indexOf(event.target as HTMLButtonElement)
+      const next = event.key === "ArrowRight" ? (index + 1) % tabs.length : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1
+      if (next >= 0) { event.preventDefault(); tabs[next].focus(); tabs[next].click() }
+    }}>
+      {([['preview', 'Preview'], ['versions', 'History'], ['comments', 'Comments']] as const).map(([tab, label]) => <button key={tab} type="button" role="tab" aria-selected={activeTab === tab}
+        id={`artifact-detail-tab-${tab}`} aria-controls={`artifact-detail-panel-${tab}`} onClick={() => setActiveTab(tab)}
+        tabIndex={activeTab === tab ? 0 : -1}
+        className={cn("rounded-md px-3 py-1.5 text-sm coarse:min-h-[44px]", activeTab === tab ? "bg-muted font-semibold" : "text-muted-foreground hover:text-foreground")}>
+        {label}
+      </button>)}
+    </div>}
     {toolbar}
-    {subToolbar}
+    {(!library || activeTab === "preview") && subToolbar}
     <div className="min-h-0 flex-1 overflow-auto">
       <div className="grid content-start gap-3 p-3">
         {banners}
         <p role="status" aria-live="polite" className="text-xs text-muted-foreground empty:hidden">{notice.text}</p>
-        {history}
+        <div hidden={library && activeTab !== "versions"} {...(library ? { role: "tabpanel", id: "artifact-detail-panel-versions", "aria-labelledby": "artifact-detail-tab-versions" } : {})}>{history}</div>
+        <div hidden={library && activeTab !== "preview"} {...(library ? { role: "tabpanel", id: "artifact-detail-panel-preview", "aria-labelledby": "artifact-detail-tab-preview" } : {})}>
         {selectMode && !anchor && !viewingOld && (anchorable
           ? <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><MousePointerClick className="size-3.5" aria-hidden />Click a part of the screen. The comment stays anchored to that element and version.</p>
           : <p role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground"><Info className="size-3.5" aria-hidden />Nothing on this screen can take a comment yet: comments anchor to parts with an id, and this screen has none. Ask the agent in chat to add them.</p>)}
         {canvas}
-        {queue}
+        </div>
+        <div hidden={library && activeTab !== "comments"} {...(library ? { role: "tabpanel", id: "artifact-detail-panel-comments", "aria-labelledby": "artifact-detail-tab-comments" } : {})}>{queue}</div>
         <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Info className="size-3.5 shrink-0" aria-hidden />A comment starts the agent only when you choose Send to agent.</p>
       </div>
     </div>

@@ -428,6 +428,7 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 			}
 		}
 	}
+	remapGridCraft(dump, idMap)
 	// Dataset document IDs are authored keys within a Page; preserve them and
 	// rewrite their composite anchors, which reference heads rather than pages.
 	for _, table := range []string{"artifact_data_collections", "artifact_data_documents"} {
