@@ -52,6 +52,13 @@ func migrationDeckNativeKinds(ctx context.Context, db *sql.DB, logger *slog.Logg
 		if err != nil {
 			return err
 		}
+		// Design's append-only migration may already have widened the head.
+		// Preserve that closed family rather than replacing its CHECK with the
+		// pre-Design shape. Unknown schema variants still fail closed.
+		if c.table == "artifact_version_heads" && strings.Contains(original, "'design'") {
+			c.old = "CHECK(content_type IN ('artifact_project','wordcraft','gridcraft','design'))"
+			c.next = "CHECK(content_type IN ('artifact_project','wordcraft','gridcraft','design','deckcraft'))"
+		}
 		switch {
 		case strings.Count(original, c.next) == 1 && !strings.Contains(original, c.old):
 			// Schema work committed but its separate migration-ledger ACK was lost.

@@ -558,6 +558,15 @@ it("preserves a true native descriptor independently of stable identity availabi
   expect(toPageView({id:"legacy",slug:"page",has_document:"true" as unknown as boolean}).hasDocument).toBe(false)
 })
 
+it("preserves only known server native Craft application metadata", () => {
+  for (const application of ["wordcraft", "gridcraft", "deckcraft"] as const) {
+    expect(toPageView(wirePage({ native_craft_application: application })).nativeCraftApplication).toBe(application)
+  }
+  for (const application of [undefined, "unknown", "DeckCraft", "deckcraft-unknown"]) {
+    expect(toPageView(wirePage({ native_craft_application: application })).nativeCraftApplication).toBeUndefined()
+  }
+})
+
 describe("server-authorized Dashboard classification", () => {
   it("preserves explicit Dashboard metadata without inferring from its name", () => {
     expect(toPageView(wirePage({ artifact_kind: "dashboard", artifact_shared_version: 2 })).artifactKind).toBe("dashboard")

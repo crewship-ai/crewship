@@ -1,6 +1,6 @@
 # Native Craft sessions, leases, agent tasks and whole-document API
 
-The separate whole-native WordCraft/GridCraft profile is experimental and off by
+The separate whole-native WordCraft/GridCraft/DeckCraft profile is experimental and off by
 default. `craft_native.enabled: true` or `CREWSHIP_CRAFT_NATIVE_ENABLED=true`
 enables its human session and EditLease HTTP API. It requires a Linux boot-aware
 clock. A qualified Word profile is advertised as `wordcraft_native` by the authenticated
@@ -40,7 +40,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | POST | `/api/v1/pages/{slug}/craft/lease/request-handoff` | `{}`. | `{request_id, generation}`, 201. |
 | POST | `/api/v1/pages/{slug}/craft/lease/handoff` | `{generation: "1", request_id: "public-request-id"}`. | New holder's lease status, 200. |
 | GET | `/api/v1/pages/{slug}/craft/events` | Craft admission header; keep the connection open. | `text/event-stream`: `lease` status or `session_retired` metadata; 200. |
-| POST | `/api/v1/pages/{slug}/craft/initialize` | Existing empty personal Page owner, original human `pages:write`; Qualified Word or Grid native bytes. | Atomic native profile, lease and version1, with private admission, 201. |
+| POST | `/api/v1/pages/{slug}/craft/initialize` | Existing empty personal Page owner, original human `pages:write`; Qualified Word, Grid or Deck native bytes. | Atomic native profile, lease and version1, with private admission, 201. |
 | GET | `/api/v1/pages/{slug}/craft/document` | Craft admission header. | Complete base64 native bytes, version and pinned editor/engine metadata, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/save` | Bound whole snapshot described below. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Same whole snapshot contract; existing explicit native Page only. | Exact committed snapshot receipt, 200. |
@@ -123,7 +123,7 @@ descriptor again, and rejects repair warnings or lossy roundtrips. Requests neve
 choose an executable, validator callback or profile. A missing application
 profile returns 503. Availability never converts an old Page into this profile.
 
-Initialization accepts `application_id: "wordcraft"` or `"gridcraft"` and base64
+Initialization accepts `application_id: "wordcraft"`, `"gridcraft"` or `"deckcraft"` and base64
 `bytes`; the selected application must have an operator-qualified profile.
 It requires an existing empty personal Page owned by the authenticated human,
 current folder policy and live membership. Crew-owned Pages, existing content,
@@ -145,7 +145,12 @@ The native-only operator environment overrides are
 `CREWSHIP_CRAFT_NATIVE_GRID_CLI_PATH`,
 `CREWSHIP_CRAFT_NATIVE_GRID_CLI_SHA256`,
 `CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_BUNDLE` and
-`CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_URL`.
+`CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_URL`. The corresponding presentation overrides are
+`CREWSHIP_CRAFT_NATIVE_DECK_ENGINE_REVISION`,
+`CREWSHIP_CRAFT_NATIVE_DECK_CLI_PATH`,
+`CREWSHIP_CRAFT_NATIVE_DECK_CLI_SHA256`,
+`CREWSHIP_CRAFT_NATIVE_DECK_EDITOR_BUNDLE` and
+`CREWSHIP_CRAFT_NATIVE_DECK_EDITOR_URL`.
 These override corresponding YAML
 fields without enabling the product flag or any legacy profile. Explicit empty
 values remain empty and fail qualification; every startup/manifest/hash check
@@ -159,6 +164,12 @@ Native bytes are bounded to 32 MiB; the encoded JSON body is bounded to 45 MiB.
 The lease and current original credential/Page rights are checked in publication
 transactions, and pins must match the Page's immutable native profile. No HTML
 or partial patch stands in for the native model.
+
+Word and Grid store `document.json` with media type `application/json`. Deck
+stores the original `document.deckcraft` ZIP with media type
+`application/vnd.storyteller.deckcraft+zip`. The qualified original Deck CLI
+validates a roundtrip before publication; authored presentation fields and media
+bytes must survive without repair. ZIP bytes are stored without conversion.
 
 A snapshot receipt repeats the exact scope/session/generation/revision/hash and
 base binding, gives the exact successor `version`, matching `candidateHash`,
@@ -236,6 +247,10 @@ attempt. An exact repeated request only reconciles its original snapshot; it
 never reruns the engine. A changed packet with the same ID conflicts, and a
 historical receipt cannot clear another attempt's uncertainty or downgrade the
 last confirmed version.
+
+Deck has no qualified agent command adapter yet: its `agents_enabled` remains
+false even when human editing and the Word/Grid agent runtime are ready. Direct
+Deck task admission is refused before capturing consent or creating work.
 
 The initial command surface is deliberately narrow: Word supports
 `caret.docStart`, `caret.docEnd` and plaintext `text.insert`; Sheet supports

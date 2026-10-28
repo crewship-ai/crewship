@@ -136,3 +136,46 @@ func deckMigrationRows(t *testing.T, db *sql.DB, query string) string {
 	}
 	return string(b)
 }
+
+// Design widens the head family before Deck is deployed. Exercise that exact
+// closed CHECK as a schema compatibility fixture; the full registry migration
+// and dashboard child preservation are covered separately above.
+func TestDeckNativeMigrationPreservesDesignFamily(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "design-before-deck.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	db.SetMaxOpenConns(1)
+	for _, q := range []string{
+		`CREATE TABLE craft_native_documents (page_id TEXT PRIMARY KEY, application_id TEXT NOT NULL CHECK(application_id IN ('wordcraft','gridcraft')))`,
+		`CREATE TABLE artifact_version_heads (page_id TEXT PRIMARY KEY, content_type TEXT NOT NULL CHECK(content_type IN ('artifact_project','wordcraft','gridcraft','design')), latest_version INTEGER NOT NULL)`,
+		`INSERT INTO artifact_version_heads VALUES ('existing-design','design',7)`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := deckMigrationRows(t, db.DB, `SELECT * FROM artifact_version_heads`)
+	if err := migrationDeckNativeKinds(t.Context(), db.DB, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := deckMigrationRows(t, db.DB, `SELECT * FROM artifact_version_heads`); got != before {
+		t.Fatal("changed existing Design head")
+	}
+	for _, q := range []string{
+		`INSERT INTO artifact_version_heads VALUES ('new-deck','deckcraft',1)`,
+		`INSERT INTO artifact_version_heads VALUES ('new-design','design',1)`,
+		`INSERT INTO craft_native_documents VALUES ('new-deck','deckcraft')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO artifact_version_heads VALUES ('unknown','unknown',1)`); err == nil {
+		t.Fatal("opened closed family constraint")
+	}
+	if err := migrationDeckNativeKinds(t.Context(), db.DB, nil); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+}

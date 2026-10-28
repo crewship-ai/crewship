@@ -122248,7 +122248,8 @@
                             "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                             "enum": [
                               "wordcraft",
-                              "gridcraft"
+                              "gridcraft",
+                              "deckcraft"
                             ],
                             "type": "string"
                           },
@@ -123586,7 +123587,8 @@
                           "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                           "enum": [
                             "wordcraft",
-                            "gridcraft"
+                            "gridcraft",
+                            "deckcraft"
                           ],
                           "type": "string"
                         },
@@ -123952,7 +123954,8 @@
                           "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                           "enum": [
                             "wordcraft",
-                            "gridcraft"
+                            "gridcraft",
+                            "deckcraft"
                           ],
                           "type": "string"
                         },
@@ -124330,7 +124333,8 @@
                             "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                             "enum": [
                               "wordcraft",
-                              "gridcraft"
+                              "gridcraft",
+                              "deckcraft"
                             ],
                             "type": "string"
                           },
@@ -124792,7 +124796,8 @@
                         "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                         "enum": [
                           "wordcraft",
-                          "gridcraft"
+                          "gridcraft",
+                          "deckcraft"
                         ],
                         "type": "string"
                       },
@@ -125211,7 +125216,8 @@
                       "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                       "enum": [
                         "wordcraft",
-                        "gridcraft"
+                        "gridcraft",
+                        "deckcraft"
                       ],
                       "type": "string"
                     },
@@ -125458,7 +125464,8 @@
                       "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                       "enum": [
                         "wordcraft",
-                        "gridcraft"
+                        "gridcraft",
+                        "deckcraft"
                       ],
                       "type": "string"
                     },
@@ -126543,7 +126550,8 @@
                       "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                       "enum": [
                         "wordcraft",
-                        "gridcraft"
+                        "gridcraft",
+                        "deckcraft"
                       ],
                       "type": "string"
                     },
@@ -126790,7 +126798,8 @@
                       "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                       "enum": [
                         "wordcraft",
-                        "gridcraft"
+                        "gridcraft",
+                        "deckcraft"
                       ],
                       "type": "string"
                     },
@@ -127520,7 +127529,8 @@
                       "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                       "enum": [
                         "wordcraft",
-                        "gridcraft"
+                        "gridcraft",
+                        "deckcraft"
                       ],
                       "type": "string"
                     },
@@ -128029,7 +128039,8 @@
                       "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                       "enum": [
                         "wordcraft",
-                        "gridcraft"
+                        "gridcraft",
+                        "deckcraft"
                       ],
                       "type": "string"
                     },
@@ -145418,7 +145429,8 @@
                           "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                           "enum": [
                             "wordcraft",
-                            "gridcraft"
+                            "gridcraft",
+                            "deckcraft"
                           ],
                           "type": "string"
                         },
