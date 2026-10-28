@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Open backend-typed artifacts in their versioned viewer from library links and ordinary Page URLs, preserving workspace and selected versions without falling back to an empty panels view.
+
 - Add default-off authored Slides projections and vector PDF export with explicit version pins and current Page/run authority rechecked after rendering. Existing artifact history and comments remain authoritative.
 
 - Add a standalone, bounded Slides-to-PDF foundation with a fixed embedded font, vector shapes and tables, and explicit text overflow errors; product export entrypoints are not enabled yet.
