@@ -23,6 +23,11 @@ vi.mock("@/hooks/use-document-viewer-read", () => ({
 vi.mock("@/components/features/pages/document-readonly/document-readonly", () => ({
   DocumentReadonly: ({ accessibleLabel }: { accessibleLabel: string }) => <div role="region" aria-label={accessibleLabel}>document body</div>,
 }))
+// Per-user preferences as plain state; the hook's server sync is its own test.
+vi.mock("@/hooks/use-user-preference", async () => {
+  const { useState } = await import("react")
+  return { useUserPreference: <T,>(_key: string, initial: T) => { const [value, set] = useState<T>(initial); return [value, set, { ready: true }] as const } }
+})
 vi.mock("@/hooks/use-page-folders", () => ({ usePageFolders: () => ({ folders: state.folders, loading: false, error: null, supported: true, refresh: vi.fn(), reread: vi.fn() }) }))
 vi.mock("@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities", () => ({
   useArtifactCapabilities: () => ({ projects: true, dashboards: false, documents: true, sheets: false, pages: true }),
@@ -245,4 +250,26 @@ it("J and K move between items, Enter opens, Escape leaves the detail, never fro
   view.rerender(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />)
   fireEvent.keyDown(document.body, { key: "Escape" })
   expect(state.select).toHaveBeenLastCalledWith(null)
+})
+
+it("remembers what was opened and starred, per person, in Recently opened and Favorites", () => {
+  state.item = "brief"
+  const view = renderLibrary()
+  fireEvent.click(screen.getByRole("button", { name: "Add to favorites" }))
+  expect(screen.getByRole("button", { name: "Remove from favorites" }).getAttribute("aria-pressed")).toBe("true")
+  state.item = null
+  view.rerender(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />)
+  expect(screen.getByRole("heading", { name: /Recently opened/ })).toBeTruthy()
+  fireEvent.click(screen.getByRole("tab", { name: /Recently opened/ }))
+  expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(item => item.textContent)).toEqual([expect.stringContaining("Partner brief")])
+  fireEvent.click(screen.getByRole("button", { name: /^Favorites/ }))
+  expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(item => item.textContent)).toEqual([expect.stringContaining("Partner brief")])
+})
+
+it("each kind wears its colour and the gallery draws a thumbnail per kind", () => {
+  renderLibrary()
+  openAll()
+  fireEvent.click(screen.getByRole("radio", { name: "Gallery" }))
+  const thumbs = [...document.querySelectorAll("[data-thumb]")].map(node => node.getAttribute("data-thumb"))
+  expect(thumbs).toEqual(["project", "word", "sheet", "page"])
 })
