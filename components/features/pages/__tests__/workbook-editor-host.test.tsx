@@ -153,6 +153,7 @@ describe("createEditorFrame", () => {
     Object.defineProperty(real, "src", { set() { seen.push({ sandbox: real.getAttribute("sandbox"), credentialless: real.getAttribute("credentialless"), referrerpolicy: real.getAttribute("referrerpolicy") }) } })
     const doc = { createElement: () => real } as unknown as Document
     expect(createEditorFrame(doc, EDITOR_URL, () => {})).toBe(real)
+    expect(real.getAttribute("allow")).toBeNull()
     expect(seen).toEqual([{ sandbox: "allow-scripts", credentialless: "", referrerpolicy: "no-referrer" }])
   })
 
