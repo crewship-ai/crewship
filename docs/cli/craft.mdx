@@ -90,3 +90,42 @@ NDJSON actions use that admission exactly as `connect`; there is no implicit
 second session or lease acquisition. EOF does not release or commit content.
 Use an explicit `release` action when required. `--file -` consumes stdin as
 raw native bytes and ends without subsequent NDJSON actions.
+
+
+## crewship craft task
+
+These human commands require the separate default-off native agent flag and
+current Page write rights. They use normal CLI authentication and workspace
+selection; they do not create an editor session or borrow an agent identity.
+
+### crewship craft task start
+
+```sh
+crewship craft task start @PAGE --chat-id CHAT --message-id MESSAGE --whole-document --workspace WORKSPACE
+```
+
+`--chat-id` selects the registered agent chat, `--message-id` selects your own
+persisted original instruction and `--whole-document` supplies explicit consent
+for this one task. All three are required; consent defaults to false and
+`--whole-document=false` is refused before any request. Acceptance means queued,
+not executed or saved. Start never automatically retries or follows redirects.
+
+### crewship craft task status
+
+```sh
+crewship craft task status @PAGE WORK_ID --workspace WORKSPACE
+```
+
+Status reads the actual bounded host timeline and the last confirmed receipt.
+That receipt is historical; an uncertain or in-flight later attempt is not Saved.
+
+### crewship craft task stop
+
+```sh
+crewship craft task stop @PAGE --workspace WORKSPACE
+```
+
+Stop withdraws your current agent mandate for that Page and requests process
+termination. The response distinguishes revoked custody from a process whose
+stop is still pending. It cannot force a human holder and does not replay a
+failed mutation. Existing document content and versions remain available.

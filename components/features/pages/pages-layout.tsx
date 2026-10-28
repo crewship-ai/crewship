@@ -1,5 +1,6 @@
 "use client"
 
+import { useRouter } from "next/navigation"
 import { usePageCreationAccess, usePageFolderCreationAccess } from "@/hooks/use-page-creation-access"
 
 import { PageApplicationView } from "./page-application"
@@ -136,6 +137,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const [creating, setCreating] = React.useState(false)
   const [creatingDocument, setCreatingDocument] = React.useState(false)
   const documentAvailability = useDocumentsAvailability(workspaceId)
+  const nativeRouter = useRouter()
   const [search, setSearch] = React.useState("")
   const [filters, setFilters] = React.useState<PageFilters>(EMPTY_PAGE_FILTERS)
 
@@ -259,6 +261,14 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   // not there. The address is not allowed to reach a state the data does not
   // support.
   const nativePageId = typeof detail.raw?.id === "string" ? detail.raw.id.trim() : ""
+  const nativeCraftApplication = detail.page?.nativeCraftApplication
+  React.useEffect(()=>{
+    if(currentUserId && nativeCraftApplication && nativePageId && !detail.loading && !detail.error && !detail.accessDenied){
+      // The server names an existing explicit native profile. Opening it is a
+      // fresh read-only admission, never a conversion of this Page's content.
+      nativeRouter.replace(`/pages/craft/editor?${new URLSearchParams({workspace_id:workspaceId,page_id:nativePageId})}`)
+    }
+  },[currentUserId,nativeCraftApplication,nativePageId,detail.loading,detail.error,detail.accessDenied,nativeRouter,workspaceId])
   const nativeScope = session.status === "authenticated" && currentUserId && selectedSlug
     ? JSON.stringify([workspaceId, currentUserId, selectedSlug]) : null
   // An original producer's identity is retained DATA, never cached read/write
@@ -447,7 +457,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {canCreatePage && <SubBarSecondary icon={Upload} onClick={() => canCreatePage && setImporting(true)}>
               Import
             </SubBarSecondary>}
-            {canCreatePage && (documentAvailability.data === true || documentAvailability.wordcraftSDKPrefix || documentAvailability.wordcraftCommands) && <SubBarSecondary icon={FilePlus2} className="coarse:min-h-[44px]" onClick={() => setCreatingDocument(true)}>New Doc</SubBarSecondary>}
+            {canCreatePage && (documentAvailability.data === true || documentAvailability.wordcraftNative || documentAvailability.gridcraftNative || documentAvailability.wordcraftSDKPrefix || documentAvailability.wordcraftCommands) && <SubBarSecondary icon={FilePlus2} className="coarse:min-h-[44px]" onClick={() => setCreatingDocument(true)}>New Doc</SubBarSecondary>}
             {canCreatePage && <SubBarPrimary icon={FilePlus2} onClick={() => canCreatePage && setCreating(true)}>
               New page
             </SubBarPrimary>}
@@ -624,7 +634,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
       </div>
 
       {nativeAccessSlug && <NativeDocumentAccessDialog key={`${workspaceId}:${nativeAccessSlug}`} workspaceId={workspaceId} slug={nativeAccessSlug} onClose={closeNativeAccess} returnFocus={nativeAccessOpener} />}
-      {creatingDocument && <NewDocumentDialog key={workspaceId} workspaceId={workspaceId} onClose={() => setCreatingDocument(false)} onCreated={openPage} />}
+      {creatingDocument && <NewDocumentDialog key={workspaceId} workspaceId={workspaceId} onClose={() => setCreatingDocument(false)} onCreated={(slug,nativePageId)=>{if(nativePageId)nativeRouter.push(`/pages/craft/editor?${new URLSearchParams({workspace_id:workspaceId,page_id:nativePageId})}`);else openPage(slug)}} />}
 
       {importing && (
         <PageImportDialog

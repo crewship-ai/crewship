@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -43,6 +44,30 @@ func TestDocumentAvailabilityKeepsLegacyAndWordCraftIndependent(t *testing.T) {
 			}
 			if want == "" && strings.Contains(string(raw), "wordcraft_sdk_prefix") {
 				t.Fatal("disabled capability was advertised")
+			}
+		})
+	}
+}
+
+func TestDocumentAvailabilityWholeNativeWordRequiresLiveQualifiedProfile(t *testing.T) {
+	for _, mode := range []string{"off", "unqualified", "live"} {
+		t.Run(mode, func(t *testing.T) {
+			h := &craftNativeHTTP{enabled: mode != "off"}
+			d := newCraftNativeDocumentsHTTP(h, nil)
+			if mode != "unqualified" {
+				d.applications["wordcraft"] = craftNativeApplication{}
+			}
+			r := &Router{pages: &PageHandler{}, craftNativeHTTP: h, craftNativeDocuments: d}
+			raw, err := json.Marshal(r.documentAvailability(httptest.NewRequest("GET", "/api/v1/documents/status", nil)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]any
+			if err := json.Unmarshal(raw, &fields); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(fields["wordcraft_native"], mode == "live") {
+				t.Fatalf("mode %s status %s", mode, raw)
 			}
 		})
 	}

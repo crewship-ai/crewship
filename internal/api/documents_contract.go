@@ -6,6 +6,8 @@ import "encoding/json"
 // Binary Yjs state is authoritative; these structs do not grant write authority.
 type DocumentAvailability struct {
 	Enabled            bool   `json:"enabled"`
+	WordCraftNative    bool   `json:"wordcraft_native"`
+	GridCraftNative    bool   `json:"gridcraft_native"`
 	WordCraftSDKPrefix string `json:"wordcraft_sdk_prefix,omitempty"`
 	WordCraftCommands  bool   `json:"wordcraft_commands,omitempty"`
 }
