@@ -13,6 +13,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add opt-in inert Dashboard previews (`NEXT_PUBLIC_ARTIFACT_DASHBOARDS`): authorized collection data refreshes numbers, tables and native meter charts without publishing new code; shared readers stay on their shared manifest and data has source and freshness labels.
 
 - Add Preview, History and Comments tabs to the opt-in Artifacts library; sending an anchored comment starts the source agent, with delivery confirmation and retry of the saved task.
+- Add default-off Dashboard collection reads and atomic JSON document batches through authenticated Page API, CLI and original-run MCP tools. Shared readers use the current shared code manifest; data changes preserve code history and document conflicts never overwrite newer data.
+
 - Add a disabled dashboard dataset storage foundation with atomic document version checks, bounded JSON batches, server attribution, portable backups and Page lifetime cleanup; code versions remain in the existing artifact VersionStore.
 
 - Add an opt-in Artifacts library at `/artifacts` (`NEXT_PUBLIC_ARTIFACTS_LIBRARY`): a gallery or table of projects, Word, Sheet, Slides and dashboards with kind and shared version, a project detail on its version history and the edit lock of a native Word; the Pages list reports `artifact_kind` and `artifact_shared_version`.

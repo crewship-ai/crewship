@@ -1924,3 +1924,46 @@ crewship page artifact comment demo --version 1 --path index.html --selector '#a
 Omit `--send-to-agent` to store only the comment. Queuing a task does not confirm
 agent delivery. A protected agent invocation cannot fall back to a saved human
 profile to create the comment. `page artifact comments` remains the read command.
+
+
+### Dashboard data (disabled by default)
+
+Both `artifact_projects` and `artifact_dashboard_data` must be enabled. A code
+manifest declares its collections in a `dashboard.json` file:
+
+```json
+{"schema_version":1,"collections":["sales"]}
+```
+
+```bash
+crewship page artifact data collections demo --version 1
+crewship page artifact data get demo sales --version 1
+crewship page artifact data batch demo sales --file batch.json
+```
+
+`batch.json` carries the current code version and exact document versions:
+
+```json
+{"base_version":1,"documents":[{"id":"north","ifVersion":0,"value":{"revenue":1250}}]}
+```
+
+`ifVersion:0` creates a document. Updates supply its last returned positive
+version. A batch is atomic: one conflict returns an error and retains every
+existing document. Reconcile explicitly; the CLI never retries a stale batch.
+Data updates increment document versions without publishing a code version.
+Collection and document identifiers contain 1–128 ASCII letters, digits,
+underscores or hyphens, starting with a letter or digit. Values are JSON objects;
+duplicate object keys and noncanonical transport fields are rejected.
+
+Limits are 256 KiB per document, 50 writes and 1 MiB per batch, 4096 documents
+and 8 MiB of stored JSON per collection, and 32 collections per Page. Code-version
+reads are required; shared readers can read only collections declared by the
+current shared pin, and cannot write. Responses include host update time and a
+reader-safe source label, without private run or account identifiers.
+
+Agent tools `artifact_data_batch`, `artifact_data_read` and
+`artifact_data_collections` use these same fields (`slug`, `collection`,
+`base_version`/`version`, `documents`) under the original signed run and exact
+Page mandate. Protected CLI runs use that sidecar transport and cannot fall back
+to human credentials. Code restore/share/comments retain the existing artifact
+version and comment operations; restoring code does not rewind mutable data.
