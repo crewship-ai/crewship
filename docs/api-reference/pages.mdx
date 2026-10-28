@@ -2635,7 +2635,7 @@ Nodes have stable IDs and types `frame`, `rect`, `text` or `image`. Live content
 is separate from retained snapshots; awareness is transient and never grants
 write permission. CLI equivalents are under `crewship page design`.
 
-### POST /api/v1/pages/design
+### `POST /api/v1/pages/design`
 
 **Auth:** authenticated human with current Page creation permission and CLI
 `pages:write` scope. **Request:** JSON `{slug,name}` and workspace selection.
@@ -2644,7 +2644,7 @@ initial retained version. **Statuses:** 201 created, 400 invalid input, 401
 unauthenticated, 403 missing authority, 404 disabled, 409 occupied slug, 413
 capacity, 500 persistence failure, 503 unavailable engine.
 
-### GET /api/v1/pages/{slug}/design
+### `GET /api/v1/pages/{slug}/design`
 
 **Auth:** current Page read access and CLI `pages:read` scope. **Request:** no
 body; optional positive `version` selects a retained snapshot. Editors may read
@@ -2655,7 +2655,7 @@ optional and restricted to authorized editors. **Statuses:** 200 success, 400
 invalid version, 401 unauthenticated, 403 invalid scope, 404 disabled or missing
 accessible content, 500 internal failure, 503 unavailable engine.
 
-### POST /api/v1/pages/{slug}/design/operations
+### `POST /api/v1/pages/{slug}/design/operations`
 
 **Auth:** current Page Edit permission and CLI `pages:write`; agents additionally
 need their original live run and exact selected-Page mandate. **Request:**
@@ -2668,7 +2668,7 @@ fields are `name`, `parentId`, `fill`, `text` and `src`. **Response:** committed
 unavailable Page, 409 concurrent head, 413 capacity, 500 persistence failure,
 503 engine unavailable. Failed publication preserves the previous live head.
 
-### POST /api/v1/pages/{slug}/design/snapshots
+### `POST /api/v1/pages/{slug}/design/snapshots`
 
 **Auth:** current Page Edit and CLI `pages:write`; agents need their exact live
 mandate. **Request:** `{message?}`. **Response:** retained `{version,actor}`
@@ -2676,7 +2676,7 @@ receipt; no change to the shared pin. **Statuses:** 200 success, 400 invalid
 request, 401 unauthenticated, 403 no Edit authority, 404 unavailable Page, 409
 concurrent head, 413 capacity, 500 persistence failure, 503 engine unavailable.
 
-### GET /api/v1/pages/{slug}/design/versions
+### `GET /api/v1/pages/{slug}/design/versions`
 
 **Auth:** current Page read and CLI `pages:read`. **Request:** no body.
 **Response:** `{versions,latest_version,shared_version}`. Editors receive retained
@@ -2684,7 +2684,7 @@ history; readers receive only their authorized shared snapshot. **Statuses:**
 200 success, 401 unauthenticated, 403 invalid scope, 404 unavailable Page or
 shared content, 500 internal failure.
 
-### POST /api/v1/pages/{slug}/design/restore
+### `POST /api/v1/pages/{slug}/design/restore`
 
 **Auth:** current Page Edit and CLI `pages:write`; an agent also needs its exact
 live mandate. **Request:** `{version}` for a positive retained snapshot.
@@ -2694,7 +2694,7 @@ canvas, preserves history and leaves the shared pin unchanged. **Statuses:**
 404 unavailable snapshot, 409 concurrent head, 413 capacity, 500 persistence
 failure, 503 engine unavailable.
 
-### GET /api/v1/pages/{slug}/design/comments
+### `GET /api/v1/pages/{slug}/design/comments`
 
 **Auth:** current Page read and CLI `pages:read`. **Request:** no body.
 **Response:** `{comments:[...]}` with exact version, stable node selector,
@@ -2702,7 +2702,7 @@ quoted text, feedback, task status and authorized replies. Readers see only
 feedback and replies for the shared pin. **Statuses:** 200 success, 401
 unauthenticated, 403 invalid scope, 404 unavailable Page, 500 internal failure.
 
-### POST /api/v1/pages/{slug}/design/comments
+### `POST /api/v1/pages/{slug}/design/comments`
 
 **Auth:** current Page feedback authority and CLI `pages:write`; Read and Produce
 never grant comment permission. **Request:** `{version,path:"design.json",
@@ -2713,7 +2713,7 @@ optional pending task. Queuing is not proof of agent delivery. **Statuses:**
 permission, 404 unavailable Page, 409 stale version or changed node, 500 internal
 failure, 503 engine unavailable.
 
-### POST /api/v1/pages/{slug}/design/share
+### `POST /api/v1/pages/{slug}/design/share`
 
 **Auth:** current human Page owner and CLI `pages:write`. **Request:** positive
 retained `{version}`. **Response:** `{version,shared_version}`. Existing Page
@@ -2722,7 +2722,7 @@ grants remain in force; this operation never grants an unrelated caller access.
 current owner, 404 unavailable snapshot, 409 concurrent head, 500 persistence
 failure.
 
-### POST /api/v1/pages/{slug}/design/agent
+### `POST /api/v1/pages/{slug}/design/agent`
 
 **Auth:** current human Page owner and CLI `pages:write`. **Request:** `{chat_id}`
 for an existing private chat owned by that same human in this workspace.
@@ -2731,7 +2731,7 @@ replaces a fresh message intent and exact live-run mandate. **Statuses:**
 200 success, 400 invalid request, 401 unauthenticated, 403 invalid owner/chat,
 404 unavailable Page, 500 persistence failure.
 
-### GET /api/v1/pages/{slug}/design/ws
+### `GET /api/v1/pages/{slug}/design/ws`
 
 **Auth:** authenticated current Page reader with same-origin browser
 credentials or CLI `pages:read`; every update additionally checks current Edit
