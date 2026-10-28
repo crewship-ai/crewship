@@ -115,6 +115,7 @@ func pagesImport(t *testing.T, h *PageHandler, wsID, userID string, bundle map[s
 		"format":     bundle["format"],
 		"page":       bundle["page"],
 		"references": bundle["references"],
+		"metadata":   bundle["metadata"],
 	}
 	if slug != "" {
 		body["slug"] = slug

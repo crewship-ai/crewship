@@ -84,6 +84,8 @@ many edits were not saved.
 
 ```bash
 crewship workbook create my-book --name "My book"
+# In your dedicated QA workspace, mark a new probe explicitly:
+crewship workbook create qa-book --name "QA workbook" --test-item
 crewship workbook import @PAGE_ID --file import.json
 crewship workbook session open @PAGE_ID
 crewship workbook edit @PAGE_ID --file edit.json

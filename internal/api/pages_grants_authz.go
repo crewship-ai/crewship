@@ -72,6 +72,7 @@ import (
 // refuses.
 const (
 	pageGrantRead    = "read"
+	pageGrantComment = "comment"
 	pageGrantProduce = "produce"
 	pageGrantWrite   = "write"
 
@@ -87,7 +88,7 @@ const (
 
 func validPageGrantLevel(level string) bool {
 	switch level {
-	case pageGrantRead, pageGrantProduce, pageGrantWrite:
+	case pageGrantRead, pageGrantComment, pageGrantProduce, pageGrantWrite:
 		return true
 	}
 	return false
@@ -105,7 +106,7 @@ func validPageSubjectType(kind string) bool {
 // in Go, so the handler answers 400 in a sentence rather than a constraint
 // violation: read or write, never produce.
 func workspaceSubjectLevelAllowed(level string) bool {
-	return level == pageGrantRead || level == pageGrantWrite
+	return level == pageGrantRead || level == pageGrantComment || level == pageGrantWrite
 }
 
 // pageGrantRecord is one page_grants row PLUS the use-time verdict on its
@@ -175,7 +176,7 @@ func (g pageGrantRecord) inertReason() string {
 // here — "does any live grant name you" — has no ordering in it.
 func reachesPage(level string) bool {
 	switch level {
-	case pageGrantRead, pageGrantProduce, pageGrantWrite:
+	case pageGrantRead, pageGrantComment, pageGrantProduce, pageGrantWrite:
 		return true
 	}
 	return false
