@@ -14,6 +14,8 @@ type CraftNativeHTTPConfig struct {
 	AgentsEnabled bool
 	AgentApply    CraftNativeAgentApply
 	AgentInspect  CraftNativeAgentInspect
+	// Package-private trusted clock injection; server configuration uses the native boot clock.
+	newOwnerClock func() (mooring.OwnerClock, error)
 }
 
 func WithCraftNativeHTTP(c CraftNativeHTTPConfig) RouterOption {
@@ -34,7 +36,11 @@ func (r *Router) registerCraftNativeRoutes() {
 			r.craftNativeStartupErr = err
 			return
 		}
-		clock, err = mooring.NewBootOwnerClock()
+		factory := r.craftNativeHTTPConfig.newOwnerClock
+		if factory == nil {
+			factory = mooring.NewBootOwnerClock
+		}
+		clock, err = factory()
 		if err != nil {
 			r.craftNativeStartupErr = err
 			return
