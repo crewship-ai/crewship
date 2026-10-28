@@ -1584,10 +1584,10 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
-    # The old single-job 15m cap allowed a 12m measured Vitest run little
-    # daylight. With four partitions expected test time is ~3–4m, but the
-    # install action permits 8m. Keep 8m tool < 9m step, plus setup < 20m job.
-    timeout-minutes: 20
+    # Bound dependency install (8m), Chromium setup (14m), Vitest (9m) and
+    # checkout/report overhead (4m) separately. Privacy browser cases execute
+    # in these required shards, including on runners without a cached browser.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -1595,6 +1595,11 @@ jobs:
       - uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: ${{ env.NODE_VERSION }}
+      - name: Install Chromium for native privacy browser regressions
+        timeout-minutes: 14
+        uses: ./.github/actions/setup-playwright-browser
+        with:
+          browser: chromium
       - name: Run isolated partition with complete coverage inventory
         timeout-minutes: 9
         env:
