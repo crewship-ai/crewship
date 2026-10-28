@@ -224,7 +224,7 @@ func (r pageListRowJSON) panelCount() int {
 // the document verbatim as a string would leave the server holding an opaque
 // blob it is required by §10b.1 to validate.
 type pageWriteJSON struct {
-	CreatedByTest *bool                `json:"created_by_test,omitempty"`
+	CreatedByTest *bool                `json:"created_by_test,omitempty" yaml:"created_by_test,omitempty"`
 	AllowEmpty    bool                 `json:"allow_empty,omitempty" yaml:"allow_empty,omitempty"`
 	Slug          string               `json:"slug" yaml:"slug"`
 	Name          string               `json:"name" yaml:"name"`
