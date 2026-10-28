@@ -125,8 +125,12 @@ The native-only operator environment overrides are
 `CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH`,
 `CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256`,
 `CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_BUNDLE` and
-`CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL`. Matching `CREWSHIP_CRAFT_NATIVE_GRID_*`
-overrides select the Grid engine revision, CLI path/hash and editor bundle/URL.
+`CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL`. The corresponding Sheet overrides are
+`CREWSHIP_CRAFT_NATIVE_GRID_ENGINE_REVISION`,
+`CREWSHIP_CRAFT_NATIVE_GRID_CLI_PATH`,
+`CREWSHIP_CRAFT_NATIVE_GRID_CLI_SHA256`,
+`CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_BUNDLE` and
+`CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_URL`.
 These override corresponding YAML
 fields without enabling the product flag or any legacy profile. Explicit empty
 values remain empty and fail qualification; every startup/manifest/hash check
