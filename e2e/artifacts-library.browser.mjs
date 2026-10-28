@@ -90,17 +90,24 @@ try {
     await shot("02-table")
     await page.getByRole("radio", { name: "Gallery" }).click()
 
-    // 3. Project detail opens on its version history; restore v1 as a new version.
+    // 3. Project detail opens on Preview; all three tabs retain the project state.
     await page.getByRole("button", { name: "Open Pricing site" }).click()
     await page.getByRole("heading", { level: 1, name: "Pricing site" }).waitFor()
     const viewer = page.locator('section[aria-label="Artifact viewer"]')
     await viewer.waitFor()
+    assert.equal(await viewer.getByRole("tab", { name: "Preview" }).getAttribute("aria-selected"), "true")
+    await viewer.getByRole("tab", { name: "Comments", exact: true }).click()
+    await viewer.getByRole("region", { name: "Comment queue" }).waitFor()
+    await shot("03-project-comments")
+    await viewer.getByRole("tab", { name: "History" }).click()
     await viewer.getByText("Headline names every team").waitFor()
     await noSideways("project history")
     await shot("03-project-history")
     // History is newest first, so v1's restore is the last one.
     await viewer.getByRole("button", { name: "Restore as new version" }).last().click()
     await viewer.getByText("Restored v1 as v5 · nothing deleted").waitFor()
+    await viewer.getByRole("tab", { name: "Preview" }).click()
+    await viewer.getByTitle(/Preview of/).waitFor()
     await shot("04-project-restored")
     await page.getByRole("button", { name: "All artifacts" }).click()
     await gallery.waitFor()

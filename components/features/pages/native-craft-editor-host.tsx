@@ -11,6 +11,7 @@ import {createNativeEditorPort,type NativeEditorPort} from "@/lib/mooring/native
 import {openNativeDraftJournal,validNativeVersion,type NativeDraft,type NativeDraftJournal,type NativeRecovery} from "@/lib/mooring/native-draft"
 import {createSingleEditorSave,type NativeSaveState} from "@/lib/mooring/single-editor-save"
 import {createEditorFrame,editorFrameSupported} from "./workbook-editor-host"
+import {downloadNativeExport} from "@/lib/mooring/native-export-download"
 import {NativeCraftLeaseBar,type NativeCraftLeaseAction,type NativeCraftLeaseView} from "./native-craft-lease-bar"
 
 interface Lease extends NativeCraftLeaseView {expires_at: string|null}
@@ -142,6 +143,10 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    const timer=setTimeout(()=>{reject(Error('native_bootstrap_timeout'));if(r&&live(r))stop('Editor se bezpečně nepřipojil. Koncept nebyl označen jako uložený.')},20000)
    let port:NativeEditorPort
    try{port=createNativeEditorPort({applicationId:'wordcraft',enginePin:snapshot.enginePin,bundle:snapshot.editorBundle,frame:frame.contentWindow,scope:{workspaceId,pageId,sessionId,baseVersion:snapshot.version,generation},requireAccessProtocol:true,
+    onExport(file){
+     if(!r||!live(r)||!r.ready||r.blocked)return
+     try{downloadNativeExport(file)}catch{setError('Export se nepodařilo stáhnout. Dokument zůstává otevřený.')}
+    },
     onChanged(){if(r&&live(r)&&r.ready&&r.writable&&!r.blocked){r.edit++;r.ackedVersion=undefined;r.coordinator?.edited();display(r)}},
     onSaveRequest(request){if(r&&live(r)&&r.writable&&!r.blocked&&r.coordinator){r.ackedVersion=undefined;void r.coordinator.save(request.requestId).catch(()=>{if(r&&live(r)){if(request.requestId)r.port.saveFailed(request.requestId,'Uložení nebylo potvrzeno.');display(r)}})}},
     onError(){clearTimeout(timer);reject(Error('native_lifecycle_failure'));if(r&&live(r))failNative(r,'Spojení s editorem skončilo. Poslední změny nejsou potvrzené; původní editor zůstává uzamčený.')},
@@ -201,7 +206,15 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   async function refreshReader(){
    if(dead||networkRetired||transition||current?.writable||current?.blocked||current&&(!current.nativeReadOnly||current.retiring&&!current.retirementFinished))return
    if(readerRefresh)return readerRefresh
-   readerRefresh=(async()=>{const snapshot=await client.read(lifetime.signal);if(dead||networkRetired||transition||current?.writable||current?.blocked||current&&(!current.nativeReadOnly||current.retiring&&!current.retirementFinished))return;if(snapshot.version!==current?.version)await mountEditor(snapshot,viewNow.generation??'1')})().finally(()=>{readerRefresh=undefined})
+   readerRefresh=(async()=>{
+    const snapshot=await client.read(lifetime.signal)
+    if(dead||networkRetired||transition||current?.writable||current?.blocked||current&&(!current.nativeReadOnly||current.retiring&&!current.retirementFinished))return
+    if(snapshot.version!==current?.version){
+     setBusy(true)
+     try{await mountEditor(snapshot,viewNow.generation??'1')}
+     finally{if(!dead&&!networkRetired&&!transition)setBusy(false)}
+    }
+   })().finally(()=>{readerRefresh=undefined})
    return readerRefresh
   }
   async function observeLease(raw:unknown){

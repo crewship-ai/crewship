@@ -88,7 +88,7 @@ function OpenInPages({ workspaceId, slug }: { workspaceId: string; slug: string 
 /** One artifact: a project shows its history in the project viewer, a native Word or Sheet its edit lock. */
 function ArtifactDetail({ workspaceId, item, onBack }: { workspaceId: string; item: LibraryItem; onBack: () => void }) {
   const projects = useArtifactProjectsAvailable(workspaceId)
-  const target = useMemo(() => ({ slug: item.slug, tab: "versions" as const }), [item.slug])
+  const target = useMemo(() => ({ slug: item.slug, tab: "preview" as const }), [item.slug])
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
     <div><Button type="button" variant="ghost" size="sm" className="-ml-2 coarse:min-h-[44px]" onClick={onBack}><ArrowLeft aria-hidden />All artifacts</Button></div>
     <header className="flex min-w-0 flex-wrap items-center gap-3">
@@ -101,7 +101,7 @@ function ArtifactDetail({ workspaceId, item, onBack }: { workspaceId: string; it
     </header>
     {item.kind === "project" && projects
       ? <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
-        <div className="flex min-h-[520px] flex-1 overflow-hidden rounded-card border"><ArtifactViewerPanel /></div>
+        <div className="flex min-h-[520px] flex-1 overflow-hidden rounded-card border"><ArtifactViewerPanel variant="library" /></div>
       </ArtifactViewerProvider>
       : item.native && item.kind === "word" && item.pageId
         ? <div className="overflow-hidden rounded-card border">
