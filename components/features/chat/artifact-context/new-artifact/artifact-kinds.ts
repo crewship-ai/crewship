@@ -1,5 +1,6 @@
 import { AppWindow, FileText, LayoutDashboard, PanelsTopLeft, Presentation, Sheet, type LucideIcon } from "lucide-react"
 import type { PageView } from "@/hooks/use-pages"
+import { ACCENT, type Accent, type AccentName } from "@/lib/concept-accents"
 
 /**
  * The one registry of artifact kinds. The library, its New artifact dialog and
@@ -43,6 +44,8 @@ export interface ArtifactKindEntry {
   plural: string
   description: string
   icon: LucideIcon
+  /** The kind's colour from the tested concept palette: Word blue, Sheet green, Project purple, Dashboard teal, Slides orange, Page slate. */
+  accent: AccentName
   /** What opens it, in the reader's words. */
   viewer: string
   make: ArtifactMake
@@ -61,7 +64,7 @@ export interface ArtifactKindEntry {
 
 export const ARTIFACT_KINDS: readonly ArtifactKindEntry[] = [
   {
-    key: "project", drafted: true, family: "web", label: "Project", plural: "Projects", icon: AppWindow,
+    key: "project", drafted: true, family: "web", accent: "purple", label: "Project", plural: "Projects", icon: AppWindow,
     description: "Screens that link together", viewer: "Screens · Select · Compare", make: "agent",
     placeholder: "Pricing site", templates: ["Pricing site", "Sign-up flow", "Landing page", "Status page"], uploadExtensions: [],
     starterPrompts: ["A three-screen pricing site: plans, compare, FAQ", "A sign-up flow with a confirmation screen"],
@@ -69,35 +72,35 @@ export const ARTIFACT_KINDS: readonly ArtifactKindEntry[] = [
     live: caps => caps.projects,
   },
   {
-    key: "dashboard", drafted: true, family: "web", label: "Dashboard", plural: "Dashboards", icon: LayoutDashboard,
+    key: "dashboard", drafted: true, family: "web", accent: "teal", label: "Dashboard", plural: "Dashboards", icon: LayoutDashboard,
     description: "Numbers and tables agents keep current", viewer: "Live data with sources", make: "agent",
     placeholder: "Sales pipeline", templates: ["Sales pipeline", "Support SLA", "Cash flow", "Release health"], uploadExtensions: [],
     starterPrompts: ["Sales pipeline by stage with owners", "Support SLA for this week"],
     live: caps => caps.projects && caps.dashboards,
   },
   {
-    key: "page", drafted: false, family: "web", label: "Page", newLabel: "Page with panels", plural: "Pages", icon: PanelsTopLeft,
+    key: "page", drafted: false, family: "web", accent: "slate", label: "Page", newLabel: "Page with panels", plural: "Pages", icon: PanelsTopLeft,
     description: "Monitors and queues crews keep filled", viewer: "Panels (monitors, queues)", make: "panels",
     placeholder: "Overdue invoices", templates: ["Monitor", "Approval queue", "Team board"], uploadExtensions: [],
     starterPrompts: [],
     live: caps => caps.pages,
   },
   {
-    key: "word", drafted: true, family: "document", label: "Word", newLabel: "Word document", plural: "Word", icon: FileText,
+    key: "word", drafted: true, family: "document", accent: "blue", label: "Word", newLabel: "Word document", plural: "Word", icon: FileText,
     description: "A document, one editor at a time", viewer: "Read-only preview · Edit in WordCraft", make: "edit",
     placeholder: "Partner brief", templates: ["Proposal", "Contract summary", "Meeting minutes", "Playbook"], uploadExtensions: [".docx"],
     starterPrompts: ["A partner brief from this chat", "Turn the weekly report into a two-page memo"],
     live: caps => caps.pages && caps.documents,
   },
   {
-    key: "sheet", drafted: false, family: "document", label: "Sheet", plural: "Sheets", icon: Sheet,
+    key: "sheet", drafted: false, family: "document", accent: "green", label: "Sheet", plural: "Sheets", icon: Sheet,
     description: "Workbook with formulas in GridCraft", viewer: "Read-only preview · Edit in GridCraft", make: "edit",
     placeholder: "Price model", templates: ["Quote", "Budget", "Invoice batch", "Hiring plan"], uploadExtensions: [".xlsx", ".csv"],
     starterPrompts: ["Price model with seats and MRR", "Hiring plan for 2027"],
     live: caps => caps.pages && caps.sheets,
   },
   {
-    key: "slides", drafted: false, family: "document", label: "Slides", plural: "Slides", icon: Presentation,
+    key: "slides", drafted: false, family: "document", accent: "orange", label: "Slides", plural: "Slides", icon: Presentation,
     description: "A deck you can present", viewer: "Slides · Present · PDF", make: "agent",
     placeholder: "Quarterly review", templates: [], uploadExtensions: [],
     starterPrompts: [],
@@ -113,6 +116,8 @@ export function artifactKind(key: ArtifactKindKey): ArtifactKindEntry {
 }
 
 export const KIND_ICON: Record<ArtifactKindKey, LucideIcon> = Object.fromEntries(ARTIFACT_KINDS.map(k => [k.key, k.icon])) as Record<ArtifactKindKey, LucideIcon>
+
+export const KIND_ACCENT: Record<ArtifactKindKey, Accent> = Object.fromEntries(ARTIFACT_KINDS.map(k => [k.key, ACCENT[k.accent]])) as Record<ArtifactKindKey, Accent>
 
 export function creatableKinds(caps: ArtifactCapabilities): ArtifactKindEntry[] {
   return ARTIFACT_KINDS.filter(k => k.live(caps))

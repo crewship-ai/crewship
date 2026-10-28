@@ -37,8 +37,8 @@ export function NewArtifactPanel({ kinds, onPick, onClose, className, dialog = t
     <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-[repeat(auto-fill,minmax(112px,1fr))]">
       {kinds.map(k => <button key={k.id} type="button" aria-pressed={k.id === kind.id} onClick={() => setSelected(k.id)}
         className={cn("grid min-w-0 justify-items-start gap-1.5 rounded-card border p-2 text-left hover:bg-muted", FOCUS, k.id === kind.id && "border-transparent ring-2 ring-primary")}>
-        <span aria-hidden className="grid h-11 w-full place-items-center rounded-row bg-muted"><k.icon className="size-5 text-muted-foreground" /></span>
-        <b className="flex items-center gap-1 text-control font-semibold"><k.icon aria-hidden className="size-3.5 text-muted-foreground" />{k.name}</b>
+        <span aria-hidden className={cn("grid h-11 w-full place-items-center rounded-row border", k.accent.chip)}><k.icon className={cn("size-5", k.accent.fg)} /></span>
+        <b className="flex items-center gap-1 text-control font-semibold"><k.icon aria-hidden className={cn("size-3.5", k.accent.fg)} />{k.name}</b>
         <small className="text-xs text-muted-foreground">{k.description}</small>
       </button>)}
     </div>

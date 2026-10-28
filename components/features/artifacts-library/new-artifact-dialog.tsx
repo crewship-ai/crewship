@@ -201,10 +201,10 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
       {creatable.length === 0
         ? <CreateSurfaceNotice tone="info">Nothing can be created in this workspace right now.</CreateSurfaceNotice>
         : <div role="group" aria-label="Kind" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          {shown.map(k => <CreateSurfaceTile key={k.key} data-kind={k.key} icon={k.icon} title={k.newLabel ?? k.label} description={k.description}
+          {shown.map(k => <CreateSurfaceTile key={k.key} data-kind={k.key} icon={k.icon} accent={k.accent} title={k.newLabel ?? k.label} description={k.description}
             selected={k.key === kind?.key} disabled={frozen} onClick={() => { setPicked(k.key); setStartPick(undefined) }} />)}
         </div>}
-      {coming.length > 0 && <p className="text-[11px] text-muted-foreground-soft">Coming: {coming.map(k => k.label).join(", ")}</p>}
+      {coming.length > 0 && <p className="text-micro text-muted-foreground-soft">Coming: {coming.map(k => k.label).join(", ")}</p>}
 
       {kind && <>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -229,11 +229,11 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
           <Eye aria-hidden className="size-3.5 shrink-0" />
           <span>Who can open: <b className="font-medium text-foreground">{folder ? `People with access to ${folder.name}` : "Only you until you share it"}</b></span>
-          <span className="ml-auto text-[11px] text-muted-foreground-soft max-sm:hidden">Change in Share after</span>
+          <span className="ml-auto text-micro text-muted-foreground-soft max-sm:hidden">Change in Share after</span>
         </p>
 
         <div className="flex flex-col gap-1.5">
-          <span className="text-[12px] font-semibold text-muted-foreground">Start with</span>
+          <span className="text-xs font-semibold text-muted-foreground">Start with</span>
           <Segmented ariaLabel="Start with" value={start} options={frozen ? starts.map(o => ({ ...o, disabled: true })) : starts} onChange={setStartPick} />
         </div>
 
@@ -245,7 +245,7 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
           {kind.templates.map(t => <button key={t} type="button" aria-pressed={t === chosenTemplate} onClick={() => setTemplate(t)}
             className={cn("rounded-card border px-2.5 py-1.5 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:min-h-[44px]", t === chosenTemplate && "border-transparent ring-2 ring-primary")}>{t}</button>)}
         </div>}
-        {start === "blank" && <p className="text-[11px] text-muted-foreground-soft">{kind.make === "panels"
+        {start === "blank" && <p className="text-micro text-muted-foreground-soft">{kind.make === "panels"
           ? "An empty Page. Crews add panels on their next run."
           : `Opens with you holding the lock. Nobody else sees it until you share a version.`}</p>}
       </>}

@@ -15,6 +15,11 @@ const state = vi.hoisted(() => ({
 }))
 
 // The library's own data around the detail; the detail itself stays real.
+// Per-user preferences as plain state; the hook's server sync is its own test.
+vi.mock("@/hooks/use-user-preference", async () => {
+  const { useState } = await import("react")
+  return { useUserPreference: <T,>(_key: string, initial: T) => { const [value, set] = useState<T>(initial); return [value, set, { ready: true }] as const } }
+})
 vi.mock("@/hooks/use-page-folders", () => ({ usePageFolders: () => ({ folders: [], loading: false, error: null, supported: true, refresh: () => {}, reread: async () => {} }) }))
 vi.mock("@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities", () => ({
   useArtifactCapabilities: () => ({ projects: true, dashboards: false, documents: false, sheets: false, pages: false }),
