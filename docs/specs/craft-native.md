@@ -285,25 +285,22 @@ canonical blank bytes for a fresh Page. Creation releases only its exact lease
 generation; an ambiguous release can reopen the confirmed document with fresh
 read-only admission, while an ambiguous initialize is never repeated. Existing
 native Pages retain their application descriptor when opened from the Pages list.
-Proposals, agent execution, one-hour browser acceptance and 2,000 changing saves
-remain separate work.
-
 
 The native blank Word asset is serialized by the original engine separately from
-the older checkpoint blank. The explicit binary qualification instructions are
-in [the canonical Word creation test](../../internal/mooring/native_word_creation_linux_test.go).
-Run `go test ./internal/mooring -run ^TestNativeCLIValidatorCanonicalWordCreation$`
-with its pinned original engine.
-The explicit run must pass; ordinary unit runs skip it when no binary is supplied.
-It also verifies that the old lossy float promotion is still rejected.
+the older checkpoint blank. For explicit qualification, set
+`CRAFT_QUALIFICATION_ENGINE` and `CRAFT_QUALIFICATION_SHA256` to the original
+pinned Word executable and hash, then run
+`crewship-heavy go test -tags craft_native_engine_qualification ./internal/mooring -run ^TestNativeCLIValidatorCanonicalWordCreation$`.
+The run must execute and pass, including refusal of the old lossy float promotion.
 
 The canonical Sheet asset is the qualified GridCraft CLI's native output, used
-without model conversion. Follow [the canonical Sheet creation test's binary
-qualification instructions](../../internal/mooring/native_grid_creation_linux_test.go),
-then explicitly run
-`go test ./internal/mooring -run ^TestNativeCLIValidatorCanonicalSheetCreation$`.
+without model conversion. Set the same two qualification inputs to the original
+pinned Grid executable and hash, then run it separately:
+`crewship-heavy go test -tags craft_native_engine_qualification ./internal/mooring -run ^TestNativeCLIValidatorCanonicalSheetCreation$`.
 It must accept the actual creation bytes and reject an authored extension that
-the engine would discard; an ordinary optional test skip is not qualification.
+the engine would discard. Both are qualification-only inputs, not server
+configuration. These explicit runs fail when inputs are absent; ordinary unit
+builds exclude them. Default CI is not evidence that either engine executed.
 
 The human and agent transport boundaries have targeted API, original-engine,
 private-process, retirement, cancellation and receipt regressions. Live editor
