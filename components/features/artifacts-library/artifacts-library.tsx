@@ -16,7 +16,6 @@ import { kindCounts, kindLabel, LIBRARY_KINDS, libraryItems, type LibraryItem, t
 const KIND_ICON: Record<LibraryKind, LucideIcon> = { project: AppWindow, word: FileText, sheet: Sheet, slides: Presentation, dashboard: LayoutDashboard }
 const CHIP = "inline-flex items-center gap-1 rounded-full px-1.5 text-micro font-semibold leading-[1.6]"
 
-const pagesHref = (workspaceId: string, slug: string) => `/pages/${encodeURIComponent(slug)}?${new URLSearchParams({ workspace_id: workspaceId })}`
 /** Project, and Word or Sheet stored natively, carry a version head; only they can say what is shared. */
 const versioned = (item: LibraryItem) => item.projectBacked || item.native
 
@@ -80,9 +79,13 @@ function LibraryTable({ items, onOpen }: { items: LibraryItem[]; onOpen: (slug: 
   </div>
 }
 
-function OpenInPages({ workspaceId, slug }: { workspaceId: string; slug: string }) {
+function OpenInPages({ workspaceId, item }: { workspaceId: string; item: LibraryItem }) {
+  const query = new URLSearchParams({ workspace_id: workspaceId })
+  if (item.projectBacked) query.set("artifact", "1")
+  const reference = item.projectBacked && item.pageId ? "@" + item.pageId : item.slug
+  const href = `/pages/${encodeURIComponent(reference)}?${query}`
   return <Button asChild size="sm" variant="outline" className="coarse:min-h-[44px]">
-    <a href={pagesHref(workspaceId, slug)}>Open in Pages<ExternalLink aria-hidden /></a>
+    <a href={href}>Open in Pages<ExternalLink aria-hidden /></a>
   </Button>
 }
 
@@ -99,7 +102,7 @@ function ArtifactDetail({ workspaceId, item, onBack }: { workspaceId: string; it
         <h1 className="truncate text-xl font-semibold">{item.name}</h1>
         <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><KindBadge kind={item.kind} /><StateChips item={item} /><span>{meta(item)}</span></p>
       </div>
-      {!projectPreview && <OpenInPages workspaceId={workspaceId} slug={item.slug} />}
+      {!projectPreview && <OpenInPages workspaceId={workspaceId} item={item} />}
     </header>
     {projectPreview
       ? <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
