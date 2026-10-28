@@ -58,6 +58,7 @@ var AllEntryTypes = []EntryType{
 	EntryContainerSnapshot,
 	EntryConversationCompacted,
 	EntryCostIncurred,
+	EntryType("craft.native_preview_shared"), // journalCraftNativePreviewShared, internal/api/craft_native_preview.go:19:7
 	EntryCredentialAutoAssignEmpty,
 	EntryCredentialAutoAssignFailed,
 	EntryCredentialLeaseIssued,
@@ -121,8 +122,8 @@ var AllEntryTypes = []EntryType{
 	EntryType("onboarding.proposal_applied"), // journalEntryOnboardingProposalApplied, internal/api/onboarding_proposal.go:43:7
 	EntryPageActionDispatched,
 	EntryType("page.folder_acl_changed"),        // entryPageFolderACLChanged, internal/api/pages_folder_acl.go:84:7
-	EntryType("page.folder_changed"),            // entryPageFolderChanged, internal/api/pages_folders.go:76:2
-	EntryType("page.folder_membership_changed"), // entryPageFolderMembershipChanged, internal/api/pages_folders.go:80:2
+	EntryType("page.folder_changed"),            // entryPageFolderChanged, internal/api/pages_folders.go:77:2
+	EntryType("page.folder_membership_changed"), // entryPageFolderMembershipChanged, internal/api/pages_folders.go:81:2
 	EntryPageGrantAdded,
 	EntryPageGrantRemoved,
 	EntryType("page.link_revoked"),      // journalPageLinkRevoked, internal/api/pages_public_tokens.go:797:2
