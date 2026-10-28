@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -233,5 +234,53 @@ func TestDashboardDataDeclarationMatchesPreviewByteBound(t *testing.T) {
 	}
 	if w := dashboardRequest(t, h, ws, owner, "GET", "sales", "?version=1", ""); w.Code != 404 {
 		t.Fatalf("oversized declaration admitted: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestDashboardDataRealStoreAcceptsCodecBoundaryBatch(t *testing.T) {
+	h, ws, owner, call := artifactProjectFixture(t)
+	t.Setenv("CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED", "true")
+	if w := call(owner, "POST", "artifacts", `{"slug":"three-screens","name":"Dashboard",`+strings.TrimPrefix(dashboardBody(0, "sales"), "{")); w.Code != 201 {
+		t.Fatalf("create %d %s", w.Code, w.Body)
+	}
+	batch := artifacts.DataBatch{BaseVersion: 1}
+	for i := 0; i < 4; i++ {
+		batch.Documents = append(batch.Documents, artifacts.DataWrite{ID: fmt.Sprintf("row%d", i), Value: json.RawMessage(`{"x":""}`)})
+	}
+	empty, err := artifacts.MarshalDataJSON(batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remaining := artifacts.MaxDataBatchBytes - 8 - len(empty)
+	for i := range batch.Documents {
+		n := remaining / (len(batch.Documents) - i)
+		remaining -= n
+		batch.Documents[i].Value = json.RawMessage(`{"x":"` + strings.Repeat("a", n) + `"}`)
+	}
+	raw, err := artifacts.MarshalDataJSON(batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != artifacts.MaxDataBatchBytes-8 {
+		t.Fatalf("boundary fixture %d", len(raw))
+	}
+	if _, err := artifacts.DecodeDataBatch(raw); err != nil {
+		t.Fatalf("codec boundary invalid: %v", err)
+	}
+	w := dashboardRequest(t, h, ws, owner, "POST", "sales", "", string(raw))
+	if w.Code != 200 {
+		t.Fatalf("codec-valid %d-byte batch rejected by actual handler/store: %d %s", len(raw), w.Code, w.Body)
+	}
+	var result artifactDataResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || len(result.Documents) != 4 {
+		t.Fatalf("receipt %v rows%d", err, len(result.Documents))
+	}
+	for i, doc := range result.Documents {
+		if doc.Version != 1 || !bytes.Equal(doc.Value, batch.Documents[i].Value) {
+			t.Fatalf("write %d changed/version%d", i, doc.Version)
+		}
+	}
+	if stale := dashboardRequest(t, h, ws, owner, "POST", "sales", "", string(raw)); stale.Code != 409 {
+		t.Fatalf("boundary CAS weakened: %d", stale.Code)
 	}
 }
