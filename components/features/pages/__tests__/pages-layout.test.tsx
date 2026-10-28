@@ -82,6 +82,8 @@ vi.mock("@/components/features/pages/native-document-access-dialog", () => ({ Na
 // whether the layout mounts CURRENT metadata beside a retained draft producer.
 vi.mock("@/components/features/chat/right-panel-tabs/chat-document-access", () => ({ NativeDocumentProvenance: ({ pageId, viewerId }: { pageId: string; viewerId: string }) => <div data-testid="native-provenance" data-page={pageId} data-viewer={viewerId} /> }))
 
+vi.mock("@/components/features/pages/artifact-project", () => ({ ArtifactProject: ({workspaceId, slug, initialVersion}: {workspaceId: string; slug: string; initialVersion?: number}) => <div data-testid="artifact-reader" data-workspace={workspaceId} data-page={slug} data-pin={initialVersion}>Versioned artifact reader</div> }))
+
 import { PagesLayout } from "@/components/features/pages/pages-layout"
 import { PAGE_STATE_ORDER } from "@/components/features/pages/page-state"
 import { PANEL_STATES } from "@/components/features/pages/panels/types"
@@ -149,7 +151,77 @@ describe("PagesLayout", () => {
     // address between tests.)
     window.history.replaceState(null, "", "/pages")
   })
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
+
+  it.each(["project", "dashboard", "slides"] as const)("uses current selected %s metadata inside the guarded shell", async kind => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true")
+    renderLayout([{...FLEET, artifact_kind: kind, has_application: true}], FLEET.slug!)
+    expect(await screen.findByTestId("artifact-reader")).toHaveAttribute("data-page", FLEET.slug)
+    expect(screen.queryByTestId("application")).toBeNull()
+    expect(screen.queryByRole("button", {name: "Edit"})).toBeNull()
+    expect(screen.queryByRole("button", {name: "Share"})).toBeNull()
+    expect(screen.queryByText("Jede to?")).toBeNull()
+  })
+
+  it("preserves legacy application routing with the artifact flag off", async () => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "false")
+    renderLayout([{...FLEET, artifact_kind: "dashboard", has_application: true}], FLEET.slug!)
+    await screen.findByTestId("application")
+    expect(screen.queryByTestId("artifact-reader")).toBeNull()
+  })
+
+  it("does not mount either content reader before initial selected metadata is authorized", () => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true")
+    const qc = newQueryClient()
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})))
+    render(<QueryClientProvider client={qc}><PagesLayout workspaceId="ws-1" slug={FLEET.slug!} now={NOW} /></QueryClientProvider>)
+    expect(screen.queryByTestId("artifact-reader")).toBeNull()
+    expect(screen.queryByTestId("application")).toBeNull()
+    expect(screen.queryByText("Jede to?")).toBeNull()
+  })
+
+  it.each([undefined, 2, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])("applies only valid selected code pin %s", async pin => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true")
+    const qc = newQueryClient()
+    qc.setQueryData(pagesKeys.detail("ws-1", FLEET.slug!, identity.id), {...FLEET, artifact_kind: "dashboard"})
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})))
+    render(<QueryClientProvider client={qc}><PagesLayout workspaceId="ws-1" slug={FLEET.slug!} initialArtifactVersion={pin} now={NOW} /></QueryClientProvider>)
+    expect((await screen.findByTestId("artifact-reader")).getAttribute("data-pin")).toBe(pin === 2 ? "2" : null)
+  })
+
+  it.each(["keep", "discard"] as const)("keeps the real dirty producer until %s answers navigation to an artifact", async choice => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true")
+    window.history.replaceState(null, "", `/pages/${FLEET.slug}`)
+    const view = renderLayout([{...FLEET, has_collaboration: true}, {...CLOSE, artifact_kind: "dashboard"}], FLEET.slug!)
+    const original = await screen.findByTestId("native-wordcraft")
+    fireEvent.click(screen.getByRole("button", {name: "Make draft"}))
+    window.history.replaceState(null, "", `/pages/${CLOSE.slug}`)
+    view.rerender(<QueryClientProvider client={view.qc}><PagesLayout workspaceId="ws-1" slug={CLOSE.slug!} initialArtifactVersion={7} now={NOW} /></QueryClientProvider>)
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("Leave with unsent edits?")
+    expect(screen.getByTestId("native-wordcraft")).toBe(original)
+    expect(screen.queryByTestId("artifact-reader")).toBeNull()
+    fireEvent.click(screen.getByRole("button", {name: choice === "keep" ? "Keep editing" : "Leave anyway"}))
+    if (choice === "keep") {
+      expect(screen.getByTestId("native-wordcraft")).toBe(original)
+      expect(screen.queryByTestId("artifact-reader")).toBeNull()
+      expect(window.location.pathname).toBe(`/pages/${FLEET.slug}`)
+    } else {
+      expect(await screen.findByTestId("artifact-reader")).toHaveAttribute("data-page", CLOSE.slug)
+      expect(screen.getByTestId("artifact-reader")).toHaveAttribute("data-pin", "7")
+      expect(original.isConnected).toBe(false)
+    }
+  })
+
+  it.each([403, 404, 500])("does not render stale artifact data or panels after metadata refresh %s", async status => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true")
+    const view = renderLayout([{...FLEET, artifact_kind: "dashboard", has_application: true}], FLEET.slug!)
+    await screen.findByTestId("artifact-reader")
+    view.mockFetch.mockImplementation(async () => new Response(JSON.stringify({error:"unavailable"}), {status}))
+    await act(async () => { await view.qc.refetchQueries({queryKey: pagesKeys.detail("ws-1", FLEET.slug!, identity.id)}) })
+    await waitFor(() => expect(screen.queryByTestId("artifact-reader")).toBeNull())
+    expect(screen.queryByTestId("application")).toBeNull()
+    expect(screen.queryByText("Jede to?")).toBeNull()
+  })
 
   it("opens native sharing without replacing a dirty WordCraft editor and closes it when the host stops", async () => {
     renderLayout([{ ...FLEET, has_collaboration: true }], FLEET.slug!)

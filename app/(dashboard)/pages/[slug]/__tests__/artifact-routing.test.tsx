@@ -7,7 +7,7 @@ vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ worksp
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => "full" }))
 vi.mock("@/components/features/restricted/access-notice", () => ({ useAccessContext: () => ({}) }))
 vi.mock("@/components/features/pages/restricted-pages", () => ({ RestrictedPages: () => null }))
-vi.mock("@/components/features/pages/pages-layout", () => ({ PagesLayout: () => <p>Legacy Page reader</p> }))
+vi.mock("@/components/features/pages/pages-layout", () => ({ PagesLayout: ({initialArtifactVersion}: {initialArtifactVersion?: number}) => <p data-pin={initialArtifactVersion}>Legacy Page reader</p> }))
 vi.mock("@/components/features/pages/artifact-project", () => ({ ArtifactProject: ({ workspaceId, slug, initialVersion }: { workspaceId: string; slug: string; initialVersion?: number }) => <p data-testid="artifact-reader" data-workspace={workspaceId} data-page={slug} data-pin={initialVersion}>Versioned artifact reader</p> }))
 vi.mock("@/hooks/use-pages", () => ({ usePage: (...args: unknown[]) => {
   state.read(...args)
@@ -16,39 +16,13 @@ vi.mock("@/hooks/use-pages", () => ({ usePage: (...args: unknown[]) => {
 import { PageDetailClient } from "../page-client"
 beforeEach(() => { state.kind = undefined; state.rawKind = undefined; state.error = null; state.loading = false; state.denied = false; state.query = ""; state.workspace = "real-owner-workspace"; state.slug = "ordinary-demo-owner-page"; state.read.mockClear(); vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true") })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
-it.each(["project", "dashboard", "slides"])("routes a normal owner Page URL for backend %s without an artifact query", kind => {
+it.each(["project", "dashboard", "slides", "word", "sheet", undefined])("keeps the guarded PagesLayout mounted for normal backend %s URLs", kind => {
   state.kind = kind
-  render(<PageDetailClient />)
-  expect(screen.getByTestId("artifact-reader")).toHaveAttribute("data-workspace", "real-owner-workspace")
-  expect(screen.getByTestId("artifact-reader")).toHaveAttribute("data-page", "ordinary-demo-owner-page")
-  expect(screen.queryByText("Legacy Page reader")).toBeNull()
-})
-it.each(["word", "sheet", undefined])("preserves the existing native/legacy reader for %s", kind => {
-  state.kind = kind
-  render(<PageDetailClient />)
-  expect(screen.getByText("Legacy Page reader")).toBeInTheDocument()
-  expect(screen.queryByTestId("artifact-reader")).toBeNull()
-})
-it("does not flash panels while authoritative type metadata is loading", () => {
-  state.loading = true
-  render(<PageDetailClient />)
-  expect(screen.queryByText("Legacy Page reader")).toBeNull()
-  expect(screen.queryByTestId("artifact-reader")).toBeNull()
-})
-it("cannot use a cached artifact kind after current Page authority is denied", () => {
-  state.kind = "dashboard"
   const view = render(<PageDetailClient />)
-  expect(screen.getByTestId("artifact-reader")).toBeInTheDocument()
-  state.denied = true
+  const shell = screen.getByText("Legacy Page reader")
+  state.slug = "next-url-page"
   view.rerender(<PageDetailClient />)
-  expect(screen.queryByTestId("artifact-reader")).toBeNull()
-  expect(screen.queryByText("Legacy Page reader")).toBeNull()
-  expect(screen.getByRole("alert")).toHaveTextContent("Document unavailable.")
-})
-it("keeps the normal route unchanged when artifact UI is off", () => {
-  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "false"); state.kind = "dashboard"
-  render(<PageDetailClient />)
-  expect(screen.getByText("Legacy Page reader")).toBeInTheDocument()
+  expect(screen.getByText("Legacy Page reader")).toBe(shell)
   expect(state.read).not.toHaveBeenCalled()
 })
 it("retains an explicit selected code pin without a second Page-type request", () => {
@@ -57,50 +31,8 @@ it("retains an explicit selected code pin without a second Page-type request", (
   expect(screen.getByTestId("artifact-reader")).toHaveAttribute("data-pin", "2")
   expect(state.read).not.toHaveBeenCalled()
 })
-
-it("recognizes a current backend kind even before the view normalizer knows that additive kind", () => {
-  state.rawKind = "dashboard"
+it.each([["version=2", "2"], ["version=0", null], ["version=-1", null], ["version=bogus", null], ["version=1.5", null], ["", null]] as const)("passes only positive safe code pins for normal guarded route %s", (query, pin) => {
+  state.query = query
   render(<PageDetailClient />)
-  expect(screen.getByTestId("artifact-reader")).toBeInTheDocument()
-  expect(screen.queryByText("Legacy Page reader")).toBeNull()
-})
-it("shows a load error without either content reader after a current request fails", () => {
-  state.kind = "dashboard"; state.error = "private backend error must not be reflected"
-  render(<PageDetailClient />)
-  expect(screen.queryByTestId("artifact-reader")).toBeNull()
-  expect(screen.queryByText("Legacy Page reader")).toBeNull()
-  expect(screen.getByRole("alert")).toHaveTextContent("Document could not be loaded.")
-  expect(screen.queryByText(state.error)).toBeNull()
-})
-
-it.each(["word", "sheet", undefined])("does not remount an admitted native/legacy reader %s when its own access lifecycle must retire content", kind => {
-  state.kind = kind
-  const view = render(<PageDetailClient />)
-  const reader = screen.getByText("Legacy Page reader")
-  state.error = "temporary current Page refresh error"
-  view.rerender(<PageDetailClient />)
-  expect(reader.isConnected).toBe(true)
-  expect(screen.getByText("Legacy Page reader")).toBe(reader)
-  state.denied = true
-  view.rerender(<PageDetailClient />)
-  expect(screen.getByText("Legacy Page reader")).toBe(reader)
-})
-
-it.each(["workspace", "slug"] as const)("does not carry a legacy-reader selection across %s changes", field => {
-  state.kind = "word"
-  const view = render(<PageDetailClient />)
-  const reader = screen.getByText("Legacy Page reader")
-  state[field] = "next-authorized-scope"; state.kind = "dashboard"
-  view.rerender(<PageDetailClient />)
-  expect(reader.isConnected).toBe(false)
-  expect(screen.getByTestId("artifact-reader")).toHaveAttribute(field === "workspace" ? "data-workspace" : "data-page", "next-authorized-scope")
-})
-it.each(["workspace", "slug"] as const)("requires fresh authority after a legacy-reader %s changes", field => {
-  state.kind = "word"
-  const view = render(<PageDetailClient />)
-  state[field] = "denied-next-scope"; state.denied = true
-  view.rerender(<PageDetailClient />)
-  expect(screen.queryByText("Legacy Page reader")).toBeNull()
-  expect(screen.queryByTestId("artifact-reader")).toBeNull()
-  expect(screen.getByRole("alert")).toHaveTextContent("Document unavailable.")
+  expect(screen.getByText("Legacy Page reader").getAttribute("data-pin")).toBe(pin)
 })
