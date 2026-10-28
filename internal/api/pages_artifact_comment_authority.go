@@ -36,7 +36,8 @@ func (h *PageHandler) mayCommentPage(ctx context.Context, wsID, userID, role str
 	return false
 }
 
-// Native observer reads currently serve latest rather than a shared snapshot.
+// Native observer and existing collaborative checkpoint reads currently serve
+// latest rather than a shared snapshot.
 // Preserve all pre-existing read paths, but do not turn the new comment level
 // into permission to obtain native private bytes before shared reads exist.
 func (h *PageHandler) mayReadNativeWithoutComment(ctx context.Context, wsID string, rec *pageRecord, viewer *pageViewer) bool {
