@@ -2,10 +2,10 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { toPageView, type PageView, type WirePage } from "@/hooks/use-pages"
 
-const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error: null as string | null, refresh: vi.fn(), projectsOn: true, item: null as string | null, select: vi.fn(), folders: [] as { id: string; slug: string; name: string; pageCount: number }[], reads: [] as { target: { pageId: string } | null; enabled: boolean; chatId: string }[], readStatus: "ready" as string, mobile: false }))
+const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error: null as string | null, refresh: vi.fn(), projectsOn: true, item: null as string | null, select: vi.fn(), folders: [] as { id: string; slug: string; name: string; pageCount: number }[], reads: [] as { target: { pageId: string } | null; enabled: boolean; chatId: string }[], readStatus: "ready" as string, pagesArgs: [] as unknown[], mobile: false }))
 vi.mock("@/hooks/use-pages", async importOriginal => ({
   ...(await importOriginal<typeof import("@/hooks/use-pages")>()),
-  usePages: () => ({ pages: state.pages, loading: state.loading, error: state.error, refresh: state.refresh }),
+  usePages: (...args: unknown[]) => { state.pagesArgs = args; return { pages: state.pages, loading: state.loading, error: state.error, refresh: state.refresh } },
 }))
 vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-project-data", () => ({ useArtifactProjectsAvailable: () => state.projectsOn }))
 vi.mock("@/components/features/chat/artifact-context/projects/artifact-viewer-context", () => ({
@@ -67,7 +67,7 @@ beforeEach(() => {
     wire({ slug: "weekly", id: "page-weekly", name: "Weekly report", panel_count: 2 } as Partial<WirePage>),
     wire({ slug: "calc", id: "page-calc", name: "Calculator", has_application: true } as Partial<WirePage>),
   ]
-  state.folders = []; state.reads = []; state.readStatus = "ready"; state.loading = false; state.error = null; state.projectsOn = true; state.mobile = false; state.item = null; state.select.mockReset(); state.refresh.mockReset()
+  state.folders = []; state.reads = []; state.pagesArgs = []; state.mobile = false; state.readStatus = "ready"; state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.select.mockReset(); state.refresh.mockReset()
 })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
@@ -89,6 +89,12 @@ it("lists every kind with something in it, a panel Page as Page, and keeps empty
   expect(screen.queryByText("Calculator")).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: /Empty/ }))
   expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(item => item.textContent)).toEqual([expect.stringContaining("Calculator")])
+})
+
+it("asks the server for archived and test-made items, which it leaves out by default", () => {
+  renderLibrary()
+  // Without them the Archive and Test items views stay empty against the real API (#4444).
+  expect(state.pagesArgs).toEqual(["ws1", undefined, { archived: "include", testItems: "include" }])
 })
 
 it("Home offers what can be made, what is not shared yet and what changed last, each once", () => {
