@@ -76,6 +76,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react"
 import { EmptyState } from "@/components/layout/empty-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
+import { artifactsLibrary } from "@/lib/feature-flags"
 import { PageAvatarPopover } from "@/components/features/pages/page-avatar-popover"
 import { cn } from "@/lib/utils"
 import { PanelRenderer } from "@/components/features/pages/panels"
@@ -271,6 +272,12 @@ export interface PageViewProps {
    */
   mayEditAvatar?: boolean
   /**
+   * The artifact kind the layout resolved for this Page, from the detail read
+   * or the list. A typed artifact opens in its own viewer; if it lands here
+   * anyway it says so and links there, never "declares no panels".
+   */
+  artifactKind?: string
+  /**
    * Whether this page is actually subscribed and receiving (`usePage().live`).
    *
    * Defaults to `offline` rather than to `live`: a caller that does not pass it
@@ -292,6 +299,7 @@ export function PageView({
   workspaceId,
   mayEditAvatar,
   live = "offline",
+  artifactKind,
 }: PageViewProps) {
   // The bar is derived from the panels the SERVER sent, sealed placeholders
   // included, so it has the same shape for every viewer (§2.3). It lives out
@@ -408,6 +416,7 @@ export function PageView({
             now={now}
             workspaceId={workspaceId}
             mayEditAvatar={mayEditAvatar}
+            artifactKind={artifactKind ?? page?.artifactKind}
             tabs={tabs}
             activeTab={activeTab}
             tabIdScope={tabIdScope}
@@ -415,6 +424,31 @@ export function PageView({
         </div>
       </div>
     </div>
+  )
+}
+
+/** Where a typed artifact is read instead: the library detail, or the versioned reader with its history. */
+export function artifactReaderHref(slug: string, kind: string, workspaceId?: string | null): string | null {
+  const query = new URLSearchParams()
+  if (workspaceId) query.set("workspace_id", workspaceId)
+  if (artifactsLibrary()) {
+    query.set("item", slug)
+    return `/artifacts?${query}`
+  }
+  if (kind !== "project" && kind !== "dashboard" && kind !== "slides") return null
+  query.set("artifact", "1")
+  return `/pages/${encodeURIComponent(slug)}?${query}`
+}
+
+function ArtifactElsewhere({ slug, kind, workspaceId }: { slug: string; kind: string; workspaceId?: string | null }) {
+  const href = artifactReaderHref(slug, kind, workspaceId)
+  return (
+    <EmptyState
+      icon={CONCEPT_ICON.pages}
+      title="Can't show this artifact here"
+      description="It opens in its own viewer, with its versions in History."
+      action={href ? <Link href={href} className="text-sm font-medium text-primary hover:underline">Open in its viewer</Link> : undefined}
+    />
   )
 }
 
@@ -428,6 +462,7 @@ function PageBody({
   now,
   workspaceId,
   mayEditAvatar = false,
+  artifactKind,
   tabs,
   activeTab,
   tabIdScope,
@@ -524,7 +559,9 @@ function PageBody({
         )}
       </div>
 
-      {panels.length === 0 ? (
+      {panels.length === 0 && artifactKind ? (
+        <ArtifactElsewhere slug={slug} kind={artifactKind} workspaceId={workspaceId} />
+      ) : panels.length === 0 ? (
         <EmptyState
           icon={CONCEPT_ICON.pages}
           title="This page declares no panels"
