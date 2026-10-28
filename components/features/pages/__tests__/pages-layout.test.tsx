@@ -482,9 +482,19 @@ it("offers New Doc and WordCraft when native collaboration is available without 
  view.qc.clear()
 })
 
-it("reopens an explicit native Craft Page in the full editor instead of an empty legacy view",async()=>{
+it.each(["wordcraft","gridcraft"])("reopens an explicit native %s Page in the full editor instead of an empty legacy view",async(application)=>{
  cleanup();window.history.replaceState(null,"","/pages/native-word")
- const {qc}=renderLayout([{id:"native-id",slug:"native-word",name:"Native Word",panels:[],native_craft_application:"wordcraft"} as WirePage],"native-word")
+ const {qc}=renderLayout([{id:"native-id",slug:"native-word",name:"Native Word",panels:[],native_craft_application:application} as WirePage],"native-word")
  await waitFor(()=>expect(replace).toHaveBeenCalledWith("/pages/craft/editor?workspace_id=ws-1&page_id=native-id"))
  qc.clear()
+})
+
+it('offers New Doc when only the independently qualified native Sheet is available',async()=>{
+ cleanup();window.history.replaceState(null,'','/pages')
+ Object.assign(access,{role:'OWNER',capabilities:[],loading:false,error:false})
+ const view=renderLayout([],undefined,{enabled:false,wordcraft_native:false,gridcraft_native:true})
+ fireEvent.click(await screen.findByRole('button',{name:'New Doc'}))
+ expect(await screen.findByLabelText('Format')).toHaveValue('sheet')
+ expect(screen.getByRole('option',{name:'Sheet'})).toBeInTheDocument()
+ view.qc.clear()
 })

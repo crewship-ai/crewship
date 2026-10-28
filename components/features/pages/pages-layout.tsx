@@ -457,7 +457,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
             {canCreatePage && <SubBarSecondary icon={Upload} onClick={() => canCreatePage && setImporting(true)}>
               Import
             </SubBarSecondary>}
-            {canCreatePage && (documentAvailability.data === true || documentAvailability.wordcraftNative || documentAvailability.wordcraftSDKPrefix || documentAvailability.wordcraftCommands) && <SubBarSecondary icon={FilePlus2} className="coarse:min-h-[44px]" onClick={() => setCreatingDocument(true)}>New Doc</SubBarSecondary>}
+            {canCreatePage && (documentAvailability.data === true || documentAvailability.wordcraftNative || documentAvailability.gridcraftNative || documentAvailability.wordcraftSDKPrefix || documentAvailability.wordcraftCommands) && <SubBarSecondary icon={FilePlus2} className="coarse:min-h-[44px]" onClick={() => setCreatingDocument(true)}>New Doc</SubBarSecondary>}
             {canCreatePage && <SubBarPrimary icon={FilePlus2} onClick={() => canCreatePage && setCreating(true)}>
               New page
             </SubBarPrimary>}
