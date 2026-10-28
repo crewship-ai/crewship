@@ -27,6 +27,25 @@ async function ready(){await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenC
 async function acquire(){fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(ports.at(-1)?.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)))}
 
 describe('native Word host authority and persistence',()=>{
+ it('opens Grid with the same read-only lease gate, isolated port and matching draft namespace',async()=>{
+  client.open.mockResolvedValueOnce({sessionId:'private-session',applicationId:'gridcraft'})
+  const base=await client.read(new AbortController().signal)
+  client.read.mockResolvedValue({...base,applicationId:'gridcraft',bytes:new TextEncoder().encode('{"sheets":[]}')})
+  mount();await ready()
+  expect(portOptions[0].applicationId).toBe('gridcraft')
+  expect(portOptions[0].requireAccessProtocol).toBe(true)
+  expect(document.querySelector('iframe')?.title).toBe('GridCraft editor')
+  expect(client.leaseAction).not.toHaveBeenCalled()
+  expect(m.openJournal).not.toHaveBeenCalled()
+  await acquire()
+  expect(m.openJournal).toHaveBeenCalledWith({human:'human',workspace:'w',page:'p',applicationId:'gridcraft'})
+  ports.at(-1)!.snapshot.mockResolvedValue({bytes:new TextEncoder().encode('{"sheets":[1]}'),editorRevision:'grid:2',documentId:'doc'})
+  act(()=>portOptions.at(-1)!.onSaveRequest({documentId:'doc',editorRevision:'grid:2'}))
+  await waitFor(()=>expect(client.save).toHaveBeenCalledOnce())
+  expect(client.save.mock.calls[0][0].applicationId).toBe('gridcraft')
+  await screen.findByText('Uloženo')
+ })
+
  it.each(['free','handed'])('disables takeover while a newer readonly snapshot bootstraps, then acquires on one click (%s)',async(leaseState)=>{
   mount();await ready()
   const newer=await client.read(new AbortController().signal)
