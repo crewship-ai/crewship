@@ -30,13 +30,16 @@ func TestArtifactDataMCPPacketKeepsExactCASAndRejectsIdentity(t *testing.T) {
 }
 
 func TestArtifactDataMCPEnvelopeDoesNotExpandHTMLLikeValues(t *testing.T) {
-	w := httptest.NewRecorder()
-	s := &Server{}
-	body := []byte(`{"value":"` + strings.Repeat("<", 1<<20) + `"}`)
-	s.writeArtifactDataMCPResult(w, memoryMCPRequest{ID: json.RawMessage(`1`)}, 200, body)
-	if w.Code != 200 || w.Body.Len() > len(body)+1024 || strings.Contains(w.Body.String(), `\u003c`) {
-		t.Fatalf("data envelope expanded: %d bytes", w.Body.Len())
+	for _, value := range []string{strings.Repeat("<", 1<<20), strings.Repeat(string([]rune{0x2028, 0x2029}), 25000)} {
+		w := httptest.NewRecorder()
+		s := &Server{}
+		body := []byte(`{"value":"` + value + `"}`)
+		s.writeArtifactDataMCPResult(w, memoryMCPRequest{ID: json.RawMessage(`1`)}, 200, body)
+		if w.Code != 200 || w.Body.Len() > len(body)+1024 {
+			t.Fatalf("data envelope expanded: %d -> %d bytes", len(body), w.Body.Len())
+		}
 	}
+
 }
 
 func TestArtifactDataMCPBoundaryValueKeepsWireBudget(t *testing.T) {

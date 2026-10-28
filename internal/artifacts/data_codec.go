@@ -5,6 +5,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"encoding/json/jsontext"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"io"
 )
@@ -14,13 +16,10 @@ const MaxDataResponseBytes = 16 << 20
 // MarshalDataJSON preserves the stored JSON byte budget across JSON-only
 // transports: HTML escaping would expand a valid '<' value up to sixfold.
 func MarshalDataJSON(value any) ([]byte, error) {
-	var b bytes.Buffer
-	e := json.NewEncoder(&b)
-	e.SetEscapeHTML(false)
-	if err := e.Encode(value); err != nil {
-		return nil, err
-	}
-	return bytes.TrimSuffix(b.Bytes(), []byte("\n")), nil
+	// Go 1.27's v1-compatible Encoder keeps EscapeForJS enabled even after
+	// SetEscapeHTML(false). Explicit JSON-only options preserve literal LS/PS
+	// as well as HTML-like values, while retaining legacy wire conventions.
+	return jsonv2.Marshal(value, json.DefaultOptionsV1(), jsontext.EscapeForHTML(false), jsontext.EscapeForJS(false))
 }
 
 type DataBatch struct {

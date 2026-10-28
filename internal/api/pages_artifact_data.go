@@ -1,7 +1,6 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -133,21 +132,19 @@ func projectArtifactData(r *http.Request, collection string, version int64, docu
 	return out
 }
 func writeArtifactData(w http.ResponseWriter, value any) {
-	var body bytes.Buffer
-	encoder := json.NewEncoder(&body)
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(value); err != nil {
+	body, err := artifacts.MarshalDataJSON(value)
+	if err != nil {
 		replyError(w, 500, "cannot encode dataset response")
 		return
 	}
-	if body.Len() > artifacts.MaxDataResponseBytes {
+	if len(body) > artifacts.MaxDataResponseBytes {
 		artifactDataError(w, artifacts.ErrDataQuota)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(200)
-	_, _ = w.Write(body.Bytes())
+	_, _ = w.Write(body)
 }
 func dataCodeVersion(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	version, err := strconv.ParseInt(r.URL.Query().Get("version"), 10, 64)
