@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Create native Sheets from New Doc.** The Sheet choice appears only for a qualified GridCraft release, initializes its original engine model, and reopens saved native Sheets in the full editor.
+
+- **Native Sheet documents can use the full GridCraft editor.** The experimental, default-off native profile now initializes qualified Grid workbooks with the same edit lease, local draft and confirmed whole-document save flow as Word.
+
 - **New Doc was unavailable with only the native Word profile enabled.** The qualified, default-off native profile now offers Word creation through the existing whole-document initializer and opens the full editor after releasing creation custody. Ambiguous initialization never creates another Page or blindly retries a write.
 
 - **Native document exports did not download.** Word and spreadsheet export copies now download through the host browser while retaining the isolated editor and separate server save confirmation.
@@ -16,7 +20,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Taking over a native document no longer ignores the first click during refresh.** Lease controls wait for a newer read-only editor snapshot to finish opening before accepting custody actions.
 
-- **Native Sheet documents can use the full GridCraft editor.** The experimental, default-off native profile now initializes qualified Grid workbooks with the same edit lease, local draft and confirmed whole-document save flow as Word.
 - **Native Craft editing can continue past access-token expiry.** The browser refreshes its cookie before admitting or renewing the same editing connection and replaces only its authenticated metadata stream. Unsaved work, the lease generation and in-flight saves remain in place; document mutations are never replayed.
 - Allow native Craft editors to copy to the clipboard while keeping clipboard reads and opaque-frame isolation restricted.
 

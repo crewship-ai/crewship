@@ -6922,6 +6922,9 @@
           "enabled": {
             "type": "boolean"
           },
+          "gridcraft_native": {
+            "type": "boolean"
+          },
           "wordcraft_native": {
             "type": "boolean"
           },

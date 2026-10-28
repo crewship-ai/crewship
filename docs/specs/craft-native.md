@@ -176,9 +176,18 @@ requires its erasure.
 The backend has direct-handler and real-Router two-human regression coverage.
 Whole-document routes require an already explicit native Page and a trusted
 qualified profile; only the explicit owner-only native initializer may create
-that profile on an existing empty Page. New Doc uses that initializer for a fresh personal Word Page.
-Proposals and agent execution,
-one-hour browser acceptance and 2,000 changing saves remain separate work.
+that profile on an existing empty Page.
+New Doc offers Word and Sheet only when their independent `wordcraft_native` and
+`gridcraft_native` status capabilities are literal true. These capabilities
+advertise live, qualified profiles without enabling the older Docs engine.
+The owner-only native initializer receives the selected original engine's
+canonical blank bytes for a fresh Page. Creation releases only its exact lease
+generation; an ambiguous release can reopen the confirmed document with fresh
+read-only admission, while an ambiguous initialize is never repeated. Existing
+native Pages retain their application descriptor when opened from the Pages list.
+Proposals, agent execution, one-hour browser acceptance and 2,000 changing saves
+remain separate work.
+
 
 The native blank Word asset is serialized by the original engine separately from
 the older checkpoint blank. To qualify it against a real binary, set
@@ -186,3 +195,10 @@ the older checkpoint blank. To qualify it against a real binary, set
 `go test ./internal/mooring -run ^TestNativeCLIValidatorCanonicalWordCreation$`.
 The explicit run must pass; ordinary unit runs skip it when no binary is supplied.
 It also verifies that the old lossy float promotion is still rejected.
+
+The canonical Sheet asset is the qualified GridCraft CLI's native output, used
+without model conversion. Set `CREWSHIP_TEST_GRIDCRAFT_CLI` and
+`CREWSHIP_TEST_GRIDCRAFT_CLI_SHA256`, then explicitly run
+`go test ./internal/mooring -run ^TestNativeCLIValidatorCanonicalSheetCreation$`.
+It must accept the actual creation bytes and reject an authored extension that
+the engine would discard; an ordinary optional test skip is not qualification.
