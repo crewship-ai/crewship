@@ -15,13 +15,16 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 )
 
-// This infrastructure export is deliberately opt-in. Its package-pass elapsed
-// time is charged by the API race aggregate; an ordinary skipped invocation
-// does not constitute bootstrap evidence.
+// Full export is deliberately opt-in and its package-pass elapsed time is
+// charged by the API race aggregate. Ordinary invocations verify refusal of
+// an unauthorized export; they do not produce a bundle or bootstrap evidence.
 func TestCIRaceTemplateBootstrap(t *testing.T) {
 	dir, configured := os.LookupEnv(exportBundleEnv)
 	if !configured {
-		t.Skip("CI race template export was not requested")
+		if err := exportMigratedBundle("", migratedBundleMetadata{}); err == nil || !strings.Contains(err.Error(), "actual race") {
+			t.Fatalf("unauthorized export was not refused before migrations: %v", err)
+		}
+		return
 	}
 	if _, importing := os.LookupEnv(importBundleEnv); importing {
 		t.Fatal("bootstrap must run genuine migrations, not import another bundle")
@@ -160,7 +163,7 @@ func TestMigratedBundleRejectsMissingCorruptAndSymlinkEntries(t *testing.T) {
 				}
 				t.Cleanup(func() { os.RemoveAll(path + "-real") })
 				if err := os.Symlink(path+"-real", path); err != nil {
-					t.Skipf("symlinks unavailable: %v", err)
+					t.Fatalf("create required symlink fixture: %v", err)
 				}
 			case "corrupt-db":
 				data, err := os.ReadFile(db)
