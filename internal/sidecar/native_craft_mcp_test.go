@@ -128,3 +128,86 @@ func TestNativeCraftHostAllowsBoundedOriginalEngineConversion(t *testing.T) {
 		t.Fatal("native budget broadened unrelated operations")
 	}
 }
+
+// Protocol-only synthetic HTTP fixture. This proves request normalization and
+// refusal boundaries, not an authenticated provider run or a native receipt.
+func TestNativeCraftMCPOptionalArgumentsHTTPContract(t *testing.T) {
+	s, key := newRunIdentityServer(t)
+	token := internaltoken.DeriveAgentRunToken(key, "ws-1", "agent-boot", "run-boot")
+	s.ipc.Token = "fixture-native-ipc"
+	forwarded := make(chan string, 32)
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/internal/craft-native/task" ||
+			r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("X-Internal-Token") != "fixture-native-ipc" {
+			t.Error("fixed route or original synthetic authentication changed")
+		}
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+		}
+		forwarded <- string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"fixture_only":true}`)
+	}))
+	defer host.Close()
+	s.ipc.BaseURL = host.URL
+	proxy := NewProxy(ProxyConfig{CredStore: NewCredStore(), Allowlist: NewDomainAllowlist(nil), Logger: testLogger()})
+	handler := s.buildHandler(proxy)
+	for _, tc := range []struct {
+		name, params, packet string
+	}{
+		{"acquire-omitted", `{"name":"craft_acquire"}`, `{"operation":"acquire"}`},
+		{"acquire-explicit-empty-calibration", `{"name":"craft_acquire","arguments":{}}`, `{"operation":"acquire"}`},
+		{"read-omitted", `{"name":"craft_read"}`, `{"operation":"read"}`},
+		{"read-explicit-empty-calibration", `{"name":"craft_read","arguments":{}}`, `{"operation":"read"}`},
+		{"acquire-meta-is-not-forwarded", `{"name":"craft_acquire","_meta":{"progressToken":"fixture"}}`, `{"operation":"acquire"}`},
+		{"acquire-null", `{"name":"craft_acquire","arguments":null}`, ""},
+		{"read-null", `{"name":"craft_read","arguments":null}`, ""},
+		{"acquire-array", `{"name":"craft_acquire","arguments":[]}`, ""},
+		{"acquire-string", `{"name":"craft_acquire","arguments":"{}"}`, ""},
+		{"acquire-number", `{"name":"craft_acquire","arguments":1}`, ""},
+		{"acquire-selector", `{"name":"craft_acquire","arguments":{"page_id":"foreign"}}`, ""},
+		{"read-selector", `{"name":"craft_read","arguments":{"run_id":"foreign"}}`, ""},
+		{"unknown-name", `{"name":"craft_unknown"}`, ""},
+		{"unprefixed-name", `{"name":"acquire"}`, ""},
+		{"renew-omitted-required-generation", `{"name":"craft_renew"}`, ""},
+		{"release-omitted-required-generation", `{"name":"craft_release"}`, ""},
+		{"apply-omitted-required-fields", `{"name":"craft_apply"}`, ""},
+		{"renew-empty-required-generation", `{"name":"craft_renew","arguments":{}}`, ""},
+		{"release-empty-required-generation", `{"name":"craft_release","arguments":{}}`, ""},
+		{"apply-empty-required-fields", `{"name":"craft_apply","arguments":{}}`, ""},
+		{"null-meta", `{"name":"craft_acquire","_meta":null}`, ""},
+		{"outer-selector", `{"name":"craft_acquire","page_id":"foreign"}`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9119/mcp/craft-native", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":`+tc.params+`}`))
+			r.RemoteAddr = "127.0.0.1:12345"
+			r.Header.Set("Authorization", "Bearer "+token)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			failed, _ := documentCreateMCPResult(t, w)
+			if tc.packet != "" {
+				if failed {
+					t.Errorf("valid optional-arguments call was refused: %s", w.Body)
+				}
+				select {
+				case got := <-forwarded:
+					if got != tc.packet {
+						t.Errorf("host packet=%s want=%s", got, tc.packet)
+					}
+				default:
+					t.Error("valid optional-arguments call did not reach synthetic host")
+				}
+			} else {
+				if !failed {
+					t.Error("invalid or incomplete operation was accepted")
+				}
+				select {
+				case got := <-forwarded:
+					t.Errorf("refused operation reached host: %s", got)
+				default:
+				}
+			}
+		})
+	}
+}
