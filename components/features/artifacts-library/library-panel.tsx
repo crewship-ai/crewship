@@ -24,6 +24,11 @@ const SPACES = [
   { key: "attention", label: "Needs attention", icon: AlertCircle },
 ] as const
 
+const VIEWS = [
+  { key: "series", label: "Repeated runs", icon: Copy },
+  { key: "empty", label: "Empty", icon: Inbox },
+] as const
+
 const meta = (n: number) => <span className="shrink-0 text-micro tabular-nums text-muted-foreground">{n}</span>
 
 function toggle<T extends string>(list: T[], value: T): T[] {
@@ -63,7 +68,7 @@ export function LibraryPanel({ items, folders, filters, onFiltersChange }: {
     <SidebarToolbar>
       <div className="min-w-0 flex-1">
         <SidebarSearch value={filters.q} onValueChange={q => narrow({ q })}
-          placeholder="Search, or kind: is: owner:" aria-label="Search artifacts" />
+          placeholder="Search artifacts…" aria-label="Search artifacts" />
       </div>
       <SidebarFilterButton activeCount={active} {...facets.triggerProps}>Filter</SidebarFilterButton>
     </SidebarToolbar>
@@ -93,16 +98,17 @@ export function LibraryPanel({ items, folders, filters, onFiltersChange }: {
         {chips.map(chip => <SidebarActiveChip key={chip.key} label={chip.text} onRemove={chip.remove}>{chip.text}</SidebarActiveChip>)}
       </SidebarActiveChips>}
 
-      <SidebarSection label="Views">
-        <SidebarRow selected={filters.view === "series"} aria-current={filters.view === "series" ? "page" : undefined} onSelect={() => set({ view: filters.view === "series" ? "all" : "series" })}>
-          <Copy className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="min-w-0 flex-1 truncate">Repeated runs</span>{meta(viewCount("series"))}
-        </SidebarRow>
-        <SidebarRow selected={filters.view === "empty"} aria-current={filters.view === "empty" ? "page" : undefined} onSelect={() => set({ view: filters.view === "empty" ? "all" : "empty" })}>
-          <Inbox className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="min-w-0 flex-1 truncate">Empty</span>{meta(viewCount("empty"))}
-        </SidebarRow>
-      </SidebarSection>
+      {/* A view with nothing in it is clutter; it shows while chosen so it can be left. */}
+      {VIEWS.some(entry => viewCount(entry.key) > 0 || filters.view === entry.key) && <SidebarSection label="Views">
+        {VIEWS.filter(entry => viewCount(entry.key) > 0 || filters.view === entry.key).map(entry => {
+          const on = filters.view === entry.key
+          const Icon = entry.icon
+          return <SidebarRow key={entry.key} selected={on} aria-current={on ? "page" : undefined} onSelect={() => set({ view: on ? "all" : entry.key })}>
+            <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">{entry.label}</span>{meta(viewCount(entry.key))}
+          </SidebarRow>
+        })}
+      </SidebarSection>}
 
       {(folders.length > 0 || unfiled > 0) && <SidebarSection label="Folders" count={folders.length || undefined}>
         {folders.map(folder => {
