@@ -41,7 +41,7 @@ try {
   await build({
     entryPoints: ["e2e/artifacts-library.fixture.tsx"], bundle: true, outfile: join(output, "bundle.js"), platform: "browser", format: "esm", jsx: "automatic",
     alias: { "@": process.cwd() }, logLevel: "error", external: ["/fonts/*"],
-    define: { "process.env": JSON.stringify({ NODE_ENV: "test", NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS: "true", NEXT_PUBLIC_CHAT_CRAFT_LEASE: "true", NEXT_PUBLIC_ARTIFACTS_LIBRARY: "true" }) },
+    define: { "process.env": JSON.stringify({ NODE_ENV: "test", NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS: "true", NEXT_PUBLIC_CHAT_CRAFT_LEASE: "true", NEXT_PUBLIC_ARTIFACTS_LIBRARY: "true", NEXT_PUBLIC_ARTIFACTS_SHARING_MOCK: "true" }) },
     plugins: [{ name: "fixture-neighbours", setup(b) {
       b.onResolve({ filter: /(?:^@\/hooks\/use-auth$|\/hooks\/use-auth(?:\.tsx?)?$|^@\/hooks\/use-workspace$|^next\/navigation$)/ }, args => ({ path: stubOf(args.path), namespace: "fixture" }))
       b.onLoad({ filter: /.*/, namespace: "fixture" }, args => ({ loader: "js", contents: STUBS[args.path] }))
@@ -105,7 +105,7 @@ try {
     const spaces = panel.getByRole("tablist", { name: "Artifacts" })
     assert.equal(await spaces.getByRole("tab", { name: /^Home/ }).getAttribute("aria-selected"), "true")
     await panel.getByRole("button", { name: /^Empty/ }).waitFor()
-    assert.equal(await panel.getByRole("button", { name: /Repeated runs/ }).count(), 0, "a view with nothing in it is not listed")
+    assert.equal(await panel.getByRole("button", { name: /Clean up/ }).count(), 0, "a view with nothing in it is not listed")
     await panel.getByRole("button", { name: /Research/ }).waitFor()
     if (vp.mobile) await shot("01b-panel-sheet")
     await spaces.getByRole("tab", { name: /^All artifacts/ }).click()
@@ -245,6 +245,43 @@ try {
       await shot(`07-${entry.kind.toLowerCase()}`)
       await back()
     }
+
+    // 4b. Sharing (mock of the agreed interface): Share with Comment, the Access tab says who and why;
+    // then select two rows, Move with an impact preview, Confirm; Archive previews and deletes nothing.
+    await list.getByRole("button", { name: "Open Price model" }).click()
+    await page.getByRole("button", { name: "Share", exact: true }).click()
+    const share = page.getByRole("dialog", { name: /Share/ })
+    await share.waitFor()
+    assert.equal(await share.getByText(/expir|guest|public link/i).filter({ hasNotText: "No public links" }).count(), 0, "no expiry, guests or links")
+    await share.getByLabel("Share with", { exact: true }).selectOption({ label: "Jana Nováková" })
+    await share.getByLabel("Level", { exact: true }).selectOption({ label: "Comment" })
+    await share.getByRole("button", { name: /^Share$/ }).click()
+    await share.getByLabel("Level for Jana Nováková").waitFor()
+    assert.equal(await share.getByLabel("Level for Jana Nováková").inputValue(), "comment")
+    await noSideways("share dialog")
+    await shot("08a-share")
+    await page.keyboard.press("Escape")
+    await share.waitFor({ state: "detached" })
+    await page.getByRole("radio", { name: "Access" }).click()
+    await page.getByText("Jana Nováková").waitFor()
+    await shot("08b-access")
+    await back()
+    await list.getByRole("checkbox", { name: "Select Partner brief" }).check()
+    await list.getByRole("checkbox", { name: "Select Price model" }).check()
+    const bulk = page.getByRole("toolbar", { name: "Selection" })
+    await bulk.getByText("2 selected").waitFor()
+    await bulk.getByRole("button", { name: /^Archive/ }).click()
+    const archivePreview = page.getByRole("dialog", { name: /Archive/ })
+    await archivePreview.getByText(/not deleted/i).first().waitFor()
+    // The dry run: the crew's brief is skipped with its reason, the owner's own sheet would be archived.
+    await archivePreview.getByText("1 will be archived, 1 skipped").waitFor()
+    await archivePreview.getByText("Only its owner can archive it").waitFor()
+    await noSideways("bulk preview")
+    await shot("08c-bulk-archive-preview")
+    await archivePreview.getByRole("button", { name: "Cancel" }).click()
+    await archivePreview.waitFor({ state: "detached" })
+    assert.deepEqual(await listed(), ALL, "a cancelled preview changes nothing")
+    await bulk.getByRole("button", { name: "Clear" }).click()
 
     // 5. New artifact from the SubBar: the dialog with its kinds, then Cancel.
     await page.getByRole("button", { name: "New artifact", exact: true }).click()

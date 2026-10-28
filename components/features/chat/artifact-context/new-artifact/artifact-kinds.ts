@@ -25,6 +25,8 @@ export interface ArtifactCapabilities {
   projects: boolean
   /** The live Dashboard build flag. */
   dashboards: boolean
+  /** The Slides build flag: decks render in the viewer. */
+  slides: boolean
   /** Some document creation format is confirmed (Doc, WordCraft or commands). */
   documents: boolean
   /** GridCraft workbook creation is switched on for the workspace. */
@@ -33,7 +35,7 @@ export interface ArtifactCapabilities {
   pages: boolean
 }
 
-export const NO_CAPABILITIES: ArtifactCapabilities = { projects: false, dashboards: false, documents: false, sheets: false, pages: false }
+export const NO_CAPABILITIES: ArtifactCapabilities = { projects: false, dashboards: false, slides: false, documents: false, sheets: false, pages: false }
 
 export interface ArtifactKindEntry {
   key: ArtifactKindKey
@@ -100,12 +102,12 @@ export const ARTIFACT_KINDS: readonly ArtifactKindEntry[] = [
     live: caps => caps.pages && caps.sheets,
   },
   {
-    key: "slides", drafted: false, family: "document", accent: "orange", label: "Slides", plural: "Slides", icon: Presentation,
+    key: "slides", drafted: true, family: "document", accent: "orange", label: "Slides", newLabel: "Slide deck", plural: "Slides", icon: Presentation,
     description: "A deck you can present", viewer: "Slides · Present · PDF", make: "agent",
-    placeholder: "Quarterly review", templates: [], uploadExtensions: [],
-    starterPrompts: [],
-    // Listed, never creatable until it passes live acceptance (no PDF through MCP yet).
-    live: () => false,
+    placeholder: "Quarterly review", templates: ["Quarterly review", "Project update", "Pitch"], uploadExtensions: [],
+    starterPrompts: ["A six-slide quarterly review: results, risks, next steps", "A short project update for the team"],
+    // An agent makes a deck like a project; the viewer renders it once the Slides flag is on.
+    live: caps => caps.projects && caps.slides,
   },
 ]
 

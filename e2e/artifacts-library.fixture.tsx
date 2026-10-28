@@ -63,6 +63,9 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const method = (init?.method ?? "GET").toUpperCase()
   if (path === "/api/v1/pages" && method === "GET") return json(LIST)
   if (path === "/api/v1/page-folders" && method === "GET") return json({ folders: FOLDERS })
+  if (path === "/api/v1/workspaces/ws-fixture/members" && method === "GET") return json([
+    { user_id: "u-jana", user: { full_name: "Jana Nováková" } }, { user_id: "u-petr", user: { full_name: "Petr Malý" } },
+  ])
   if (path === "/api/v1/me/preferences" && method === "GET") return json({})
   if (path.startsWith("/api/v1/me/preferences/") && method === "PUT") return json({ ok: true })
   if (path === "/api/v1/documents/status" && method === "GET") return json({ enabled: true })

@@ -25,7 +25,7 @@ vi.mock("@/lib/workbooks/create", () => ({ createWorkbook: m.createWorkbook }))
 
 import { NewArtifactDialog } from "../new-artifact-dialog"
 
-const ALL: ArtifactCapabilities = { projects: true, dashboards: true, documents: true, sheets: true, pages: true }
+const ALL: ArtifactCapabilities = { projects: true, dashboards: true, slides: true, documents: true, sheets: true, pages: true }
 const folder = (slug: string, name: string, over: Partial<PageFolderView> = {}): PageFolderView => ({
   id: slug, slug, name, icon: null, color: null, ownerRef: "crew/sales", ownerLabel: "Sales", pageCount: 0, aclVersion: 3, shared: "crews", createdAt: null, updatedAt: null, ...over,
 })
@@ -52,14 +52,14 @@ const create = () => screen.getByRole("button", { name: /^Create/ })
 
 it("shows a thumbnail for every creatable kind, a Coming line for the rest, and no search under nine kinds", () => {
   mount()
-  expect(kinds().map(b => b.getAttribute("data-kind"))).toEqual(["project", "dashboard", "page", "word", "sheet"])
-  expect(screen.getByText(/Coming:/)).toHaveTextContent("Coming: Slides")
+  expect(kinds().map(b => b.getAttribute("data-kind"))).toEqual(["project", "dashboard", "page", "word", "sheet", "slides"])
+  expect(screen.queryByText(/Coming:/)).toBeNull()
   expect(screen.queryByRole("searchbox")).toBeNull()
   expect(kinds()[0]).toHaveAttribute("aria-pressed", "true")
 })
 
 it("leaves out kinds the workspace cannot create", () => {
-  m.caps = { ...ALL, projects: false, sheets: false }
+  m.caps = { ...ALL, projects: false, sheets: false, slides: false }
   mount()
   expect(kinds().map(b => b.getAttribute("data-kind"))).toEqual(["page", "word"])
   expect(screen.getByText(/Coming:/)).toHaveTextContent("Coming: Project, Dashboard, Sheet, Slides")
@@ -171,6 +171,15 @@ it("hands agent kinds to chat as an unsent draft with Describe it", () => {
   expect(url.searchParams.get("draft")).toBe("1")
   expect(url.searchParams.get("prompt")).toBe('Create a project "Pricing site": plans, compare, FAQ')
   expect(onOpenChange).toHaveBeenCalledWith(false)
+  expect(m.fetch).not.toHaveBeenCalled()
+})
+
+it("hands a Slides deck to the agent like a project", () => {
+  mount({ defaultKind: "slides" })
+  name("Q3 review")
+  fireEvent.change(screen.getByLabelText(/What should it contain/), { target: { value: "results and risks" } })
+  fireEvent.click(screen.getByRole("button", { name: "Continue in chat" }))
+  expect(new URL(m.push.mock.calls[0][0], "http://x").searchParams.get("prompt")).toBe('Create a slide deck "Q3 review": results and risks')
   expect(m.fetch).not.toHaveBeenCalled()
 })
 
