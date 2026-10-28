@@ -950,6 +950,8 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	var documentInitDiagnostic mooringDocumentInitDiagnostic
 	var nativeInitDiagnostic nativeCraftInitDiagnostic
 	defer nativeInitDiagnostic.report(o.logger, req)
+	var nativeToolDiagnostic nativeCraftToolDiagnostic
+	defer nativeToolDiagnostic.report(o.logger, req)
 	var documentToolDiagnostic mooringDocumentToolDiagnostic
 	defer documentToolDiagnostic.report(o.logger, req)
 	usageModel := req.LLMModel
@@ -957,6 +959,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		inBand.observe(event)
 		documentInitDiagnostic.observe(o.logger, req, event)
 		nativeInitDiagnostic.observe(o.logger, req, event)
+		nativeToolDiagnostic.observe(req, event)
 		documentToolDiagnostic.observe(req, event)
 		if !req.strictContentPrivacy && event.Type == "system" {
 			if meta, ok := event.Metadata.(map[string]any); ok {
