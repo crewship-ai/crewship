@@ -86,6 +86,14 @@ try {
       await sheet.waitFor({ state: "detached" })
     }
     const list = page.getByRole("list", { name: "Artifacts" })
+    const peek = page.getByRole("complementary", { name: "Preview" })
+    // A click peeks on the right on a desktop (Open in the peek opens the detail); a phone opens it directly.
+    const openRow = async name => {
+      await list.getByRole("button", { name: `Open ${name}` }).click()
+      if (vp.mobile) return
+      await peek.getByRole("heading", { name, exact: true }).waitFor()
+      await peek.getByRole("button", { name: "Open", exact: true }).click()
+    }
     const listed = () => list.getByRole("button").evaluateAll(buttons => buttons.map(b => b.getAttribute("aria-label")))
     const noEmptyPanels = async where => assert.equal(await page.getByText(/declares no panels/i).count(), 0, `${vp.name} ${where}: never "This page declares no panels"`)
 
@@ -129,6 +137,22 @@ try {
     await closePanel()
     await page.getByRole("toolbar", { name: "Display" }).getByText("2 artifacts").waitFor()
     assert.deepEqual(await listed(), ["Open Pricing site", "Open Q3 support summary"])
+    if (!vp.mobile) {
+      // 2b. The peek: the list stays with its filter; J/K move the peek, Escape closes it, Enter opens.
+      await list.getByRole("button", { name: "Open Pricing site" }).click()
+      await peek.getByRole("heading", { name: "Pricing site", exact: true }).waitFor()
+      assert.deepEqual(await listed(), ["Open Pricing site", "Open Q3 support summary"], "the list keeps its filter under the peek")
+      assert.equal(await list.getByRole("button", { name: "Open Pricing site" }).getAttribute("aria-current"), "true")
+      await page.keyboard.press("j")
+      await peek.getByRole("heading", { name: "Q3 support summary", exact: true }).waitFor()
+      await noSideways("peek")
+      await shot("02b-peek")
+      await page.keyboard.press("k")
+      await peek.getByRole("heading", { name: "Pricing site", exact: true }).waitFor()
+      await page.keyboard.press("Escape")
+      await peek.waitFor({ state: "detached" })
+      assert.deepEqual(await listed(), ["Open Pricing site", "Open Q3 support summary"])
+    }
     panel = await openPanel()
     const filterButton = panel.getByRole("button", { name: /^Filter/ })
     await filterButton.click()
@@ -158,7 +182,7 @@ try {
     // History, restore. The others land on their Open in Pages / Open page link (Word with its lock).
     const back = async () => { await page.getByRole("button", { name: "All artifacts", exact: true }).click(); await list.waitFor() }
     const openItem = async (name, kind) => {
-      await list.getByRole("button", { name: `Open ${name}` }).click()
+      await openRow(name)
       // Exactly one title: the library's h1, or the viewer's own header where it opens in the viewer.
       const title = page.getByRole("heading", { level: 1, name }).or(page.locator('section[aria-label="Artifact viewer"]').getByRole("heading", { level: 2, name }))
       await title.waitFor()
@@ -248,7 +272,7 @@ try {
 
     // 4b. Sharing (mock of the agreed interface): Share with Comment, the Access tab says who and why;
     // then select two rows, Move with an impact preview, Confirm; Archive previews and deletes nothing.
-    await list.getByRole("button", { name: "Open Price model" }).click()
+    await openRow("Price model")
     await page.getByRole("button", { name: "Share", exact: true }).click()
     const share = page.getByRole("dialog", { name: /Share/ })
     await share.waitFor()
