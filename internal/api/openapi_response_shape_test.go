@@ -51,6 +51,8 @@ var responseShapeContracts = []struct {
 	value any
 }{
 
+	{name: "ArtifactDataResponse", pointer: "/components/schemas/ArtifactDataResponse", value: artifactDataResponse{}},
+	{name: "ArtifactDataDocument", pointer: "/components/schemas/ArtifactDataDocument", value: artifactDataDocumentResponse{}},
 	{name: "NativeCraftAvailability", pointer: "/components/schemas/NativeCraftAvailability", value: craftNativeAvailabilityResponse{}},
 	{name: "NativeCraftRenewal", pointer: "/components/schemas/NativeCraftRenewal", value: craftNativeRenewalResponse{}},
 	{name: "NativeCraftLease", pointer: "/components/schemas/NativeCraftLease", value: craftNativeLeaseResponse{}},
