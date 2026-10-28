@@ -42,6 +42,8 @@ export function nativeDialogCalls(src: string): string[] {
   const localConfirm = /(?:const|let|var|function)\s+confirm\b/.test(code)
   for (const m of code.matchAll(/(?<![\w.$])(confirm|alert)\s*\(/g)) {
     if (m[1] === "confirm" && localConfirm) continue
+    // `confirm(draft) {` and `confirm(draft): T` declare a method, not call one.
+    if (/^[^()]*\)\s*[{:]/.test(code.slice(m.index! + m[0].length))) continue
     hits.push(m[0])
   }
   return hits
@@ -54,6 +56,9 @@ describe("no native browser dialogs", () => {
     expect(nativeDialogCalls("alert('x')")).toHaveLength(1)
     expect(nativeDialogCalls("const confirm = f(); confirm(1)")).toHaveLength(0)
     expect(nativeDialogCalls("// window.confirm('x')\n/* alert('y') */")).toHaveLength(0)
+    expect(nativeDialogCalls("const api = { async confirm(draft) { await journal.confirm(draft) } }")).toHaveLength(0)
+    expect(nativeDialogCalls("interface J { confirm(draft: Draft): Promise<void> }")).toHaveLength(0)
+    expect(nativeDialogCalls("const ok = confirm('x') && go()")).toHaveLength(1)
   })
 
   it("production code calls confirm()/alert() only where allowed", () => {

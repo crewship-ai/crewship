@@ -8,8 +8,9 @@ const scope = { human: "alice", workspace: "w", page: "p", applicationId: "wordc
 const fixture = { applicationId: "wordcraft", enginePin: "fixture", sessionId: "tab", generation: "1", baseVersion: "1", editorRevision: "opaque" }
 type Journal = import("./native-draft").NativeDraftJournal
 type NativeWindow = Window & { nativeDraft: typeof import("./native-draft"); legacyDraft: typeof import("../document-queue"); journal?: Journal; opening?: Promise<string>; status?: string; releasePurge?: () => void; purging?: boolean; revoking?: Promise<void> }
+// Same contract as native-draft.browser.test.ts: runs where Playwright's Chromium is installed.
+const browserIt = it.skipIf(!existsSync(chromium.executablePath()))
 async function withBrowser(run: (a: Page, b: Page) => Promise<void>) {
-  expect(existsSync(chromium.executablePath())).toBe(true)
   const browser = await chromium.launch({ headless: true })
   try {
     const context = await browser.newContext()
@@ -21,7 +22,7 @@ async function withBrowser(run: (a: Page, b: Page) => Promise<void>) {
     await run(a, b)
   } finally { await browser.close() }
 }
-it("fails native storage closed without Web Locks while preserving the legacy fallback", () => withBrowser(async a => {
+browserIt("fails native storage closed without Web Locks while preserving the legacy fallback", () => withBrowser(async a => {
   const result = await a.evaluate(async ({ scope, fixture }) => {
     const w = window as unknown as NativeWindow
     Object.defineProperty(navigator, "locks", { configurable: true, value: undefined })
@@ -44,7 +45,7 @@ it("fails native storage closed without Web Locks while preserving the legacy fa
   }, { scope, fixture })
   expect(result).toEqual({ nativeRefused: true, peerLateWrite: false, legacyWorks: true })
 }))
-it("rejects old queued native openers and holds the Page lock throughout privacy purge", () => withBrowser(async (a, b) => {
+browserIt("rejects old queued native openers and holds the Page lock throughout privacy purge", () => withBrowser(async (a, b) => {
   await a.evaluate(async scope => { const w = window as unknown as NativeWindow; w.journal = await w.nativeDraft.openNativeDraftJournal(scope) }, scope)
   await b.evaluate(scope => {
     const w = window as unknown as NativeWindow
@@ -81,7 +82,7 @@ it("rejects old queued native openers and holds the Page lock throughout privacy
   }, fixture)
   expect({ ...beforeRelease, lateWrite }).toEqual({ first: "refused", duringRefused: true, lateWrite: false })
 }))
-it("rejects read revocation from a closed lifecycle and preserves a fresh authorized mount", () => withBrowser(async (a, b) => {
+browserIt("rejects read revocation from a closed lifecycle and preserves a fresh authorized mount", () => withBrowser(async (a, b) => {
   await a.evaluate(async scope => { const w = window as unknown as NativeWindow; w.journal = await w.nativeDraft.openNativeDraftJournal(scope); await w.journal.close() }, scope)
   await b.evaluate(async ({ scope, fixture }) => { const w = window as unknown as NativeWindow; w.journal = await w.nativeDraft.openNativeDraftJournal(scope); await w.journal.persist({ ...fixture, bytes: new Uint8Array([7]) }) }, { scope, fixture })
   const retiredRejected = await a.evaluate(async () => { try { await (window as unknown as NativeWindow).journal!.revokeRead(); return false } catch { return true } })
