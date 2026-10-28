@@ -9,7 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Taking over a native document no longer ignores the first click during refresh.** Lease controls wait for a newer read-only editor snapshot to finish opening before accepting custody actions.
+- Add a disabled dashboard dataset storage foundation with atomic document version checks, bounded JSON batches, server attribution, portable backups and Page lifetime cleanup; code versions remain in the existing artifact VersionStore.
+- Require actual Chromium execution of native document privacy regressions in frontend CI while preserving the strict browser-dialog guard.
 
 - Add an opt-in Artifacts library at `/artifacts` (`NEXT_PUBLIC_ARTIFACTS_LIBRARY`): a gallery or table of projects, Word, Sheet, Slides and dashboards with kind and shared version, a project detail on its version history and the edit lock of a native Word; the Pages list reports `artifact_kind` and `artifact_shared_version`.
 - Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
@@ -39,6 +40,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Execute a flat WordCraft editor package with a real WASM snippet import in the packaging regression, checking the original ABI identity and manifest hashes.
 - Keep an idle native WordCraft read alive when typing starts, ignoring its obsolete projection without resending the command.
+- **Taking over a native document no longer ignores the first click during refresh.** Lease controls wait for a newer read-only editor snapshot to finish opening before accepting custody actions.
 - Explain when a browser cannot support the isolated WordCraft command editor, including iPhone browsers.
 
 - Allow the 72 generated fixture-qualified WordCraft commands in the default-off C1 backend test profile, with closed parameters and a new exact catalog identity.
