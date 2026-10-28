@@ -18,6 +18,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Native Sheet documents can use the full GridCraft editor.** The experimental, default-off native profile now initializes qualified Grid workbooks with the same edit lease, local draft and confirmed whole-document save flow as Word.
 - **Native Craft editing can continue past access-token expiry.** The browser refreshes its cookie before admitting or renewing the same editing connection and replaces only its authenticated metadata stream. Unsaved work, the lease generation and in-flight saves remain in place; document mutations are never replayed.
+- Allow native Craft editors to copy to the clipboard while keeping clipboard reads and opaque-frame isolation restricted.
 
 - Add an opt-in Artifacts library at `/artifacts` (`NEXT_PUBLIC_ARTIFACTS_LIBRARY`): a gallery or table of projects, Word, Sheet, Slides and dashboards with kind and shared version, a project detail on its version history and the edit lock of a native Word; the Pages list reports `artifact_kind` and `artifact_shared_version`.
 - Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
