@@ -6,6 +6,7 @@ import type { LibraryItem } from "../library-items"
 const flags = vi.hoisted(() => ({ mock: true, fetch: vi.fn() }))
 vi.mock("@/lib/feature-flags", async importOriginal => ({ ...(await importOriginal<typeof import("@/lib/feature-flags")>()), artifactsSharingMock: () => flags.mock }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: flags.fetch }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "me" } }, status: "authenticated" }) }))
 vi.mock("@/hooks/use-issue-people", () => ({ useIssuePeople: () => ({ people: [{ id: "u2", name: "Ada Lovelace" }, { id: "u3", name: "Alan Turing" }], error: false }) }))
 
 import { mockSharingApi, resetSharingMock } from "../sharing/sharing-api"
@@ -83,11 +84,19 @@ it("shows folder rows read-only with where to change them", async () => {
   expect(within(folderRow).queryByRole("button")).toBeNull()
 })
 
+const perms = (read: boolean, comment = false, edit = false) => ({ read, comment, edit, produce: false })
+const OWNER = { subject_type: "user", subject_id: "me", label: "You", paths: ["owner"], effective_permissions: perms(true, true, true), sources: [{ path: "owner", inherited: false, permissions: perms(true, true, true) }] }
+/** GET …/access and …/grants as #4444 serves them; writes answer with the grants envelope. */
+const serve = (grants: unknown[], write?: (method: string, url: string) => Response | undefined) => flags.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+  const method = init?.method ?? "GET"
+  const answer = method === "GET" ? undefined : write?.(method, url)
+  if (answer) return answer
+  return new Response(JSON.stringify(url.includes("/grants") ? { page: "brief", grants } : { page: "brief", page_id: "p1", pages_version: 3, subjects: [OWNER] }), { status: 200 })
+})
+
 it("shows the server's message when sharing fails", async () => {
   flags.mock = false
-  flags.fetch.mockImplementation(async (_path: string, init?: RequestInit) => init?.method === "PUT"
-    ? new Response(JSON.stringify({ error: "Only the owner can share this artifact." }), { status: 403 })
-    : new Response(JSON.stringify({ entries: [{ subject_type: "user", subject_id: "me", label: "You", level: "write", via: "owner" }] }), { status: 200 }))
+  serve([], method => method === "PUT" ? new Response(JSON.stringify({ error: "Only the owner can share this artifact." }), { status: 403 }) : undefined)
   renderDialog()
   await within(list()).findByText("You")
   fireEvent.change(screen.getByRole("combobox", { name: "Share with" }), { target: { value: "workspace:" } })
@@ -107,4 +116,18 @@ it("offers no expiry, guest or link sharing", async () => {
   const subjects = [...(screen.getByRole("combobox", { name: "Share with" }) as HTMLSelectElement).options].map(o => o.textContent)
   expect(subjects).toEqual(["Add a person…", "Everyone in this workspace", "Ada Lovelace", "Alan Turing"])
   expect([...(screen.getByRole("combobox", { name: "Level" }) as HTMLSelectElement).options].map(o => o.textContent)).toEqual(["Edit", "Comment", "Read"])
+})
+
+it("on the server, a downgrade from Edit to Read removes Edit, by query", async () => {
+  flags.mock = false
+  serve([{ subject_type: "user", subject: "ada@example.test", subject_id: "u2", level: "write", live: true }])
+  renderDialog()
+  await within(list()).findByText("ada@example.test")
+  fireEvent.change(within(row("ada@example.test")).getByRole("combobox"), { target: { value: "read" } })
+  await waitFor(() => expect(flags.fetch.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(true))
+  const writes = flags.fetch.mock.calls.filter(([, init]) => init?.method && init.method !== "GET")
+  expect(writes.map(([url, init]) => [init.method, init.body ? JSON.parse(init.body) : new URL(url, "http://h").searchParams.toString()])).toEqual([
+    ["PUT", { subject_type: "user", subject: "u2", level: "read" }],
+    ["DELETE", "workspace_id=ws1&subject_type=user&subject=u2&level=write"],
+  ])
 })

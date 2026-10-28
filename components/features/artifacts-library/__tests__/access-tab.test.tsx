@@ -3,9 +3,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import type { LibraryItem } from "../library-items"
 
-const flags = vi.hoisted(() => ({ mock: true, fetch: vi.fn() }))
+const flags = vi.hoisted(() => ({ mock: true, fetch: vi.fn(), human: "u1" as string | null }))
 vi.mock("@/lib/feature-flags", async importOriginal => ({ ...(await importOriginal<typeof import("@/lib/feature-flags")>()), artifactsSharingMock: () => flags.mock }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: flags.fetch }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => flags.human ? { data: { user: { id: flags.human } }, status: "authenticated" } : { data: null, status: "unauthenticated" } }))
 
 import { mockSharingApi, resetSharingMock } from "../sharing/sharing-api"
 import { AccessTab } from "../sharing/access-tab"
@@ -16,7 +17,7 @@ const item = (over: Partial<LibraryItem> = {}): LibraryItem => ({
   empty: false, private: false, ownerLabel: "You", folder: null, updatedAt: null, ...over,
 })
 
-beforeEach(() => { resetSharingMock(); localStorage.clear(); flags.mock = true; flags.fetch.mockReset() })
+beforeEach(() => { resetSharingMock(); localStorage.clear(); flags.mock = true; flags.human = "u1"; flags.fetch.mockReset() })
 afterEach(cleanup)
 
 const renderTab = (it: LibraryItem = item(), onShare = vi.fn()) => render(<QueryClientProvider client={new QueryClient()}>
@@ -69,9 +70,56 @@ it("shows any other error as the server wrote it", async () => {
   expect((await screen.findByRole("alert")).textContent).toBe("Access is temporarily unavailable.")
 })
 
+/** GET …/access and GET …/grants as #4444 serves them. */
+const serve = (subjects: unknown[], grants: unknown[]) => flags.fetch.mockImplementation(async (url: string) =>
+  new Response(JSON.stringify(url.includes("/grants") ? { page: "brief", grants } : { page: "brief", page_id: "p1", pages_version: 3, subjects }), { status: 200 }))
+const perms = (read: boolean, comment = false, edit = false) => ({ read, comment, edit, produce: false })
+
 it("shows an empty state when the server lists nobody", async () => {
+  flags.mock = false
+  serve([], [])
+  renderTab()
+  expect(await screen.findByText("Nobody else can open it yet.")).toBeTruthy()
+})
+
+it("shows a real server answer with a non-owner grant, never as private", async () => {
+  flags.mock = false
+  serve(
+    [{ subject_type: "user", subject_id: "u1", label: "me@example.test", paths: ["owner"], effective_permissions: perms(true, true, true), sources: [{ path: "owner", inherited: false, permissions: perms(true, true, true) }] },
+      { subject_type: "user", subject_id: "u2", label: "ann@example.test", paths: ["grant:page:comment"], effective_permissions: perms(true, true), sources: [{ path: "grant:page:comment", inherited: false, permissions: perms(true, true) }] }],
+    [{ subject_type: "user", subject: "ann@example.test", subject_id: "u2", level: "comment", live: true }],
+  )
+  renderTab()
+  const groups = await screen.findAllByRole("group")
+  expect(groups.map(g => g.getAttribute("aria-label"))).toEqual(["Edit access", "Comment access"])
+  expect(within(groups[1]).getByText("ann@example.test")).toBeTruthy()
+  expect(within(groups[1]).getByText("Shared directly")).toBeTruthy()
+  expect(screen.queryByText("Nobody else can open it yet.")).toBeNull()
+})
+
+it("an envelope it does not recognise is an error, not an empty list", async () => {
   flags.mock = false
   flags.fetch.mockResolvedValue(new Response(JSON.stringify({ entries: [] }), { status: 200 }))
   renderTab()
+  expect((await screen.findByRole("alert")).textContent).toMatch(/could not be read/)
+  expect(screen.queryByText("Nobody else can open it yet.")).toBeNull()
+})
+
+it("a new session in the same workspace never sees the previous one's list", async () => {
+  flags.mock = false
+  serve([], [{ subject_type: "user", subject: "ann@example.test", subject_id: "u2", level: "read", live: true }])
+  const client = new QueryClient()
+  const view = render(<QueryClientProvider client={client}><AccessTab workspaceId="ws1" item={item()} onShare={vi.fn()} /></QueryClientProvider>)
+  await screen.findByText("ann@example.test")
+  // Signed out, then another human: the old answer is gone at once, and no request runs without a human.
+  flags.human = null
+  flags.fetch.mockClear()
+  view.rerender(<QueryClientProvider client={client}><AccessTab workspaceId="ws1" item={item()} onShare={vi.fn()} /></QueryClientProvider>)
+  expect(screen.queryByText("ann@example.test")).toBeNull()
+  expect(flags.fetch).not.toHaveBeenCalled()
+  flags.human = "u7"
+  serve([], [])
+  view.rerender(<QueryClientProvider client={client}><AccessTab workspaceId="ws1" item={item()} onShare={vi.fn()} /></QueryClientProvider>)
+  expect(screen.queryByText("ann@example.test")).toBeNull()
   expect(await screen.findByText("Nobody else can open it yet.")).toBeTruthy()
 })

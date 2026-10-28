@@ -464,6 +464,22 @@ describe("usePages / usePage", () => {
     expect(result.current.pages[0].state).toBe("fresh")
   })
 
+  it("asks for archived and test items only when a caller opts in, under its own cache key (#4444 catalog filters)", async () => {
+    mockFetch.mockResolvedValue(okJSON([wirePage({ archived: true, created_by_test: true })]))
+    const { result } = renderHook(() => usePages("ws-1", undefined, { archived: "include", testItems: "include" }), { wrapper: makeWrapper(qc) })
+    await waitFor(() => expect(result.current.pages).toHaveLength(1))
+    const url = new URL(mockFetch.mock.calls[0][0] as string, "http://host")
+    expect([url.searchParams.get("archived"), url.searchParams.get("test_items")]).toEqual(["include", "include"])
+    expect(result.current.pages[0]).toMatchObject({ archived: true, createdByTest: true })
+    expect(pagesKeys.list("ws-1", "h", undefined, { archived: "include", testItems: "include" })).toEqual(["pages", "ws-1", { view: "list" }, "h", { archived: "include", test_items: "include" }])
+
+    mockFetch.mockClear()
+    renderHook(() => usePages("ws-2"), { wrapper: makeWrapper(qc) })
+    await waitFor(() => expect(mockFetch).toHaveBeenCalled())
+    const plain = new URL(mockFetch.mock.calls[0][0] as string, "http://host")
+    expect([plain.searchParams.has("archived"), plain.searchParams.has("test_items")]).toEqual([false, false])
+  })
+
   it("reads one page and hands the renderer a spec plus a snapshot", async () => {
     mockFetch.mockResolvedValue(okJSON(wirePage()))
     const { result } = renderHook(() => usePage("ws-1", "fleet-201"), { wrapper: makeWrapper(qc) })
@@ -565,4 +581,9 @@ describe("server-authorized Dashboard classification", () => {
     expect(toPageView(wirePage({ name: "Dashboard", slug: "dashboard" })).artifactKind).toBeUndefined()
     expect(toPageView(wirePage({ artifact_kind: "unknown" })).artifactKind).toBeUndefined()
   })
+})
+
+it("projects only explicit server catalog markers without title heuristics", () => {
+  expect(toPageView(wirePage({ name: "codex test run", slug: "qa-test" }))).toMatchObject({ createdByTest: false, archived: false })
+  expect(toPageView(wirePage({ created_by_test: true, archived: true, archived_at: "2026-10-28T19:34:11Z" }))).toMatchObject({ createdByTest: true, archived: true, archivedAt: "2026-10-28T19:34:11Z" })
 })

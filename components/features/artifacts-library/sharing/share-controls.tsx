@@ -31,8 +31,8 @@ export function SubjectSelect({ subjects, value, onChange, exclude = [], label =
   </select>
 }
 
-export function LevelSelect({ value, onChange, label = "Level" }: { value: ShareLevel; onChange: (level: ShareLevel) => void; label?: string }) {
+export function LevelSelect({ value, onChange, label = "Level", levels = SHARE_LEVELS }: { value: ShareLevel; onChange: (level: ShareLevel) => void; label?: string; levels?: readonly ShareLevel[] }) {
   return <select aria-label={label} className={SELECT} value={value} onChange={event => onChange(event.target.value as ShareLevel)}>
-    {SHARE_LEVELS.map(level => <option key={level} value={level}>{SHARE_LEVEL_LABEL[level]}</option>)}
+    {levels.map(level => <option key={level} value={level}>{SHARE_LEVEL_LABEL[level]}</option>)}
   </select>
 }

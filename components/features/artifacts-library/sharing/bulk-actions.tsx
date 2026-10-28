@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import type { LibraryItem } from "../library-items"
 import { LevelSelect, SELECT, SubjectSelect, useSubjects, type Subject } from "./share-controls"
 import {
-  BULK_LIMIT, SHARE_LEVEL_LABEL, useSharingApi, useSharingMutation,
+  BULK_LIMIT, SHARE_LEVEL_LABEL, useSharingApi, useSharingHuman, useSharingMutation,
   type AccessEntry, type BulkAction, type BulkRequest, type BulkResult, type ShareLevel,
 } from "./sharing-api"
 
@@ -75,6 +75,7 @@ const listEntries = (entries: AccessEntry[]) => entries.map(e => `${e.label} (${
 /** Changes 26–27: pick the action, read its dry run per item, confirm only what can happen. */
 export function BulkPreviewDialog({ workspaceId, action, items, folders, open, onOpenChange, onDone }: BulkPreviewDialogProps) {
   const api = useSharingApi(workspaceId)
+  const { humanId } = useSharingHuman()
   const { subjects } = useSubjects(workspaceId, open && action === "share")
   const [target, setTarget] = useState("")
   const [subject, setSubject] = useState<Subject | null>(null)
@@ -89,7 +90,7 @@ export function BulkPreviewDialog({ workspaceId, action, items, folders, open, o
   useEffect(() => {
     if (!open) return
     setTarget(""); setSubject(null); setLevel("read"); setPreview(null); setPreviewError(null); setApplied(null)
-  }, [open, action, identity])
+  }, [open, action, identity, humanId])
 
   /** The request without its items and dry-run flag, or null while the action still needs a choice. */
   const base = useMemo((): Omit<BulkRequest, "items" | "dryRun"> | null => {
@@ -108,9 +109,10 @@ export function BulkPreviewDialog({ workspaceId, action, items, folders, open, o
       .then(result => { if (live) setPreview(result) })
       .catch((error: unknown) => { if (live) setPreviewError(error instanceof Error ? error.message : "The preview failed.") })
     return () => { live = false }
-    // `items` is tracked by identity: a new array with the same slugs is the same selection.
+    // `items` is tracked by identity: a new array with the same slugs is the same selection. A new human
+    // re-runs the preview and drops the old one's late answer.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, open, base, tooMany, identity])
+  }, [api, open, base, tooMany, identity, humanId])
 
   const ok = preview?.items.filter(r => r.ok) ?? []
   const skipped = (preview?.items.length ?? 0) - ok.length
@@ -119,7 +121,8 @@ export function BulkPreviewDialog({ workspaceId, action, items, folders, open, o
   const confirm = () => {
     if (!base || !ok.length) return
     const slugs = new Set(ok.map(r => r.slug))
-    apply.mutate({ ...base, items: items.filter(i => slugs.has(i.slug)), dryRun: false }, {
+    // The preview rows go with the confirmation: the server confirms what was reviewed, nothing else.
+    apply.mutate({ ...base, items: items.filter(i => slugs.has(i.slug)), dryRun: false, reviewed: ok }, {
       onSuccess: result => {
         onDone?.(result)
         if (result.items.every(r => r.ok)) onOpenChange(false)
@@ -166,7 +169,7 @@ export function BulkPreviewDialog({ workspaceId, action, items, folders, open, o
                       {!r.ok && <StatusPill tone="warn" label="Skipped" />}
                     </span>
                     {r.ok
-                      ? <ImpactLines action={action} gains={r.gains} loses={r.loses} />
+                      ? <ImpactLines action={action} gains={r.gains} loses={r.loses} note={r.note} />
                       : <span className="text-muted-foreground">{r.reason ?? "Not allowed."}</span>}
                   </li>)}
                 </ul>
@@ -188,13 +191,15 @@ export function BulkPreviewDialog({ workspaceId, action, items, folders, open, o
   </Dialog>
 }
 
-function ImpactLines({ action, gains, loses }: { action: BulkAction; gains: AccessEntry[]; loses: AccessEntry[] }) {
+function ImpactLines({ action, gains, loses, note }: { action: BulkAction; gains: AccessEntry[]; loses: AccessEntry[]; note?: string }) {
   if (action === "archive") return <span className="text-muted-foreground">Hidden from the library, not deleted.</span>
   if (action === "unarchive") return <span className="text-muted-foreground">Back in the library.</span>
-  if (!gains.length && !loses.length) return <span className="text-muted-foreground">No change in who can open it.</span>
+  // A note means the preview could not show the change; "no change" would be a claim nobody checked.
+  if (!gains.length && !loses.length) return <span className="text-muted-foreground">{note ?? "No change in who can open it."}</span>
   return <>
     {gains.length > 0 && <span>Gains: {listEntries(gains)}.</span>}
     {loses.length > 0 && <span>Loses: {listEntries(loses)}.</span>}
+    {note && <span className="text-muted-foreground">{note}</span>}
   </>
 }
 

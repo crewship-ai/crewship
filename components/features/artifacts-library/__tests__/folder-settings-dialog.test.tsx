@@ -2,16 +2,18 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
-vi.mock("@/lib/feature-flags", async importOriginal => ({ ...(await importOriginal<typeof import("@/lib/feature-flags")>()), artifactsSharingMock: () => true }))
+const flags = vi.hoisted(() => ({ mock: true, fetch: vi.fn((): Promise<Response> => { throw new Error("no HTTP in the mock") }) }))
+vi.mock("@/lib/feature-flags", async importOriginal => ({ ...(await importOriginal<typeof import("@/lib/feature-flags")>()), artifactsSharingMock: () => flags.mock }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "me" } }, status: "authenticated" }) }))
 vi.mock("@/hooks/use-issue-people", () => ({ useIssuePeople: () => ({ people: [{ id: "u2", name: "Ann Novak" }, { id: "u3", name: "Bo Lind" }], error: false }) }))
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn(() => { throw new Error("no HTTP in the mock") }), broadcastSessionExpired: vi.fn() }))
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: flags.fetch, broadcastSessionExpired: vi.fn() }))
 
 import { FolderSettingsDialog } from "../sharing/folder-settings-dialog"
 import { mockSharingApi, resetSharingMock } from "../sharing/sharing-api"
 
 const FOLDER = { slug: "design", name: "Design" }
 // vitest.setup stubs localStorage, so the mock lives in memory only; reset it per test.
-beforeEach(() => { resetSharingMock(); localStorage.clear() })
+beforeEach(() => { resetSharingMock(); localStorage.clear(); flags.mock = true })
 afterEach(cleanup)
 
 const renderDialog = (onOpenChange = vi.fn()) => {
@@ -67,4 +69,24 @@ it("Cancel leaves the saved settings alone", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
   expect(onOpenChange).toHaveBeenCalledWith(false)
   expect(await mockSharingApi("ws1").folderSettings("design")).toMatchObject({ defaultAudience: "folder", entries: [] })
+})
+
+it("on the server, offers only what #4444 serves: Read or Edit, no default audience, saved entry by entry", async () => {
+  flags.mock = false
+  const acl = { folder: "design", acl_version: 2, acl: [{ subject_type: "user", subject_id: "u2", label: "ann@example.test", can_read: true, can_write: false }] }
+  flags.fetch.mockImplementation(async () => new Response(JSON.stringify(acl), { status: 200 }))
+  const onOpenChange = vi.fn()
+  renderDialog(onOpenChange)
+  await screen.findByRole("list", { name: "Folder access" })
+  expect(screen.queryByRole("radio")).toBeNull()
+  expect([...(screen.getByRole("combobox", { name: "Level for ann@example.test" }) as HTMLSelectElement).options].map(o => o.textContent)).toEqual(["Read", "Edit"])
+  expect(screen.getByText(/Give Comment on each artifact/)).toBeTruthy()
+  expect(screen.getByText(/Each change is saved on its own/)).toBeTruthy()
+  change("Level for ann@example.test", "write")
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  const writes = flags.fetch.mock.calls.map(call => call as unknown as [string, RequestInit | undefined]).filter(([, init]) => init?.method === "PUT")
+  expect(writes.map(([url, init]) => [new URL(url, "http://h").pathname, JSON.parse(String(init!.body))])).toEqual([
+    ["/api/v1/page-folders/design/acl", { subject_type: "user", subject_id: "u2", can_write: true }],
+  ])
 })

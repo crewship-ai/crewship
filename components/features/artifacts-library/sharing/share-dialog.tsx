@@ -9,7 +9,7 @@ import { useIssuePeople } from "@/hooks/use-issue-people"
 import type { LibraryItem } from "../library-items"
 import { accessVia, byAccess, LEVEL_TONE, LEVELS_DESC, lockedReason } from "./access-reason"
 import {
-  entryKey, SHARE_LEVEL_LABEL, SHARE_LEVEL_MEANING, useAccess, useSharingMutation,
+  entryKey, SHARE_LEVEL_LABEL, SHARE_LEVEL_MEANING, useAccess, useSharingHuman, useSharingMutation,
   type AccessEntry, type ShareInput, type ShareLevel,
 } from "./sharing-api"
 
@@ -24,13 +24,15 @@ export interface ShareDialogProps {
 }
 
 export function ShareDialog({ workspaceId, item, open, onOpenChange }: ShareDialogProps) {
+  // A new session or item starts a new form: nothing typed or read for the previous one carries over.
+  const { humanId } = useSharingHuman()
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="sm:max-w-lg">
       <DialogHeader>
         <DialogTitle>Share “{item.name}”</DialogTitle>
         <DialogDescription className="text-xs">Choose who in this workspace can open it, and how.</DialogDescription>
       </DialogHeader>
-      {open && <ShareBody key={item.slug} workspaceId={workspaceId} item={item} />}
+      {open && <ShareBody key={`${humanId ?? ""}:${workspaceId}:${item.slug}`} workspaceId={workspaceId} item={item} />}
     </DialogContent>
   </Dialog>
 }
