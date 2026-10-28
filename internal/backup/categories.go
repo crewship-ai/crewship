@@ -183,6 +183,9 @@ const categoryWorkOnly = ""
 // TableCategory maps every table in BackupTables to its category. A table
 // missing here fails TestTableCategory_CoversEveryBackupTable.
 var TableCategory = map[string]string{
+	"gridcraft_heads": CategoryPages, "gridcraft_revisions": CategoryPages, "gridcraft_operations": CategoryPages, "gridcraft_audit": CategoryPages, "gridcraft_outbox": CategoryPages,
+	"artifact_data_collections":        CategoryPages,
+	"artifact_data_documents":          CategoryPages,
 	"artifact_version_heads":           CategoryPages,
 	"artifact_version_blobs":           CategoryPages,
 	"artifact_versions":                CategoryPages,

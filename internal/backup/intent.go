@@ -36,6 +36,8 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
+	"artifact_data_collections":        IntentInclude,
+	"artifact_data_documents":          IntentInclude,
 	"artifact_project_comments":        IntentInclude,
 	"artifact_project_comment_tasks":   IntentInclude,
 	"artifact_project_comment_replies": IntentInclude,
@@ -70,13 +72,12 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 
 	"craft_native_documents": IntentInclude, // immutable native compatibility pins, never runtime authority
 
-	// Portable workbook backup is unavailable in the experimental pilot. Dump
-	// refuses a workspace containing workbooks instead of silently omitting them.
-	"gridcraft_heads":        IntentExcludeOperational,
-	"gridcraft_operations":   IntentExcludeOperational,
-	"gridcraft_revisions":    IntentExcludeOperational,
-	"gridcraft_audit":        IntentExcludeOperational,
-	"gridcraft_outbox":       IntentExcludeOperational,
+	// Workbook content and immutable receipts travel; live authority does not.
+	"gridcraft_heads":        IntentInclude,
+	"gridcraft_operations":   IntentInclude,
+	"gridcraft_revisions":    IntentInclude,
+	"gridcraft_audit":        IntentInclude,
+	"gridcraft_outbox":       IntentInclude,
 	"gridcraft_intents":      IntentExcludeRuntime,
 	"gridcraft_sessions":     IntentExcludeRuntime,
 	"gridcraft_writer_fence": IntentExcludeRuntime,
