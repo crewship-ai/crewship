@@ -497,7 +497,7 @@ export interface PageView {
   /** Confirmed GridCraft workbook storage; the Page renders the read-only workbook preview. */
   hasWorkbook?: boolean
   /** Versioned artifact kind from the version head; undefined for any other Page. */
-  artifactKind?: "project" | "word" | "sheet"
+  artifactKind?: "project" | "word" | "sheet" | "dashboard" | "slides"
   /** The version readers see; undefined when nothing is shared. */
   artifactSharedVersion?: number
   hasMooring?: boolean
@@ -653,7 +653,7 @@ export function toPageView(raw: WirePage): PageView {
     privateAudience: typeof raw.private_audience === "boolean" ? raw.private_audience : undefined,
     hasSlides: raw.has_slides === true,
     hasWorkbook: raw.has_workbook === true,
-    ...(raw.artifact_kind === "project" || raw.artifact_kind === "word" || raw.artifact_kind === "sheet" ? { artifactKind: raw.artifact_kind } : {}),
+    ...(raw.artifact_kind === "project" || raw.artifact_kind === "word" || raw.artifact_kind === "sheet" || raw.artifact_kind === "dashboard" || raw.artifact_kind === "slides" ? { artifactKind: raw.artifact_kind } : {}),
     ...(Number.isSafeInteger(raw.artifact_shared_version) && raw.artifact_shared_version! > 0 ? { artifactSharedVersion: raw.artifact_shared_version } : {}),
     hasMooring: raw.has_mooring === true,
     hasCollaboration: raw.has_collaboration === true,

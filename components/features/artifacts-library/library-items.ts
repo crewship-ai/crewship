@@ -23,6 +23,8 @@ export interface LibraryItem {
   sharedVersion: number | null
   /** A Word or Sheet with a version head is a native Craft and carries an edit lease. */
   native: boolean
+  /** Explicit backend VersionStore kind; legacy panel dashboards and Slides stay in their Page reader. */
+  projectBacked: boolean
   private: boolean
   ownerLabel: string | null
   updatedAt: Date | null
@@ -53,7 +55,8 @@ export function libraryItems(pages: PageView[]): LibraryItem[] {
       slug: page.slug, name: page.name, kind,
       ...(page.immutablePageId ? { pageId: page.immutablePageId } : {}),
       sharedVersion: page.artifactSharedVersion ?? null,
-      native: Boolean(page.artifactKind) && kind !== "project",
+      native: page.artifactKind === "word" || page.artifactKind === "sheet",
+      projectBacked: page.artifactKind === "project" || page.artifactKind === "dashboard" || page.artifactKind === "slides",
       // Only the server's explicit classification; ownership or a missing folder is not privacy.
       private: page.privateAudience === true,
       ownerLabel: ownerOf(page),

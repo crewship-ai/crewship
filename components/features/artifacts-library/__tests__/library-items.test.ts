@@ -45,3 +45,12 @@ describe("library items", () => {
     expect(kindCounts(items)).toEqual([["project", 2], ["sheet", 1]])
   })
 })
+
+it.each(["project", "dashboard", "slides"])("preserves the explicit backend %s as a VersionStore route, never a native lease", artifact_kind => {
+  const [item] = libraryItems([toPageView(page({ id: "stable-page", slug: "current-owner", artifact_kind }))])
+  expect(item).toMatchObject({ kind: artifact_kind, pageId: "stable-page", projectBacked: true, native: false })
+})
+it("does not classify legacy panel dashboards or native Slides as VersionStore projects", () => {
+  const items = libraryItems([toPageView(page({ panel_count: 1 })), toPageView(page({ has_slides: true }))])
+  expect(items.every(item => item.projectBacked === false)).toBe(true)
+})
