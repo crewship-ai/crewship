@@ -139,5 +139,5 @@ export function artifactsLibrary(): boolean {
 
 /** Inert live-data Dashboard previews. Opt-in at build time; no data requests while off. */
 export function artifactDashboards(): boolean {
-  return process.env.NEXT_PUBLIC_ARTIFACT_DASHBOARDS === "true"
+  return true // Demo branch only: live Dashboard acceptance.
 }
