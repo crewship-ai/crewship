@@ -19,7 +19,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 
 - **Native Craft editing can continue past access-token expiry.** The browser refreshes its cookie before admitting or renewing the same editing connection and replaces only its authenticated metadata stream. Unsaved work, the lease generation and in-flight saves remain in place; document mutations are never replayed.
-- Allow native Craft editors to copy to the clipboard while keeping clipboard reads and opaque-frame isolation restricted.
 
 - Add a disabled dashboard dataset storage foundation with atomic document version checks, bounded JSON batches, server attribution, portable backups and Page lifetime cleanup; code versions remain in the existing artifact VersionStore.
 - Require actual Chromium execution of native document privacy regressions in frontend CI while preserving the strict browser-dialog guard.
@@ -47,6 +46,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Expose a default-off native Craft human session and edit-lease HTTP API with Page-scoped availability, named holders, requested handoff and live connection renewal. Original credentials and current Page rights fence every action; existing document profiles are unchanged.
 
 - Add separately opt-in native Word/Sheet agent tasks with explicit original-human consent, confirmed run identity, shared edit leases, original-engine edits and receipt-backed whole-document saves. Human holders are refused; the original human can inspect actual task outcomes and stop the agent without lending a human editor session.
+- Allow native Craft editors to copy to the clipboard while keeping clipboard reads and opaque-frame isolation restricted.
 
 - Add a default-off whole-native WordCraft/GridCraft version store with immutable compatibility pins, engine validation, lease and CAS fencing, exact snapshot receipts and portable profile backups. Its visible 16 GiB history budget preserves versions on exhaustion; editor activation remains separate.
 
