@@ -64,11 +64,11 @@ it("opening a card selects it by slug", () => {
   expect(state.select).toHaveBeenCalledWith("brief")
 })
 
-it("a project detail shows its history in the project viewer", () => {
+it("a project detail opens the project preview", () => {
   state.item = "site"
   renderLibrary()
   expect(screen.getByRole("heading", { level: 1, name: "Pricing site" })).toBeTruthy()
-  expect(screen.getByTestId("viewer-provider").dataset).toMatchObject({ slug: "site", tab: "versions" })
+  expect(screen.getByTestId("viewer-provider").dataset).toMatchObject({ slug: "site", tab: "preview" })
   expect(screen.getByTestId("viewer-panel")).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "All artifacts" }))
   expect(state.select).toHaveBeenCalledWith(null)
