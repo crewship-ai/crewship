@@ -10,6 +10,9 @@ import (
 
 // This optional qualification uses the original application executable. Ordinary
 // unit tests do not require a private binary or any external service.
+// To qualify explicitly, set CREWSHIP_TEST_WORDCRAFT_CLI to the original executable
+// and CREWSHIP_TEST_WORDCRAFT_CLI_SHA256 to its pinned SHA256, then run this test.
+// These are test inputs, not server startup configuration. A skip is not qualification.
 func TestNativeCLIValidatorCanonicalWordCreation(t *testing.T) {
 	binary := os.Getenv("CREWSHIP_TEST_WORDCRAFT_CLI")
 	if binary == "" {
