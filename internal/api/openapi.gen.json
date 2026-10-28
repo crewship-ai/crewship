@@ -7329,6 +7329,10 @@
           "actor": {
             "$ref": "#/components/schemas/DesignActor"
           },
+          "authority_revision": {
+            "description": "Opaque workspace policy revision. Keep as a string; a fresh authorized metadata revision establishes a replacement collaborative session.",
+            "type": "string"
+          },
           "can_comment": {
             "type": "boolean"
           },
@@ -7378,6 +7382,7 @@
         },
         "required": [
           "page_id",
+          "authority_revision",
           "origin",
           "can_edit",
           "can_comment",

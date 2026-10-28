@@ -2650,8 +2650,10 @@ capacity, 500 persistence failure, 503 unavailable engine.
 body; optional positive `version` selects a retained snapshot. Editors may read
 history; readers may select only the shared pin. Without `version`, authorized
 readers see the live canvas. **Response:** `{page_id,nodes,order,can_edit,
-can_comment,version,latest_version,shared_version,actor,origin}`; origin is
-optional and restricted to authorized editors. **Statuses:** 200 success, 400
+can_comment,version,latest_version,shared_version,authority_revision,actor,origin}`.
+`authority_revision` is an opaque string; a fresh authorized read establishes
+a new connection after rights change. `origin` is null unless available to
+the authorized editor. **Statuses:** 200 success, 400
 invalid version, 401 unauthenticated, 403 invalid scope, 404 disabled or missing
 accessible content, 500 internal failure, 503 unavailable engine.
 
@@ -2707,7 +2709,10 @@ unauthenticated, 403 invalid scope, 404 unavailable Page, 500 internal failure.
 **Auth:** current Page feedback authority and CLI `pages:write`; Read and Produce
 never grant comment permission. **Request:** `{version,path:"design.json",
 selector,quote,text,send_to_agent}`. The selector is a stable node ID; an optional
-empty quote skips text matching. **Response:** HTTP 201 stored comment and
+empty quote skips text matching. The node and quote are checked against the
+latest retained version, never unsaved live state. Canonical Comment grants
+allow feedback when that shared grant feature is installed; `send_to_agent`
+additionally requires Edit. **Response:** HTTP 201 stored comment and
 optional pending task. Queuing is not proof of agent delivery. **Statuses:**
 201 created, 400 invalid input, 401 unauthenticated, 403 missing feedback
 permission, 404 unavailable Page, 409 stale version or changed node, 500 internal

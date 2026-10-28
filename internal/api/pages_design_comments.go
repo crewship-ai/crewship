@@ -17,12 +17,18 @@ import (
 // level is installed. Read and Produce never become comment authority. The
 // shared Page grant reader supplies issuer validity, membership and revocation.
 func (h *PageHandler) designCommentAuthority(r *http.Request, k artifacts.VersionKey) artifacts.VersionAuthorize {
+	editAuth, readAuth := h.designAuthority(r, k, true), h.designAuthority(r, k, false)
+	var stamp designAuthorityStamp
 	return func(ctx context.Context, tx *sql.Tx) (string, error) {
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
-		if actor, e := h.designAuthority(r, k, true)(ctx, tx); e == nil {
-			return actor, nil
+		revision, err := designAuthorityRevision(ctx, tx, k.WorkspaceID)
+		if err != nil {
+			return "", err
 		}
-		actor, err := h.designAuthority(r, k, false)(ctx, tx)
+		if actor, e := editAuth(ctx, tx); e == nil {
+			return stamp.admit(actor, revision)
+		}
+		actor, err := readAuth(ctx, tx)
 		if err != nil {
 			return "", err
 		}
@@ -43,7 +49,7 @@ func (h *PageHandler) designCommentAuthority(r *http.Request, k artifacts.Versio
 		}
 		for _, g := range grants {
 			if g.Level == "comment" {
-				return actor, nil
+				return stamp.admit(actor, revision)
 			}
 		}
 		return "", errDesignAccess
@@ -139,13 +145,34 @@ func (h *PageHandler) CreateDesignComment(w http.ResponseWriter, r *http.Request
 	room.mu.Lock()
 	defer room.mu.Unlock()
 	err := h.designAuthorizedTx(r, k, h.designCommentAuthority(r, k), func(ctx context.Context, tx *sql.Tx, actor string) error {
-		var state []byte
 		var latest int64
-		if e := tx.QueryRowContext(ctx, `SELECT d.state,h.latest_version FROM artifact_design_documents d JOIN artifact_version_heads h ON h.workspace_id=d.workspace_id AND h.page_id=d.page_id WHERE d.workspace_id=? AND d.page_id=?`, k.WorkspaceID, k.PageID).Scan(&state, &latest); e != nil {
+		if e := tx.QueryRowContext(ctx, `SELECT latest_version FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&latest); e != nil {
 			return e
 		}
 		if latest != p.Version {
 			return artifacts.ErrVersionConflict
+		}
+		// Anchors refer to an immutable normal version, never unsaved live state.
+		var manifestJSON string
+		if e := tx.QueryRowContext(ctx, `SELECT manifest_json FROM artifact_versions WHERE workspace_id=? AND page_id=? AND version=?`, k.WorkspaceID, k.PageID, p.Version).Scan(&manifestJSON); e != nil {
+			return e
+		}
+		var manifest struct {
+			Files map[string]struct {
+				Hash string `json:"hash"`
+			} `json:"files"`
+		}
+		if json.Unmarshal([]byte(manifestJSON), &manifest) != nil || manifest.Files["design.yjs"].Hash == "" {
+			return artifacts.ErrVersionInvalid
+		}
+		var state []byte
+		if e := tx.QueryRowContext(ctx, `SELECT content FROM artifact_version_blobs WHERE workspace_id=? AND page_id=? AND hash=?`, k.WorkspaceID, k.PageID, manifest.Files["design.yjs"].Hash).Scan(&state); e != nil {
+			return e
+		}
+		if p.SendToAgent {
+			if _, e := h.designAuthority(r, k, true)(ctx, tx); e != nil {
+				return e
+			}
 		}
 		result, e := design.Run(ctx, design.Request{State: state})
 		if e != nil {
@@ -200,8 +227,9 @@ func (h *PageHandler) ShareDesign(w http.ResponseWriter, r *http.Request) {
 	}
 	// Sharing is retained by the Page owner. An Edit grant permits collaboration,
 	// but never confers control over the immutable shared pin.
+	editAuth := h.designAuthority(r, k, true)
 	auth := func(ctx context.Context, tx *sql.Tx) (string, error) {
-		a, e := h.designAuthority(r, k, true)(ctx, tx)
+		a, e := editAuth(ctx, tx)
 		if e != nil {
 			return "", e
 		}

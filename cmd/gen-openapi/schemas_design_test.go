@@ -75,7 +75,7 @@ func TestDesignSchemasValidateNodePatchesAndExactReceipts(t *testing.T) {
 		{"DesignNode", `{"id":"screen","type":"frame","x":0,"y":0,"width":360,"height":640}`, `{"id":"screen","type":"script","x":0,"y":0,"width":360,"height":640}`},
 		{"DesignVersionReceipt", `{"version":2,"actor":"user"}`, `{"Version":2,"Actor":"user"}`},
 		{"DesignCreateRequest", `{"slug":"checkout","name":"Checkout"}`, `{"slug":"checkout","name":"Checkout","actor":"forged"}`},
-		{"DesignSnapshot", `{"page_id":"page","origin":null,"can_edit":false,"can_comment":false,"nodes":[],"order":[],"version":1,"latest_version":1,"shared_version":0,"actor":{"id":"user","name":"Reader"}}`, `{"page_id":"page","nodes":[]}`},
+		{"DesignSnapshot", `{"page_id":"page","authority_revision":"9007199254740993","origin":null,"can_edit":false,"can_comment":false,"nodes":[],"order":[],"version":1,"latest_version":1,"shared_version":0,"actor":{"id":"user","name":"Reader"}}`, `{"page_id":"page","nodes":[]}`},
 	}
 	for _, fixture := range fixtures {
 		t.Run(fixture.schema, func(t *testing.T) {
@@ -94,5 +94,29 @@ func TestDesignSchemasValidateNodePatchesAndExactReceipts(t *testing.T) {
 				t.Fatal("invalid wire shape accepted")
 			}
 		})
+	}
+}
+
+func TestDesignAuthorityRevisionIsRequiredOpaqueString(t *testing.T) {
+	raw, err := json.Marshal(buildDocument(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := compileAt(t, raw, "/components/schemas/DesignSnapshot")
+	var body map[string]any
+	err = json.Unmarshal([]byte(`{"page_id":"page","authority_revision":"9007199254740993","origin":null,"can_edit":true,"can_comment":true,"nodes":[],"order":[],"version":1,"latest_version":1,"shared_version":0,"actor":{"id":"user","name":"Owner"}}`), &body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = schema.Validate(body); err != nil {
+		t.Fatalf("opaque policy revision refused: %v", err)
+	}
+	delete(body, "authority_revision")
+	if schema.Validate(body) == nil {
+		t.Fatal("missing authority revision accepted")
+	}
+	body["authority_revision"] = float64(2)
+	if schema.Validate(body) == nil {
+		t.Fatal("numeric policy revision accepted")
 	}
 }

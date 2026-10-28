@@ -98,11 +98,43 @@ func (h *PageHandler) designKey(w http.ResponseWriter, r *http.Request) (artifac
 	return k, true
 }
 
+// A websocket retains the authority epoch admitted under the writer fence.
+// Regranting an identical grant does not revive an older connection.
+type designAdmissionKey struct{}
+type designAdmission struct{ WorkspaceID, Revision string }
+type designAuthorityStamp struct {
+	actor, revision string
+	initialized     bool
+}
+
+func (s *designAuthorityStamp) admit(actor, revision string) (string, error) {
+	if s.initialized && (s.actor != actor || s.revision != revision) {
+		return "", artifacts.ErrVersionAuthority
+	}
+	s.actor, s.revision, s.initialized = actor, revision, true
+	return actor, nil
+}
+func designAuthorityRevision(ctx context.Context, tx *sql.Tx, workspace string) (string, error) {
+	var revision string
+	if err := tx.QueryRowContext(ctx, `SELECT CAST(authority_revision AS TEXT) FROM workspaces WHERE id=?`, workspace).Scan(&revision); err != nil {
+		return "", err
+	}
+	if admitted, ok := ctx.Value(designAdmissionKey{}).(designAdmission); ok && (admitted.WorkspaceID != workspace || admitted.Revision != revision) {
+		return "", artifacts.ErrVersionAuthority
+	}
+	return revision, nil
+}
+
 // Canonical Page ACLs, live credentials and membership are checked under the
 // same SQLite writer fence as every persisted update. Read/Comment never writes.
 func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, write bool) artifacts.VersionAuthorize {
+	var stamp designAuthorityStamp
 	return func(ctx context.Context, tx *sql.Tx) (string, error) {
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
+		revision, err := designAuthorityRevision(ctx, tx, k.WorkspaceID)
+		if err != nil {
+			return "", err
+		}
 		if !h.designEnabled(ctx) {
 			return "", artifacts.ErrDisabled
 		}
@@ -161,9 +193,9 @@ func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, w
 			return "", errDesignAccess
 		}
 		if agent != nil {
-			return "agent:" + agent.AgentID + ":" + agent.RunID, nil
+			return stamp.admit("agent:"+agent.AgentID+":"+agent.RunID, revision)
 		}
-		return u.ID, nil
+		return stamp.admit(u.ID, revision)
 	}
 }
 func (h *PageHandler) designTx(r *http.Request, k artifacts.VersionKey, write bool, fn func(context.Context, *sql.Tx, string) error) error {
@@ -301,6 +333,7 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 	canComment := false
 	actor := ""
 	displayName := ""
+	authorityRevision := ""
 	var origin *designOriginResponse
 	var selected int64
 	if value := r.URL.Query().Get("version"); value != "" {
@@ -313,6 +346,11 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 	}
 	err := h.designTx(r, k, false, func(ctx context.Context, tx *sql.Tx, a string) error {
 		actor = a
+		var epochErr error
+		authorityRevision, epochErr = designAuthorityRevision(ctx, tx, k.WorkspaceID)
+		if epochErr != nil {
+			return epochErr
+		}
 		if e := tx.QueryRowContext(ctx, `SELECT coalesce(nullif(full_name,''),email,id) FROM users WHERE id=?`, UserFromContext(ctx).ID).Scan(&displayName); e != nil {
 			return e
 		}
@@ -363,7 +401,7 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 		designError(w, err)
 		return
 	}
-	writeJSON(w, 200, designSnapshotResponse{PageID: k.PageID, Origin: origin, CanComment: canComment, Nodes: result.Nodes, Order: result.Order, CanEdit: canEdit, Version: version, LatestVersion: version, SharedVersion: shared, Actor: designActorResponse{ID: actor, Name: displayName}})
+	writeJSON(w, 200, designSnapshotResponse{AuthorityRevision: authorityRevision, PageID: k.PageID, Origin: origin, CanComment: canComment, Nodes: result.Nodes, Order: result.Order, CanEdit: canEdit, Version: version, LatestVersion: version, SharedVersion: shared, Actor: designActorResponse{ID: actor, Name: displayName}})
 }
 func (h *PageHandler) designApplyLocked(r *http.Request, k artifacts.VersionKey, input design.Request) (design.Result, error) {
 	var result design.Result
@@ -456,8 +494,9 @@ func (h *PageHandler) DesignVersions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	readAuth := h.designAuthority(r, k, false)
 	view, err := h.designStore(r.Context()).View(r.Context(), k, func(ctx context.Context, tx *sql.Tx) (string, artifacts.VersionSelection, error) {
-		actor, e := h.designAuthority(r, k, false)(ctx, tx)
+		actor, e := readAuth(ctx, tx)
 		if e != nil {
 			return "", artifacts.VersionSelection{}, e
 		}
@@ -522,8 +561,9 @@ func (h *PageHandler) designVersionedMutationLocked(r *http.Request, k artifacts
 		return result, artifacts.VersionReceipt{}, err
 	}
 	calls := 0
+	editAuth := h.designAuthority(r, k, true)
 	auth := func(ctx context.Context, tx *sql.Tx) (string, error) {
-		actor, e := h.designAuthority(r, k, true)(ctx, tx)
+		actor, e := editAuth(ctx, tx)
 		if e != nil {
 			return "", e
 		}

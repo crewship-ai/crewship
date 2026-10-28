@@ -23,16 +23,17 @@ type designOriginResponse struct {
 	AgentID string `json:"agent_id"`
 }
 type designSnapshotResponse struct {
-	PageID        string                `json:"page_id"`
-	Origin        *designOriginResponse `json:"origin"`
-	CanEdit       bool                  `json:"can_edit"`
-	CanComment    bool                  `json:"can_comment"`
-	Nodes         []json.RawMessage     `json:"nodes"`
-	Order         []string              `json:"order"`
-	Version       int64                 `json:"version"`
-	LatestVersion int64                 `json:"latest_version"`
-	SharedVersion int64                 `json:"shared_version"`
-	Actor         designActorResponse   `json:"actor"`
+	AuthorityRevision string                `json:"authority_revision"`
+	PageID            string                `json:"page_id"`
+	Origin            *designOriginResponse `json:"origin"`
+	CanEdit           bool                  `json:"can_edit"`
+	CanComment        bool                  `json:"can_comment"`
+	Nodes             []json.RawMessage     `json:"nodes"`
+	Order             []string              `json:"order"`
+	Version           int64                 `json:"version"`
+	LatestVersion     int64                 `json:"latest_version"`
+	SharedVersion     int64                 `json:"shared_version"`
+	Actor             designActorResponse   `json:"actor"`
 }
 type designOperationsResponse struct {
 	Nodes   []json.RawMessage `json:"nodes"`

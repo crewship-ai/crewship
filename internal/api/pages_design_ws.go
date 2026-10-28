@@ -202,11 +202,16 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 	}
 	room := h.designRoom(k)
 	room.mu.Lock()
-	var actor, displayName string
+	var actor, displayName, admittedRevision string
 	var initial design.Result
 	canEdit := false
 	err := h.designTx(r, k, false, func(ctx context.Context, tx *sql.Tx, a string) error {
 		actor = a
+		var epochErr error
+		admittedRevision, epochErr = designAuthorityRevision(ctx, tx, k.WorkspaceID)
+		if epochErr != nil {
+			return epochErr
+		}
 		if e := tx.QueryRowContext(ctx, `SELECT coalesce(nullif(full_name,''),email,id) FROM users WHERE id=?`, UserFromContext(ctx).ID).Scan(&displayName); e != nil {
 			return e
 		}
@@ -229,6 +234,7 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 		designError(w, err)
 		return
 	}
+	r = r.WithContext(context.WithValue(r.Context(), designAdmissionKey{}, designAdmission{WorkspaceID: k.WorkspaceID, Revision: admittedRevision}))
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }, ReadBufferSize: 8192, WriteBufferSize: 8192}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {

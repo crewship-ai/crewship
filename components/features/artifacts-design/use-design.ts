@@ -13,6 +13,7 @@ import { designNodes, type DesignNode } from "./design-document"
 
 interface DesignState {
  page_id: string
+ authority_revision: string
  origin?: ArtifactOrigin
  can_comment?: boolean
  comments?: ArtifactComment[]
@@ -44,12 +45,15 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  }, [endpoint, workspaceId])
  const query = useQuery({ queryKey: [...key, selectedVersion ?? "live"], queryFn: () => request<DesignState>(selectedVersion ? `?version=${selectedVersion}` : ""), retry: false, gcTime: 0, refetchInterval: 10_000 })
  const pageId = query.data?.page_id
+ // Opaque server policy generation: only successful metadata can admit a
+ // replacement socket after the previous connection was retired.
+ const authorityRevision = !query.isError && typeof query.data?.authority_revision === "string" && query.data.authority_revision !== "" ? query.data.authority_revision : null
  const pinnedRequest = useCallback(async <T,>(path: string, body?: unknown): Promise<T> => {
   if (!pageId) throw new Error("Design identity is unavailable.")
   return request<T>(path, body, pageId)
  }, [pageId, request])
- const versions = useQuery({ queryKey: [...key, pageId, "versions"], queryFn: () => pinnedRequest<DesignVersions>("/versions"), enabled: Boolean(pageId && !query.isError), retry: false, gcTime: 0, refetchInterval: 15_000 })
- const comments = useQuery({ queryKey: [...key, pageId, "comments"], queryFn: () => pinnedRequest<{ comments: ArtifactComment[] }>("/comments"), enabled: Boolean(pageId && !query.isError), retry: false, gcTime: 0, refetchInterval: 5000 })
+ const versions = useQuery({ queryKey: [...key, pageId, authorityRevision, "versions"], queryFn: () => pinnedRequest<DesignVersions>("/versions"), enabled: Boolean(pageId && authorityRevision !== null && !query.isError), retry: false, gcTime: 0, refetchInterval: 15_000 })
+ const comments = useQuery({ queryKey: [...key, pageId, authorityRevision, "comments"], queryFn: () => pinnedRequest<{ comments: ArtifactComment[] }>("/comments"), enabled: Boolean(pageId && authorityRevision !== null && !query.isError), retry: false, gcTime: 0, refetchInterval: 5000 })
  const [doc, setDoc] = useState<Y.Doc | null>(null)
  const [nodes, setNodes] = useState<DesignNode[]>([])
  const [peers, setPeers] = useState<DesignPeer[]>([])
@@ -57,10 +61,10 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const [dirty, setDirty] = useState(false)
  const [draftError, setDraftError] = useState(false)
  const provider = useRef<DesignProvider | null>(null)
- const editable = Boolean(query.data?.can_edit && !query.isError && !selectedVersion && connection !== "denied")
+ const editable = Boolean(authorityRevision !== null && query.data?.can_edit && !query.isError && !selectedVersion && connection !== "denied")
  const editableRef = useRef(editable)
  useEffect(() => { editableRef.current = editable; provider.current?.setEditable(editable) }, [editable])
- const canConnect = Boolean(pageId && !query.isError && !selectedVersion)
+ const canConnect = Boolean(pageId && authorityRevision !== null && !query.isError && !selectedVersion)
  const actorName = query.data?.actor?.name ?? session?.data?.user?.name ?? "Collaborator"
  const initialCanEdit = query.data?.can_edit === true
  useEffect(() => {
@@ -76,6 +80,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
    } catch { setDraftError(true) }
   }
   setDoc(document)
+  setNodes(designNodes(document))
   const update = (_update: Uint8Array, origin: unknown) => {
    setNodes(designNodes(document))
    if (origin === "editor" && initialCanEdit && userId !== "anonymous") {
@@ -112,7 +117,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
    setNodes([])
    setPeers([])
   }
- }, [canConnect, endpoint, workspaceId, slug, userId, pageId, actorName, initialCanEdit, client])
+ }, [canConnect, endpoint, workspaceId, slug, userId, pageId, authorityRevision, actorName, initialCanEdit, client])
  const invalidate = () => { void client.invalidateQueries({ queryKey: key }) }
  const save = useMutation({ mutationFn: async (message: string) => {
   if (!editableRef.current || !provider.current?.ready) throw new Error("Reconnect before saving a version. Your changes remain in this browser.")
