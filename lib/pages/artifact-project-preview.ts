@@ -1,7 +1,7 @@
 import DOMPurify from "dompurify"
 import { staticCSS } from "./artifact-raster"
 import type { ArtifactFile } from "@/hooks/use-artifact-project"
-import { dashboardName, installDashboardBindings, type DashboardPreviewOptions } from "./artifact-dashboard"
+import { dashboardField, dashboardName, installDashboardBindings, type DashboardPreviewOptions } from "./artifact-dashboard"
 
 /** Match Go strings.Fields and count Unicode codepoints, preserving opaque text such as BOM.
  * Keep this closure-free: the same function runs inside the sandboxed bridge. */
@@ -21,7 +21,7 @@ export function artifactProjectDocument(files: ArtifactFile[], path: string, tok
   for (const attribute of ["data-source", "data-row", "data-field"]) {
    const value = element.getAttribute(attribute)
    // Keep an empty boundary: removing it could accidentally inherit an outer valid binding.
-   if (value !== null && !(attribute === "data-row" && value === "*") && (!dashboardName(value) || attribute === "data-source" && !dashboard.collections.includes(value))) element.setAttribute(attribute, "")
+   if (value !== null && !(attribute === "data-row" && value === "*") && (!(attribute === "data-field" ? dashboardField(value) : dashboardName(value)) || attribute === "data-source" && !dashboard.collections.includes(value))) element.setAttribute(attribute, "")
   }
  }
  // Only links to HTML files in this exact manifest can navigate the preview.

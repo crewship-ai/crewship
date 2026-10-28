@@ -68,6 +68,20 @@ try {
   await frame.locator('aside[aria-label="Data sources"] p').first().click()
   assert.equal(await page.evaluate(() => window.messages.length), selections)
   assert.equal(await page.evaluate(() => window.messages.includes("bad")), false)
+  await page.evaluate(() => {
+    window.files = [{ path: "index.html", media_type: "text/html", content: '<h1>Flat keys</h1><div data-source="constructor" data-row="prototype"><span id="own-proto" data-field="__proto__"></span><span id="own-constructor" data-field="constructor"></span><span id="own-prototype" data-field="prototype"></span><span id="business-name" data-field="DisplayName"></span><span id="dot-key" data-field="a.b"></span><span id="inherited" data-field="toString"></span></div>' }]
+    document.querySelector("iframe").srcdoc = ArtifactPreview.artifactProjectDocument(window.files, "index.html", "fresh-nonce", false, { hostOrigin: location.origin, codeVersion: 1, collections: ["constructor"] })
+  })
+  await frame.getByRole("heading", { name: "Flat keys" }).waitFor()
+  await page.evaluate(() => window.feed([], { collections: [{ collection: "constructor", code_version: 1, documents: [{ id: "prototype", version: 1, value: JSON.parse('{"__proto__":"<img src=https://escape.invalid/proto onerror=alert(1)>","constructor":"Own constructor","prototype":"Own prototype","DisplayName":"North region","a.b":"Flat dot key"}'), updated_at: "2026-10-28T08:00:00Z", source_label: "Agent" }] }] }))
+  await frame.locator("#own-proto").filter({ hasText: "<img" }).waitFor()
+  assert.equal(await frame.locator("#own-constructor").textContent(), "Own constructor")
+  assert.equal(await frame.locator("#own-prototype").textContent(), "Own prototype")
+  assert.equal(await frame.locator("#business-name").textContent(), "North region")
+  assert.equal(await frame.locator("#dot-key").textContent(), "Flat dot key")
+  assert.equal(await frame.locator("#inherited").textContent(), "Unavailable")
+  assert.equal(await frame.locator("img,[onerror]").count(), 0)
+  assert.equal(await frame.locator("body").evaluate(() => Object.getPrototypeOf({}) === Object.prototype && !Object.hasOwn(Object.prototype, "polluted")), true)
   // A small authored template times a valid collection must be bounded before any refresh clone.
   await page.evaluate(() => {
     window.files = [{ path: "index.html", media_type: "text/html", content: '<h1>Bounded dashboard</h1><div data-source="sales"><section data-row="*">' + '<span data-field="revenue"></span>'.repeat(16) + '</section></div>' }]
