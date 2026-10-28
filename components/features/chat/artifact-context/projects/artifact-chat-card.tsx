@@ -1,12 +1,15 @@
 "use client"
 import { useEffect } from "react"
-import { AppWindow, Lock, MessageSquare } from "lucide-react"
+import { Lock, MessageSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { StatusPill } from "@/components/ui/status-pill"
 import { cn } from "@/lib/utils"
 import { artifactDashboards } from "@/lib/feature-flags"
 import { parseDashboardManifest } from "@/lib/pages/artifact-dashboard"
 import { artifactSlidesMode } from "@/lib/pages/artifact-slides"
+import type { ArtifactKindKey } from "../new-artifact/artifact-kinds"
+import { ArtifactKindBadge, ArtifactKindTile } from "./artifact-kind-tile"
 import { useArtifactViewer } from "./artifact-viewer-context"
 import { useArtifactProjectSnapshot } from "./use-artifact-project-data"
 import type { ArtifactToolActivity } from "./tool-result"
@@ -22,23 +25,34 @@ interface ArtifactChatCardProps {
 }
 
 const CARD = "flex w-full min-w-0 max-w-[520px] flex-wrap items-center gap-2.5 rounded-xl border bg-card py-2 pl-2 pr-2.5"
-const CHIP = "rounded-full px-1.5 text-micro font-semibold leading-[1.6]"
 
-function KindTile({ restricted }: { restricted?: boolean }) {
-  const Icon = restricted ? Lock : AppWindow
-  return <span aria-hidden="true" className={cn("flex size-8 shrink-0 items-center justify-center rounded-[28%]",
-    restricted ? "bg-muted text-muted-foreground" : "bg-primary/10 text-primary")}>
-    <Icon className="size-4" />
+/**
+ * The kind a chat card may claim, from the authorized snapshot only: typed
+ * Slides metadata, a valid Dashboard manifest behind its flag, otherwise a
+ * Project. Ambiguous markers are `null`, never a guessed positive type.
+ */
+export function chatCardKind(snapshot: ArtifactProjectSnapshot): ArtifactKindKey | null {
+  const slidesMode = artifactSlidesMode(snapshot.artifact_kind, snapshot.manifest.files)
+  if (slidesMode === "slides") return "slides"
+  if (slidesMode === "unsupported") return null
+  return artifactDashboards() && parseDashboardManifest(snapshot.manifest.files) ? "dashboard" : "project"
+}
+
+function RestrictedTile() {
+  return <span aria-hidden="true" className="flex size-8 shrink-0 items-center justify-center rounded-[28%] border bg-muted text-muted-foreground">
+    <Lock className="size-4" />
   </span>
 }
 
 function StateChips({ snapshot }: { snapshot: ArtifactProjectSnapshot }) {
   const { shared_version: shared, latest_version: latest } = snapshot
-  // Draft whenever the newest version is not the shared one, even if an older one is.
-  if (shared > 0 && shared === latest) return <span className={cn(CHIP, "bg-success/10 text-success")}>Shared</span>
+  // proposed server field: a comment the agent is answering right now. Shown only when sent.
+  const working = snapshot.comments.some(comment => comment.status === "working")
   return <>
-    <span className={cn(CHIP, "bg-muted text-muted-foreground ring-1 ring-inset ring-border")}>Draft</span>
-    {shared > 0 && <span className={cn(CHIP, "bg-success/10 text-success")}>Shared v{shared}</span>}
+    {/* Draft whenever the newest version is not the shared one, even if an older one is. */}
+    {!(shared > 0 && shared === latest) && <StatusPill tone="muted" label="Draft" />}
+    {shared > 0 && <StatusPill tone="success" label={`Shared v${shared}`} />}
+    {working && <StatusPill tone="purple" live label="Agent working…" />}
   </>
 }
 
@@ -67,14 +81,14 @@ export function ArtifactChatCard({ slug, fallbackName, activity, source }: Artif
   if (error && (error.status === 403 || error.status === 404)) {
     // No name: the reader may not learn what the project is called.
     return <div className={CARD} data-testid="artifact-card-restricted">
-      <KindTile restricted />
+      <RestrictedTile />
       <p className="min-w-0 flex-1 truncate text-sm text-muted-foreground">Restricted item · you don’t have access</p>
     </div>
   }
 
   if (error || !data) {
     return <div className={CARD}>
-      <KindTile />
+      <ArtifactKindTile kind={null} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold">{fallbackName ?? slug}</p>
         <p className="text-xs text-muted-foreground">Couldn’t load</p>
@@ -84,18 +98,19 @@ export function ArtifactChatCard({ slug, fallbackName, activity, source }: Artif
   }
 
   const title = data.name ?? fallbackName ?? slug
-  const slidesMode = artifactSlidesMode(data.artifact_kind, data.manifest.files)
+  const kind = chatCardKind(data)
   return <article aria-label={title} data-open={isOpen || undefined}
     className={cn(CARD, isOpen && "ring-2 ring-primary")}>
-    <KindTile />
+    <ArtifactKindTile kind={kind} />
     <div className="grid min-w-0 flex-[1_1_140px] gap-0.5">
       <p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold">
         <span className="truncate">{title}</span>
         <span className="shrink-0 rounded-sm border bg-muted px-[5px] font-mono text-micro font-semibold text-foreground/80">v{data.latest_version}</span>
       </p>
       <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground" data-testid="artifact-card-kind">
-        <span>{slidesMode === "slides" ? "Slides" : slidesMode === "unsupported" ? "Artifact" : artifactDashboards() && parseDashboardManifest(data.manifest.files) ? "Dashboard" : "Project"}</span><StateChips snapshot={data} />
+        {kind ? <ArtifactKindBadge kind={kind} /> : <span>Artifact</span>}<StateChips snapshot={data} />
       </p>
+      {!kind && <p className="text-xs text-muted-foreground">Can’t show this version here</p>}
     </div>
     <div className="flex flex-none items-center gap-1">
       <Button type="button" size="xs" variant="ghost" aria-label={`Comment on ${title}`}
