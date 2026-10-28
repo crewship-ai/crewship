@@ -125,14 +125,17 @@ final authorization. It publishes the private admission only after commit;
 validation or final authorization failure leaves no partial native state.
 Ordinary Page creation remains separate.
 
-The native-only operator environment overrides are
-`CREWSHIP_CRAFT_NATIVE_EDITOR_BUNDLE_DIR`,
-`CREWSHIP_CRAFT_NATIVE_WORD_ENGINE_REVISION`,
-`CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH`,
-`CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256`,
-`CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_BUNDLE` and
-`CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL`. Matching `CREWSHIP_CRAFT_NATIVE_GRID_*`
-overrides select the Grid engine revision, CLI path/hash and editor bundle/URL.
+The native-only operator override `CREWSHIP_CRAFT_NATIVE_EDITOR_BUNDLE_DIR`
+selects the bundle directory. Per-application release bindings are explicit:
+
+| Binding | Word | Sheet |
+| --- | --- | --- |
+| Engine revision | `CREWSHIP_CRAFT_NATIVE_WORD_ENGINE_REVISION` | `CREWSHIP_CRAFT_NATIVE_GRID_ENGINE_REVISION` |
+| CLI path | `CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH` | `CREWSHIP_CRAFT_NATIVE_GRID_CLI_PATH` |
+| CLI SHA256 | `CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256` | `CREWSHIP_CRAFT_NATIVE_GRID_CLI_SHA256` |
+| Editor bundle | `CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_BUNDLE` | `CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_BUNDLE` |
+| Editor URL | `CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL` | `CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_URL` |
+
 These override corresponding YAML
 fields without enabling the product flag or any legacy profile. Explicit empty
 values remain empty and fail qualification; every startup/manifest/hash check
@@ -177,15 +180,17 @@ Proposals, agent execution, one-hour browser acceptance and 2,000 changing saves
 remain separate work.
 
 The native blank Word asset is serialized by the original engine separately from
-the older checkpoint blank. To qualify it against a real binary, set
-`CREWSHIP_TEST_WORDCRAFT_CLI` and `CREWSHIP_TEST_WORDCRAFT_CLI_SHA256`, then run
-`go test ./internal/mooring -run ^TestNativeCLIValidatorCanonicalWordCreation$`.
+the older checkpoint blank. The explicit binary qualification instructions are
+in [the canonical Word creation test](../../internal/mooring/native_word_creation_linux_test.go).
+Run `go test ./internal/mooring -run ^TestNativeCLIValidatorCanonicalWordCreation$`
+with its pinned original engine.
 The explicit run must pass; ordinary unit runs skip it when no binary is supplied.
 It also verifies that the old lossy float promotion is still rejected.
 
 The canonical Sheet asset is the qualified GridCraft CLI's native output, used
-without model conversion. Set `CREWSHIP_TEST_GRIDCRAFT_CLI` and
-`CREWSHIP_TEST_GRIDCRAFT_CLI_SHA256`, then explicitly run
+without model conversion. Follow [the canonical Sheet creation test's binary
+qualification instructions](../../internal/mooring/native_grid_creation_linux_test.go),
+then explicitly run
 `go test ./internal/mooring -run ^TestNativeCLIValidatorCanonicalSheetCreation$`.
 It must accept the actual creation bytes and reject an authored extension that
 the engine would discard; an ordinary optional test skip is not qualification.

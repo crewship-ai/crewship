@@ -11,6 +11,9 @@ import (
 
 // Optional ordinary tests do not require a private executable. Qualification
 // explicitly supplies the pinned original engine and checks the actual UI bytes.
+// Set CREWSHIP_TEST_GRIDCRAFT_CLI to that executable and
+// CREWSHIP_TEST_GRIDCRAFT_CLI_SHA256 to its pinned SHA256, then run this test.
+// These are test inputs, not server startup configuration. A skip is not qualification.
 func TestNativeCLIValidatorCanonicalSheetCreation(t *testing.T) {
 	binary := os.Getenv("CREWSHIP_TEST_GRIDCRAFT_CLI")
 	if binary == "" {

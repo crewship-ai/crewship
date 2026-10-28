@@ -83,20 +83,26 @@ func applyCraftNativeEnv(c *CraftNativeConfig) {
 	if value, ok := os.LookupEnv("CREWSHIP_CRAFT_NATIVE_EDITOR_BUNDLE_DIR"); ok {
 		c.EditorBundleDir = value
 	}
-	for _, app := range []struct{ application, prefix string }{{"wordcraft", "WORD"}, {"gridcraft", "GRID"}} {
+	for _, app := range []struct {
+		application                                                                string
+		engineRevisionEnv, cliPathEnv, cliSHA256Env, editorBundleEnv, editorURLEnv string
+	}{
+		{"wordcraft", "CREWSHIP_CRAFT_NATIVE_WORD_ENGINE_REVISION", "CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH", "CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256", "CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_BUNDLE", "CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL"},
+		{"gridcraft", "CREWSHIP_CRAFT_NATIVE_GRID_ENGINE_REVISION", "CREWSHIP_CRAFT_NATIVE_GRID_CLI_PATH", "CREWSHIP_CRAFT_NATIVE_GRID_CLI_SHA256", "CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_BUNDLE", "CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_URL"},
+	} {
 		profile := c.Profiles[app.application]
 		changed := false
 		for _, field := range []struct {
 			env    string
 			target *string
 		}{
-			{"ENGINE_REVISION", &profile.EngineRevision},
-			{"CLI_PATH", &profile.CLIPath},
-			{"CLI_SHA256", &profile.CLISHA256},
-			{"EDITOR_BUNDLE", &profile.EditorBundle},
-			{"EDITOR_URL", &profile.EditorURL},
+			{app.engineRevisionEnv, &profile.EngineRevision},
+			{app.cliPathEnv, &profile.CLIPath},
+			{app.cliSHA256Env, &profile.CLISHA256},
+			{app.editorBundleEnv, &profile.EditorBundle},
+			{app.editorURLEnv, &profile.EditorURL},
 		} {
-			if value, ok := os.LookupEnv("CREWSHIP_CRAFT_NATIVE_" + app.prefix + "_" + field.env); ok {
+			if value, ok := os.LookupEnv(field.env); ok {
 				*field.target = value
 				changed = true
 			}
