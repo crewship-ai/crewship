@@ -4,6 +4,9 @@ import { AppWindow, Lock, MessageSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { artifactDashboards } from "@/lib/feature-flags"
+import { parseDashboardManifest } from "@/lib/pages/artifact-dashboard"
+import { artifactSlidesMode } from "@/lib/pages/artifact-slides"
 import { useArtifactViewer } from "./artifact-viewer-context"
 import { useArtifactProjectSnapshot } from "./use-artifact-project-data"
 import type { ArtifactToolActivity } from "./tool-result"
@@ -81,6 +84,7 @@ export function ArtifactChatCard({ slug, fallbackName, activity, source }: Artif
   }
 
   const title = data.name ?? fallbackName ?? slug
+  const slidesMode = artifactSlidesMode(data.artifact_kind, data.manifest.files)
   return <article aria-label={title} data-open={isOpen || undefined}
     className={cn(CARD, isOpen && "ring-2 ring-primary")}>
     <KindTile />
@@ -90,7 +94,7 @@ export function ArtifactChatCard({ slug, fallbackName, activity, source }: Artif
         <span className="shrink-0 rounded-sm border bg-muted px-[5px] font-mono text-micro font-semibold text-foreground/80">v{data.latest_version}</span>
       </p>
       <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground" data-testid="artifact-card-kind">
-        <span>Project</span><StateChips snapshot={data} />
+        <span>{slidesMode === "slides" ? "Slides" : slidesMode === "unsupported" ? "Artifact" : artifactDashboards() && parseDashboardManifest(data.manifest.files) ? "Dashboard" : "Project"}</span><StateChips snapshot={data} />
       </p>
     </div>
     <div className="flex flex-none items-center gap-1">

@@ -31,7 +31,7 @@ beforeEach(() => {
   ]
   state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.select.mockReset(); state.refresh.mockReset()
 })
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
 const renderLibrary = () => render(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />)
 
@@ -79,7 +79,7 @@ it("without the project surface the detail links to the Page instead of a dead v
   state.item = "site"
   renderLibrary()
   expect(screen.queryByTestId("viewer-panel")).toBeNull()
-  expect(screen.getByRole("link", { name: "Open in Pages" }).getAttribute("href")).toBe("/pages/site?workspace_id=ws1")
+  expect(screen.getByRole("link", { name: "Open in Pages" }).getAttribute("href")).toBe("/pages/%40page-site?workspace_id=ws1&artifact=1")
 })
 
 it("a native Word detail shows its edit lock by Page reference", () => {
@@ -112,4 +112,46 @@ it("empty, loading and error states say what to do", () => {
   rerender(<ArtifactsLibrary workspaceId="ws1" item={null} onSelect={state.select} />)
   fireEvent.click(screen.getByRole("button", { name: "Try again" }))
   expect(state.refresh).toHaveBeenCalled()
+})
+
+it("an explicitly typed Dashboard opens the versioned viewer without a Craft lease", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", "true")
+  // The backend-owned Page projection adds this typed kind; legacy panel dashboards stay in Pages.
+  state.pages = [{ ...wire({ slug: "sales", name: "Sales", artifact_shared_version: 2 }), artifactKind: "dashboard" } as unknown as PageView]
+  state.item = "sales"
+  renderLibrary()
+  expect(screen.getByTestId("viewer-panel")).toBeTruthy()
+  expect(screen.getByText("Shared v2")).toBeTruthy()
+  expect(screen.queryByTestId("lock-bar")).toBeNull()
+})
+
+// Availability is false while loading and after a denied capability probe. It
+// must never turn a server-typed artifact into a legacy panels link.
+it.each(["project", "dashboard", "slides"] as const)("keeps %s routed through its backend across gallery, table and fallback detail", artifact_kind => {
+  state.pages = [wire({ id: "owner-page", slug: "ordinary-owner-page", name: "Owner artifact", artifact_kind })]
+  state.projectsOn = false
+  const view = renderLibrary()
+  fireEvent.click(screen.getByRole("button", { name: "Open Owner artifact" }))
+  expect(state.select).toHaveBeenLastCalledWith("ordinary-owner-page")
+  fireEvent.click(screen.getByRole("radio", { name: "Table" }))
+  fireEvent.click(screen.getByRole("button", { name: "Owner artifact" }))
+  expect(state.select).toHaveBeenLastCalledWith("ordinary-owner-page")
+  state.item = "ordinary-owner-page"
+  view.rerender(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />)
+  expect(screen.getByRole("link", { name: "Open in Pages" })).toHaveAttribute("href", "/pages/%40owner-page?workspace_id=ws1&artifact=1")
+  expect(screen.queryByTestId("viewer-panel")).toBeNull()
+})
+
+it.each(["word", "sheet"] as const)("preserves the existing reader link for native %s", artifact_kind => {
+  state.pages = [wire({ id: "native-page", slug: "saved-native", name: "Native document", artifact_kind })]
+  state.projectsOn = false; state.item = "saved-native"
+  renderLibrary()
+  expect(screen.getByRole("link", { name: "Open in Pages" })).toHaveAttribute("href", "/pages/saved-native?workspace_id=ws1")
+})
+
+it("keeps legacy Slides in their existing Page reader", () => {
+  state.pages = [wire({ id: "legacy-page", slug: "legacy-slides", name: "Legacy deck", has_slides: true })]
+  state.item = "legacy-slides"
+  renderLibrary()
+  expect(screen.getByRole("link", { name: "Open in Pages" })).toHaveAttribute("href", "/pages/legacy-slides?workspace_id=ws1")
 })

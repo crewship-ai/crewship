@@ -92,8 +92,12 @@ func (s *DataStore) Batch(ctx context.Context, key VersionKey, collection string
 		return nil, ErrDataInvalid
 	}
 	seen := map[string]bool{}
-	batchBytes := 0
-	for _, w := range writes {
+	// Batch receives writes, not the code base_version. Account the smallest
+	// valid request envelope here; ingress codecs separately bound the actual
+	// whole request. Encode metadata only so value whitespace, Unicode and
+	// numeric lexemes retain their original byte cost.
+	batchBytes := len(`{"base_version":1,"documents":[]}`)
+	for i, w := range writes {
 		if !dataIdentifier.MatchString(w.ID) || seen[w.ID] || w.IfVersion < 0 || w.IfVersion >= MaxDataVersion {
 			return nil, ErrDataInvalid
 		}
@@ -104,7 +108,14 @@ func (s *DataStore) Batch(ctx context.Context, key VersionKey, collection string
 		if !validDataObject(w.Value) {
 			return nil, ErrDataInvalid
 		}
-		batchBytes += len(w.Value) + len(w.ID) + 80
+		metadata, err := json.Marshal(DataWrite{ID: w.ID, IfVersion: w.IfVersion, Value: json.RawMessage(`{}`)})
+		if err != nil {
+			return nil, ErrDataInvalid
+		}
+		batchBytes += len(metadata) - len(`{}`) + len(w.Value)
+		if i > 0 {
+			batchBytes++ // comma between document objects
+		}
 		if batchBytes > MaxDataBatchBytes {
 			return nil, ErrDataQuota
 		}

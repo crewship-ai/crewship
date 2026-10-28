@@ -346,6 +346,7 @@ POST /api/v1/pages/maintenance roleManage
 POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId} roleCreate
 POST /api/v1/pages/{slug}/artifact/comments roleInline
 POST /api/v1/pages/{slug}/artifact/comments/{commentId}/reply roleInline
+POST /api/v1/pages/{slug}/artifact/data/{collection} roleInline
 POST /api/v1/pages/{slug}/artifact/restore roleInline
 POST /api/v1/pages/{slug}/artifact/share roleInline
 POST /api/v1/pages/{slug}/artifact/versions roleInline

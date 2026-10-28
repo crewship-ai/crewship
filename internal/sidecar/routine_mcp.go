@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/manifest"
 	"github.com/crewship-ai/crewship/internal/pages"
 )
@@ -283,8 +284,8 @@ func init() { routineMCPTools = append(routineMCPTools, artifactProjectMCPCatalo
 // Unknown methods return JSON-RPC -32601 (method not found).
 func (s *Server) handleRoutinesMCP(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(r.Body, (1<<20)+1)) // Bounded file patches, never an unbounded source upload
-	if err != nil || len(raw) > 1<<20 {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, artifacts.MaxDataToolRequestBytes+1)) // Bounded file patches, never an unbounded source upload
+	if err != nil || len(raw) > artifacts.MaxDataToolRequestBytes {
 		writeJSONResponse(w, http.StatusBadRequest, memoryMCPResponse{
 			JSONRPC: "2.0",
 			ID:      mcpNullID,
@@ -300,6 +301,17 @@ func (s *Server) handleRoutinesMCP(w http.ResponseWriter, r *http.Request) {
 			Error:   &memoryMCPRPCError{Code: -32700, Message: "invalid JSON: " + err.Error()},
 		})
 		return
+	}
+	// Only the closed Dashboard data tools receive RPC metadata headroom.
+	// All existing tools, including Project publishing, retain their 1 MiB cap.
+	if len(raw) > 1<<20 {
+		var call struct {
+			Name string `json:"name"`
+		}
+		if req.Method != "tools/call" || json.Unmarshal(req.Params, &call) != nil || !artifactDataMCPTool(call.Name) {
+			writeJSONResponse(w, http.StatusBadRequest, memoryMCPResponse{JSONRPC: "2.0", ID: mcpNullID, Error: &memoryMCPRPCError{Code: -32700, Message: "invalid or oversized MCP request"}})
+			return
+		}
 	}
 	if req.JSONRPC != "2.0" {
 		id := req.ID

@@ -9,7 +9,7 @@ export interface NativeDocumentClientOptions {
  refresh?:()=>Promise<RefreshResult>;bearer?:()=>boolean
 }
 export interface NativeDocumentSnapshot {
- version:string;bytes:Uint8Array;applicationId:"wordcraft"|"gridcraft";enginePin:string;editorBundle:string;editorURL:string
+ version:string;bytes:Uint8Array;applicationId:"wordcraft"|"gridcraft"|"deckcraft";enginePin:string;editorBundle:string;editorURL:string
  quota:{usedBytes:string;limitBytes:string;warning:boolean;retention:string}
 }
 export interface NativeDocumentClient {
@@ -86,7 +86,7 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
     const value:unknown=await response.json()
     if(!active||!value||typeof value!=="object")throw new Error("invalid_native_session")
     const v=value as Record<string,unknown>
-    if(typeof v.session_token!=="string"||!/^[a-f0-9]{64}$/.test(v.session_token)||!identifier(v.session_id)||v.page_id!==options.pageId||(v.application_id!=="wordcraft"&&v.application_id!=="gridcraft"))throw new Error("invalid_native_session")
+    if(typeof v.session_token!=="string"||!/^[a-f0-9]{64}$/.test(v.session_token)||!identifier(v.session_id)||v.page_id!==options.pageId||(v.application_id!=="wordcraft"&&v.application_id!=="gridcraft"&&v.application_id!=="deckcraft"))throw new Error("invalid_native_session")
     token=v.session_token;sessionId=v.session_id;applicationId=v.application_id
     return {sessionId,applicationId}
    })()
@@ -197,7 +197,7 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    if(!validNativeVersion(v.version)||v.version==="0"||v.applicationId!==applicationId||typeof v.enginePin!=="string"||!/^[a-f0-9]{64}$/.test(v.enginePin)||typeof v.editorBundle!=="string"||!/^[a-f0-9]{64}$/.test(v.editorBundle)||typeof v.editorURL!=="string"||!v.editorURL.endsWith(`/b/${v.editorBundle}/index.html`)||typeof v.bytes!=="string"||!v.bytes.length||v.bytes.length>44739244||!q||!validNativeVersion(q.usedBytes)||!validNativeVersion(q.limitBytes)||q.limitBytes==="0"||typeof q.warning!=="boolean"||typeof q.retention!=="string")throw new Error("invalid_native_document")
    let bytes:Uint8Array
    try {const binary=atob(v.bytes);if(!binary.length||binary.length>32*1024*1024)throw new Error();bytes=Uint8Array.from(binary,c=>c.charCodeAt(0))}catch{throw new Error("invalid_native_document")}
-   return {version:v.version,bytes,applicationId:applicationId as "wordcraft"|"gridcraft",enginePin:v.enginePin,editorBundle:v.editorBundle,editorURL:v.editorURL,quota:{usedBytes:q.usedBytes,limitBytes:q.limitBytes,warning:q.warning,retention:q.retention}}
+   return {version:v.version,bytes,applicationId:applicationId as "wordcraft"|"gridcraft"|"deckcraft",enginePin:v.enginePin,editorBundle:v.editorBundle,editorURL:v.editorURL,quota:{usedBytes:q.usedBytes,limitBytes:q.limitBytes,warning:q.warning,retention:q.retention}}
   },
   save:(request,signal)=>mutate("save",request,signal),
   reconcile:(request,signal)=>mutate("reconcile",request,signal),

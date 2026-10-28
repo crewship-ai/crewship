@@ -12,7 +12,8 @@ import { WordCraftEditorHost } from "./wordcraft-editor-host"
 import { WordCraftCommandEditorHost } from "./wordcraft-command-editor-host"
 import { wordCraftRenderer } from "@/lib/mooring/wordcraft-renderer"
 import { PageWorkbookSurface } from "./workbook-editor-host"
-import { slidesEditorMount } from "@/lib/feature-flags"
+import { ArtifactProject } from "./artifact-project"
+import { chatArtifactProjects, slidesEditorMount } from "@/lib/feature-flags"
 import { DocumentCatalog } from "./document-catalog"
 import { PersonalDocumentSpace } from "./personal-document-space"
 import { NewDocumentDialog } from "./new-document-dialog"
@@ -94,11 +95,13 @@ export interface PagesLayoutProps {
   workspaceId: string
   /** Set by /pages/[slug]; absent on the index. */
   slug?: string
+  /** A code pin from the incoming Page URL; used only after its navigation is admitted. */
+  initialArtifactVersion?: number
   /** Injected clock for tests — absolute ages and "today" are computed. */
   now?: Date
 }
 
-export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
+export function PagesLayout({ workspaceId, slug, initialArtifactVersion, now }: PagesLayoutProps) {
   const [personalSpace, setPersonalSpace] = React.useState(false)
   const isMobile = useIsMobile()
 
@@ -295,7 +298,12 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
   const nativeCollaboration = original !== null
   const nativeMooring = detail.page?.hasMooring === true && !nativeDocument && !nativeSlides && !nativeCollaboration
   const nativeWorkbook = detail.page?.hasWorkbook === true && !nativeDocument && !nativeSlides && !nativeCollaboration
-  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null && !detail.loading && !detail.error && !nativeDocument && !nativeSlides && !nativeWorkbook && !nativeMooring && !nativeCollaboration
+  // Resolve only the selected Page already admitted by the existing route guard.
+  // Native readers keep their original producers and take precedence below.
+  const artifactKind: unknown = detail.raw?.artifact_kind ?? detail.page?.artifactKind
+  const selectedArtifactVersion = selectedSlug === slug && Number.isSafeInteger(initialArtifactVersion) && (initialArtifactVersion ?? 0) > 0 ? initialArtifactVersion : undefined
+  const versionedArtifact = chatArtifactProjects() && !nativeDocument && !nativeSlides && !nativeCollaboration && !nativeMooring && !nativeWorkbook && (artifactKind === "project" || artifactKind === "dashboard" || artifactKind === "slides")
+  const editing = nav.mode === "edit" && selectedSlug != null && detail.page != null && !detail.loading && !detail.error && !nativeDocument && !nativeSlides && !nativeWorkbook && !nativeMooring && !nativeCollaboration && !versionedArtifact
 
   // Application | Panels. The switch lives in the page header beside Edit,
   // because that is where the page is named and where a person looks for
@@ -428,7 +436,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 Ask about this Page
               </SubBarSecondary>
             )}
-            {selectedSlug && !editing && !nativeDocument && !nativeWorkbook && !nativeMooring && (
+            {selectedSlug && !editing && !nativeDocument && !nativeWorkbook && !nativeMooring && !versionedArtifact && (
               <SubBarSecondary
                 icon={Share2}
                 onClick={event => {
@@ -441,7 +449,7 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 Share
               </SubBarSecondary>
             )}
-            {selectedSlug && !editing && !nativeDocument && !nativeSlides && !nativeWorkbook && !nativeMooring && !nativeCollaboration && (
+            {selectedSlug && !editing && !nativeDocument && !nativeSlides && !nativeWorkbook && !nativeMooring && !nativeCollaboration && !versionedArtifact && (
               <SubBarSecondary
                 icon={Pencil}
                 onClick={() => nav.openEditor()}
@@ -595,7 +603,9 @@ export function PagesLayout({ workspaceId, slug, now }: PagesLayoutProps) {
                 ) : nativeWorkbook ? (
                   detail.accessDenied || !nativePageId ? <p role="alert" className="p-6">Workbook unavailable</p>
                     : <><PageWorkbookSurface key={`${workspaceId}:${nativePageId}`} workspaceId={workspaceId} pageId={nativePageId} name={detail.page?.name} onDirtyChange={nav.setDirty} /><UnsentEditsLeaveDialog pending={nav.pending} onReturnFocus={focusNativeView} /></>
-                ) : detail.page && !detail.loading && !detail.error ? (
+                ) : versionedArtifact && detail.page && !detail.loading && !detail.error && !detail.accessDenied ? (
+                  <ArtifactProject key={`${workspaceId}:${selectedSlug}:${selectedArtifactVersion ?? "latest"}`} workspaceId={workspaceId} slug={selectedSlug} initialVersion={selectedArtifactVersion} />
+                ) : versionedArtifact ? pageFallback : detail.page && !detail.loading && !detail.error && !detail.accessDenied ? (
                   <PageApplicationView key={`${workspaceId}:${selectedSlug}`} workspaceId={workspaceId} slug={selectedSlug} page={detail.raw} panels={showPanels} onAvailableChange={setApplicationAvailable} fallback={pageFallback} />
                 ) : pageFallback}
               </motion.div>

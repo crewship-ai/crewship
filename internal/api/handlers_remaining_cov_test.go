@@ -1051,11 +1051,11 @@ func TestCovRemLookupCrewNames(t *testing.T) {
 // and a display_name equal to the slug is omitted.
 func TestCovRemReconstructSKILLMD(t *testing.T) {
 	withFrontmatter := "---\nname: x\n---\nbody"
-	if got := reconstructSKILLMD("x", "v", "X", "desc", withFrontmatter); got != withFrontmatter {
+	if got := reconstructSKILLMD("x", "v", "X", "desc", withFrontmatter, ""); got != withFrontmatter {
 		t.Errorf("frontmatter passthrough changed content:\n%s", got)
 	}
 
-	got := reconstructSKILLMD("deploy", "acme", "deploy", "ship\nit", "# Body")
+	got := reconstructSKILLMD("deploy", "acme", "deploy", "ship\nit", "# Body", "")
 	if !strings.HasPrefix(got, "---\n") {
 		t.Errorf("expected synthesised frontmatter, got:\n%s", got)
 	}

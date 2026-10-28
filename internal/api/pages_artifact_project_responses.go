@@ -10,6 +10,7 @@ type artifactProjectAvailabilityResponse struct {
 
 // artifactProjectSnapshotResponse is the version-selected owner or shared view.
 type artifactProjectSnapshotResponse struct {
+	ArtifactKind  string                   `json:"artifact_kind,omitempty"`
 	PageID        string                   `json:"page_id"`
 	Name          string                   `json:"name"`
 	Slug          string                   `json:"slug"`

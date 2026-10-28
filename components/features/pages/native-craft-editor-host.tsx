@@ -30,7 +30,7 @@ function owns(view:Lease,generation?:string):boolean{return view.mine&&view.can_
 /** The server selects the approved bundle. No query, credentials or alternative executable path is accepted. */
 export function nativeCraftFrameURL(snapshot:NativeDocumentSnapshot,hostOrigin:string):string|null {
  try{
-  if(snapshot.applicationId!=='wordcraft'&&snapshot.applicationId!=='gridcraft'||!/^([a-f0-9]{64})$/.test(snapshot.editorBundle))return null
+  if(snapshot.applicationId!=='wordcraft'&&snapshot.applicationId!=='gridcraft'&&snapshot.applicationId!=='deckcraft'||!/^([a-f0-9]{64})$/.test(snapshot.editorBundle))return null
   if(snapshot.editorURL.startsWith('//')||/[?#]/.test(snapshot.editorURL)||Array.from(snapshot.editorURL).some(c=>c.charCodeAt(0)<=32||c.charCodeAt(0)===127))return null
   const url=new URL(snapshot.editorURL,hostOrigin),host=new URL(hostOrigin)
   const loopback=new Set(['localhost','127.0.0.1','[::1]'])
@@ -143,7 +143,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    frame.setAttribute('allow','clipboard-write *')
    mount.current?.append(frame)
    if(!frame.contentWindow){frame.remove();throw Error('isolated_editor_unavailable')}
-   frame.title=snapshot.applicationId==='gridcraft'?'GridCraft editor':'WordCraft editor';setApplicationId(snapshot.applicationId);setQuota(snapshot.quota)
+   frame.title=snapshot.applicationId==='deckcraft'?'DeckCraft editor':snapshot.applicationId==='gridcraft'?'GridCraft editor':'WordCraft editor';setApplicationId(snapshot.applicationId);setQuota(snapshot.quota)
    let resolve!:(r:Runtime)=>void,reject!:(e:Error)=>void
    const ready=new Promise<Runtime>((done,fail)=>{resolve=done;reject=fail})
    const timer=setTimeout(()=>{reject(Error('native_bootstrap_timeout'));if(r&&live(r))stop('Editor se bezpečně nepřipojil. Koncept nebyl označen jako uložený.')},20000)
@@ -309,7 +309,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    }).finally(()=>{transition=false;if(!dead)setBusy(false)})
   }
   void(async()=>{
-   const opened=await client.open(lifetime.signal);if(opened.applicationId!=='wordcraft'&&opened.applicationId!=='gridcraft')throw Error('unsupported_native_application');sessionApplication=opened.applicationId;sessionId=opened.sessionId
+   const opened=await client.open(lifetime.signal);if(opened.applicationId!=='wordcraft'&&opened.applicationId!=='gridcraft'&&opened.applicationId!=='deckcraft')throw Error('unsupported_native_application');sessionApplication=opened.applicationId;sessionId=opened.sessionId
    const snapshot=await client.read(lifetime.signal);viewNow=leaseView(await client.lease(lifetime.signal));setView(viewNow)
    await mountEditor(snapshot,viewNow.generation??'1');if(dead)return;setBusy(false)
    leaseWatch=setInterval(()=>{const r=current;if(r?.writable&&!owns(viewNow,r.generation))void retireWrite(r).catch(()=>stop('Platnost úprav skončila. Koncept zůstává zachován.'))},1000)
@@ -325,16 +325,16 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   })().catch(()=>{if(!dead)stop('Dokument nelze bezpečně otevřít.')})
   return()=>{unregisterPrivacy();window.removeEventListener('message',windowMessage);control.current=()=>{};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};stop('Editor uzavřen · koncept zachován',true)}
  },[enabled,humanId,workspaceId,pageId])
- function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`${draft.applicationId}-recovery.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
+ function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:draft.applicationId==='deckcraft'?'application/vnd.storyteller.deckcraft+zip':'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`${draft.applicationId}-recovery.${draft.applicationId==='deckcraft'?'deckcraft':'json'}`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
  if(!enabled)return <p className="p-6">Nativní editor není zapnutý.</p>
- return <section className="flex h-full min-h-[600px] flex-col" aria-label={applicationId==='gridcraft'?'GridCraft sešit':'WordCraft dokument'}>
+ return <section className="flex h-full min-h-[600px] flex-col" aria-label={applicationId==='deckcraft'?'DeckCraft prezentace':applicationId==='gridcraft'?'GridCraft sešit':'WordCraft dokument'}>
   <NativeCraftLeaseBar view={view} mayEdit={Boolean(humanId)&&!connectionRetired} pending={busy} onAction={(action,body)=>control.current(action,body)} onStopAgent={()=>stopAgent.current()}/>
   <NativeCraftAgentTaskStatus workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled={!connectionRetired}/>
   {!connectionRetired&&view.mine&&view.can_write&&!ownsEditor&&<Button disabled={busy} onClick={()=>control.current('acquire',{})}>Převzít úpravy</Button>}
   <div role="status" className="px-3 py-2"><span>{label}</span>{savedVersion&&<span> · verze {savedVersion}</span>}{quota&&<span className="ml-3 text-muted-foreground">Historie {quota.usedBytes} / {quota.limitBytes} B{quota.warning?' · blíží se limit':''}</span>}</div>
   {uncertain&&<Button variant="outline" onClick={()=>reconcile.current()}>Ověřit výsledek</Button>}
   {error&&<p role="alert" className="px-3 py-2">{error}</p>}
-  {recoveries.map((recovery,index)=><div key={index} className="flex gap-2 px-3 py-2"><span>Místní koncept · verze {recovery.draft.baseVersion}</span><Button variant="outline" onClick={()=>compare.current(recovery.draft)}>Porovnat</Button><Button variant="outline" onClick={()=>copy(recovery.draft)}>Kopie konceptu</Button></div>)}
+  {recoveries.map((recovery,index)=><div key={index} className="flex gap-2 px-3 py-2"><span>Místní koncept · verze {recovery.draft.baseVersion}</span>{recovery.draft.applicationId!=='deckcraft'&&<Button variant="outline" onClick={()=>compare.current(recovery.draft)}>Porovnat</Button>}<Button variant="outline" onClick={()=>copy(recovery.draft)}>Kopie konceptu</Button></div>)}
   {comparison&&<div className="grid gap-2 p-3 md:grid-cols-2"><p className="md:col-span-2">Serverová verze {comparison.version} a místní koncept: {comparison.equal?'shodná data':'odlišná data'}. Nativní data jsou pouze pro čtení.</p><label>Serverová verze<textarea aria-label="Serverová verze" readOnly value={comparison.server} className="h-48 w-full font-mono text-xs"/><span className="break-all text-xs">SHA256 {comparison.serverHash}</span></label><label>Místní koncept<textarea aria-label="Místní koncept" readOnly value={comparison.draft} className="h-48 w-full font-mono text-xs"/><span className="break-all text-xs">SHA256 {comparison.draftHash}</span></label><Button variant="outline" onClick={()=>setComparison(undefined)}>Zavřít porovnání</Button></div>}
   <div ref={mount} tabIndex={-1} className="relative min-h-0 flex-1" aria-busy={busy}/>
  </section>
