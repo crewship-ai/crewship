@@ -12,6 +12,24 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class WorkflowContracts(unittest.TestCase):
+    def test_native_privacy_browser_cases_execute_in_required_frontend_shards(self):
+        ci = self.text('ci.yml')
+        lane = self.job(ci, 'frontend-test-shards')
+        self.assertIn('uses: ./.github/actions/setup-playwright-browser', lane)
+        install = lane.index('uses: ./.github/actions/setup-playwright-browser')
+        execute = lane.index('vitest-shard.py run')
+        self.assertLess(lane.index('uses: ./.github/actions/setup-node-pnpm'), install)
+        self.assertLess(install, execute)
+        self.assertIn('timeout-minutes: 14', lane)
+        job_cap = int(re.search(r'^    timeout-minutes: (\d+)', lane, re.M).group(1))
+        self.assertGreaterEqual(job_cap, 8 + 14 + 9 + 4)
+        self.assertNotIn('continue-on-error', lane)
+        tests = (ROOT / 'lib/mooring/native-draft-privacy.browser.test.ts').read_text()
+        self.assertNotIn('skipIf', tests)
+        self.assertIn('expect(existsSync(chromium.executablePath())).toBe(true)', tests)
+        self.assertIn('await chromium.launch(', tests)
+        self.assertIn('frontend-test-shards', self.job(ci, 'frontend-test'))
+
     def text(self, name):
         return (ROOT / '.github/workflows' / name).read_text()
 
@@ -113,7 +131,7 @@ class WorkflowContracts(unittest.TestCase):
         partitions = self.job(ci, 'frontend-test-shards')
         self.assertIn('shard: [1, 2, 3, 4]', partitions)
         self.assertIn('fail-fast: false', partitions)
-        self.assertIn('timeout-minutes: 20', partitions)
+        self.assertIn('timeout-minutes: 35', partitions)
         self.assertIn('timeout --kill-after=30s 8m', partitions)
         self.assertIn('vitest-shard.py run "$SHARD_INDEX" 4', partitions)
         self.assertIn('if-no-files-found: error', partitions)
