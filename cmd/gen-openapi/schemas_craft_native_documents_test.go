@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestCraftNativeDocumentsHaveConcreteNativeBindingsAndStringVersions(t *testing.T) {
 	prefix := "/api/v1/pages/{slug}/craft/document"
@@ -35,7 +38,7 @@ func TestCraftNativeDocumentsHaveConcreteNativeBindingsAndStringVersions(t *test
 	}
 }
 
-func TestCraftNativeInitializeHasOwnerWordOnlyTypedAdmission(t *testing.T) {
+func TestCraftNativeInitializeHasOwnerNativeTypedAdmission(t *testing.T) {
 	const path = "/api/v1/pages/{slug}/craft/initialize"
 	doc := buildDocument([]route{{method: "POST", path: path}})
 	operation := doc["paths"].(map[string]any)[path].(map[string]any)["post"].(map[string]any)
@@ -48,7 +51,7 @@ func TestCraftNativeInitializeHasOwnerWordOnlyTypedAdmission(t *testing.T) {
 	if len(props) != 2 || request["additionalProperties"] != false {
 		t.Fatal("initializer accepts client scope or qualification fields")
 	}
-	if props["application_id"].(map[string]any)["enum"].([]string)[0] != "wordcraft" {
-		t.Fatal("initializer is not restricted to Word")
+	if !reflect.DeepEqual(props["application_id"].(map[string]any)["enum"], []string{"wordcraft", "gridcraft"}) {
+		t.Fatal("initializer does not list its supported native applications")
 	}
 }

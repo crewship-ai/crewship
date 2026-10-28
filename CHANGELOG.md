@@ -21,6 +21,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 - Add an opt-in private native-document draft journal and whole-snapshot save coordinator. Recovery offers compare or copy, stale generations cannot replay drafts, and only an exact durable receipt confirms a save. Existing editor profiles remain unchanged.
 
+- **Native Sheet documents can use the full GridCraft editor.** The experimental, default-off native profile now initializes qualified Grid workbooks with the same edit lease, local draft and confirmed whole-document save flow as Word.
+
 - Open an artifact card in a side viewer (full screen on phones) with screens, element select and anchored comments, the agent comment queue, version history and restore; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 - Show the Craft edit-lock bar, agent proposal cards (Compare / Accept / Reject) and recovered local drafts in chat, and a "+ New artifact" composer menu offering only kinds with a backend; off by default behind `NEXT_PUBLIC_CHAT_CRAFT_LEASE` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 - **Opening a new conversation logged three 404s.** A draft session no longer requests its execution profile, messages or participants before the first send creates it.
@@ -38,6 +40,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Native single-editor documents gain a default-off edit lease boundary.** SQL-backed holder generations fence expired, handed-off and revoked writers; workspace erasure and user deletion remove retained holder identities while preserving the fence. Lease acknowledgements recheck authority after SQL; recovery retires source holders while retaining generations, and portable replacement refuses issued target fences. A target-local workspace issuance marker preserves restore protection after Page deletion. Runtime editor and version-store wiring remain disabled.
 
 - Expose a default-off native Craft human session and edit-lease HTTP API with Page-scoped availability, named holders, requested handoff and live connection renewal. Original credentials and current Page rights fence every action; existing document profiles are unchanged.
+
+- Add a bounded host adapter for original Word/Sheet engine edits and reads: pinned executables, private files and a closed command allowlist. Agent authority remains in the separately guarded native task and edit-lease boundary.
+
+- Add separately opt-in native Word/Sheet agent tasks with explicit original-human consent, confirmed run identity, shared edit leases, original-engine edits and receipt-backed whole-document saves. Human holders are refused; the original human can inspect actual task outcomes and stop the agent without lending a human editor session.
 
 - Allow native Craft editors to copy to the clipboard while keeping clipboard reads and opaque-frame isolation restricted.
 
@@ -74,10 +80,17 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Keep idle WordCraft editors connected through standard WebSocket ping/pong while preserving the existing response and inactivity limits.
 - Show the Crewship page name in attached WordCraft chrome and hide its standalone Discord, Share and Zotero controls.
 - **Native document exports did not download.** Word and spreadsheet export copies now download through the host browser while retaining the isolated editor and separate server save confirmation.
+- **New Doc was unavailable with only the native Word profile enabled.** The qualified, default-off native profile now offers Word creation through the existing whole-document initializer and opens the full editor after releasing creation custody. Ambiguous initialization never creates another Page or blindly retries a write.
 
 - Open document links in their accessible workspace before requesting document content, preserving unsaved-work navigation guards.
 
 - **WordCraft documents can be created from Pages.** When native collaboration is enabled, choose WordCraft in New Doc to open a blank document in the editor without setup scripts.
+
+- **Create native Sheets from New Doc.** The Sheet choice appears only for a qualified GridCraft release, initializes its original engine model, and reopens saved native Sheets in the full editor.
+
+- **Native Sheet documents can use the full GridCraft editor.** The experimental, default-off native profile now initializes qualified Grid workbooks with the same edit lease, local draft and confirmed whole-document save flow as Word.
+
+- **New Doc was unavailable with only the native Word profile enabled.** The qualified, default-off native profile now offers Word creation through the existing whole-document initializer and opens the full editor after releasing creation custody. Ambiguous initialization never creates another Page or blindly retries a write.
 
 - **One departing or expired collaborator could disconnect everyone.** Keep late lease replies scoped to the original closed participant and finish an already reserved reply before that participant leaves, preserving the other collaborators' session.
 

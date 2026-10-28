@@ -52,7 +52,7 @@ func TestCraftNativeInitializeExistingEmptyOwnerPageOverTCPThenReadSave(t *testi
 	}
 }
 func TestCraftNativeInitializeRejectsNonOwnerReadScopeLegacyAndForgedBindings(t *testing.T) {
-	for _, name := range []string{"nonowner", "readscope", "legacy", "crewowner", "forgedscope", "forgedpin", "wrongapp", "invalidengine"} {
+	for _, name := range []string{"nonowner", "readscope", "legacy", "crewowner", "forgedscope", "forgedpin", "wrongapp", "missingprofile", "invalidengine"} {
 		t.Run(name, func(t *testing.T) {
 			f, router, _, owner, other, _ := craftNativeDataTCPFixture(t, true)
 			const page = "native-init-denied"
@@ -85,8 +85,11 @@ func TestCraftNativeInitializeRejectsNonOwnerReadScopeLegacyAndForgedBindings(t 
 				body["cli_path"] = "/bin/true"
 				expected = 400
 			case "wrongapp":
-				body["application_id"] = "gridcraft"
+				body["application_id"] = "othercraft"
 				expected = 400
+			case "missingprofile":
+				body["application_id"] = "gridcraft"
+				expected = 503
 			case "invalidengine":
 				body["bytes"] = []byte("not native JSON")
 				expected = 422
@@ -153,5 +156,56 @@ func TestCraftNativeInitializeExistingCollaborationReturnsConflictOverTCP(t *tes
 			}
 			craftNativeInitializeNoPartial(t, f, router, page)
 		})
+	}
+}
+
+func TestCraftNativeInitializeGridPageOverTCPThenReadSave(t *testing.T) {
+	f, router, _, owner, _, cfg := craftNativeDataTCPFixture(t, true)
+	profile := router.craftNativeDocuments.applications["wordcraft"]
+	profile.Store.Application = "gridcraft"
+	router.craftNativeDocuments.applications["gridcraft"] = profile
+	cfg.Application = "gridcraft"
+	const page = "native-init-empty"
+	f.seedPage(t, page, page, "Explicit native owner sample", f.userID, "")
+	call := craftNativeInitializeTCP(t, router, f.wsID)
+	if status, raw := call("GET", page, "", owner, "", nil); status != 200 {
+		t.Fatalf("existing owner Page calibration %d %s", status, raw)
+	}
+	initial := []byte(`{"v":1}`)
+	status, raw := call("POST", page, "initialize", owner, "", map[string]any{"application_id": "gridcraft", "bytes": initial})
+	if status != 201 {
+		t.Fatalf("explicit native initialize expected201 got%d %s", status, raw)
+	}
+	var admitted struct {
+		Token      string `json:"session_token"`
+		ID         string `json:"session_id"`
+		Page       string `json:"page_id"`
+		App        string `json:"application_id"`
+		Generation string `json:"generation"`
+		Version    string `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &admitted); err != nil || len(admitted.Token) != 64 || admitted.ID == "" || admitted.ID == admitted.Token || admitted.Page != page || admitted.App != "gridcraft" || admitted.Generation == "" || admitted.Version != "1" {
+		t.Fatal("initialization receipt lacks exact admission/version binding")
+	}
+	status, raw = call("GET", page, "document", owner, admitted.Token, nil)
+	if status != 200 {
+		t.Fatalf("initialized read %d %s", status, raw)
+	}
+	var read craftNativeDocumentResponse
+	if err := json.Unmarshal(raw, &read); err != nil || read.Version != "1" || !bytes.Equal(read.Bytes, initial) {
+		t.Fatal("initial model was not preserved")
+	}
+	body := craftNativeDataTCPBody(f, cfg, admitted.ID, admitted.Generation, "1", "opaque:init-next", []byte(`{"v":2}`))
+	body["pageId"] = page
+	body["applicationId"] = "gridcraft"
+	if status, raw = call("POST", page, "document/save", owner, admitted.Token, body); status != 200 {
+		t.Fatalf("issued lease cannot save %d %s", status, raw)
+	}
+	if status, _ = call("POST", page, "initialize", owner, "", map[string]any{"application_id": "gridcraft", "bytes": initial}); status != 409 {
+		t.Fatalf("reinitialization must not replace content: %d", status)
+	}
+	var head int
+	if err := f.db.QueryRow(`SELECT latest_version FROM artifact_version_heads WHERE page_id=?`, page).Scan(&head); err != nil || head != 2 {
+		t.Fatalf("reinitialize changed head=%d err=%v", head, err)
 	}
 }

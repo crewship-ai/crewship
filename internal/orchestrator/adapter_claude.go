@@ -58,7 +58,7 @@ func resolveMaxTurns(req AgentRunRequest) int {
 // claudePromptViaStdin is the shared predicate behind PromptViaStdin and the
 // arg-omission branch in BuildCommand so the two never disagree.
 func claudePromptViaStdin(req AgentRunRequest) bool {
-	return req.mooringDocumentTools || len(req.UserMessage) > promptArgMaxBytes
+	return (req.mooringDocumentTools || req.nativeCraftTools) || len(req.UserMessage) > promptArgMaxBytes
 }
 
 // PromptViaStdin routes oversized prompts through stdin to dodge E2BIG. Normal
@@ -128,7 +128,7 @@ func (claudeCodeAdapter) BuildCommand(req AgentRunRequest) []string {
 	// --mcp-config and are unaffected, so crewship-memory + Composio still
 	// resolve. The per-profile policy lives in builtinToolAllowlist.
 	tools := builtinToolAllowlistCSV(req.ToolProfile)
-	if req.mooringDocumentTools {
+	if req.mooringDocumentTools || req.nativeCraftTools {
 		tools = ""
 	}
 	cmd = append(cmd, "--tools", tools)

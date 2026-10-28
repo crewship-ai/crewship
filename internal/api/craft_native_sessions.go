@@ -21,6 +21,24 @@ func craftNativeOpaque() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 func (m *craftNativeHTTP) leaseAuthority(ctx context.Context, tx *sql.Tx, a mooring.EditLeaseAccess) error {
+	if _, ok := ctx.Value(craftNativeAgentStoppedKey{}).(*craftNativeAgentStoppedProof); ok {
+		if m.agents == nil {
+			return errCraftNativeAgentDenied
+		}
+		return m.agents.authorizeStoppedLease(ctx, tx, a)
+	}
+	if _, ok := ctx.Value(craftNativeAgentCancelKey{}).(*craftNativeAgentCancelProof); ok {
+		if m.agents == nil {
+			return errCraftNativeAgentDenied
+		}
+		return m.agents.authorizeCancel(ctx, tx, a)
+	}
+	if _, ok := ctx.Value(craftNativeAgentContextKey{}).(*craftNativeAgentCall); ok {
+		if m.agents == nil {
+			return errCraftNativeAgentDenied
+		}
+		return m.agents.authorizeLease(ctx, tx, a)
+	}
 	m.mu.Lock()
 	entry := m.sessionsByID[a.Principal.SessionID]
 	m.mu.Unlock()
