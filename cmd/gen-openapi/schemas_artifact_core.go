@@ -36,8 +36,9 @@ func artifactProjectCoreComponents() map[string]any {
 	schemas["ArtifactProjectAvailability"] = object(map[string]any{"enabled": boolean()}, "enabled")
 	manifestProps := map[string]any{"entrypoint": path(), "files": files("ArtifactProjectFileInput"), "message": text(4096)}
 	schemas["ArtifactProjectCreateRequest"] = object(mergeProps(manifestProps, map[string]any{
-		"slug": map[string]any{"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$", "description": "New Page slug; reserved route names are refused."},
-		"name": map[string]any{"type": "string", "minLength": 1, "maxLength": 200}, "base_version": map[string]any{"type": "integer", "enum": []int{0}},
+		"created_by_test": boolean(),
+		"slug":            map[string]any{"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$", "description": "New Page slug; reserved route names are refused."},
+		"name":            map[string]any{"type": "string", "minLength": 1, "maxLength": 200}, "base_version": map[string]any{"type": "integer", "enum": []int{0}},
 	}), "slug", "name", "entrypoint", "files")
 	schemas["ArtifactProjectPublishRequest"] = object(mergeProps(manifestProps, map[string]any{"base_version": integer(1)}), "base_version", "entrypoint", "files")
 	schemas["ArtifactProjectVersionRequest"] = object(map[string]any{"base_version": integer(1), "version": integer(1)}, "base_version", "version")

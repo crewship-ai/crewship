@@ -697,6 +697,10 @@ func (h *PageHandler) BatchMoveFolderPages(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	if hasPageReviewFields(body) {
+		replyError(w, 400, "batch preview is not supported; no Page was changed")
+		return
+	}
 	var req pageFolderBatchMoveRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid JSON body")

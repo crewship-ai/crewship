@@ -12,7 +12,7 @@ func mooringSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	manifest := obj(map[string]any{"id": text, "protocol_version": text, "format": text, "editor": editor, "initial_state": value, "commands": map[string]any{"type": "array", "items": command}}, "id", "protocol_version", "format", "editor", "initial_state", "commands")
 	state := obj(map[string]any{"rev": positive, "generation": positive, "snapshot": value}, "rev", "generation", "snapshot")
 	receipt := obj(map[string]any{"mutation_id": text, "rev": positive, "outcome": text, "issued_by": text, "durability": text, "visibility": text, "payload_hash": text, "at": text}, "mutation_id", "rev", "outcome", "issued_by", "durability", "visibility", "payload_hash", "at")
-	create := obj(map[string]any{"app_id": text, "slug": text, "name": text}, "app_id", "slug", "name")
+	create := obj(map[string]any{"app_id": text, "slug": text, "name": text, "created_by_test": map[string]any{"type": "boolean"}}, "app_id", "slug", "name")
 	created := obj(map[string]any{"page_id": text, "app_id": text, "slug": text, "name": text}, "page_id", "app_id", "slug", "name")
 	read := obj(map[string]any{"app_id": text, "manifest": ref("MooringManifest"), "state": ref("MooringState"), "editor": obj(map[string]any{"url": text, "bundle_digest": text})}, "app_id", "manifest", "state", "editor")
 	request := obj(map[string]any{"mutation_id": text, "base_rev": positive, "generation": positive, "command": text, "arguments": value}, "mutation_id", "base_rev", "generation", "command", "arguments")

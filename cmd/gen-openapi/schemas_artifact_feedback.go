@@ -33,9 +33,9 @@ func artifactProjectFeedbackComponents() map[string]any {
 	schemas["ArtifactProjectSnapshot"] = object(map[string]any{
 		"artifact_kind": map[string]any{"type": "string", "enum": []string{"slides"}},
 		"page_id":       str(), "name": str(), "slug": str(), "origin": map[string]any{"oneOf": []any{ref("ArtifactProjectOrigin"), map[string]any{"type": "null"}}},
-		"enabled": boolean(), "can_write": boolean(), "latest_version": integer(1), "shared_version": integer(0), "manifest": ref("ArtifactProjectManifest"),
+		"enabled": boolean(), "can_write": boolean(), "can_comment": boolean(), "latest_version": integer(1), "shared_version": integer(0), "manifest": ref("ArtifactProjectManifest"),
 		"versions": array(ref("ArtifactProjectVersion")), "quota": ref("ArtifactProjectQuota"), "comments": array(ref("ArtifactProjectComment")),
-	}, "page_id", "name", "slug", "origin", "enabled", "can_write", "latest_version", "shared_version", "manifest", "versions", "quota", "comments")
+	}, "page_id", "name", "slug", "origin", "enabled", "can_write", "can_comment", "latest_version", "shared_version", "manifest", "versions", "quota", "comments")
 	schemas["ArtifactProjectCommentRequest"] = object(map[string]any{
 		"version": integer(1), "path": path(), "selector": text(2000), "quote": text(2000), "text": text(10000), "send_to_agent": boolean(),
 	}, "version", "path", "selector", "quote", "text")

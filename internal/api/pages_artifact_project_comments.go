@@ -117,6 +117,10 @@ func artifactProjectAnchor(content []byte, selector, quote string) bool {
 	return false
 }
 func (h *PageHandler) artifactProjectCommentTx(r *http.Request, k artifacts.VersionKey, write bool, fn func(context.Context, *sql.Tx, string) error) error {
+	return h.artifactProjectCommentTxAuthorized(r, k, h.artifactProjectAuthority(r, k, write, false), fn)
+}
+
+func (h *PageHandler) artifactProjectCommentTxAuthorized(r *http.Request, k artifacts.VersionKey, authorize artifacts.VersionAuthorize, fn func(context.Context, *sql.Tx, string) error) error {
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		return err
@@ -125,7 +129,7 @@ func (h *PageHandler) artifactProjectCommentTx(r *http.Request, k artifacts.Vers
 	if _, err = tx.ExecContext(r.Context(), `UPDATE document_writer_fence SET seq=seq WHERE id=1`); err != nil {
 		return err
 	}
-	actor, err := h.artifactProjectAuthority(r, k, write, false)(r.Context(), tx)
+	actor, err := authorize(r.Context(), tx)
 	if err != nil {
 		return err
 	}
@@ -133,7 +137,7 @@ func (h *PageHandler) artifactProjectCommentTx(r *http.Request, k artifacts.Vers
 	if err = fn(ctx, tx, actor); err != nil {
 		return err
 	}
-	finalActor, err := h.artifactProjectAuthority(r, k, write, false)(ctx, tx)
+	finalActor, err := authorize(ctx, tx)
 	if err != nil {
 		return err
 	}
@@ -293,7 +297,7 @@ func (h *PageHandler) CreateArtifactProjectComment(w http.ResponseWriter, r *htt
 	if !ok {
 		return
 	}
-	if err := h.artifactProjectCheck(r, k, true); err != nil {
+	if _, err := h.artifactProjectStore(r.Context()).Quota(r.Context(), k, h.artifactProjectCommentAuthority(r, k)); err != nil {
 		artifactProjectError(w, err)
 		return
 	}
@@ -313,9 +317,9 @@ func (h *PageHandler) CreateArtifactProjectComment(w http.ResponseWriter, r *htt
 		return
 	}
 	out := artifactProjectComment{ID: generateCUID(), Version: p.Version, Path: p.Path, Selector: p.Selector, Quote: p.Quote, Text: p.Text, Replies: []artifactProjectReply{}, CreatedAt: tsformat.Format(h.clock.Now()), Status: "comment"}
-	err := h.artifactProjectCommentTx(r, k, true, func(ctx context.Context, tx *sql.Tx, actor string) error {
-		var head int64
-		if err := tx.QueryRowContext(ctx, `SELECT latest_version FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&head); err != nil {
+	err := h.artifactProjectCommentTxAuthorized(r, k, h.artifactProjectCommentAuthority(r, k), func(ctx context.Context, tx *sql.Tx, actor string) error {
+		head, err := artifactCommentVersion(ctx, tx, k, actor)
+		if err != nil {
 			return err
 		}
 		if head != p.Version {
@@ -350,7 +354,7 @@ func (h *PageHandler) CreateArtifactProjectComment(w http.ResponseWriter, r *htt
 			out.TaskID = generateCUID()
 			out.Status = "pending"
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO artifact_project_comments(id,workspace_id,page_id,version,path,selector,quote,text,author,task_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, out.ID, k.WorkspaceID, k.PageID, p.Version, p.Path, p.Selector, p.Quote, p.Text, actor, nullIfEmpty(out.TaskID), out.CreatedAt)
+		_, err = tx.ExecContext(ctx, `INSERT INTO artifact_project_comments(id,workspace_id,page_id,version,path,selector,quote,text,author,task_id,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, out.ID, k.WorkspaceID, k.PageID, p.Version, p.Path, p.Selector, p.Quote, p.Text, actor, nullIfEmpty(out.TaskID), out.CreatedAt)
 		if err != nil {
 			return err
 		}

@@ -45,8 +45,9 @@ type TransferReference struct {
 }
 
 type TransferMetadata struct {
-	ExportedAt string `json:"exported_at" yaml:"exported_at"`
-	PanelCount int    `json:"panel_count" yaml:"panel_count"`
+	CreatedByTest bool   `json:"created_by_test,omitempty" yaml:"created_by_test,omitempty"`
+	ExportedAt    string `json:"exported_at" yaml:"exported_at"`
+	PanelCount    int    `json:"panel_count" yaml:"panel_count"`
 }
 
 type TransferImport struct {

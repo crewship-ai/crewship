@@ -133,6 +133,9 @@ func (h *PageHandler) authorizeCollaborationPageSubject(ctx context.Context, tx 
 	if err != nil {
 		return result, err
 	}
+	if !write && !h.mayReadNativeWithoutComment(ctx, key.WorkspaceID, rec, viewer) {
+		return result, errCollaborationHumanAccess
+	}
 	if !visible || (write && !h.mayEditSpec(ctx, key.WorkspaceID, source.UserID, role, rec)) {
 		return result, errCollaborationHumanAccess
 	}
