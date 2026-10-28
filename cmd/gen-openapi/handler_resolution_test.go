@@ -324,6 +324,10 @@ var requiredQueryParametersInSpec = []string{
 	// Verified against gridcraftHTTP.commits (internal/api/gridcraft_live.go):
 	// a feed request without since is 400. Pinned by
 	// TestGridCraftCommitsFeedUnderReadAccess.
+	// Both Dashboard data reads reject an omitted code version before loading data.
+	// Pinned by TestDashboardDataReadsRequireSelectedCodeVersion.
+	"GET /api/v1/pages/{slug}/artifact/data ?version",
+	"GET /api/v1/pages/{slug}/artifact/data/{collection} ?version",
 	"GET /api/v1/pages/{slug}/workbook/commits ?since",
 	// Mooring's authenticated upgrade refuses a missing original connection_ref.
 	"GET /api/v1/pages/{slug}/mooring/ws ?connection_ref",

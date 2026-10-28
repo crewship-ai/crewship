@@ -166,6 +166,15 @@ func TestDataStoreDatasetBudgetAndRequestBudget(t *testing.T) {
 	if _, err := s.Batch(t.Context(), k, "sales", batch, a); !errors.Is(err, ErrDataQuota) {
 		t.Fatalf("batch over1MiB: %v", err)
 	}
+	// Raw whitespace is persisted and must still count, even though a JSON
+	// remarshal of the value would compact it away.
+	spaced := json.RawMessage(`{"x":` + strings.Repeat(" ", MaxDataDocumentBytes-len(`{"x":1}`)) + `1}`)
+	for i := range batch {
+		batch[i].Value = spaced
+	}
+	if _, err := s.Batch(t.Context(), k, "sales", batch, a); !errors.Is(err, ErrDataQuota) {
+		t.Fatalf("raw whitespace batch over1MiB: %v", err)
+	}
 	for i := 0; i < 32; i++ {
 		if _, err := s.Batch(t.Context(), k, "sales", []DataWrite{{ID: fmt.Sprintf("row%d", i), Value: value}}, a); err != nil {
 			t.Fatal(err)

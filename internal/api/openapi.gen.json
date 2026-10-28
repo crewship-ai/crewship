@@ -1369,6 +1369,176 @@
         },
         "type": "object"
       },
+      "ArtifactDataBatch": {
+        "additionalProperties": false,
+        "properties": {
+          "base_version": {
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactDataWrite"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "base_version",
+          "documents"
+        ],
+        "type": "object"
+      },
+      "ArtifactDataCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "maximum": 8388608,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "documents": {
+            "maximum": 4096,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "documents",
+          "bytes"
+        ],
+        "type": "object"
+      },
+      "ArtifactDataCollections": {
+        "additionalProperties": false,
+        "properties": {
+          "code_version": {
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "collections": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactDataCollection"
+            },
+            "maxItems": 32,
+            "type": "array"
+          }
+        },
+        "required": [
+          "code_version",
+          "collections"
+        ],
+        "type": "object"
+      },
+      "ArtifactDataDocument": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "source_kind": {
+            "enum": [
+              "human",
+              "agent",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "source_label": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "value": {
+            "additionalProperties": true,
+            "description": "At most 256 KiB of JSON; duplicate keys and nesting beyond 64 are rejected. Numbers are preserved without a floating-point conversion.",
+            "type": "object"
+          },
+          "version": {
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "value",
+          "updated_at",
+          "source_label",
+          "source_kind"
+        ],
+        "type": "object"
+      },
+      "ArtifactDataResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "code_version": {
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "collection": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactDataDocument"
+            },
+            "maxItems": 4096,
+            "type": "array"
+          }
+        },
+        "required": [
+          "collection",
+          "code_version",
+          "documents"
+        ],
+        "type": "object"
+      },
+      "ArtifactDataWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "ifVersion": {
+            "format": "int64",
+            "maximum": 9007199254740990,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "value": {
+            "additionalProperties": true,
+            "description": "At most 256 KiB of JSON; duplicate keys and nesting beyond 64 are rejected. Numbers are preserved without a floating-point conversion.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "ifVersion",
+          "value"
+        ],
+        "type": "object"
+      },
       "ArtifactProjectAvailability": {
         "additionalProperties": false,
         "properties": {
@@ -129476,6 +129646,436 @@
           }
         ],
         "summary": "Submit page artifact comment reply",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/artifact/data": {
+      "get": {
+        "description": "Get page artifact data (GET /api/v1/pages/{slug}/artifact/data).",
+        "operationId": "get_api_v1_pages_slug_artifact_data",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDataCollections"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page artifact data",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/artifact/data/{collection}": {
+      "get": {
+        "description": "Get page artifact data (GET /api/v1/pages/{slug}/artifact/data/{collection}).",
+        "operationId": "get_api_v1_pages_slug_artifact_data_collection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDataResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page artifact data",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      },
+      "post": {
+        "description": "Submit page artifact data (POST /api/v1/pages/{slug}/artifact/data/{collection}).",
+        "operationId": "post_api_v1_pages_slug_artifact_data_collection",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactDataBatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDataResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page artifact data",
         "tags": [
           "pages"
         ],

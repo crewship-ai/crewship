@@ -16,6 +16,7 @@ import (
 // is returned unchanged; the CLI never rereads and silently overwrites a head.
 func newPageArtifactCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "artifact", Short: "Create, version and discuss a multi-screen Page artifact"}
+	cmd.AddCommand(newArtifactDataCommand())
 	for _, action := range []string{"create", "publish"} {
 		action := action
 		child := &cobra.Command{Use: action + " <slug>", Args: cobra.ExactArgs(1), Short: "Save a complete atomic file manifest", RunE: func(cmd *cobra.Command, args []string) error {
