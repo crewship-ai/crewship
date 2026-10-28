@@ -8,18 +8,21 @@ export const LEVELS_DESC: ShareLevel[] = [...SHARE_LEVELS].reverse()
 export function accessVia(entry: AccessEntry): string {
   switch (entry.via) {
     case "owner": return "Owner"
-    case "grant": return "Shared directly"
+    case "grant": return entry.inactive ? `Shared directly, not in effect: ${entry.inactive}` : "Shared directly"
     case "folder": return `Via folder ${entry.folderName ?? entry.folderSlug ?? ""}`.trim()
     case "role": return "Workspace role"
+    case "crew": return entry.crew === "withheld" || !entry.crew ? "Through a crew" : `Member of crew ${entry.crew}`
   }
 }
 
 /** Why a row cannot be changed here; null for a direct grant. */
 export function lockedReason(entry: AccessEntry): string | null {
+  if (entry.subjectType === "agent") return "An agent's access is set with crewship page grant"
   switch (entry.via) {
     case "owner": return "The owner always has Edit"
     case "folder": return "Change in folder settings"
     case "role": return "Set by their workspace role"
+    case "crew": return "Set by crew membership"
     case "grant": return null
   }
 }

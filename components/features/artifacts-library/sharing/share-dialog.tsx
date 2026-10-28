@@ -11,7 +11,7 @@ import { useIssuePeople } from "@/hooks/use-issue-people"
 import type { LibraryItem } from "../library-items"
 import { accessVia, byAccess, LEVEL_TONE, LEVELS_DESC, lockedReason } from "./access-reason"
 import {
-  entryKey, SHARE_LEVEL_LABEL, SHARE_LEVEL_MEANING, useAccess, useSharingMutation,
+  entryKey, SHARE_LEVEL_LABEL, SHARE_LEVEL_MEANING, useAccess, useSharingHuman, useSharingMutation,
   type AccessEntry, type ShareInput, type ShareLevel,
 } from "./sharing-api"
 
@@ -27,11 +27,13 @@ export interface ShareDialogProps {
 
 /** The kit's form surface (dialogs-through-kit guard): each change saves as it is made, so the footer only closes. */
 export function ShareDialog({ workspaceId, item, open, onOpenChange }: ShareDialogProps) {
+  // A new session or item starts a new form: nothing typed or read for the previous one carries over.
+  const { humanId } = useSharingHuman()
   const close = () => onOpenChange(false)
   return <CreateSurface open={open} onOpenChange={onOpenChange} size="md">
     <CreateSurfaceHeader icon={Share2} title={`Share “${item.name}”`} description="Choose who in this workspace can open it, and how." onClose={close} />
     <CreateSurfaceBody>
-      {open && <ShareBody key={item.slug} workspaceId={workspaceId} item={item} />}
+      {open && <ShareBody key={`${humanId ?? ""}:${workspaceId}:${item.slug}`} workspaceId={workspaceId} item={item} />}
     </CreateSurfaceBody>
     <CreateSurfaceFooter hint={null} lead={<p className="mr-auto text-micro text-muted-foreground-soft">Only people in this workspace. No public links.</p>} onCancel={close} cancelLabel="Done" />
   </CreateSurface>

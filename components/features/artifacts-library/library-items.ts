@@ -44,8 +44,10 @@ export interface LibraryItem {
   updatedAt: Date | null
   /** Hidden from every view but Archive; nothing is deleted. */
   archived?: boolean
-  /** Made by a test or probe (the server's `origin: "test"`); only the Test items view shows it. */
+  /** Made by a test or probe (the server's `created_by_test`); only the Test items view shows it. */
   test?: boolean
+  /** The Page's `pages_version`, which archive and folder moves are confirmed against. */
+  pagesVersion?: number
 }
 
 /** The version head names projects, dashboards, slides, Word and Sheet; older storage names the rest. */
@@ -85,6 +87,10 @@ export function libraryItems(pages: PageView[]): LibraryItem[] {
       ownerLabel: ownerOf(page),
       folder: page.folder ?? null,
       updatedAt: page.updatedAt,
+      // The server's catalog flags, exactly as sent; nothing is inferred from the name.
+      ...(page.archived ? { archived: true } : {}),
+      ...(page.createdByTest ? { test: true } : {}),
+      ...(typeof page.pagesVersion === "number" ? { pagesVersion: page.pagesVersion } : {}),
     }
   })
   // The server already orders by last edit; keep a stable newest-first order if it did not.
