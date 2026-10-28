@@ -172,7 +172,7 @@ it("keeps the draft and shows one conflict banner on a version conflict", () => 
   act(() => state.comment.mock.calls[0][1].onError(err(409, "artifact_version_conflict")))
   act(() => state.comment.mock.calls[0][1].onError(err(409, "artifact_version_conflict")))
   expect(screen.getAllByText("Changed meanwhile")).toHaveLength(1)
-  expect(screen.getByText("Someone saved a newer version while you were working. Nothing was overwritten.")).toBeInTheDocument()
+  expect(screen.getByText(/Someone saved a newer version while you were working\. Nothing was overwritten\. Your comment and selection are kept/)).toBeInTheDocument()
   expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Keep me")
   fireEvent.click(screen.getByRole("button", { name: "Reload and reapply" }))
   expect(state.snapshot.refetch).toHaveBeenCalled()
@@ -193,13 +193,15 @@ it("warns about quota and reports a full history", () => {
   state.snapshot.data = snap({ quota: { used_bytes: 8 * 1024 * 1024, limit_bytes: 10 * 1024 * 1024, warning: true } })
   render(<ArtifactViewerPanel />)
   expect(screen.getByText("This project is close to its limit")).toBeInTheDocument()
-  expect(screen.getByText(/8\.0 MB of 10 MB \(80%\)\. Old versions stay until someone decides\./)).toBeInTheDocument()
+  expect(screen.getByText(/8\.0 MB of 10 MB \(80%\)\. History is never deleted without you\./)).toBeInTheDocument()
   expect(screen.getByRole("progressbar", { name: "History storage used" })).toHaveAttribute("aria-valuenow", "80")
   selectHero()
   fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "x" } })
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   act(() => state.comment.mock.calls[0][1].onError(err(413, "artifact_history_quota")))
-  expect(screen.getByText("History is full. Your changes were not saved and remain here.")).toBeInTheDocument()
+  expect(screen.getByText("Saving is paused")).toBeInTheDocument()
+  expect(screen.getByText(/History is full, so this was not saved\. Your comment stays here/)).toBeInTheDocument()
+  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("x")
 })
 
 it("restores against the latest version from the history list", () => {
@@ -326,10 +328,10 @@ it("shares only when the viewer can write, after confirming", () => {
   expect(screen.queryByRole("button", { name: /Share|Restore|History/ })).toBeNull()
 })
 
-it("hides the project behind a generic message on 403 and 404", () => {
-  state.snapshot = { data: undefined, isLoading: false, error: err(403, "forbidden"), refetch: vi.fn() }
+it.each([[403, "You can't open this artifact"], [404, "This artifact isn't available"]] as const)("hides the project behind a generic message on %i", (status, message) => {
+  state.snapshot = { data: undefined, isLoading: false, error: err(status, "forbidden"), refetch: vi.fn() }
   render(<ArtifactViewerPanel />)
-  expect(screen.getByText("You don’t have access to this project")).toBeInTheDocument()
+  expect(screen.getByText(message)).toBeInTheDocument()
   expect(screen.queryByText("Launch site")).toBeNull()
 })
 
@@ -337,10 +339,10 @@ const comment = (patch: Partial<ArtifactComment>): ArtifactComment => ({ id: "c"
 it.each<[Partial<ArtifactComment>, string | null]>([
   [{ status: "pending" }, "Waiting"],
   [{ status: "working" }, "Agent working"],
-  [{ status: "answered", answered_version: 5 }, "Done → v5"],
-  [{ status: "answered", replies: [{ text: "ok", version: 4 }] }, "Done → v4"],
+  [{ status: "answered", answered_version: 5 }, "Done · v5"],
+  [{ status: "answered", replies: [{ text: "ok", version: 4 }] }, "Done · v4"],
   [{ status: "needs_clarification" }, "Needs a new selection"],
-  [{ replies: [{ text: "ok", version: 6 }] }, "Done → v6"],
+  [{ replies: [{ text: "ok", version: 6 }] }, "Done · v6"],
   [{ task_id: "t1" }, "Sent to agent"],
   [{}, null],
 ])("queue chip for %j is %j", (patch, label) => {
@@ -362,7 +364,7 @@ it("lists the queue, focuses it for target.tab=comments and jumps to the comment
 it.each([403, 404])("drops the cached project when a background refresh answers %i: no stale preview after access is lost", status => {
   state.snapshot = { data: snap(), isLoading: false, error: err(status, "forbidden"), refetch: vi.fn() }
   render(<ArtifactViewerPanel />)
-  expect(screen.getByText("You don’t have access to this project")).toBeInTheDocument()
+  expect(screen.getByText(status === 403 ? "You can't open this artifact" : "This artifact isn't available")).toBeInTheDocument()
   expect(screen.queryByTitle(/Preview of/)).toBeNull()
   expect(screen.queryByText("Launch site")).toBeNull()
 })
