@@ -9,6 +9,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- Add default-off authored Slides projections and vector PDF export with explicit version pins and current Page/run authority rechecked after rendering. Existing artifact history and comments remain authoritative.
+
+- Add a standalone, bounded Slides-to-PDF foundation with a fixed embedded font, vector shapes and tables, and explicit text overflow errors; product export entrypoints are not enabled yet.
+- Add a bounded Slides artifact import adapter for a closed `deck.json` and authored HTML profile, reusing the existing slide schema and static comment anchors without enabling a new editor or preview.
+
+- Require actual Chromium execution of native document privacy regressions in frontend CI while preserving the strict browser-dialog guard.
 - **Artifact comments could report that the agent did not start after it answered.** Persisted chat acknowledgements now confirm the exact artifact request, and verified task progress clears stale delivery warnings and their retry action.
 - Add a default-off typed artifact Slides preview (`NEXT_PUBLIC_ARTIFACT_SLIDES`) with existing slide canvases, thumbnails, presentation, authored comment anchors and authorized PDF download; requires the backend Slides capability.
 

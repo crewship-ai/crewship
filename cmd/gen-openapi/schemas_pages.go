@@ -168,7 +168,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"color": map[string]any{"type": "string", "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none."},
 	}
 
-	kindMetadata := map[string]any{"type": "string", "enum": []string{"project", "dashboard", "word", "sheet"}, "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard classification requires the enabled data backend."}
+	kindMetadata := map[string]any{"type": "string", "enum": []string{"project", "dashboard", "slides", "word", "sheet"}, "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends."}
 	sharedMetadata := map[string]any{"type": "integer", "minimum": 1, "description": "Current shared code pin; omitted when nothing has been shared."}
 	page := obj(map[string]any{
 		"artifact_kind": kindMetadata, "artifact_shared_version": sharedMetadata,

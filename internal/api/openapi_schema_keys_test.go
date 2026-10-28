@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/webhook"
@@ -45,6 +46,8 @@ var schemaKeyContracts = []struct {
 	value any
 }{
 
+	{name: "ArtifactSlidesProjection", pointer: "/components/schemas/ArtifactSlidesProjection", value: artifacts.ArtifactSlidesProjection{}},
+	{name: "ArtifactSlideAnchor", pointer: "/components/schemas/ArtifactSlideAnchor", value: artifacts.ArtifactSlideAnchor{}},
 	{name: "ArtifactDataCollections", pointer: "/components/schemas/ArtifactDataCollections", value: artifactDataCollectionsResponse{}},
 	{name: "ArtifactDataResponse", pointer: "/components/schemas/ArtifactDataResponse", value: artifactDataResponse{}},
 	{name: "ArtifactDataDocument", pointer: "/components/schemas/ArtifactDataDocument", value: artifactDataDocumentResponse{}},

@@ -17,6 +17,7 @@ import (
 func newPageArtifactCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "artifact", Short: "Create, version and discuss a multi-screen Page artifact"}
 	cmd.AddCommand(newArtifactDataCommand())
+	cmd.AddCommand(newArtifactSlidesCommands()...)
 	for _, action := range []string{"create", "publish"} {
 		action := action
 		child := &cobra.Command{Use: action + " <slug>", Args: cobra.ExactArgs(1), Short: "Save a complete atomic file manifest", RunE: func(cmd *cobra.Command, args []string) error {

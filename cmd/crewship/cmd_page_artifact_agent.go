@@ -25,6 +25,10 @@ func artifactCLIRequest(cmd *cobra.Command, method, path string, body any) error
 // A protected run never falls back to a saved human profile or an environment
 // server URL. Human invocations retain the established authenticated Page CLI.
 func artifactCLIRequestWithTransport(cmd *cobra.Command, method, path string, body any, transport http.RoundTripper) error {
+	return artifactCLIRequestWithResultTransport(cmd, method, path, body, transport, nil)
+}
+
+func artifactCLIRequestWithResultTransport(cmd *cobra.Command, method, path string, body any, transport http.RoundTripper, consume func([]byte) error) error {
 	token := os.Getenv("CREWSHIP_AGENT_TOKEN")
 	if token == "" {
 		if strings.Contains(path, "/artifact/data") {
@@ -81,6 +85,10 @@ func artifactCLIRequestWithTransport(cmd *cobra.Command, method, path string, bo
 		arguments["slug"] = parts[3]
 		suffix := strings.Join(parts[5:], "/")
 		switch {
+		case method == "GET" && suffix == "slides":
+			operation = "artifact_slides_read"
+		case method == "GET" && suffix == "export.pdf":
+			operation = "artifact_export_pdf"
 		case method == "GET" && suffix == "data":
 			operation = "artifact_data_collections"
 		case len(parts) == 7 && parts[5] == "data":
@@ -112,6 +120,12 @@ func artifactCLIRequestWithTransport(cmd *cobra.Command, method, path string, bo
 			return e
 		}
 		arguments["version"] = number
+	}
+	if operation == "artifact_slides_read" || operation == "artifact_export_pdf" {
+		version, err := strconv.ParseInt(parsed.Query().Get("version"), 10, 64)
+		if err != nil || version < 1 || version > artifactSlidesMaxVersion {
+			return errors.New("exact positive safe code version required")
+		}
 	}
 	marshal := json.Marshal
 	if strings.HasPrefix(operation, "artifact_data_") {
@@ -148,7 +162,7 @@ func artifactCLIRequestWithTransport(cmd *cobra.Command, method, path string, bo
 	}
 	defer response.Body.Close()
 	limit := 3 << 20
-	if strings.HasPrefix(operation, "artifact_data_") {
+	if strings.HasPrefix(operation, "artifact_data_") || operation == "artifact_slides_read" || operation == "artifact_export_pdf" {
 		limit = 32 << 20
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, int64(limit)+1))
@@ -177,6 +191,14 @@ func artifactCLIRequestWithTransport(cmd *cobra.Command, method, path string, bo
 	}
 	if !json.Valid(result) {
 		return errors.New("artifact tool returned invalid JSON")
+	}
+	if operation == "artifact_slides_read" || operation == "artifact_export_pdf" {
+		if len(result) > artifactSlidesResponseBytes {
+			return errors.New("Slides tool result exceeds limit")
+		}
+	}
+	if consume != nil {
+		return consume(result)
 	}
 	if strings.HasPrefix(operation, "artifact_data_") {
 		return emitArtifactData(cmd, result)

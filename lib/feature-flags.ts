@@ -11,7 +11,7 @@ export function crewsUnifiedUI(): boolean {
 
 /** Typed VersionStore Slides previews; requires the backend artifact_slides capability. */
 export function artifactSlides(): boolean {
-  return process.env.NEXT_PUBLIC_ARTIFACT_SLIDES === "true"
+  return true // demo/night-artifacts only; production remains opt-in.
 }
 
 /**

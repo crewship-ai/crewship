@@ -21,6 +21,8 @@ const artifactProjectAuthoringContract = " Give meaningful sections, cards, head
 const artifactDashboardAuthoringContract = ` For a Dashboard, include dashboard.json with {"schema_version":1,"collections":["sales"]} in the code files. Use declarative HTML bindings: data-source="sales" selects a declared collection, data-row="*" repeats a row template (or name an existing document ID), and data-field="revenue" selects one literal own JSON key. Use native meter elements for numeric charts. Keep rendering free of authored JavaScript and SDK calls. Put stable artifact- IDs on authored static titles or labels outside bound and repeated subtrees for comments. Update values with artifact_data_batch using current code base_version and exact document ifVersion; data changes preserve the code version.`
 
 var artifactProjectTools = []artifactProjectTool{
+	{"artifact_slides_read", "Read the authorized Slides projection and authored comment anchors at an exact immutable code version. Workspace Slides feature must be enabled; shared readers only receive the current shared version.", []string{"slug", "version"}, []string{"slug", "version"}},
+	{"artifact_export_pdf", "Export authorized Slides as a bounded PDF at an exact immutable code version. Returns verified PDF bytes in a base64 JSON receipt; accepts no filesystem output path. Workspace Slides feature must be enabled.", []string{"slug", "version"}, []string{"slug", "version"}},
 	{"artifact_data_batch", "Atomically upsert bounded JSON dashboard documents in a declared collection using exact document ifVersion values (0 creates) and current code base_version. Does not publish a code version. A 409 requires deliberate reconciliation, never blind retry. Host attribution cannot be supplied." + artifactDashboardAuthoringContract, []string{"slug", "collection", "base_version", "documents"}, []string{"slug", "collection", "base_version", "documents"}},
 	{"artifact_data_read", "Read one declared dashboard collection under the exact selected code version and original Page mandate. Shared readers only receive collections in the current shared manifest.", []string{"slug", "collection", "version"}, []string{"slug", "collection", "version"}},
 	{"artifact_data_collections", "List dataset collections declared by the selected dashboard code version, under current Page read authority.", []string{"slug", "version"}, []string{"slug", "version"}},
@@ -42,7 +44,11 @@ func artifactProjectMCPCatalog() []memoryMCPToolDescriptor {
 			case "needs_clarification":
 				property = map[string]any{"type": "boolean"}
 			case "version", "base_version":
-				property = map[string]any{"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+				minimum := 0
+				if artifactSlidesMCPTool(tool.name) {
+					minimum = 1
+				}
+				property = map[string]any{"type": "integer", "minimum": minimum, "maximum": 9007199254740991}
 			case "files":
 				property = map[string]any{"type": "array", "minItems": 1, "maxItems": 256, "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"path", "content", "media_type"}, "properties": map[string]any{"path": map[string]any{"type": "string"}, "content": map[string]any{"type": "string"}, "media_type": map[string]any{"type": "string"}}}}
 			case "documents":
@@ -58,9 +64,10 @@ func artifactProjectMCPCatalog() []memoryMCPToolDescriptor {
 
 var artifactProjectPathID = regexp.MustCompile(`^@?[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
-// DecodeDocumentDraft rejects duplicate keys at EVERY depth and invalid UTF8.
-// Identity never comes from these arguments: the sidecar forwards the original
-// run bearer and the host independently checks the current immutable mandate.
+func artifactSlidesMCPTool(name string) bool {
+	return name == "artifact_slides_read" || name == "artifact_export_pdf"
+}
+
 func artifactDataMCPTool(name string) bool {
 	switch name {
 	case "artifact_data_batch", "artifact_data_read", "artifact_data_collections":
@@ -69,6 +76,9 @@ func artifactDataMCPTool(name string) bool {
 	return false
 }
 
+// DecodeDocumentDraft rejects duplicate keys at EVERY depth and invalid UTF8.
+// Identity never comes from these arguments: the sidecar forwards the original
+// run bearer and the host independently checks the current immutable mandate.
 func artifactProjectMCPPacket(name string, raw []byte) ([]byte, bool, error) {
 	var definition *artifactProjectTool
 	for i := range artifactProjectTools {
@@ -157,6 +167,12 @@ func artifactProjectMCPPacket(name string, raw []byte) ([]byte, bool, error) {
 			return nil, true, fmt.Errorf("%s required", required)
 		}
 	}
+	if artifactSlidesMCPTool(name) {
+		var version int64
+		if json.Unmarshal(fields["version"], &version) != nil || version < 1 {
+			return nil, true, fmt.Errorf("exact positive code version required")
+		}
+	}
 	var slug string
 	_ = json.Unmarshal(fields["slug"], &slug)
 	delete(fields, "slug")
@@ -198,7 +214,7 @@ func (s *Server) respondArtifactProjectMCPToolCall(w http.ResponseWriter, r *htt
 		return true
 	}
 	limit := int64(2 << 20)
-	if name == "artifact_data_read" {
+	if name == "artifact_data_read" || artifactSlidesMCPTool(name) {
 		limit = artifacts.MaxDataResponseBytes
 	}
 	response, err := s.sendBoundedHostRequest(r, http.MethodPost, "/api/v1/internal/pages/artifact-tool", packet, limit, slug)
@@ -206,7 +222,7 @@ func (s *Server) respondArtifactProjectMCPToolCall(w http.ResponseWriter, r *htt
 		s.writeRoutinesMCPToolResult(w, req, 503, mustJSON(map[string]string{"error": "outcome unavailable; retain candidate and inspect project before retrying"}))
 		return true
 	}
-	if strings.HasPrefix(name, "artifact_data_") {
+	if strings.HasPrefix(name, "artifact_data_") || artifactSlidesMCPTool(name) {
 		s.writeArtifactDataMCPResult(w, req, response.status, response.body)
 	} else {
 		s.writeRoutinesMCPToolResult(w, req, response.status, response.body)
