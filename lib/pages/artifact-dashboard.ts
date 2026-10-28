@@ -74,6 +74,69 @@ export function installDashboardBindings(config: DashboardPreviewOptions & { tok
   // Two extra elements per field conservatively cover meter statuses and provenance lines.
   const staticCost = document.querySelectorAll("*").length + 2 * document.querySelectorAll("[data-field]").length
   const repeatCosts = repeats.map(repeat => 1 + repeat.template.querySelectorAll("*").length + 2 * (repeat.template.matches("[data-field]") ? 1 : 0) + 2 * repeat.template.querySelectorAll("[data-field]").length)
+  const staticFields = Array.from(document.querySelectorAll("[data-field]"))
+  const repeatFields = repeats.map(repeat => [...(repeat.template.matches("[data-field]") ? [repeat.template] : []), ...repeat.template.querySelectorAll("[data-field]")])
+  // Count UTF-8 without allocating an encoded copy of a potentially repeated value.
+  function bytes(text: string): number {
+    let count = 0
+    for (let index = 0; index < text.length; index++) {
+      const code = text.charCodeAt(index)
+      if (code < 128) count++
+      else if (code < 2048) count += 2
+      else if (code >= 0xd800 && code <= 0xdbff && index + 1 < text.length && text.charCodeAt(index + 1) >= 0xdc00 && text.charCodeAt(index + 1) <= 0xdfff) { count += 4; index++ }
+      else count += 3
+    }
+    return count
+  }
+  function markupBytes(root: Element): number {
+    let count = 0
+    for (const element of [root, ...root.querySelectorAll("*")]) for (const attr of element.attributes) count += bytes(attr.name) + bytes(attr.value)
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+    while (walker.nextNode()) count += bytes(walker.currentNode.nodeValue ?? "")
+    return count
+  }
+  const staticBytes = markupBytes(document.documentElement)
+  const repeatBytes = repeats.map(repeat => markupBytes(repeat.template))
+  function binding(element: Element, feeds: Map<string, DashboardCollection>, repeat?: typeof repeats[number], rowId?: string) {
+    const source = element.closest("[data-source]"), rowElement = element.closest("[data-row]")
+    // A clone receives the repeat root's source/row; authored inner boundaries still win.
+    const collection = repeat && (!source || source === repeat.template) ? repeat.collection : source?.getAttribute("data-source")
+    const row = repeat && (!rowElement || rowElement === repeat.template) ? rowId : rowElement?.getAttribute("data-row")
+    const field = element.getAttribute("data-field")
+    const doc = collection && validName(row) ? feeds.get(collection)?.documents.find(item => item.id === row) : undefined
+    const value = doc && validField(field) && doc.value && Object.hasOwn(doc.value, field) ? doc.value[field] : undefined
+    const numeric = typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER && (!Number.isInteger(value) || Number.isSafeInteger(value))
+    const text = typeof value === "string" ? value : numeric || typeof value === "boolean" ? String(value) : value === null ? "—" : "Unavailable"
+    const note = `${collection ?? "Unknown source"}/${row ?? "?"}.${field ?? "?"} · ${doc?.source_label ?? "Unavailable"} · ${doc?.updated_at ?? "not loaded"}`
+    return { value, numeric, text, note }
+  }
+  function withinTextBudget(feeds: Map<string, DashboardCollection>): boolean {
+    let remaining = 16 * 1024 * 1024 - staticBytes
+    // Per-refresh only: never retain text from an earlier authorized dataset.
+    const sizes = new Map<string, number>()
+    const size = (text: string) => { let result = sizes.get(text); if (result === undefined) { result = bytes(text); sizes.set(text, result) } return result }
+    const charge = (amount: number) => (remaining -= amount) >= 0
+    const fieldCost = (element: Element, repeat?: typeof repeats[number], rowId?: string) => {
+      const { value, numeric, text, note } = binding(element, feeds, repeat, rowId)
+      // Value text (or meter aria-label), both note attributes and one provenance line.
+      // Count provenance per field even when the actual renderer deduplicates it.
+      // Fixed overhead also covers generated attribute names and meter status/style attributes.
+      return size(text) + 3 * size(note) + 128 + (element instanceof HTMLMeterElement ? size(numeric ? String(value) : "Unavailable") + 11 : 0)
+    }
+    if (remaining < 0) return false
+    for (const element of staticFields) if (!charge(fieldCost(element))) return false
+    for (let index = 0; index < repeats.length; index++) {
+      const repeat = repeats[index], docs = feeds.get(repeat.collection)!.documents
+      if (!charge(repeatBytes[index] * docs.length)) return false
+      for (const doc of docs) {
+        if (!validName(doc.id)) continue
+        // Over-count the clone's replacement source/row attribute values and names.
+        if (!charge(size(doc.id) + size(repeat.collection) + 23)) return false
+        for (const element of repeatFields[index]) if (!charge(fieldCost(element, repeat, doc.id))) return false
+      }
+    }
+    return true
+  }
   window.addEventListener("message", event => {
     const message = event.data
     if (failed || event.source !== parent || event.origin !== config.hostOrigin || !message || message.type !== "crewship-dashboard-data" || message.token !== config.token || message.code_version !== config.codeVersion || !Number.isSafeInteger(message.seq) || message.seq <= last || !Array.isArray(message.collections) || message.collections.length !== config.collections.length) return
@@ -83,7 +146,7 @@ export function installDashboardBindings(config: DashboardPreviewOptions & { tok
       feeds.set(feed.collection, feed)
     }
     const renderCost = repeats.reduce((total, repeat, index) => total + repeatCosts[index] * feeds.get(repeat.collection)!.documents.length, staticCost)
-    if (renderCost > 100000) {
+    if (renderCost > 100000 || !withinTextBudget(feeds)) {
       failed = true
       const alert = document.createElement("p"); alert.setAttribute("role", "alert")
       alert.textContent = "Dashboard exceeds the preview rendering limit"
@@ -104,16 +167,11 @@ export function installDashboardBindings(config: DashboardPreviewOptions & { tok
     provenance.replaceChildren()
     const notes = new Set<string>()
     for (const element of document.querySelectorAll("[data-field]")) {
-      const collection = element.closest("[data-source]")?.getAttribute("data-source"), row = element.closest("[data-row]")?.getAttribute("data-row"), field = element.getAttribute("data-field")
-      const doc = collection && validName(row) ? feeds.get(collection)?.documents.find(item => item.id === row) : undefined
-      const value = doc && validField(field) && doc.value && Object.hasOwn(doc.value, field) ? doc.value[field] : undefined
-      const numeric = typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER && (!Number.isInteger(value) || Number.isSafeInteger(value))
-      const text = typeof value === "string" ? value : numeric || typeof value === "boolean" ? String(value) : value === null ? "—" : "Unavailable"
+      const { value, numeric, text, note } = binding(element, feeds)
       if (element instanceof HTMLMeterElement) {
         meter(element, numeric ? value as number : undefined)
         element.setAttribute("aria-label", text)
       } else element.textContent = text
-      const note = `${collection ?? "Unknown source"}/${row ?? "?"}.${field ?? "?"} · ${doc?.source_label ?? "Unavailable"} · ${doc?.updated_at ?? "not loaded"}`
       element.setAttribute("title", note); element.setAttribute("aria-description", note)
       if (!notes.has(note)) { const line = document.createElement("p"); line.textContent = note; provenance.append(line); notes.add(note) }
     }

@@ -82,6 +82,36 @@ try {
   assert.equal(await frame.locator("#inherited").textContent(), "Unavailable")
   assert.equal(await frame.locator("img,[onerror]").count(), 0)
   assert.equal(await frame.locator("body").evaluate(() => Object.getPrototypeOf({}) === Object.prototype && !Object.hasOwn(Object.prototype, "polluted")), true)
+  // Calibrate the real setter, then refuse valid small-node / large-text multiplication before mutation.
+  await page.evaluate(() => {
+    window.files = [{ path: "index.html", media_type: "text/html", content: '<h1>Text budget</h1><div data-source="sales"><section data-row="*">' + '<span data-field="revenue"></span>'.repeat(400) + '</section></div>' }]
+    window.openDashboard(false)
+  })
+  await frame.getByRole("heading", { name: "Text budget" }).waitFor()
+  await frame.locator("body").evaluate(() => {
+    window.dataAssignments = 0; window.refreshClones = 0
+    const descriptor = Object.getOwnPropertyDescriptor(Node.prototype, "textContent")
+    Object.defineProperty(Node.prototype, "textContent", { ...descriptor, set(value) {
+      if (this instanceof Element && this.hasAttribute("data-field")) { window.dataAssignments++; if (String(value).length > 1024) return }
+      descriptor.set.call(this, value)
+    } })
+    const original = Element.prototype.cloneNode
+    Element.prototype.cloneNode = function (...args) { window.refreshClones++; return original.apply(this, args) }
+  })
+  await page.evaluate(document => window.feed([document]), doc(12))
+  await frame.locator('[data-field="revenue"]').first().filter({ hasText: "12" }).waitFor()
+  assert.ok(await frame.locator("body").evaluate(() => window.dataAssignments > 0 && window.refreshClones > 0))
+  await frame.locator("body").evaluate(() => { window.dataAssignments = 0; window.refreshClones = 0 })
+  await page.evaluate(document => window.feed([document], { seq: 2 }), doc("x".repeat(64 * 1024)))
+  await frame.getByRole("alert").filter({ hasText: "Dashboard exceeds the preview rendering limit" }).waitFor()
+  assert.equal(await frame.locator("body").evaluate(() => window.dataAssignments), 0)
+  assert.equal(await frame.locator("body").evaluate(() => window.refreshClones), 0)
+  assert.equal(await frame.locator("[data-row], [data-field]").count(), 0)
+  // The same limit is UTF-8 bytes, not JavaScript character count.
+  await page.evaluate(() => window.openDashboard(false))
+  await frame.getByRole("heading", { name: "Text budget" }).waitFor()
+  await page.evaluate(document => window.feed([document]), doc("é".repeat(24 * 1024)))
+  await frame.getByRole("alert").filter({ hasText: "Dashboard exceeds the preview rendering limit" }).waitFor()
   // A small authored template times a valid collection must be bounded before any refresh clone.
   await page.evaluate(() => {
     window.files = [{ path: "index.html", media_type: "text/html", content: '<h1>Bounded dashboard</h1><div data-source="sales"><section data-row="*">' + '<span data-field="revenue"></span>'.repeat(16) + '</section></div>' }]
