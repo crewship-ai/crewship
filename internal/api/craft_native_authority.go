@@ -59,6 +59,9 @@ func (m *craftNativeHTTP) pageAuthority(ctx context.Context, tx *sql.Tx, source 
 	if err != nil {
 		return result, err
 	}
+	if !write && !m.pages.mayReadNativeWithoutComment(ctx, scope.WorkspaceID, rec, viewer) {
+		return result, errCraftNativeAccess
+	}
 	if !visible || write && !m.pages.mayEditSpec(ctx, scope.WorkspaceID, source.UserID, role, rec) {
 		return result, errCraftNativeAccess
 	}

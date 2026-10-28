@@ -44,9 +44,16 @@ func TestNativeDeckStoreBinaryReceiptRestoreAndCustody(t *testing.T) {
 		}
 		return nil
 	}
+	// Application is captured by the VersionStore constructor as well as the
+	// native validator. Rebuild both together, as production profile setup does.
+	s = NewNativeStore(s.db, s.config)
 	lease, r, err := s.Initialize(t.Context(), scope, p, first)
 	if err != nil || r.Version != 1 {
 		t.Fatalf("Deck initialization: %+v %v", r, err)
+	}
+	var family string
+	if err := s.db.QueryRowContext(t.Context(), `SELECT content_type FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, scope.WorkspaceID, scope.ArtifactID).Scan(&family); err != nil || family != "deckcraft" {
+		t.Fatalf("Deck fixture must use its actual persistent family: %q %v", family, err)
 	}
 	check := func(want []byte, version int64) {
 		t.Helper()

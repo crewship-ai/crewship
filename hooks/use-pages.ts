@@ -129,6 +129,9 @@ export interface WirePanel {
 }
 
 export interface WirePage {
+  created_by_test?: boolean
+  archived?: boolean
+  archived_at?: string
   native_craft_application?: string
   /** Explicit server classification, independent of folder or owner. */
   private_audience?: boolean
@@ -487,6 +490,9 @@ function emptyTally(): PanelTally {
 
 /** A page as every Pages surface consumes it. */
 export interface PageView {
+  createdByTest?: boolean
+  archived?: boolean
+  archivedAt?: string
   nativeCraftApplication?: "wordcraft" | "gridcraft" | "deckcraft"
   /** Actual validated wire ID only; never the legacy slug-derived row key. */
   immutablePageId?: string
@@ -650,6 +656,9 @@ export function toPageView(raw: WirePage): PageView {
   const slug = trimmed(raw.slug) ?? ""
   return {
     id: trimmed(raw.id) ?? slug,
+    createdByTest: raw.created_by_test === true,
+    archived: raw.archived === true,
+    archivedAt: typeof raw.archived_at === "string" && raw.archived_at ? raw.archived_at : undefined,
     immutablePageId: typeof raw.id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(raw.id) ? raw.id : undefined,
     hasDocument: raw.has_document === true,
     privateAudience: typeof raw.private_audience === "boolean" ? raw.private_audience : undefined,

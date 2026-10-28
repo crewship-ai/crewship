@@ -1686,6 +1686,9 @@
             ],
             "type": "integer"
           },
+          "created_by_test": {
+            "type": "boolean"
+          },
           "entrypoint": {
             "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
             "maxLength": 512,
@@ -2058,6 +2061,9 @@
             ],
             "type": "string"
           },
+          "can_comment": {
+            "type": "boolean"
+          },
           "can_write": {
             "type": "boolean"
           },
@@ -2119,6 +2125,7 @@
           "origin",
           "enabled",
           "can_write",
+          "can_comment",
           "latest_version",
           "shared_version",
           "manifest",
@@ -12896,6 +12903,9 @@
         "properties": {
           "app_id": {
             "type": "string"
+          },
+          "created_by_test": {
+            "type": "boolean"
           },
           "name": {
             "type": "string"
@@ -122153,6 +122163,13 @@
                       "description": "The pages in this folder the caller reaches, as index rows.",
                       "items": {
                         "properties": {
+                          "archived": {
+                            "type": "boolean"
+                          },
+                          "archived_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
                           "artifact_kind": {
                             "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                             "enum": [
@@ -122184,6 +122201,9 @@
                           "created_at": {
                             "format": "date-time",
                             "type": "string"
+                          },
+                          "created_by_test": {
+                            "type": "boolean"
                           },
                           "description": {
                             "type": "string"
@@ -122317,6 +122337,10 @@
                             "type": "string"
                           }
                         },
+                        "required": [
+                          "created_by_test",
+                          "archived"
+                        ],
                         "type": "object"
                       },
                       "type": "array"
@@ -123469,6 +123493,12 @@
                     "description": "The folder's acl_version as last read. Required.",
                     "type": "integer"
                   },
+                  "confirm": {
+                    "type": "boolean"
+                  },
+                  "dry_run": {
+                    "type": "boolean"
+                  },
                   "page": {
                     "description": "The slug of the page to file here; it leaves any other folder it was in.",
                     "type": "string"
@@ -123476,6 +123506,9 @@
                   "pages_version": {
                     "description": "The page's pages_version as last read. Required.",
                     "type": "integer"
+                  },
+                  "review_token": {
+                    "type": "string"
                   }
                 },
                 "type": "object"
@@ -123489,64 +123522,527 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "page": {
+                  "oneOf": [
+                    {
                       "properties": {
-                        "artifact_kind": {
-                          "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
-                          "enum": [
-                            "project",
-                            "dashboard",
-                            "slides",
-                            "word",
-                            "sheet"
+                        "page": {
+                          "properties": {
+                            "archived": {
+                              "type": "boolean"
+                            },
+                            "archived_at": {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            "artifact_kind": {
+                              "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
+                              "enum": [
+                                "project",
+                                "dashboard",
+                                "slides",
+                                "word",
+                                "sheet"
+                              ],
+                              "type": "string"
+                            },
+                            "artifact_shared_version": {
+                              "description": "Current shared code pin; omitted when nothing has been shared.",
+                              "minimum": 1,
+                              "type": "integer"
+                            },
+                            "can_move": {
+                              "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
+                              "type": "boolean"
+                            },
+                            "can_remove_from_folder": {
+                              "description": "The page is filed and the caller is its owner, workspace administrator, or a live folder ACL writer.",
+                              "type": "boolean"
+                            },
+                            "color": {
+                              "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
+                              "type": "string"
+                            },
+                            "created_at": {
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            "created_by_test": {
+                              "type": "boolean"
+                            },
+                            "description": {
+                              "type": "string"
+                            },
+                            "folder": {
+                              "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                              "oneOf": [
+                                {
+                                  "properties": {
+                                    "color": {
+                                      "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
+                                      "type": "string"
+                                    },
+                                    "icon": {
+                                      "description": "A crew icon name, or empty for the client's default folder glyph.",
+                                      "type": "string"
+                                    },
+                                    "name": {
+                                      "type": "string"
+                                    },
+                                    "slug": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "has_application": {
+                              "type": "boolean"
+                            },
+                            "has_document": {
+                              "type": "boolean"
+                            },
+                            "has_project": {
+                              "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
+                              "type": "boolean"
+                            },
+                            "has_workbook": {
+                              "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels.",
+                              "type": "boolean"
+                            },
+                            "icon": {
+                              "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
+                              "type": "string"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "last_produced_at": {
+                              "description": "Newest produced_at across the page's visible panels. NOT updated_at, which §10 defines as the SPEC's modification time — a page edited an hour ago whose data last arrived a week ago must not read as \"updated today\".",
+                              "format": "date-time",
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "native_craft_application": {
+                              "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
+                              "enum": [
+                                "wordcraft",
+                                "gridcraft",
+                                "deckcraft"
+                              ],
+                              "type": "string"
+                            },
+                            "owner": {
+                              "type": "string"
+                            },
+                            "owner_crew_slug": {
+                              "type": "string"
+                            },
+                            "pages_version": {
+                              "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                              "type": "integer"
+                            },
+                            "panel_count": {
+                              "description": "Every panel on the page, sealed ones included — the grid draws a placeholder for those, so a count that skipped them would disagree with what the page renders.",
+                              "type": "integer"
+                            },
+                            "panel_states": {
+                              "properties": {
+                                "failed": {
+                                  "type": "integer"
+                                },
+                                "fresh": {
+                                  "type": "integer"
+                                },
+                                "never_produced": {
+                                  "type": "integer"
+                                },
+                                "stale": {
+                                  "type": "integer"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "private_audience": {
+                              "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience.",
+                              "readOnly": true,
+                              "type": "boolean"
+                            },
+                            "publication_version": {
+                              "type": "integer"
+                            },
+                            "reach": {
+                              "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `folder:\u003cslug\u003e` (the folder the page is in is shared with the caller), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted on the index: a page is listed because the caller reaches it. The one exception is the row a removal returns to a `w` holder who just took away their own path, which carries an empty reach. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "slug": {
+                              "type": "string"
+                            },
+                            "state": {
+                              "description": "The page's worst panel.",
+                              "enum": [
+                                "fresh",
+                                "stale",
+                                "failed",
+                                "never_produced"
+                              ],
+                              "type": "string"
+                            },
+                            "updated_at": {
+                              "format": "date-time",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "created_by_test",
+                            "archived"
                           ],
-                          "type": "string"
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "page"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "after": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "subjects": {
+                              "items": {
+                                "properties": {
+                                  "effective_permissions": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "comment": {
+                                        "type": "boolean"
+                                      },
+                                      "edit": {
+                                        "type": "boolean"
+                                      },
+                                      "produce": {
+                                        "type": "boolean"
+                                      },
+                                      "read": {
+                                        "type": "boolean"
+                                      }
+                                    },
+                                    "required": [
+                                      "read",
+                                      "comment",
+                                      "edit",
+                                      "produce"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "label": {
+                                    "description": "An email, a crew slug or an agent slug. Absent on the withheld row.",
+                                    "type": "string"
+                                  },
+                                  "paths": {
+                                    "items": {
+                                      "description": "One path: `owner`, `role`, `crew:\u003cslug\u003e` (member of the owning crew), `panel_crew:\u003cslug\u003e` (member of a crew owning a panel), `grant:page:\u003clevel\u003e` (a live grant of that level), or `panel_crew:withheld` (a crew the caller may not see). For a crew subject `owner` means the crew owns the page and `panel_crew:\u003cits slug\u003e` that it owns a panel; an agent reaches only through `grant:page:\u003clevel\u003e`.",
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "sources": {
+                                    "items": {
+                                      "properties": {
+                                        "inherited": {
+                                          "type": "boolean"
+                                        },
+                                        "path": {
+                                          "type": "string"
+                                        },
+                                        "permissions": {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "comment": {
+                                              "type": "boolean"
+                                            },
+                                            "edit": {
+                                              "type": "boolean"
+                                            },
+                                            "produce": {
+                                              "type": "boolean"
+                                            },
+                                            "read": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          "required": [
+                                            "read",
+                                            "comment",
+                                            "edit",
+                                            "produce"
+                                          ],
+                                          "type": "object"
+                                        }
+                                      },
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "subject_id": {
+                                    "description": "The stored id, or `withheld` on the anonymous row that stands for the crews the caller cannot see.",
+                                    "type": "string"
+                                  },
+                                  "subject_type": {
+                                    "enum": [
+                                      "user",
+                                      "crew",
+                                      "agent",
+                                      "workspace"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "subject_type",
+                                  "subject_id",
+                                  "paths",
+                                  "effective_permissions",
+                                  "sources"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "withheld": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "subjects",
+                            "withheld"
+                          ],
+                          "type": "object"
                         },
-                        "artifact_shared_version": {
-                          "description": "Current shared code pin; omitted when nothing has been shared.",
-                          "minimum": 1,
-                          "type": "integer"
+                        "before": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "subjects": {
+                              "items": {
+                                "properties": {
+                                  "effective_permissions": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "comment": {
+                                        "type": "boolean"
+                                      },
+                                      "edit": {
+                                        "type": "boolean"
+                                      },
+                                      "produce": {
+                                        "type": "boolean"
+                                      },
+                                      "read": {
+                                        "type": "boolean"
+                                      }
+                                    },
+                                    "required": [
+                                      "read",
+                                      "comment",
+                                      "edit",
+                                      "produce"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "label": {
+                                    "description": "An email, a crew slug or an agent slug. Absent on the withheld row.",
+                                    "type": "string"
+                                  },
+                                  "paths": {
+                                    "items": {
+                                      "description": "One path: `owner`, `role`, `crew:\u003cslug\u003e` (member of the owning crew), `panel_crew:\u003cslug\u003e` (member of a crew owning a panel), `grant:page:\u003clevel\u003e` (a live grant of that level), or `panel_crew:withheld` (a crew the caller may not see). For a crew subject `owner` means the crew owns the page and `panel_crew:\u003cits slug\u003e` that it owns a panel; an agent reaches only through `grant:page:\u003clevel\u003e`.",
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "sources": {
+                                    "items": {
+                                      "properties": {
+                                        "inherited": {
+                                          "type": "boolean"
+                                        },
+                                        "path": {
+                                          "type": "string"
+                                        },
+                                        "permissions": {
+                                          "additionalProperties": false,
+                                          "properties": {
+                                            "comment": {
+                                              "type": "boolean"
+                                            },
+                                            "edit": {
+                                              "type": "boolean"
+                                            },
+                                            "produce": {
+                                              "type": "boolean"
+                                            },
+                                            "read": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          "required": [
+                                            "read",
+                                            "comment",
+                                            "edit",
+                                            "produce"
+                                          ],
+                                          "type": "object"
+                                        }
+                                      },
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "subject_id": {
+                                    "description": "The stored id, or `withheld` on the anonymous row that stands for the crews the caller cannot see.",
+                                    "type": "string"
+                                  },
+                                  "subject_type": {
+                                    "enum": [
+                                      "user",
+                                      "crew",
+                                      "agent",
+                                      "workspace"
+                                    ],
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "subject_type",
+                                  "subject_id",
+                                  "paths",
+                                  "effective_permissions",
+                                  "sources"
+                                ],
+                                "type": "object"
+                              },
+                              "type": "array"
+                            },
+                            "withheld": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "subjects",
+                            "withheld"
+                          ],
+                          "type": "object"
                         },
-                        "can_move": {
-                          "description": "The caller may initiate movement as page owner or workspace administrator; the destination must also accept them.",
+                        "changed": {
                           "type": "boolean"
                         },
-                        "can_remove_from_folder": {
-                          "description": "The page is filed and the caller is its owner, workspace administrator, or a live folder ACL writer.",
+                        "changes": {
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "after": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "comment": {
+                                    "type": "boolean"
+                                  },
+                                  "edit": {
+                                    "type": "boolean"
+                                  },
+                                  "produce": {
+                                    "type": "boolean"
+                                  },
+                                  "read": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "read",
+                                  "comment",
+                                  "edit",
+                                  "produce"
+                                ],
+                                "type": "object"
+                              },
+                              "before": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "comment": {
+                                    "type": "boolean"
+                                  },
+                                  "edit": {
+                                    "type": "boolean"
+                                  },
+                                  "produce": {
+                                    "type": "boolean"
+                                  },
+                                  "read": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "read",
+                                  "comment",
+                                  "edit",
+                                  "produce"
+                                ],
+                                "type": "object"
+                              },
+                              "label": {
+                                "type": "string"
+                              },
+                              "subject_id": {
+                                "type": "string"
+                              },
+                              "subject_type": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "subject_type",
+                              "subject_id",
+                              "before",
+                              "after"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "dry_run": {
                           "type": "boolean"
                         },
-                        "color": {
-                          "description": "The page's colour: a crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty for none.",
-                          "type": "string"
-                        },
-                        "created_at": {
-                          "format": "date-time",
-                          "type": "string"
-                        },
-                        "description": {
-                          "type": "string"
-                        },
-                        "folder": {
-                          "description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted.",
+                        "from_folder": {
                           "oneOf": [
                             {
+                              "additionalProperties": false,
                               "properties": {
-                                "color": {
-                                  "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty.",
-                                  "type": "string"
+                                "acl_version": {
+                                  "minimum": 0,
+                                  "type": "integer"
                                 },
-                                "icon": {
-                                  "description": "A crew icon name, or empty for the client's default folder glyph.",
-                                  "type": "string"
-                                },
-                                "name": {
+                                "id": {
                                   "type": "string"
                                 },
                                 "slug": {
                                   "type": "string"
                                 }
                               },
+                              "required": [
+                                "id",
+                                "slug",
+                                "acl_version"
+                              ],
                               "type": "object"
                             },
                             {
@@ -123554,115 +124050,57 @@
                             }
                           ]
                         },
-                        "has_application": {
-                          "type": "boolean"
-                        },
-                        "has_document": {
-                          "type": "boolean"
-                        },
-                        "has_project": {
-                          "description": "This Page has application source (a project draft) at all, published or not. Distinct from has_application, which is true only while a publication is running: a Page awaiting its FIRST publication has has_project true and has_application false, and that is the case the publication review exists for.",
-                          "type": "boolean"
-                        },
-                        "has_workbook": {
-                          "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels.",
-                          "type": "boolean"
-                        },
-                        "icon": {
-                          "description": "The page's icon: a crew icon name (the crew icon picker's set, lib/crew-icons.ts), or empty for the default page glyph. Refused by name outside the set.",
+                        "page": {
                           "type": "string"
                         },
-                        "id": {
-                          "type": "string"
-                        },
-                        "last_produced_at": {
-                          "description": "Newest produced_at across the page's visible panels. NOT updated_at, which §10 defines as the SPEC's modification time — a page edited an hour ago whose data last arrived a week ago must not read as \"updated today\".",
-                          "format": "date-time",
-                          "type": "string"
-                        },
-                        "name": {
-                          "type": "string"
-                        },
-                        "native_craft_application": {
-                          "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
-                          "enum": [
-                            "wordcraft",
-                            "gridcraft",
-                            "deckcraft"
-                          ],
-                          "type": "string"
-                        },
-                        "owner": {
-                          "type": "string"
-                        },
-                        "owner_crew_slug": {
+                        "page_id": {
                           "type": "string"
                         },
                         "pages_version": {
-                          "description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale.",
+                          "maximum": 9007199254740991,
+                          "minimum": 0,
                           "type": "integer"
                         },
-                        "panel_count": {
-                          "description": "Every panel on the page, sealed ones included — the grid draws a placeholder for those, so a count that skipped them would disagree with what the page renders.",
-                          "type": "integer"
+                        "review_token": {
+                          "type": "string"
                         },
-                        "panel_states": {
+                        "to_folder": {
+                          "additionalProperties": false,
                           "properties": {
-                            "failed": {
+                            "acl_version": {
+                              "minimum": 0,
                               "type": "integer"
                             },
-                            "fresh": {
-                              "type": "integer"
+                            "id": {
+                              "type": "string"
                             },
-                            "never_produced": {
-                              "type": "integer"
-                            },
-                            "stale": {
-                              "type": "integer"
+                            "slug": {
+                              "type": "string"
                             }
                           },
-                          "type": "object"
-                        },
-                        "private_audience": {
-                          "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience.",
-                          "readOnly": true,
-                          "type": "boolean"
-                        },
-                        "publication_version": {
-                          "type": "integer"
-                        },
-                        "reach": {
-                          "description": "The paths by which the CALLER reaches this page, in a fixed order: `owner` (the caller is owner_user_id), `role` (the caller's workspace role carries manage), `crew:\u003cslug\u003e` (the caller belongs to the owning crew), `panel_crew:\u003cslug\u003e` (one per distinct crew of the caller's that owns a panel, in panel order), `folder:\u003cslug\u003e` (the folder the page is in is shared with the caller), `grant` (a live grant names the caller or one of their crews). Never empty and never omitted on the index: a page is listed because the caller reaches it. The one exception is the row a removal returns to a `w` holder who just took away their own path, which carries an empty reach. It describes the caller and nobody else — the page's ACL is the grants endpoint's, behind its own gate.",
-                          "items": {
-                            "type": "string"
-                          },
-                          "type": "array"
-                        },
-                        "slug": {
-                          "type": "string"
-                        },
-                        "state": {
-                          "description": "The page's worst panel.",
-                          "enum": [
-                            "fresh",
-                            "stale",
-                            "failed",
-                            "never_produced"
+                          "required": [
+                            "id",
+                            "slug",
+                            "acl_version"
                           ],
-                          "type": "string"
-                        },
-                        "updated_at": {
-                          "format": "date-time",
-                          "type": "string"
+                          "type": "object"
                         }
                       },
+                      "required": [
+                        "dry_run",
+                        "page_id",
+                        "page",
+                        "pages_version",
+                        "from_folder",
+                        "to_folder",
+                        "before",
+                        "after",
+                        "changes",
+                        "changed"
+                      ],
                       "type": "object"
                     }
-                  },
-                  "required": [
-                    "page"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -123859,6 +124297,13 @@
                   "properties": {
                     "page": {
                       "properties": {
+                        "archived": {
+                          "type": "boolean"
+                        },
+                        "archived_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
                         "artifact_kind": {
                           "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                           "enum": [
@@ -123890,6 +124335,9 @@
                         "created_at": {
                           "format": "date-time",
                           "type": "string"
+                        },
+                        "created_by_test": {
+                          "type": "boolean"
                         },
                         "description": {
                           "type": "string"
@@ -124023,6 +124471,10 @@
                           "type": "string"
                         }
                       },
+                      "required": [
+                        "created_by_test",
+                        "archived"
+                      ],
                       "type": "object"
                     }
                   },
@@ -124238,6 +124690,13 @@
                     "pages": {
                       "items": {
                         "properties": {
+                          "archived": {
+                            "type": "boolean"
+                          },
+                          "archived_at": {
+                            "format": "date-time",
+                            "type": "string"
+                          },
                           "artifact_kind": {
                             "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                             "enum": [
@@ -124269,6 +124728,9 @@
                           "created_at": {
                             "format": "date-time",
                             "type": "string"
+                          },
+                          "created_by_test": {
+                            "type": "boolean"
                           },
                           "description": {
                             "type": "string"
@@ -124402,6 +124864,10 @@
                             "type": "string"
                           }
                         },
+                        "required": [
+                          "created_by_test",
+                          "archived"
+                        ],
                         "type": "object"
                       },
                       "type": "array"
@@ -124701,6 +125167,13 @@
                 "schema": {
                   "items": {
                     "properties": {
+                      "archived": {
+                        "type": "boolean"
+                      },
+                      "archived_at": {
+                        "format": "date-time",
+                        "type": "string"
+                      },
                       "artifact_kind": {
                         "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                         "enum": [
@@ -124732,6 +125205,9 @@
                       "created_at": {
                         "format": "date-time",
                         "type": "string"
+                      },
+                      "created_by_test": {
+                        "type": "boolean"
                       },
                       "description": {
                         "type": "string"
@@ -124865,6 +125341,10 @@
                         "type": "string"
                       }
                     },
+                    "required": [
+                      "created_by_test",
+                      "archived"
+                    ],
                     "type": "object"
                   },
                   "type": "array"
@@ -124996,6 +125476,10 @@
                   "color": {
                     "description": "The page's colour, a crew palette key. Same pointer rule as icon; a value outside the palette is refused by name (400).",
                     "type": "string"
+                  },
+                  "created_by_test": {
+                    "description": "Explicit creation-only QA marker. No naming heuristic or legacy backfill. Human creation only unless server-recorded intent authorizes it.",
+                    "type": "boolean"
                   },
                   "description": {
                     "type": "string"
@@ -125134,6 +125618,13 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "archived": {
+                      "type": "boolean"
+                    },
+                    "archived_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
                     "artifact_kind": {
                       "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                       "enum": [
@@ -125157,6 +125648,9 @@
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
+                    },
+                    "created_by_test": {
+                      "type": "boolean"
                     },
                     "description": {
                       "type": "string"
@@ -125371,6 +125865,10 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "created_by_test",
+                    "archived"
+                  ],
                   "type": "object"
                 }
               }
@@ -125382,6 +125880,13 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "archived": {
+                      "type": "boolean"
+                    },
+                    "archived_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
                     "artifact_kind": {
                       "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                       "enum": [
@@ -125405,6 +125910,9 @@
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
+                    },
+                    "created_by_test": {
+                      "type": "boolean"
                     },
                     "description": {
                       "type": "string"
@@ -125619,6 +126127,10 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "created_by_test",
+                    "archived"
+                  ],
                   "type": "object"
                 }
               }
@@ -125825,7 +126337,8 @@
                           "enum": [
                             "user",
                             "crew",
-                            "agent"
+                            "agent",
+                            "workspace"
                           ],
                           "type": "string"
                         }
@@ -126183,6 +126696,9 @@
                   },
                   "metadata": {
                     "properties": {
+                      "created_by_test": {
+                        "type": "boolean"
+                      },
                       "exported_at": {
                         "format": "date-time",
                         "type": "string"
@@ -126468,6 +126984,13 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "archived": {
+                      "type": "boolean"
+                    },
+                    "archived_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
                     "artifact_kind": {
                       "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                       "enum": [
@@ -126491,6 +127014,9 @@
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
+                    },
+                    "created_by_test": {
+                      "type": "boolean"
                     },
                     "description": {
                       "type": "string"
@@ -126705,6 +127231,10 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "created_by_test",
+                    "archived"
+                  ],
                   "type": "object"
                 }
               }
@@ -126716,6 +127246,13 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "archived": {
+                      "type": "boolean"
+                    },
+                    "archived_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
                     "artifact_kind": {
                       "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                       "enum": [
@@ -126739,6 +127276,9 @@
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
+                    },
+                    "created_by_test": {
+                      "type": "boolean"
                     },
                     "description": {
                       "type": "string"
@@ -126953,6 +127493,10 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "created_by_test",
+                    "archived"
+                  ],
                   "type": "object"
                 }
               }
@@ -127447,6 +127991,13 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "archived": {
+                      "type": "boolean"
+                    },
+                    "archived_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
                     "artifact_kind": {
                       "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                       "enum": [
@@ -127470,6 +128021,9 @@
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
+                    },
+                    "created_by_test": {
+                      "type": "boolean"
                     },
                     "description": {
                       "type": "string"
@@ -127684,6 +128238,10 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "created_by_test",
+                    "archived"
+                  ],
                   "type": "object"
                 }
               }
@@ -127957,6 +128515,13 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "archived": {
+                      "type": "boolean"
+                    },
+                    "archived_at": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
                     "artifact_kind": {
                       "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                       "enum": [
@@ -127980,6 +128545,9 @@
                     "created_at": {
                       "format": "date-time",
                       "type": "string"
+                    },
+                    "created_by_test": {
+                      "type": "boolean"
                     },
                     "description": {
                       "type": "string"
@@ -128194,6 +128762,10 @@
                       "type": "string"
                     }
                   },
+                  "required": [
+                    "created_by_test",
+                    "archived"
+                  ],
                   "type": "object"
                 }
               }
@@ -128379,9 +128951,39 @@
                     "page": {
                       "type": "string"
                     },
+                    "page_id": {
+                      "type": "string"
+                    },
+                    "pages_version": {
+                      "type": "integer"
+                    },
                     "subjects": {
                       "items": {
                         "properties": {
+                          "effective_permissions": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "comment": {
+                                "type": "boolean"
+                              },
+                              "edit": {
+                                "type": "boolean"
+                              },
+                              "produce": {
+                                "type": "boolean"
+                              },
+                              "read": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": [
+                              "read",
+                              "comment",
+                              "edit",
+                              "produce"
+                            ],
+                            "type": "object"
+                          },
                           "label": {
                             "description": "An email, a crew slug or an agent slug. Absent on the withheld row.",
                             "type": "string"
@@ -128393,6 +128995,44 @@
                             },
                             "type": "array"
                           },
+                          "sources": {
+                            "items": {
+                              "properties": {
+                                "inherited": {
+                                  "type": "boolean"
+                                },
+                                "path": {
+                                  "type": "string"
+                                },
+                                "permissions": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "comment": {
+                                      "type": "boolean"
+                                    },
+                                    "edit": {
+                                      "type": "boolean"
+                                    },
+                                    "produce": {
+                                      "type": "boolean"
+                                    },
+                                    "read": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": [
+                                    "read",
+                                    "comment",
+                                    "edit",
+                                    "produce"
+                                  ],
+                                  "type": "object"
+                                }
+                              },
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
                           "subject_id": {
                             "description": "The stored id, or `withheld` on the anonymous row that stands for the crews the caller cannot see.",
                             "type": "string"
@@ -128401,7 +129041,8 @@
                             "enum": [
                               "user",
                               "crew",
-                              "agent"
+                              "agent",
+                              "workspace"
                             ],
                             "type": "string"
                           }
@@ -128409,7 +129050,9 @@
                         "required": [
                           "subject_type",
                           "subject_id",
-                          "paths"
+                          "paths",
+                          "effective_permissions",
+                          "sources"
                         ],
                         "type": "object"
                       },
@@ -128418,6 +129061,8 @@
                   },
                   "required": [
                     "page",
+                    "page_id",
+                    "pages_version",
                     "subjects"
                   ],
                   "type": "object"
@@ -129666,6 +130311,330 @@
           "pages"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/archive": {
+      "post": {
+        "description": "Submit page archive (POST /api/v1/pages/{slug}/archive).",
+        "operationId": "post_api_v1_pages_slug_archive",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Preview with dry_run=true. Mutation requires confirm=true and the exact preview review_token. Changed content, identity, versions or authority requires another preview. Tokens confer no access rights.",
+                "oneOf": [
+                  {
+                    "properties": {
+                      "confirm": {
+                        "enum": [
+                          false
+                        ]
+                      },
+                      "dry_run": {
+                        "enum": [
+                          true
+                        ]
+                      },
+                      "review_token": {
+                        "enum": [
+                          ""
+                        ]
+                      }
+                    },
+                    "required": [
+                      "dry_run"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "confirm": {
+                        "enum": [
+                          true
+                        ]
+                      },
+                      "dry_run": {
+                        "enum": [
+                          false
+                        ]
+                      },
+                      "review_token": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "confirm",
+                      "review_token"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "confirm": {
+                    "type": "boolean"
+                  },
+                  "dry_run": {
+                    "type": "boolean"
+                  },
+                  "pages_version": {
+                    "maximum": 9007199254740990,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "review_token": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "pages_version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "after": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "archived": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "archived"
+                      ],
+                      "type": "object"
+                    },
+                    "before": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "archived": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "archived"
+                      ],
+                      "type": "object"
+                    },
+                    "changed": {
+                      "type": "boolean"
+                    },
+                    "dry_run": {
+                      "type": "boolean"
+                    },
+                    "impact": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "access_changed": {
+                          "type": "boolean"
+                        },
+                        "content_deleted": {
+                          "type": "boolean"
+                        },
+                        "removed_from_default_lists": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "removed_from_default_lists",
+                        "access_changed",
+                        "content_deleted"
+                      ],
+                      "type": "object"
+                    },
+                    "page": {
+                      "type": "string"
+                    },
+                    "page_id": {
+                      "type": "string"
+                    },
+                    "pages_version": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "review_token": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "dry_run",
+                    "page_id",
+                    "page",
+                    "pages_version",
+                    "before",
+                    "after",
+                    "impact",
+                    "changed"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page archive",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/pages/{slug}/artifact": {
@@ -137223,6 +138192,9 @@
                     },
                     "metadata": {
                       "properties": {
+                        "created_by_test": {
+                          "type": "boolean"
+                        },
                         "exported_at": {
                           "format": "date-time",
                           "type": "string"
@@ -137712,6 +138684,7 @@
                           "level": {
                             "enum": [
                               "read",
+                              "comment",
                               "produce",
                               "write"
                             ],
@@ -137737,7 +138710,8 @@
                             "enum": [
                               "user",
                               "crew",
-                              "agent"
+                              "agent",
+                              "workspace"
                             ],
                             "type": "string"
                           }
@@ -137916,6 +138890,7 @@
                           "level": {
                             "enum": [
                               "read",
+                              "comment",
                               "produce",
                               "write"
                             ],
@@ -137941,7 +138916,8 @@
                             "enum": [
                               "user",
                               "crew",
-                              "agent"
+                              "agent",
+                              "workspace"
                             ],
                             "type": "string"
                           }
@@ -138053,6 +139029,7 @@
                   "level": {
                     "enum": [
                       "read",
+                      "comment",
                       "produce",
                       "write"
                     ],
@@ -138068,11 +139045,15 @@
                   "subject": {
                     "type": "string"
                   },
+                  "subject_id": {
+                    "type": "string"
+                  },
                   "subject_type": {
                     "enum": [
                       "user",
                       "crew",
-                      "agent"
+                      "agent",
+                      "workspace"
                     ],
                     "type": "string"
                   }
@@ -138112,6 +139093,7 @@
                           "level": {
                             "enum": [
                               "read",
+                              "comment",
                               "produce",
                               "write"
                             ],
@@ -138137,7 +139119,8 @@
                             "enum": [
                               "user",
                               "crew",
-                              "agent"
+                              "agent",
+                              "workspace"
                             ],
                             "type": "string"
                           }
@@ -145347,6 +146330,13 @@
                     },
                     "page": {
                       "properties": {
+                        "archived": {
+                          "type": "boolean"
+                        },
+                        "archived_at": {
+                          "format": "date-time",
+                          "type": "string"
+                        },
                         "artifact_kind": {
                           "description": "Artifact family derived from the authorized code manifest: the current owner's latest code, other readers' current shared pin. Dashboard and Slides classifications require their enabled backends.",
                           "enum": [
@@ -145370,6 +146360,9 @@
                         "created_at": {
                           "format": "date-time",
                           "type": "string"
+                        },
+                        "created_by_test": {
+                          "type": "boolean"
                         },
                         "description": {
                           "type": "string"
@@ -145584,6 +146577,10 @@
                           "type": "string"
                         }
                       },
+                      "required": [
+                        "created_by_test",
+                        "archived"
+                      ],
                       "type": "object"
                     },
                     "rolled_back_to": {
@@ -146296,6 +147293,330 @@
           "pages"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/unarchive": {
+      "post": {
+        "description": "Submit page unarchive (POST /api/v1/pages/{slug}/unarchive).",
+        "operationId": "post_api_v1_pages_slug_unarchive",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Preview with dry_run=true. Mutation requires confirm=true and the exact preview review_token. Changed content, identity, versions or authority requires another preview. Tokens confer no access rights.",
+                "oneOf": [
+                  {
+                    "properties": {
+                      "confirm": {
+                        "enum": [
+                          false
+                        ]
+                      },
+                      "dry_run": {
+                        "enum": [
+                          true
+                        ]
+                      },
+                      "review_token": {
+                        "enum": [
+                          ""
+                        ]
+                      }
+                    },
+                    "required": [
+                      "dry_run"
+                    ]
+                  },
+                  {
+                    "properties": {
+                      "confirm": {
+                        "enum": [
+                          true
+                        ]
+                      },
+                      "dry_run": {
+                        "enum": [
+                          false
+                        ]
+                      },
+                      "review_token": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "confirm",
+                      "review_token"
+                    ]
+                  }
+                ],
+                "properties": {
+                  "confirm": {
+                    "type": "boolean"
+                  },
+                  "dry_run": {
+                    "type": "boolean"
+                  },
+                  "pages_version": {
+                    "maximum": 9007199254740990,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "review_token": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "pages_version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "after": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "archived": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "archived"
+                      ],
+                      "type": "object"
+                    },
+                    "before": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "archived": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "archived"
+                      ],
+                      "type": "object"
+                    },
+                    "changed": {
+                      "type": "boolean"
+                    },
+                    "dry_run": {
+                      "type": "boolean"
+                    },
+                    "impact": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "access_changed": {
+                          "type": "boolean"
+                        },
+                        "content_deleted": {
+                          "type": "boolean"
+                        },
+                        "removed_from_default_lists": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "removed_from_default_lists",
+                        "access_changed",
+                        "content_deleted"
+                      ],
+                      "type": "object"
+                    },
+                    "page": {
+                      "type": "string"
+                    },
+                    "page_id": {
+                      "type": "string"
+                    },
+                    "pages_version": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "review_token": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "dry_run",
+                    "page_id",
+                    "page",
+                    "pages_version",
+                    "before",
+                    "after",
+                    "impact",
+                    "changed"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page unarchive",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/pages/{slug}/versions": {
@@ -162742,6 +164063,9 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "created_by_test": {
+                    "type": "boolean"
+                  },
                   "name": {
                     "type": "string"
                   },

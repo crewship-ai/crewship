@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -24,7 +25,8 @@ func TestArtifactProjectMigrationsAdoptOriginalPilotWithoutChangingData(t *testi
 	// leaving the new schema installed. Original pilot SQL follows verbatim.
 	var baseline []migration
 	for _, m := range migrations {
-		if m.version != 20261027175100 && m.version != 20261027175101 {
+		// The later additive marker depends on the pilot intent table too.
+		if m.version != 20261027175100 && m.version != 20261027175101 && m.version != 20261028195659 {
 			baseline = append(baseline, m)
 		}
 	}
@@ -73,7 +75,13 @@ func TestArtifactProjectMigrationsAdoptOriginalPilotWithoutChangingData(t *testi
 		t.Helper()
 		result := map[string]string{}
 		for _, table := range []string{"artifact_version_heads", "artifact_versions", "artifact_version_blobs", "artifact_project_comments", "artifact_project_comment_tasks", "artifact_project_comment_replies", "artifact_project_origins", "artifact_project_run_consents", "artifact_project_message_intents", "feature_flags"} {
-			rows, err := db.QueryContext(t.Context(), "SELECT * FROM "+table+" ORDER BY 1")
+			projection := "*"
+			if table == "artifact_project_message_intents" {
+				// Compare every original pilot column across the additive migration.
+				// The new field is checked separately after each real Migrate.
+				projection = "message_id,workspace_id,human_user_id,chat_id,submission_id,page_id,comment_id,base_version,run_id,revoked_at,created_at"
+			}
+			rows, err := db.QueryContext(t.Context(), "SELECT "+projection+" FROM "+table+" ORDER BY 1")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -109,6 +117,13 @@ func TestArtifactProjectMigrationsAdoptOriginalPilotWithoutChangingData(t *testi
 	for pass := 1; pass <= 2; pass++ {
 		if err = Migrate(t.Context(), db.DB, logger); err != nil {
 			t.Fatalf("adopt original pilot, pass%d: %v", pass, err)
+		}
+		var marked int
+		if err = db.QueryRow(`SELECT created_by_test FROM artifact_project_message_intents WHERE message_id='pilot-message'`).Scan(&marked); err != nil || marked != 0 {
+			t.Fatalf("legacy intent marker changed on pass%d: marker=%d err=%v", pass, marked, err)
+		}
+		if _, err = db.Exec(`UPDATE artifact_project_message_intents SET created_by_test=1 WHERE message_id='pilot-message'`); err == nil || !strings.Contains(err.Error(), "artifact message test origin is immutable") {
+			t.Fatalf("marker immutable trigger missing on pass%d: %v", pass, err)
 		}
 		if after := snapshot(); !reflect.DeepEqual(before, after) {
 			t.Fatalf("pilot content/permission changed on pass%d: before%v after%v", pass, before, after)

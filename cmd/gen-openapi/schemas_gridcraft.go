@@ -22,7 +22,7 @@ func gridcraftSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	op["additionalProperties"] = false
 	edit := obj(map[string]any{"session_id": str(), "mutation_id": map[string]any{"type": "string", "description": "<session_id>:<seq>, stable across retries"}, "base_rev": integer(1), "generation": integer(1), "ops": map[string]any{"type": "array", "items": op, "minItems": 1, "maxItems": 64}}, "session_id", "mutation_id", "base_rev", "generation", "ops")
 	edit["additionalProperties"] = false
-	create := obj(map[string]any{"slug": str(), "name": str()}, "slug", "name")
+	create := obj(map[string]any{"slug": str(), "name": str(), "created_by_test": map[string]any{"type": "boolean"}}, "slug", "name")
 	create["additionalProperties"] = false
 	created := obj(map[string]any{"page_id": str(), "slug": str(), "name": str()}, "page_id", "slug", "name")
 	conflict := obj(map[string]any{"sheet": str(), "cell": str(), "input": map[string]any{"type": "string", "description": "The cell's input in the head revision"}, "rev": integer(1), "actor_label": map[string]any{"type": "string", "description": "Display name of the writer of that input"}}, "sheet", "cell", "input", "rev", "actor_label")

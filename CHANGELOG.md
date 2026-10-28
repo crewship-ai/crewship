@@ -9,6 +9,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Native DeckCraft presentations** gain experimental, default-off original ZIP editing through a qualified engine profile, with a single-editor lease and whole-document saves confirmed by a Node receipt.
+
+- Add human Comment grants for shared artifact feedback without edit or agent execution rights, explicit QA item markers and catalog filters, and confirmed archive and folder-move previews with live access checks. Access reports include effective capabilities and their sources; existing content, history and grants remain intact.
+
 - **Native Craft editing can continue past access-token expiry.** The browser refreshes its cookie before admitting or renewing the same editing connection and replaces only its authenticated metadata stream. Unsaved work, the lease generation and in-flight saves remain in place; document mutations are never replayed.
 - **Workspace backups now preserve experimental workbooks.** Encrypted portable restore and forks retain snapshots, published audience and immutable mutation receipts; recovery fences unfinished edits and requires fresh editor sessions and run permissions.
 - Add a disabled dashboard dataset storage foundation with atomic document version checks, bounded JSON batches, server attribution, portable backups and Page lifetime cleanup; code versions remain in the existing artifact VersionStore.

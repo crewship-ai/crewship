@@ -102,9 +102,10 @@ func (m *mooringHTTP) human(r *http.Request, tx *sql.Tx, write bool) (appengine.
 }
 func (m *mooringHTTP) create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		AppID string `json:"app_id"`
-		Slug  string `json:"slug"`
-		Name  string `json:"name"`
+		CreatedByTest bool   `json:"created_by_test,omitempty"`
+		AppID         string `json:"app_id"`
+		Slug          string `json:"slug"`
+		Name          string `json:"name"`
 	}
 	if decodeGridCraftBody(w, r, &req) != nil {
 		mooringError(w, mooring.ErrInvalid)
@@ -140,9 +141,10 @@ func (m *mooringHTTP) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var id, owner, app, name string
-	e = tx.QueryRowContext(r.Context(), `SELECT p.id,p.owner_user_id,m.app_id,p.name FROM pages p LEFT JOIN mooring_documents m ON m.page_id=p.id WHERE p.workspace_id=? AND p.slug=?`, ws, req.Slug).Scan(&id, &owner, &app, &name)
+	var existingTest bool
+	e = tx.QueryRowContext(r.Context(), `SELECT p.id,p.owner_user_id,m.app_id,p.name,p.created_by_test FROM pages p LEFT JOIN mooring_documents m ON m.page_id=p.id WHERE p.workspace_id=? AND p.slug=?`, ws, req.Slug).Scan(&id, &owner, &app, &name, &existingTest)
 	if e == nil {
-		if owner != user.ID || app != req.AppID || name != req.Name {
+		if owner != user.ID || app != req.AppID || name != req.Name || existingTest != req.CreatedByTest {
 			mooringError(w, mooring.ErrConflict)
 			return
 		}
@@ -161,7 +163,7 @@ func (m *mooringHTTP) create(w http.ResponseWriter, r *http.Request) {
 	id = generateCUID()
 	stamp := tsformat.Format(time.Now())
 	raw, _ := json.Marshal(spec)
-	_, e = tx.ExecContext(r.Context(), `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at,private_audience) VALUES(?,?,?,?,?,?,?,?,1)`, id, ws, req.Slug, req.Name, user.ID, string(raw), stamp, stamp)
+	_, e = tx.ExecContext(r.Context(), `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at,private_audience,created_by_test) VALUES(?,?,?,?,?,?,?,?,1,?)`, id, ws, req.Slug, req.Name, user.ID, string(raw), stamp, stamp, req.CreatedByTest)
 	if e == nil {
 		e = insertPageVersion(r.Context(), tx, id, 1, string(raw), user.ID, stamp)
 	}

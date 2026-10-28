@@ -575,3 +575,8 @@ describe("server-authorized Dashboard classification", () => {
     expect(toPageView(wirePage({ artifact_kind: "unknown" })).artifactKind).toBeUndefined()
   })
 })
+
+it("projects only explicit server catalog markers without title heuristics", () => {
+  expect(toPageView(wirePage({ name: "codex test run", slug: "qa-test" }))).toMatchObject({ createdByTest: false, archived: false })
+  expect(toPageView(wirePage({ created_by_test: true, archived: true, archived_at: "2026-10-28T19:34:11Z" }))).toMatchObject({ createdByTest: true, archived: true, archivedAt: "2026-10-28T19:34:11Z" })
+})

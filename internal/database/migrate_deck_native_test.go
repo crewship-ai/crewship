@@ -10,6 +10,21 @@ import (
 	"testing"
 )
 
+func TestDeckNativeMigrationRegistryVersionMatchesConstant(t *testing.T) {
+	var found int
+	for _, m := range migrations {
+		if m.name == "deck_native_family" {
+			found++
+			if m.version != deckNativeMigrationVersion || m.fnNoTx == nil {
+				t.Fatalf("Deck registry binding differs from its migration: version=%d expected=%d nontransactional=%t", m.version, deckNativeMigrationVersion, m.fnNoTx != nil)
+			}
+		}
+	}
+	if found != 1 {
+		t.Fatalf("expected exactly one Deck migration, found %d", found)
+	}
+}
+
 func TestDeckNativeMigrationPreservesExistingFamiliesAndDashboardChildren(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "native-families.db"))
 	if err != nil {

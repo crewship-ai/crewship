@@ -47,9 +47,9 @@ const migrationsFile = "internal/database/migrate.go"
 //
 // We capture (version, name, ref-name) — version/name are the public
 // identity, ref-name lets us look up the body of the underlying
-// sql/fn const so the fingerprint can detect body edits that keep the
+// sql/fn/fnNoTx symbol so the fingerprint can detect body edits that keep the
 // version+name pair intact.
-var migrationLine = regexp.MustCompile(`\{version:\s*(\d+),\s*name:\s*"([^"]+)"(?:,\s*(?:sql|fn):\s*(\w+))?`)
+var migrationLine = regexp.MustCompile(`\{version:\s*(\d+),\s*name:\s*"([^"]+)"(?:,\s*(?:sql|fn|fnNoTx):\s*(\w+))?`)
 
 // constDecl captures Go's `const name = ` and `var name = ` forms
 // when the value is a backtick-quoted raw string OR a single
@@ -66,7 +66,7 @@ var stringConstDecl = regexp.MustCompile("(?:const|var)\\s+(\\w+)\\s*=\\s*`([^`]
 type entry struct {
 	version int
 	name    string
-	refName string // identifier referenced by the `sql:` or `fn:` field
+	refName string // identifier referenced by the `sql:`, `fn:` or `fnNoTx:` field
 }
 
 // fingerprint returns a stable hash for one migration entry. It folds:

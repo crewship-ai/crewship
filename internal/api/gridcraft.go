@@ -269,8 +269,9 @@ func (h *gridcraftHTTP) humanKey(r *http.Request, write bool) (appengine.Key, er
 }
 
 type gridcraftCreate struct {
-	Slug string `json:"slug"`
-	Name string `json:"name"`
+	CreatedByTest bool   `json:"created_by_test,omitempty"`
+	Slug          string `json:"slug"`
+	Name          string `json:"name"`
 }
 
 type gridcraftCreated struct {
@@ -327,10 +328,11 @@ func (h *gridcraftHTTP) create(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 403, "Forbidden")
 		return
 	}
+	var existingTest bool
 	var existing gridcraftCreated
 	var owner, name string
 	var private bool
-	err = tx.QueryRowContext(r.Context(), `SELECT id,coalesce(owner_user_id,''),name,private_audience=1 AND folder_id IS NULL AND owner_crew_id IS NULL FROM pages WHERE workspace_id=? AND slug=?`, wsID, req.Slug).Scan(&existing.PageID, &owner, &name, &private)
+	err = tx.QueryRowContext(r.Context(), `SELECT id,coalesce(owner_user_id,''),name,created_by_test,private_audience=1 AND folder_id IS NULL AND owner_crew_id IS NULL FROM pages WHERE workspace_id=? AND slug=?`, wsID, req.Slug).Scan(&existing.PageID, &owner, &name, &existingTest, &private)
 	switch {
 	case err == nil:
 		empty, emptyErr := appengine.PageHasNoContent(r.Context(), tx, existing.PageID)
@@ -338,7 +340,7 @@ func (h *gridcraftHTTP) create(w http.ResponseWriter, r *http.Request) {
 			gridcraftError(w, emptyErr)
 			return
 		}
-		if owner != user.ID || !private || name != req.Name || !empty {
+		if owner != user.ID || !private || name != req.Name || !empty || existingTest != req.CreatedByTest {
 			replyError(w, 409, "conflict")
 			return
 		}
@@ -367,7 +369,7 @@ func (h *gridcraftHTTP) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	pageID, stamp := generateCUID(), tsformat.Format(time.Now())
-	if _, err = tx.ExecContext(r.Context(), `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at,private_audience) VALUES(?,?,?,?,?,?,?,?,1)`, pageID, wsID, req.Slug, req.Name, user.ID, string(specJSON), stamp, stamp); err != nil {
+	if _, err = tx.ExecContext(r.Context(), `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at,private_audience,created_by_test) VALUES(?,?,?,?,?,?,?,?,1,?)`, pageID, wsID, req.Slug, req.Name, user.ID, string(specJSON), stamp, stamp, req.CreatedByTest); err != nil {
 		if isUniqueViolation(err) {
 			replyError(w, 409, "conflict")
 			return
