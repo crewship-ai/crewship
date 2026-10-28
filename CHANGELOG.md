@@ -43,6 +43,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add authenticated artifact project creation and workspace availability endpoints behind the disabled artifact projects flag.
 
 - Artifact creation and publication tools now request stable element IDs so generated screens support precise element comments.
+- Version the bundled Project, Dashboard and Slides authoring packages and preserve their release in agent skill files, with immutable compiled type metadata and unchanged content versions.
 
 - Clear copied-command feedback timers when onboarding unmounts.
 
