@@ -37,6 +37,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Expose a default-off native Craft human session and edit-lease HTTP API with Page-scoped availability, named holders, requested handoff and live connection renewal. Original credentials and current Page rights fence every action; existing document profiles are unchanged.
 
+- Allow native Craft editors to copy to the clipboard while keeping clipboard reads and opaque-frame isolation restricted.
+
 - Add a default-off whole-native WordCraft/GridCraft version store with immutable compatibility pins, engine validation, lease and CAS fencing, exact snapshot receipts and portable profile backups. Its visible 16 GiB history budget preserves versions on exhaustion; editor activation remains separate.
 
 - Create vendored WordCraft numeric test fixtures exclusively so a competing output file cannot be truncated.

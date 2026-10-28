@@ -116,6 +116,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    const abort=new AbortController();let r:Runtime|undefined
    const frame=createEditorFrame(document,src,()=>r?.port.loaded())
    if(!frame)throw Error('isolated_editor_unavailable')
+   // The sandbox gives the editor an opaque origin; delegate writes explicitly while
+   // editororigin's response policy continues to deny clipboard reads.
+   frame.setAttribute('allow','clipboard-write *')
    mount.current?.append(frame)
    if(!frame.contentWindow){frame.remove();throw Error('isolated_editor_unavailable')}
    frame.title='WordCraft editor';setQuota(snapshot.quota)
