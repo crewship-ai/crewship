@@ -118,7 +118,14 @@ func artifactCLIRequestWithTransport(cmd *cobra.Command, method, path string, bo
 		marshal = artifacts.MarshalDataJSON
 	}
 	packet, err := marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{"name": operation, "arguments": arguments}})
-	if err != nil || len(packet) > 1<<20 {
+	limitRequest := 1 << 20
+	if strings.HasPrefix(operation, "artifact_data_") {
+		limitRequest = artifacts.MaxDataToolRequestBytes
+	}
+	if err != nil || len(packet) > limitRequest {
+		if strings.HasPrefix(operation, "artifact_data_") {
+			return errors.New("dashboard data tool request exceeds limit")
+		}
 		return errors.New("artifact tool request exceeds 1 MiB")
 	}
 	req, err := http.NewRequestWithContext(cmd.Context(), http.MethodPost, selectedAgentOrigin+"/mcp/routines", bytes.NewReader(packet))
