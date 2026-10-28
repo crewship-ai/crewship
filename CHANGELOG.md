@@ -13,6 +13,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add a bounded Slides artifact import adapter for a closed `deck.json` and authored HTML profile, reusing the existing slide schema and static comment anchors without enabling a new editor or preview.
 
 - Require actual Chromium execution of native document privacy regressions in frontend CI while preserving the strict browser-dialog guard.
+- Accept valid near-limit Dashboard data batches by counting their exact metadata and original value bytes, preserving document limits and atomic version conflicts.
+
 - Add default-off Dashboard collection reads and atomic JSON document batches through authenticated Page API, CLI and original-run MCP tools. Shared readers use the current shared code manifest; data changes preserve code history and document conflicts never overwrite newer data.
 - Classify Dashboard artifacts from the authorized code manifest in Page lists and detail: owners use the latest code, shared readers use the current shared pin. The disabled Dashboard data flag preserves the ordinary Project classification.
 
