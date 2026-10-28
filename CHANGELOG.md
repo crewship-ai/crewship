@@ -41,6 +41,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Execute a flat WordCraft editor package with a real WASM snippet import in the packaging regression, checking the original ABI identity and manifest hashes.
 - Keep an idle native WordCraft read alive when typing starts, ignoring its obsolete projection without resending the command.
+- **Taking over a native document no longer ignores the first click during refresh.** Lease controls wait for a newer read-only editor snapshot to finish opening before accepting custody actions.
 - Explain when a browser cannot support the isolated WordCraft command editor, including iPhone browsers.
 
 - Allow the 72 generated fixture-qualified WordCraft commands in the default-off C1 backend test profile, with closed parameters and a new exact catalog identity.
