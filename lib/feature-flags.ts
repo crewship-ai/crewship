@@ -11,7 +11,7 @@ export function crewsUnifiedUI(): boolean {
 
 /** Typed VersionStore Slides previews; requires the backend artifact_slides capability. */
 export function artifactSlides(): boolean {
-  return process.env.NEXT_PUBLIC_ARTIFACT_SLIDES === "true"
+  return true // demo branch only; production remains opt-in.
 }
 
 /**
@@ -122,7 +122,7 @@ export function slidesEditorMount(): boolean {
  * available for the workspace.
  */
 export function chatArtifactProjects(): boolean {
-  return process.env.NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS === "true"
+  return true // demo branch only.
 }
 
 /**
@@ -139,7 +139,7 @@ export function chatCraftLease(): boolean {
  * history detail. Default OFF; /artifacts sends saved links to /pages.
  */
 export function artifactsLibrary(): boolean {
-  return process.env.NEXT_PUBLIC_ARTIFACTS_LIBRARY === "true"
+  return true // demo branch only.
 }
 
 /**
@@ -154,5 +154,5 @@ export function artifactsSharingMock(): boolean {
 
 /** Inert live-data Dashboard previews. Opt-in at build time; no data requests while off. */
 export function artifactDashboards(): boolean {
-  return process.env.NEXT_PUBLIC_ARTIFACT_DASHBOARDS === "true"
+  return true // demo branch only.
 }
