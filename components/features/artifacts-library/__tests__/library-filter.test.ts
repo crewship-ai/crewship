@@ -72,3 +72,27 @@ describe("filters in the URL", () => {
     expect(filtersFromParams(new URLSearchParams("view=trash&kind=word,bogus&access=public&version=old"))).toEqual({ ...EMPTY_FILTERS, kinds: ["word"] })
   })
 })
+
+describe("personal views", () => {
+  const personal = { opened: new Map([["brief", 3000], ["site", 2000], ["blank", 9000]]), favorites: new Set(["weekly", "gone"]) }
+  const view = (v: LibraryFilters["view"]) => applyFilters(items, { ...EMPTY_FILTERS, view: v }, personal).map(item => item.slug)
+
+  it("Recently opened lists what this person opened, newest open first, never an empty item", () => {
+    expect(view("opened")).toEqual(["brief", "site"])
+  })
+
+  it("Mine lists what the person owns; Favorites what they starred and can still read", () => {
+    expect(view("mine")).not.toContain("brief")
+    expect(view("mine")).toContain("site")
+    expect(view("favorites")).toEqual(["weekly"])
+  })
+
+  it("personal views are empty without a record, never everything", () => {
+    expect(applyFilters(items, { ...EMPTY_FILTERS, view: "opened" }).length).toBe(0)
+    expect(applyFilters(items, { ...EMPTY_FILTERS, view: "favorites" }).length).toBe(0)
+  })
+
+  it("the opened and favorite views survive the URL", () => {
+    for (const v of ["opened", "mine", "favorites"] as const) expect(filtersFromParams(filtersToParams({ ...EMPTY_FILTERS, view: v })).view).toBe(v)
+  })
+})

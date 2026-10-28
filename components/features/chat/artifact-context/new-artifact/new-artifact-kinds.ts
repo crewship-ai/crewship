@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react"
+import { ACCENT, type Accent } from "@/lib/concept-accents"
 import { ARTIFACT_KINDS, NO_CAPABILITIES, type ArtifactCapabilities } from "./artifact-kinds"
 
 /** The kinds the chat composer can start: it carries an intent for exactly these two. */
@@ -9,6 +10,8 @@ export interface ArtifactKind {
   name: string
   description: string
   icon: LucideIcon
+  /** The kind's colour classes from the registry (glyph and tinted square). */
+  accent: Accent
   starterPrompts: string[]
 }
 
@@ -25,5 +28,5 @@ export function availableArtifactKinds(caps: { projects: boolean; documents: boo
   const full: ArtifactCapabilities = { ...NO_CAPABILITIES, ...caps, pages: true }
   return ARTIFACT_KINDS
     .filter(k => (CHAT_KINDS as readonly string[]).includes(k.key) && k.live(full))
-    .map(k => ({ id: k.key as ArtifactKindId, name: k.label, description: k.description, icon: k.icon, starterPrompts: k.starterPrompts }))
+    .map(k => ({ id: k.key as ArtifactKindId, name: k.label, description: k.description, icon: k.icon, accent: ACCENT[k.accent], starterPrompts: k.starterPrompts }))
 }

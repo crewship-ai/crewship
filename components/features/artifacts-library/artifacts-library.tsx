@@ -1,6 +1,6 @@
 "use client"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { ArrowLeft, ExternalLink, LayoutGrid, Library, List, Lock, Plus, Table2 } from "lucide-react"
+import { ArrowLeft, ExternalLink, LayoutGrid, Library, List, Lock, Plus, Star, Table2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Segmented } from "@/components/ui/segmented"
 import { StatusPill } from "@/components/ui/status-pill"
@@ -11,6 +11,7 @@ import { usePages } from "@/hooks/use-pages"
 import { usePageFolders } from "@/hooks/use-page-folders"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useDocumentViewerRead } from "@/hooks/use-document-viewer-read"
+import { useUserPreference } from "@/hooks/use-user-preference"
 import { DocumentReadonly } from "@/components/features/pages/document-readonly/document-readonly"
 import { formatRelativeShort } from "@/lib/time"
 import { artifactDashboards, artifactSlides } from "@/lib/feature-flags"
@@ -19,20 +20,22 @@ import { ArtifactViewerProvider } from "@/components/features/chat/artifact-cont
 import { useArtifactProjectsAvailable } from "@/components/features/chat/artifact-context/projects/use-artifact-project-data"
 import { ArtifactViewerPanel } from "@/components/features/chat/artifact-context/viewer/artifact-viewer-panel"
 import { CraftLockBar, craftEditorHref } from "@/components/features/chat/artifact-context/craft/craft-lock-bar"
-import { KIND_ICON, ARTIFACT_KINDS, type ArtifactKindKey } from "@/components/features/chat/artifact-context/new-artifact/artifact-kinds"
+import { KIND_ACCENT, KIND_ICON, ARTIFACT_KINDS, type ArtifactKindKey } from "@/components/features/chat/artifact-context/new-artifact/artifact-kinds"
 import { useArtifactCapabilities } from "@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities"
 import { NewArtifactDialog } from "./new-artifact-dialog"
 import { kindLabel, libraryItems, type LibraryItem, type LibraryKind } from "./library-items"
 import {
-  applyFilters, EMPTY_FILTERS, groupItems, needsAttention, sortItems, versioned,
-  type GroupKey, type LibraryFilters, type SortKey,
+  applyFilters, EMPTY_FILTERS, groupItems, inView, needsAttention, sortItems, versioned,
+  type GroupKey, type LibraryFilters, type Personal, type SortKey,
 } from "./library-filter"
 import { LibraryPanel } from "./library-panel"
+import { KindThumb } from "./kind-thumb"
 
-/** Kinds are neutral; colour is kept for states (Harbor 2). */
+/** Each kind wears its registry colour, so Word reads blue and Sheet green before the label is read. */
 function KindTile({ kind, large }: { kind: LibraryKind; large?: boolean }) {
   const Icon = KIND_ICON[kind]
-  return <span aria-hidden="true" className={cn("flex shrink-0 items-center justify-center rounded-[28%] border border-border bg-muted text-muted-foreground", large ? "size-10" : "size-7")}>
+  const accent = KIND_ACCENT[kind]
+  return <span aria-hidden="true" className={cn("flex shrink-0 items-center justify-center rounded-[28%] border", accent.chip, accent.fg, large ? "size-10" : "size-7")}>
     <Icon className={large ? "size-5" : "size-3.5"} />
   </span>
 }
@@ -56,15 +59,18 @@ const meta = (item: LibraryItem) => [item.ownerLabel, item.folder?.name, item.up
 function GalleryCard({ item, onOpen }: { item: LibraryItem; onOpen: () => void }) {
   return <li className="min-w-0">
     <button type="button" aria-label={`Open ${item.name}`} onClick={onOpen} data-library-item=""
-      className="grid h-full w-full min-w-0 content-start gap-2.5 rounded-card border bg-card p-3 text-left transition-colors hover:border-foreground/20 focus-visible:outline-2 focus-visible:outline-primary">
-      <span className="flex min-w-0 items-center gap-2.5">
-        <KindTile kind={item.kind} large />
-        <span className="grid min-w-0 gap-0.5">
-          <h3 className="truncate text-sm font-semibold">{item.name}</h3>
-          <small className="truncate text-xs text-muted-foreground">{meta(item)}</small>
+      className="grid h-full w-full min-w-0 content-start overflow-hidden rounded-card border bg-card text-left transition-colors hover:border-foreground/20 focus-visible:outline-2 focus-visible:outline-primary">
+      <KindThumb kind={item.kind} empty={item.empty} />
+      <span className="grid min-w-0 gap-2 p-3">
+        <span className="flex min-w-0 items-center gap-2.5">
+          <KindTile kind={item.kind} />
+          <span className="grid min-w-0 gap-0.5">
+            <h3 className="truncate text-sm font-semibold">{item.name}</h3>
+            <small className="truncate text-xs text-muted-foreground">{meta(item)}</small>
+          </span>
         </span>
+        <span className="flex min-w-0 flex-wrap items-center gap-1.5"><KindBadge kind={item.kind} /><StateChips item={item} /></span>
       </span>
-      <span className="flex min-w-0 flex-wrap items-center gap-1.5"><KindBadge kind={item.kind} /><StateChips item={item} /></span>
     </button>
   </li>
 }
@@ -144,15 +150,16 @@ function DisplayRow({ count, sort, group, layout, onSort, onGroup, onLayout }: {
   </div>
 }
 
-/** Home: what can be made, what waits on its owner, what changed last. */
-function LibraryHome({ items, creatable, onNew, onOpen, onAll }: {
-  items: LibraryItem[]; creatable: ArtifactKindKey[]
-  onNew: (kind: ArtifactKindKey) => void; onOpen: (slug: string) => void; onAll: () => void
+/** Home: what can be made, what waits on its owner, what this person opened last (or what changed last). */
+function LibraryHome({ items, creatable, personal, onNew, onOpen, onShow }: {
+  items: LibraryItem[]; creatable: ArtifactKindKey[]; personal: Personal
+  onNew: (kind: ArtifactKindKey) => void; onOpen: (slug: string) => void; onShow: (view: "all" | "opened") => void
 }) {
   const visible = items.filter(item => !item.empty)
   const attention = visible.filter(needsAttention).slice(0, 5)
-  // Each item once on Home: what waits on its owner is not repeated under Recent.
-  const recent = visible.filter(item => !attention.includes(item))
+  const opened = inView(items, "opened", personal)
+  // Each item once on Home: what waits on its owner is not repeated below.
+  const below = (opened.length ? opened : visible).filter(item => !attention.includes(item))
   return <div className="grid content-start gap-6">
     <header className="grid gap-1">
       <h1 className="text-xl font-semibold">Artifacts</h1>
@@ -179,10 +186,11 @@ function LibraryHome({ items, creatable, onNew, onOpen, onAll }: {
     </section>}
     <section aria-labelledby="recent-heading" className="grid gap-2">
       <div className="flex items-center gap-2">
-        <h2 id="recent-heading" className="text-sm font-semibold">Recent</h2>
-        {recent.length > 8 && <Button type="button" variant="link" size="sm" className="ml-auto h-auto p-0" onClick={onAll}>All {visible.length}</Button>}
+        <h2 id="recent-heading" className="text-sm font-semibold">{opened.length ? "Recently opened" : "Recent"}
+          {opened.length > 0 && <span className="ml-1.5 font-normal text-muted-foreground">by you</span>}</h2>
+        {below.length > 8 && <Button type="button" variant="link" size="sm" className="ml-auto h-auto p-0" onClick={() => onShow(opened.length ? "opened" : "all")}>All {below.length}</Button>}
       </div>
-      <ItemsView items={recent.slice(0, 8)} layout="gallery" onOpen={onOpen} />
+      <ItemsView items={below.slice(0, 8)} layout="gallery" onOpen={onOpen} />
     </section>
   </div>
 }
@@ -223,7 +231,9 @@ const DETAIL_HINT: Partial<Record<LibraryKind, string>> = {
 }
 
 /** One artifact: a project shows its history in the project viewer, a native Word or Sheet its edit lock. */
-function ArtifactDetail({ workspaceId, item, onBack }: { workspaceId: string; item: LibraryItem; onBack: () => void }) {
+function ArtifactDetail({ workspaceId, item, onBack, favorite, onFavorite }: {
+  workspaceId: string; item: LibraryItem; onBack: () => void; favorite: boolean; onFavorite: () => void
+}) {
   const projects = useArtifactProjectsAvailable(workspaceId)
   const projectPreview = item.projectBacked && (item.kind === "project" || item.kind === "dashboard" && artifactDashboards() || item.kind === "slides" && artifactSlides()) && projects
   const target = useMemo(() => ({ slug: item.slug, tab: "preview" as const }), [item.slug])
@@ -232,6 +242,10 @@ function ArtifactDetail({ workspaceId, item, onBack }: { workspaceId: string; it
       <Button type="button" variant="ghost" size="sm" className="-ml-2 coarse:min-h-[44px]" onClick={onBack}><ArrowLeft aria-hidden />All artifacts</Button>
       {/* The viewer names the artifact, its kind and version itself; here only what it does not say. */}
       {projectPreview && meta(item) && <span className="ml-auto truncate text-xs text-muted-foreground">{meta(item)}</span>}
+      <Button type="button" variant="ghost" size="icon-sm" aria-pressed={favorite} className={cn("coarse:min-h-[44px] coarse:min-w-[44px]", !(projectPreview && meta(item)) && "ml-auto")}
+        aria-label={favorite ? "Remove from favorites" : "Add to favorites"} title={favorite ? "Remove from favorites" : "Add to favorites"} onClick={onFavorite}>
+        <Star aria-hidden className={cn("size-4", favorite && "fill-current text-warn")} />
+      </Button>
     </div>
     {!projectPreview && <header className="flex min-w-0 flex-wrap items-center gap-3">
       <KindTile kind={item.kind} large />
@@ -315,8 +329,25 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
   const [layout, setLayout] = useState<Layout>("list")
   const [newKind, setNewKind] = useState<ArtifactKindKey | null | undefined>(undefined)
   const creatable = ARTIFACT_KINDS.filter(kind => kind.live(caps)).map(kind => kind.key)
+  // Per person, synced across devices: what they opened and what they starred. Never shared with others.
+  const [recent, setRecent] = useUserPreference<{ slug: string; at: number }[]>(`artifacts.${workspaceId}.recentlyOpened`, [])
+  const [favorites, setFavorites] = useUserPreference<string[]>(`artifacts.${workspaceId}.favorites`, [])
+  const personal = useMemo<Personal>(() => ({
+    opened: new Map(Array.isArray(recent) ? recent.filter(entry => typeof entry?.slug === "string" && Number.isFinite(entry?.at)).map(entry => [entry.slug, entry.at]) : []),
+    favorites: new Set(Array.isArray(favorites) ? favorites.filter(slug => typeof slug === "string") : []),
+  }), [recent, favorites])
   const selected = item !== null ? items.find(entry => entry.slug === item) ?? null : null
   const contentRef = useRef<HTMLDivElement>(null)
+  const openedSlug = selected?.slug
+  useEffect(() => {
+    if (!openedSlug) return
+    const rest = (Array.isArray(recent) ? recent : []).filter(entry => entry?.slug !== openedSlug)
+    setRecent([{ slug: openedSlug, at: Date.now() }, ...rest].slice(0, 50))
+  }, [openedSlug]) // eslint-disable-line react-hooks/exhaustive-deps -- one record per open, not per list change
+  const toggleFavorite = (slug: string) => {
+    const list = [...(personal.favorites ?? [])]
+    setFavorites(list.includes(slug) ? list.filter(entry => entry !== slug) : [slug, ...list])
+  }
   useLibraryKeys(contentRef, item !== null, () => onSelect(null))
 
   const subBar = <SubBar icon={Library} title="Artifacts" ariaLabel="Artifacts" heading={false}
@@ -329,7 +360,8 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
   if (loading) content = <div aria-label="Loading artifacts"><PageLoading variant="cards" /></div>
   else if (error && !items.length) content = <PageError title="Artifacts could not be loaded" onRetry={refresh} retryLabel="Try again" />
   else if (item !== null) {
-    content = selected ? <ArtifactDetail workspaceId={workspaceId} item={selected} onBack={() => onSelect(null)} />
+    content = selected ? <ArtifactDetail workspaceId={workspaceId} item={selected} onBack={() => onSelect(null)}
+      favorite={personal.favorites?.has(selected.slug) ?? false} onFavorite={() => toggleFavorite(selected.slug)} />
       : <div className="grid gap-2 text-sm">
         <p>This artifact is not available.</p>
         <div><Button type="button" size="sm" variant="outline" onClick={() => onSelect(null)}><ArrowLeft aria-hidden />All artifacts</Button></div>
@@ -339,10 +371,12 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
       description="Ask an agent in Chat to make a project or a dashboard, or start a document here."
       primary={creatable.length ? { label: "New artifact", icon: Plus, onClick: () => setNewKind(null) } : undefined} />
   } else if (filters.view === "home") {
-    content = <LibraryHome items={items} creatable={creatable} onNew={kind => setNewKind(kind)} onOpen={onSelect}
-      onAll={() => setFilters({ ...filters, view: "all" })} />
+    content = <LibraryHome items={items} creatable={creatable} personal={personal} onNew={kind => setNewKind(kind)} onOpen={onSelect}
+      onShow={view => setFilters({ ...filters, view })} />
   } else {
-    const shown = sortItems(applyFilters(items, filters), sort)
+    const filtered = applyFilters(items, filters, personal)
+    // Recently opened keeps its own order until another sort is chosen.
+    const shown = filters.view === "opened" && sort === "updated" ? filtered : sortItems(filtered, sort)
     content = <div className="grid content-start gap-3">
       <DisplayRow count={shown.length} sort={sort} group={group} layout={layout} onSort={setSort} onGroup={setGroup} onLayout={setLayout} />
       {filters.view === "series" && <p className="text-sm text-muted-foreground">Runs of the same thing with a number or date in the name. Nothing here is archived or deleted.</p>}
@@ -359,7 +393,7 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
     {subBar}
     <div className="relative flex min-h-0 flex-1 overflow-hidden">
       {!loading && !(error && !items.length) && <SecondaryPanel id="artifacts" label="Artifacts">
-        <LibraryPanel items={items} folders={folders} filters={filters}
+        <LibraryPanel items={items} folders={folders} filters={filters} personal={personal}
           onFiltersChange={next => {
             setFilters(next)
             // The route drops ?item= with its own replace; a second navigation would race it.

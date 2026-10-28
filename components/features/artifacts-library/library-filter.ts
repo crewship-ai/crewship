@@ -1,7 +1,13 @@
 import { LIBRARY_KINDS, repeatedSeries, type LibraryItem, type LibraryKind } from "./library-items"
 
 /** The places the panel offers. Empty and Repeated runs only show; nothing is archived or deleted. */
-export type LibraryView = "home" | "all" | "attention" | "empty" | "series"
+export type LibraryView = "home" | "all" | "attention" | "opened" | "mine" | "favorites" | "empty" | "series"
+
+/** What only this person knows: when they last opened each item, and what they starred. Kept per user. */
+export interface Personal {
+  opened?: ReadonlyMap<string, number>
+  favorites?: ReadonlySet<string>
+}
 
 export type Access = "private" | "open"
 export type VersionState = "shared" | "unshared" | "unversioned"
@@ -92,17 +98,24 @@ export function matches(item: LibraryItem, filters: LibraryFilters, skip?: "kind
 }
 
 /** What a view holds before filters: empty items only in Empty, repeated runs only in their view. */
-export function inView(items: LibraryItem[], view: LibraryView): LibraryItem[] {
+export function inView(items: LibraryItem[], view: LibraryView, personal: Personal = {}): LibraryItem[] {
+  const live = items.filter(item => !item.empty)
   switch (view) {
     case "empty": return items.filter(item => item.empty)
-    case "series": return repeatedSeries(items.filter(item => !item.empty)).flatMap(series => series.items)
-    case "attention": return items.filter(needsAttention)
-    default: return items.filter(item => !item.empty)
+    case "series": return repeatedSeries(live).flatMap(series => series.items)
+    case "attention": return live.filter(needsAttention)
+    case "mine": return live.filter(item => item.ownerLabel === "You")
+    case "favorites": return live.filter(item => personal.favorites?.has(item.slug))
+    case "opened": {
+      const opened = personal.opened
+      return opened ? live.filter(item => opened.has(item.slug)).sort((a, b) => opened.get(b.slug)! - opened.get(a.slug)!) : []
+    }
+    default: return live
   }
 }
 
-export function applyFilters(items: LibraryItem[], filters: LibraryFilters): LibraryItem[] {
-  return inView(items, filters.view).filter(item => matches(item, filters))
+export function applyFilters(items: LibraryItem[], filters: LibraryFilters, personal: Personal = {}): LibraryItem[] {
+  return inView(items, filters.view, personal).filter(item => matches(item, filters))
 }
 
 export function sortItems(items: LibraryItem[], sort: SortKey): LibraryItem[] {
@@ -134,8 +147,8 @@ export interface FacetCounts {
 }
 
 /** Counts over the view with every other facet applied, so a value's count is what choosing it would show. */
-export function facetCounts(items: LibraryItem[], filters: LibraryFilters): FacetCounts {
-  const base = inView(items, filters.view)
+export function facetCounts(items: LibraryItem[], filters: LibraryFilters, personal: Personal = {}): FacetCounts {
+  const base = inView(items, filters.view, personal)
   const count = <K extends string>(skip: "kinds" | "access" | "version" | "owners", key: (item: LibraryItem) => K) => {
     const counts = new Map<K, number>()
     for (const item of base) if (matches(item, filters, skip)) counts.set(key(item), (counts.get(key(item)) ?? 0) + 1)
@@ -156,7 +169,7 @@ export function facetCounts(items: LibraryItem[], filters: LibraryFilters): Face
 export const activeFacetCount = (filters: LibraryFilters) =>
   filters.kinds.length + filters.access.length + filters.version.length + filters.owners.length + (filters.folder !== null ? 1 : 0)
 
-const VIEWS: readonly LibraryView[] = ["home", "all", "attention", "empty", "series"]
+const VIEWS: readonly LibraryView[] = ["home", "all", "attention", "opened", "mine", "favorites", "empty", "series"]
 const UNFILED = "~unfiled"
 const list = (value: string | null) => (value ? value.split(",").map(entry => entry.trim()).filter(Boolean) : [])
 
