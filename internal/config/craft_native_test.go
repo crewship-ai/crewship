@@ -112,3 +112,30 @@ func TestCraftNativeDedicatedOriginSharesOnlyExplicitDirectoryAndPins(t *testing
 		}
 	}
 }
+
+func TestCraftNativeGridExplicitEnvProfileOverridesPreserveWordAndDefaultOff(t *testing.T) {
+	cfg := Default()
+	cfg.CraftNative.Profiles = map[string]CraftNativeDocumentProfile{"wordcraft": {Application: "wordcraft", EngineRevision: "yaml-revision"}, "gridcraft": {Application: "gridcraft", EngineRevision: "grid-yaml"}}
+	t.Setenv("CREWSHIP_CRAFT_NATIVE_EDITOR_BUNDLE_DIR", "/srv/native-bundles")
+	t.Setenv("CREWSHIP_CRAFT_NATIVE_GRID_ENGINE_REVISION", strings.Repeat("a", 40))
+	t.Setenv("CREWSHIP_CRAFT_NATIVE_GRID_CLI_PATH", "/srv/native/gridcraft")
+	t.Setenv("CREWSHIP_CRAFT_NATIVE_GRID_CLI_SHA256", strings.Repeat("b", 64))
+	t.Setenv("CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_BUNDLE", strings.Repeat("c", 64))
+	t.Setenv("CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_URL", "/_editor/b/"+strings.Repeat("c", 64)+"/index.html")
+	applyEnvOverrides(cfg)
+	p := cfg.CraftNative.Profiles["gridcraft"]
+	if cfg.CraftNative.Enabled || cfg.GridCraft.Enabled || cfg.Mooring.Enabled {
+		t.Fatal("profile env implicitly enabled product or legacy profiles")
+	}
+	if cfg.CraftNative.EditorBundleDir != "/srv/native-bundles" || p.Application != "gridcraft" || p.EngineRevision != strings.Repeat("a", 40) || p.CLIPath != "/srv/native/gridcraft" || p.CLISHA256 != strings.Repeat("b", 64) || p.EditorBundle != strings.Repeat("c", 64) || p.EditorURL != "/_editor/b/"+strings.Repeat("c", 64)+"/index.html" {
+		t.Fatal("native-only operator env lost release bindings")
+	}
+	if cfg.CraftNative.Profiles["wordcraft"].EngineRevision != "yaml-revision" {
+		t.Fatal("Grid env replaced Word profile")
+	}
+	t.Setenv("CREWSHIP_CRAFT_NATIVE_GRID_CLI_SHA256", "")
+	applyEnvOverrides(cfg)
+	if cfg.CraftNative.Profiles["gridcraft"].CLISHA256 != "" {
+		t.Fatal("explicit empty operator override silently reused YAML qualification")
+	}
+}
