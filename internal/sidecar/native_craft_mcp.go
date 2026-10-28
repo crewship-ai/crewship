@@ -46,6 +46,11 @@ func (s *Server) handleNativeCraftMCP(w http.ResponseWriter, r *http.Request) {
 			s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": "invalid arguments"}))
 			return
 		}
+		// MCP permits omitted arguments; explicit null and required fields remain
+		// subject to the unchanged closed operation validator below.
+		if len(params.Arguments) == 0 {
+			params.Arguments = json.RawMessage(`{}`)
+		}
 		packet, ok := nativeCraftToolPacket(params.Name, params.Arguments)
 		if !ok {
 			s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": "explicit bounded native operation required"}))
