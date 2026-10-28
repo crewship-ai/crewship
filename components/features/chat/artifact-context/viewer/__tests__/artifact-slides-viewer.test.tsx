@@ -36,7 +36,7 @@ it("starts at deck order rather than manifest order and posts the first authored
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
   render(<QueryClientProvider client={client}><ArtifactViewerProvider workspaceId="workspace" target={{ slug: "deck" }} onTargetChange={() => {}}><ArtifactViewerPanel /></ArtifactViewerProvider></QueryClientProvider>)
   await screen.findByText("Slide 1 / 2")
-  fireEvent.click(screen.getByRole("button", { name: "Select", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Select" }))
   fireEvent.pointerDown(screen.getByRole("button", { name: "text 1" }))
   fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Improve this title" } })
   fireEvent.click(screen.getByRole("button", { name: "Save comment" }))

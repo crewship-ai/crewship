@@ -149,7 +149,7 @@ it.each(["true", "false"])("routes explicit server-typed Slides with flag %s whi
     open()
     if (flag === "true") {
       expect(screen.getByTestId("library-slides")).toHaveAttribute("data-select-mode", "false")
-      expect(screen.queryByRole("button", { name: "Select", exact: true })).toBeNull()
+      expect(screen.queryByRole("button", { name: "Select" })).toBeNull()
       expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull()
     } else {
       expect(screen.queryByTestId("library-slides")).toBeNull()

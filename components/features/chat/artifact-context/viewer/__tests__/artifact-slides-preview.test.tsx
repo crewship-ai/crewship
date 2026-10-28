@@ -35,7 +35,7 @@ it("uses the selected code pin and real typed canvas to send the exact Go-author
 it("navigates actual thumbnail canvases and presents existing typed slides without edit controls", async () => {
   mount({ selectMode: false })
   const region = await screen.findByRole("region", { name: "Slides" })
-  const thumbnail = within(region).getByRole("button", { name: "Slide 2", exact: true })
+  const thumbnail = within(region).getByRole("button", { name: "Slide 2" })
   expect(thumbnail.querySelector("svg")).not.toBeNull()
   fireEvent.click(thumbnail)
   expect(props.onNavigate).toHaveBeenCalledExactlyOnceWith("slides/details.html")
@@ -124,7 +124,9 @@ it("accepts an own constructor anchor and refuses an inherited constructor as a 
   expect(props.onSelect).toHaveBeenCalledExactlyOnceWith({ selector: "#constructor", quote: "North12" })
   props.onSelect.mockReset()
   const changed = { ...structuredClone(fixture), anchors: {} }
-  changed.deck.slides[1].elements[0].table!.cells = [["Changed", "17"]]
+  const table = changed.deck.slides[1].elements[0]
+  if (!("table" in table) || !table.table) throw new Error("Expected the table fixture")
+  table.table.cells = [["Changed", "17"]]
   mock.send.mockResolvedValue(new Response(JSON.stringify(changed)))
   await act(async () => { await view.client.invalidateQueries() })
   await screen.findAllByText("Changed")
@@ -136,7 +138,9 @@ it("accepts an own constructor anchor and refuses an inherited constructor as a 
 
 it("renders source-looking strings as React text rather than agent markup", async () => {
   const input = structuredClone(fixture)
-  input.deck.slides[0].elements[0].text!.value = '<img src="https://evil.invalid/secret" onerror="fetch(\'/private\')">'
+  const text = input.deck.slides[0].elements[0]
+  if (!("text" in text) || !text.text) throw new Error("Expected the text fixture")
+  text.text.value = '<img src="https://evil.invalid/secret" onerror="fetch(\'/private\')">'
   mock.send.mockResolvedValue(new Response(JSON.stringify(input)))
   mount()
   const region = await screen.findByRole("region", { name: "Slides" })
