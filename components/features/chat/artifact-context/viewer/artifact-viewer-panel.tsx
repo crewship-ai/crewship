@@ -231,7 +231,15 @@ function LoadedViewer({ data, target, setViewing, refetch, workspaceId, shell, f
     })
   }
   // The comment is saved as the agent's task; the run starts with a chat message bound to it.
+  const deliveryConfirmed = (saved: ArtifactComment) => Boolean(saved.task_id && data.comments.some(current =>
+    current.id === saved.id && current.task_id === saved.task_id && current.version === saved.version &&
+    (current.status === "working" || current.status === "answered" || current.status === "needs_clarification" || current.replies?.some(reply => /^agent:/.test(reply.author ?? ""))),
+  ))
+  // Authoritative task progress wins over a missing or late socket ACK. Clear
+  // the old failure before it paints, so Retry cannot launch an answered task.
+  if (undispatched && deliveryConfirmed(undispatched)) setUndispatched(null)
   const dispatch = async (saved: ArtifactComment) => {
+    if (deliveryConfirmed(saved)) return
     setUndispatched(null)
     const started = sendToAgent ? await sendToAgent({ pageId: data.page_id, comment: saved }).catch(() => false) : false
     if (started) setNotice({ text: "Comment sent to the agent", commentOn: saved.version })

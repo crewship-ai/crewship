@@ -683,6 +683,8 @@ func kitEnv(kit *RecoveryKit) (map[string]string, error) {
 // must not survive a move: sign-in sessions, pairings, locks, the scheduler
 // lease, OAuth polling. Tables absent from this schema are skipped.
 var runtimeResets = []struct{ table, what string }{
+	{"gridcraft_intents", "workbook run intents"},
+	{"gridcraft_sessions", "workbook editor sessions"},
 	{"mooring_session_owners", "Mooring session owner leases"},
 	{"document_creation_consents", "document creation consents"},
 	{"document_iteration_intents", "document iteration intents"},
@@ -779,6 +781,10 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 				rep.RuntimeReset = append(rep.RuntimeReset, fmt.Sprintf("%s (%d)", r.what, n))
 			}
 		}
+		if err := resetRecoveredGridCraft(ctx, db.DB); err != nil {
+			return err
+		}
+		rep.RuntimeReset = append(rep.RuntimeReset, "workbook writer generations and reservations")
 		// Close source delivery capabilities, but retain issued expiry bounds for
 		// read-revocation barriers if recovery shares the same OS boot. Never
 		// interpret discarded runtime metadata as an acknowledgement.

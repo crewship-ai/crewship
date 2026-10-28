@@ -49,8 +49,6 @@ var workspaceTablesNotBundled = map[string]string{
 	"mooring_delivery_gates":           "runtime delivery admission requires fresh identity after portable restore",
 	"mooring_delivery_barriers":        "runtime read-revocation barriers belong to source installation",
 	"mooring_session_owners":           "process-bound owner capability must not travel in a portable backup",
-	"gridcraft_heads":                  "experimental workbook portability is unavailable; dumping a workspace with workbooks is refused",
-	"gridcraft_operations":             "experimental workbook portability is unavailable; dumping a workspace with workbooks is refused",
 	"gridcraft_intents":                "run-bound permission cannot travel in a portable backup",
 	"gridcraft_sessions":               "editor sessions are bound to a live credential and expire within hours",
 
