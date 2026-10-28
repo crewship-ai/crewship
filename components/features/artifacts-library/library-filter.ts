@@ -155,3 +155,38 @@ export function facetCounts(items: LibraryItem[], filters: LibraryFilters): Face
 
 export const activeFacetCount = (filters: LibraryFilters) =>
   filters.kinds.length + filters.access.length + filters.version.length + filters.owners.length + (filters.folder !== null ? 1 : 0)
+
+const VIEWS: readonly LibraryView[] = ["home", "all", "attention", "empty", "series"]
+const UNFILED = "~unfiled"
+const list = (value: string | null) => (value ? value.split(",").map(entry => entry.trim()).filter(Boolean) : [])
+
+/** The filters as URL parameters, so a view survives reload and can be shared. Defaults are left out. */
+export function filtersToParams(filters: LibraryFilters, params: URLSearchParams = new URLSearchParams()): URLSearchParams {
+  const next = new URLSearchParams(params)
+  for (const key of ["view", "q", "kind", "access", "version", "owner", "folder"]) next.delete(key)
+  if (filters.view !== EMPTY_FILTERS.view) next.set("view", filters.view)
+  if (filters.q) next.set("q", filters.q)
+  if (filters.kinds.length) next.set("kind", filters.kinds.join(","))
+  if (filters.access.length) next.set("access", filters.access.join(","))
+  if (filters.version.length) next.set("version", filters.version.join(","))
+  if (filters.owners.length) next.set("owner", filters.owners.join(","))
+  if (filters.folder !== null) next.set("folder", filters.folder === "" ? UNFILED : filters.folder)
+  return next
+}
+
+/** Reads what `filtersToParams` wrote; an unknown value is dropped, never guessed. */
+export function filtersFromParams(params: URLSearchParams | null | undefined): LibraryFilters {
+  if (!params) return EMPTY_FILTERS
+  const view = params.get("view") as LibraryView | null
+  const kinds = new Set(LIBRARY_KINDS.map(entry => entry.kind as string))
+  const folder = params.get("folder")
+  return {
+    view: view && VIEWS.includes(view) ? view : EMPTY_FILTERS.view,
+    q: params.get("q") ?? "",
+    kinds: list(params.get("kind")).filter(kind => kinds.has(kind)) as LibraryKind[],
+    access: list(params.get("access")).filter(access => access === "private" || access === "open") as Access[],
+    version: list(params.get("version")).filter(version => version === "shared" || version === "unshared" || version === "unversioned") as VersionState[],
+    owners: list(params.get("owner")),
+    folder: folder === null ? null : folder === UNFILED ? "" : folder,
+  }
+}

@@ -5,8 +5,14 @@ const nav = vi.hoisted(() => ({ params: new URLSearchParams("workspace_id=ws1"),
 vi.mock("next/navigation", () => ({ useSearchParams: () => nav.params, useRouter: () => ({ replace: nav.replace, push: nav.push }) }))
 vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ workspaceId: "ws1", loading: false, linkUnavailable: false }) }))
 vi.mock("@/components/features/artifacts-library/artifacts-library", () => ({
-  ArtifactsLibrary: ({ workspaceId, item, onSelect }: { workspaceId: string; item: string | null; onSelect: (slug: string | null) => void }) =>
-    <div data-testid="library" data-ws={workspaceId} data-item={item ?? ""}><button onClick={() => onSelect("site")}>pick</button><button onClick={() => onSelect(null)}>back</button></div>,
+  ArtifactsLibrary: ({ workspaceId, item, onSelect, filters, onFiltersChange }: {
+    workspaceId: string; item: string | null; onSelect: (slug: string | null) => void
+    filters: { view: string; q: string }; onFiltersChange: (next: unknown) => void
+  }) =>
+    <div data-testid="library" data-ws={workspaceId} data-item={item ?? ""} data-view={filters.view} data-q={filters.q}>
+      <button onClick={() => onSelect("site")}>pick</button><button onClick={() => onSelect(null)}>back</button>
+      <button onClick={() => onFiltersChange({ ...filters, view: "all", q: "kind:word" })}>search</button>
+    </div>,
 }))
 
 import ArtifactsPage from "../page"
@@ -29,4 +35,14 @@ it("keeps the open artifact in the URL next to the workspace", () => {
   expect(nav.push).toHaveBeenCalledWith("/artifacts?workspace_id=ws1&item=site")
   fireEvent.click(screen.getByText("back"))
   expect(nav.push).toHaveBeenLastCalledWith("/artifacts?workspace_id=ws1")
+})
+
+it("keeps the view and filters in the URL and replaces the entry while filtering", () => {
+  nav.params = new URLSearchParams("workspace_id=ws1&view=attention&q=brief")
+  render(<ArtifactsPage />)
+  expect([screen.getByTestId("library").dataset.view, screen.getByTestId("library").dataset.q]).toEqual(["attention", "brief"])
+  fireEvent.click(screen.getByText("search"))
+  expect(nav.replace).toHaveBeenCalledWith("/artifacts?workspace_id=ws1&view=all&q=kind%3Aword")
+  fireEvent.click(screen.getByText("pick"))
+  expect(nav.push).toHaveBeenCalledWith("/artifacts?workspace_id=ws1&view=attention&q=brief&item=site")
 })
