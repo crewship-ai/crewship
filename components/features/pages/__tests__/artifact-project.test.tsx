@@ -52,3 +52,13 @@ it("retains 500 Unicode codepoints in a normalized selected quote sent to the ag
  const expected = Array.from("\ufeffŽluťoučký kůň pěl ďábelské ódy " + "🙂".repeat(520)).slice(0,500).join("")
  expect(state.comment.mock.calls[0][0].quote).toBe(expected)
 })
+
+it("keeps the Page Project preview when the Dashboard flag is off and dashboard.json is only an asset", () => {
+ vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", "false")
+ state.data.manifest.files.push({ path: "dashboard.json", media_type: "application/json", content: '{"schema_version":1,"collections":["sales"]}' })
+ try {
+  render(<ArtifactProject workspaceId="w" slug="demo" />)
+  expect(screen.getByTitle("Artifact preview")).toHaveAttribute("srcdoc", "safe document")
+  expect(screen.queryByText("Dashboard preview is unavailable.")).toBeNull()
+ } finally { state.data.manifest.files.pop(); vi.unstubAllEnvs() }
+})

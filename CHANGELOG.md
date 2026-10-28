@@ -14,6 +14,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Require actual Chromium execution of native document privacy regressions in frontend CI while preserving the strict browser-dialog guard.
 
 - Add an opt-in Artifacts library at `/artifacts` (`NEXT_PUBLIC_ARTIFACTS_LIBRARY`): a gallery or table of projects, Word, Sheet, Slides and dashboards with kind and shared version, a project detail on its version history and the edit lock of a native Word; the Pages list reports `artifact_kind` and `artifact_shared_version`.
+- Add opt-in inert Dashboard previews (`NEXT_PUBLIC_ARTIFACT_DASHBOARDS`): authorized collection data refreshes numbers, tables and native meter charts without publishing new code; shared readers stay on their shared manifest and data has source and freshness labels.
 - Add Preview, History and Comments tabs to the opt-in Artifacts library; sending an anchored comment starts the source agent, with delivery confirmation and retry of the saved task.
 - **Artifact comments could report that the agent did not start after it answered.** Persisted chat acknowledgements now confirm the exact artifact request, and verified task progress clears stale delivery warnings and their retry action.
 - Show agent artifact project steps in chat as cards with kind, version, Draft/Shared state and a running "Creating version n…" step that settles into "vn ready · Restore"; off by default behind `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.

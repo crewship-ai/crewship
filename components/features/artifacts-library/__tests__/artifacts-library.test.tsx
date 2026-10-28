@@ -31,7 +31,7 @@ beforeEach(() => {
   ]
   state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.select.mockReset(); state.refresh.mockReset()
 })
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
 const renderLibrary = () => render(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />)
 
@@ -112,4 +112,15 @@ it("empty, loading and error states say what to do", () => {
   rerender(<ArtifactsLibrary workspaceId="ws1" item={null} onSelect={state.select} />)
   fireEvent.click(screen.getByRole("button", { name: "Try again" }))
   expect(state.refresh).toHaveBeenCalled()
+})
+
+it("an explicitly typed Dashboard opens the versioned viewer without a Craft lease", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", "true")
+  // The backend-owned Page projection adds this typed kind; legacy panel dashboards stay in Pages.
+  state.pages = [{ ...wire({ slug: "sales", name: "Sales", artifact_shared_version: 2 }), artifactKind: "dashboard" } as unknown as PageView]
+  state.item = "sales"
+  renderLibrary()
+  expect(screen.getByTestId("viewer-panel")).toBeTruthy()
+  expect(screen.getByText("Shared v2")).toBeTruthy()
+  expect(screen.queryByTestId("lock-bar")).toBeNull()
 })
