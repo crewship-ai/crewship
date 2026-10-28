@@ -149,7 +149,7 @@ export function artifactsLibrary(): boolean {
  * `comment` level and `default_audience`. Default OFF.
  */
 export function artifactsSharingMock(): boolean {
-  return process.env.NEXT_PUBLIC_ARTIFACTS_SHARING_MOCK === "true"
+  return true // demo: sharing runs on the in-browser mock until the server routes land
 }
 
 /** Inert live-data Dashboard previews. Opt-in at build time; no data requests while off. */
