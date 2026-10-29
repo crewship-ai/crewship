@@ -83,6 +83,55 @@ func TestSandboxRejectsImplicitImageVolumes(t *testing.T) {
 		t.Fatalf("implicit volume: %v", err)
 	}
 }
+
+func TestSandboxCreationPreservesHomeInstalledTools(t *testing.T) {
+	var created struct {
+		container.Config
+		HostConfig *container.HostConfig
+	}
+	started := false
+	p, close := newFakeDockerProvider(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/images/"):
+			json.NewEncoder(w).Encode(map[string]any{"Id": sandboxTestSpec().ImageID, "Config": map[string]any{}})
+		case strings.HasSuffix(r.URL.Path, "/containers/create"):
+			if err := json.NewDecoder(r.Body).Decode(&created); err != nil {
+				t.Error(err)
+				http.Error(w, "invalid create request", http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]any{"Id": "owned-sandbox"})
+		case strings.HasSuffix(r.URL.Path, "/start"):
+			started = true
+			w.WriteHeader(http.StatusNoContent)
+		case strings.HasSuffix(r.URL.Path, "/json"):
+			json.NewEncoder(w).Encode(map[string]any{"Id": "owned-sandbox", "Image": sandboxTestSpec().ImageID, "Config": created.Config, "HostConfig": created.HostConfig, "State": map[string]bool{"Running": started}})
+		default:
+			t.Errorf("unexpected Docker call %s %s", r.Method, r.URL.Path)
+		}
+	})
+	defer close()
+	p.cfg.InstanceID = "installation"
+	if _, err := p.CreateSandbox(context.Background(), sandboxTestSpec()); err != nil {
+		t.Fatal(err)
+	}
+	if _, masked := created.HostConfig.Tmpfs["/home/agent"]; masked {
+		t.Fatal("sandbox hides image-installed CLI binaries and symlink targets under /home/agent")
+	}
+	var home string
+	for _, kv := range created.Env {
+		if strings.HasPrefix(kv, "HOME=") {
+			home = strings.TrimPrefix(kv, "HOME=")
+		}
+	}
+	if home == "" || home == "/home/agent" || created.HostConfig.Tmpfs[home] == "" {
+		t.Fatalf("sandbox requires a separate fresh writable HOME: %q", home)
+	}
+	if !created.HostConfig.ReadonlyRootfs || created.HostConfig.NetworkMode != "none" {
+		t.Fatal("image tool paths must remain read-only and offline")
+	}
+}
 func TestSandboxOutputIsBounded(t *testing.T) {
 	b := &sandboxOutput{limit: 4}
 	if _, err := b.Write([]byte("abc")); err != nil {
@@ -116,7 +165,7 @@ func TestOfflineSandboxAuditRejectsWeakenedConfiguration(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			pids := int64(64)
-			c := container.InspectResponse{HostConfig: &container.HostConfig{NetworkMode: "none", IpcMode: "private", CgroupnsMode: "private", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Resources: container.Resources{Memory: 128 << 20, MemorySwap: 128 << 20, NanoCPUs: 1e9, PidsLimit: &pids}, Tmpfs: map[string]string{"/home/agent": "rw,nosuid,nodev,size=67108864,uid=1001,gid=1001,mode=0700", "/tmp": "rw,nosuid,nodev,noexec,size=16777216,mode=1777"}}, Config: &container.Config{User: "1002:1002", Healthcheck: &container.HealthConfig{Test: []string{"NONE"}}}}
+			c := container.InspectResponse{HostConfig: &container.HostConfig{NetworkMode: "none", IpcMode: "private", CgroupnsMode: "private", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Resources: container.Resources{Memory: 128 << 20, MemorySwap: 128 << 20, NanoCPUs: 1e9, PidsLimit: &pids}, Tmpfs: map[string]string{provider.SandboxHome: "rw,nosuid,nodev,size=67108864,uid=1001,gid=1001,mode=0700", "/tmp": "rw,nosuid,nodev,noexec,size=16777216,mode=1777"}}, Config: &container.Config{User: "1002:1002", Healthcheck: &container.HealthConfig{Test: []string{"NONE"}}}}
 			if err := auditOfflineSandbox(c); err != nil {
 				t.Fatal("valid fixture rejected", err)
 			}
