@@ -32,7 +32,7 @@ import { ArtifactViewerPanel } from "../artifact-viewer-panel"
 const page = (name: string) => ({ path: name, content: `<body><h1 id="hero">Big idea</h1>${name}</body>`, media_type: "text/html" })
 function snap(patch: Partial<ArtifactProjectSnapshot> = {}): ArtifactProjectSnapshot {
   return {
-    page_id: "p1", name: "Launch site", slug: "launch", can_write: true, latest_version: 5, shared_version: 4,
+    page_id: "p1", name: "Launch site", slug: "launch", can_write: true, can_share:true, can_restore:true, can_send_to_agent:true, latest_version: 5, shared_version: 4,
     origin: { chat_id: "chat-1", agent_id: "agent-1" },
     manifest: { version: 5, entrypoint: "home.html", files: [page("home.html")] },
     versions: [{ version: 5, message: "Five" }, { version: 4, message: "Four" }, { version: 3, message: "Three" }],
@@ -208,4 +208,41 @@ it("a history near its limit offers what to do before saving fails", () => {
   expect(screen.getByText(/History is never deleted without you/)).toBeInTheDocument()
   fireEvent.click(screen.getByRole("button", { name: "Review versions" }))
   expect(screen.getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true")
+})
+
+it.each([false,undefined])("does not send a waiting batch after a fresh read lacks send capability %s",cap=>{
+ state.snapshot.data=snap({comments:[waiting("a","First"),waiting("b","Second")]})
+ state.snapshot.refetch.mockResolvedValue({data:snap({can_send_to_agent:cap,comments:[waiting("a","First"),waiting("b","Second")]}),error:null})
+ renderLibrary()
+ const rail=within(screen.getByRole("complementary",{name:"Comments beside preview"}))
+ return act(async()=>{
+  fireEvent.click(rail.getByRole("button",{name:"Send 2 to agent"}))
+  await Promise.resolve()
+  expect(state.dispatch).not.toHaveBeenCalled()
+  expect(state.comment).not.toHaveBeenCalled()
+ })
+})
+it("stops a waiting batch when send capability leaves and returns during the first dispatch",async()=>{
+ let resolve!:(ok:boolean)=>void
+ state.dispatch.mockImplementationOnce(()=>new Promise<boolean>(done=>{resolve=done}))
+ state.snapshot.data=snap({comments:[waiting("a","First"),waiting("b","Second")]})
+ const view=renderLibrary()
+ fireEvent.click(within(screen.getByRole("complementary",{name:"Comments beside preview"})).getByRole("button",{name:"Send 2 to agent"}))
+ await waitFor(()=>expect(state.dispatch).toHaveBeenCalledTimes(1))
+ state.snapshot.data=snap({can_send_to_agent:false,comments:[waiting("a","First"),waiting("b","Second")]});view.rerender(<ArtifactViewerPanel variant="library" />)
+ expect(screen.queryByRole("button",{name:"Send 2 to agent"})).toBeNull()
+ state.snapshot.data=snap({comments:[waiting("a","First"),waiting("b","Second")]});view.rerender(<ArtifactViewerPanel variant="library" />)
+ await act(async()=>resolve(true))
+ expect(state.dispatch).toHaveBeenCalledTimes(1)
+ expect(state.comment).not.toHaveBeenCalled()
+})
+it("keeps source editing available to an Edit user without owner queue, sharing or restore controls",()=>{
+ state.snapshot.data=snap({can_share:false,can_restore:false,can_send_to_agent:false})
+ renderLibrary()
+ expect(screen.getByRole("link",{name:"Edit source"})).toHaveAttribute("href","/pages/launch?artifact=1&workspace_id=ws1")
+ selectHero();fireEvent.change(screen.getByRole("textbox",{name:"Comment"}),{target:{value:"Local feedback"}})
+ expect(screen.queryByRole("button",{name:"Add to queue"})).toBeNull()
+ expect(screen.queryByRole("button",{name:"Send to agent"})).toBeNull()
+ fireEvent.click(screen.getByRole("button",{name:"Save comment"}))
+ expect(state.comment).toHaveBeenCalledWith(expect.objectContaining({send_to_agent:false}),expect.anything())
 })

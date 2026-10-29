@@ -149,6 +149,7 @@ export function parseArtifactProject(raw: unknown): ArtifactProjectSnapshot | nu
     ...(origin !== undefined ? { origin } : {}),
     ...(typeof raw.enabled === "boolean" ? { enabled: raw.enabled } : {}),
     can_write: raw.can_write,
+    ...Object.fromEntries(["can_share","can_restore","can_send_to_agent","can_comment"].filter(key=>typeof raw[key]==="boolean").map(key=>[key,raw[key]])),
     latest_version: raw.latest_version,
     shared_version: raw.shared_version,
     manifest,

@@ -10,20 +10,23 @@ type artifactProjectAvailabilityResponse struct {
 
 // artifactProjectSnapshotResponse is the version-selected owner or shared view.
 type artifactProjectSnapshotResponse struct {
-	ArtifactKind  string                   `json:"artifact_kind,omitempty"`
-	PageID        string                   `json:"page_id"`
-	Name          string                   `json:"name"`
-	Slug          string                   `json:"slug"`
-	Origin        any                      `json:"origin"`
-	Enabled       bool                     `json:"enabled"`
-	CanComment    bool                     `json:"can_comment"`
-	CanWrite      bool                     `json:"can_write"`
-	LatestVersion int64                    `json:"latest_version"`
-	SharedVersion int64                    `json:"shared_version"`
-	Manifest      map[string]any           `json:"manifest"`
-	Versions      []map[string]any         `json:"versions"`
-	Quota         artifacts.VersionQuota   `json:"quota"`
-	Comments      []artifactProjectComment `json:"comments"`
+	ArtifactKind   string                   `json:"artifact_kind,omitempty"`
+	PageID         string                   `json:"page_id"`
+	Name           string                   `json:"name"`
+	Slug           string                   `json:"slug"`
+	Origin         any                      `json:"origin"`
+	Enabled        bool                     `json:"enabled"`
+	CanComment     bool                     `json:"can_comment"`
+	CanShare       bool                     `json:"can_share"`
+	CanRestore     bool                     `json:"can_restore"`
+	CanSendToAgent bool                     `json:"can_send_to_agent"`
+	CanWrite       bool                     `json:"can_write"`
+	LatestVersion  int64                    `json:"latest_version"`
+	SharedVersion  int64                    `json:"shared_version"`
+	Manifest       map[string]any           `json:"manifest"`
+	Versions       []map[string]any         `json:"versions"`
+	Quota          artifacts.VersionQuota   `json:"quota"`
+	Comments       []artifactProjectComment `json:"comments"`
 }
 
 type artifactProjectMutationResponse struct {

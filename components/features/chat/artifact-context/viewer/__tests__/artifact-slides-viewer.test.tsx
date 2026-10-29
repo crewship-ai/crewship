@@ -24,7 +24,7 @@ it("starts at deck order rather than manifest order and posts the first authored
   projection.anchors.constructor.slide_id = "zeta"; projection.anchors.constructor.path = "slides/zeta.html"
   projection.deck.slides.reverse()
   mock.snapshot = {
-    page_id: "page", artifact_kind: "slides", can_write: true, latest_version: 2, shared_version: 1,
+    page_id: "page", artifact_kind: "slides", can_write: true, can_share: true, can_restore: true, can_send_to_agent: true, latest_version: 2, shared_version: 1,
     manifest: { version: 2, entrypoint: "deck.json", files: [
       { path: "slides/zeta.html", media_type: "text/html", content: '<section id="zeta">Second</section>' },
       { path: "slides/alpha.html", media_type: "text/html", content: '<section id="alpha"><p id="title">Revenue</p></section>' },

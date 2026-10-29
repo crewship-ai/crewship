@@ -4,7 +4,7 @@ export const snapshot = (patch: Partial<ArtifactProjectSnapshot> = {}): Artifact
   page_id: "pg-1",
   name: "Onboarding flow",
   slug: "onboarding",
-  can_write: true,
+  can_write: true, can_share: true, can_restore: true, can_send_to_agent: true,
   latest_version: 2,
   shared_version: 0,
   manifest: {

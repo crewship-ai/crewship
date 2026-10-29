@@ -2064,6 +2064,15 @@
           "can_comment": {
             "type": "boolean"
           },
+          "can_restore": {
+            "type": "boolean"
+          },
+          "can_send_to_agent": {
+            "type": "boolean"
+          },
+          "can_share": {
+            "type": "boolean"
+          },
           "can_write": {
             "type": "boolean"
           },
@@ -2125,6 +2134,9 @@
           "origin",
           "enabled",
           "can_write",
+          "can_share",
+          "can_restore",
+          "can_send_to_agent",
           "can_comment",
           "latest_version",
           "shared_version",

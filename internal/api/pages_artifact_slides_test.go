@@ -95,7 +95,7 @@ func TestArtifactSlidesSelectedProjectionAndPDF(t *testing.T) {
 }
 
 func TestArtifactSlidesRechecksAuthorityAfterActualRender(t *testing.T) {
-	cases := []string{"grant", "token", "member", "shared pin", "owner mode", "flag", "project flag", "retention", "source replacement", "blob corruption"}
+	cases := []string{"edit aba", "grant", "token", "member", "shared pin", "owner mode", "flag", "project flag", "retention", "source replacement", "blob corruption"}
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
 			h, ws, owner, reader, page := slidesAPIFixture(t)
@@ -108,9 +108,14 @@ func TestArtifactSlidesRechecksAuthorityAfterActualRender(t *testing.T) {
 				mustExec(t, h.db, `INSERT OR IGNORE INTO feature_flags(id,key,description,enabled,created_at,updated_at) VALUES('ff_artifact_slides','artifact_slides','Slides',0,datetime('now'),datetime('now'))`)
 				mustExec(t, h.db, `INSERT INTO feature_flag_overrides(id,flag_id,workspace_id,enabled) VALUES('slides-enabled','ff_artifact_slides',?,1)`, ws)
 			}
+			version := "1"
+			if name == "edit aba" {
+				mustExec(t, h.db, `UPDATE page_grants SET level='write' WHERE page_id=? AND subject_id=?`, page, reader)
+				version = "2"
+			}
 			w := httptest.NewRecorder()
 			calls := 0
-			request := slidesAPIRequest(t, h, ws, user, page, "export.pdf?version=1")
+			request := slidesAPIRequest(t, h, ws, user, page, "export.pdf?version="+version)
 			h.serveArtifactSlides(w, request, true, func(ctx context.Context, p artifacts.ArtifactSlidesProjection) ([]byte, error) {
 				calls++
 				if w.Body.Len() != 0 || w.Header().Get("Content-Type") != "" || w.Header().Get("Content-Disposition") != "" {
@@ -121,6 +126,9 @@ func TestArtifactSlidesRechecksAuthorityAfterActualRender(t *testing.T) {
 					return nil, err
 				}
 				switch name {
+				case "edit aba":
+					mustExec(t, h.db, `DELETE FROM page_grants WHERE page_id=? AND subject_id=?`, page, reader)
+					mustExec(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'user',?,'write',?)`, page, reader, owner)
 				case "grant":
 					mustExec(t, h.db, `DELETE FROM page_grants WHERE page_id=? AND subject_id=?`, page, reader)
 				case "token":

@@ -26,7 +26,7 @@ func TestArtifactProjectFeedbackSchemasAcceptOwnerAndSharedSnapshots(t *testing.
 		t.Fatal(err)
 	}
 	snapshot := compileAt(t, raw, "/components/schemas/ArtifactProjectSnapshot")
-	fixture := map[string]any{"page_id": "page", "name": "Project", "slug": "project", "origin": nil, "enabled": true, "can_write": true, "can_comment": true, "latest_version": float64(1), "shared_version": float64(0), "manifest": map[string]any{"version": float64(1), "entrypoint": "index.html", "files": []any{map[string]any{"path": "index.html", "content": "<h1 id=artifact-hero>Hello</h1>", "media_type": "text/html"}}, "created_at": "2026-10-27T00:00:00Z", "message": "", "restored_from": float64(0)}, "versions": []any{}, "quota": map[string]any{"used_bytes": float64(100), "limit_bytes": float64(1000), "warning": false, "retention": "keep-all"}, "comments": []any{}}
+	fixture := map[string]any{"page_id": "page", "name": "Project", "slug": "project", "origin": nil, "enabled": true, "can_write": true, "can_share": true, "can_restore": true, "can_send_to_agent": false, "can_comment": true, "latest_version": float64(1), "shared_version": float64(0), "manifest": map[string]any{"version": float64(1), "entrypoint": "index.html", "files": []any{map[string]any{"path": "index.html", "content": "<h1 id=artifact-hero>Hello</h1>", "media_type": "text/html"}}, "created_at": "2026-10-27T00:00:00Z", "message": "", "restored_from": float64(0)}, "versions": []any{}, "quota": map[string]any{"used_bytes": float64(100), "limit_bytes": float64(1000), "warning": false, "retention": "keep-all"}, "comments": []any{}}
 	if err := snapshot.Validate(fixture); err != nil {
 		t.Fatal("owner snapshot rejected", err)
 	}

@@ -162,9 +162,9 @@ func TestArtifactCommentGrantFolderMoveKeepsSharedAndOwnerAuthority(t *testing.T
 	}
 	mustExec(t, h.db, `DELETE FROM page_grants WHERE page_id=? AND subject_id=?`, page, user)
 	mustExec(t, h.db, `INSERT INTO page_folder_acl(folder_id,subject_type,subject_id,can_read,can_write,set_at) VALUES('comment-folder','user',?,1,1,datetime('now'))`, user)
-	// Folder access does not expose the owner's unshared retained content.
+	// Explicit folder Edit grants the latest project content, even without a shared pin.
 	mustExec(t, h.db, `UPDATE artifact_version_heads SET shared_version=0 WHERE page_id=?`, page)
-	if got := call(user, "GET", "three-screens/artifact", ""); got.Code != 403 && got.Code != 404 {
-		t.Fatalf("folder-only private bytes %d %s", got.Code, got.Body)
+	if got := call(user, "GET", "three-screens/artifact", ""); got.Code != 200 {
+		t.Fatalf("folder editor latest %d %s", got.Code, got.Body)
 	}
 }

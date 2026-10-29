@@ -4,6 +4,7 @@ import type { ArtifactComment, ArtifactProjectSnapshot } from "../../projects/ty
 import type { ArtifactViewerTarget } from "../../projects/artifact-viewer-context"
 
 const state = vi.hoisted(() => ({
+  agentHook:vi.fn(),
   userId: "user-me",
   target: null as ArtifactViewerTarget | null,
   close: vi.fn(),
@@ -13,6 +14,7 @@ const state = vi.hoisted(() => ({
   sendToAgent: undefined as undefined | ((request: unknown) => Promise<boolean>),
 }))
 
+vi.mock("@/hooks/use-artifact-agent-dispatch",()=>({useArtifactAgentDispatch:(...args:unknown[])=>{state.agentHook(...args);return {dispatch:vi.fn(),ready:false}}}))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: state.userId } } }) }))
 vi.mock("../../projects/artifact-viewer-context", () => ({
   useArtifactViewer: () => ({ workspaceId: "ws1", target: state.target, open: vi.fn(), close: state.close, sendToAgent: state.sendToAgent }),
@@ -34,7 +36,7 @@ import { ArtifactViewerPanel, commentQueueChip } from "../artifact-viewer-panel"
 const html = (name: string) => ({ path: name, content: `<body><h1 id="hero">Big  idea</h1>${name}</body>`, media_type: "text/html" })
 function snap(patch: Partial<ArtifactProjectSnapshot> = {}): ArtifactProjectSnapshot {
   return {
-    page_id: "p1", name: "Launch site", slug: "launch", can_write: true, latest_version: 3, shared_version: 2,
+    page_id: "p1", name: "Launch site", slug: "launch", can_write: true, can_share: true, can_restore: true, can_send_to_agent: true, latest_version: 3, shared_version: 2,
     manifest: { version: 3, entrypoint: "home.html", files: [html("about.html"), { path: "a.css", content: "", media_type: "text/css" }, html("home.html"), html("contact.html")] },
     versions: [
       { version: 1, message: "First", actor: "Ada", created_at: "2026-10-20T10:00:00Z" },
@@ -581,7 +583,7 @@ it("recovers an exact persisted Waiting task after close/reopen without creating
  expect(screen.queryByRole("button",{name:"Retry"})).toBeNull()
 })
 
-it.each(["accepted", "missing eligibility", "claimed", "new head", "changed origin", "lost write"])("fresh Retry read fences %s without another dispatch", async change=>{
+it.each(["accepted", "missing eligibility", "claimed", "new head", "changed origin", "lost write", "lost send", "missing send"])("fresh Retry read fences %s without another dispatch", async change=>{
  state.snapshot.data=retrySnapshot()
  const fresh=retrySnapshot()
  if(change==="accepted")fresh.comments[0].delivery_retryable=false
@@ -590,6 +592,8 @@ it.each(["accepted", "missing eligibility", "claimed", "new head", "changed orig
  if(change==="new head")fresh.latest_version=4
  if(change==="changed origin")fresh.origin={chat_id:"different-chat",agent_id:"origin-agent"}
  if(change==="lost write")fresh.can_write=false
+ if(change==="lost send")fresh.can_send_to_agent=false
+ if(change==="missing send")delete fresh.can_send_to_agent
  state.snapshot.refetch.mockResolvedValue({data:fresh,error:null})
  state.sendToAgent=vi.fn().mockResolvedValue(true)
  render(<ArtifactViewerPanel />)
@@ -670,4 +674,32 @@ it.each(["another-origin",null])("fences an old Retry refresh after origin chang
  view.rerender(<ArtifactViewerPanel />)
  await act(async()=>settle({data:retrySnapshot(),error:null}))
  expect(state.sendToAgent).not.toHaveBeenCalled()
+})
+
+it.each([false,undefined,"true"])("withholds owner actions from an editor when capabilities are %s",cap=>{
+ state.snapshot.data=snap({can_share:cap,can_restore:cap,can_send_to_agent:cap} as unknown as Partial<ArtifactProjectSnapshot>)
+ render(<ArtifactViewerPanel />)
+ fireEvent.click(screen.getByRole("button",{name:"History"}))
+ expect(screen.queryAllByRole("button",{name:/Share|Restore as new version/})).toHaveLength(0)
+ selectHero();fireEvent.change(screen.getByRole("textbox",{name:"Comment"}),{target:{value:"Feedback"}})
+ expect(screen.queryByRole("button",{name:"Send to agent"})).toBeNull()
+ fireEvent.submit(screen.getByRole("form",{name:"New comment"}))
+ expect(state.comment).toHaveBeenCalledWith(expect.objectContaining({send_to_agent:false}),expect.anything())
+})
+it("retires an acknowledged agent comment when send permission changes while Edit remains",async()=>{
+ const send=vi.fn().mockResolvedValue(true);state.sendToAgent=send
+ const view=render(<ArtifactViewerPanel />)
+ selectHero();fireEvent.change(screen.getByRole("textbox",{name:"Comment"}),{target:{value:"Feedback"}})
+ fireEvent.click(screen.getByRole("button",{name:"Send to agent"}))
+ const success=state.comment.mock.calls[0][1].onSuccess
+ state.snapshot.data=snap({can_send_to_agent:false});view.rerender(<ArtifactViewerPanel />)
+ await act(async()=>success(comment({task_id:"task"})))
+ expect(send).not.toHaveBeenCalled()
+})
+it("offers only editors an escaped unpinned source editor link",()=>{
+ state.target={slug:"a/b ?&"}
+ render(<ArtifactViewerPanel variant="library" />)
+ expect(screen.getByRole("link",{name:"Edit source"})).toHaveAttribute("href","/pages/a%2Fb%20%3F%26?artifact=1&workspace_id=ws1")
+ cleanup();state.snapshot.data=snap({can_write:false});render(<ArtifactViewerPanel variant="library" />)
+ expect(screen.queryByRole("link",{name:"Edit source"})).toBeNull()
 })

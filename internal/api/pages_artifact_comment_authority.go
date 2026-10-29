@@ -63,14 +63,22 @@ func (h *PageHandler) mayReadNativeWithoutComment(ctx context.Context, wsID stri
 	return err == nil && folder.read
 }
 
-func artifactCommentVersion(ctx context.Context, tx *sql.Tx, k artifacts.VersionKey, human string) (int64, error) {
+func (h *PageHandler) artifactCommentVersion(ctx context.Context, tx *sql.Tx, k artifacts.VersionKey, human string) (int64, error) {
 	var owner string
 	var latest, shared int64
 	err := tx.QueryRowContext(ctx, `SELECT p.owner_user_id,v.latest_version,v.shared_version FROM pages p JOIN artifact_version_heads v ON v.page_id=p.id AND v.workspace_id=p.workspace_id WHERE p.id=? AND p.workspace_id=?`, k.PageID, k.WorkspaceID).Scan(&owner, &latest, &shared)
 	if err != nil {
 		return 0, err
 	}
-	if owner == human {
+	rec, loadErr := h.loadPageForRead(context.WithValue(ctx, pageAuthReaderKey{}, tx), k.WorkspaceID, "@"+k.PageID)
+	if loadErr != nil {
+		return 0, loadErr
+	}
+	viewer, loadErr := h.loadViewer(context.WithValue(ctx, pageAuthReaderKey{}, tx), k.WorkspaceID, human)
+	if loadErr != nil {
+		return 0, loadErr
+	}
+	if owner == human || h.artifactProjectHumanEditor(context.WithValue(ctx, pageAuthReaderKey{}, tx), k, rec, viewer) {
 		return latest, nil
 	}
 	if shared < 1 {
@@ -107,7 +115,7 @@ func (h *PageHandler) artifactProjectCommentAuthority(r *http.Request, k artifac
 		if err != nil || !h.mayCommentPage(ctx, k.WorkspaceID, user.ID, role, rec) {
 			return "", errArtifactProjectAccess
 		}
-		version, err := artifactCommentVersion(ctx, tx, k, user.ID)
+		version, err := h.artifactCommentVersion(ctx, tx, k, user.ID)
 		if err != nil {
 			return "", err
 		}
@@ -130,7 +138,7 @@ func (h *PageHandler) artifactProjectCanComment(r *http.Request, k artifacts.Ver
 		if err != nil {
 			return "", err
 		}
-		selected, err := artifactCommentVersion(ctx, tx, k, actor)
+		selected, err := h.artifactCommentVersion(ctx, tx, k, actor)
 		if err != nil || selected != version {
 			return "", errArtifactProjectAccess
 		}

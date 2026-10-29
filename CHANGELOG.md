@@ -44,6 +44,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add a default-off typed artifact Slides preview (`NEXT_PUBLIC_ARTIFACT_SLIDES`) with existing slide canvases, thumbnails, presentation, authored comment anchors and authorized PDF download; requires the backend Slides capability.
 - Show the Craft edit-lock bar, agent proposal cards (Compare / Accept / Reject) and recovered local drafts in chat, and a "+ New artifact" composer menu offering only kinds with a backend; off by default behind `NEXT_PUBLIC_CHAT_CRAFT_LEASE` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 - **Opening a new conversation logged three 404s.** A draft session no longer requests its execution profile, messages or participants before the first send creates it.
+- **Project Edit grants could return 403 instead of allowing changes.** Human editors can read and save the latest complete project with version conflict checks and their own attribution. Read and Comment stay on the shared version; publishing a shared pin, restoring history and agent execution keep separate owner permissions.
+
 - **Artifact authoring clients support complete project versions.** Add pilot MCP tools and `page artifact` commands for atomic manifests, explicit version conflicts, restore and anchored feedback on servers that enable the artifact project backend.
 - Artifact project feedback exposes verified human/agent attribution, occupied addresses have a distinct error, and authoring tools require stable selection IDs.
 - Add default-off authored Slides projections and vector PDF export with explicit version pins and current Page/run authority rechecked after rendering. Existing artifact history and comments remain authoritative.

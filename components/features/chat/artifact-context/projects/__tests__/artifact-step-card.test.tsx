@@ -110,6 +110,12 @@ it("failed shows the error without a retry", () => {
   expect(screen.queryByRole("button")).toBeNull()
 })
 
+it.each([false,undefined])("does not offer Restore to an editor without explicit owner capability %s",cap=>{
+ h.snap=query({data:snapshot({can_restore:cap})})
+ renderStep({tool:"publish",state:"done",slug:"onboarding",version:2})
+ expect(screen.queryByRole("button",{name:"Restore v1"})).toBeNull()
+})
+
 it("a running new version says the current one stays as it is", () => {
   renderStep({ tool: "publish", state: "running", slug: "onboarding", baseVersion: 3 })
   expect(screen.getByText("You can keep working; v3 stays as it is.")).toBeTruthy()

@@ -63,7 +63,7 @@ const saved: ArtifactComment = {
 beforeEach(() => {
   state.pages = [toPageView({ id: "page-1", slug: "launch", name: "Launch", owner: "user/owner", artifact_kind: "project" })]
   state.snapshot = {
-    page_id: "page-1", name: "Launch", slug: "launch", can_write: true,
+    page_id: "page-1", name: "Launch", slug: "launch", can_write: true, can_share: true, can_restore: true, can_send_to_agent: true,
     origin: { chat_id: "source-chat", agent_id: "source-agent" },
     latest_version: 3, shared_version: 2,
     manifest: { version: 3, entrypoint: "index.html", files: [{ path: "index.html", media_type: "text/html", content: '<body><h1 id="heading">Hello</h1></body>' }] },

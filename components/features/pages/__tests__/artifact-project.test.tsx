@@ -1,10 +1,10 @@
 import React from "react"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
-const state = vi.hoisted(() => ({ user: "owner", token: "", comment: vi.fn(), dispatch: vi.fn(), data: { can_write: true, can_comment: false, latest_version: 2, shared_version: 1, manifest: { version: 2, entrypoint: "index.html", files: [{ path: "index.html", content: "<h1>Hello</h1>", media_type: "text/html" }, { path: "details.html", content: "<h1>Details</h1>", media_type: "text/html" }] }, versions: [{ version: 2 }, { version: 1 }], quota: { used_bytes: 10, limit_bytes: 100, warning: false }, comments: [] }, restore: vi.fn(), share: vi.fn() }))
+const state = vi.hoisted(() => ({ user: "owner", token: "", save: vi.fn(), comment: vi.fn(), dispatch: vi.fn(), data: { can_write: true, can_comment: false, can_share: true, can_restore: true, can_send_to_agent: true, latest_version: 2, shared_version: 1, manifest: { version: 2, entrypoint: "index.html", files: [{ path: "index.html", content: "<h1>Hello</h1>", media_type: "text/html" }, { path: "details.html", content: "<h1>Details</h1>", media_type: "text/html" }] }, versions: [{ version: 2 }, { version: 1 }], quota: { used_bytes: 10, limit_bytes: 100, warning: false }, comments: [] }, restore: vi.fn(), share: vi.fn() }))
 vi.mock("@/hooks/use-artifact-agent-dispatch", () => ({ useArtifactAgentDispatch: () => ({ dispatch: state.dispatch, ready: false }) }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: state.user } } }) }))
-vi.mock("@/hooks/use-artifact-project", () => ({ useArtifactProject: () => ({ query: { data: state.data }, restore: { mutate: state.restore }, share: { mutate: state.share }, comment: { mutate: state.comment } }) }))
+vi.mock("@/hooks/use-artifact-project", () => ({ useArtifactProject: () => ({ query: { data: state.data }, restore: { mutate: state.restore }, share: { mutate: state.share }, comment: { mutate: state.comment }, save: { mutate: state.save } }) }))
 vi.mock("@/lib/pages/artifact-project-preview", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/pages/artifact-project-preview")>(), artifactProjectDocument: vi.fn((_files: unknown, _path: string, token: string) => { state.token = token; return "safe document" }) }))
 vi.mock("@/components/features/chat/artifact-context/viewer/artifact-slides-preview", () => ({ ArtifactSlidesPreview: ({selectMode,onSelect}:{selectMode:boolean;onSelect:(value:{selector:string;quote:string})=>void}) => <div>Typed Page Slides<button disabled={!selectMode} onClick={() => onSelect({selector:"#typed",quote:"Typed heading"})}>Pick typed element</button></div> }))
 vi.mock("@/components/features/chat/artifact-context/viewer/artifact-dashboard-preview", () => ({ ArtifactDashboardPreview: ({selectMode,onSelect}:{selectMode:boolean;onSelect:(value:{selector:string;quote:string})=>void}) => <button disabled={!selectMode} onClick={() => onSelect({selector:"#typed",quote:"Typed heading"})}>Pick typed element</button> }))
@@ -193,4 +193,62 @@ it("retires an owner submission before its success can dispatch after downgrade 
   expect(state.dispatch).not.toHaveBeenCalled()
   expect(screen.getByLabelText("Comment")).toHaveValue("Commenter feedback")
  }finally{state.data=previous}
+})
+
+it("lets an editor save a whole manifest while withholding owner controls", () => {
+ const previous=state.data
+ try {
+  state.data={...state.data,can_share:false,can_restore:false,can_send_to_agent:false}
+  render(<ArtifactProject workspaceId="w" slug="demo" />)
+  expect(screen.queryByRole("button",{name:/Restore version|Share version|Send to agent/})).toBeNull()
+  fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+  fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"<h1>Edited by human</h1>"}})
+  fireEvent.click(screen.getByRole("button",{name:"Save project"}))
+  expect(state.save).toHaveBeenCalledWith({base_version:2,entrypoint:"index.html",files:[{path:"index.html",media_type:"text/html",content:"<h1>Edited by human</h1>"},previous.manifest.files[1]]},expect.anything())
+ } finally {state.data=previous}
+})
+it("keeps a conflicting source draft and requires an explicit retry",async()=>{
+ render(<ArtifactProject workspaceId="w" slug="demo" />)
+ fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+ fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"Private source draft"}})
+ fireEvent.click(screen.getByRole("button",{name:"Save project"}))
+ await act(async()=>state.save.mock.calls[0][1].onError(Object.assign(Error("Changed"),{status:409})))
+ expect(screen.getByLabelText("Source file")).toHaveValue("Private source draft")
+ expect(state.save).toHaveBeenCalledOnce()
+})
+it("never carries source drafts across identities or accepts an old save after A to B to A",async()=>{
+ const view=render(<ArtifactProject workspaceId="w" slug="demo" />)
+ fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+ fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"A private draft"}})
+ fireEvent.click(screen.getByRole("button",{name:"Save project"}))
+ const success=state.save.mock.calls[0][1].onSuccess
+ state.user="B";view.rerender(<ArtifactProject workspaceId="w" slug="demo" />)
+ expect(screen.queryByLabelText("Source file")).toBeNull()
+ state.user="owner";view.rerender(<ArtifactProject workspaceId="w" slug="demo" />)
+ fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+ fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"New A draft"}})
+ await act(async()=>success({version:3}))
+ expect(screen.getByLabelText("Source file")).toHaveValue("New A draft")
+})
+it("keeps the original CAS base when a background refetch finds a newer manifest",()=>{
+ const previous=state.data
+ try {
+  const view=render(<ArtifactProject workspaceId="w" slug="demo" />)
+  fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+  fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"Keep version two draft"}})
+  state.data={...state.data,latest_version:3,manifest:{...state.data.manifest,version:3}}
+  view.rerender(<ArtifactProject workspaceId="w" slug="demo" />)
+  fireEvent.click(screen.getByRole("button",{name:"Save project"}))
+  expect(state.save.mock.calls[0][0].base_version).toBe(2)
+  expect(state.save.mock.calls[0][0].files[0].content).toBe("Keep version two draft")
+ }finally{state.data=previous}
+})
+it("removes the private iframe after a refused source save",async()=>{
+ render(<ArtifactProject workspaceId="w" slug="demo" />)
+ fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+ fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"Private draft"}})
+ fireEvent.click(screen.getByRole("button",{name:"Save project"}))
+ await act(async()=>state.save.mock.calls[0][1].onError(Object.assign(Error("Revoked"),{status:403})))
+ expect(screen.queryByTitle("Artifact preview")).toBeNull()
+ expect(screen.getByLabelText("Source file")).toHaveValue("Private draft")
 })
