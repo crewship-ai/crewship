@@ -21,7 +21,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -303,14 +305,47 @@ func TestOAuth_Callback_IssuerValidation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Keep a real HTTP exchange and the transport-error branch, without
+			// waiting for a TEST-NET dial timeout. The dedicated HTTPError tests
+			// still exercise the unchanged production SSRF-safe transport.
+			var exchanges atomic.Int32
+			endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				exchanges.Add(1)
+				if r.Method != http.MethodPost || r.URL.Path != "/token" {
+					t.Errorf("unexpected token request: %s %s", r.Method, r.URL.Path)
+				}
+				want := url.Values{
+					"grant_type": {"authorization_code"}, "client_id": {"client"},
+					"client_secret": {"secret"}, "code": {"auth-code"},
+					"redirect_uri": {"https://app/cb"}, "code_verifier": {"verifier"},
+				}
+				if err := r.ParseForm(); err != nil || !reflect.DeepEqual(r.PostForm, want) {
+					t.Errorf("token form = %v, err = %v; want %v", r.PostForm, err, want)
+				}
+				connection, _, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Errorf("hijack token exchange: %v", err)
+					return
+				}
+				_ = connection.Close() // EOF before any response: Client.Do must fail.
+			}))
+			t.Cleanup(endpoint.Close)
+			endpointTarget, err := url.Parse(endpoint.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original := oauthTokenClient
+			client := *original // Preserve all timeouts and client policies.
+			transport := &httpsafe.RewriteRoundTripper{Target: endpointTarget}
+			client.Transport = transport
+			oauthTokenClient = &client
+			t.Cleanup(func() { oauthTokenClient = original })
 			h, db := newOAuthHandler(t)
 			userID := seedTestUser(t, db)
 			wsID := seedTestWorkspace(t, db, userID)
 			credID := "cred-iss-" + strings.ReplaceAll(strings.ReplaceAll(tt.name, " ", "-"), "_", "-")
-			// Unroutable token URL: if the iss check is (correctly) bypassed
-			// or passed, the handler must reach the network and fail with
-			// 502 — that is how a passing case is told apart from a
-			// short-circuited 400.
+			// Passing or bypassed issuer validation must reach the endpoint;
+			// rejected issuer validation must make zero token requests.
 			seedOAuthCredential(t, db, wsID, credID, "client", "secret", "https://p/auth", "http://192.0.2.1:1/token")
 			if tt.credIssuer != "" {
 				if _, err := db.Exec("UPDATE credentials SET oauth_issuer = ? WHERE id = ?", tt.credIssuer, credID); err != nil {
@@ -337,6 +372,13 @@ func TestOAuth_Callback_IssuerValidation(t *testing.T) {
 			h.Callback(rr, req)
 			if rr.Code != tt.wantStatus {
 				t.Errorf("status = %d, want %d; body=%s", rr.Code, tt.wantStatus, rr.Body.String())
+			}
+			wantExchanges := int32(0)
+			if tt.wantStatus == http.StatusBadGateway {
+				wantExchanges = 1
+			}
+			if got := exchanges.Load(); got != wantExchanges {
+				t.Errorf("token exchanges = %d, want %d", got, wantExchanges)
 			}
 		})
 	}
