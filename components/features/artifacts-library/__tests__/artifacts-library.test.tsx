@@ -194,6 +194,26 @@ it("on a phone a click opens the detail directly, with no peek", () => {
   expect(screen.queryByRole("complementary", { name: "Preview" })).toBeNull()
 })
 
+it("phone rows show checkboxes only after Select", () => {
+  state.mobile = true
+  renderLibrary()
+  openAll()
+  expect(screen.queryByRole("checkbox", { name: "Select Partner brief" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: /^Select$/ }))
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select Partner brief" }))
+  expect(screen.getByRole("toolbar", { name: "Bulk actions" })).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Done" }))
+  expect(screen.queryByRole("checkbox", { name: "Select Partner brief" })).toBeNull()
+  expect(screen.queryByRole("toolbar", { name: "Bulk actions" })).toBeNull()
+})
+
+it("desktop rows keep their checkboxes without a Select toggle", () => {
+  renderLibrary()
+  openAll()
+  expect(screen.getByRole("checkbox", { name: "Select Partner brief" })).toBeTruthy()
+  expect(screen.queryByRole("button", { name: /^Select$/ })).toBeNull()
+})
+
 it("a project detail opens the project preview", () => {
   state.item = "site"
   renderLibrary()

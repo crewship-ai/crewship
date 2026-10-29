@@ -150,13 +150,17 @@ function ItemsView({ items, layout, onOpen, selection, peeked }: {
 }
 
 /** Sort, group and layout over the list, never in the panel (Harbor 2 Display row). */
-function DisplayRow({ count, sort, group, layout, onSort, onGroup, onLayout }: {
+function DisplayRow({ count, sort, group, layout, onSort, onGroup, onLayout, selecting, onSelecting }: {
   count: number; sort: SortKey; group: GroupKey; layout: Layout
   onSort: (sort: SortKey) => void; onGroup: (group: GroupKey) => void; onLayout: (layout: Layout) => void
+  // Phones show row checkboxes only in select mode; desktop leaves this unset.
+  selecting?: boolean; onSelecting?: (selecting: boolean) => void
 }) {
   const select = "h-[var(--control-sm)] rounded-md border border-border bg-card px-2 text-xs text-foreground coarse:min-h-[44px]"
   return <div role="toolbar" aria-label="Display" className="flex min-w-0 flex-wrap items-center gap-2">
     <span className="mr-auto text-xs tabular-nums text-muted-foreground">{count} {count === 1 ? "artifact" : "artifacts"}</span>
+    {onSelecting && <Button type="button" size="sm" variant="outline" className="coarse:min-h-[44px]"
+      onClick={() => onSelecting(!selecting)}>{selecting ? "Done" : "Select"}</Button>}
     <label className="flex items-center gap-1.5 text-xs text-muted-foreground">Sort
       <select aria-label="Sort" className={select} value={sort} onChange={event => onSort(event.target.value as SortKey)}>
         <option value="updated">Last edited</option><option value="name">Name</option><option value="kind">Kind</option>
@@ -501,6 +505,7 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
     return withLibraryState(base, sharing.libraryState(base))
   }, [pages, sharing, stateTick]) // eslint-disable-line react-hooks/exhaustive-deps -- stateTick is the re-read signal
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
+  const [selecting, setSelecting] = useState(false)
   const [folderSettings, setFolderSettings] = useState<{ slug: string; name: string } | null>(null)
   const folderChoices = useMemo(() => folders.map(folder => ({ slug: folder.slug, name: folder.name })), [folders])
   const [own, setOwn] = useState<LibraryFilters>(EMPTY_FILTERS)
@@ -582,7 +587,8 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
           <Settings2 aria-hidden />Folder settings
         </Button>
       </div>}
-      <DisplayRow count={shown.length} sort={sort} group={group} layout={layout} onSort={setSort} onGroup={setGroup} onLayout={setLayout} />
+      <DisplayRow count={shown.length} sort={sort} group={group} layout={layout} onSort={setSort} onGroup={setGroup} onLayout={setLayout}
+        selecting={mobile ? selecting || picked.size > 0 : undefined} onSelecting={mobile && layout === "list" ? next => { setSelecting(next); if (!next) setPicked(new Set()) } : undefined} />
       {note && <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-card border border-dashed p-3 text-sm text-muted-foreground">
         <span className="min-w-0 flex-[1_1_260px]">{note}</span>
         {shown.length > 0 && <Button type="button" size="sm" variant="outline" onClick={() => setPicked(new Set(shown.map(entry => entry.slug)))}>Select all {shown.length}</Button>}
@@ -593,7 +599,7 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
         ? <PageNoResults onClear={() => setFilters({ ...EMPTY_FILTERS, view: filters.view })} />
         : groupItems(shown, group).map(entry => <section key={entry.key} aria-label={entry.label || undefined} className="grid gap-2">
           {entry.label && <h2 className="text-xs font-semibold text-muted-foreground">{entry.label} <span className="tabular-nums">{entry.items.length}</span></h2>}
-          <ItemsView items={entry.items} layout={layout} onOpen={pick} selection={layout === "list" ? selection : undefined} peeked={peeked?.slug} />
+          <ItemsView items={entry.items} layout={layout} onOpen={pick} selection={layout === "list" && (!mobile || selecting || picked.size > 0) ? selection : undefined} peeked={peeked?.slug} />
         </section>)}
     </div>
   }
