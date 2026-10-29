@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,9 +19,14 @@ import (
 
 func craftNativeHTTPFixture(t *testing.T) (*pagesTransferRig, *craftNativeHTTP, context.Context) {
 	t.Helper()
-	copy := testutil.MigratedDB(t)
-	path := copy.Path()
-	if err := copy.Close(); err != nil {
+	// Copy the verified migrated template without opening a temporary NORMAL
+	// pool first. Native receipts still use production FULL on every connection.
+	data, err := os.ReadFile(testutil.MigratedTemplatePath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := testutil.ActualEvidenceDBPath(t, filepath.Join(t.TempDir(), "native.db"))
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		t.Fatal(err)
 	}
 	db, err := database.Open("file:" + path)
@@ -27,6 +34,7 @@ func craftNativeHTTPFixture(t *testing.T) (*pagesTransferRig, *craftNativeHTTP, 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
+	drainBackgroundWork(t)
 	f := pagesTransferSetupWithDB(t, db)
 	f.seedPage(t, "native-page", "native-page", "Native", f.userID, "")
 	mustExec(t, f.db, `INSERT INTO craft_native_documents(page_id,workspace_id,application_id,engine_revision,engine_sha256,editor_bundle) VALUES('native-page',?,'wordcraft',?,?,?)`, f.wsID, strings.Repeat("a", 40), strings.Repeat("b", 64), strings.Repeat("c", 64))
