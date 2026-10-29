@@ -98,7 +98,13 @@ func (h *PageHandler) artifactProjectMessageAuthority(ctx context.Context, tx *s
 	}
 	var crew string
 	err = tx.QueryRowContext(ctx, `SELECT a.crew_id FROM conversation_messages m JOIN chats c ON c.id=m.session_id AND c.created_by=m.author_user_id AND c.visibility='private' JOIN agents a ON a.id=c.agent_id AND a.id=m.agent_id AND a.workspace_id=c.workspace_id WHERE m.id=? AND m.session_id=? AND m.author_user_id=? AND m.agent_id=? AND m.role='user' AND c.workspace_id=?`, message, receipt.ChatID, receipt.UserID, receipt.AgentID, receipt.WorkspaceID).Scan(&crew)
-	if err != nil || !h.artifactProjectEnabled(ctx) || !h.artifactAgentPolicyAllows(ctx, receipt.WorkspaceID, crew) {
+	enabled := h.artifactProjectEnabled(ctx)
+	contentType := "artifact_project"
+	if intent.Kind == "design" {
+		enabled = h.designEnabled(ctx)
+		contentType = "design"
+	}
+	if err != nil || !enabled || !h.artifactAgentPolicyAllows(ctx, receipt.WorkspaceID, crew) {
 		return errArtifactProjectAccess
 	}
 	if intent.PageID == "" {
@@ -108,7 +114,7 @@ func (h *PageHandler) artifactProjectMessageAuthority(ctx context.Context, tx *s
 		return nil
 	}
 	var allowed int
-	err = tx.QueryRowContext(ctx, `SELECT count(*) FROM pages p JOIN artifact_version_heads v ON v.page_id=p.id AND v.workspace_id=p.workspace_id AND v.content_type='artifact_project' WHERE p.id=? AND p.workspace_id=? AND p.owner_user_id=? AND p.owner_crew_id IS NULL AND v.latest_version=?`, intent.PageID, receipt.WorkspaceID, receipt.UserID, intent.BaseVersion).Scan(&allowed)
+	err = tx.QueryRowContext(ctx, `SELECT count(*) FROM pages p JOIN artifact_version_heads v ON v.page_id=p.id AND v.workspace_id=p.workspace_id AND v.content_type=? WHERE p.id=? AND p.workspace_id=? AND p.owner_user_id=? AND p.owner_crew_id IS NULL AND v.latest_version=?`, contentType, intent.PageID, receipt.WorkspaceID, receipt.UserID, intent.BaseVersion).Scan(&allowed)
 	if err != nil || allowed != 1 {
 		return artifacts.ErrVersionConflict
 	}

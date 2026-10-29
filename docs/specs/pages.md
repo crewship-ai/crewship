@@ -1423,3 +1423,72 @@ projection without Page identity. Full-text List/Count excludes private-output a
 unclassified folder entries before matching, preventing title confirmation.
 Canonical backup/recovery data retains its existing OWNER/instance-admin gates;
 this does not introduce Page folder ACL mutation auditing or change its atomicity.
+
+### Design canvases (opt-in)
+
+Design uses the same Page identity, grants and retained artifact versions. The
+server `CREWSHIP_ARTIFACTS_DESIGN_ENABLED` flag and browser
+`NEXT_PUBLIC_ARTIFACTS_DESIGN` flag are disabled by default. The server also
+accepts the workspace-scoped `artifacts_design` feature flag. The embedded Yjs
+engine uses an existing Node runtime; no additional service is started.
+The browser uses standard Yjs sync and awareness; frame, rectangle, text and
+image nodes have stable IDs. Live operations also work without an open browser.
+Cookie-authenticated collaboration refreshes credentials before each connection
+and replaces only its websocket every five minutes, preserving the Yjs document
+and unsaved draft. Fresh metadata must confirm the same actor, immutable Page,
+Edit capability and opaque authority revision. Browser websocket admission sends
+that `authority_revision`; the host rejects a mismatch before upgrading, including
+a revoke-and-regrant gap. Revocation never restores an earlier writer draft.
+Credential renewal does not replay an HTTP snapshot or mutation.
+
+The authenticated CLI surface is:
+
+```bash
+crewship page design create checkout --name "Checkout"
+crewship page design get checkout
+crewship page design apply checkout --file changes.json
+crewship page design snapshot checkout --message "Added cart"
+crewship page design versions checkout
+crewship page design restore checkout --version 1
+```
+
+`changes.json` contains an `operations` array and optional `message`. An upsert
+changes supplied fields of a stable node; new nodes need complete geometry:
+
+```json
+{"operations":[{"op":"upsert","node":{"id":"cart","type":"frame","name":"Cart","x":20,"y":20,"width":390,"height":844,"fill":"#ffffff"}}]}
+```
+
+Delete uses `{"op":"delete","id":"cart"}`; reorder uses
+`{"op":"reorder","order":["cart"]}`. Keep existing IDs when changing colors,
+text or geometry. A snapshot creates an ordinary retained artifact version;
+restore creates a new version and preserves history.
+
+The corresponding agent tools are `design_get`, `design_apply`,
+`design_snapshot`, `design_versions` and `design_restore`. CLI invocations with a
+live agent token use those same tools through the sidecar. The original live
+run capability and exact Page mandate are forwarded to the host; an agent
+cannot choose a human identity, workspace, alternate profile or server. A
+visible tool never grants access. Creating a Design requires human authentication;
+agents edit an explicitly selected existing Design. The host rejects calls when Design is
+not enabled. A failed response is never automatically retried.
+The agent tool's `slug` accepts a Page slug or the exact immutable Page ID
+selected by that run's original human mandate, with or without `@`. This does
+not permit selecting another Page.
+
+Additional human CLI commands list or create anchored comments, pin a shared
+version, and connect the owner's private chat:
+
+```bash
+crewship page design comments checkout
+crewship page design comment checkout --version 2 --node cart --text "Use brand colors"
+crewship page design share checkout --version 2
+crewship page design agent checkout --chat-id private-chat-id
+crewship page design watch checkout --count 1
+```
+
+`watch` exposes unchanged standard Yjs frames as base64 NDJSON and stops after
+`--count` binary frames (zero watches until interrupted). It uses the saved
+human credential with the normal server-host guard; agent runs use the bounded
+MCP read/apply tools. `get` returns the current canvas, while `versions` lists
+immutable retained snapshots. Sharing never grants a reader edit rights.

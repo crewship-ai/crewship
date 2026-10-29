@@ -197,3 +197,16 @@ it("marks templates and upload for Crafts as coming", () => {
   expect(screen.getByRole("radio", { name: /Upload/ })).toBeDisabled()
   expect(screen.getByRole("radio", { name: "Describe it" })).toBeEnabled()
 })
+
+
+it("creates a Design through its canvas endpoint while preserving the shared folder flow", async () => {
+  m.caps = { ...ALL, designs: true }
+  m.fetch.mockResolvedValue(new Response(JSON.stringify({ page_id: "canvas-id", slug: "checkout", version: 1 }), { status: 201 }))
+  const { onCreated } = mount({ defaultKind: "design", defaultFolderSlug: "sales" })
+  name("Checkout")
+  fireEvent.click(create())
+  await waitFor(() => expect(onCreated).toHaveBeenCalledWith("checkout"))
+  expect(m.fetch).toHaveBeenCalledWith("/api/v1/pages/design?workspace_id=ws1", expect.objectContaining({ method: "POST", body: JSON.stringify({ name: "Checkout", slug: "checkout" }) }))
+  expect(m.addPage).toHaveBeenCalledWith(expect.objectContaining({ folder: "sales", page: "checkout", pagesVersion: 0 }))
+  expect(m.wordCreate).not.toHaveBeenCalled()
+})

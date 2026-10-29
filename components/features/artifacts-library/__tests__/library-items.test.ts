@@ -60,7 +60,15 @@ describe("library items", () => {
   })
 })
 
-it.each(["project", "dashboard", "slides"])("preserves the explicit backend %s as a VersionStore route, never a native lease", artifact_kind => {
+ it("recognizes Design version heads without treating them as a Craft", () => {
+ const [item] = libraryItems([toPageView(page({ artifact_kind: "design", artifact_shared_version: 2 }))])
+ expect(item.kind).toBe("design")
+ expect(item.native).toBe(false)
+ expect(item.projectBacked).toBe(true)
+ expect(item.sharedVersion).toBe(2)
+ })
+
+it.each(["project", "dashboard", "slides", "design"])("preserves the explicit backend %s as a VersionStore route, never a native lease", artifact_kind => {
   const [item] = libraryItems([toPageView(page({ id: "stable-page", slug: "current-owner", artifact_kind }))])
   expect(item).toMatchObject({ kind: artifact_kind, pageId: "stable-page", projectBacked: true, native: false })
 })

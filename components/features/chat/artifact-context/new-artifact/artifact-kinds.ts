@@ -1,4 +1,4 @@
-import { AppWindow, FileText, LayoutDashboard, PanelsTopLeft, Presentation, Sheet, type LucideIcon } from "lucide-react"
+import { AppWindow, FileText, Frame, LayoutDashboard, PanelsTopLeft, Presentation, Sheet, type LucideIcon } from "lucide-react"
 import type { PageView } from "@/hooks/use-pages"
 import { ACCENT, type Accent, type AccentName } from "@/lib/concept-accents"
 
@@ -7,7 +7,7 @@ import { ACCENT, type Accent, type AccentName } from "@/lib/concept-accents"
  * the chat "+" menu all read it, so a new kind is one entry here and no UI
  * change. Keys match the library's kinds and the server's `artifact_kind`.
  */
-export type ArtifactKindKey = "project" | "dashboard" | "page" | "word" | "sheet" | "slides"
+export type ArtifactKindKey = "project" | "dashboard" | "page" | "word" | "sheet" | "slides" | "design"
 
 /** Web kinds render as screens or panels; document kinds are files with an editor. */
 export type ArtifactFamily = "web" | "document"
@@ -17,12 +17,14 @@ export type ArtifactFamily = "web" | "document"
  * an empty Craft holding the lock (`edit`), or an empty Page waits for crews
  * to add panels (`panels`).
  */
-export type ArtifactMake = "agent" | "edit" | "panels"
+export type ArtifactMake = "agent" | "edit" | "panels" | "canvas"
 
 /** What the current workspace and build can actually serve. Unknown is false. */
 export interface ArtifactCapabilities {
   /** The server reports artifact projects available for this workspace. */
   projects: boolean
+  /** Collaborative Design creation is switched on for this build. */
+  designs?: boolean
   /** The live Dashboard build flag. */
   dashboards: boolean
   /** The Slides build flag: decks render in the viewer. */
@@ -35,7 +37,7 @@ export interface ArtifactCapabilities {
   pages: boolean
 }
 
-export const NO_CAPABILITIES: ArtifactCapabilities = { projects: false, dashboards: false, slides: false, documents: false, sheets: false, pages: false }
+export const NO_CAPABILITIES: ArtifactCapabilities = { projects: false, designs: false, dashboards: false, slides: false, documents: false, sheets: false, pages: false }
 
 export interface ArtifactKindEntry {
   key: ArtifactKindKey
@@ -109,6 +111,13 @@ export const ARTIFACT_KINDS: readonly ArtifactKindEntry[] = [
     // An agent makes a deck like a project; the viewer renders it once the Slides flag is on.
     live: caps => caps.projects && caps.slides,
   },
+  {
+    key: "design", drafted: false, family: "document", accent: "rose", label: "Design", plural: "Designs", icon: Frame,
+    description: "A shared canvas with screens", viewer: "Canvas · presence · versions", make: "canvas",
+    placeholder: "Checkout flow", templates: [], uploadExtensions: [],
+    starterPrompts: ["Add a Cart screen and unify the colors on this Design"],
+    live: caps => caps.pages && caps.designs === true,
+  },
 ]
 
 const BY_KEY = new Map(ARTIFACT_KINDS.map(k => [k.key, k]))
@@ -127,7 +136,7 @@ export function creatableKinds(caps: ArtifactCapabilities): ArtifactKindEntry[] 
 
 /** Listed in a "Coming" line rather than offered. */
 export function comingKinds(caps: ArtifactCapabilities): ArtifactKindEntry[] {
-  return ARTIFACT_KINDS.filter(k => !k.live(caps))
+  return ARTIFACT_KINDS.filter(k => !k.live(caps) && (k.key !== "design" || caps.designs === true))
 }
 
 /** The kind of an existing Page: the version head first, then the storage it reports; a plain Page is a Page. */
