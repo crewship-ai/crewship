@@ -13,7 +13,7 @@ vi.mock("@/hooks/use-websocket", async (importOriginal) => ({
 }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "user-1" } } }) }))
 vi.mock("@/lib/server-base", () => ({ resolveWsBase: () => "ws://t" }))
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("execution-profile") ? { mode: "trusted" } : { token: "t" }), { status: 200 })) }))
+vi.mock("@/lib/api-fetch", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/api-fetch")>(), apiFetch: vi.fn(async (url: string) => new Response(JSON.stringify(url.includes("execution-profile") ? { mode: "trusted" } : { token: "t" }), { status: 200 })) }))
 import { useArtifactAgentDispatch } from "../use-artifact-agent-dispatch"
 
 const comment = { id: "c1", version: 3, path: "index.html", selector: "#hero", quote: "Hero", text: "Bolder", task_id: "t1" }
