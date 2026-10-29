@@ -43,6 +43,12 @@ func (auth assignmentWorkAuthorizer) Authorize(ctx context.Context, a dispatch.A
 		return dispatch.Refuse("assignment domain already terminal"), nil
 	}
 	if cancelled.Valid {
+		// Allow is safe here: it only lets the runtime observe the durable cancel.
+		// RequestCancel commits cancel_requested_at on the attempt first, and
+		// MarkRuntimeRequestedTx refuses any attempt carrying it, so this
+		// claim can never cross the process-creation gate; runAssignment also
+		// checks cancellation before it prepares anything. The attempt then
+		// settles as a confirmed cancel without an exec.
 		_, err = work.NewStore(auth.h.db).RequestCancel(ctx, a.Item.ID, "assignment", "assignment cancellation requested")
 		return dispatch.Allow(), err
 	}

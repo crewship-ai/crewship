@@ -71,7 +71,10 @@ func TestClaimLegacyAssignmentDeduplicatesOnlyHoldingOwner(t *testing.T) {
 	for _, tc := range []struct {
 		state string
 		want  int
-	}{{"queued", 1}, {"running", 1}, {"needs_reconciliation", 1}, {"succeeded", 1}} {
+	}{{"queued", 1}, {"running", 1}, {"needs_reconciliation", 1},
+		// A settled owner proves the only executor finished; the RUNNING
+		// domain row is merely awaiting projection and must not hold a slot.
+		{"succeeded", 0}, {"failed", 0}, {"cancelled", 0}, {"expired", 0}} {
 		t.Run(tc.state, func(t *testing.T) {
 			if _, err := db.Exec(`UPDATE work_items SET state=? WHERE id=?`, tc.state, owner.WorkID); err != nil {
 				t.Fatal(err)
@@ -132,6 +135,29 @@ func TestClaimCrewBudgetMatchesMemorySetting(t *testing.T) {
 				t.Fatalf("budget=%d want=%d", budget, tc.want)
 			}
 		})
+	}
+}
+
+// An owned assignment whose work already settled stays RUNNING only until its
+// projection commits. It must not keep its agent and crew blocked meanwhile.
+func TestClaimSettledOwnedAssignmentAwaitingProjectionFreesSlot(t *testing.T) {
+	s, db, _ := newTestStore(t)
+	seedLegacyAssignment(t, db)
+	if _, err := db.Exec(`UPDATE crews SET max_concurrent_agents=1 WHERE id='crew'`); err != nil {
+		t.Fatal(err)
+	}
+	r := backgroundReq("owner")
+	r.Source, r.DomainKind, r.DomainID, r.AgentID, r.CrewID = SourceAssignment, "assignment", "old", "legacy", "crew"
+	owner := accept(t, s, db, r)
+	if _, err := db.Exec(`UPDATE work_items SET state='succeeded',terminal_at=datetime('now') WHERE id=?`, owner.WorkID); err != nil {
+		t.Fatal(err)
+	}
+	next := backgroundReq("next")
+	next.AgentID, next.CrewID = "legacy", "crew"
+	want := accept(t, s, db, next)
+	claim, err := s.Claim(context.Background(), ClaimOptions{LeaseOwner: "test", Limits: SerialAgentLimits()})
+	if err != nil || claim.Item.ID != want.WorkID {
+		t.Fatalf("settled owner still holds the slot: claim=%+v err=%v", claim, err)
 	}
 }
 

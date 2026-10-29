@@ -13,6 +13,12 @@ import (
 // applicable slot. Deduplicate by domain identity, never by agent: two different
 // assignments on one agent remain two executions. A queued work row cannot
 // erase a running legacy hold.
+//
+// A terminal owner is different: only the dispatcher executes an owned
+// assignment, so a settled work item proves its execution ended. The domain row
+// stays RUNNING only until the terminal projection commits, and the legacy
+// sweeps skip owned rows, so counting it would leak the slot for as long as
+// projection is delayed or retrying.
 var liveSlotsCTE = `WITH live_slots AS (
  SELECT workspace_id,agent_id,crew_id,session_id,class
  FROM work_items WHERE state IN (` + sqlHoldsExecutionSlot + `)
@@ -22,7 +28,7 @@ var liveSlotsCTE = `WITH live_slots AS (
  WHERE a.status='RUNNING' AND NOT EXISTS (
   SELECT 1 FROM work_items w WHERE w.workspace_id=a.workspace_id
   AND w.source='assignment' AND w.domain_kind='assignment' AND w.domain_id=a.id
-  AND w.state IN (` + sqlHoldsExecutionSlot + `))
+  AND w.state IN (` + sqlHoldsExecutionSlot + `,` + sqlTerminal + `))
 ) `
 
 // Match the existing crew budget contract inside the same admission transaction.

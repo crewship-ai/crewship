@@ -52,6 +52,12 @@ func TestAssignmentWorkMigrationAdoptsOnlyUnexecutedDomains(t *testing.T) {
 	if domain != "PENDING" || agent != "agent" || crew != "crew" || scope != "assignment:PENDING" || state != "queued" || generation != 0 || attempts != 0 {
 		t.Fatalf("changed acceptance identity: %s/%s/%s/%s/%s/%d/%d", domain, agent, crew, scope, state, generation, attempts)
 	}
+	// Documented in the migration: adopted rows record no digest rather than
+	// one that would not match the live Go encoding.
+	var digest string
+	if err := db.QueryRow(`SELECT input_sha256 FROM work_items WHERE id='assignment:PENDING'`).Scan(&digest); err != nil || digest != "" {
+		t.Fatalf("adopted input digest=%q err=%v", digest, err)
+	}
 	var input map[string]any
 	if err := json.Unmarshal([]byte(raw), &input); err != nil {
 		t.Fatal(err)

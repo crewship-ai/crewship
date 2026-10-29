@@ -20,6 +20,12 @@ WHERE source='assignment' AND domain_kind='assignment' AND replay_of IS NULL;
 
 -- Only work which has not executed can be handed to the new dispatcher.
 -- Legacy RUNNING rows retain their old ownership and count against admission.
+-- input_sha256 is left at its '' default on purpose. Live acceptance hashes the
+-- Go encoding of the input; SQLite has no SHA-256 and json_object's byte form is
+-- not that encoding, so any digest written here would mismatch a recomputation.
+-- Assignment work is authorized by parsing input_json and comparing each field
+-- with the domain row (assignmentWorkAuthorizer); nothing compares this digest
+-- for the assignment kind. '' reads as "not recorded", never as a valid digest.
 INSERT INTO work_items(id,workspace_id,source,source_ref,domain_kind,domain_id,agent_id,crew_id,session_id,class,authorized_by_user_id,authorized_scope,input_json,state,generation,attempts,eligible_at,created_at,updated_at)
 SELECT 'assignment:'||a.id,a.workspace_id,'assignment',a.id,'assignment',a.id,a.assigned_to_id,COALESCE(ag.crew_id,''),COALESCE(a.session_id,''),'background',COALESCE(a.created_by_user_id,''),'assignment:'||a.id,
  json_object('version',1,'assignment_id',a.id,'workspace_id',a.workspace_id,'agent_id',a.assigned_to_id,'crew_id',COALESCE(ag.crew_id,''),'task',a.task,'author_agent_id',COALESCE(a.assigned_by_id,'')),
