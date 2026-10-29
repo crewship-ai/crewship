@@ -5,6 +5,7 @@
 
 import { describeCron } from "@/lib/cron-describe"
 import { scheduleHealth } from "@/lib/schedule-health"
+import { scheduleLastStatusLabel } from "@/lib/routine-schedule-status"
 import type { StatusTone } from "@/lib/format-status"
 import { stepFromDsl, stepToDsl, type WizardStep } from "@/lib/routine-wizard"
 
@@ -178,6 +179,9 @@ export interface TriggerScheduleInput {
   max_consecutive_failures: number
   disabled_reason?: string
   activation?: "draft"
+  last_run_at?: string
+  last_status?: string
+  last_missed_count?: number
 }
 
 export interface TriggerWebhookInput {
@@ -195,6 +199,12 @@ export interface TriggerAutomationInput {
   name: string
   enabled: boolean
   event_type: string
+}
+
+/** "last fire <time> · <outcome>", when the schedule has fired. */
+function lastFire(s: TriggerScheduleInput, lifecycle: "active" | "proposed" | "disabled", fmt: (iso: string, tz?: string) => string): string | null {
+  const label = scheduleLastStatusLabel(s, lifecycle)
+  return s.last_run_at && label ? `last fire ${fmt(s.last_run_at, s.timezone)} · ${label}` : null
 }
 
 const CATCHUP: Record<string, string> = {
@@ -227,6 +237,7 @@ export function routineTriggerRows(input: {
       s.enabled && s.next_run_at ? `next ${fmt(s.next_run_at, s.timezone)}` : null,
       CATCHUP[s.catchup_policy ?? ""] ?? null,
       pinned ? `pinned to v${s.target_pipeline_version}` : "follows the published version",
+      lastFire(s, input.lifecycle, fmt),
     ].filter(Boolean)
     const status: StateBadge =
       s.activation === "draft"

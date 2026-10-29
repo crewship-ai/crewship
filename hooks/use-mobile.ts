@@ -1,6 +1,9 @@
 import * as React from "react"
 
-const MOBILE_BREAKPOINT = 768
+import { LAYOUT_BREAKPOINTS } from "@/hooks/use-layout-breakpoint"
+
+/** The phone edge of the layout scale (Tailwind `md`). */
+const MOBILE_BREAKPOINT = LAYOUT_BREAKPOINTS.tablet
 
 /** Returns true when the viewport is narrower than 768px (mobile breakpoint). */
 export function useIsMobile() {

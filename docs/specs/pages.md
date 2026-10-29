@@ -1440,6 +1440,8 @@ Edit capability and opaque authority revision. Browser websocket admission sends
 that `authority_revision`; the host rejects a mismatch before upgrading, including
 a revoke-and-regrant gap. Revocation never restores an earlier writer draft.
 Credential renewal does not replay an HTTP snapshot or mutation.
+Human Design creation accepts the optional create-only `created_by_test` boolean
+and retains it in Page catalog metadata, just like other artifact creation.
 
 The authenticated CLI surface is:
 

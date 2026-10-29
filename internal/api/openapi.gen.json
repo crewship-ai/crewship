@@ -7272,6 +7272,9 @@
       "DesignCreateRequest": {
         "additionalProperties": false,
         "properties": {
+          "created_by_test": {
+            "type": "boolean"
+          },
           "name": {
             "maxLength": 200,
             "minLength": 1,

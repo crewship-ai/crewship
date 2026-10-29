@@ -11,12 +11,10 @@ export function prefersReducedMotion(): boolean {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 }
 
-const REDUCE_QUERY = "(prefers-reduced-motion: reduce)";
-
 /** useSyncExternalStore subscribe for the OS reduced-motion setting. */
 export function subscribeReducedMotion(listener: () => void): () => void {
   if (typeof window === "undefined" || !window.matchMedia) return () => {};
-  const mq = window.matchMedia(REDUCE_QUERY);
+  const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
   mq.addEventListener?.("change", listener);
   return () => mq.removeEventListener?.("change", listener);
 }

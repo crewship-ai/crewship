@@ -2,12 +2,12 @@ import { cn } from "@/lib/utils"
 import { Card, CardContent } from "@/components/ui/card"
 
 /** "compact" is flush with its surface; "inline" is its former name. */
-type EmptyStateSize = "card" | "compact" | "inline"
+export type EmptyStateSize = "card" | "compact" | "inline"
 
-interface EmptyStateProps {
+export interface EmptyStateProps {
   icon: React.ElementType
   title: string
-  description: string
+  description?: string
   /** "card" wraps in a bordered Card; "compact" renders flush with the
    *  surface (a tab, a card body). "inline" is the same as "compact". */
   size?: EmptyStateSize
@@ -40,7 +40,7 @@ export function EmptyState({
         <Icon className="h-6 w-6" />
       </div>
       <h3 className="text-default font-semibold tracking-[-0.02em]">{title}</h3>
-      <p className="mt-1 max-w-sm text-body text-muted-foreground">{description}</p>
+      {description && <p className="mt-1 max-w-sm text-body text-muted-foreground">{description}</p>}
       {action && <div data-slot="empty-state-action" className="mt-4">{action}</div>}
       {children}
     </div>

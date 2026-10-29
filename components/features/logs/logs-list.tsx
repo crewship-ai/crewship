@@ -3,7 +3,6 @@
 import { entityHref } from "@/lib/entity-links"
 
 import { memo, useState, useCallback } from "react"
-import Image from "next/image"
 import { Virtuoso } from "react-virtuoso"
 import {
   Bot,
@@ -29,8 +28,7 @@ import {
 } from "@/lib/journal-style"
 import { iconForEntryType } from "@/lib/journal-icons"
 import { CrewIcon } from "@/components/ui/crew-icon"
-import { getAgentAvatarUrl } from "@/lib/agent-avatar"
-import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import {
   useJournalLookup,
   type AgentLookup,
@@ -173,7 +171,6 @@ export function LogsList({ entries, wrap, followTail, newestFirst, onEndReached,
   // mounted list three times whether or not the data changed. Reading
   // the maps here means only a real map swap reaches the rows.
   const { agents, crews, missions } = useJournalLookup()
-  const stylesVersion = useAvatarStylesVersion()
 
   // A fresh closure per item per render defeats React.memo on LogRow —
   // every row would re-render on every keystroke in the search box.
@@ -189,14 +186,13 @@ export function LogsList({ entries, wrap, followTail, newestFirst, onEndReached,
         agent={e.agent_id ? agents.get(e.agent_id) : undefined}
         crew={e.crew_id ? crews.get(e.crew_id) : undefined}
         missionIdentifier={e.mission_id ? missions.get(e.mission_id)?.identifier : undefined}
-        stylesVersion={stylesVersion}
         onSelectTrace={onSelectTrace}
         onSelectAgent={onSelectAgent}
         onSelectCrew={onSelectCrew}
         onSelectMission={onSelectMission}
       />
     ),
-    [wrap, expanded, toggleExpand, agents, crews, missions, stylesVersion, onSelectTrace, onSelectAgent, onSelectCrew, onSelectMission],
+    [wrap, expanded, toggleExpand, agents, crews, missions, onSelectTrace, onSelectAgent, onSelectCrew, onSelectMission],
   )
 
   if (entries.length === 0) {
@@ -256,14 +252,16 @@ function ActorAvatar({
     // two different faces for one agent. Keep them in lockstep.
     const seed = agent?.avatar_seed || agent?.name || agentId
     return (
-      <Image
-        src={getAgentAvatarUrl(seed, agent?.avatar_style ?? null)}
+      <AgentAvatar
+        seed={seed}
+        style={agent?.avatar_style ?? null}
         alt={name ?? agentId}
         title={name ?? agentId}
         width={18}
         height={18}
+        loading="lazy"
+        decoding="async"
         className="h-[18px] w-[18px] rounded-[4px] shrink-0 bg-muted/40"
-        unoptimized
       />
     )
   }
@@ -331,12 +329,6 @@ const LogRow = memo(function LogRow({
   crew: CrewLookup | undefined
   /** ENG-4 for the row's mission, when the lookup knows it — the link back to the issue. */
   missionIdentifier?: string
-  /**
-   * Bumped when a lazily-imported DiceBear collection finishes loading.
-   * Never read here — it exists so this memo boundary invalidates and
-   * getAgentAvatarUrl gets a second chance at a real avatar.
-   */
-  stylesVersion: number
   onSelectTrace?: (traceId: string) => void
   onSelectAgent?: (agentId: string) => void
   onSelectCrew?: (crewId: string) => void
