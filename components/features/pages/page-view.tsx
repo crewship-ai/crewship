@@ -434,7 +434,12 @@ export function PageView({
 export function artifactReaderHref(slug: string, kind: string, workspaceId?: string | null): string | null {
   const query = new URLSearchParams()
   if (workspaceId) query.set("workspace_id", workspaceId)
-  if (artifactsLibrary()) return `/artifacts/${encodeURIComponent(slug)}${query.size ? `?${query}` : ""}`
+  if (artifactsLibrary()) {
+    // "@<id>" is the immutable ID address; a slug opens by slug and the library moves it to the ID.
+    if (slug.startsWith("@")) return `/artifacts/${encodeURIComponent(slug.slice(1))}${query.size ? `?${query}` : ""}`
+    query.set("item", slug)
+    return `/artifacts?${query}`
+  }
   if (kind !== "project" && kind !== "dashboard" && kind !== "slides") return null
   query.set("artifact", "1")
   return `/pages/${encodeURIComponent(slug)}?${query}`

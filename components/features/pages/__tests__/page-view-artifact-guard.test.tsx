@@ -43,7 +43,14 @@ describe("PageView for a typed artifact", () => {
   it("links every kind to the library detail when the library is on", () => {
     flags.library = true
     renderView({ id: "p1", slug: "brief", name: "Partner brief", panels: [], artifact_kind: "word" })
-    expect(screen.getByRole("link", { name: "Open in its viewer" }).getAttribute("href")).toBe("/artifacts/brief?workspace_id=ws1")
+    expect(screen.getByRole("link", { name: "Open in its viewer" }).getAttribute("href")).toBe("/artifacts?workspace_id=ws1&item=brief")
+  })
+
+  it("opens an @<id> reference at the library's ID address and never treats a slug as an ID", async () => {
+    const { artifactReaderHref } = await import("../page-view")
+    flags.library = true
+    expect(artifactReaderHref("@p1", "word", "ws1")).toBe("/artifacts/p1?workspace_id=ws1")
+    expect(artifactReaderHref("brief", "word", "ws1")).toBe("/artifacts?workspace_id=ws1&item=brief")
   })
 
   it("keeps the panels empty state for a legacy Page", () => {
