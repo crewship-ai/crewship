@@ -9,6 +9,7 @@ import { toast } from "@/lib/toast"
 
 import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
+import { useIsInstanceAdmin } from "@/hooks/use-auth"
 import { useWorkspace } from "@/hooks/use-workspace"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { isAdminTier } from "@/lib/permissions/tiers"
@@ -81,14 +82,14 @@ type View = "map" | "list"
  * List view is the same hooks as rows, for searching.
  *
  * Reading is open to every member (GET /hooks is authed + workspace); every
- * write is ADMIN+ (roleManage), and a shell handler OWNER only.
+ * non-host write requires workspace ADMIN+, and host hooks require an instance administrator.
  */
 export function HooksPage() {
   const { workspaceId, role, loading: wsLoading } = useWorkspace()
   const isMobile = useIsMobile()
   const reduce = useReducedMotion()
   const canWrite = isAdminTier(role)
-  const isOwner = role === "OWNER"
+  const isHostAdmin = useIsInstanceAdmin() === true
   const search = useSearchParams().toString()
 
   const [hooks, setHooks] = React.useState<HookRow[] | null>(null)
@@ -167,6 +168,7 @@ export function HooksPage() {
     try {
       const res = await apiFetch(`/api/v1/hooks/${encodeURIComponent(hook.id)}/${next ? "enable" : "disable"}?workspace_id=${encodeURIComponent(workspaceId ?? "")}`, { method: "POST" })
       if (!res.ok) throw new Error(String(res.status))
+      setReload((n) => n + 1)
     } catch {
       setHooks((prev) => prev?.map((h) => (h.id === hook.id ? { ...h, enabled: hook.enabled } : h)) ?? prev)
       toast.error(next ? "Enabling the hook was refused." : "Disabling the hook was refused.")
@@ -190,10 +192,10 @@ export function HooksPage() {
   const blocking = all.filter((h) => h.enabled && h.blocking && eventInfo(h.event).canBlock).length
   const failing = all.filter((h) => outcomeTone(runs[h.id]?.[0]?.outcome) === "bad").length
 
-  const newButton = canWrite && (
+  const newButton = (canWrite || isHostAdmin) && (
     <Button size="sm" className="gap-1.5 px-3 text-xs" onClick={() => openNew()}><Plus className="h-3.5 w-3.5" />New hook</Button>
   )
-  const slotProps = { inSlot, runs, canWrite, filtering, onOpen: (h: HookRow) => setOpenId(h.id), onAdd: openNew }
+  const slotProps = { inSlot, runs, canWrite:canWrite || isHostAdmin, filtering, onOpen: (h: HookRow) => setOpenId(h.id), onAdd: openNew }
 
   return (
     <>
@@ -217,8 +219,16 @@ export function HooksPage() {
               <button type="button" onClick={() => setFilters({ state: filters.state === "failing" ? "" : "failing" })} className="hover:text-foreground">
                 <Stat n={failing} one="failed last time" many="failed last time" className={cn(failing > 0 && "text-destructive")} />
               </button>
-              {!canWrite && <span>Read-only — admins add and change hooks.</span>}
+              {!canWrite && !isHostAdmin && <span>Read-only — admins add and change hooks.</span>}
             </div>
+
+            {all.some((hook) => hook.host_review_required) && (
+              <PageBanner tone="warn" icon={ShieldAlert}>
+                Host hooks are disabled pending instance administrator review after upgrade or restore.
+                An instance administrator must review each command, then enable it here or with crewship hooks enable ID.
+                The global lifecycle-hooks pause still applies.
+              </PageBanner>
+            )}
 
             {loadError && (
               <PageBanner tone="bad" icon={TriangleAlert} action={<Button variant="outline" size="sm" onClick={() => setReload((n) => n + 1)}>Retry</Button>}>
@@ -253,7 +263,7 @@ export function HooksPage() {
           <SheetDescription className="sr-only">What the hook runs, where, and its recent runs</SheetDescription>
           {opened && (
             <HookDetail hook={opened} runs={runs[opened.id] ?? []} runsCapped={runsCapped} crewName={crewName(opened.crew_id)}
-              canWrite={canWrite} isOwner={isOwner} pending={pending.has(opened.id)}
+              canWrite={canWrite} isHostAdmin={isHostAdmin} pending={pending.has(opened.id)}
               onToggle={() => void toggle(opened)} onEdit={() => openEdit(opened)} onDelete={() => remove(opened)} />
           )}
         </SheetContent>
@@ -535,16 +545,17 @@ function HookList({ hooks, runs, crewName, onOpen }: {
   )
 }
 
-function HookDetail({ hook, runs, runsCapped, crewName, canWrite, isOwner, pending, onToggle, onEdit, onDelete }: {
-  hook: HookRow; runs: HookRun[]; runsCapped: boolean; crewName: string; canWrite: boolean; isOwner: boolean; pending: boolean
+function HookDetail({ hook, runs, runsCapped, crewName, canWrite, isHostAdmin, pending, onToggle, onEdit, onDelete }: {
+  hook: HookRow; runs: HookRun[]; runsCapped: boolean; crewName: string; canWrite: boolean; isHostAdmin: boolean; pending: boolean
   onToggle: () => void; onEdit: () => void; onDelete: () => Promise<void>
 }) {
   const info = eventInfo(hook.event)
   const kind = KIND[hook.handler_kind] ?? KIND.http
   const retired = RETIRED_EVENTS.has(hook.event)
   const blockingLive = info.canBlock && hook.blocking
-  // An ADMIN can toggle any hook but edit or delete a shell one only as OWNER.
-  const canChange = canWrite && (hook.handler_kind !== "shell" || isOwner)
+  // Workspace admins can stop host execution; reviewing or enabling it requires an instance administrator.
+  const canChange = hook.handler_kind === "shell" ? isHostAdmin : canWrite
+  const canToggle = hook.handler_kind === "shell" ? (hook.enabled ? canWrite || isHostAdmin : isHostAdmin) : canWrite
   const matcher = hook.matcher ?? {}
   const s = slotOf(hook.event)
   const step = LIFECYCLE_STEPS.findIndex((x) => x.id === s.step)
@@ -562,7 +573,7 @@ function HookDetail({ hook, runs, runsCapped, crewName, canWrite, isOwner, pendi
         <p className="text-xs text-muted-foreground">{info.when}</p>
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-xs">
-            <Switch checked={hook.enabled} onCheckedChange={onToggle} disabled={!canWrite || pending} aria-label={`${hook.enabled ? "Disable" : "Enable"} the ${hook.event} hook`} />
+            <Switch checked={hook.enabled} onCheckedChange={onToggle} disabled={!canToggle || pending} aria-label={`${hook.enabled ? "Disable" : "Enable"} the ${hook.event} hook`} />
             {hook.enabled ? "On" : "Off"}
           </label>
           {blockingLive && <span className="rounded bg-warn/15 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-warn">STOPS THE ACTION</span>}
@@ -570,6 +581,7 @@ function HookDetail({ hook, runs, runsCapped, crewName, canWrite, isOwner, pendi
         </div>
       </section>
 
+      {hook.host_review_required && <p role="status" className="text-sm text-warn">Disabled pending instance administrator review. Review the command before re-enabling this host hook.</p>}
       {retired && (
         <p role="alert" className="rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-xs text-warn">
           This event is no longer dispatched, so the hook can never run. Delete it, or re-create it on an event that fires (e.g. After a tool runs).
@@ -591,7 +603,7 @@ function HookDetail({ hook, runs, runsCapped, crewName, canWrite, isOwner, pendi
         </dl>
         {hook.handler_kind === "shell" && (
           <p className="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-label text-destructive">
-            <ShieldAlert className="mt-px h-3.5 w-3.5 shrink-0" />Runs as the Crewship service on the host, outside any container. Only the owner can change it.
+            <ShieldAlert className="mt-px h-3.5 w-3.5 shrink-0" />Runs as the Crewship service on the host, outside any container. Only an instance administrator can change or enable it.
           </p>
         )}
       </section>
@@ -619,7 +631,7 @@ function HookDetail({ hook, runs, runsCapped, crewName, canWrite, isOwner, pendi
         <Link href="/activity?section=log&q=hook.fired" className="inline-block text-xs text-primary-hover hover:underline">Open in Activity →</Link>
       </section>
 
-      {canChange && (
+      {canWrite && (
         <section aria-label="Delete hook" className="flex flex-wrap items-center gap-3 border-t border-border/60 pt-4">
           <p className="min-w-0 flex-1 basis-48 text-label text-muted-foreground">The hook stops running at once. Its past runs stay in the journal.</p>
           <AlertDialog>

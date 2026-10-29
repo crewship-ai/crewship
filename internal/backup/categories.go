@@ -183,6 +183,28 @@ const categoryWorkOnly = ""
 // TableCategory maps every table in BackupTables to its category. A table
 // missing here fails TestTableCategory_CoversEveryBackupTable.
 var TableCategory = map[string]string{
+	"gridcraft_heads": CategoryPages, "gridcraft_revisions": CategoryPages, "gridcraft_operations": CategoryPages, "gridcraft_audit": CategoryPages, "gridcraft_outbox": CategoryPages,
+	"artifact_data_collections":        CategoryPages,
+	"artifact_data_documents":          CategoryPages,
+	"artifact_design_documents":        CategoryPages,
+	"artifact_version_heads":           CategoryPages,
+	"artifact_version_blobs":           CategoryPages,
+	"artifact_versions":                CategoryPages,
+	"artifact_project_comments":        CategoryPages,
+	"artifact_project_comment_tasks":   CategoryPages,
+	"artifact_project_comment_replies": CategoryPages,
+	"artifact_project_origins":         CategoryPages,
+
+	"mooring_collab_documents":       CategoryPages,
+	"mooring_collab_tasks":           CategoryPages,
+	"mooring_collab_changes":         CategoryPages,
+	"mooring_collab_target_versions": CategoryPages,
+	"mooring_collab_target_effects":  CategoryPages,
+	"mooring_collab_operations":      CategoryPages,
+	"mooring_collab_checkpoints":     CategoryPages,
+	"mooring_collab_audit":           CategoryPages,
+	"mooring_collab_artifact_edits":  CategoryPages,
+	"mooring_documents":              CategoryPages, "mooring_receipts": CategoryPages,
 	"workspace_artifact_creation_policy": CategoryAgents,
 	"workspace_artifact_creation_crews":  CategoryAgents,
 
@@ -199,8 +221,9 @@ var TableCategory = map[string]string{
 	"agents": CategoryAgents, "crew_connections": CategoryAgents, "crew_mcp_servers": CategoryAgents,
 	"agent_skills": CategoryAgents, "agent_mcp_bindings": CategoryAgents, "agent_config_history": CategoryAgents, "agent_slug_reservations": CategoryAgents,
 	"crew_templates": CategoryAgents, "workspace_members": CategoryAgents, "access_grants": CategoryAgents,
-	"access_preset_selections": CategoryAgents,
-	"workspace_invitations":    CategoryAgents, "workspace_mcp_servers": CategoryAgents,
+	"access_preset_selections":      CategoryAgents,
+	"crew_access_preset_selections": CategoryAgents,
+	"workspace_invitations":         CategoryAgents, "workspace_mcp_servers": CategoryAgents,
 	"feature_flag_overrides": CategoryAgents, "budget_limits": CategoryAgents, "hooks_config": CategoryAgents,
 	"automations": CategoryAgents, "keeper_governance_settings": CategoryAgents, "retention_settings": CategoryAgents,
 	"notification_channels": CategoryAgents, "user_notification_prefs": CategoryAgents,
@@ -251,7 +274,8 @@ var TableCategory = map[string]string{
 
 	// Pages and their files.
 	"page_folders": CategoryPages, "page_folder_acl": CategoryPages, "pages": CategoryPages,
-	"page_panels": CategoryPages, "page_panel_data": CategoryPages, "page_versions": CategoryPages,
+	"craft_native_documents": CategoryPages,
+	"page_panels":            CategoryPages, "page_panel_data": CategoryPages, "page_versions": CategoryPages,
 	"page_project_builds": CategoryPages, "page_project_publications": CategoryPages,
 	"page_project_live": CategoryPages, "page_project_withdrawals": CategoryPages,
 	"page_project_drafts": CategoryPages, "page_project_revisions": CategoryPages, "page_grants": CategoryPages,

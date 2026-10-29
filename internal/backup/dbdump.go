@@ -221,10 +221,11 @@ var BackupTables = []string{
 	"approvals_queue",
 	"routine_folders", // pipelines.folder_id → routine_folders, so folders land first (ODCH-RT-01)
 	"pipelines",
-	"routine_folder_members",   // FK pipeline_id → pipelines, folder_id → routine_folders: after both (ODCH-RT-01)
-	"routine_templates",        // saved routine definitions (ODCH-RT-22); FK workspace only
-	"routine_test_results",     // latest Test run per definition hash (ODCH-RT-13); FK workspace only
-	"access_preset_selections", // informational choice; after membership and typed resource parents
+	"routine_folder_members",        // FK pipeline_id → pipelines, folder_id → routine_folders: after both (ODCH-RT-01)
+	"routine_templates",             // saved routine definitions (ODCH-RT-22); FK workspace only
+	"routine_test_results",          // latest Test run per definition hash (ODCH-RT-13); FK workspace only
+	"access_preset_selections",      // informational choice; after membership and typed resource parents
+	"crew_access_preset_selections", // after crew and membership parents
 	"pipeline_versions",
 	"pipeline_drafts",
 	"pipeline_schedules",
@@ -319,7 +320,34 @@ var BackupTables = []string{
 	"page_folders",    // pages.folder_id → page_folders, so folders land first; FK owner_crew_id → crews
 	"page_folder_acl", // FK folder_id → page_folders; nullable set_by_user_id → users
 	"pages",
+	"craft_native_documents", // immutable native profile, Page/workspace FKs remap on fork
+	"artifact_version_heads",
+	"artifact_design_documents",
+	"artifact_version_blobs",
+	"artifact_versions",
+	"artifact_data_collections",
+	"artifact_data_documents",
+	"artifact_project_comments",
+	"artifact_project_comment_tasks",
+	"artifact_project_comment_replies",
+	"artifact_project_origins",
 	"documents",
+	"gridcraft_heads",
+	"gridcraft_revisions",
+	"gridcraft_operations",
+	"gridcraft_audit",
+	"gridcraft_outbox",
+	"mooring_documents", // after Pages; owns receipts
+	"mooring_receipts",
+	"mooring_collab_documents",
+	"mooring_collab_tasks",
+	"mooring_collab_changes",
+	"mooring_collab_operations",
+	"mooring_collab_target_versions",
+	"mooring_collab_target_effects",
+	"mooring_collab_checkpoints",
+	"mooring_collab_audit",
+	"mooring_collab_artifact_edits",
 	"document_creations",
 	"slides_heads",
 	"slides_revisions",
@@ -417,6 +445,8 @@ func tableHasColumn(ctx context.Context, tx *sql.Tx, table, col string) (bool, e
 // are followed up with custom queries below.
 func workspaceFilterSQL(table, workspaceID string) (string, []any, bool) {
 	switch table {
+	case "artifact_project_comment_replies":
+		return "comment_id IN (SELECT id FROM artifact_project_comments WHERE workspace_id=?)", []any{workspaceID}, true
 	case "workspaces":
 		return "id = ?", []any{workspaceID}, true
 	case "users":
@@ -1082,6 +1112,13 @@ type RestoreDumpHooks struct {
 // with the supplied lifecycle hooks. See RestoreDumpHooks for the
 // contract of each hook.
 func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *RestoreDumpHooks) (RestoreStats, error) {
+	if err := rejectMooringCollaborationCollision(ctx, db, dump); err != nil {
+		return RestoreStats{}, err
+	}
+	if err := rejectGridCraftHistoryCollision(ctx, db, dump); err != nil {
+		return RestoreStats{}, err
+	}
+
 	if hooks == nil {
 		hooks = &RestoreDumpHooks{}
 	}
@@ -1109,6 +1146,14 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	if err != nil {
 		return stats, fmt.Errorf("backup: begin restore tx: %w", err)
 	}
+	if err := rejectMooringCollaborationCollision(ctx, tx, dump); err != nil {
+		_ = tx.Rollback()
+		return stats, err
+	}
+	if err := rejectGridCraftHistoryCollision(ctx, tx, dump); err != nil {
+		_ = tx.Rollback()
+		return stats, err
+	}
 	// Defer FK checks until commit. Without this, the tombstone purge
 	// pass walks tables in BackupTables order (parents first), so
 	// deleting a soft-deleted `workspaces` row before its child
@@ -1130,6 +1175,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		return stats, err
 	}
 	if err := validatePrivateArtifactContextTarget(ctx, tx, dump); err != nil {
+		return stats, err
+	}
+	if err := rejectMooringDeliveryRestoreTarget(ctx, tx, dump); err != nil {
 		return stats, err
 	}
 	webEpochBefore, err := webAuthorityEpoch(ctx, tx)
@@ -1237,11 +1285,47 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 		}
 		tableInserted := 0
 		for _, originalRow := range rows {
+			restoreWorkbookAudience := false
 			// main's conversation sanitiser runs FIRST: it rebuilds the row
 			// from the original, so the held-work override below — which
 			// copies whatever row is current — has to come after it or its
 			// CANCELLED status would be thrown away.
 			row := safeConversationRestoreRow(table, originalRow, conversationAssignments)
+			row, err = safeGridCraftRestoreRow(table, row)
+			if err != nil {
+				return stats, err
+			}
+			if table == "gridcraft_heads" {
+				restoreWorkbookAudience, err = prepareRestoredGridCraftAudience(ctx, tx, row)
+				if err != nil {
+					return stats, err
+				}
+				if err = fenceGridCraftTarget(ctx, tx, row["workspace_id"].(string), row["page_id"].(string), false); err != nil {
+					return stats, err
+				}
+				if _, err = tx.ExecContext(ctx, `DELETE FROM gridcraft_intents WHERE workspace_id=? AND page_id=?`, row["workspace_id"], row["page_id"]); err != nil {
+					return stats, err
+				}
+				if _, err = tx.ExecContext(ctx, `DELETE FROM gridcraft_sessions WHERE workspace_id=? AND page_id=?`, row["workspace_id"], row["page_id"]); err != nil {
+					return stats, err
+				}
+				if _, err = tx.ExecContext(ctx, `UPDATE gridcraft_heads SET generation=MAX(generation,?) WHERE workspace_id=? AND page_id=?`, row["generation"], row["workspace_id"], row["page_id"]); err != nil {
+					return stats, err
+				}
+			}
+			if table == "hooks_config" {
+				copy := make(map[string]any, len(row)+1)
+				for k, v := range row {
+					copy[k] = v
+				}
+				if allowed["host_authorization"] {
+					copy["host_authorization"] = ""
+				}
+				if copy["handler_kind"] == "shell" {
+					copy["enabled"] = int64(0)
+				}
+				row = copy
+			}
 			row, err = safeDocumentRestoreRow(table, row)
 			if err != nil {
 				return stats, err
@@ -1384,6 +1468,27 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				stats.RowsInserted += int(n)
 				tableInserted += int(n)
 				landed = n > 0
+			}
+			if table == "gridcraft_heads" {
+				if !landed {
+					return stats, fmt.Errorf("backup: workbook head did not insert")
+				}
+				if restoreWorkbookAudience {
+					if err := finishRestoredGridCraftAudience(ctx, tx, row); err != nil {
+						return stats, err
+					}
+				}
+			}
+			if landed && table == "hooks_config" && row["handler_kind"] == "shell" {
+				receipt, err := tx.ExecContext(ctx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at)
+					VALUES(lower(hex(randomblob(16))),?,NULL,'hook.host_review_required','hook',?,
+					'{"reason":"restored host authority requires local review"}',strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, row["workspace_id"], row["id"])
+				if err != nil {
+					return stats, fmt.Errorf("backup: record restored host hook review: %w", err)
+				}
+				if n, err := receipt.RowsAffected(); err != nil || n != 1 {
+					return stats, fmt.Errorf("backup: restored host hook audit not inserted: rows=%d error=%v", n, err)
+				}
 			}
 			if replaceWork && !landed {
 				return stats, fmt.Errorf("backup: replacement issue work did not insert")

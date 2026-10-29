@@ -129,6 +129,7 @@ var identityShapes = map[string]struct {
 	"notification_channels_removed":          {"notification_channels", 1}, // the scope='user' one
 	"onboarding_proposals_removed":           {"onboarding_proposals", 1},
 	"user_model_provenance_removed":          {"user_model_provenance", 1}, // #1693
+	"gridcraft_sessions_removed":             {"gridcraft_sessions", 1},
 	"workspace_invitations_revoked":          {"workspace_invitations", 1},
 	"trust_grants_revoked":                   {"waitpoint_trust_grants", 1}, // granted by the subject
 	"trust_grants_anonymised":                {"waitpoint_trust_grants", 1}, // revoked by the subject
@@ -200,6 +201,17 @@ func (r *pagesIdentityRig) seedIdentityShapes(t *testing.T, wsID, tag, crew stri
 		       (?,?,?,?,'role','writes the docs','I write the docs','msg-o-'||?,'stated')`,
 		id("ump"), wsID, u, "slug-"+tag, tag,
 		id("ump-o"), wsID, o, "slug-o-"+tag, tag)
+	// Live workbook editor sessions name their user and sign-in. The rig's
+	// workbook is another member's personal Page, so the owner transfer stays
+	// out of the picture; the statement is keyed by workspace and user.
+	pidExec(t, r.db, `INSERT INTO pages (id, workspace_id, slug, name, owner_user_id, private_audience, spec_json)
+		VALUES (?,?,?,?,?,1,'{}')`, id("wb"), wsID, "workbook-"+tag, "Workbook "+tag, o)
+	pidExec(t, r.db, `INSERT INTO gridcraft_heads (page_id, workspace_id, schema_version, head_rev, generation, snapshot)
+		VALUES (?,?,1,1,1,x'00')`, id("wb"), wsID)
+	pidExec(t, r.db, `INSERT INTO gridcraft_sessions (session_id, workspace_id, page_id, user_id, credential, generation, created_at, expires_at)
+		VALUES (?,?,?,?,'session:sid-'||?,1,1,2), (?,?,?,?,'session:sid-o-'||?,1,1,2)`,
+		"ws_"+tag+"_subject", wsID, id("wb"), u, tag,
+		"ws_"+tag+"_other", wsID, id("wb"), o, tag)
 
 	// ── capabilities ──
 	pidExec(t, r.db, `INSERT INTO workspace_invitations (id, workspace_id, email, invited_by, token, expires_at)
@@ -403,8 +415,9 @@ func TestGDPRErasure_PageTablesNoLongerNameSubject(t *testing.T) {
 		t.Errorf("another user's authorship was cleared too: %d, want 1", otherAuthored)
 	}
 
-	// The page itself is never deleted by this cascade (§7.1 rule 1b), and
-	// neither is its panel — the webhook goes, the panel stays.
+	// The pages themselves (the crew page and another member's workbook) are
+	// never deleted by this cascade (§7.1 rule 1b), and neither is the panel —
+	// the webhook goes, the panel stays.
 	var pages, panels int
 	if err := r.db.QueryRow(`SELECT COUNT(*) FROM pages WHERE workspace_id = ?`, pidWSA).Scan(&pages); err != nil {
 		t.Fatalf("count pages: %v", err)
@@ -413,8 +426,8 @@ func TestGDPRErasure_PageTablesNoLongerNameSubject(t *testing.T) {
 		WHERE p.workspace_id = ?`, pidWSA).Scan(&panels); err != nil {
 		t.Fatalf("count panels: %v", err)
 	}
-	if pages != 1 || panels != 1 {
-		t.Errorf("erasure removed page/panel rows: pages=%d panels=%d, want 1/1", pages, panels)
+	if pages != 2 || panels != 1 {
+		t.Errorf("erasure removed page/panel rows: pages=%d panels=%d, want 2/1", pages, panels)
 	}
 }
 
@@ -486,12 +499,13 @@ func TestGDPRErasure_PageTableCountsInAuditScope(t *testing.T) {
 
 	// Anonymising is not deleting: rows_deleted counts rows that went away,
 	// and a version whose author was cleared did not. 4 from the Pages
-	// tables, plus the eight rows seedIdentityShapes plants that the
+	// tables, plus the nine rows seedIdentityShapes plants that the
 	// identity step DELETES (their own five records, an invitation, a trust
-	// grant, and the operator-model evidence row of #1693); the thirty-odd
-	// anonymised and the re-attributed credential are not in it.
-	if got, _ := body["rows_deleted"].(float64); got != 12 {
-		t.Errorf("rows_deleted = %v, want 12 (2 grants + 1 token + 1 webhook + 7 #2308 deletes + 1 #1693 delete; anonymised rows are not deletions)", got)
+	// grant, the operator-model evidence row of #1693 and a workbook editor
+	// session); the thirty-odd anonymised and the re-attributed credential
+	// are not in it.
+	if got, _ := body["rows_deleted"].(float64); got != 13 {
+		t.Errorf("rows_deleted = %v, want 13 (2 grants + 1 token + 1 webhook + 7 #2308 deletes + 1 #1693 delete + 1 editor session; anonymised rows are not deletions)", got)
 	}
 }
 
@@ -804,6 +818,15 @@ func TestGDPRErasure_IdentityVerbsAreTheRightOnes(t *testing.T) {
 	}
 	if n := count(`SELECT COUNT(*) FROM user_model_provenance WHERE workspace_id = ? AND user_id = ?`, pidWSA, r.userID); n != 0 {
 		t.Errorf("the subject's operator-model evidence survived the erasure: %d row(s)", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM gridcraft_sessions WHERE workspace_id = ? AND user_id = ?`, pidWSA, r.userID); n != 0 {
+		t.Errorf("the subject's workbook editor sessions survived the erasure: %d row(s)", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM gridcraft_sessions WHERE workspace_id = ? AND user_id = ?`, pidWSA, r.other); n != 1 {
+		t.Errorf("another user's workbook editor session was deleted: %d, want 1", n)
+	}
+	if n := count(`SELECT COUNT(*) FROM gridcraft_sessions WHERE workspace_id = ? AND user_id = ?`, pidWSB, r.userID); n != 1 {
+		t.Errorf("the subject's editor session in the untouched workspace was deleted: %d, want 1", n)
 	}
 
 	// The subject's personal channel is gone; the workspace channel they

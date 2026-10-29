@@ -380,14 +380,39 @@ steps:
     type: code
     code:
       runtime: expr
-      # body is rendered first ({{ inputs.x }} substituted), then
-      # evaluated. Operators: >  >=  <  <=  ==  !=
-      code: "{{ inputs.spend_usd }} > {{ inputs.threshold_usd }}"
+      # Runtime values stay data. Operators: >  >=  <  <=  ==  !=
+      code: "inputs.spend_usd > inputs.threshold_usd"
 ```
 
-Operands are numeric or string literals, or a `CREWSHIP_INPUT_<NAME>`
+Operands are typed input/step selectors, numeric or string literals, or a `CREWSHIP_INPUT_<NAME>`
 env reference. This is the wake-gate / cost-spike primitive — pair it
 with a schedule whose `wake_gate` checks the probe output.
+
+### Typed data in code steps
+
+CEL and expr receive runtime values as data, never as source text. Prefer
+`inputs.amount` and `steps.parse.output`; identifiers containing hyphens use
+brackets, for example `steps["parse-invoice"].output`. Legacy simple references
+such as `{{ inputs.amount }}` (including a whole ordinary quoted reference)
+translate to typed selectors during validation/execution. Stored definitions
+are not rewritten. Embedded text and expressions inside templates are rejected
+with guidance when saving; existing definitions fail closed at execution.
+Use CEL operations such as `"prefix " + inputs.name` instead.
+
+Step outputs that contain one complete JSON value retain that value's type:
+`7`, `"7"`, `true`, arrays and `null` differ. Invalid or trailing JSON remains
+raw text. `steps.parse.output` is the complete value; object fields also have
+shortcuts such as `steps.parse.total`. An object's own `output` property stays
+at `steps.parse.output.output`. Missing selectors fail rather than rendering
+empty. Legacy dotted paths now traverse segments; use explicit brackets for
+a key containing dots (`inputs.a["b.c"]`). Templates inside raw, bytes or
+triple quoted literals are rejected; literals without templates are unchanged.
+
+Credential resolution keeps its existing explicit `{{ secrets.TYPE }}`
+declarations and workspace/crew scope. A direct `secrets.TYPE` selector alone
+does not request a credential or enumerate the vault. Output/error scrubbing
+is retained. Lazy step decoding avoids unused outputs for ordinary selectors;
+whole-map operations can still decode all outputs and are not a memory budget.
 
 ### `runtime: cel` — general agentless logic, token-zero
 

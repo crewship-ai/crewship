@@ -275,7 +275,7 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if claimed {
-		notify, err := h.appendMemberCreatedIn(r.Context(), tx, actor.ID, workspaceID, userID, role, now, expected)
+		notify, err := h.appendMemberCreatedIn(r.Context(), tx, actor.ID, workspaceID, userID, role, now, expected, memberCreationProvenance{CreatedUser: createdUser, SetupLinkIssued: false})
 		if err != nil {
 			replyInternalError(w, h.logger, "audit provisioned membership", err)
 			return
@@ -302,7 +302,7 @@ func (h *WorkspaceHandler) ProvisionMember(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	notify, err := h.appendMemberCreatedIn(r.Context(), tx, actor.ID, workspaceID, userID, role, now, expected)
+	notify, err := h.appendMemberCreatedIn(r.Context(), tx, actor.ID, workspaceID, userID, role, now, expected, memberCreationProvenance{CreatedUser: createdUser, SetupLinkIssued: true})
 	if err != nil {
 		replyInternalError(w, h.logger, "audit provisioned membership", err)
 		return

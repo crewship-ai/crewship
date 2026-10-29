@@ -238,7 +238,11 @@ func (p *serviceRestorePlan) importImages(ctx context.Context, runtime ServiceSn
 		if err != nil {
 			return err
 		}
-		err = runtime.ImportQuotaVolume(ctx, item.target, item.source.Bytes, io.LimitReader(file, item.source.Bytes))
+		if err := reserveRestoreGenerated(ctx, item.source.Bytes); err != nil {
+			_ = file.Close()
+			return err
+		}
+		err = runtime.ImportQuotaVolume(ctx, item.target, item.source.Bytes, io.LimitReader(&restoreReadGuard{ctx: ctx, r: file, b: readBudget(ctx), decoded: true}, item.source.Bytes))
 		closeErr := file.Close()
 		if err != nil {
 			return err

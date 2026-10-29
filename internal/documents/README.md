@@ -39,6 +39,11 @@ confirmed edit can be retried after boot fencing with a new lease. Requests
 without a generation condition preserve their original digest representation.
 
 A checkpoint pins the snapshot and projection at the confirmed revision.
+Initialization atomically retains revision 0 under an `initial-` ID derived from
+the initialization request digest, with the same trusted actor and history byte
+budget. Exact retries retain that one checkpoint without another receipt. Later
+human edits leave the initial version readable; existing documents are not
+backfilled and individual edits do not automatically create checkpoints.
 Restoration creates a new head revision, advances its epoch and generation,
 and clears the writer lease. It replaces the replay log while retaining pinned
 checkpoints and retry receipts. Checkpoint and restore retries bind the original
@@ -101,12 +106,22 @@ boot fencing, immutable transaction guards, exact retries and revoked authority.
 Checkpoint and restore tests also cover generation-bound retries, scoped reads,
 pinned history, and transaction rollback that preserves the original writer.
 
-Retained targeted run authority is an internal foundation. A trusted host can
-bind an already retained personal Document intent to the original human turn
-and live run. This slice exposes no chat send flow for creating that intent.
-It does not turn ordinary messages, Page context or creation provenance into
-permission to edit an existing Document. Shared targets require a proposal
-and remain unavailable through this direct path.
+With Docs explicitly enabled, a human can request an existing personal
+Document update through `run --chat CHAT --document-target FILE`. The closed
+file names `submission_id`, immutable `page_id`, `schema: 3`, `rev` and
+`generation`. The trusted chat bridge durably saves the human message before
+the in-process issuer checks current ownership, private audience and original
+revision, seals the chat and retains that purpose. Run admission binds it
+transactionally to the original live human receipt and message. A provisioning
+resume carries the same tuple rather than inferring a fresh purpose.
+
+Only the author’s private chat and their native personal Document are supported;
+folder, shared, crew, project/application and panel targets are refused. Neither
+ordinary messages, legacy Page context nor creation provenance grant iteration.
+Creation and iteration purposes cannot be combined. Shared targets still
+require unavailable proposals. The browser composer remains unavailable; after
+a successful CLI update, reopen the existing Document’s Latest panel to read
+its saved content. No read-only preview is treated as a write grant.
 
 The binding preserves the original Page ID, schema, generation, revision,
 human principal and expiry. Existing draft operations recheck current private

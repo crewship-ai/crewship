@@ -37,6 +37,19 @@ source tree and shared by every test binary:
   child copies the parent's template instead of migrating again. The child
   uses it only when its own executable is the one named; otherwise it builds
   its own.
+- `CREWSHIP_TESTUTIL_EXPORT_BUNDLE` — test-only output directory used by the
+  API race bootstrap wrapper. The opt-in bootstrap test runs the genuine
+  migration chain on a fresh database under race instrumentation, checkpoints
+  it and exports an immutable database plus identity and integrity metadata.
+  Existing destination files are refused. The aggregate includes the entire
+  successful bootstrap package duration in the unchanged race budget.
+- `CREWSHIP_TESTUTIL_IMPORT_BUNDLE` — test-only explicit bundle directory for
+  API race workers. Import precedes the normal local cache and verifies the
+  source/workflow identity, Go/platform/race configuration, migration and source
+  fingerprints, database size and checksum while copying to a private template.
+  Each test still receives its own database copy. An invalid configured import
+  fails without fallback; an earlier attempt is accepted only in the same run
+  and source revision. This does not loosen same-executable inheritance above.
 
 Tests that verify fresh bootstrap or migrations themselves still open their
 own database through `database.Open`/`database.Migrate`.

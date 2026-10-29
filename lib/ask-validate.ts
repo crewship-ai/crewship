@@ -279,15 +279,8 @@ export function validateAskAnswer(
   if (field.max !== undefined && length > field.max) {
     return fail("max", `${label} must be at most ${countOf(field.max, "character")}.`)
   }
-  if (field.pattern) {
-    const re = compilePattern(field.pattern)
-    // A pattern that does not compile was refused on save; one that reaches
-    // here came from a row that predates the validator, and refusing every
-    // answer to it would be a field nobody can fill in.
-    if (re && !re.test(single)) {
-      return fail("pattern", `${label} is not in the expected format.`)
-    }
-  }
+  // Author patterns are evaluated only by the server's Go regexp engine at
+  // submission. Even a pattern accepted by Go can backtrack in JavaScript.
   return null
 }
 
@@ -298,19 +291,6 @@ export function validateAskAnswer(
 export function askFieldLabel(field: AskFormField): string {
   const explicit = field.label?.trim()
   return explicit ? explicit : field.name.replace(/_/g, " ")
-}
-
-/** Anchored at both ends — the same thing an HTML `pattern=` attribute means,
- *  and the only reading that does not accept `xxCZ25788001xx` for
- *  `CZ[0-9]{8}`. The pattern was compiled by Go's RE2 on the way in, which is
- *  what makes running it here safe: RE2 has no backreferences and no
- *  lookaround, so nothing that reaches this point can backtrack pathologically. */
-function compilePattern(pattern: string): RegExp | null {
-  try {
-    return new RegExp(`^(?:${pattern})$`)
-  } catch {
-    return null
-  }
 }
 
 /**

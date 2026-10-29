@@ -2,6 +2,7 @@ package backup
 
 import (
 	"archive/tar"
+	"context"
 	"io"
 	"path"
 	"strings"
@@ -26,12 +27,17 @@ func isMemoryEntry(name string) bool {
 
 // filterTar re-streams a tar keeping only the entries keep() accepts.
 // The reader is consumed lazily; the caller still owns the original.
-func filterTar(src io.ReadCloser, keep func(*tar.Header) bool) io.ReadCloser {
+func filterTar(src io.ReadCloser, keep func(*tar.Header) bool, contexts ...context.Context) io.ReadCloser {
+	ctx := context.Background()
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
 	pr, pw := io.Pipe()
 	go func() {
 		defer src.Close()
-		tr := tar.NewReader(src)
-		tw := tar.NewWriter(pw)
+		tr := newRestoreTarReader(ctx, src)
+		defer tr.Close()
+		tw := tar.NewWriter(RestoreWriter(ctx, pw))
 		for {
 			hdr, err := tr.Next()
 			if err == io.EOF {
@@ -67,16 +73,16 @@ func filterTar(src io.ReadCloser, keep func(*tar.Header) bool) io.ReadCloser {
 // directory metadata, which the sidecar cannot apply to agent-owned
 // directories. RestoreCrew prepares the shared directory skeleton before
 // extraction. Nothing outside `.memory` belongs to this ownership domain.
-func memoryFilesTar(src io.ReadCloser) io.ReadCloser {
+func memoryFilesTar(src io.ReadCloser, contexts ...context.Context) io.ReadCloser {
 	return filterTar(src, func(h *tar.Header) bool {
 		return h.Typeflag != tar.TypeDir && isMemoryEntry(h.Name)
-	})
+	}, contexts...)
 }
 
 // agentStateTar keeps everything that is NOT memory — the agent's own
 // files, restored under the agent as they always were.
-func agentStateTar(src io.ReadCloser) io.ReadCloser {
-	return filterTar(src, func(h *tar.Header) bool { return !isMemoryEntry(h.Name) })
+func agentStateTar(src io.ReadCloser, contexts ...context.Context) io.ReadCloser {
+	return filterTar(src, func(h *tar.Header) bool { return !isMemoryEntry(h.Name) }, contexts...)
 }
 
 // filesOnlyTar re-streams a tar with every directory entry removed.
@@ -95,12 +101,17 @@ func agentStateTar(src io.ReadCloser) io.ReadCloser {
 // create. Any parent a file still needs, tar makes implicitly.
 //
 // The reader is consumed lazily; the caller still owns the original.
-func filesOnlyTar(src io.ReadCloser) io.ReadCloser {
+func filesOnlyTar(src io.ReadCloser, contexts ...context.Context) io.ReadCloser {
+	ctx := context.Background()
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
 	pr, pw := io.Pipe()
 	go func() {
 		defer src.Close()
-		tr := tar.NewReader(src)
-		tw := tar.NewWriter(pw)
+		tr := newRestoreTarReader(ctx, src)
+		defer tr.Close()
+		tw := tar.NewWriter(RestoreWriter(ctx, pw))
 		for {
 			hdr, err := tr.Next()
 			if err == io.EOF {

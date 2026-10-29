@@ -53,6 +53,20 @@ import (
 // dump (NOT from the target — the whole point is that they may
 // disagree with whatever the target had under that slug).
 func ReplaceWorkspaceContents(ctx context.Context, tx *sql.Tx, bundleWorkspaceID, bundleWorkspaceSlug string) (map[string]int, error) {
+	return ReplaceWorkspaceContentsWithOptions(ctx, tx, bundleWorkspaceID, bundleWorkspaceSlug, ReplaceOptions{})
+}
+
+// ReplaceOptions are explicit acknowledgements a replacement may need.
+type ReplaceOptions struct {
+	// DiscardWorkbooks permits destroying target workbook history that may be
+	// absent from the bundle. The zero value refuses (ErrWorkbookTargetReplacement).
+	DiscardWorkbooks bool
+}
+
+// ReplaceWorkspaceContentsWithOptions is ReplaceWorkspaceContents with
+// explicit acknowledgements. When workbooks are discarded, the returned
+// counts include "gridcraft_heads": the number of workbooks destroyed.
+func ReplaceWorkspaceContentsWithOptions(ctx context.Context, tx *sql.Tx, bundleWorkspaceID, bundleWorkspaceSlug string, opts ReplaceOptions) (map[string]int, error) {
 	if bundleWorkspaceID == "" {
 		return nil, fmt.Errorf("backup: ReplaceWorkspaceContents requires bundleWorkspaceID")
 	}
@@ -78,6 +92,13 @@ func ReplaceWorkspaceContents(ctx context.Context, tx *sql.Tx, bundleWorkspaceID
 	if err := rejectPrivateArtifactTargetReplacement(ctx, tx, targetIDs); err != nil {
 		return nil, err
 	}
+	workbooks, err := targetWorkbookPages(ctx, tx, targetIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(workbooks) > 0 && !opts.DiscardWorkbooks {
+		return nil, workbookReplacementError(workbooks)
+	}
 
 	// Discover the FK-scoped table set and apply intent.
 	scoped, err := discoverScopedTablesTx(ctx, tx)
@@ -98,6 +119,10 @@ func ReplaceWorkspaceContents(ctx context.Context, tx *sql.Tx, bundleWorkspaceID
 	}
 
 	deleted := map[string]int{}
+	if len(workbooks) > 0 {
+		// Not a backup table: the workbooks go with their Pages by cascade.
+		deleted["gridcraft_heads"] = len(workbooks)
+	}
 	for _, st := range order {
 		expr, args := st.WorkspaceScopeFilterIDs(targetIDs)
 		query := fmt.Sprintf("DELETE FROM %s WHERE %s", quoteIdent(st.Name), expr)

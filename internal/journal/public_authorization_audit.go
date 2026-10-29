@@ -8,9 +8,14 @@ import "maps"
 func PublicAuthorizationAudit(e Entry) Entry {
 	e.Payload = maps.Clone(e.Payload)
 	switch e.Type {
-	case EntryMemberAdded:
-		// Keep the producer's exact public whitelist across feeds, preview,
-		// matching and rendering; the canonical initial policy stays intact.
+	case EntryAuditEntityCreated, EntryAuditEntityUpdated, EntryAuditEntityDeleted, EntryAuditEntityRestored:
+		if action, _ := e.Payload["action"].(string); action == "user.session_revoked" || action == "user.sessions_revoked" || action == "user.unlocked" {
+			delete(e.Payload, "metadata")
+		}
+
+	case EntryMemberAdded, EntryMemberRemoved:
+		// Keep the producer's public whitelist across feeds, preview,
+		// matching and rendering; canonical access snapshots stay intact.
 		public := map[string]any{}
 		for _, key := range []string{"member_id", "subject_user_id", "action"} {
 			if value, ok := e.Payload[key]; ok {
@@ -28,6 +33,9 @@ func PublicAuthorizationAudit(e Entry) Entry {
 			}
 			e.Payload = payload
 		}
+	case EntryInvitationCreated, EntryInvitationReissued, EntryInvitationRevoked, EntryInvitationAccepted:
+		delete(e.Payload, "access_mode")
+		delete(e.Payload, "rights")
 	case EntryMemberCapabilitiesChanged:
 		delete(e.Payload, "previous_capabilities")
 		delete(e.Payload, "capabilities")

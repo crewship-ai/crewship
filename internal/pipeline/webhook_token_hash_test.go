@@ -43,6 +43,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_pipeline_webhooks_token_hash
 func openHashedWebhookTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db := openStoreTestDB(t)
+	seedPipeline(t, db, "pl_1", "hashed-webhook")
+	if _, err := db.Exec(`UPDATE pipelines SET workspace_id='ws_1' WHERE id='pl_1'`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.ExecContext(context.Background(), hashedWebhookSchemaSQL); err != nil {
 		t.Fatalf("webhook schema: %v", err)
 	}

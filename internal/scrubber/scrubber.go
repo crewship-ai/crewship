@@ -2,13 +2,15 @@ package scrubber
 
 import (
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/literalfilter"
 	"regexp"
 	"sync"
 )
 
 type pattern struct {
-	name string
-	re   *regexp.Regexp
+	filter literalfilter.Filter
+	name   string
+	re     *regexp.Regexp
 }
 
 // Scrubber detects and redacts credential patterns from text.
@@ -26,18 +28,18 @@ type Scrubber struct {
 // request.
 var builtinPatterns = []pattern{
 	// SSH/RSA/EC private keys (multiline)
-	{name: "ssh_private_key", re: regexp.MustCompile(`-----BEGIN OPENSSH PRIVATE KEY-----[\s\S]*?-----END OPENSSH PRIVATE KEY-----`)},
-	{name: "private_key", re: regexp.MustCompile(`-----BEGIN (?:RSA |EC |DSA |ED25519 )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |ED25519 )?PRIVATE KEY-----`)},
+	{name: "ssh_private_key", filter: literalfilter.ExactAll("-----BEGIN OPENSSH PRIVATE KEY-----"), re: regexp.MustCompile(`-----BEGIN OPENSSH PRIVATE KEY-----[\s\S]*?-----END OPENSSH PRIVATE KEY-----`)},
+	{name: "private_key", filter: literalfilter.ExactAll("-----BEGIN ", "PRIVATE KEY-----", "-----END "), re: regexp.MustCompile(`-----BEGIN (?:RSA |EC |DSA |ED25519 )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |ED25519 )?PRIVATE KEY-----`)},
 
 	// Anthropic API keys: sk-ant-* (also covers sk-ant-oat for OAuth tokens)
-	{name: "anthropic_key", re: regexp.MustCompile(`sk-ant-[a-zA-Z0-9_-]{10,}`)},
+	{name: "anthropic_key", filter: literalfilter.ExactAll("sk-ant-"), re: regexp.MustCompile(`sk-ant-[a-zA-Z0-9_-]{10,}`)},
 
 	// OpenRouter (used by OpenCode multi-provider routing): sk-or-*. Ahead of
 	// openai_key because that pattern's sk-… fallback below now accepts `-` and
 	// `_` too and would otherwise swallow this one, relabelling an OpenRouter
 	// key as an OpenAI key. Redaction is what matters, but the marker names the
 	// provider an operator then goes and rotates.
-	{name: "openrouter_key", re: regexp.MustCompile(`sk-or-[a-zA-Z0-9_-]{20,}`)},
+	{name: "openrouter_key", filter: literalfilter.ExactAll("sk-or-"), re: regexp.MustCompile(`sk-or-[a-zA-Z0-9_-]{20,}`)},
 
 	// OpenAI API keys: sk-proj-*, sk-svcacct-*, sk-{20+ chars}.
 	//
@@ -48,48 +50,48 @@ var builtinPatterns = []pattern{
 	// `sk-my_proxy-abc…` matched nothing at all under the alphanumeric-only
 	// class and survived in logs only where the bearer_token or "apiKey":
 	// patterns happened to cover the same text.
-	{name: "openai_key", re: regexp.MustCompile(`sk-(?:proj|svcacct)-[a-zA-Z0-9_-]{10,}|sk-[a-zA-Z0-9_-]{20,}`)},
+	{name: "openai_key", filter: literalfilter.ExactAll("sk-"), re: regexp.MustCompile(`sk-(?:proj|svcacct)-[a-zA-Z0-9_-]{10,}|sk-[a-zA-Z0-9_-]{20,}`)},
 
 	// Google API keys: AIzaSy...
-	{name: "google_key", re: regexp.MustCompile(`AIzaSy[a-zA-Z0-9_-]{33}`)},
+	{name: "google_key", filter: literalfilter.ExactAll("AIzaSy"), re: regexp.MustCompile(`AIzaSy[a-zA-Z0-9_-]{33}`)},
 
 	// Cursor API keys: cur_* (added with the multi-CLI wave). Pre-fix
 	// scrubber missed these — Cursor key leaked in agent stdout would
 	// flow unscrubbed into chat UI + journal entries.
-	{name: "cursor_key", re: regexp.MustCompile(`cur_[a-zA-Z0-9_-]{20,}`)},
+	{name: "cursor_key", filter: literalfilter.ExactAll("cur_"), re: regexp.MustCompile(`cur_[a-zA-Z0-9_-]{20,}`)},
 
 	// Factory Droid API keys: fact_* / factory_* (per Factory CLI docs).
-	{name: "factory_key", re: regexp.MustCompile(`fact(?:ory)?_[a-zA-Z0-9_-]{20,}`)},
+	{name: "factory_key", filter: literalfilter.ExactAny("fact_", "factory_"), re: regexp.MustCompile(`fact(?:ory)?_[a-zA-Z0-9_-]{20,}`)},
 
 	// xAI / Grok keys: xai-*
-	{name: "xai_key", re: regexp.MustCompile(`xai-[a-zA-Z0-9]{20,}`)},
+	{name: "xai_key", filter: literalfilter.ExactAll("xai-"), re: regexp.MustCompile(`xai-[a-zA-Z0-9]{20,}`)},
 
 	// Groq keys: gsk_*
-	{name: "groq_key", re: regexp.MustCompile(`gsk_[a-zA-Z0-9]{20,}`)},
+	{name: "groq_key", filter: literalfilter.ExactAll("gsk_"), re: regexp.MustCompile(`gsk_[a-zA-Z0-9]{20,}`)},
 
 	// GitHub tokens: ghp_, gho_, ghs_, ghr_, github_pat_
-	{name: "github_token", re: regexp.MustCompile(`(?:ghp_|gho_|ghs_|ghr_|github_pat_)[a-zA-Z0-9]{10,}`)},
+	{name: "github_token", filter: literalfilter.ExactAny("ghp_", "gho_", "ghs_", "ghr_", "github_pat_"), re: regexp.MustCompile(`(?:ghp_|gho_|ghs_|ghr_|github_pat_)[a-zA-Z0-9]{10,}`)},
 
 	// GitLab personal access tokens: glpat-*
-	{name: "gitlab_token", re: regexp.MustCompile(`glpat-[a-zA-Z0-9_-]{20,}`)},
+	{name: "gitlab_token", filter: literalfilter.ExactAll("glpat-"), re: regexp.MustCompile(`glpat-[a-zA-Z0-9_-]{20,}`)},
 
 	// Slack tokens: xoxb-, xoxp-, xoxa-, xoxr-
-	{name: "slack_token", re: regexp.MustCompile(`xox[bpar]-[a-zA-Z0-9-]+`)},
+	{name: "slack_token", filter: literalfilter.ExactAny("xoxb-", "xoxp-", "xoxa-", "xoxr-"), re: regexp.MustCompile(`xox[bpar]-[a-zA-Z0-9-]+`)},
 
 	// AWS access key IDs: AKIA*
-	{name: "aws_key", re: regexp.MustCompile(`AKIA[0-9A-Z]{16}`)},
+	{name: "aws_key", filter: literalfilter.ExactAll("AKIA"), re: regexp.MustCompile(`AKIA[0-9A-Z]{16}`)},
 
 	// Bearer tokens in Authorization headers. Matches JWT-shaped AND opaque
 	// tokens (an authenticated local-model endpoint / LiteLLM proxy issues
 	// opaque bearers, not JWTs — #974 S2). 12+ non-space chars after "Bearer".
-	{name: "bearer_token", re: regexp.MustCompile(`(?i)Bearer\s+\S{12,}`)},
+	{name: "bearer_token", filter: literalfilter.FoldedAll("bearer"), re: regexp.MustCompile(`(?i)Bearer\s+\S{12,}`)},
 
 	// Generic password/secret patterns in JSON or env var format.
 	// Case-insensitive so camelCase `"apiKey":` (emitted into
 	// OPENCODE_CONFIG_CONTENT by the local-model endpoint, #974 S2) is caught
 	// alongside snake_case and SCREAMING_CASE variants.
-	{name: "", re: regexp.MustCompile(`(?i)"(?:password|secret|token|api_key|apikey|secret_key)":\s*"[^"]+"`)},
-	{name: "", re: regexp.MustCompile(`(?i)(?:PASSWORD|SECRET|SECRET_KEY|API_KEY|APIKEY)=[^\s]{6,}`)},
+	{name: "", filter: literalfilter.FoldedAny(`"password":`, `"secret":`, `"token":`, `"api_key":`, `"apikey":`, `"secret_key":`), re: regexp.MustCompile(`(?i)"(?:password|secret|token|api_key|apikey|secret_key)":\s*"[^"]+"`)},
+	{name: "", filter: literalfilter.FoldedAny("password=", "secret=", "secret_key=", "api_key=", "apikey="), re: regexp.MustCompile(`(?i)(?:PASSWORD|SECRET|SECRET_KEY|API_KEY|APIKEY)=[^\s]{6,}`)},
 }
 
 // New creates a Scrubber with built-in patterns for common credential types.
@@ -141,7 +143,11 @@ func (s *Scrubber) Scrub(input string) string {
 	defer s.mu.RUnlock()
 
 	result := stripZeroWidth(input)
+	view := literalfilter.NewView(result)
 	for _, p := range s.patterns {
+		if !view.MayMatch(p.filter) {
+			continue
+		}
 		replacement := "[REDACTED]"
 		if p.name != "" {
 			replacement = "[REDACTED:" + p.name + "]"
@@ -153,6 +159,7 @@ func (s *Scrubber) Scrub(input string) string {
 		} else {
 			result = p.re.ReplaceAllString(result, replacement)
 		}
+		view = literalfilter.NewView(result)
 	}
 	return result
 }
@@ -228,7 +235,11 @@ func (s *Scrubber) matchBounds(input string) [][2]int {
 	defer s.mu.RUnlock()
 
 	var out [][2]int
+	view := literalfilter.NewView(input)
 	for _, p := range s.patterns {
+		if !view.MayMatch(p.filter) {
+			continue
+		}
 		for _, loc := range p.re.FindAllStringIndex(input, -1) {
 			out = append(out, [2]int{loc[0], loc[1]})
 		}
@@ -248,7 +259,11 @@ func (s *Scrubber) ContainsSecret(input string) bool {
 	defer s.mu.RUnlock()
 
 	normalized := stripZeroWidth(input)
+	view := literalfilter.NewView(normalized)
 	for _, p := range s.patterns {
+		if !view.MayMatch(p.filter) {
+			continue
+		}
 		if p.re.MatchString(normalized) {
 			return true
 		}

@@ -589,7 +589,60 @@ workspace (slug).`,
 	},
 }
 
+type instanceAuditVerifyResult struct {
+	OK                   bool   `json:"ok" yaml:"ok"`
+	Count                int    `json:"count" yaml:"count"`
+	ContinuationVerified bool   `json:"continuation_verified" yaml:"continuation_verified"`
+	HistoricalStatus     string `json:"historical_status,omitempty" yaml:"historical_status,omitempty"`
+	UnchainedFallback    int    `json:"unchained_fallback,omitempty" yaml:"unchained_fallback,omitempty"`
+	Reason               string `json:"reason,omitempty" yaml:"reason,omitempty"`
+}
+
+var adminInstanceAuditVerifyCmd = &cobra.Command{
+	Use:   "verify",
+	Short: "Verify the whole instance audit chain",
+	Long: `GET /api/v1/admin/instance/audit/verify. Audited writes check only the chain
+tail, so this walks every instance audit row on demand: MACs under the keyring,
+links, OWNER reseal checkpoints. historical_status names defects behind an
+authentic tail (historical_* for inherited rows, post_upgrade_invalid for rows
+signed since the keyring upgrade or after a reseal); unchained_fallback counts
+security actions recorded while the tail was broken. Exits non-zero unless the
+chain verifies completely.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		client, err := requireAuthInstance()
+		if err != nil {
+			return err
+		}
+		var res instanceAuditVerifyResult
+		if err := getJSON(client, "/api/v1/admin/instance/audit/verify", &res); err != nil {
+			return err
+		}
+		if err := resolvedFormatter(cmd).AutoHuman(res, func() {
+			out := cmd.OutOrStdout()
+			switch {
+			case res.OK:
+				fmt.Fprintf(out, "Instance audit chain OK — %d entries verified.\n", res.Count)
+			case res.ContinuationVerified:
+				fmt.Fprintf(out, "Instance audit chain NOT CLEAN — %d entries; the current segment verifies, history status: %s.\n", res.Count, res.HistoricalStatus)
+			default:
+				fmt.Fprintf(out, "Instance audit chain BROKEN at the tail — %d entries examined: %s\n", res.Count, res.Reason)
+			}
+			if res.UnchainedFallback > 0 {
+				fmt.Fprintf(out, "%d security action(s) recorded as unchained fallback while the tail was broken.\n", res.UnchainedFallback)
+			}
+		}); err != nil {
+			return err
+		}
+		if !res.OK {
+			return fmt.Errorf("instance audit integrity check failed")
+		}
+		return nil
+	},
+}
+
 func init() {
+	adminInstanceAuditCmd.AddCommand(adminInstanceAuditVerifyCmd)
 	adminInstanceAddPersonCmd.Flags().String("name", "", "Full name")
 	adminInstanceAddPersonCmd.Flags().StringArray("access", nil, "Workspace access as <slug>=<ROLE> (repeatable)")
 

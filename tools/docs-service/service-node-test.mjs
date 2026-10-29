@@ -668,7 +668,7 @@ test('authoring adapter bytes change the copied service build identity', async (
   const dir=await mkdtemp(join(tmpdir(),'docs-build-'));
   let f, service;
   try {
-    for(const file of ['pnpm-lock.yaml','schema.mjs','schema-core.mjs','service.mjs','create-document.mjs','secret.mjs'])await copyFile(new URL(file,import.meta.url),join(dir,file));
+    for(const file of ['pnpm-lock.yaml','schema.mjs','schema-core.mjs','position-migrations.mjs','service.mjs','create-document.mjs','secret.mjs'])await copyFile(new URL(file,import.meta.url),join(dir,file));
     await symlink(fileURLToPath(new URL('node_modules',import.meta.url)),join(dir,'node_modules'),'dir');
     const {startService:copiedStart}=await import(pathToFileURL(join(dir,'service.mjs')).href);
     f=await fixture(authorityModel().handle);
@@ -681,6 +681,11 @@ test('authoring adapter bytes change the copied service build identity', async (
     await appendFile(join(dir,'create-document.mjs'),'\n// copied public fixture identity change\n');
     service=await start();
     assert.notEqual(service.identity.build,original,'authoring adapter changes must invalidate service identity');
+    const authored=service.identity.build;
+    await service.close(); service=undefined;
+    await appendFile(join(dir,'position-migrations.mjs'),'\n// copied migration validator identity change\n');
+    service=await start();
+    assert.notEqual(service.identity.build,authored,'migration validator changes must invalidate service identity');
   } finally {
     try {if(service)await service.close()} finally {try {if(f)await f.close()} finally {await rm(dir,{recursive:true})}}
   }
@@ -738,4 +743,31 @@ test('authority deadline after durable commit permits exact receipt retry withou
     assert.equal(retry.status, 200); assert.equal(retry.body.duplicate, true);
     assert.equal(model.commits, 1, 'uncertain confirmation executed the original mutation again');
   } finally { await f.close(); }
+});
+
+test('invalid live or retained position migration updates never reach durable commit', async () => {
+  for (const kind of ['malformed', 'retained', 'oversized', 'arbitrary-root']) {
+    const model = authorityModel(), f = await fixture(model.handle); await f.start();
+    try {
+      const state = (await read(f)).body, before = structuredClone(model.state);
+      const doc = load(state.snapshot);
+      const key = '__tiptap_position_migrations:root:default';
+      const map = doc.getMap(kind === 'arbitrary-root' ? 'arbitrary' : key);
+      if (kind === 'oversized') {
+        map.set('1:0', { version: 1, client: 1, clock: 0, seen: [], transfers: Array.from({ length: 4097 }, () => ({ source: { client: 1, clock: 0, length: 1 }, target: null })) });
+      } else {
+        map.set('1:0', { opaque: 'payload that must never be committed' });
+        if (kind === 'retained') map.delete('1:0');
+      }
+      const update = snapshot(doc); doc.destroy();
+      const result = await call(f.socket, '/v1/documents/p/patch', { id: `migration-${kind}`, schema: 2, kind: 'human', update, epoch: state.epoch, ifRev: state.rev });
+      assert.equal(result.status, 400, kind);
+      assert.deepEqual(result.body, { error: 'invalid document operation' });
+      assert.equal(model.commits, 0); assert.equal(model.receipts.size, 0);
+      // Taking the fenced writer lease advances its epoch even when validation
+      // refuses content. No durable content/revision/generation may change.
+      assert.equal(model.acquisitions, 1); assert.equal(model.state.epoch, before.epoch + 1);
+      assert.deepEqual({ ...model.state, epoch: before.epoch }, before);
+    } finally { await f.close(); }
+  }
 });

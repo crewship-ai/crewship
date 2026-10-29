@@ -13,6 +13,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/api"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/restricteddispatch"
 	"github.com/crewship-ai/crewship/internal/restrictedpreflight"
 	"github.com/crewship-ai/crewship/internal/restrictedruntime"
@@ -96,6 +97,10 @@ func startRestrictedTextRuntime(ctx context.Context, db *sql.DB, databasePath st
 	// Private authority stays in the domain table. Shared dispatch owns claims,
 	// leases and conservative reconciliation of interrupted graph execution.
 	workflow.SourceChecker = restrictedpreflight.CheckSource
+	// Published-run audit joins the configured chained journal writer.
+	if emitter, ok := router.Journal().(journal.TransactionEmitter); ok {
+		workflow.Audit = emitter
+	}
 	if err = workflow.Start(ctx); err != nil {
 		closeAll()
 		return nil, fmt.Errorf("start restricted workflow: %w", err)

@@ -361,3 +361,14 @@ Background scheduler: every 6h. Compactor: daily at 03:00 UTC. Both wired at ser
 - [Memory observability](/guides/memory-observability) -- operator playbook for the HITL approve/reject/explain flow and the `memory_versions` audit trail.
 - [`crewship consolidate`](/cli/consolidate).
 - [Episodic memory](/guides/episodic-memory) -- indexer runs on the same tick.
+
+
+### Diff computation limits
+
+`GET /api/v1/consolidate/proposed/{id}/diff` shares a process-wide budget with
+routine-version previews. See [configuration](/configuration/environment#diff-preview-computation).
+Input byte/line or output limits return `413` with an explicit refusal;
+occupied computation slots return `429` with `Retry-After: 1` and no waiting
+queue. Existing workspace membership and proposal lookup checks still run first.
+Accepted comparisons retain their original hunks, timestamps and edit statistics.
+No proposal is approved or changed by an unsuccessful preview.

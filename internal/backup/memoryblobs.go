@@ -274,7 +274,8 @@ func RestoreMemoryBlobs(ctx context.Context, blobRoot string, payload *Extracted
 	}
 	defer func() { _ = r.Close() }()
 
-	tr := tar.NewReader(r)
+	tr := newRestoreTarReader(ctx, r)
+	defer tr.Close()
 	written := 0
 	for {
 		select {
@@ -317,7 +318,7 @@ func RestoreMemoryBlobs(ctx context.Context, blobRoot string, payload *Extracted
 			}
 			continue
 		}
-		if err := restoreMemoryBlobFile(dst, tr); err != nil {
+		if err := restoreMemoryBlobFile(ctx, dst, tr); err != nil {
 			return written, fmt.Errorf("backup: restore memory blob %s: %w", canonicalSha, err)
 		}
 		written++
@@ -350,8 +351,8 @@ func RestoreMemoryBlobs(ctx context.Context, blobRoot string, payload *Extracted
 // (io.Reader-based) variant, this function should be replaced by a
 // call to it so the two packages share one durability primitive
 // instead of two copies of the same sequence.
-func restoreMemoryBlobFile(dst string, r io.Reader) error {
-	return writeBlobDurable(dst, r, "")
+func restoreMemoryBlobFile(ctx context.Context, dst string, r io.Reader) error {
+	return writeBlobDurable(ctx, dst, r, "")
 }
 
 // errBlobDigestMismatch is returned by writeBlobDurable when the bytes it
@@ -364,7 +365,7 @@ var errBlobDigestMismatch = errors.New("blob content does not match its sha256")
 // on the way to the tempfile and the rename only happens if they match —
 // a content-addressed file whose name lies about its content is worse than
 // no file, because every later reader trusts the name.
-func writeBlobDurable(dst string, r io.Reader, wantSha string) error {
+func writeBlobDurable(ctx context.Context, dst string, r io.Reader, wantSha string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
@@ -384,7 +385,7 @@ func writeBlobDurable(dst string, r io.Reader, wantSha string) error {
 	cleanup := func() { _ = os.Remove(tmp) }
 
 	hasher := sha256.New()
-	if _, err = io.Copy(io.MultiWriter(out, hasher), r); err != nil {
+	if _, err = io.Copy(RestoreWriter(ctx, io.MultiWriter(out, hasher)), &restoreReadGuard{ctx: ctx, r: r, b: readBudget(ctx), decoded: true}); err != nil {
 		_ = out.Close()
 		cleanup()
 		return fmt.Errorf("write: %w", err)

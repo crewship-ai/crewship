@@ -38,7 +38,7 @@ func (s *Server) handleDocumentCreate(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "document authoring exceeds 1 MiB", 413)
 		return
 	}
-	response, err := s.boundedHostRequest(r, http.MethodPost, "/api/v1/internal/documents/create", body, 64<<10)
+	response, err := s.documentHostRequest(r, http.MethodPost, "/api/v1/internal/documents/create", body, 64<<10)
 	if err != nil {
 		http.Error(w, "document creation outcome unavailable; retry the same mutation_id", 503)
 		return

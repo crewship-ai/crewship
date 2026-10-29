@@ -1,0 +1,1075 @@
+{
+  "profile": "mooring.checkpoint.v0.4",
+  "notes": [
+    "Digest is the generic full tuple, not opaque-content SHA256.",
+    "Expected preimages were calculated independently with fixed ASCII object keys, all counters as strings, UTF-16 asset sorting and UTF-8 canonical string escaping.",
+    "No application, asset retrieval, transport or authorization qualification is implied."
+  ],
+  "cases": [
+    {
+      "id": "base64-fulltuple",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:8118bccd6d536b69a1ae9f22d500359aefdec3af30d82f11fd6ad4fd30069fe1",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216,
+      "expected_digest": "sha256:8118bccd6d536b69a1ae9f22d500359aefdec3af30d82f11fd6ad4fd30069fe1",
+      "expected_content_digest": "sha256:82f73cb6bf567721b351f20ccc365d9b01072fe62be5a3f49cc7a0dc0e23f577",
+      "expected_state_base64": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+      "expected_preimage": "{\"assets\":[{\"asset_id\":\"😀\",\"digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size_bytes\":\"18446744073709551615\"},{\"asset_id\":\"\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size_bytes\":\"2\"}],\"domain\":\"mooring.checkpoint.v0.4\",\"format_version\":\"wordcraft-0.10.0/yrs-0.28.0/v2\",\"generation\":\"7\",\"revision\":\"12\",\"scope\":{\"application_id\":\"wordcraft\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"state_base64\":\"eyJhIjoxLCJ6IjoixI3wn5iAIn0=\",\"versions\":{\"engine_version\":\"0.10.0\",\"model_version\":\"0.2.0\",\"protocol_version\":\"0.4.0\"}}",
+      "verify": true
+    },
+    {
+      "id": "json-same-jcs-bytes",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "json",
+        "state": "{\"a\":1,\"z\":\"č😀\"}",
+        "digest": "sha256:8118bccd6d536b69a1ae9f22d500359aefdec3af30d82f11fd6ad4fd30069fe1",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216,
+      "expected_digest": "sha256:8118bccd6d536b69a1ae9f22d500359aefdec3af30d82f11fd6ad4fd30069fe1",
+      "expected_content_digest": "sha256:82f73cb6bf567721b351f20ccc365d9b01072fe62be5a3f49cc7a0dc0e23f577",
+      "expected_state_base64": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+      "expected_preimage": "{\"assets\":[{\"asset_id\":\"😀\",\"digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size_bytes\":\"18446744073709551615\"},{\"asset_id\":\"\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size_bytes\":\"2\"}],\"domain\":\"mooring.checkpoint.v0.4\",\"format_version\":\"wordcraft-0.10.0/yrs-0.28.0/v2\",\"generation\":\"7\",\"revision\":\"12\",\"scope\":{\"application_id\":\"wordcraft\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"state_base64\":\"eyJhIjoxLCJ6IjoixI3wn5iAIn0=\",\"versions\":{\"engine_version\":\"0.10.0\",\"model_version\":\"0.2.0\",\"protocol_version\":\"0.4.0\"}}",
+      "verify": true
+    },
+    {
+      "id": "asset-wire-order-independent",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:8118bccd6d536b69a1ae9f22d500359aefdec3af30d82f11fd6ad4fd30069fe1",
+        "assets": [
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          },
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216,
+      "expected_digest": "sha256:8118bccd6d536b69a1ae9f22d500359aefdec3af30d82f11fd6ad4fd30069fe1",
+      "expected_content_digest": "sha256:82f73cb6bf567721b351f20ccc365d9b01072fe62be5a3f49cc7a0dc0e23f577",
+      "expected_state_base64": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+      "expected_preimage": "{\"assets\":[{\"asset_id\":\"😀\",\"digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size_bytes\":\"18446744073709551615\"},{\"asset_id\":\"\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size_bytes\":\"2\"}],\"domain\":\"mooring.checkpoint.v0.4\",\"format_version\":\"wordcraft-0.10.0/yrs-0.28.0/v2\",\"generation\":\"7\",\"revision\":\"12\",\"scope\":{\"application_id\":\"wordcraft\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"state_base64\":\"eyJhIjoxLCJ6IjoixI3wn5iAIn0=\",\"versions\":{\"engine_version\":\"0.10.0\",\"model_version\":\"0.2.0\",\"protocol_version\":\"0.4.0\"}}",
+      "verify": true
+    },
+    {
+      "id": "full-u64-counters",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "18446744073709551615",
+        "generation": "18446744073709551615",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:dc78cf0af3d3742910d662334155ac3260e48e10456e6a4f5692603400c99db9",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216,
+      "expected_digest": "sha256:dc78cf0af3d3742910d662334155ac3260e48e10456e6a4f5692603400c99db9",
+      "expected_content_digest": "sha256:82f73cb6bf567721b351f20ccc365d9b01072fe62be5a3f49cc7a0dc0e23f577",
+      "expected_state_base64": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+      "expected_preimage": "{\"assets\":[{\"asset_id\":\"😀\",\"digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size_bytes\":\"18446744073709551615\"},{\"asset_id\":\"\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size_bytes\":\"2\"}],\"domain\":\"mooring.checkpoint.v0.4\",\"format_version\":\"wordcraft-0.10.0/yrs-0.28.0/v2\",\"generation\":\"18446744073709551615\",\"revision\":\"18446744073709551615\",\"scope\":{\"application_id\":\"wordcraft\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"state_base64\":\"eyJhIjoxLCJ6IjoixI3wn5iAIn0=\",\"versions\":{\"engine_version\":\"0.10.0\",\"model_version\":\"0.2.0\",\"protocol_version\":\"0.4.0\"}}",
+      "verify": true
+    },
+    {
+      "id": "mutation-scope",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "another"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:ff9ca1f4a7385e1148f979d4cf3ee901b98e7b8dc2ba360c1453d2e78551d646",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216,
+      "expected_digest": "sha256:ff9ca1f4a7385e1148f979d4cf3ee901b98e7b8dc2ba360c1453d2e78551d646",
+      "expected_content_digest": "sha256:82f73cb6bf567721b351f20ccc365d9b01072fe62be5a3f49cc7a0dc0e23f577",
+      "expected_state_base64": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+      "expected_preimage": "{\"assets\":[{\"asset_id\":\"😀\",\"digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size_bytes\":\"18446744073709551615\"},{\"asset_id\":\"\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size_bytes\":\"2\"}],\"domain\":\"mooring.checkpoint.v0.4\",\"format_version\":\"wordcraft-0.10.0/yrs-0.28.0/v2\",\"generation\":\"7\",\"revision\":\"12\",\"scope\":{\"application_id\":\"wordcraft\",\"artifact_id\":\"another\",\"workspace_id\":\"w\"},\"state_base64\":\"eyJhIjoxLCJ6IjoixI3wn5iAIn0=\",\"versions\":{\"engine_version\":\"0.10.0\",\"model_version\":\"0.2.0\",\"protocol_version\":\"0.4.0\"}}",
+      "verify": true
+    },
+    {
+      "id": "mutation-revision",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "13",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:4389867610c397647624c704e26fe84764c2198e7ea5b2f906dc6246af9adb4e",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216,
+      "expected_digest": "sha256:4389867610c397647624c704e26fe84764c2198e7ea5b2f906dc6246af9adb4e",
+      "expected_content_digest": "sha256:82f73cb6bf567721b351f20ccc365d9b01072fe62be5a3f49cc7a0dc0e23f577",
+      "expected_state_base64": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+      "expected_preimage": "{\"assets\":[{\"asset_id\":\"😀\",\"digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size_bytes\":\"18446744073709551615\"},{\"asset_id\":\"\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size_bytes\":\"2\"}],\"domain\":\"mooring.checkpoint.v0.4\",\"format_version\":\"wordcraft-0.10.0/yrs-0.28.0/v2\",\"generation\":\"7\",\"revision\":\"13\",\"scope\":{\"application_id\":\"wordcraft\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"state_base64\":\"eyJhIjoxLCJ6IjoixI3wn5iAIn0=\",\"versions\":{\"engine_version\":\"0.10.0\",\"model_version\":\"0.2.0\",\"protocol_version\":\"0.4.0\"}}",
+      "verify": true
+    },
+    {
+      "id": "mutation-creator-generation",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "8",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:7b50c420e5e0158eb00ed08fb4dab6ed426662ae3fa09297bd090203b5a37461",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216,
+      "expected_digest": "sha256:7b50c420e5e0158eb00ed08fb4dab6ed426662ae3fa09297bd090203b5a37461",
+      "expected_content_digest": "sha256:82f73cb6bf567721b351f20ccc365d9b01072fe62be5a3f49cc7a0dc0e23f577",
+      "expected_state_base64": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+      "expected_preimage": "{\"assets\":[{\"asset_id\":\"😀\",\"digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size_bytes\":\"18446744073709551615\"},{\"asset_id\":\"\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size_bytes\":\"2\"}],\"domain\":\"mooring.checkpoint.v0.4\",\"format_version\":\"wordcraft-0.10.0/yrs-0.28.0/v2\",\"generation\":\"8\",\"revision\":\"12\",\"scope\":{\"application_id\":\"wordcraft\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"state_base64\":\"eyJhIjoxLCJ6IjoixI3wn5iAIn0=\",\"versions\":{\"engine_version\":\"0.10.0\",\"model_version\":\"0.2.0\",\"protocol_version\":\"0.4.0\"}}",
+      "verify": true
+    },
+    {
+      "id": "mutation-format",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "other-format",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:bcab665f96023d9a6703d7c393f4511533732cdee72c3ffbcb2e4f5467048513",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216,
+      "expected_digest": "sha256:bcab665f96023d9a6703d7c393f4511533732cdee72c3ffbcb2e4f5467048513",
+      "expected_content_digest": "sha256:82f73cb6bf567721b351f20ccc365d9b01072fe62be5a3f49cc7a0dc0e23f577",
+      "expected_state_base64": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+      "expected_preimage": "{\"assets\":[{\"asset_id\":\"😀\",\"digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size_bytes\":\"18446744073709551615\"},{\"asset_id\":\"\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size_bytes\":\"2\"}],\"domain\":\"mooring.checkpoint.v0.4\",\"format_version\":\"other-format\",\"generation\":\"7\",\"revision\":\"12\",\"scope\":{\"application_id\":\"wordcraft\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"state_base64\":\"eyJhIjoxLCJ6IjoixI3wn5iAIn0=\",\"versions\":{\"engine_version\":\"0.10.0\",\"model_version\":\"0.2.0\",\"protocol_version\":\"0.4.0\"}}",
+      "verify": true
+    },
+    {
+      "id": "mutation-model-version",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.3.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:1291e01ab22080f4406abb5934f47f238a585235c44e8d8e6b73164815aec8e8",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216,
+      "expected_digest": "sha256:1291e01ab22080f4406abb5934f47f238a585235c44e8d8e6b73164815aec8e8",
+      "expected_content_digest": "sha256:82f73cb6bf567721b351f20ccc365d9b01072fe62be5a3f49cc7a0dc0e23f577",
+      "expected_state_base64": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+      "expected_preimage": "{\"assets\":[{\"asset_id\":\"😀\",\"digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size_bytes\":\"18446744073709551615\"},{\"asset_id\":\"\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size_bytes\":\"2\"}],\"domain\":\"mooring.checkpoint.v0.4\",\"format_version\":\"wordcraft-0.10.0/yrs-0.28.0/v2\",\"generation\":\"7\",\"revision\":\"12\",\"scope\":{\"application_id\":\"wordcraft\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"state_base64\":\"eyJhIjoxLCJ6IjoixI3wn5iAIn0=\",\"versions\":{\"engine_version\":\"0.10.0\",\"model_version\":\"0.3.0\",\"protocol_version\":\"0.4.0\"}}",
+      "verify": true
+    },
+    {
+      "id": "mutation-asset-size",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:98467721c23bc80fff3750a90ed7e941f3d23a9da26619034586f7ae31ee2f72",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "3"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216,
+      "expected_digest": "sha256:98467721c23bc80fff3750a90ed7e941f3d23a9da26619034586f7ae31ee2f72",
+      "expected_content_digest": "sha256:82f73cb6bf567721b351f20ccc365d9b01072fe62be5a3f49cc7a0dc0e23f577",
+      "expected_state_base64": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+      "expected_preimage": "{\"assets\":[{\"asset_id\":\"😀\",\"digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size_bytes\":\"18446744073709551615\"},{\"asset_id\":\"\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size_bytes\":\"3\"}],\"domain\":\"mooring.checkpoint.v0.4\",\"format_version\":\"wordcraft-0.10.0/yrs-0.28.0/v2\",\"generation\":\"7\",\"revision\":\"12\",\"scope\":{\"application_id\":\"wordcraft\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"state_base64\":\"eyJhIjoxLCJ6IjoixI3wn5iAIn0=\",\"versions\":{\"engine_version\":\"0.10.0\",\"model_version\":\"0.2.0\",\"protocol_version\":\"0.4.0\"}}",
+      "verify": true
+    },
+    {
+      "id": "mutation-asset-digest",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:6813a27685c5c5048f6896e6cc316055a1ffc14347df2797e9b1e766e69a75f7",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216,
+      "expected_digest": "sha256:6813a27685c5c5048f6896e6cc316055a1ffc14347df2797e9b1e766e69a75f7",
+      "expected_content_digest": "sha256:82f73cb6bf567721b351f20ccc365d9b01072fe62be5a3f49cc7a0dc0e23f577",
+      "expected_state_base64": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+      "expected_preimage": "{\"assets\":[{\"asset_id\":\"😀\",\"digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size_bytes\":\"18446744073709551615\"},{\"asset_id\":\"\",\"digest\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"size_bytes\":\"2\"}],\"domain\":\"mooring.checkpoint.v0.4\",\"format_version\":\"wordcraft-0.10.0/yrs-0.28.0/v2\",\"generation\":\"7\",\"revision\":\"12\",\"scope\":{\"application_id\":\"wordcraft\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"state_base64\":\"eyJhIjoxLCJ6IjoixI3wn5iAIn0=\",\"versions\":{\"engine_version\":\"0.10.0\",\"model_version\":\"0.2.0\",\"protocol_version\":\"0.4.0\"}}",
+      "verify": true
+    },
+    {
+      "id": "mutation-state",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "Y2hhbmdlZCBzdGF0ZQ==",
+        "digest": "sha256:d35b11e5da40837c1ba24284091d2f25f7150b9b4d417bc93281decdda8debe7",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216,
+      "expected_digest": "sha256:d35b11e5da40837c1ba24284091d2f25f7150b9b4d417bc93281decdda8debe7",
+      "expected_content_digest": "sha256:77bb4e5700b5c2776d9406d44798e3808a83aa892f42c2de054d964ac0566e5b",
+      "expected_state_base64": "Y2hhbmdlZCBzdGF0ZQ==",
+      "expected_preimage": "{\"assets\":[{\"asset_id\":\"😀\",\"digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size_bytes\":\"18446744073709551615\"},{\"asset_id\":\"\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size_bytes\":\"2\"}],\"domain\":\"mooring.checkpoint.v0.4\",\"format_version\":\"wordcraft-0.10.0/yrs-0.28.0/v2\",\"generation\":\"7\",\"revision\":\"12\",\"scope\":{\"application_id\":\"wordcraft\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"state_base64\":\"Y2hhbmdlZCBzdGF0ZQ==\",\"versions\":{\"engine_version\":\"0.10.0\",\"model_version\":\"0.2.0\",\"protocol_version\":\"0.4.0\"}}",
+      "verify": true
+    },
+    {
+      "id": "digest-field-excluded-but-verify-denies",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216,
+      "expected_digest": "sha256:8118bccd6d536b69a1ae9f22d500359aefdec3af30d82f11fd6ad4fd30069fe1",
+      "expected_content_digest": "sha256:82f73cb6bf567721b351f20ccc365d9b01072fe62be5a3f49cc7a0dc0e23f577",
+      "expected_state_base64": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+      "expected_preimage": "{\"assets\":[{\"asset_id\":\"😀\",\"digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"size_bytes\":\"18446744073709551615\"},{\"asset_id\":\"\",\"digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size_bytes\":\"2\"}],\"domain\":\"mooring.checkpoint.v0.4\",\"format_version\":\"wordcraft-0.10.0/yrs-0.28.0/v2\",\"generation\":\"7\",\"revision\":\"12\",\"scope\":{\"application_id\":\"wordcraft\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"state_base64\":\"eyJhIjoxLCJ6IjoixI3wn5iAIn0=\",\"versions\":{\"engine_version\":\"0.10.0\",\"model_version\":\"0.2.0\",\"protocol_version\":\"0.4.0\"}}",
+      "verify": false
+    },
+    {
+      "id": "empty-state",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "",
+        "digest": "sha256:922ccb4d965c280aa4b57dca4b1dea4573bbd03bbab22429c7a084ba84e74fa5",
+        "assets": []
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216,
+      "expected_digest": "sha256:922ccb4d965c280aa4b57dca4b1dea4573bbd03bbab22429c7a084ba84e74fa5",
+      "expected_content_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "expected_state_base64": "",
+      "expected_preimage": "{\"assets\":[],\"domain\":\"mooring.checkpoint.v0.4\",\"format_version\":\"wordcraft-0.10.0/yrs-0.28.0/v2\",\"generation\":\"7\",\"revision\":\"12\",\"scope\":{\"application_id\":\"wordcraft\",\"artifact_id\":\"a\",\"workspace_id\":\"w\"},\"state_base64\":\"\",\"versions\":{\"engine_version\":\"0.10.0\",\"model_version\":\"0.2.0\",\"protocol_version\":\"0.4.0\"}}",
+      "verify": true
+    },
+    {
+      "id": "canonical-budget-html-and-line-separator",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "< >"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "",
+        "digest": "sha256:105ce520a25d9f7802a75a840a36f58b8d7a6b583d87f424fb7a01c5467a67a5",
+        "assets": []
+      },
+      "decoded_limit": 0,
+      "preimage_limit": 319,
+      "expected_digest": "sha256:105ce520a25d9f7802a75a840a36f58b8d7a6b583d87f424fb7a01c5467a67a5",
+      "expected_content_digest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "expected_state_base64": "",
+      "expected_preimage": "{\"assets\":[],\"domain\":\"mooring.checkpoint.v0.4\",\"format_version\":\"wordcraft-0.10.0/yrs-0.28.0/v2\",\"generation\":\"7\",\"revision\":\"12\",\"scope\":{\"application_id\":\"wordcraft\",\"artifact_id\":\"< >\",\"workspace_id\":\"w\"},\"state_base64\":\"\",\"versions\":{\"engine_version\":\"0.10.0\",\"model_version\":\"0.2.0\",\"protocol_version\":\"0.4.0\"}}",
+      "verify": true
+    }
+  ],
+  "rejected": [
+    {
+      "id": "bad-pad-bits",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "Zh==",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216
+    },
+    {
+      "id": "base64-newline",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "Zg==\n",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216
+    },
+    {
+      "id": "invalid-base64",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "!!!!",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216
+    },
+    {
+      "id": "invalid-version",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216
+    },
+    {
+      "id": "invalid-model-version",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "00.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216
+    },
+    {
+      "id": "duplicate-asset",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216
+    },
+    {
+      "id": "invalid-asset-digest",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "assets": [
+          {
+            "asset_id": "x",
+            "digest": "SHA256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "1"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216
+    },
+    {
+      "id": "json-spaces",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "json",
+        "state": "{\"a\":1, \"b\":2}",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216
+    },
+    {
+      "id": "json-key-order",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "json",
+        "state": "{\"b\":2,\"a\":1}",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216
+    },
+    {
+      "id": "json-duplicate",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "json",
+        "state": "{\"a\":1,\"a\":1}",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216
+    },
+    {
+      "id": "json-unsafe-integer",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "json",
+        "state": "{\"n\":9007199254740993}",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216
+    },
+    {
+      "id": "json-negative-zero",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "json",
+        "state": "-0",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 16777216
+    },
+    {
+      "id": "decoded-capacity",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 1,
+      "preimage_limit": 16777216
+    },
+    {
+      "id": "preimage-capacity",
+      "checkpoint": {
+        "scope": {
+          "application_id": "wordcraft",
+          "workspace_id": "w",
+          "artifact_id": "a"
+        },
+        "revision": "12",
+        "generation": "7",
+        "format_version": "wordcraft-0.10.0/yrs-0.28.0/v2",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "encoding": "base64",
+        "state": "eyJhIjoxLCJ6IjoixI3wn5iAIn0=",
+        "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "assets": [
+          {
+            "asset_id": "",
+            "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size_bytes": "2"
+          },
+          {
+            "asset_id": "😀",
+            "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "size_bytes": "18446744073709551615"
+          }
+        ]
+      },
+      "decoded_limit": 8388608,
+      "preimage_limit": 8
+    }
+  ]
+}

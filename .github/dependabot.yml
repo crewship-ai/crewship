@@ -38,7 +38,9 @@ version: 2
 updates:
   # NPM dependencies (works with pnpm)
   - package-ecosystem: "npm"
-    directory: "/"
+    directories:
+      - "/"
+      - "/tools/docs-service"
     target-branch: "main"
     schedule:
       interval: "weekly"
@@ -50,6 +52,16 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     groups:
+      # Browser and service share a CRDT binary contract. Review these together,
+      # outside the broad production/development dependency groups.
+      document-editor:
+        applies-to: version-updates
+        patterns:
+          - "@tiptap/*"
+          - "yjs"
+        update-types:
+          - "minor"
+          - "patch"
       production-dependencies:
         applies-to: version-updates
         update-types:
@@ -57,6 +69,8 @@ updates:
           - "patch"
         exclude-patterns:
           - "@types/*"
+          - "@tiptap/*"
+          - "yjs"
       development-dependencies:
         applies-to: version-updates
         dependency-type: "development"
@@ -65,6 +79,8 @@ updates:
           - "patch"
         exclude-patterns:
           - "@types/*"
+          - "@tiptap/*"
+          - "yjs"
       typescript-types:
         applies-to: version-updates
         patterns:

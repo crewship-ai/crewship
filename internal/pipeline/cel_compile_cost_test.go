@@ -17,8 +17,8 @@ import (
 //        repeatedly with unchanging source compiles once.
 //
 //   M5 — celCostLimit is passed to cel.Program as a CostLimit, which bounds
-//        Eval ONLY; Compile was unbounded. Because the step body is Render()'d
-//        (runner_code.go) BEFORE it reaches the runner, a webhook-controlled
+//        Eval ONLY; Compile was unbounded. Historically the step body was Render()'d
+//        before reaching the runner, so a webhook-controlled
 //        `{{ inputs.payload }}` is substituted directly into the CEL *source*
 //        that gets compiled — a "compile-bomb". The fix caps the rendered
 //        source length (maxCELSourceBytes) and rejects oversized expressions
@@ -32,7 +32,8 @@ import (
 // full production path (now cached), while BenchmarkCEL_EvalOnly_CachedProgram
 // measures Eval against a pre-built program.
 
-// renderCELBody mirrors runner_code.go:74 — the step body is Render()'d before
+// renderCELBody models the historical source interpolation, retained to test direct runner source limits.
+// Historically the step body was rendered before
 // it reaches the runner, so an attacker-controlled input is substituted into
 // the CEL source string that env.Compile() then parses.
 func renderCELBody(payload string) string {

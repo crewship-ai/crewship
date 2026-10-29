@@ -94,8 +94,27 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 		h.memberAccessError(w, err)
 		return
 	}
+	crewNames, err := liveCrewGrantNames(r.Context(), h.db, workspace, p)
+	if err != nil {
+		h.memberAccessError(w, err)
+		return
+	}
 	for _, right := range p.Rights {
 		decision := memberAccessDecision{Right: right, State: "allowed", Reason: "explicit_resource_grant"}
+		if right.Kind == "crew" {
+			if name, ok := crewNames[right]; ok {
+				decision.Name = name
+				decision.Reason = "Crew View allows discovering its agents; Crew Use also allows chatting and running them. Neither grants delegation, credential access or crew administration."
+				if right.Operation == "manage" {
+					decision.Reason = "Explicit trusted Crew Manage permits crew profile/configuration and ordinary membership changes. It does not permit assigning crew roles, private-network opt-in, deletion or workspace administration."
+				}
+			} else {
+				decision.State = "denied"
+				decision.Reason = "Current crew share authority is unavailable."
+			}
+			result.Decisions = append(result.Decisions, decision)
+			continue
+		}
 		// Names are read only for currently granted local resources. The final
 		// membership fence also covers changes while building this explanation.
 		grantErr := store.Check(r.Context(), user, workspace, right)
@@ -127,7 +146,7 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 			}
 		} else if right.Kind == "routine" && right.Operation == "edit" {
 			decision.State = "conditional"
-			decision.Reason = "Edit allows changes to the collaborative draft with current View access and token scope. Publication still requires trusted review and testing; Edit does not grant execution."
+			decision.Reason = "Edit allows changes to the collaborative draft with current View access and token scope. Publishing also requires an explicit Publish share and publication admission; Edit does not grant execution."
 			if e := store.Check(r.Context(), user, workspace, access.Right{Kind: "routine", ID: right.ID, Operation: "view"}); e != nil {
 				if !errors.Is(e, access.ErrDenied) {
 					h.memberAccessError(w, e)
@@ -136,6 +155,9 @@ func (h *WorkspaceHandler) writeEffectiveAccess(w http.ResponseWriter, r *http.R
 				decision.State = "denied"
 				decision.Reason = "Editing the collaborative draft also requires a current View share."
 			}
+		} else if right.Kind == "routine" && right.Operation == "publish" {
+			decision.State = "conditional"
+			decision.Reason = "Explicit Publish requires current Edit and View shares. Publication admission is a separate operation; this grant neither publishes nor executes a routine."
 		} else if right.Kind == "routine" && !authorized[right.ID] {
 			decision.State = "denied"
 			decision.Reason = "Requires current agent run/delegate grants, provider authority and a supported active definition."

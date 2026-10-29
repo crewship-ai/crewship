@@ -357,11 +357,11 @@ func TestCovWsMUpdate_ExecDBError(t *testing.T) {
 
 func TestCovWsMUpdate_NotFoundAfterUpdate(t *testing.T) {
 	h, uw := covWsMHandler(t)
-	// Soft-delete the workspace so the post-update SELECT (deleted_at IS NULL)
-	// returns no row → 500 (handler does not special-case ErrNoRows here).
-	if _, err := h.db.Exec("UPDATE workspaces SET deleted_at = '2026-01-01T00:00:00Z' WHERE id = ?", uw.wsID); err != nil {
-		t.Fatalf("soft delete: %v", err)
-	}
+	before := covWsMName(t, h, uw.wsID)
+	// Remove the row from the response query only after the authorized UPDATE.
+	// Both the requested name and the trigger's soft deletion must roll back.
+	execOrFatal(t, h.db, `CREATE TRIGGER hide_updated_workspace AFTER UPDATE OF name ON workspaces
+		BEGIN UPDATE workspaces SET deleted_at='2026-01-01T00:00:00Z' WHERE id=NEW.id; END`)
 	req := httptest.NewRequest("PATCH", "/api/v1/workspaces/"+uw.wsID,
 		strings.NewReader(`{"name":"Renamed"}`))
 	req = withWorkspaceUser(req, uw.userID, uw.wsID, "OWNER")
@@ -369,6 +369,10 @@ func TestCovWsMUpdate_NotFoundAfterUpdate(t *testing.T) {
 	h.Update(rr, req)
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("want 500, got %d", rr.Code)
+	}
+	var intact bool
+	if err := h.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=? AND name=? AND deleted_at IS NULL)`, uw.wsID, before).Scan(&intact); err != nil || !intact {
+		t.Fatalf("workspace update did not roll back: intact=%v err=%v", intact, err)
 	}
 }
 

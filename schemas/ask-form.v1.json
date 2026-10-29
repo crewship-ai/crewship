@@ -146,7 +146,7 @@
             "pattern": {
               "type": "string",
               "maxLength": 200,
-              "description": "A regular expression the whole value must match - anchored at both ends, like an HTML pattern attribute, so CZ[0-9]{8} does not accept xxCZ25788001xx. Only on the text-ish types (text, textarea, and unrecognised types, which render as text inputs). Compiled by Go's RE2 on save, which is what makes it safe to run in the browser: no backreferences, no lookaround, no catastrophic backtracking."
+              "description": "A regular expression the whole value must match - anchored at both ends, so CZ[0-9]{8} does not accept xxCZ25788001xx. Only on the text-ish types (text, textarea, and unrecognised types, which render as text inputs). Checked by Go on save and by the server on submission, using the same answer validator as CLI preview. Author patterns are never executed by the browser: Go-valid does not imply safe for a native backtracking engine. A legacy stored pattern Go cannot compile is not enforced; new invalid patterns cannot be saved."
             }
           }
         }

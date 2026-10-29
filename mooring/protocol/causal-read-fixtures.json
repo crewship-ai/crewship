@@ -1,0 +1,2674 @@
+{
+  "profile": "causal-confirmed-read-pure-draft-v1",
+  "notes": [
+    "Not a wire schema or authority proof. Host-qualified entry attestations require a separately negotiated causal private profile.",
+    "Current strict policy is unchanged. Host expected results require full retained SQL history; Rust expected results consume exact compact attestations and original atomic prefix effects.",
+    "read_index is a canonical decimal string0..255; optional observed_structure_revision is absent when absent, never null.",
+    "1k history measurement is separate actualSQL evidence; fixtures do not waive required task size."
+  ],
+  "cases": [
+    {
+      "id": "saved-a-stale-b-covered",
+      "document_revision": "1",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "eligible"
+      }
+    },
+    {
+      "id": "zero-effect-transitive-connector",
+      "document_revision": "2",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        },
+        {
+          "op_id": "x",
+          "revision": "2",
+          "dependencies": [
+            "a"
+          ],
+          "effects_complete": true,
+          "effects": [],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "x"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "3"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "eligible"
+      }
+    },
+    {
+      "id": "uncovered-intermediate-c",
+      "document_revision": "3",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "3",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        },
+        {
+          "op_id": "c",
+          "revision": "2",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "c",
+              "target_id": "p",
+              "before": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "2",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        },
+        {
+          "op_id": "a2",
+          "revision": "3",
+          "dependencies": [
+            "a"
+          ],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a2",
+              "target_id": "p",
+              "before": {
+                "revision": "2",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "3",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a2"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "4"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "3",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": false
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "precondition_failed",
+        "op_id": "b"
+      }
+    },
+    {
+      "id": "all-intervening-ops-covered",
+      "document_revision": "3",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "3",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        },
+        {
+          "op_id": "c",
+          "revision": "2",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "c",
+              "target_id": "p",
+              "before": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "2",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        },
+        {
+          "op_id": "a2",
+          "revision": "3",
+          "dependencies": [
+            "a"
+          ],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a2",
+              "target_id": "p",
+              "before": {
+                "revision": "2",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "3",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a2",
+            "c"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "4"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "3",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "eligible"
+      }
+    },
+    {
+      "id": "same-atomic-prefix-covered",
+      "document_revision": "0",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "0",
+          "dependencies": [],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        },
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "1"
+        },
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "a",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "0",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        },
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "0",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "host": "qualified",
+        "rust": "eligible"
+      }
+    },
+    {
+      "id": "same-atomic-prefix-uncovered",
+      "document_revision": "0",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "0",
+          "dependencies": [],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        },
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "1"
+        },
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "a",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "0",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        },
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "0",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "p",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "host": "qualified",
+        "rust": "precondition_failed",
+        "op_id": "b"
+      }
+    },
+    {
+      "id": "independent-target-prefix",
+      "document_revision": "0",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        },
+        {
+          "target_id": "q",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        },
+        {
+          "target_id": "q",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [],
+      "operations": [
+        {
+          "op_id": "a",
+          "base_revision": "0",
+          "dependencies": [],
+          "read_preconditions": [
+            {
+              "target_id": "q",
+              "revision": "0"
+            }
+          ]
+        },
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "a",
+          "revision": "1"
+        },
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "a",
+          "read_index": "0",
+          "target_id": "q",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "0",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        },
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "0",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [
+        {
+          "op_id": "a",
+          "effects": [
+            {
+              "target_id": "q",
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "host": "qualified",
+        "rust": "eligible"
+      }
+    },
+    {
+      "id": "structure-chain-covered",
+      "document_revision": "1",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "1",
+                "deleted": false
+              },
+              "content_changed": false,
+              "structure_changed": true,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0",
+              "structure_revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "1",
+            "deleted": false
+          },
+          "covered": true,
+          "observed_structure_revision": "0"
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "eligible"
+      }
+    },
+    {
+      "id": "wrong-original-structure",
+      "document_revision": "1",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "1",
+                "deleted": false
+              },
+              "content_changed": false,
+              "structure_changed": true,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0",
+              "structure_revision": "1"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "1",
+            "deleted": false
+          },
+          "covered": false,
+          "observed_structure_revision": "1"
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "precondition_failed",
+        "op_id": "b"
+      }
+    },
+    {
+      "id": "created-target-has-no-provisional-zero",
+      "document_revision": "1",
+      "initial_targets": [],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "1",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": null,
+              "after": {
+                "revision": "1",
+                "structure_revision": "1",
+                "deleted": false
+              },
+              "content_changed": false,
+              "structure_changed": true,
+              "created": true,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "1",
+            "deleted": false
+          },
+          "covered": false
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "precondition_failed",
+        "op_id": "b"
+      }
+    },
+    {
+      "id": "retained-deleted-target",
+      "document_revision": "1",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "1",
+          "deleted": true
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "1",
+                "deleted": true
+              },
+              "content_changed": false,
+              "structure_changed": true,
+              "created": false,
+              "deleted": true
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "1",
+            "deleted": true
+          },
+          "covered": false
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "target_deleted",
+        "op_id": "b"
+      }
+    },
+    {
+      "id": "missing-target-complete-inventory",
+      "document_revision": "0",
+      "initial_targets": [],
+      "targets": [],
+      "ledger": [],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "1"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": null,
+          "covered": false
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "invalid_request",
+        "op_id": "b"
+      }
+    },
+    {
+      "id": "historical-counter-gap",
+      "document_revision": "3",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "3",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "3",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "3",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "2"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "4"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "2",
+          "entry": {
+            "revision": "3",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": false
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "precondition_failed",
+        "op_id": "b"
+      }
+    },
+    {
+      "id": "missing-zero-effect-completeness-marker",
+      "document_revision": "2",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        },
+        {
+          "op_id": "x",
+          "revision": "2",
+          "dependencies": [
+            "a"
+          ],
+          "effects_complete": false,
+          "effects": [],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "x"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "3"
+        }
+      ],
+      "qualified_reads": [],
+      "steps": [],
+      "expected": {
+        "host": "nonterminal",
+        "rust": "not_called"
+      }
+    },
+    {
+      "id": "missing-transitive-dependency",
+      "document_revision": "2",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "x",
+          "revision": "2",
+          "dependencies": [
+            "missing"
+          ],
+          "effects_complete": true,
+          "effects": [],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "x"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "3"
+        }
+      ],
+      "qualified_reads": [],
+      "steps": [],
+      "expected": {
+        "host": "nonterminal",
+        "rust": "not_called"
+      }
+    },
+    {
+      "id": "broken-effect-before-chain",
+      "document_revision": "1",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "9",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [],
+      "steps": [],
+      "expected": {
+        "host": "nonterminal",
+        "rust": "not_called"
+      }
+    },
+    {
+      "id": "rejected-dependency-preserves-original-root",
+      "document_revision": "0",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "0",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [],
+          "status": "rejected",
+          "code": "invalid_request"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "1"
+        }
+      ],
+      "qualified_reads": [],
+      "steps": [],
+      "expected": {
+        "host": "dependency_rejected",
+        "rust": "not_called",
+        "op_id": "a"
+      }
+    },
+    {
+      "id": "full-u64-exact-order",
+      "document_revision": "18446744073709551614",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "18446744073709551614",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "18446744073709551614",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "18446744073709551614",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "18446744073709551615"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "18446744073709551614",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "eligible"
+      }
+    },
+    {
+      "id": "prospective-u64-overflow",
+      "document_revision": "18446744073709551615",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "18446744073709551615",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [],
+      "qualified_reads": [],
+      "steps": [],
+      "expected": {
+        "host": "nonterminal",
+        "rust": "not_called"
+      }
+    },
+    {
+      "id": "tampered-op-id",
+      "document_revision": "1",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "nonterminal"
+      },
+      "tamper": {
+        "qualification_index": "0",
+        "field": "op_id",
+        "value": "foreign"
+      }
+    },
+    {
+      "id": "tampered-read-index",
+      "document_revision": "1",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "nonterminal"
+      },
+      "tamper": {
+        "qualification_index": "0",
+        "field": "read_index",
+        "value": "1"
+      }
+    },
+    {
+      "id": "tampered-target-id",
+      "document_revision": "1",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "nonterminal"
+      },
+      "tamper": {
+        "qualification_index": "0",
+        "field": "target_id",
+        "value": "foreign"
+      }
+    },
+    {
+      "id": "tampered-observed-revision",
+      "document_revision": "1",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "nonterminal"
+      },
+      "tamper": {
+        "qualification_index": "0",
+        "field": "observed_revision",
+        "value": "1"
+      }
+    },
+    {
+      "id": "tampered-observed-structure-revision",
+      "document_revision": "1",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "nonterminal"
+      },
+      "tamper": {
+        "qualification_index": "0",
+        "field": "observed_structure_revision",
+        "value": null
+      }
+    },
+    {
+      "id": "tampered-entry",
+      "document_revision": "1",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "nonterminal"
+      },
+      "tamper": {
+        "qualification_index": "0",
+        "field": "entry",
+        "value": {
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      }
+    },
+    {
+      "id": "duplicate-qualification",
+      "document_revision": "1",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "nonterminal"
+      },
+      "tamper": {
+        "append_qualification_index": "0"
+      }
+    },
+    {
+      "id": "missing-qualification",
+      "document_revision": "1",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "2"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "nonterminal"
+      },
+      "tamper": {
+        "remove_qualification_index": "0"
+      }
+    },
+    {
+      "id": "tampered-false-current-observation",
+      "document_revision": "0",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [],
+      "operations": [
+        {
+          "op_id": "b",
+          "base_revision": "0",
+          "dependencies": [],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "b",
+          "revision": "1"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "b",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "0",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "nonterminal"
+      },
+      "tamper": {
+        "qualification_index": "0",
+        "field": "covered",
+        "value": false
+      }
+    },
+    {
+      "id": "all-bindings-before-any-terminal-read",
+      "document_revision": "1",
+      "initial_targets": [
+        {
+          "target_id": "p",
+          "revision": "0",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "targets": [
+        {
+          "target_id": "p",
+          "revision": "1",
+          "structure_revision": "0",
+          "deleted": false
+        }
+      ],
+      "ledger": [
+        {
+          "op_id": "a",
+          "revision": "1",
+          "dependencies": [],
+          "effects_complete": true,
+          "effects": [
+            {
+              "op_id": "a",
+              "target_id": "p",
+              "before": {
+                "revision": "0",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "after": {
+                "revision": "1",
+                "structure_revision": "0",
+                "deleted": false
+              },
+              "content_changed": true,
+              "structure_changed": false,
+              "created": false,
+              "deleted": false
+            }
+          ],
+          "status": "saved"
+        }
+      ],
+      "operations": [
+        {
+          "op_id": "first",
+          "base_revision": "0",
+          "dependencies": [],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        },
+        {
+          "op_id": "second",
+          "base_revision": "0",
+          "dependencies": [
+            "a"
+          ],
+          "read_preconditions": [
+            {
+              "target_id": "p",
+              "revision": "0"
+            }
+          ]
+        }
+      ],
+      "operation_revisions": [
+        {
+          "op_id": "first",
+          "revision": "2"
+        },
+        {
+          "op_id": "second",
+          "revision": "3"
+        }
+      ],
+      "qualified_reads": [
+        {
+          "op_id": "first",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": false
+        },
+        {
+          "op_id": "second",
+          "read_index": "0",
+          "target_id": "p",
+          "observed_revision": "0",
+          "entry": {
+            "revision": "1",
+            "structure_revision": "0",
+            "deleted": false
+          },
+          "covered": true
+        }
+      ],
+      "steps": [],
+      "expected": {
+        "host": "qualified",
+        "rust": "nonterminal"
+      },
+      "tamper": {
+        "qualification_index": "1",
+        "field": "observed_revision",
+        "value": "1"
+      }
+    }
+  ],
+  "scale_cases": [
+    {
+      "id": "required-1000-saved-chain",
+      "chain_operations": 1000,
+      "intervening_unrelated_effect": false,
+      "expected_host": "qualified"
+    },
+    {
+      "id": "required-1000-chain-uncovered-middle-effect",
+      "chain_operations": 1000,
+      "intervening_unrelated_effect": true,
+      "expected_host": "precondition_failed"
+    },
+    {
+      "id": "finite-budget-does-not-truncate-closure",
+      "chain_operations": 1000,
+      "intervening_unrelated_effect": false,
+      "history_budget": {
+        "operations": 999,
+        "dependency_edges": 65536,
+        "effects": 100000
+      },
+      "expected_host": "nonterminal"
+    }
+  ],
+  "rules": {
+    "new_private_profile_proposed": "mooring.prepare-causal.v1",
+    "strict_profile_unchanged": "mooring.prepare.v1",
+    "pure_types_only": true,
+    "default_history_budget": {
+      "operations": 10000,
+      "dependency_edges": 65536,
+      "effects": 100000
+    },
+    "qualification_requires_every_intervening_effect": true,
+    "missing_history": "nonterminal",
+    "provisional_target_reads": false
+  }
+}

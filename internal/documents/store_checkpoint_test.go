@@ -31,7 +31,7 @@ func TestCheckpointRestoreAndBoundedReplay(t *testing.T) {
 		t.Fatal(e)
 	}
 	stats, e := s.Stats(ctx, key, allow)
-	if e != nil || stats.Receipts != 42 || stats.Checkpoints != 1 || stats.ReplayUpdates != 8 || stats.ReplayBytes != int64(8*len("incremental")) {
+	if e != nil || stats.Receipts != 42 || stats.Checkpoints != 2 || stats.ReplayUpdates != 8 || stats.ReplayBytes != int64(8*len("incremental")) {
 		t.Fatal(stats, e)
 	}
 	pinned, e := s.Checkpoint(ctx, key, l, "pinned", []byte("pinned full state"), 0, allow)
@@ -61,7 +61,7 @@ func TestCheckpointRestoreAndBoundedReplay(t *testing.T) {
 	}
 }
 func TestQuotaAndAtomicRollback(t *testing.T) {
-	s, db, _ := fixture(t, Options{MaxCommits: 2, MaxDocuments: 2, MaxHistoryBytes: 50})
+	s, db, _ := fixture(t, Options{MaxCommits: 2, MaxDocuments: 2, MaxHistoryBytes: 80})
 	l := acquire(t, s)
 	if _, e := s.Commit(ctx, key, commit(l, "one", 0), allow); e != nil {
 		t.Fatal(e)
@@ -69,7 +69,7 @@ func TestQuotaAndAtomicRollback(t *testing.T) {
 	if _, e := s.Commit(ctx, key, commit(l, "two", 1), allow); !errors.Is(e, ErrQuota) {
 		t.Fatal(e)
 	}
-	s = New(db.DB, Options{MaxHistoryBytes: 50, MaxDocuments: 2})
+	s = New(db.DB, Options{MaxHistoryBytes: 80, MaxDocuments: 2})
 	if _, e := s.Checkpoint(ctx, key, l, "a", []byte("checkpoint"), 1, allow); e != nil {
 		t.Fatal(e)
 	}

@@ -18,11 +18,31 @@ func chatEntitySchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	page := obj(map[string]any{"contract_version": map[string]any{"type": "integer", "enum": []int{1}}, "reset": boolean(), "next_cursor": str(), "snapshot_id": str(), "snapshot_complete": boolean(), "has_more": boolean(), "refs": map[string]any{"type": "array", "items": ref("ChatEntityReference")}}, "contract_version", "reset", "next_cursor", "snapshot_id", "snapshot_complete", "has_more", "refs")
 	operation := obj(map[string]any{"id": str(), "status": str(), "kind": str(), "verb": str(), "entity": ref("ChatEntityIdentity"), "provenance": ref("ChatEntityProvenance"), "revision_at_action": ref("IssueEntityRevision")}, "id", "status", "kind", "verb", "entity", "provenance", "revision_at_action")
 	components := map[string]any{"ChatEntityIdentity": entity, "ChatEntityProvenance": provenance, "IssueEntityRevision": revision, "ChatEntityReference": item, "ChatEntityReferencePage": page, "ChatEntityOperation": operation}
+	taskView := obj(map[string]any{"work_id": str(), "run_id": str(), "scope": str(), "expires_at": map[string]any{"type": "string", "format": "date-time"}, "can_read": boolean(), "can_write": boolean(), "allow_partial": boolean()}, "work_id", "run_id", "scope", "expires_at", "can_read", "can_write", "allow_partial")
+	documentAccess := obj(map[string]any{
+		"page_id": str(), "title": str(), "document_type": map[string]any{"type": "string", "enum": []string{"document", "spreadsheet"}}, "application_id": str(),
+		"document_grant": map[string]any{"type": "string", "enum": []string{"read", "write"}}, "policy_allows": boolean(),
+		"task_status": map[string]any{"type": "string", "enum": []string{"unavailable", "no_active_task", "active"}},
+		"tasks":       map[string]any{"type": "array", "items": ref("ChatDocumentTaskView")}, "provenance": map[string]any{"type": "string", "enum": []string{"unknown"}},
+	}, "page_id", "title", "document_type", "application_id", "document_grant", "policy_allows", "task_status", "tasks", "provenance")
+	components["ChatDocumentTaskView"] = taskView
+	components["ChatDocumentAccess"] = documentAccess
+	edit := obj(map[string]any{
+		"page_id": str(), "title": str(), "application_id": map[string]any{"type": "string", "enum": []string{"wordcraft"}}, "provenance": map[string]any{"type": "string", "enum": []string{"agent_edited"}},
+		"chat_id": str(), "message_id": str(), "agent_slug": str(), "last_revision": map[string]any{"type": "string", "pattern": "^[1-9][0-9]*$"}, "edited_at": str(),
+	}, "page_id", "title", "application_id", "provenance", "chat_id", "message_id", "agent_slug", "last_revision", "edited_at")
+	components["NativeArtifactEdit"] = edit
+	artifacts := map[string]any{"type": "array", "maxItems": 64, "items": ref("NativeArtifactEdit")}
+	partial := map[string]any{"type": "boolean", "enum": []bool{true}, "description": "Bounded recent projection; never a complete history/count of inaccessible edits."}
+	components["ChatDocumentAccessList"] = obj(map[string]any{"documents": map[string]any{"type": "array", "items": ref("ChatDocumentAccess")}, "artifacts": artifacts, "artifacts_partial": partial}, "documents", "artifacts", "artifacts_partial")
+	components["NativeDocumentProvenance"] = obj(map[string]any{"artifacts": artifacts, "artifacts_partial": partial}, "artifacts", "artifacts_partial")
 	path := func(name string) map[string]any {
 		return map[string]any{"name": name, "in": "path", "required": true, "schema": str()}
 	}
 	noStore := map[string]any{"Cache-Control": map[string]any{"description": "Authorization-sensitive projection; never store in shared caches.", "schema": str()}}
 	routes := map[string]DomainSchema{}
+	routes["GET /api/v1/pages/{slug}/mooring/provenance"] = DomainSchema{Response: ref("NativeDocumentProvenance"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"401", "403", "404", "503"}, SuccessHeaders: noStore, Parameters: []map[string]any{path("slug")}}
+	routes["GET /api/v1/chats/{chatId}/document-access"] = DomainSchema{Response: ref("ChatDocumentAccessList"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"401", "403", "404", "503"}, SuccessHeaders: noStore, Parameters: []map[string]any{path("chatId")}}
 	for route, schema := range map[string]string{
 		"GET /api/v1/chats/{chatId}/entity-refs":                            "ChatEntityReferencePage",
 		"GET /api/v1/operations/{operationId}":                              "ChatEntityOperation",

@@ -1,9 +1,11 @@
 "use client"
 
 
+import { useSearchParams } from "next/navigation"
+import { ArtifactProject } from "@/components/features/pages/artifact-project"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useUrlSegment } from "@/lib/use-url-segment"
-import { useWorkspace } from "@/hooks/use-workspace"
+import { usePageWorkspace } from "@/hooks/use-page-workspace"
 import { PagesLayout } from "@/components/features/pages/pages-layout"
 import { useAccessContext } from "@/components/features/restricted/access-notice"
 import { RestrictedPages } from "@/components/features/pages/restricted-pages"
@@ -17,8 +19,9 @@ import { useAccessMode } from "@/hooks/use-access-mode"
 const PAGE_PATH_RE = /^\/pages\/([^/]+)\/?$/
 
 export function PageDetailClient() {
-  const { workspaceId, loading: wsLoading } = useWorkspace()
+  const { workspaceId, loading: wsLoading, linkUnavailable } = usePageWorkspace()
   const access = useAccessContext()
+  const search = useSearchParams()
   // The slug comes from the URL, never from useParams(). Under
   // `output: "export"` this route is exported once, as /pages/_/index.html,
   // and the Go binary serves that file for every real slug — so useParams()
@@ -30,6 +33,8 @@ export function PageDetailClient() {
   // A restricted session cannot open the Studio page view (its endpoints are
   // not on the allowlist); it gets the same declared-actions surface as /pages.
   const accessMode = useAccessMode()
+
+  if (linkUnavailable) return <p className="p-6" role="alert">Document unavailable.</p>
 
   if (wsLoading || !workspaceId || !slug || accessMode === "loading") {
     return (
@@ -44,5 +49,10 @@ export function PageDetailClient() {
   }
 
   if (accessMode === "restricted") return <RestrictedPages key={workspaceId} workspaceId={workspaceId} access={access} />
-  return <PagesLayout workspaceId={workspaceId} slug={slug} />
+  const value = Number(search.get("version"))
+  const initialVersion = Number.isSafeInteger(value) && value > 0 ? value : undefined
+  if (search.get("artifact") === "1") {
+    return <ArtifactProject key={`${workspaceId}:${slug}:${initialVersion ?? "latest"}`} workspaceId={workspaceId} slug={slug} initialVersion={initialVersion} />
+  }
+  return <PagesLayout workspaceId={workspaceId} slug={slug} {...(initialVersion === undefined ? {} : { initialArtifactVersion: initialVersion })} />
 }

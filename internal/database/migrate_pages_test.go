@@ -177,6 +177,8 @@ func TestMigratePages_TablesAndColumns(t *testing.T) {
 				// Private chat artifacts have a durable audience independent of
 				// their type, ordinary grants and transient run provenance.
 				{name: "private_audience", notNull: true},
+				{name: "created_by_test", notNull: true},
+				{name: "archived_at"},
 			},
 		},
 		{

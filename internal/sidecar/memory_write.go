@@ -1236,8 +1236,27 @@ func (s *Server) boundedHostRequest(r *http.Request, method, path string, body [
 	if !ok {
 		return nil, &memoryHostTransportError{err: errors.New("acting agent identity could not be resolved")}
 	}
+	return s.sendBoundedHostRequest(r, method, path, body, responseLimit, slug)
+}
 
-	ctx, cancel := context.WithTimeout(r.Context(), memoryHostIPCTimeout)
+// sendBoundedHostRequest preserves the existing bounded IPC transport. Its
+// callers separately establish the route's required acting identity.
+func (s *Server) sendBoundedHostRequest(r *http.Request, method, path string, body []byte, responseLimit int64, slug string) (*memoryHostResponse, error) {
+	if s.ipc == nil {
+		return nil, &memoryHostTransportError{err: errors.New("IPC not configured")}
+	}
+
+	budget := memoryHostIPCTimeout
+	if path == "/api/v1/internal/gridcraft" {
+		// The workbook lease is 30s; retain time for commit and its receipt.
+		budget = 35 * time.Second
+	}
+	if path == "/api/v1/internal/craft-native/task" {
+		// A pinned original-engine apply and final native validation each have
+		// a 30s bound. The host renews only this live authorized request's lease.
+		budget = 65 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), budget)
 	defer cancel()
 
 	var reader io.Reader
@@ -1256,7 +1275,9 @@ func (s *Server) boundedHostRequest(r *http.Request, method, path string, body [
 	if capability := bearerToken(r); capability != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+capability)
 	}
-	httpReq.Header.Set(actingAgentSlugHeader, slug)
+	if slug != "" {
+		httpReq.Header.Set(actingAgentSlugHeader, slug)
+	}
 
 	// The sent/not-sent evidence R5 turns on. GotConn fires once this call
 	// has a connection to write the request onto; before that there is
@@ -1271,7 +1292,13 @@ func (s *Server) boundedHostRequest(r *http.Request, method, path string, body [
 		GotConn: func(httptrace.GotConnInfo) { gotConn.Store(true) },
 	}))
 
-	resp, err := ipcClient.Do(httpReq)
+	client := ipcClient
+	if client.Timeout != 0 && client.Timeout < budget {
+		clone := *client
+		clone.Timeout = budget
+		client = &clone
+	}
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		// Deliberately conservative at the boundary. A connection that was
 		// obtained and then failed before a single byte was flushed (a stale

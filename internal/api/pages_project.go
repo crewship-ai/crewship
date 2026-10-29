@@ -36,7 +36,12 @@ func (h *PageHandler) projectPage(w http.ResponseWriter, r *http.Request) (*page
 		replyError(w, 401, "Unauthorized")
 		return nil, false
 	}
-	rec, err := h.loadPage(r.Context(), WorkspaceIDFromContext(r.Context()), r.PathValue("slug"))
+	readOnly := r.Method == http.MethodGet || r.Method == http.MethodHead
+	load := h.loadPage
+	if readOnly {
+		load = h.loadPageForRead
+	}
+	rec, err := load(r.Context(), WorkspaceIDFromContext(r.Context()), r.PathValue("slug"))
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, 404, "page not found")
 		return nil, false
@@ -45,14 +50,26 @@ func (h *PageHandler) projectPage(w http.ResponseWriter, r *http.Request) (*page
 		replyInternalError(w, h.logger, "load project page", err)
 		return nil, false
 	}
+	attached, e := h.artifactContentAttached(r.Context(), rec.ID)
+	if e != nil {
+		replyInternalError(w, h.logger, "check artifact content", e)
+		return nil, false
+	}
+	if attached {
+		replyError(w, 409, "use artifact project versions to edit this Page")
+		return nil, false
+	}
 	allowed := false
 	if actor := projectAgentFrom(r.Context()); actor != nil {
 		allowed = actor.WorkspaceID == WorkspaceIDFromContext(r.Context()) && actor.OwnerCrewID != "" && rec.OwnerCrewID == actor.OwnerCrewID
 	} else if u != nil {
-		allowed = h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), u.ID, RoleFromContext(r.Context()), rec)
+		allowed = (readOnly && rec.PrivateAudience) || h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), u.ID, RoleFromContext(r.Context()), rec)
 	}
 	if !allowed {
 		h.refusePageAction(w, r, rec, "reading or editing project sources requires page edit permission", "page not found")
+		return nil, false
+	}
+	if readOnly && !h.auditPrivateOwnerAccess(w, r, rec) {
 		return nil, false
 	}
 	if h.projectStore == nil {

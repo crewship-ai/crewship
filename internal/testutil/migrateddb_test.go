@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/database"
@@ -17,7 +18,8 @@ import (
 // runner just built. If it ever diverges, every package that swapped
 // database.Migrate for MigratedDB is silently testing a different schema.
 func TestMigratedDB_SchemaMatchesMigrateRunner(t *testing.T) {
-	fromHelper := objectNames(t, MigratedSQLDB(t))
+	helperDB := MigratedSQLDB(t)
+	fromHelper := objectNames(t, helperDB)
 
 	dir, err := os.MkdirTemp("", "migrate-reference-")
 	if err != nil {
@@ -33,6 +35,22 @@ func TestMigratedDB_SchemaMatchesMigrateRunner(t *testing.T) {
 		t.Fatalf("migrate reference db: %v", err)
 	}
 	fromRunner := objectNames(t, ref.DB)
+	if !reflect.DeepEqual(snapshotFixtureRows(t, helperDB), snapshotFixtureRows(t, ref.DB)) {
+		t.Fatal("helper differs from real full Migrate table rows, ledger or seeds; only documented migration clocks may differ")
+	}
+	for _, db := range []*sql.DB{helperDB, ref.DB} {
+		rows, err := db.Query("PRAGMA foreign_key_check")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rows.Next() {
+			t.Fatal("full migrated schema violates foreign keys")
+		}
+		if err = rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		_ = rows.Close()
+	}
 
 	if len(fromHelper) == 0 {
 		t.Fatal("helper DB has no schema objects")

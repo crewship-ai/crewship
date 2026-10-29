@@ -10,8 +10,87 @@ tag: Experimental
 
 Crewship implements role-based access control at two levels: **workspace roles** (human users) and **agent roles** (AI agents within crews).
 
+## Guest routine execution in v1
+
+Guests can use explicitly shared View, Results, Edit and Publish rights on
+routines and drafts. Publishing saves the reviewed version; it never launches
+execution. Guest-initiated runs of published routines are deferred from the v1
+contract. Routine runs in the supported v1 flow are initiated by team members
+or crew triggers, subject to their existing authorization and publication rules.
+
+Guest execution requires a separately qualified private runtime. A default
+installation refuses Guest run requests with HTTP 503 and code
+`restricted_runtime_unavailable`, without queuing or starting work. An
+administrator must explicitly configure the qualified runtime; a Run share
+alone does not install it. See the [private workflow contract](../specs/restricted-workflows.md).
+
+## Resource Access v1
+
+Resource Access v1 adds explicit resource sharing to the workspace roles below.
+**Guest** is the UI name for an account in restricted access mode, rather than
+another value in the workspace-role enum. Its restriction applies across the
+account; a grant does not change the account mode or grant a workspace role.
+
+The v1 release includes:
+
+- Per-object grants for agents, routines, and projects and their issues. An
+  unshared object remains unavailable through its supported Guest view. Routine
+  definition View, Results, Edit, Publish and Run are separate permissions.
+- Crew View/Use sharing for Guests and explicit Manage sharing for trusted
+  MEMBER/MANAGER recipients. Guest crew presets preview and confirm None,
+  View or Use; Manage remains a separate explicit share. View/Use covers current
+  and future agents, with each agent's authority and execution preflight still
+  required. Manage permits profile/configuration and ordinary membership, while
+  explicit role assignment/removal, deletion, budgets and workspace administration
+  keep their existing administrator guards.
+- Pages with their existing, separate ACL and issuer checks. This release does
+  not migrate Pages to the unified resource-grant model.
+- Routine Publish controls in the web UI, API and CLI. Publish requires Edit;
+  publishing also requires current View. Publishing a definition does not grant
+  execution. Existing triggers and member execution retain their own guards.
+- Atomic permission mutations and chained audit records, a sealed audit keyring
+  at rest, key rotation, tail verification and chain-break alerts. Verification
+  reports retain their distinction between verified continuation and older
+  unverified history; an alert or successful tail check is not proof that all
+  historical records have been verified.
+
+Resource sharing uses the same versioned policy across the web UI, API and CLI.
+Saved shares retain their issuers and become inactive when current issuer
+checks fail. Logout and revocation keep their existing account/session fences.
+For crew details, see [Guest sharing](#explicit-guest-crew-shares) and
+[trusted Manage](#explicit-trusted-crew-manage-shares); for audit operations,
+see [audit CLI](/cli/audit) and [encryption and rotation](/security/encryption).
+
+### Deferred to v1.1
+
+The following are **not delivered by Resource Access v1**:
+
+- Credential resource grants, including separate See, Use and Reveal rights.
+- Crews and workspaces as grant recipients; current resource grants target people.
+- A person Access card with complete inherited-source explanations and the
+  people × objects permissions grid. Existing explicit policy editors and the
+  Guest's own-access explanation do not provide that complete interface.
+- A universal leak guard across all GET routes and streams, and a universal
+  constant-query-count guard for resource lists.
+- Migration of Pages from their existing ACL to unified resource grants.
+- Guest execution of published routines and its provider-backed acceptance.
+  In a default installation, without a qualified restricted runtime, this
+  execution remains unavailable and Run is rejected with HTTP 503 before work
+  is created. Guests can still view shared definitions/results, edit shared
+  drafts and publish with the required rights. Members or existing triggers
+  start runs under the crew's normal execution policy.
+
+**Known risk accepted for this release:** there is no universal GET/stream leak
+or list-query-count guard. Existing leak regressions cover individual features
+where implemented, including the projects/issues response-body checks; they do
+not establish coverage of every read route or stream. Feature-specific SQL
+query-count tests likewise do not establish a universal performance guarantee.
+Enterprise phase 1 remains a separate scope; this release does not claim it.
+
 ## Workspace Roles (Human Users)
 
+The table describes the trusted workspace-role baseline; restricted Guest mode
+and explicit resource grants apply the additional boundaries described above.
 Users are assigned one of five roles within a workspace:
 
 | Role | Level | Permissions |
@@ -197,3 +276,58 @@ User authentication uses JWT tokens signed with `NEXTAUTH_SECRET`:
 - WebSocket connections use short-lived tokens (`ws_token_expiry`, default 5 minutes)
 - API requests use session-based JWT tokens
 - Token validation is handled by the middleware layer
+
+
+## Explicit Guest crew shares
+
+Workspace OWNER/ADMIN users can open **Share** in a crew's Settings profile,
+or select **Crew** in a person's resource Access editor. These controls use the
+same member-policy API as `crewship share crew` and `crewship unshare crew`.
+They change only explicit View/Use shares for Guest accounts and preserve all
+other resource operations. Saving a share never changes the person's account
+mode or grants a crew role.
+
+View shares crew identity and current agent identities/status. Use additionally
+shares Chat and Run for current and future agents in that crew, with each
+agent's authority and execution preflight still required. Newly added agents
+become discoverable. Neither choice grants Delegate, credential visibility,
+existing conversations, activity or crew administration. Execution can still use the
+crew's configured credentials after normal preflight. The sharing dialog states
+this dynamic audience before the administrator saves it.
+
+Saved grants keep their issuer. An inactive share requires an explicit
+**Reissue as me** choice; a revision conflict requires reloading and reviewing
+the current policy. A Guest can see the crew source and an explanation of inherited agent capabilities in
+**Settings → Your access**, without receiving access to another person's policy.
+
+## Explicit trusted crew Manage shares
+
+The crew **Share** dialog also displays trusted recipients. OWNER/ADMIN can
+select **Manage crew** for a trusted MEMBER or MANAGER. The person Access
+editor also offers Crew / Manage for these trusted recipients, using the same versioned
+member-policy API and `crewship share crew --operation manage` CLI. The control
+preserves trusted mode and shares for other resources. It does not grant a crew
+role, agent Delegate, credential visibility or additional reveal scope.
+
+Manage permits that crew's profile/configuration and ordinary membership,
+without assigning/removing explicit crew roles, deleting the crew, changing
+budgets/policy or administering the workspace. Saved inactive shares remain
+visible after a recipient becomes VIEWER, ADMIN or OWNER: they can be removed,
+but a new or reissued Manage share requires a trusted MEMBER/MANAGER. The API
+rechecks current recipient and issuer authority on every save. Conflicts require
+an explicit reload, and account mode is never changed by the Share dialog.
+
+A trusted recipient with a currently allowed Manage share sees **Add Member**
+and **Remove** for ordinary crew members in Crew Settings. Memberships with
+an explicit crew role can be removed or edited only by the existing
+administrator controls. The UI checks the signed-in actor's own effective
+access and hides grant-based controls while checking, after a failed refresh,
+or after an account, crew or workspace switch. The API remains authoritative
+and rechecks every mutation; an earlier successful display never authorizes a
+later request. Budgets, deletion and workspace administration keep their guards.
+The corresponding CLI commands remain `crewship crew member add` and
+`crewship crew member remove` under the same server policy.
+
+Losing management authority closes and discards an open Add Member draft.
+Losing the administrator floor also discards an open role editor, even if an
+ordinary Manage share remains. Restoring access never reopens those drafts.

@@ -38,7 +38,17 @@ Scripts that ran bare `crewship admin list-users` for host-side recovery need th
 </Warning>
 
 <Warning>
-Because the write happens straight against SQLite, an admin-CLI action does **not** produce a `journal_entries` row the way HTTP-fronted actions do — it never passes through the audit middleware. Treat these commands as out-of-band operator actions and record them in your own change log if you need an audit trail.
+`reset-password --local` appends `auth.password_reset` to the chained instance
+audit in the same transaction as the password, lockout reset and session
+revocation. Its actor is the local recovery process, not an authenticated user;
+passwords and hashes are omitted. A failed audit rolls the entire reset back.
+Use the same configured audit key as the installation; an invalid chain refuses
+the reset. The other direct local writes do not gain an audit entry from this
+change and remain out-of-band operator actions.
+
+The local process cannot notify the running server's stream registry. Stop the
+server as described below for recovery: persisted revocation alone does not yet
+close every already-open stream.
 </Warning>
 
 Five verbs ship today, all in `cmd/crewship/cmd_admin.go`. `reset-password` mints a fresh bcrypt hash for a user (interactive prompt by default; `--password` for scripted recovery; `--password-stdin` for the leak-free CI pattern that mirrors `docker login --password-stdin`) and revokes every active session in the same transaction so a leaked cookie can't outlive the recovery. `invalidate-sessions` is the same session-revoke without a password rotation — use when the password is believed safe but a session token is suspected leaked. `list-users --local` dumps every row of the `users` table to a tab-aligned table, flags currently-locked-out accounts with a footer count, accepts `--locked-only` to filter, and shows the per-account `failed_login_count`. `promote` rewrites a user's workspace role (`OWNER` / `ADMIN` / `MANAGER` / `MEMBER` / `VIEWER`), accepting `--workspace=<slug>` or defaulting to the user's single workspace when there's exactly one. `sessions list` is a forensic read-only dump of every `user_sessions` row for `--email=<email>` (`--active-only` to filter, `--limit` to cap) — the read side paired with `invalidate-sessions`. Each opens the DB with a 30s `busy_timeout`, so a write that races the running server serializes rather than failing instantly; still, stop the server first to avoid a half-applied change.

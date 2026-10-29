@@ -49,7 +49,20 @@ var restrictedAllowedPatterns = []string{
 	"GET /api/v1/chats/{chatId}/restricted-context",
 	"GET /api/v1/chats/{chatId}/restricted-files",
 	"GET /api/v1/chats/{chatId}/restricted-files/{fileId}/download",
+	"GET /api/v1/crews",
+	"GET /api/v1/crews/{crewId}",
+	"GET /api/v1/crews/{crewId}/access/me",
 	"GET /api/v1/pages/{slug}/application/actions/{pendingId}",
+	"GET /api/v1/pages/{slug}/document",
+	"GET /api/v1/pages/{slug}/document/checkpoints",
+	"GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}",
+	"GET /api/v1/pages/{slug}/export",
+	"GET /api/v1/pages/{slug}/project",
+	"GET /api/v1/pages/{slug}/project/history",
+	"GET /api/v1/pages/{slug}/project/history/{revision}",
+	"GET /api/v1/pages/{slug}/project/history/{revision}/source",
+	"GET /api/v1/pages/{slug}/project/source",
+	"GET /api/v1/pages/{slug}/versions",
 	"GET /api/v1/workspaces",
 	"GET /api/v1/workspaces/{workspaceId}/access/me",
 	"GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files",
@@ -90,6 +103,9 @@ var restrictedAllowedPatterns = []string{
 	"POST /api/v1/workspaces/{workspaceId}/restricted-issues",
 	"POST /api/v1/workspaces/{workspaceId}/restricted-issues/{issueId}/comments",
 	"POST /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones",
+	"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/publish",
+	"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/validate",
+	"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/unpublish",
 	"PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}",
 	"PUT /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones/{milestoneId}",
 	"PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft",
@@ -103,10 +119,24 @@ var restrictedAgentCheckedPatterns = []string{
 	"POST /api/v1/agents/{agentId}/chats",
 }
 
+var restrictedPrivateCustodyPatterns = []string{
+	"GET /api/v1/pages/{slug}/versions",
+	"GET /api/v1/pages/{slug}/export",
+	"GET /api/v1/pages/{slug}/document",
+	"GET /api/v1/pages/{slug}/document/checkpoints",
+	"GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}",
+	"GET /api/v1/pages/{slug}/project",
+	"GET /api/v1/pages/{slug}/project/source",
+	"GET /api/v1/pages/{slug}/project/history",
+	"GET /api/v1/pages/{slug}/project/history/{revision}",
+	"GET /api/v1/pages/{slug}/project/history/{revision}/source",
+}
+
 type restrictedRouteFixture struct {
-	router *Router
-	user   string
-	member string
+	workspace string
+	router    *Router
+	user      string
+	member    string
 }
 
 // newRestrictedRouteFixture seeds one restricted member (granted chat on
@@ -141,11 +171,12 @@ func newRestrictedRouteFixture(t *testing.T) restrictedRouteFixture {
 		t.Fatal(err)
 	}
 
+	execOrFatal(t, db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,private_audience) VALUES('rt-private',?,'rt-private','Private','rt-restricted','{}',1)`, workspace)
 	router, err := NewRouter(db, "restricted-route-table-test-secret-32b", newTestLogger())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return restrictedRouteFixture{router: router, user: "rt-restricted", member: "rt-member"}
+	return restrictedRouteFixture{workspace: workspace, router: router, user: "rt-restricted", member: "rt-member"}
 }
 
 // registeredPatterns rebuilds every pattern string exactly as it was handed
@@ -181,6 +212,8 @@ func (f restrictedRouteFixture) restrictedDecision(t *testing.T, user, pattern, 
 		ctx := withUser(req.Context(), &AuthUser{ID: user, SessionID: "synthetic-verified-session"})
 		req = req.WithContext(context.WithValue(ctx, ctxAuthKind, AuthKindSession))
 	}
+	req.SetPathValue("slug", "rt-private")
+	req.Header.Set("X-Workspace-ID", f.workspace)
 	req.SetPathValue("agentId", agentID)
 	rr := httptest.NewRecorder()
 	ok := f.router.authMw.restrictedRequest(rr, req, user)
@@ -262,6 +295,9 @@ func TestRestrictedAllowlistPatternsAreRegistered(t *testing.T) {
 	}
 	checked := map[string]bool{}
 	for _, p := range restrictedAgentCheckedPatterns {
+		checked[p] = true
+	}
+	for _, p := range restrictedPrivateCustodyPatterns {
 		checked[p] = true
 	}
 	checked["POST /api/v1/auth/cli-token"] = true

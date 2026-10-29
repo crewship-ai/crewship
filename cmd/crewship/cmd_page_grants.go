@@ -75,8 +75,9 @@ type pageGrantWriteBody struct {
 // ── grant ──────────────────────────────────────────────────────────────────
 
 var pageGrantCmd = &cobra.Command{
-	Use:   "grant <slug>",
-	Short: "Grant read, produce or write on a page to a user, a crew or an agent",
+	Use:     "grant <slug>",
+	Aliases: []string{"share"},
+	Short:   "Grant read, comment, produce or write on a page to a user, a crew or an agent",
 	Long: `Widen who reaches a page. Three verbs, deliberately separate:
 
   read     may see the page and its panels
@@ -116,6 +117,12 @@ with you. "crewship page grants <slug>" shows which rows are still live.`,
 			return cli.WithExitCode(errors.New(
 				`--level is required: "read" (see the page), "produce" (push into named panels) or "write" (edit the spec)`),
 				cli.ExitValidation)
+		}
+		if level != "read" && level != "comment" && level != "produce" && level != "write" {
+			return cli.WithExitCode(errors.New("unknown page grant level"), cli.ExitValidation)
+		}
+		if level == "comment" && subjectType == "agent" || cmd.CalledAs() == "share" && (subjectType == "agent" || level == "produce") {
+			return cli.WithExitCode(errors.New("page share/comment grants are for people; agent production uses page grant --level produce"), cli.ExitValidation)
 		}
 		panels, _ := cmd.Flags().GetStringSlice("panels")
 		panels = pageGrantCleanPanels(panels)
@@ -352,13 +359,13 @@ func init() {
 		c.Flags().String("user", "", "Subject: a workspace member, by email or id")
 		c.Flags().String("crew", "", "Subject: a crew, by slug or id")
 		c.Flags().String("agent", "", "Subject: an agent, by slug or id")
-		c.Flags().Bool("workspace", false, "Subject: everyone in the workspace (read or write only, never produce)")
+		c.Flags().Bool("workspace", false, "Subject: everyone in the workspace (read, comment or write only, never produce)")
 	}
-	pageGrantCmd.Flags().String("level", "", `What is granted: "read", "produce" or "write"`)
+	pageGrantCmd.Flags().String("level", "", `What is granted: "read", "comment", "produce" or "write"`)
 	pageGrantCmd.Flags().StringSlice("panels", nil,
 		"Panel ids a produce grant covers (comma-separated, or repeat the flag); omit to cover every panel")
 	pageRevokeCmd.Flags().String("level", "",
-		`Withdraw only this level ("read", "produce", "write"); omit to withdraw every level the subject holds`)
+		`Withdraw only this level ("read", "comment", "produce", "write"); omit to withdraw every level the subject holds`)
 
 	pageCmd.AddCommand(pageGrantCmd)
 	pageCmd.AddCommand(pageRevokeCmd)

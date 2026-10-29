@@ -25,7 +25,11 @@ The legacy routine save command continues to publish directly.
   crewship routine draft save draft.json -f json > saved.json
   crewship routine draft publish saved.json
 
-Publish accepts --approve-risk for an explicit review of capability changes.`,
+Publish of a legacy file accepts --approve-risk for explicit capability review.
+Shared drafts instead use the exact reference from routine shared-draft:
+  crewship routine draft validate <routine> --draft-id <id> --revision <n> --base-revision <n>
+  crewship routine draft publish <routine> --draft-id <id> --revision <n> --base-revision <n>
+Shared validate checks structure only and never authorizes execution.`,
 }
 
 func newRoutineDraftCommand(action string) *cobra.Command {
@@ -41,6 +45,9 @@ func newRoutineDraftCommand(action string) *cobra.Command {
 		cmd.Args = cobra.NoArgs
 	}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if action == "validate" || (action == "publish" && (cmd.Flags().Changed("draft-id") || cmd.Flags().Changed("revision") || cmd.Flags().Changed("base-revision"))) {
+			return runRoutinePublication(cmd, args, action)
+		}
 		if err := requireAuth(); err != nil {
 			return err
 		}
@@ -145,13 +152,24 @@ func newRoutineDraftCommand(action string) *cobra.Command {
 		}
 		return resolvedFormatter(cmd).AutoHuman(result, func() { b, _ := json.MarshalIndent(result, "", "  "); fmt.Fprintln(cmd.OutOrStdout(), string(b)) })
 	}
+	if action == "publish" || action == "validate" {
+		addRoutinePublicationFlags(cmd)
+	}
+	if action == "validate" {
+		cmd.Use = "validate <routine-id-or-slug>"
+		cmd.Short = "Check shared draft structure only; does not promise publication authority or run readiness"
+		for _, flag := range []string{"draft-id", "revision", "base-revision"} {
+			_ = cmd.MarkFlagRequired(flag)
+		}
+	}
 	if action == "publish" {
+		cmd.Use = "publish <draft.json-or-shared-routine>"
 		cmd.Flags().Bool("approve-risk", false, "Approve the capability changes in this exact publication")
 	}
 	return cmd
 }
 func init() {
-	for _, action := range []string{"list", "get", "save", "publish", "discard"} {
+	for _, action := range []string{"list", "get", "save", "validate", "publish", "discard"} {
 		routineDraftCmd.AddCommand(newRoutineDraftCommand(action))
 	}
 	pipelineCmd.AddCommand(routineDraftCmd)

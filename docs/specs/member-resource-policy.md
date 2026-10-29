@@ -44,9 +44,9 @@ The replacement body is the same shape as the GET response:
 ```
 
 `rights: []` explicitly revokes all resource grants in restricted mode. Omitted
-or null rights are rejected, as are unknown body fields. `trusted` requires an
-empty rights array and restores ordinary workspace access; it is not a narrower
-client setting. The actor always comes from authentication, not JSON.
+or null rights are rejected, as are unknown body fields. `trusted` restores ordinary workspace access and also accepts explicit crew
+`manage` shares for trusted MEMBER/MANAGER recipients. Other trusted resource
+rights are rejected. It is not a narrower client setting. The actor always comes from authentication, not JSON.
 
 Every accepted replacement advances the membership revision. Treat it as an
 opaque version: grant/role triggers can advance it by more than one. A stale revision
@@ -124,6 +124,16 @@ The upgrade preserves valid and inert grant metadata and fences work whose
 issuer was already unavailable. Effective access explains an unavailable issuer.
 
 ### Ordered resource presets
+
+Crew `crew-levels` v1 explicitly manages only View/Use: None clears those two
+crew-root operations, View saves `view`, and Use saves `view,use`. The preview
+explains the current/future agent audience and individual execution preflight.
+Delegate, credential visibility, existing conversations, activity and crew
+administration stay outside the bundle. Independent agent/resource grants and
+inactive issuer provenance survive; lowering a crew preset does not revoke an
+independent agent grant. Existing project/routine selections and their table stay unchanged; crew intent
+uses separate informational storage read into the same policy projection, so
+a prior crew-capable binary safely ignores the new metadata on rollback. Trusted crew Manage is outside this Guest preset.
 
 The immutable v1 catalog defines routine View (`view,results`), Run
 (`view,results,run`) and draft-only Edit (`view,results,run,edit`), plus project
@@ -492,16 +502,16 @@ save checks the exact draft ID/revision and publication base. A stale editor or
 changed published base receives 409 without automatic refresh or retry; an audit
 failure rolls back the edit. Saving does not change executable bytes or version
 history, create a trigger, run a test or approve risk. Server-owned draft metadata
-and origin remain intact. The trusted authoring workflow must review and test the
-exact revision before publishing. Direct Guest publication and full Routine Edit
-acceptance remain unfinished PRD work.
+and origin remain intact. The trusted authoring workflow retains its own review
+and test gates. Direct Guest publication uses a separate current Publish share
+and exact saved-revision review; structural validation is not a test receipt.
 
 The Guest definition view offers **Edit shared draft** only with current View,
 Edit and mutation scope. Transient errors/conflicts retain local work; hard
 access loss clears the editor. The CLI reads the same JSON snapshot with
 `crewship routine shared-draft ROUTINE` and saves it with
 `crewship routine shared-draft save ROUTINE --file draft.json` (or `--file -`).
-Read-only `can_edit` is removed before PUT; the CLI performs no hidden GET or
+Read-only `can_edit` and `can_publish` are removed before PUT; the CLI performs no hidden GET or
 conflict retry.
 
 
@@ -653,6 +663,45 @@ A storage failure or conservative stream-admission race rejects the upgrade with
 a generic error; it does not claim the session was revoked. Operational errors
 retain their class for server-side handling and logging.
 
+## Audit signing authority and recovery
+
+New workspace journal and instance audit rows identify a v2 signing key. The
+immutable boot keyring retains old verification keys; NULL-key historical rows
+keep the legacy MAC algorithm. Normal server boot creates a private random
+active key once in its data directory, independent of vault-key rotation.
+An explicit `CREWSHIP_AUDIT_KEYRING_PATH` or YAML `audit.keyring_path` is loaded
+without rewriting the supplied file. Keyring changes require a restart.
+
+The age-encrypted instance recovery kit carries the signing keyring, including
+retained keys that no credential envelope references. Normal instance recovery
+preserves old MACs; workspace/crew forks retain their explicit new-genesis
+contract and never export keys. Unverifiable source compaction checkpoints
+cannot become authenticated just because a fork remaps their IDs.
+
+An audited append verifies the chain in its writer transaction after insert
+triggers. A missing verification key or invalid current segment refuses commit;
+no new quarantine state or fork protocol is introduced.
+Verification reports historical integrity failures without changing the database.
+Missing signing keys, database contention and cancellation are not proof of tampering. `GET /api/v1/admin/audit/head`, exposed by `crewship audit head`,
+returns the stored tail sequence/hash for explicit inspection and does not
+claim integrity. `POST /api/v1/admin/audit/reseal`, exposed by `crewship audit reseal`,
+requires the live configured instance OWNER with `instance:admin`, or a live
+trusted workspace OWNER with `workspace:admin`. Suspension and the account-wide
+restricted ceiling still apply; instance ADMIN alone cannot reseal. The body
+selects exactly one scope, supplies the reviewed old tail sequence/hash and an
+8–512 byte reason, rejects unknown fields and is bounded to 4096 bytes.
+The transaction rechecks authority, compares the tail, appends a purpose-bound
+OWNER checkpoint naming the reviewed old tail and reason. A stale tail
+returns 409; a failed append, final readback or commit rolls back the operation.
+
+An explicit checkpoint never rewrites old history or upgrades its proof status.
+`continuation_verified` qualifies the new segment; `historical_unverified` and
+`historical_invalid` remain distinct from whole-history verification. Legacy
+unchained rows remain unverified; they never bridge a chained sequence gap.
+They do not prevent appending to an otherwise authenticated current segment. Workspace
+verification and the CLI preserve a non-success verdict for unverified history.
+This does not add MFA/step-up or anchor an audit tail outside the database.
+
 ## Capability and membership audit
 
 Adding an existing account to a workspace or provisioning a new or existing account
@@ -789,3 +838,212 @@ frames with 1×1, 16×8 and 64×16 concurrent clients and channels sharing a
 five-connection pool. It reports time per authorization, SQL statements per
 frame, and pool wait count and duration per frame. These are concurrent
 throughput measurements, not end-to-end socket latency or p99 claims.
+
+
+### Revocable backups and private Page custody
+
+Workspace and instance bundle downloads verify credential, suspension and current
+role before each chunk. Browser stream delivery additionally verifies its exact
+persisted session, so a separate local password recovery process can revoke an
+already open stream. Logout/revocation never waits for the whole file copy.
+
+Private Page versions, exports, document reads, project sources/history and chat
+context use the private custodian policy. An active custodian restricted in a
+different workspace retains custody; unrelated grants do not widen private
+audiences. Another current workspace OWNER must produce the existing audit
+before private output is released. Metadata snapshot fences remain in place.
+
+### Atomic password and destructive permission changes
+
+The existing password change and reset endpoints write `auth.password_changed`
+and `auth.password_reset` to the chained instance audit. Password storage,
+reset-proof consumption, session revocation and requested CLI-token revocation
+share the mutation transaction. Audit and revocation failures preserve the old
+password and the reset proof; there is no partial-success response. The current
+browser session is retained on password change, while reset revokes all browser
+sessions. Existing CLI commands use the same endpoints and request fields.
+A concurrent change of the verified password returns 409 instead of overwriting
+the newer password. Only revocation counts and the subject identifier enter the password audit,
+never hashes, passwords, reset proofs or session credentials. Session stores
+default to the handler database when omitted. Custom stores must support
+transaction-scoped revocation; unsupported custom stores fail
+before a password mutation commits. Disconnect notifications run after commit.
+
+Workspace deletion appends `workspace.deleted` to its workspace journal in the
+same transaction as its membership/crew cascade, recording the actor, the number
+of removed workspace members and the affected crew IDs. The current active trusted
+OWNER is checked again after acquiring the writer transaction. Workspace member
+removal similarly rechecks its current active trusted administrator and the
+selected non-OWNER membership before transferring pages or deleting membership.
+
+Folder ACL set/reissue/removal appends the existing `page.folder_acl_changed`
+event through the configured transactional journal writer, together with the
+ACL row and version fence. The canonical event retains old/new ACL snapshots
+and the previous version; public feeds and automation projections remove those
+private fields. Failure rolls back both, and observers are notified
+only after commit. This does not claim completion of the remaining F1 mutation
+inventory or the audit-key rotation/recovery contract.
+
+
+Host-side `crewship admin reset-password --local` retains its local database
+recovery path and appends the same `auth.password_reset` instance event with no
+invented human actor and `source: local_recovery`. Password/session final state
+is checked after the audit, before the same commit. An unavailable or invalid
+audit chain refuses recovery and rolls back the password and lockout changes;
+this does not implement the separate F6 keyring/reseal contract. The separate
+CLI process does not send in-process stream notifications. Existing browser
+streams use the persisted-session checks described above; WS and terminal retain
+their credential liveness polling. This password audit adds no separate stream
+notification mechanism.
+
+Deleting a folder records its ACL removals and `page.folder_changed` deletion
+in the same writer transaction. Current human authority and owning-crew
+membership are reloaded after the writer fence. Final ACL sets/version fences,
+folder/workspace cascade state, membership absence, password hashes, the final
+active session set, selected token revocations and reset-proof consumption are
+checked after the last audit. Folder deletion also compares every audit row it
+created after the final append. Ignored or undone writes roll back without
+observer notifications.
+### Settings, session administration and membership provenance audit
+
+Workspace settings (including privileged credentials), crew settings and crew
+deletion commit their compliance row and configured chained journal entry in
+the same writer transaction. The writer checks current authority and final
+stored values before commit; audit or commit failure rolls back the mutation.
+Privilege and capability edits record explicit previous/current non-secret
+values, without copying runtime environments or complete configuration files.
+
+Administrative single-session revocation, bulk revocation and account unlock
+use the same boundary, with fresh actor/target authority. Instance-wide actions
+use the instance chain. Revocation notifications follow commit only; repeated
+single-session revocation preserves its original timestamp/reason and emits no
+new revocation signal. Canonical device and lockout metadata stays private in
+public projections and full-text List/Count queries.
+
+Member departure retains the previous role, access mode, stored resource rights
+and workspace-scoped crew memberships before deletion. Invitation create,
+reissue, revoke and acceptance retain stored mode/rights without proofs, hashes
+or addresses. Provisioned member events record only booleans for account
+creation and setup-link issuance, never the link or token. These canonical
+policy snapshots are removed from public feeds and payload search; summaries
+remain searchable, and unrelated audit payload search is unchanged.
+
+Blank first-run Setup records its inherited (NULL-role) crew membership in the
+same transaction as onboarding creation, using current crew-creation authority
+and the configured chain key. Audit failure leaves Setup retryable; observers
+run after commit. This boundary covers blank Setup, with proposal/template
+application governed by their existing separate contracts.
+## Routine Publish right
+
+`routine.publish` is an explicit restricted member share, valid only with Edit
+on the same routine; it implies neither View nor Run. Effective Publish also
+requires live View and active account/issuers. Policy, invitation, provisioning
+and preset preview/apply reject Publish without Edit with 422 before writes.
+The v1 preset catalog is unchanged.
+
+The immutable `routine-levels` v2 definition explicitly manages only Edit and
+Publish, with the ordered levels `none` (removes both), `edit` (keeps Edit,
+removes Publish) and `edit_publish` (**Edit + Publish**). It adds neither View,
+Results nor Run; existing grants and their issuers remain orthogonal and
+unchanged unless explicitly reissued. Preview shows these consequences, including
+a `PUBLISH_REVOKED` warning when Publish is removed, before the existing
+confirmation/apply flow. Revoking Publish therefore needs no raw policy replace.
+
+Saved preset choices are recorded per member, resource, preset and version.
+Applying v2 never rewrites a v1 record; each record stays `selected` only while
+its own managed operations match. A change to a record's managed operations
+deletes that record, so a v1 choice disappears when v2 removes Edit. A v1 level
+without Edit cannot be applied while Publish is held (422 `Publish requires
+Edit`); apply v2 `none` or `edit` first. Routine Share and the person's Access
+card reject saving Publish without Edit.
+
+Per-version records (migration `20261022114610`) are a downgrade boundary.
+Earlier builds update a choice per member and resource without a version
+filter, so they must not run against this schema; the version-skew guard
+refuses them. Downgrade restores the pre-upgrade snapshot instead.
+
+In Shared definitions, an editor saves the draft, selects **Check saved draft
+structure**, then—with a current Publish hint—**Publish reviewed draft**. The
+check is the `structure_only` validation, not a test run. Both POSTs carry the
+saved draft ID/revision/base revision. Editing or saving again clears the check;
+unsaved content cannot be checked or published. A 422 refusal (unsupported
+steps or profiles, existing triggers, saved `call_pipeline` callers) shows the
+server's reason and changes nothing. A conflict or uncertain publication
+requires explicit reload/review without hidden retry. Hard access loss clears
+cached draft content. Publication acknowledges its version without starting a
+run. Hints never replace the endpoint's live checks.
+
+Publication refuses a routine that other saved routines target through
+`call_pipeline` (at any nesting depth), mirroring the existing refusal to save a
+caller of an already published routine.
+
+Publication archives retain physical authority across backup/restore. Generic
+Run, nested calls and trigger writers refuse bounded publication authority;
+trusted archives retain their existing behavior. Shared publication captures an
+exact draft ID/revision/base revision and live explicit rights in one writer
+transaction with audit. Validation is structural only; publishing creates no
+run, chat or attempt. Bounded manual runs of a published routine are described
+in [restricted workflows](restricted-workflows.md#guest-published-routines).
+
+
+## Explicit crew inheritance
+
+The existing member-policy GET/PUT and `crewship share|unshare crew CREW_ID`
+accept explicit `view` or `use` rights for an existing Guest. Only a current
+trusted workspace OWNER/ADMIN can issue them. A crew in another workspace or
+an unsupported crew operation is refused; this does not change crew roles.
+
+Crew View inherits `discover` on its current, non-retired agents. Crew Use
+inherits `discover`, `chat` and `run`, and never `delegate`, credential Use or
+Reveal. Agent list/detail remain the existing metadata-only Guest projection;
+overlapping direct and crew grants produce one agent row. Crew retirement,
+agent moves/removal, grant revocation and issuer loss invalidate admitted work;
+restoring the same source cannot revive an old attempt. New agents inherit
+from the current crew share without persisting individual agent grants.
+
+Saved policy/provenance lists only explicit crew grants. Access explanations
+read all granted crew names in one query; snapshots for private context/files
+contain the distinct effective leaf grants. Crew Share and person Access
+editors can add and remove Guest crew shares, including explicit crew-levels
+v1 presets. Trusted additive crew management remains a subsequent slice.
+Credential grants and Pages migration are not added by this slice.
+
+```sh
+crewship share crew CREW_ID --with MEMBER_ID --operation use
+crewship share list crew CREW_ID
+crewship unshare crew CREW_ID --with MEMBER_ID --operation use
+```
+
+## Explicit trusted crew management
+
+Trusted OWNER/ADMIN operators can add `{kind:"crew",id:"CREW_ID",operation:"manage"}`
+to a trusted MEMBER/MANAGER's versioned policy. No shares are added on upgrade.
+VIEWER and OWNER/ADMIN targets do not receive additive management shares. Any
+Guest membership elsewhere keeps the account ceiling closed. Guest crew View/Use
+and agent derivation remain unchanged; Manage never derives agent Run or Delegate.
+
+This API/CLI slice permits PATCH/PUT crew profile/configuration and ordinary
+crew membership add/remove without explicit crew role overrides. Removing a
+role-bearing membership retains its administrator floor. It does not permit
+crew role assignment, crew deletion,
+private-network egress opt-in, budgets, policy administration, credential reveal
+or workspace administration. Existing token scopes and workspace runtime privilege
+ceilings still apply. Authority is checked on the writer and after audit hooks;
+settings/membership and the authorization audit commit or roll back together.
+The existing Access editor displays saved trusted shares and permits deliberate
+removal/reissue; creation and the crew's management affordances remain CLI/API work.
+
+Switching an account to Guest while it holds any trusted-only crew share returns
+422, including shares in another workspace or from an inactive issuer. First
+explicitly remove those shares, save the trusted policy, then change the mode. Retained
+inactive shares remain visible after a recipient role change, can be revoked
+individually without reissuing the others, and cannot be newly granted or
+reissued while the recipient is ineligible.
+The same policy cannot silently remove a trusted-only share while downshifting.
+
+The timestamp migration rebuilds only the canonical child grant table, preserving
+all existing grant IDs, scope, provenance, timestamps, indexes and dependent
+views/triggers. It fails transactionally on an unknown schema or incoming foreign
+key. A rollback binary predating trusted Manage does not support these shares;
+remove them explicitly before reverting that feature. Existing crew grants and
+informational preset metadata remain intact. No runtime image or provider changes.

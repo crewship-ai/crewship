@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
@@ -25,6 +26,7 @@ import (
 // agentConfigData holds the intermediate state during agent config resolution.
 type agentConfigData struct {
 	agentID       string
+	askForms      sql.NullString
 	agentSlug     string
 	agentName     string
 	agentStatus   string
@@ -402,6 +404,7 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 	resp := map[string]interface{}{
 		"agent_id":           agentID,
 		"agent_slug":         data.agentSlug,
+		"ask_forms":          data.askForms.String,
 		"agent_role":         roleStr,
 		"agent_status":       data.agentStatus,
 		"crew_id":            crewIDStr,
@@ -643,7 +646,7 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 	d := &agentConfigData{agentID: agentID}
 	query := `
 		SELECT a.slug, a.name, a.status, a.role_title, a.agent_role, a.cli_adapter, a.system_prompt_legacy,
-			a.tool_profile, a.timeout_seconds, a.memory_enabled,
+			a.tool_profile, a.timeout_seconds, a.memory_enabled, a.ask_forms,
 			c2.id, c2.slug, c2.name, a.workspace_id, a.llm_model, a.llm_provider,
 			c2.network_mode, c2.allowed_domains, COALESCE(c2.allow_private_endpoints, 0),
 			c2.container_memory_mb, c2.container_cpus, c2.container_ttl_hours,
@@ -668,7 +671,7 @@ func (h *InternalHandler) loadAgentData(r *http.Request, agentID string) (*agent
 		args = append(args, crew)
 	}
 	err := h.db.QueryRowContext(r.Context(), query, args...).Scan(&d.agentSlug, &d.agentName, &d.agentStatus, &d.roleTitle, &d.agentRole, &d.cliAdapter, &d.systemPrompt,
-		&d.toolProfile, &d.timeoutSecs, &d.memoryEnabled,
+		&d.toolProfile, &d.timeoutSecs, &d.memoryEnabled, &d.askForms,
 		&d.crewID, &d.crewSlug, &d.crewName, &d.wsID, &d.llmModel, &d.llmProvider,
 		&d.crewNetworkMode, &d.crewAllowedDomains, &d.crewAllowPrivateEndpoints,
 		&d.crewMemoryMB, &d.crewCPUs, &d.crewTTLHours,
@@ -1254,7 +1257,7 @@ func (h *InternalHandler) resolveSkillsBlock(r *http.Request, creds []mcpCredEnt
 // keeps the payload smaller).
 func (h *InternalHandler) resolveInstalledSkills(r *http.Request, agentID string) ([]installedSkillResponse, error) {
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT s.slug, COALESCE(s.vendor, ''), s.display_name, COALESCE(s.description, ''), s.content
+		SELECT s.slug, COALESCE(s.vendor, ''), s.display_name, COALESCE(s.description, ''), COALESCE(s.version, ''), s.content
 		FROM agent_skills as2
 		JOIN skills s ON s.id = as2.skill_id
 		WHERE as2.agent_id = ? AND as2.enabled = 1 AND s.content IS NOT NULL AND s.content != ''
@@ -1267,14 +1270,14 @@ func (h *InternalHandler) resolveInstalledSkills(r *http.Request, agentID string
 
 	var out []installedSkillResponse
 	for rows.Next() {
-		var slug, vendor, displayName, description, content string
-		if err := rows.Scan(&slug, &vendor, &displayName, &description, &content); err != nil {
+		var slug, vendor, displayName, description, version, content string
+		if err := rows.Scan(&slug, &vendor, &displayName, &description, &version, &content); err != nil {
 			return nil, fmt.Errorf("scan agent skill: %w", err)
 		}
 		out = append(out, installedSkillResponse{
 			Slug:    slug,
 			Vendor:  vendor,
-			Content: reconstructSKILLMD(slug, vendor, displayName, description, content),
+			Content: reconstructSKILLMD(slug, vendor, displayName, description, content, version),
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -1286,10 +1289,10 @@ func (h *InternalHandler) resolveInstalledSkills(r *http.Request, agentID string
 // reconstructSKILLMD synthesises a SKILL.md file from DB columns. The
 // body already contains markdown; we prepend a minimal frontmatter so
 // CLIs that parse the file (Claude Code, Cursor, OpenCode) get the
-// metadata they expect. If the content already starts with a `---`
-// frontmatter delimiter we trust it as-is — bundled anthropic skills
-// arrive verbatim with their original frontmatter intact.
-func reconstructSKILLMD(slug, vendor, displayName, description, body string) string {
+// metadata they expect, including the stored release. Normal bundled/import
+// paths store the parsed Markdown body; legacy complete SKILL.md bodies
+// keep their existing frontmatter unchanged for compatibility.
+func reconstructSKILLMD(slug, vendor, displayName, description, body, version string) string {
 	trimmed := strings.TrimLeft(body, " \t\r\n")
 	if strings.HasPrefix(trimmed, "---") {
 		return body
@@ -1298,6 +1301,9 @@ func reconstructSKILLMD(slug, vendor, displayName, description, body string) str
 	var sb strings.Builder
 	sb.WriteString("---\n")
 	fmt.Fprintf(&sb, "name: %s\n", yamlQuote(slug))
+	if version != "" {
+		fmt.Fprintf(&sb, "version: %s\n", yamlQuote(version))
+	}
 	if displayName != "" && displayName != slug {
 		fmt.Fprintf(&sb, "display_name: %s\n", yamlQuote(displayName))
 	}
@@ -1322,21 +1328,9 @@ func reconstructSKILLMD(slug, vendor, displayName, description, body string) str
 // pitfalls (colons, hashes, leading dashes, "true"/"false"/"null"
 // alias values) for an automated writer.
 func yamlQuote(s string) string {
-	var sb strings.Builder
-	sb.Grow(len(s) + 2)
-	sb.WriteByte('"')
-	for _, r := range s {
-		switch r {
-		case '"':
-			sb.WriteString(`\"`)
-		case '\\':
-			sb.WriteString(`\\`)
-		default:
-			sb.WriteRune(r)
-		}
-	}
-	sb.WriteByte('"')
-	return sb.String()
+	// ASCII escapes preserve YAML-sensitive Unicode controls and line breaks
+	// without allowing the YAML parser to fold them or reject literal controls.
+	return strconv.QuoteToASCII(s)
 }
 
 // -----------------------------------------------------------------------------

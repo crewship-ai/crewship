@@ -23,10 +23,11 @@ chat_origin_id TEXT,
     parent_version  INTEGER,
     change_summary  TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now','subsec')),
+    authority_fingerprint TEXT NOT NULL DEFAULT 'legacy-trusted:v1',
+    publication_authority_json TEXT,
     UNIQUE (pipeline_id, version),
-    UNIQUE (pipeline_id, definition_hash)
+    UNIQUE (pipeline_id, definition_hash,authority_fingerprint)
 );
-ALTER TABLE pipelines ADD COLUMN head_version INTEGER NOT NULL DEFAULT 1;
 `
 
 func openVersioningTestDB(t *testing.T) *sql.DB {

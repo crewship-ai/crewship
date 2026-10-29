@@ -127,7 +127,8 @@ func TestV167_RepairRefusesAnAttackerChosenMissionID(t *testing.T) {
 			const wsID, missionID = "ws_repair_bypass", "mission_authentic"
 			execV167(t, db, `INSERT INTO workspaces (id, name, slug) VALUES (?,?,?)`, wsID, "rb", "rb")
 
-			w := journal.NewWriter(db, quiet, journal.WriterOptions{FlushInterval: time.Hour})
+			// The frozen v167 repair authenticates historical v1 MACs.
+			w := journal.NewWriter(db, quiet, journal.WriterOptions{FlushInterval: time.Hour, ChainKey: journal.ChainKeyFromEnv()})
 			entryID, err := w.Emit(ctx, journal.Entry{
 				WorkspaceID: wsID, MissionID: missionID,
 				Type: journal.EntryMissionStatus, Severity: journal.SeverityInfo,

@@ -30,6 +30,29 @@ func crewWorkspaceGETSchemaCatalogV1() (map[string]map[string]DomainSchema, map[
 	}
 	addList := func(path, name string, item map[string]any) { add(path, name, array(item)) }
 
+	// Explicit Guest crew projections never inherit the full configuration DTO.
+	sharedAgent := object(map[string]any{"id": str(), "name": str(), "slug": str(), "agent_role": str(), "status": str()})
+	sharedAgent["required"] = []string{"id", "name", "slug", "agent_role", "status"}
+	sharedAgent["additionalProperties"] = false
+	schemas["SharedCrewAgent"] = sharedAgent
+	shared := object(map[string]any{"id": str(), "name": str(), "slug": str(), "restricted": map[string]any{"type": "boolean", "enum": []bool{true}}, "agent_count": map[string]any{"type": "integer", "minimum": 0}, "agents": array(ref("SharedCrewAgent"))})
+	shared["required"] = []string{"id", "name", "slug", "restricted", "agent_count"}
+	shared["additionalProperties"] = false
+	schemas["SharedCrew"] = shared
+	add("/api/v1/crews/{crewId}", "CrewRead", map[string]any{"oneOf": []any{ref("Crew"), ref("SharedCrew")}})
+	addList("/api/v1/crews", "CrewList", ref("CrewRead"))
+	decision := object(map[string]any{"state": map[string]any{"type": "string", "enum": []string{"allowed", "conditional", "denied"}}, "reason": str()})
+	decision["required"] = []string{"state", "reason"}
+	decision["additionalProperties"] = false
+	schemas["CrewAccessDecision"] = decision
+	actions := object(map[string]any{"view": ref("CrewAccessDecision"), "use": ref("CrewAccessDecision"), "manage": ref("CrewAccessDecision")})
+	actions["required"] = []string{"view", "use", "manage"}
+	actions["additionalProperties"] = false
+	own := object(map[string]any{"crew_id": str(), "actions": actions})
+	own["required"] = []string{"crew_id", "actions"}
+	own["additionalProperties"] = false
+	add("/api/v1/crews/{crewId}/access/me", "CrewAccessMe", own)
+
 	member := object(map[string]any{"user_id": str(), "user_name": str(), "email": str(), "role": str(), "capabilities": array(str()), "created_at": str()})
 	pipeline := object(map[string]any{
 		"step_count":   integer(),

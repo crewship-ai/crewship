@@ -312,6 +312,10 @@ func TestChangePassword_RevokeCLITokens(t *testing.T) {
 					t.Fatalf("insert token: %v", err)
 				}
 			}
+			if _, err := h.db.Exec(`INSERT INTO users (id, email) VALUES ('password-other', 'password-other@example.test');
+				INSERT INTO cli_tokens (id, user_id, name, token_hash, tier) VALUES ('other-token', 'password-other', 'other', 'other-fingerprint', 'STANDARD')`); err != nil {
+				t.Fatalf("insert other user's token: %v", err)
+			}
 
 			body := map[string]any{"current_password": "oldpassword1", "new_password": "brandnew123"}
 			if tc.revoke != nil {
@@ -334,6 +338,9 @@ func TestChangePassword_RevokeCLITokens(t *testing.T) {
 			_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 			if resp.CLITokensRevoked != tc.wantRevoked {
 				t.Fatalf("cli_tokens_revoked = %d, want %d", resp.CLITokensRevoked, tc.wantRevoked)
+			}
+			if err := h.db.QueryRow(`SELECT COUNT(*) FROM cli_tokens WHERE user_id = 'password-other' AND revoked_at IS NULL`).Scan(&live); err != nil || live != 1 {
+				t.Fatalf("other user's live tokens = %d, err = %v; want 1", live, err)
 			}
 		})
 	}

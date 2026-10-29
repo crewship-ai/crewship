@@ -39,3 +39,13 @@ it.each([403,503])("withdraws confirmed availability when an authorized refresh 
   await waitFor(()=>expect(result.current.data).not.toBe(true))
   unmount();client.clear()
 })
+
+it.each([true,false,"true",undefined])("advertises whole-native creation only on boolean true: %s",async(native)=>{
+ fetchMock.mockResolvedValue({ok:true,json:async()=>({enabled:false,wordcraft_native:native})})
+ const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0}}})
+ const wrapper=({children}:{children:ReactNode})=>createElement(QueryClientProvider,{client},children)
+ const {result,unmount}=renderHook(()=>useDocumentsAvailability("workspace"),{wrapper})
+ await waitFor(()=>expect(result.current.isSuccess).toBe(true))
+ expect(result.current.wordcraftNative).toBe(native===true);expect(result.current.data).toBe(false)
+ unmount();client.clear()
+})

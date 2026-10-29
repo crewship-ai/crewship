@@ -189,6 +189,9 @@ func writeMCPClaude(
 	_ string,
 	logger *slog.Logger,
 ) error {
+	if req.mooringDocumentTools || req.nativeCraftTools {
+		return writeMooringDocumentMCP(ctx, container, containerID, req)
+	}
 	return setupMCPConfig(ctx, container, containerID, req.AgentSlug, req.RunID,
 		req.CrewMCPConfigJSON, req.AgentMCPConfigJSON, req.MCPServers, logger)
 }

@@ -249,7 +249,7 @@ func TestVerifyChain_RepairableIsNotReachableSuppression(t *testing.T) {
 	t.Setenv("ENCRYPTION_KEY", bypassTestKey)
 	db := openTestDB(t)
 	defer db.Close()
-	w := NewWriter(db, quietLogger(), WriterOptions{FlushInterval: time.Hour})
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushInterval: time.Hour, ChainKey: ChainKeyFromEnv()})
 	defer w.Close()
 	ctx := context.Background()
 

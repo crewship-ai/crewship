@@ -13,14 +13,16 @@ import (
 // re-serialise THIS struct, so a field missing here is a field the harness
 // never sees.
 type journalVerifyResponse struct {
-	WorkspaceID string              `json:"workspace_id" yaml:"workspace_id"`
-	OK          bool                `json:"ok" yaml:"ok"`
-	Count       int                 `json:"count" yaml:"count"`
-	Checkpoints int                 `json:"checkpoints" yaml:"checkpoints"`
-	BrokenSeq   int64               `json:"broken_seq" yaml:"broken_seq"`
-	BrokenID    string              `json:"broken_id" yaml:"broken_id"`
-	Reason      string              `json:"reason" yaml:"reason"`
-	Breaks      []journalChainBreak `json:"breaks,omitempty" yaml:"breaks,omitempty"`
+	ContinuationVerified bool                `json:"continuation_verified,omitempty" yaml:"continuation_verified,omitempty"`
+	HistoricalStatus     string              `json:"historical_status,omitempty" yaml:"historical_status,omitempty"`
+	WorkspaceID          string              `json:"workspace_id" yaml:"workspace_id"`
+	OK                   bool                `json:"ok" yaml:"ok"`
+	Count                int                 `json:"count" yaml:"count"`
+	Checkpoints          int                 `json:"checkpoints" yaml:"checkpoints"`
+	BrokenSeq            int64               `json:"broken_seq" yaml:"broken_seq"`
+	BrokenID             string              `json:"broken_id" yaml:"broken_id"`
+	Reason               string              `json:"reason" yaml:"reason"`
+	Breaks               []journalChainBreak `json:"breaks,omitempty" yaml:"breaks,omitempty"`
 	// omitempty so an OLDER server — which sends none of these — yields
 	// byte-identical JSON to before. Without it the CLI would assert
 	// "break_count: 0", i.e. "no further breaks", when the truth is
@@ -145,6 +147,9 @@ Examples:
 
 		f := newFormatter()
 		if err := f.AutoHuman(res, func() {
+			if res.ContinuationVerified && res.HistoricalStatus != "" {
+				fmt.Printf("Current audit segment verifies; historical status: %s. This does not authenticate a missing historical MAC.\n", res.HistoricalStatus)
+			}
 			if clean {
 				fmt.Printf("Journal chain OK — %d entries verified against the keyed HMAC chain, no tampering detected.\n", res.Count)
 				if res.Checkpoints > 0 {

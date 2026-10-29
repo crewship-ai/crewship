@@ -41,13 +41,13 @@ func (p *ExtractedPayload) extractEnvironmentEntry(tr *TarZstReader, hdr *tar.He
 		if hdr.Typeflag != tar.TypeReg {
 			return nil
 		}
-		if gen, key, ok := readStoreKeyEntry(name, tr); ok {
+		if gen, key, ok := readStoreKeyEntry(name, RestoreBufferedReader(tr.restoreContext(), tr)); ok {
 			if p.envKeys == nil {
 				p.envKeys = EnvironmentKeys{}
 			}
 			p.envKeys[gen] = key
 		}
-		return nil
+		return restoreOperationError(tr.restoreContext())
 	}
 	if rest, ok := strings.CutPrefix(name, environmentBlobsPrefix); ok {
 		if hdr.Typeflag != tar.TypeReg {
@@ -60,14 +60,14 @@ func (p *ExtractedPayload) extractEnvironmentEntry(tr *TarZstReader, hdr *tar.He
 		if p.envBlobs == nil {
 			p.envBlobs = &EnvironmentStore{Dir: filepath.Join(p.tempDir, "environment-store")}
 		}
-		if _, _, err := p.envBlobs.Put(tr, "sha256:"+h); err != nil {
+		if _, _, err := p.envBlobs.Put(&restoreReadGuard{ctx: tr.restoreContext(), r: tr, b: readBudget(tr.restoreContext()), generated: true}, "sha256:"+h); err != nil {
 			return fmt.Errorf("backup: inline environment blob %s: %w", h, err)
 		}
 		return nil
 	}
 	rest := strings.TrimPrefix(name, environmentsPrefix)
 	if slug, ok := strings.CutSuffix(rest, ".json"); ok && !strings.Contains(slug, "/") {
-		data, err := io.ReadAll(io.LimitReader(tr, maxEnvironmentRecordBytes))
+		data, err := io.ReadAll(io.LimitReader(RestoreBufferedReader(tr.restoreContext(), tr), maxEnvironmentRecordBytes))
 		if err != nil {
 			return err
 		}

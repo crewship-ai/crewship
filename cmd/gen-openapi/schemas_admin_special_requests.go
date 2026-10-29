@@ -40,7 +40,7 @@ func adminSpecialRequestSchemaCatalog() (map[string]DomainSchema, map[string]any
 
 	components := map[string]any{
 		"AdminBackupCreateRequest":   req(map[string]any{"scope": map[string]any{"type": "string", "enum": []string{"crew", "workspace"}}, "scope_level": map[string]any{"type": "string", "enum": []string{"quick", "standard", "full"}}, "crew_id": str(), "passphrase": str(), "recipient": str(), "no_encrypt": boolean(), "output_dir": str(), "recover_services": boolean()}, "scope"),
-		"AdminBackupRestoreRequest":  req(map[string]any{"path": str(), "passphrase": str(), "identity": str(), "as_workspace": str(), "as_crew": str(), "replace": boolean(), "dry_run": boolean(), "files_only": boolean(), "recover_services": boolean()}, "path"),
+		"AdminBackupRestoreRequest":  req(map[string]any{"path": str(), "passphrase": str(), "identity": str(), "as_workspace": str(), "as_crew": str(), "replace": boolean(), "discard_workbooks": boolean(), "dry_run": boolean(), "files_only": boolean(), "recover_services": boolean()}, "path"),
 		"AdminBackupRotateRequest":   object(map[string]any{"keep_last": integer(), "keep_days": integer(), "dry_run": boolean()}),
 		"AdminBackupSelfTestRequest": req(map[string]any{"crew_id": str()}, "crew_id"),
 		"AdminLogLevelRequest":       req(map[string]any{"level": str(), "ttl_seconds": integer()}, "level"),

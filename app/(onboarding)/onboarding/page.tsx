@@ -260,6 +260,11 @@ export default function OnboardingPage() {
   // different credential from the CLI token pairing mints. See the poll below.
   const [tokenDelivered, setTokenDelivered] = useState(false)
   const [pairCopied, setPairCopied] = useState(false)
+  useEffect(() => {
+    if (!pairCopied) return
+    const timeout = setTimeout(() => setPairCopied(false), 1500)
+    return () => clearTimeout(timeout)
+  }, [pairCopied])
   // Whether a container runtime is INSTALLED (advisory, step 1 copy).
   const [runtimeReady, setRuntimeReady] = useState<boolean | null>(null)
   // Whether THIS SERVER is actually driving one. The distinction decides
@@ -538,10 +543,7 @@ export default function OnboardingPage() {
 
   const copyPairCmd = useCallback(() => {
     if (!pairCommand) return
-    copyText(pairCommand, () => {
-      setPairCopied(true)
-      setTimeout(() => setPairCopied(false), 1500)
-    })
+    copyText(pairCommand, () => setPairCopied(true))
   }, [pairCommand])
 
   const selectedProvider = (CLI_ADAPTERS[adapter]?.provider || "ANTHROPIC").toUpperCase()

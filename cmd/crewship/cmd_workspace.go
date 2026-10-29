@@ -299,6 +299,10 @@ var workspaceUpdateCmd = &cobra.Command{
 			v, _ := flags.GetInt("approvals-retention-days")
 			body["approvals_retention_days"] = v
 		}
+		if flags.Changed("guest-routine-max-run-minutes") {
+			v, _ := flags.GetInt("guest-routine-max-run-minutes")
+			body["guest_routine_max_run_minutes"] = v
+		}
 		if flags.Changed("pages-theme") {
 			v, _ := flags.GetString("pages-theme")
 			theme, err := parsePagesThemeFlag(v)
@@ -915,6 +919,8 @@ func init() {
 		"Days of audit_logs history to keep; 0 means keep forever, which is the default — audit_logs is the compliance trail (#1887)")
 	workspaceUpdateCmd.Flags().Int("approvals-retention-days", 0,
 		"Days of decided approvals_queue history to keep; 0 means keep forever. Unset uses the 90-day default (#2233)")
+	workspaceUpdateCmd.Flags().Int("guest-routine-max-run-minutes", 30,
+		"Hard limit in minutes (1-240) for one Guest-published routine run; applies to runs accepted afterwards (OWNER/ADMIN)")
 	workspaceUpdateCmd.Flags().String("pages-theme", "",
 		"Shared Page colours as a JSON object of #RRGGBB values keyed accent, background, surface, text, muted, border; @file reads it from a file, {} resets to the SDK defaults")
 	workspaceUpdateCmd.Flags().String("appearance-default", "",

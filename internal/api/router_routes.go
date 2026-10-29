@@ -48,6 +48,8 @@ func (r *Router) registerRoutes() {
 	// Pages — the panel surface (docs/specs/pages.md §11). Workspace-unscoped
 	// routes plus the single panel write path.
 	r.registerPageRoutes()
+	r.registerCraftNativeRoutes()
+	r.registerMooringRoutes()
 	r.registerDocumentRoutes()
 
 	// Public pages — the /p/{token} surface (§7.3). Its own registrar because

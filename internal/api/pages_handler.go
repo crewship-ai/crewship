@@ -43,6 +43,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/documents"
@@ -60,6 +61,9 @@ import (
 // freshness verdict is arithmetic against it, and "a panel goes stale exactly
 // at its SLA" is only testable if the test owns the clock.
 type PageHandler struct {
+	designOnce sync.Once
+	design     *designHTTP
+
 	artifactMasterToken              string
 	documentStoreOptions             documents.Options
 	documentCall                     func(context.Context, string, string, string, string, any) ([]byte, int, error)
@@ -252,7 +256,22 @@ type pageSealedPanelWire struct {
 // Panels is []any because it is heterogeneous by design: a full panel or a
 // sealed placeholder, decided per panel and per viewer.
 type pageWire struct {
-	HasDocument bool `json:"has_document"`
+	CreatedByTest          bool   `json:"created_by_test"`
+	Archived               bool   `json:"archived"`
+	ArchivedAt             string `json:"archived_at,omitempty"`
+	ArtifactKind           string `json:"artifact_kind,omitempty"`
+	ArtifactSharedVersion  int    `json:"artifact_shared_version,omitempty"`
+	NativeCraftApplication string `json:"native_craft_application,omitempty"`
+	HasDocument            bool   `json:"has_document"`
+	HasArtifactProject     bool   `json:"has_artifact_project,omitempty"`
+	HasSlides              bool   `json:"has_slides"`
+	SlidesSchema           int    `json:"slides_schema"`
+	// HasWorkbook marks a Page holding a GridCraft workbook, viewed read-only.
+	HasWorkbook bool `json:"has_workbook,omitempty"`
+	HasMooring  bool `json:"has_mooring,omitempty"`
+	// HasCollaboration selects the protocol-backed document host, not the pilot.
+	HasCollaboration    bool   `json:"has_collaboration,omitempty"`
+	CollaborationFormat string `json:"collaboration_format,omitempty"`
 	// HasProject and HasApplication answer DIFFERENT questions, and the editor
 	// needs both. HasApplication is "an application is published and running";
 	// HasProject is "this Page has application source at all", published or
@@ -319,9 +338,25 @@ type pageWire struct {
 // whose data last arrived a week ago would read as "updated today" if the two
 // were conflated. They answer different questions.
 type pageListWire struct {
+	CreatedByTest          bool   `json:"created_by_test"`
+	Archived               bool   `json:"archived"`
+	ArchivedAt             string `json:"archived_at,omitempty"`
+	NativeCraftApplication string `json:"native_craft_application,omitempty"`
 	// Explicit audience classification; unfiled human ownership is not privacy.
 	PrivateAudience bool `json:"private_audience"`
 	HasDocument     bool `json:"has_document"`
+	HasSlides       bool `json:"has_slides"`
+	SlidesSchema    int  `json:"slides_schema"`
+	// ArtifactKind names a versioned artifact (project, word, sheet) for the
+	// Artifacts library; ArtifactSharedVersion is the version shared with
+	// readers. The latest version is left out on purpose: a reader sees only
+	// the shared pin, and the snapshot read decides who sees more.
+	ArtifactKind          string `json:"artifact_kind,omitempty"`
+	ArtifactSharedVersion int    `json:"artifact_shared_version,omitempty"`
+	HasWorkbook           bool   `json:"has_workbook,omitempty"`
+	HasMooring            bool   `json:"has_mooring,omitempty"`
+	HasCollaboration      bool   `json:"has_collaboration,omitempty"`
+	CollaborationFormat   string `json:"collaboration_format,omitempty"`
 	// See pageWire.HasProject: source that exists versus source that is live.
 	HasProject         bool   `json:"has_project"`
 	HasApplication     bool   `json:"has_application"`
@@ -383,13 +418,14 @@ func zeroPanelStates() map[string]int {
 // arrives. The server rebuilds a pages.Document from it and validates again —
 // the client's validation is a courtesy, this one is the gate (§10b.1).
 type pageWriteRequest struct {
-	AllowEmpty  bool             `json:"allow_empty"`
-	Slug        *string          `json:"slug"`
-	Name        *string          `json:"name"`
-	Description *string          `json:"description"`
-	Panels      []pagePanelWire  `json:"panels"`
-	Owner       *string          `json:"owner"`
-	Spec        *json.RawMessage `json:"spec"`
+	CreatedByTest *bool            `json:"created_by_test,omitempty"`
+	AllowEmpty    bool             `json:"allow_empty"`
+	Slug          *string          `json:"slug"`
+	Name          *string          `json:"name"`
+	Description   *string          `json:"description"`
+	Panels        []pagePanelWire  `json:"panels"`
+	Owner         *string          `json:"owner"`
+	Spec          *json.RawMessage `json:"spec"`
 	// Icon and Color are the page's avatar (#2563): a crew icon name and a
 	// crew palette key, the folder's vocabulary exactly (pages_folder_icons.go).
 	// Pointers for the same reason every other field is one — on a PATCH an
@@ -403,23 +439,40 @@ type pageWriteRequest struct {
 // ── Internal records ───────────────────────────────────────────────────────
 
 type pageRecord struct {
-	PrivateAudience    bool
-	HasDocument        bool
-	HasProject         bool
-	HasApplication     bool
-	PublicationVersion int64
-	ID                 string
-	Slug               string
-	Name               string
-	Description        string
-	OwnerUserID        string
-	OwnerCrewID        string
-	FolderID           string
-	PagesVersion       int64
-	Icon               string
-	Color              string
-	CreatedAt          string
-	UpdatedAt          string
+	CreatedByTest          bool
+	ArchivedAt             string
+	NativeCraftApplication string
+	PrivateAudience        bool
+	HasDocument            bool
+	HasSlides              bool
+	SlidesSchema           int
+	// ArtifactContentType and ArtifactSharedVersion come from the version head
+	// (artifact_version_heads); empty and 0 for a Page without one.
+	ArtifactDashboardDeclaration []byte
+	ArtifactSlidesDeclaration    []byte
+	ArtifactSelectedManifest     []byte
+	ArtifactSlidesEnabled        bool
+	ArtifactContentType          string
+	ArtifactSharedVersion        int
+	HasMooring                   bool
+	HasCollaboration             bool
+	CollaborationFormat          string
+	HasWorkbook                  bool
+	HasProject                   bool
+	HasApplication               bool
+	PublicationVersion           int64
+	ID                           string
+	Slug                         string
+	Name                         string
+	Description                  string
+	OwnerUserID                  string
+	OwnerCrewID                  string
+	FolderID                     string
+	PagesVersion                 int64
+	Icon                         string
+	Color                        string
+	CreatedAt                    string
+	UpdatedAt                    string
 }
 
 type panelRecord struct {
@@ -541,7 +594,8 @@ type pageIndexRow struct {
 }
 
 func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pageViewer, scope pageScope) (*pageIndex, error) {
-	args := append([]any{wsID}, scope.args...)
+	slidesEnabled := h.artifactSlidesEnabled(ctx)
+	args := append([]any{slidesEnabled, viewer.UserID, h.artifactDataEnabled(ctx), slidesEnabled, wsID}, scope.args...)
 	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, `
 		SELECT p.id, p.slug, p.name, COALESCE(p.description, ''),
 		       COALESCE(p.owner_user_id, ''), COALESCE(p.owner_crew_id, ''),
@@ -550,8 +604,16 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		       p.created_at, p.updated_at,
 		       EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
 		       COALESCE(l.published,0), COALESCE(l.version,0),
- EXISTS(SELECT 1 FROM documents WHERE page_id=p.id), p.private_audience
+ EXISTS(SELECT 1 FROM documents WHERE page_id=p.id), p.private_audience,
+ EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=p.id), COALESCE((SELECT format_profile FROM mooring_collab_documents WHERE page_id=p.id),''),
+ EXISTS(SELECT 1 FROM slides_heads WHERE page_id=p.id AND workspace_id=p.workspace_id), COALESCE((SELECT schema_version FROM slides_heads WHERE page_id=p.id AND workspace_id=p.workspace_id),0),
+ COALESCE(h.content_type,''), COALESCE(h.shared_version,0), COALESCE(ab.content,''),COALESCE(sb.content,''), CASE WHEN ?=1 AND length(CAST(av.manifest_json AS BLOB))<=131072 THEN CAST(av.manifest_json AS BLOB) ELSE '' END,
+ COALESCE((SELECT application_id FROM craft_native_documents WHERE page_id=p.id AND workspace_id=p.workspace_id),''), p.created_by_test, COALESCE(p.archived_at,'')
 		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
+		LEFT JOIN artifact_version_heads h ON h.workspace_id=p.workspace_id AND h.page_id=p.id
+ LEFT JOIN artifact_versions av ON av.workspace_id=h.workspace_id AND av.page_id=h.page_id AND av.version=CASE WHEN p.owner_user_id=? THEN h.latest_version ELSE h.shared_version END
+ LEFT JOIN artifact_version_blobs ab ON ab.workspace_id=av.workspace_id AND ab.page_id=av.page_id AND ab.hash=json_extract(av.manifest_json,'$.files."dashboard.json".hash') AND length(ab.content)<=16384 AND ?=1
+ LEFT JOIN artifact_version_blobs sb ON sb.workspace_id=av.workspace_id AND sb.page_id=av.page_id AND sb.hash=json_extract(av.manifest_json,'$.files."deck.json".hash') AND length(sb.content)<=16384 AND ?=1
 		WHERE p.workspace_id = ? AND `+scope.where+`
 		ORDER BY p.updated_at DESC, p.slug ASC`, args...)
 	if err != nil {
@@ -565,9 +627,10 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 		if err := rows.Scan(&p.ID, &p.Slug, &p.Name, &p.Description,
 			&p.OwnerUserID, &p.OwnerCrewID, &p.FolderID, &p.PagesVersion,
 			&p.Icon, &p.Color,
-			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience); err != nil {
+			&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration, &p.CollaborationFormat, &p.HasSlides, &p.SlidesSchema, &p.ArtifactContentType, &p.ArtifactSharedVersion, &p.ArtifactDashboardDeclaration, &p.ArtifactSlidesDeclaration, &p.ArtifactSelectedManifest, &p.NativeCraftApplication, &p.CreatedByTest, &p.ArchivedAt); err != nil {
 			return nil, err
 		}
+		p.ArtifactSlidesEnabled = slidesEnabled
 		records = append(records, p)
 	}
 	if err := rows.Err(); err != nil {
@@ -664,11 +727,30 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
 
 // pageListRow renders one index row for this viewer. It costs no statement:
 // everything it reads was loaded in bulk by loadPageIndex.
+// artifactListKind maps a version head's content type to the library's kind;
+// an unknown type is not listed as an artifact at all.
+func artifactListKind(contentType string) string {
+	switch contentType {
+	case "artifact_project":
+		return "project"
+	case "wordcraft":
+		return "word"
+	case "gridcraft":
+		return "sheet"
+	case "design":
+		return "design"
+	}
+	return ""
+}
+
 func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFolderRecord, viewer *pageViewer) pageListWire {
 	rec := &row.rec
 	out := pageListWire{
+		CreatedByTest: rec.CreatedByTest, Archived: rec.ArchivedAt != "", ArchivedAt: rec.ArchivedAt,
 		PrivateAudience: rec.PrivateAudience,
-		HasDocument:     rec.HasDocument, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		HasSlides:       rec.HasSlides, SlidesSchema: rec.SlidesSchema,
+		ArtifactKind: artifactSelectedMetadataKind(rec.ArtifactContentType, rec.ArtifactDashboardDeclaration, true, rec.ArtifactSelectedManifest, rec.ArtifactSlidesDeclaration, rec.ArtifactSlidesEnabled), ArtifactSharedVersion: rec.ArtifactSharedVersion,
+		NativeCraftApplication: rec.NativeCraftApplication, HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasCollaboration: rec.HasCollaboration, CollaborationFormat: rec.CollaborationFormat, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:                  rec.ID,
 		Slug:                rec.Slug,
 		Name:                rec.Name,
@@ -825,6 +907,11 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	createdByTest := req.CreatedByTest != nil && *req.CreatedByTest
+	if agent, _ := pageGrantCallerIsAgent(r); createdByTest && (agent || projectAgentFrom(r.Context()) != nil) {
+		replyError(w, http.StatusForbidden, "test origin requires explicit human creation")
+		return
+	}
 	if req.AllowEmpty {
 		agent, _ := pageGrantCallerIsAgent(r)
 		if agent {
@@ -934,10 +1021,10 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(r.Context(), `
-		INSERT INTO pages (id, workspace_id, slug, name, description, owner_user_id, owner_crew_id, spec_json, icon, color, created_at, updated_at)
-		VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?)`,
+		INSERT INTO pages (id, workspace_id, slug, name, description, owner_user_id, owner_crew_id, spec_json, icon, color, created_at, updated_at, created_by_test)
+		VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)`,
 		pageID, wsID, doc.Metadata.Slug, doc.Metadata.Name, doc.Metadata.Description,
-		ownerUserID, ownerCrewID, string(specJSON), icon, color, now, now); err != nil {
+		ownerUserID, ownerCrewID, string(specJSON), icon, color, now, now, createdByTest); err != nil {
 		if isUniqueViolation(err) {
 			replyError(w, http.StatusConflict, fmt.Sprintf("a page with slug %q already exists in this workspace", doc.Metadata.Slug))
 			return
@@ -1026,9 +1113,17 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.refusePageAction(w, r, rec, "only the page owner, a workspace admin, or a write grantee may edit this page", "")
 		return
 	}
+	if !workbookPageOwnerOnly(rec, user.ID) {
+		h.refusePageAction(w, r, rec, workbookPageRefusal, "")
+		return
+	}
 
 	req, ok := h.decodeWrite(w, r)
 	if !ok {
+		return
+	}
+	if req.CreatedByTest != nil {
+		replyError(w, http.StatusBadRequest, "created_by_test is create-only")
 		return
 	}
 	// The slug is the page's identity and its URL; renaming it through a PATCH
@@ -1062,8 +1157,23 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if req.Panels != nil {
+		attached, e := h.artifactContentAttached(r.Context(), rec.ID)
+		if e != nil {
+			replyInternalError(w, h.logger, "check artifact content", e)
+			return
+		}
+		if attached {
+			replyError(w, 409, "artifact project pages cannot contain panels")
+			return
+		}
+	}
 	if req.Panels != nil && rec.HasDocument {
 		replyError(w, 409, "document pages cannot contain panels")
+		return
+	}
+	if len(req.Panels) != 0 && (rec.HasWorkbook || rec.HasMooring || rec.HasCollaboration) {
+		replyError(w, 409, "workbook pages cannot contain panels")
 		return
 	}
 	if req.Panels != nil {
@@ -1303,9 +1413,40 @@ func (h *PageHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !h.hasPrivateOutputMetadata(r.Context(), rec) {
 		payload["slug"] = rec.Slug
 	}
-	if _, err := h.db.ExecContext(r.Context(), `DELETE FROM pages WHERE id = ?`, rec.ID); err != nil {
-		replyInternalError(w, h.logger, "delete page", err)
+	if rec.HasCollaboration {
+		h.refusePageAction(w, r, rec, "collaboration documents cannot be deleted yet", "")
 		return
+	}
+	if rec.HasWorkbook || rec.HasMooring {
+		refusal, err := h.deleteWorkbookPage(r, wsID, rec, user)
+		if err != nil {
+			replyInternalError(w, h.logger, "delete workbook page", err)
+			return
+		}
+		if refusal != "" {
+			h.refusePageAction(w, r, rec, refusal, "")
+			return
+		}
+	} else {
+		// Content attached after the Page was loaded is never deleted
+		// through the ordinary Page path. The writer checks both types.
+		deleted, err := h.db.ExecContext(r.Context(), `DELETE FROM pages WHERE id = ? AND NOT EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id = pages.id) AND NOT EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id = pages.id)`, rec.ID)
+		if err != nil {
+			replyInternalError(w, h.logger, "delete page", err)
+			return
+		}
+		if n, err := deleted.RowsAffected(); err == nil && n == 0 {
+			var collaboration bool
+			if h.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=?)`, rec.ID).Scan(&collaboration) != nil || collaboration {
+				h.refusePageAction(w, r, rec, "collaboration documents cannot be deleted yet", "")
+				return
+			}
+			var workbook bool
+			if h.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=?)`, rec.ID).Scan(&workbook) == nil && workbook {
+				h.refusePageAction(w, r, rec, workbookPageRefusal, "")
+				return
+			}
+		}
 	}
 	// Panels, data, versions and grants cascade from the page row; the wake
 	// gates' `automations` rows belong to another feature's table and do not.
@@ -1338,13 +1479,13 @@ func pageWorkspaceInvalidation(rec *pageRecord, hasPanels bool) map[string]any {
 }
 
 func pageHasPrivateOutputMetadata(rec *pageRecord, hasPanels bool) bool {
-	return rec.HasDocument || (!hasPanels && rec.OwnerUserID != "" && !rec.HasProject && !rec.HasApplication)
+	return rec.HasDocument || rec.HasWorkbook || rec.HasMooring || rec.HasCollaboration || (!hasPanels && rec.OwnerUserID != "" && !rec.HasProject && !rec.HasApplication)
 }
 
 // Use when panels are not already loaded, before deleting or moving the Page.
 // A failed classification must hide descriptive metadata, never disclose it.
 func (h *PageHandler) hasPrivateOutputMetadata(ctx context.Context, rec *pageRecord) bool {
-	if rec.HasDocument {
+	if rec.HasDocument || rec.HasWorkbook || rec.HasMooring || rec.HasCollaboration {
 		return true
 	}
 	if rec.OwnerUserID == "" || rec.HasProject || rec.HasApplication {
@@ -1390,11 +1531,14 @@ func (h *PageHandler) loadPageWithPrivateAudience(ctx context.Context, wsID, slu
  EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=pages.id),
  EXISTS(SELECT 1 FROM page_project_live WHERE page_id=pages.id AND published=1),
  COALESCE((SELECT version FROM page_project_live WHERE page_id=pages.id),0),
- EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id), private_audience
+ EXISTS(SELECT 1 FROM documents WHERE page_id=pages.id), private_audience,
+ EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=pages.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=pages.id), EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=pages.id), COALESCE((SELECT format_profile FROM mooring_collab_documents WHERE page_id=pages.id),''),
+ EXISTS(SELECT 1 FROM slides_heads WHERE page_id=pages.id AND workspace_id=pages.workspace_id), COALESCE((SELECT schema_version FROM slides_heads WHERE page_id=pages.id AND workspace_id=pages.workspace_id),0),
+ COALESCE((SELECT application_id FROM craft_native_documents WHERE page_id=pages.id AND workspace_id=pages.workspace_id),''), created_by_test, COALESCE(archived_at,'')
 		FROM pages WHERE workspace_id = ? AND `+column+` = ?`, wsID, slug).Scan(
 		&p.ID, &p.Slug, &p.Name, &p.Description, &p.OwnerUserID, &p.OwnerCrewID,
 		&p.FolderID, &p.PagesVersion, &p.Icon, &p.Color,
-		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience)
+		&p.CreatedAt, &p.UpdatedAt, &p.HasProject, &p.HasApplication, &p.PublicationVersion, &p.HasDocument, &p.PrivateAudience, &p.HasWorkbook, &p.HasMooring, &p.HasCollaboration, &p.CollaborationFormat, &p.HasSlides, &p.SlidesSchema, &p.NativeCraftApplication, &p.CreatedByTest, &p.ArchivedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1805,8 +1949,14 @@ func (h *PageHandler) pageDocument(ctx context.Context, rec *pageRecord, panels 
 // branch, because it was replaced by the placeholder above. A reader who
 // cannot edit still sees exactly what they saw before.
 func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, panels []*panelRecord, viewer *pageViewer, authored bool) pageWire {
+	attached, _ := h.artifactProjectAttached(ctx, rec.ID)
+	kind, shared := h.artifactPageMetadata(ctx, WorkspaceIDFromContext(ctx), rec.ID)
 	out := pageWire{
-		HasDocument: rec.HasDocument, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
+		CreatedByTest: rec.CreatedByTest, Archived: rec.ArchivedAt != "", ArchivedAt: rec.ArchivedAt,
+		ArtifactKind: kind, ArtifactSharedVersion: shared,
+		HasArtifactProject: attached,
+		HasSlides:          rec.HasSlides, SlidesSchema: rec.SlidesSchema,
+		NativeCraftApplication: rec.NativeCraftApplication, HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasCollaboration: rec.HasCollaboration, CollaborationFormat: rec.CollaborationFormat, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:          rec.ID,
 		Slug:        rec.Slug,
 		Name:        rec.Name,

@@ -43,6 +43,15 @@ import (
 // either add it to BackupTables (FK-safe order, plus BackupTableIntent) or
 // write its reason here. "It is not important" is not a reason; see #1437.
 var workspaceTablesNotBundled = map[string]string{
+	"artifact_project_message_intents": "original-message run authority requires fresh admission after restore",
+	"artifact_project_run_consents":    "live original-run Page permissions cannot travel in a bundle",
+	"mooring_authority_generations":    "target-local non-ABA author generations must survive logical replacement; portable bundles cannot reset them",
+	"mooring_delivery_gates":           "runtime delivery admission requires fresh identity after portable restore",
+	"mooring_delivery_barriers":        "runtime read-revocation barriers belong to source installation",
+	"mooring_session_owners":           "process-bound owner capability must not travel in a portable backup",
+	"gridcraft_intents":                "run-bound permission cannot travel in a portable backup",
+	"gridcraft_sessions":               "editor sessions are bound to a live credential and expire within hours",
+
 	"document_iteration_intents":        "targeted human-message authority requires fresh admission after recovery",
 	"document_creation_consents":        "one-use human creation permission is bound to the original installation and run",
 	"artifact_run_principals":           "live human-chat admissions require fresh authority after restore; portable bundles must not replay them",
@@ -56,6 +65,10 @@ var workspaceTablesNotBundled = map[string]string{
 	"access_attempts":                   "execution capabilities and generations must be issued anew on a restored instance",
 	"restricted_preflight_reservations": "live private issue source authority must not replay on a copied instance",
 	"attempt_project_inputs":            "attempt-specific native input capabilities must not replay after restore",
+
+	"mooring_edit_leases":           "editor capabilities belong to their installation; retain target-local generation tombstones",
+	"mooring_edit_lease_workspaces": "target-local issuance fences survive Page deletion; restore must not replace their workspace",
+
 	// --- Migration artefacts / archives (derived, never read by the app) ---
 	"agent_runs_archive":       "one-off snapshot taken by v61 drop_agent_runs; the live data was folded into journal_entries, which rides the bundle",
 	"journal_entries_archived": "compaction archive; BLOB/vector shape would corrupt under the TEXT-only round-trip path (see dbdump.go)",

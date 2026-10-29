@@ -42,6 +42,7 @@ package orchestrator
 import (
 	"context"
 	"io"
+	"log/slog"
 	"regexp"
 	"strings"
 	"sync"
@@ -165,12 +166,16 @@ func (o *Orchestrator) agentSecretsLock(containerID, agentSlug, runID string) *s
 // or failed exec is logged, never surfaced — the next run rewrites the files
 // regardless, and the tmpfs mount guarantees they die with the container.
 func (o *Orchestrator) cleanupAgentSecrets(containerID, agentSlug, runID string) {
+	o.cleanupAgentSecretsWithLogger(containerID, agentSlug, runID, o.logger)
+}
+
+func (o *Orchestrator) cleanupAgentSecretsWithLogger(containerID, agentSlug, runID string, logger *slog.Logger) {
 	if o.container == nil || containerID == "" {
 		return
 	}
 	script := buildSecretsCleanupScript(agentSlug, runID)
 	if script == "" {
-		o.logger.Warn("post-run secrets cleanup skipped: unsafe agent slug or run id",
+		logger.Warn("post-run secrets cleanup skipped: unsafe agent slug or run id",
 			"agent_slug", agentSlug, "run_id", runID)
 		return
 	}
@@ -183,7 +188,7 @@ func (o *Orchestrator) cleanupAgentSecrets(containerID, agentSlug, runID string)
 	lk.Lock()
 	defer lk.Unlock()
 	if n := o.secretsHoldCount(containerID, agentSlug, runID); n > 0 {
-		o.logger.Debug("post-run secrets cleanup skipped: run retained again",
+		logger.Debug("post-run secrets cleanup skipped: run retained again",
 			"agent_slug", agentSlug, "run_id", runID, "holds", n)
 		return
 	}
@@ -196,7 +201,7 @@ func (o *Orchestrator) cleanupAgentSecrets(containerID, agentSlug, runID string)
 	})
 	if err != nil {
 		// Usually "container not running" — nothing left to remove then.
-		o.logger.Debug("post-run secrets cleanup exec skipped", "agent_slug", agentSlug, "run_id", runID, "error", err)
+		logger.Debug("post-run secrets cleanup exec skipped", "agent_slug", agentSlug, "run_id", runID, "error", err)
 		return
 	}
 	if res != nil && res.Reader != nil {
@@ -214,16 +219,16 @@ func (o *Orchestrator) cleanupAgentSecrets(containerID, agentSlug, runID string)
 			// is making sure agent credential files do not outlive the run.
 			// Say plainly that this is unknown rather than silently
 			// upgrading it to "done".
-			o.logger.Warn("post-run secrets cleanup outcome unknown: inspect failed",
+			logger.Warn("post-run secrets cleanup outcome unknown: inspect failed",
 				"agent_slug", agentSlug, "run_id", runID, "error", ierr)
 			return
 		case !running && code != 0:
-			o.logger.Warn("post-run secrets cleanup exited non-zero",
+			logger.Warn("post-run secrets cleanup exited non-zero",
 				"agent_slug", agentSlug, "run_id", runID, "exit_code", code)
 			return
 		}
 	}
-	o.logger.Debug("post-run secrets cleanup done", "agent_slug", agentSlug, "run_id", runID)
+	logger.Debug("post-run secrets cleanup done", "agent_slug", agentSlug, "run_id", runID)
 }
 
 // runHomeCleanupTimeout bounds the one rm that removes a finished run's HOME.
@@ -258,12 +263,16 @@ func buildRunHomeCleanupScript(agentSlug, runID string) string {
 // cleanupAgentSecrets: the run's ctx is frequently already cancelled by the
 // time this fires, and a stopped container has nothing left to remove.
 func (o *Orchestrator) cleanupRunHome(containerID, agentSlug, runID, runToken string) {
+	o.cleanupRunHomeWithLogger(containerID, agentSlug, runID, runToken, o.logger)
+}
+
+func (o *Orchestrator) cleanupRunHomeWithLogger(containerID, agentSlug, runID, runToken string, logger *slog.Logger) {
 	if o.container == nil || containerID == "" {
 		return
 	}
 	script := buildRunHomeCleanupScript(agentSlug, runID)
 	if script == "" {
-		o.logger.Warn("post-run home cleanup skipped: unsafe agent slug or run id",
+		logger.Warn("post-run home cleanup skipped: unsafe agent slug or run id",
 			"agent_slug", agentSlug, "run_id", runID)
 		return
 	}
@@ -291,7 +300,7 @@ func (o *Orchestrator) cleanupRunHome(containerID, agentSlug, runID, runToken st
 		User:        "1001:1001",
 	})
 	if err != nil {
-		o.logger.Debug("post-run home cleanup exec skipped",
+		logger.Debug("post-run home cleanup exec skipped",
 			"agent_slug", agentSlug, "run_id", runID, "error", err)
 		return
 	}
@@ -299,5 +308,5 @@ func (o *Orchestrator) cleanupRunHome(containerID, agentSlug, runID, runToken st
 		_, _ = io.Copy(io.Discard, res.Reader)
 		_ = res.Reader.Close()
 	}
-	o.logger.Debug("post-run home cleanup done", "agent_slug", agentSlug, "run_id", runID)
+	logger.Debug("post-run home cleanup done", "agent_slug", agentSlug, "run_id", runID)
 }

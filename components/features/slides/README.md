@@ -50,7 +50,9 @@ flag is off, because the routes are not installed; 405, 501) is shown as "not av
 
 There is no PATCH, order or agent route yet, so editing is a local draft: the status
 line says so, there is no Save button, and leaving with edits asks the browser to
-confirm. `SlidesWorkspace` can drive the proposed save contract only when a caller
+confirm. The status words and the leave prompt come from the shared editor lifecycle
+(`lib/editor-lifecycle`, also used by Document): a draft is "not stored in this browser
+or on the server", and "Saved" appears only after a receipt echoing the sent `mutation_id`. `SlidesWorkspace` can drive the proposed save contract only when a caller
 passes `saveEnabled` (tests, with the in-memory fixture); no environment flag
 enables it, and `patch` on the HTTP client sends nothing. Browser flow:
 `e2e/slides-editor.spec.ts` (flag-on tests need a UI started with

@@ -1,0 +1,2469 @@
+{
+  "status": "shape-contract-only-not-session-admission",
+  "profile": "mooring.session-causal.v1",
+  "baseline_definition_hashes": {
+    "Counter": "sha256:37a23129e271e9925a041b5d4db1a28a8b550c14a56b7b4d10388b9f5a85c32a",
+    "Scope": "sha256:2cd4a91cda032ed2494461ca7c37ac4b69fa5d8dfaf7691a627b5a40b188287d",
+    "Versions": "sha256:4f735378c8e4b0fe6c3578cf1ee6e2b3b790e8a0cb74bc981b90aef882cb1936",
+    "ErrorCode": "sha256:4645aa78208e6190b69e75a27cd86f18961c98c0f55632e64edae1810ab23693",
+    "ReadPrecondition": "sha256:debfb8bddbf35c00ab35a8464bc501c6883071658282e5fd64d3054f33001ec1",
+    "Operation": "sha256:29c2716d68c67e4a56c69d651f6c01f7fa618565bf75a3eacd3de62e384fe51a",
+    "AtomicChange": "sha256:efc532bb2f216481e630996d81c19cf024f88eb5d959dcb01218f3f51e4035cd",
+    "Fence": "sha256:7e75f0451d7dd456924bdb0b0c432f9140a61abe156d8b4742bf299779776dc4",
+    "Rejection": "sha256:d25a3fc83ac8ed557be6e55e629e34a2fe145fcbf7d201be4924c25ff6fe7c19",
+    "OperationResult": "sha256:4081f439d1238d8622add73908a4b6b13ec236763e650bda1a1630f4200d32a6",
+    "ChangeResult": "sha256:d5db4cd2554944b7377813c0c8e120dbc43f0b3adff05cfb5e6670ce28ec9443",
+    "Welcome": "sha256:a22827d1c1ff75afc7ebefaff4c777fc309031779f97c0518ccafd830da687b7",
+    "CommitBatch": "sha256:718bfa6c92faae47a94f8bf9f0209f6822a1e066411e9bb0dbc705d2ff2c549b",
+    "CommitResult": "sha256:44a27eb60ab65c95e9b4789c264dac3adfcad71b04e3e41be4bbb41dde43ac83",
+    "StatusRequest": "sha256:8323969ed7a092a292c50091ff3026dfb227a51272f2c826d34be268ce07d6c2",
+    "StatusResult": "sha256:dbe8ceef0cb98c517ac8a3f51f84fd2d01691b5ec4976851b97ef9b7cb8b29f2",
+    "Asset": "sha256:8d8871b9b749bbe58067efa7c518793a1e4a318caf3b83ff856c41ba25f6b161",
+    "Checkpoint": "sha256:07b21b3cab0068992ba9de1ed24f55404a4ec098b3502a99e901f245f6d119c5",
+    "Capabilities": "sha256:420a41076b0b89d8c31f6227d049068adab9cfb408883af3c639588414c78a19",
+    "SessionTicketRequest": "sha256:48c69de989410c3a30628f37f492fbe1bc1eb53155d1f49bf61d551d54a88fc4",
+    "SessionTicket": "sha256:156b4cfad8993cea50796708888fe8510745ab810bc51da7374e6e6905585a06",
+    "OwnerAcquire": "sha256:e6687faa1955fe86ff9bb09227e179bdd6a04dac341f68defa33842a15d714cc",
+    "OwnerRenew": "sha256:8c94417dfdd640635a419da15adde4c057ab2effd2d480cd63360fc942551f2e",
+    "OwnerGrant": "sha256:1a2fdee23d44b3d77e7015bb9a022005bd5769348a316b3c999feb7c9ed8ddb5",
+    "DeliveryRenew": "sha256:fce07cfb51fbc1e35e64a5c76a0fba7b4f7d17a915ec2711a51faab24aad3d24",
+    "DeliveryGrant": "sha256:9f16bbbe3bc9580d8929af72b3ba5d8a3adb86ae7676c2f94a4705021684af05",
+    "SessionClosed": "sha256:0ea7b7b296dbb9058f563b864d7a6425b6de3be238971b62c29f0fbed914667b",
+    "DeliveryBlocked": "sha256:a109bd459be4d54ec7535bf3154e38944a3d7afdf79ac977f5bf0d3baafcad1f",
+    "RevocationConfirmed": "sha256:df8c3f109446e0079f4d7bd26ed4261b68abd79729082a31fd71e2010e6c57e5",
+    "ReadRequest": "sha256:3cfa83be8a6c430964a7d94ba9ad8b5bbe7c2122aa5c8e1867055eba1169cd1d",
+    "ReadResult": "sha256:ce8bf371068711024a4418afab3a38c9ea8cdcdf5eac8af6ee3d7bf319659ad5",
+    "CheckpointRequest": "sha256:d9158cb8b74718b43273db4fc82d383576a73c3afad1a93bbcdbd7b42ddf7d0d",
+    "CheckpointResult": "sha256:62a0e268e5db30a76502618f179fe8e976b6568531081b0954f34cf248b9cb0a",
+    "Presence": "sha256:d1e6b5f38d2cd017b0881296452707ad6cbc34166456e3a3cb7fb4e0a21968f1",
+    "TaskSummary": "sha256:617c6d148b027aca15b46edf182cd4aaf93ef8c0965d0e4e6cbe0e932b472c25",
+    "TaskStatus": "sha256:cdfd441636d121f6354cc3524897ac83c04f9b350cd27d6f7442bea9bc7d8abe",
+    "TaskResult": "sha256:57038231a9be414f3b4a67d14f708364de6aa125bb59a1e11c2338e61225ef63",
+    "TaskCancel": "sha256:cda5a67700b4f1138ea7355198fef72239e8c25535c5bd50ec48626d93ed4055",
+    "Proposal": "sha256:8ab9c306e67e8c9e320fa10322950b5b83c1f947d963711b004c3bbc3b8ad966",
+    "ProposalAccept": "sha256:6272d0a5031f34ccea0349693153ccdc6ec248d08b411b4035a7f8b06179dd9b",
+    "UndoRequest": "sha256:154f5800c06aed9eedbe1431ec8d3b1b737ac3fb2e32c6507a5372805906079d",
+    "ProtocolError": "sha256:db55a666feac207b98fbbe096e3a987c70bab08b5e404a4342cf2d3af0f6110f",
+    "PositiveCounter": "sha256:c4ba49fa6fc7b623b900f28190e15a9d3658829c2805fdf3be89165cfa597088",
+    "Digest": "sha256:c7c801a1b115a3b78c346d46220dbede9c547173d2e238839afd574479e98638",
+    "ReadItem": "sha256:e5928360af584ad1337fe1b33a0e58103b19000509a2d213b777b483a3f546b9",
+    "WireLimits": "sha256:0eb1251bbf4a7c5f1e9fe479137b707678656b2e4d2d0b8265e2cd919d752e4c",
+    "CommandDeclaration": "sha256:effe2c4b8be8c88ba8a4c86e317069deedcd66e54da5943e08e579069ca65479",
+    "FormatDeclaration": "sha256:e8e5a890b8b75ca387da6697378b5c24fdb68e46d6e0d18e7ec9f63b28fac37e",
+    "RevocationGuarantee": "sha256:b631b6400dc80d37c53e003264da8de7f86d0ee4e78d94c867739bc42ddcdc43",
+    "StorageDeclaration": "sha256:36b51088bc5b39f9421bb25a52a4ae9ca875629909b053ba34b013a4d2748682",
+    "ApplicationManifest": "sha256:363a448c7c6a6dfba8a769ba4d954caa47156bd70b60ebe1e2390983c3b2416b",
+    "ManifestRequest": "sha256:c53f12fa73bb320677e57f6e360469af8c599eca666e5f543a3d69b7c9ee7fe9",
+    "ManifestResult": "sha256:ba21452759a55fef15424a0e96bb2ee781b20374addd82f0db92df8087039341",
+    "LifecycleRequest": "sha256:b323ed1e7f978ffe2b464c69fb9a9bdf67fdabc8600924e10e1633726bb030cc",
+    "LifecycleResult": "sha256:2474221a94ea949cf6028df2c3c6fcfbf73802995ec2caf9edb0dd37cd177bf9",
+    "SessionJoin": "sha256:a72c2766eb1318446727f7b6ffc519424883eab09a4955d113f9f4d20ad852dc",
+    "SessionJoined": "sha256:13146fe81feedc451a50a4ab93a7296269c9c71158c2fa12ba1860c0cea85d4e",
+    "SessionLeave": "sha256:cbc0f1096962ab83a5da7c340b4701f5cab04581c756c229dc3b15965e4e772a",
+    "SubmitChanges": "sha256:d5c447f7358b12635683ae36e7233f3d95b8a0e1a085357b048052d91381a48f",
+    "ChangesReceived": "sha256:47822a127e642b7570df84a405615679650b52809e8fdf772f75030f97fcdc9f",
+    "TaskSubmit": "sha256:02d5d83b292602b33906f6265108558a5597959d74e4b85768f0b4747a1903b1",
+    "ProposalRequest": "sha256:324050cf21bb418fb85ecd0eaf1ca0be386e1b7efda6651cc830b0cc0ce2f23b",
+    "CollaborationUpdate": "sha256:fc868f5edf2d9ad0021fef3937d86cb5048707faa3b6cc200d85e24d71e20cb3",
+    "DocumentUpdate": "sha256:d5aa672e8c88a5341ca3e852c25892fb2cd84d608026125d4ac0d83aea6330c8",
+    "AssetRequest": "sha256:d1037b97423cd73c1ee6772b0a13e4af25cc4c7d37b6f6d1f6d7cd6fc0eadcd4",
+    "AssetResult": "sha256:77098e3e87204bac4f1b28b905249b6ec7bca2dfec840f9ca510fe657de6fafe",
+    "TicketValidationRequest": "sha256:d19c3f2f42547a551c0a505c6af8064fc49c511901108015327881f0846f064d",
+    "TicketValidationResult": "sha256:08ca4c5f704ff423f072158a59bfad2d7e118b1aba46d4d3adf059692f4086f8",
+    "RevocationNotice": "sha256:4cec77e53aef5e3c29c75f12e6b734ff3e53c5ba7b68a649eaa8ea0b83fe2312",
+    "TaskChangeState": "sha256:b4d7c91f50d4605b134c3cfd035ed104601d6e9c9cb7c95c88bc687cac62e8f8",
+    "Identifier": "sha256:c479a1197e2b8ccd5baf9f9dd6ba6b533ecfc3ca72d8eb2c4b3512dfbc9a9f59",
+    "OpaquePreparedCheckpoint": "sha256:9d46338f69604041e4d8170f30f093dec36bef24b15ebb818a0de74e9da1ae5c",
+    "TargetIdentity": "sha256:b23f7ffa12a737f4cfbb117b1f2674a74b14df042df52671258561eb359cf712",
+    "TargetVersion": "sha256:e77ce0ccf48db4202927b3ee156f60abfc9fb7c137c0238430623a0ba2eb091d",
+    "PreparedOperationRevision": "sha256:23133d3597f65cd009e9a8bc4baaa0a7c102bd4c8fd0f9ad3909031a0617b592",
+    "PrepareContext": "sha256:744f1b210eebd9fb1ff91f27bfadb974b028bb1e9a36ccc8aa332957e8a8541c",
+    "TargetEffect": "sha256:5f5dbd080b999c9e213125f3434913122b8554f11ab250c3db8f212d4adf36c8",
+    "PreparedOperationEffects": "sha256:2fc60d0bbc0dfecda4ba46b7d745ec507841897890ca089dd2038e619864f1f2",
+    "ValidateCheckpoint": "sha256:7ca5a982904ecb887c51ef06f4770a86ffdc6ec94335254d5b7e23d357eab15e",
+    "CheckpointValidated": "sha256:3c0eebd821bec5f4edf4c043e0f93e2c191d65ed2fae50c08c7e8521c011c4f3",
+    "PrepareAtomic": "sha256:35e1a71d3d7322ff9a4fca482d8557ef883c8ac4b3ac5af607baa847cb5e25fc",
+    "PreparedCandidate": "sha256:cc10ac0d4edaf2b980e8f69728f76c851bfcf2d48e5ee32af1f861c4950c8356",
+    "PreparedDirectFailure": "sha256:7d51e601cef07f6039972c6512f095e467a9885438cbb5ec68e5796144b57c5f",
+    "AtomicPrepared": "sha256:ea379dab3ceb82781c06bfa7732f6417f7171fc854d8e29f6adb9687df3753ad",
+    "CausalReadIndex": "sha256:eac8d6bbf631fcf4f5b321213ccfa323645dea487ada308922a05f813e7a0a5a",
+    "CausalEntryVersion": "sha256:24f1068401661c9a1f2f38d5be2ed9c04e680c6c8aa324e112ba49d0d5c2761c",
+    "QualifiedCausalRead": "sha256:ae14dd52a91bcde5a363274d612295c5714fa36d1e6c38a2e68b6c83a3d4727a",
+    "CausalPrepareContext": "sha256:e0469c1669781f8db081a48e28013ce7271d5cef06c1083ac7c9f77167b31863",
+    "ValidateCheckpointCausal": "sha256:86c4f4b2524dbdbc1fd3e8b80d85bdf6e6dd9eb52c065b71aa2f72c9f3368e3d",
+    "CheckpointValidatedCausal": "sha256:248edbf0f2e2da13d1ef349b103ca3941d2d6f3db8fddd80d073ec8311864dc8",
+    "PrepareAtomicCausal": "sha256:316d70995800a8bb76818338e78300ef87082ef6d98b51fd2106b8edff9bdd9d",
+    "AtomicPreparedCausal": "sha256:285769997bf7a0951f2eb064404be262973e259a4672fa879c398c2f21c13ba1"
+  },
+  "cases": [
+    {
+      "id": "valid-SessionOpen",
+      "sender": "host",
+      "valid": true,
+      "message": {
+        "type": "session_open",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "required_capabilities": [
+          "checkpoint_identity_v1"
+        ]
+      }
+    },
+    {
+      "id": "missing-control_profile-SessionOpen",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_open",
+        "request_id": "vvvvv",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "required_capabilities": [
+          "checkpoint_identity_v1"
+        ]
+      }
+    },
+    {
+      "id": "missing-session_id-SessionOpen",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_open",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "required_capabilities": [
+          "checkpoint_identity_v1"
+        ]
+      }
+    },
+    {
+      "id": "extra-SessionOpen",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_open",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "unexpected": true,
+        "required_capabilities": [
+          "checkpoint_identity_v1"
+        ]
+      }
+    },
+    {
+      "id": "valid-SessionRestore",
+      "sender": "host",
+      "valid": true,
+      "message": {
+        "type": "session_restore",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "0",
+          "format_version": "vvvvv",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "json",
+          "state": "vvvvv",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        },
+        "targets": []
+      }
+    },
+    {
+      "id": "missing-control_profile-SessionRestore",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_restore",
+        "request_id": "vvvvv",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "0",
+          "format_version": "vvvvv",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "json",
+          "state": "vvvvv",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        },
+        "targets": []
+      }
+    },
+    {
+      "id": "missing-session_id-SessionRestore",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_restore",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "0",
+          "format_version": "vvvvv",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "json",
+          "state": "vvvvv",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        },
+        "targets": []
+      }
+    },
+    {
+      "id": "extra-SessionRestore",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_restore",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "0",
+          "format_version": "vvvvv",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "json",
+          "state": "vvvvv",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        },
+        "targets": [],
+        "unexpected": true
+      }
+    },
+    {
+      "id": "valid-SessionOpened",
+      "sender": "runtime",
+      "valid": true,
+      "message": {
+        "type": "session_opened",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "capabilities": [
+          "checkpoint_identity_v1"
+        ]
+      }
+    },
+    {
+      "id": "missing-control_profile-SessionOpened",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_opened",
+        "request_id": "vvvvv",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "capabilities": [
+          "checkpoint_identity_v1"
+        ]
+      }
+    },
+    {
+      "id": "missing-session_id-SessionOpened",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_opened",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "capabilities": [
+          "checkpoint_identity_v1"
+        ]
+      }
+    },
+    {
+      "id": "extra-SessionOpened",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_opened",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "unexpected": true,
+        "capabilities": [
+          "checkpoint_identity_v1"
+        ]
+      }
+    },
+    {
+      "id": "valid-SessionSubmitBatch",
+      "sender": "runtime",
+      "valid": true,
+      "message": {
+        "type": "session_submit_batch",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "changes": [
+          {
+            "change_id": "vvvvv",
+            "operations": [
+              {
+                "op_id": "vvvvv",
+                "fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                "participant_ref": "vvvvv",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {}
+              }
+            ],
+            "membership_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "id": "missing-control_profile-SessionSubmitBatch",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_submit_batch",
+        "request_id": "vvvvv",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "changes": [
+          {
+            "change_id": "vvvvv",
+            "operations": [
+              {
+                "op_id": "vvvvv",
+                "fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                "participant_ref": "vvvvv",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {}
+              }
+            ],
+            "membership_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "id": "missing-session_id-SessionSubmitBatch",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_submit_batch",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "changes": [
+          {
+            "change_id": "vvvvv",
+            "operations": [
+              {
+                "op_id": "vvvvv",
+                "fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                "participant_ref": "vvvvv",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {}
+              }
+            ],
+            "membership_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "id": "extra-SessionSubmitBatch",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_submit_batch",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "changes": [
+          {
+            "change_id": "vvvvv",
+            "operations": [
+              {
+                "op_id": "vvvvv",
+                "fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                "participant_ref": "vvvvv",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {}
+              }
+            ],
+            "membership_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ],
+        "unexpected": true
+      }
+    },
+    {
+      "id": "valid-SessionCommitResult",
+      "sender": "host",
+      "valid": true,
+      "message": {
+        "type": "session_commit_result",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "receipt": {
+          "type": "commit_result",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "generation": "1",
+          "revision": "1",
+          "issuer": "crewship",
+          "durability": "node",
+          "changes": [
+            {
+              "change_id": "c1",
+              "status": "saved",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "saved",
+                  "revision": "1",
+                  "issuer": "crewship",
+                  "durability": "node"
+                }
+              ],
+              "first_revision": "1",
+              "last_revision": "1"
+            }
+          ]
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "0",
+          "format_version": "vvvvv",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "json",
+          "state": "vvvvv",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        },
+        "targets": []
+      }
+    },
+    {
+      "id": "missing-control_profile-SessionCommitResult",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_commit_result",
+        "request_id": "vvvvv",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "receipt": {
+          "type": "commit_result",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "generation": "1",
+          "revision": "1",
+          "issuer": "crewship",
+          "durability": "node",
+          "changes": [
+            {
+              "change_id": "c1",
+              "status": "saved",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "saved",
+                  "revision": "1",
+                  "issuer": "crewship",
+                  "durability": "node"
+                }
+              ],
+              "first_revision": "1",
+              "last_revision": "1"
+            }
+          ]
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "0",
+          "format_version": "vvvvv",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "json",
+          "state": "vvvvv",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        },
+        "targets": []
+      }
+    },
+    {
+      "id": "missing-session_id-SessionCommitResult",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_commit_result",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "receipt": {
+          "type": "commit_result",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "generation": "1",
+          "revision": "1",
+          "issuer": "crewship",
+          "durability": "node",
+          "changes": [
+            {
+              "change_id": "c1",
+              "status": "saved",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "saved",
+                  "revision": "1",
+                  "issuer": "crewship",
+                  "durability": "node"
+                }
+              ],
+              "first_revision": "1",
+              "last_revision": "1"
+            }
+          ]
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "0",
+          "format_version": "vvvvv",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "json",
+          "state": "vvvvv",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        },
+        "targets": []
+      }
+    },
+    {
+      "id": "extra-SessionCommitResult",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_commit_result",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "receipt": {
+          "type": "commit_result",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "generation": "1",
+          "revision": "1",
+          "issuer": "crewship",
+          "durability": "node",
+          "changes": [
+            {
+              "change_id": "c1",
+              "status": "saved",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "saved",
+                  "revision": "1",
+                  "issuer": "crewship",
+                  "durability": "node"
+                }
+              ],
+              "first_revision": "1",
+              "last_revision": "1"
+            }
+          ]
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "0",
+          "format_version": "vvvvv",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "json",
+          "state": "vvvvv",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        },
+        "targets": [],
+        "unexpected": true
+      }
+    },
+    {
+      "id": "valid-SessionParticipantOpen",
+      "sender": "host",
+      "valid": true,
+      "message": {
+        "type": "session_participant_open",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "join": {
+          "type": "session_join",
+          "request_id": "request-1",
+          "ticket": "synthetic-test-ticket",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "id": "missing-control_profile-SessionParticipantOpen",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_participant_open",
+        "request_id": "vvvvv",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "join": {
+          "type": "session_join",
+          "request_id": "request-1",
+          "ticket": "synthetic-test-ticket",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "id": "missing-session_id-SessionParticipantOpen",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_participant_open",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "join": {
+          "type": "session_join",
+          "request_id": "request-1",
+          "ticket": "synthetic-test-ticket",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "id": "extra-SessionParticipantOpen",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_participant_open",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "join": {
+          "type": "session_join",
+          "request_id": "request-1",
+          "ticket": "synthetic-test-ticket",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          }
+        },
+        "unexpected": true
+      }
+    },
+    {
+      "id": "valid-SessionParticipantInput",
+      "sender": "host",
+      "valid": true,
+      "message": {
+        "type": "session_participant_input",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "submit_changes",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "session_id": "session-1",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          },
+          "changes": [
+            {
+              "change_id": "c1",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "participant_ref": "host-ref",
+                  "base_revision": "0",
+                  "dependencies": [],
+                  "read_preconditions": [],
+                  "payload": {
+                    "kind": "text",
+                    "text": "Příliš žluťoučký kůň"
+                  },
+                  "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+                }
+              ],
+              "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "missing-control_profile-SessionParticipantInput",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_participant_input",
+        "request_id": "vvvvv",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "submit_changes",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "session_id": "session-1",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          },
+          "changes": [
+            {
+              "change_id": "c1",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "participant_ref": "host-ref",
+                  "base_revision": "0",
+                  "dependencies": [],
+                  "read_preconditions": [],
+                  "payload": {
+                    "kind": "text",
+                    "text": "Příliš žluťoučký kůň"
+                  },
+                  "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+                }
+              ],
+              "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "missing-session_id-SessionParticipantInput",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_participant_input",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "submit_changes",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "session_id": "session-1",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          },
+          "changes": [
+            {
+              "change_id": "c1",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "participant_ref": "host-ref",
+                  "base_revision": "0",
+                  "dependencies": [],
+                  "read_preconditions": [],
+                  "payload": {
+                    "kind": "text",
+                    "text": "Příliš žluťoučký kůň"
+                  },
+                  "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+                }
+              ],
+              "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "extra-SessionParticipantInput",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_participant_input",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "submit_changes",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "session_id": "session-1",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          },
+          "changes": [
+            {
+              "change_id": "c1",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "participant_ref": "host-ref",
+                  "base_revision": "0",
+                  "dependencies": [],
+                  "read_preconditions": [],
+                  "payload": {
+                    "kind": "text",
+                    "text": "Příliš žluťoučký kůň"
+                  },
+                  "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+                }
+              ],
+              "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+            }
+          ]
+        },
+        "unexpected": true
+      }
+    },
+    {
+      "id": "valid-SessionParticipantOutput",
+      "sender": "runtime",
+      "valid": true,
+      "message": {
+        "type": "session_participant_output",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "session_joined",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "session_id": "session-1",
+          "participant_ref": "host-ref",
+          "generation": "1",
+          "permission_version": "1",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          },
+          "gate_id": "gate-1"
+        }
+      }
+    },
+    {
+      "id": "missing-control_profile-SessionParticipantOutput",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_participant_output",
+        "request_id": "vvvvv",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "session_joined",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "session_id": "session-1",
+          "participant_ref": "host-ref",
+          "generation": "1",
+          "permission_version": "1",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          },
+          "gate_id": "gate-1"
+        }
+      }
+    },
+    {
+      "id": "missing-session_id-SessionParticipantOutput",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_participant_output",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "session_joined",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "session_id": "session-1",
+          "participant_ref": "host-ref",
+          "generation": "1",
+          "permission_version": "1",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          },
+          "gate_id": "gate-1"
+        }
+      }
+    },
+    {
+      "id": "extra-SessionParticipantOutput",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_participant_output",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "session_joined",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "session_id": "session-1",
+          "participant_ref": "host-ref",
+          "generation": "1",
+          "permission_version": "1",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          },
+          "gate_id": "gate-1"
+        },
+        "unexpected": true
+      }
+    },
+    {
+      "id": "valid-SessionRestored",
+      "sender": "runtime",
+      "valid": true,
+      "message": {
+        "type": "session_restored",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "id": "missing-control_profile-SessionRestored",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_restored",
+        "request_id": "vvvvv",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "id": "missing-session_id-SessionRestored",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_restored",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "id": "extra-SessionRestored",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_restored",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "unexpected": true
+      }
+    },
+    {
+      "id": "valid-SessionStatusRequest",
+      "sender": "runtime",
+      "valid": true,
+      "message": {
+        "type": "session_status_request",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "operation_status",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "op_id": "o1",
+          "expected_fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+        }
+      }
+    },
+    {
+      "id": "missing-control_profile-SessionStatusRequest",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_status_request",
+        "request_id": "vvvvv",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "operation_status",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "op_id": "o1",
+          "expected_fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+        }
+      }
+    },
+    {
+      "id": "missing-session_id-SessionStatusRequest",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_status_request",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "operation_status",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "op_id": "o1",
+          "expected_fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+        }
+      }
+    },
+    {
+      "id": "extra-SessionStatusRequest",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_status_request",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "operation_status",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "op_id": "o1",
+          "expected_fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+        },
+        "unexpected": true
+      }
+    },
+    {
+      "id": "valid-SessionStatusResult",
+      "sender": "host",
+      "valid": true,
+      "message": {
+        "type": "session_status_result",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "operation_status_result",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "result": {
+            "op_id": "o1",
+            "status": "saved",
+            "revision": "1",
+            "issuer": "crewship",
+            "durability": "node"
+          }
+        }
+      }
+    },
+    {
+      "id": "missing-control_profile-SessionStatusResult",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_status_result",
+        "request_id": "vvvvv",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "operation_status_result",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "result": {
+            "op_id": "o1",
+            "status": "saved",
+            "revision": "1",
+            "issuer": "crewship",
+            "durability": "node"
+          }
+        }
+      }
+    },
+    {
+      "id": "missing-session_id-SessionStatusResult",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_status_result",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "operation_status_result",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "result": {
+            "op_id": "o1",
+            "status": "saved",
+            "revision": "1",
+            "issuer": "crewship",
+            "durability": "node"
+          }
+        }
+      }
+    },
+    {
+      "id": "extra-SessionStatusResult",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_status_result",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.session-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "operation_status_result",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "result": {
+            "op_id": "o1",
+            "status": "saved",
+            "revision": "1",
+            "issuer": "crewship",
+            "durability": "node"
+          }
+        },
+        "unexpected": true
+      }
+    },
+    {
+      "id": "wrong-profile-SessionOpen",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_open",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.prepare-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "required_capabilities": [
+          "checkpoint_identity_v1"
+        ]
+      }
+    },
+    {
+      "id": "wrong-profile-SessionRestore",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_restore",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.prepare-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "0",
+          "format_version": "vvvvv",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "json",
+          "state": "vvvvv",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        },
+        "targets": []
+      }
+    },
+    {
+      "id": "wrong-profile-SessionOpened",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_opened",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.prepare-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "capabilities": [
+          "checkpoint_identity_v1"
+        ]
+      }
+    },
+    {
+      "id": "wrong-profile-SessionSubmitBatch",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_submit_batch",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.prepare-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "changes": [
+          {
+            "change_id": "vvvvv",
+            "operations": [
+              {
+                "op_id": "vvvvv",
+                "fingerprint": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                "participant_ref": "vvvvv",
+                "base_revision": "0",
+                "dependencies": [],
+                "read_preconditions": [],
+                "payload": {}
+              }
+            ],
+            "membership_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ]
+      }
+    },
+    {
+      "id": "wrong-profile-SessionCommitResult",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_commit_result",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.prepare-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "receipt": {
+          "type": "commit_result",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "generation": "1",
+          "revision": "1",
+          "issuer": "crewship",
+          "durability": "node",
+          "changes": [
+            {
+              "change_id": "c1",
+              "status": "saved",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "saved",
+                  "revision": "1",
+                  "issuer": "crewship",
+                  "durability": "node"
+                }
+              ],
+              "first_revision": "1",
+              "last_revision": "1"
+            }
+          ]
+        },
+        "checkpoint": {
+          "scope": {
+            "workspace_id": "vvvvv",
+            "artifact_id": "vvvvv",
+            "application_id": "vvvvv"
+          },
+          "revision": "0",
+          "generation": "0",
+          "format_version": "vvvvv",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "0.2.0",
+            "engine_version": "0.10.0"
+          },
+          "encoding": "json",
+          "state": "vvvvv",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "assets": []
+        },
+        "targets": []
+      }
+    },
+    {
+      "id": "wrong-profile-SessionParticipantOpen",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_participant_open",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.prepare-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "join": {
+          "type": "session_join",
+          "request_id": "request-1",
+          "ticket": "synthetic-test-ticket",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          }
+        }
+      }
+    },
+    {
+      "id": "wrong-profile-SessionParticipantInput",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_participant_input",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.prepare-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "submit_changes",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "session_id": "session-1",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          },
+          "changes": [
+            {
+              "change_id": "c1",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "participant_ref": "host-ref",
+                  "base_revision": "0",
+                  "dependencies": [],
+                  "read_preconditions": [],
+                  "payload": {
+                    "kind": "text",
+                    "text": "Příliš žluťoučký kůň"
+                  },
+                  "fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+                }
+              ],
+              "membership_hash": "sha256:92e1a3c1a3102e3d2d31c26c25cb8a251a31b20d0a42eb10a2f147e3074a1c47"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "wrong-profile-SessionParticipantOutput",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_participant_output",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.prepare-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "session_joined",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "session_id": "session-1",
+          "participant_ref": "host-ref",
+          "generation": "1",
+          "permission_version": "1",
+          "versions": {
+            "protocol_version": "0.4.0",
+            "model_version": "1.0.0",
+            "engine_version": "1.0.0"
+          },
+          "gate_id": "gate-1"
+        }
+      }
+    },
+    {
+      "id": "wrong-profile-SessionRestored",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_restored",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.prepare-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "versions": {
+          "protocol_version": "0.4.0",
+          "model_version": "0.2.0",
+          "engine_version": "0.10.0"
+        },
+        "confirmed_basis": {
+          "revision": "0",
+          "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      }
+    },
+    {
+      "id": "wrong-profile-SessionStatusRequest",
+      "sender": "runtime",
+      "valid": false,
+      "message": {
+        "type": "session_status_request",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.prepare-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "operation_status",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "op_id": "o1",
+          "expected_fingerprint": "sha256:f779162680508174c9cf99e7c0b8e0bb61332d80278cf0afa6527689dac0bc97"
+        }
+      }
+    },
+    {
+      "id": "wrong-profile-SessionStatusResult",
+      "sender": "host",
+      "valid": false,
+      "message": {
+        "type": "session_status_result",
+        "request_id": "vvvvv",
+        "control_profile": "mooring.prepare-causal.v1",
+        "scope": {
+          "workspace_id": "vvvvv",
+          "artifact_id": "vvvvv",
+          "application_id": "vvvvv"
+        },
+        "session_id": "vvvvv",
+        "runtime_ref": "vvvvv",
+        "fence": {
+          "generation": "0",
+          "token": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+        },
+        "connection_ref": "vvvvv",
+        "participant_ref": "vvvvv",
+        "gate_id": "vvvvv",
+        "permission_version": "0",
+        "message": {
+          "type": "operation_status_result",
+          "request_id": "request-1",
+          "scope": {
+            "application_id": "editor",
+            "artifact_id": "a",
+            "workspace_id": "w"
+          },
+          "result": {
+            "op_id": "o1",
+            "status": "saved",
+            "revision": "1",
+            "issuer": "crewship",
+            "durability": "node"
+          }
+        }
+      }
+    }
+  ],
+  "semantic_cases": [
+    {
+      "id": "status-after-queued-A",
+      "expected": "wait_for_host_fifo_barrier_no_terminal_unknown"
+    },
+    {
+      "id": "status-after-A-saved-before-barrier",
+      "expected": "return_exact_host_saved_receipt"
+    },
+    {
+      "id": "status-A-uncertain",
+      "expected": "nonterminal_recovery_no_guessed_unknown"
+    },
+    {
+      "id": "receipt-checkpoint-revision-mismatch",
+      "expected": "close_preserve_pending"
+    },
+    {
+      "id": "late-owner-generation",
+      "expected": "close_preserve_pending"
+    },
+    {
+      "id": "chunk-gate-expires-between-chunks",
+      "expected": "discard_partial_no_next_chunk"
+    },
+    {
+      "id": "encoded-output-exceeds-complete-transfer-before-commit",
+      "expected": "rollback_no_saved"
+    }
+  ]
+}

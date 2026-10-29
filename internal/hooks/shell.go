@@ -16,6 +16,29 @@ import (
 // too long" error.
 const maxShellPayloadBytes = 64 * 1024
 
+// Keep one byte past the presentation limit so truncate retains its exact
+// marker behavior. Drain excess bytes without retaining unbounded output.
+const maxShellCapturedBytes = 4097
+
+// Do not embed bytes.Buffer: its promoted ReadFrom would let io.Copy bypass
+// Write and grow retention without a bound.
+type shellOutput struct{ buf bytes.Buffer }
+
+func (b *shellOutput) Len() int       { return b.buf.Len() }
+func (b *shellOutput) String() string { return b.buf.String() }
+
+func (b *shellOutput) Write(p []byte) (int, error) {
+	n := len(p)
+	remaining := maxShellCapturedBytes - b.Len()
+	if remaining > 0 {
+		if remaining > len(p) {
+			remaining = len(p)
+		}
+		_, _ = b.buf.Write(p[:remaining])
+	}
+	return n, nil
+}
+
 // shellHandler executes handler_config.command as a shell script via
 // `sh -c`. The command runs with:
 //
@@ -26,7 +49,7 @@ const maxShellPayloadBytes = 64 * 1024
 //     scripts don't have to parse argv. Parent env is NOT inherited beyond
 //     what's needed for basic sh resolution (PATH), keeping the blast
 //     radius small if a shell hook is compromised.
-//   - stdout + stderr captured; each truncated to 4 KB in Result.Payload so
+//   - stdout + stderr drained with bounded capture; each truncated to 4 KB in Result.Payload so
 //     the journal doesn't balloon when a script spews MB of logs.
 //
 // Exit code 0 produces OutcomePass. Non-zero produces OutcomeBlock so the
@@ -44,7 +67,7 @@ const maxShellPayloadBytes = 64 * 1024
 // the shell or leaks via /proc.
 //
 // NOTE: This is dockerless. On Linux we would layer seccomp / cgroup / uid
-// isolation; today we rely on the hook being OWNER-only and on the caller
+// isolation; today we rely on verified instance administrator authority and on the caller
 // having audited the command. See CLAUDE.md about sidecar UID boundaries —
 // shell hooks run in the crewshipd process, not in an agent container.
 func shellHandler(ctx context.Context, h Hook, ec EventContext) (Result, error) {
@@ -90,7 +113,7 @@ func shellHandler(ctx context.Context, h Hook, ec EventContext) (Result, error) 
 	defer cancel()
 
 	// Per-OS shell: `sh -c` on POSIX hosts, `cmd.exe /c` on Windows (#946).
-	// The trust model is documented above (hook config = owner-only, env
+	// The trust model is documented above (hook config = instance-admin-only, env
 	// sanitized, timeout bounded).
 	cmd := shellCommand(cctx, command)
 	// Put the shell and every child it spawns in a fresh process group so
@@ -120,7 +143,7 @@ func shellHandler(ctx context.Context, h Hook, ec EventContext) (Result, error) 
 		"CREWSHIP_PAYLOAD="+string(payloadJSON),
 	)
 
-	var stdout, stderr bytes.Buffer
+	var stdout, stderr shellOutput
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 

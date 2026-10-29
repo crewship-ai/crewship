@@ -57,6 +57,18 @@ var restrictedAgentChatGrant = restrictedRule{check: func(m *AuthMiddleware, sto
 // with an acceptance test, and update restrictedAllowedPatterns in
 // restricted_route_table_test.go in the same change.
 var restrictedRoutes = map[string]restrictedRule{
+	// Exact live private custody only; ordinary Page authority is not widened.
+	"GET /api/v1/pages/{slug}/versions":                          restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/export":                            restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/document":                          restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/document/checkpoints":              restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}": restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/project":                           restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/project/source":                    restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/project/history":                   restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/project/history/{revision}":        restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/project/history/{revision}/source": restrictedPrivateCustody,
+
 	"GET /api/v1/workspaces/{workspaceId}/restricted-issue-projects":                                   restrictedPass,
 	"GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}":                             restrictedPass,
 	"GET /api/v1/workspaces/{workspaceId}/restricted-projects/{projectId}/milestones":                  restrictedPass,
@@ -101,9 +113,12 @@ var restrictedRoutes = map[string]restrictedRule{
 	"GET /api/v1/chats/{chatId}/restricted-files/{fileId}/download": restrictedPass,
 
 	// Dedicated restricted directory projections expose granted metadata only.
-	"GET /api/v1/agents":           restrictedPass,
-	"GET /api/v1/agents/{agentId}": restrictedPass,
-	"GET /api/v1/workspaces":       restrictedPass,
+	"GET /api/v1/crews":                    restrictedPass,
+	"GET /api/v1/crews/{crewId}":           restrictedPass,
+	"GET /api/v1/crews/{crewId}/access/me": restrictedPass,
+	"GET /api/v1/agents":                   restrictedPass,
+	"GET /api/v1/agents/{agentId}":         restrictedPass,
+	"GET /api/v1/workspaces":               restrictedPass,
 
 	// The member's own sessions, CLI tokens and password.
 	"GET /api/v1/auth/sessions":                restrictedPass,
@@ -118,20 +133,23 @@ var restrictedRoutes = map[string]restrictedRule{
 	"POST /api/v1/agents/{agentId}/chats": restrictedAgentChatGrant,
 
 	// Restricted pages, routines and pipeline runs.
-	"GET /api/v1/workspaces/{workspaceId}/restricted-pages":                                    restrictedPass,
-	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft":        restrictedPass,
-	"PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft":        restrictedPass,
-	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library":                          restrictedPass,
-	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}":              restrictedPass,
-	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs":         restrictedPass,
-	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs/{runId}": restrictedPass,
-	"GET /api/v1/workspaces/{workspaceId}/restricted-routines":                                 restrictedPass,
-	"GET /api/v1/pages/{slug}/application/actions/{pendingId}":                                 restrictedPass,
-	"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run":                               restrictedPass,
-	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}":                     restrictedPass,
-	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs":                             restrictedPass,
-	"POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}":                            restrictedPass,
-	"POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId}":                       restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-pages":                                       restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft":           restrictedPass,
+	"PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft":           restrictedPass,
+	"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/validate": restrictedPass,
+	"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/publish":  restrictedPass,
+	"POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/unpublish":      restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library":                             restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}":                 restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs":            restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/runs/{runId}":    restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routines":                                    restrictedPass,
+	"GET /api/v1/pages/{slug}/application/actions/{pendingId}":                                    restrictedPass,
+	"POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run":                                  restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs/{runId}":                        restrictedPass,
+	"GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs":                                restrictedPass,
+	"POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}":                               restrictedPass,
+	"POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId}":                          restrictedPass,
 
 	// Exact audience and server admission are enforced by these handlers.
 	"GET /api/v1/agents/{agentId}/run-profile":           restrictedPass,
@@ -161,6 +179,11 @@ func (m *AuthMiddleware) restrictedRequest(w http.ResponseWriter, r *http.Reques
 		return true
 	}
 	rule, ok := restrictedRoutes[r.Pattern]
+	if _, privateRead := r.Context().Value(documentPrivateReadKey{}).(documentPrivateReadAdmission); privateRead {
+		// Only the service-secret authenticated Docs boundary creates this
+		// marker, for its three exact read operations; never infer from Pattern.
+		rule, ok = restrictedPrivateCustody, true
+	}
 	switch {
 	case !ok:
 		err = access.ErrDenied

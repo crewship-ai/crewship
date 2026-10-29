@@ -161,6 +161,34 @@ for setting in AUTHORITY_SOCKET=authority.sock SERVICE_SOCKET=service.sock SERVI
 done
 check "--documents teardown removes private state" "$([[ -e "$tmp/state/docsok" ]] && echo left || echo gone)" gone
 
+# Native Grid profile settings must survive the clean environment without
+# allowing callers to replace this server's identity or document credentials.
+grid_profile=(
+  CREWSHIP_CRAFT_NATIVE_GRID_ENGINE_REVISION=1111111111111111111111111111111111111111
+  CREWSHIP_CRAFT_NATIVE_GRID_CLI_PATH=/qualified/gridcraft-cli
+  CREWSHIP_CRAFT_NATIVE_GRID_CLI_SHA256=2222222222222222222222222222222222222222222222222222222222222222
+  CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_BUNDLE=3333333333333333333333333333333333333333333333333333333333333333
+  CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_URL=https://editor.invalid/gridcraft/index.html
+)
+grid_args=()
+for setting in "${grid_profile[@]}"; do grid_args+=(--env "$setting"); done
+if (cmd_start gridok --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" "${grid_args[@]}") >"$tmp/grid-profile.log" 2>&1; then
+  r=accepted
+else
+  r=refused
+fi
+check "native Grid profile is accepted" "$r" accepted
+if [[ "$r" == accepted ]]; then
+  for setting in "${grid_profile[@]}"; do
+    check "native Grid ${setting%%=*} reaches the server process" "$(grep -cFx "$setting" "$FAKE_SERVER_ENV" || true)" 1
+  done
+  check "native Grid keeps its owned data directory" "$(grep -cFx "CREWSHIP_DATA_DIR=$tmp/state/gridok/data" "$FAKE_SERVER_ENV" || true)" 1
+  cmd_stop gridok >/dev/null 2>&1
+  check "native Grid profile server has no orphan" "$([[ -e "$tmp/state/gridok" ]] && echo left || echo gone)" gone
+else
+  cat "$tmp/grid-profile.log" >&2
+fi
+
 cmd_start envok --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" \
   --env CREWSHIP_PAGE_BUILD_IMAGE=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
   --env CREWSHIP_RATELIMIT_DISABLED=1 --env CREWSHIP_ALLOW_SIGNUP=true \
@@ -213,5 +241,50 @@ check "overlong paths create no instance state" "$([[ -e "$long_root/docreject" 
 if (STATE_ROOT="$tmp/state/../state" cmd_start docreject --binary /bin/true --documents --port 8199) >/dev/null 2>&1; then r=started; else r=refused; fi
 check "--documents refuses unclean paths" "$r" refused
 check "unclean paths create no instance state" "$([[ -e "$tmp/state/docreject" ]] && echo created || echo absent)" absent
+
+# Native-agent launch needs one exact operator opt-in; no generic prefix.
+if (cmd_start agentenv --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" --env CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true) >/dev/null 2>"$tmp/agent-env.err"; then agent_started=yes; else agent_started=no; fi
+check "native agent exact opt-in is accepted" "$agent_started" yes
+if [[ "$agent_started" == yes ]]; then
+  check "native agent exact opt-in reaches isolated child" "$(grep -Fxc 'CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true' "$FAKE_SERVER_ENV" || true)" 1
+  cmd_stop agentenv >/dev/null 2>&1 || true
+fi
+for bad_agent in CREWSHIP_CRAFT_NATIVE_AGENTS_ACTOR_ID=forged CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED_EXTRA=true; do
+  if (cmd_start agentbad --binary /bin/true --env "$bad_agent") >/dev/null 2>&1; then r=started; else r=refused; fi
+  check "native agent prefix refuses ${bad_agent%%=*}" "$r" refused
+done
+
+# --- native qualification env: exactly seven operator bindings, no identity ---
+# Transport fixture only: real native server startup still verifies CLI/bundles.
+native_bindings=(
+  CREWSHIP_CRAFT_NATIVE_ENABLED=true
+  "CREWSHIP_CRAFT_NATIVE_EDITOR_BUNDLE_DIR=$tmp/qualified-native-bundles"
+  CREWSHIP_CRAFT_NATIVE_WORD_ENGINE_REVISION=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  "CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH=$tmp/qualified-wordcraft"
+  CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_BUNDLE=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+  CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL=/_editor/b/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/index.html
+)
+native_args=()
+for binding in "${native_bindings[@]}"; do native_args+=(--env "$binding"); done
+check "native operator binding fixture contains exactly seven names" "${#native_bindings[@]}" 7
+if (cmd_start nativeenv --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" "${native_args[@]}") >/dev/null 2>"$tmp/native-env.err"; then native_started=yes; else native_started=no; fi
+check "native env allowlist accepts exactly seven qualified operator bindings" "$native_started" yes
+if [[ "$native_started" == yes ]]; then
+  for binding in "${native_bindings[@]}"; do
+    check "native env exact value ${binding%%=*}" "$(grep -Fxc -- "$binding" "$FAKE_SERVER_ENV" || true)" 1
+  done
+  check "only seven native settings reached the isolated child" "$(grep -c '^CREWSHIP_CRAFT_NATIVE_' "$FAKE_SERVER_ENV" || true)" 7
+  check "native feature passthrough kept owned data identity" "$(grep -Fxc -- "CREWSHIP_DATA_DIR=$tmp/state/nativeenv/data" "$FAKE_SERVER_ENV" || true)" 1
+  cmd_stop nativeenv >/dev/null 2>&1 || true
+  check "native fake server teardown removed only its own state" "$([[ -e "$tmp/state/nativeenv" ]] && echo left || echo gone)" gone
+  if (exec 3<>/dev/tcp/127.0.0.1/"$FAKE_PORT") 2>/dev/null; then native_port=still-listening; else native_port=closed; fi
+  check "native fake server teardown leaves no orphan" "$native_port" closed
+  if [[ -f "$FAKE_SERVER_PID" ]]; then kill "$(cat "$FAKE_SERVER_PID")" 2>/dev/null || true; fi
+fi
+for bad_native in CREWSHIP_CRAFT_NATIVE_WORD_ACTOR_ID=forged CREWSHIP_CRAFT_NATIVE_WORD_SESSION_TOKEN=forged; do
+  if (cmd_start nativebad --binary /bin/true --env "$bad_native") >/dev/null 2>&1; then r=started; else r=refused; fi
+  check "native prefix does not admit arbitrary ${bad_native%%=*}" "$r" refused
+ done
 
 exit "$fail"

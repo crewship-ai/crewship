@@ -3,7 +3,6 @@
 package managedlaunch
 
 import (
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,11 +20,7 @@ func TestManagedExecVerifiedDescriptorSurvivesPathSubstitution(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer f.Close()
-		raw, err := io.ReadAll(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		artifact, err := Capture("/opt/native/codex", raw)
+		artifact, err := CaptureFile("/opt/native/codex", f)
 		if err != nil || artifact == nil {
 			t.Fatalf("qualification: %v", err)
 		}

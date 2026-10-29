@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { UserPlus, Pencil, Check, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Badge } from "@/components/ui/badge"
@@ -47,6 +47,8 @@ interface CrewMembersProps {
    *  peer permissions because they could ladder up. The UI mirrors
    *  that gate so the role-edit chip only renders for admins. */
   canEdit: boolean
+  /** A live explicit Manage share permits only ordinary membership changes. */
+  canManage?: boolean
   onMembersChange: (members: CrewMember[]) => void
 }
 
@@ -74,7 +76,7 @@ const roleCls: Record<CrewMemberRole, string> = {
   VIEWER: "bg-muted text-muted-foreground border-border",
 }
 
-export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersChange }: CrewMembersProps) {
+export function CrewMembers({ members, crewId, workspaceId, canEdit, canManage = canEdit, onMembersChange }: CrewMembersProps) {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [removingId, setRemovingId] = useState<string | null>(null)
   // Inline-edit state for the role column. Holds the member id
@@ -84,7 +86,14 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
   const [pendingRole, setPendingRole] = useState<CrewMemberRole | null>(null)
   const [savingRole, setSavingRole] = useState(false)
 
+  useEffect(() => {
+    if (!canManage) setAddDialogOpen(false)
+    if (!canEdit) { setEditingId(null); setPendingRole(null) }
+  }, [canManage, canEdit])
+
   async function handleRemoveMember(memberId: string, memberName: string) {
+    const target = members.find(member => member.id === memberId)
+    if (!target || (!canEdit && (!canManage || target.role != null))) return
     setRemovingId(memberId)
     try {
       const res = await apiFetch(
@@ -105,6 +114,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
   }
 
   function handleMemberAdded(member: CrewMember) {
+    if (!canManage) return
     onMembersChange([...members, member])
     toast.success(`${member.user.full_name || member.user.email} added to crew`)
   }
@@ -115,7 +125,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
   // optimistically mutate the local list rather than refetching —
   // the server returns the new value in the response.
   async function handleSaveRole(memberId: string) {
-    if (savingRole) return
+    if (!canEdit || savingRole) return
     setSavingRole(true)
     const isInherit = pendingRole === null || pendingRole === undefined
     try {
@@ -147,6 +157,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
   }
 
   function startEdit(member: CrewMember) {
+    if (!canEdit) return
     setEditingId(member.id)
     setPendingRole(member.role ?? null)
   }
@@ -160,8 +171,8 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
     <div>
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-default font-semibold">Members</h2>
-        {canEdit && (
-          <Button variant="outline" size="sm" className="gap-2" onClick={() => setAddDialogOpen(true)}>
+        {canManage && (
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => { if (canManage) setAddDialogOpen(true) }}>
             <UserPlus className="h-3.5 w-3.5" />
             Add Member
           </Button>
@@ -180,12 +191,12 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
                   <TableHead>Email</TableHead>
                   <TableHead className="w-48">Role in this crew</TableHead>
                   <TableHead>Joined</TableHead>
-                  {canEdit && <TableHead className="w-20" />}
+                  {(canEdit || canManage) && <TableHead className="w-20" />}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {members.map((member) => {
-                  const isEditing = editingId === member.id
+                  const isEditing = canEdit && editingId === member.id
                   return (
                     <TableRow key={member.id} className="group">
                       <TableCell className="text-body font-medium">
@@ -272,7 +283,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
                       <TableCell className="text-label text-muted-foreground">
                         {new Date(member.created_at).toLocaleDateString()}
                       </TableCell>
-                      {canEdit && (
+                      {(canEdit || canManage) && (
                         <TableCell>
                           {/* Actions column: Remove only. The role edit
                               affordance lives next to the role badge above
@@ -282,7 +293,7 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
                               control. Hiding Remove during inline edit
                               avoids two competing destructive actions on
                               the same row. */}
-                          {!isEditing && (
+                          {!isEditing && (canEdit || (canManage && member.role == null)) && (
                             <div className="flex items-center gap-1">
                               <AlertDialog>
                                 <AlertDialogTrigger asChild>
@@ -327,8 +338,9 @@ export function CrewMembers({ members, crewId, workspaceId, canEdit, onMembersCh
       )}
 
       <AddMemberDialog
-        open={addDialogOpen}
-        onOpenChange={setAddDialogOpen}
+        open={addDialogOpen && canManage}
+        canAdd={canManage}
+        onOpenChange={open => setAddDialogOpen(open && canManage)}
         crewId={crewId}
         workspaceId={workspaceId}
         existingMemberIds={members.map((m) => m.user_id)}

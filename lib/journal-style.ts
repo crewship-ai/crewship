@@ -275,6 +275,7 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "crew.member_changed": "audit",
   "member.role_changed": "audit",
   "member.removed": "audit",
+  "workspace.deleted": "audit",
   // Provisioning — container build lifecycle.
   "provisioning.queued": "provisioning",
   "provisioning.building": "provisioning",
@@ -338,6 +339,14 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "page.folder_membership_changed": "page",
   "page.folder_acl_changed": "page",
   "page.owner_transferred": "page",
+  "artifact.mooring_created": "page",
+  "artifact.mooring_committed": "page",
+  "artifact.mooring_mandate_admitted": "page",
+  "artifact.mooring_mandate_revoked": "page",
+  "artifact.project_shared": "page",
+  "craft.native_preview_shared": "page",
+  "artifact.orphaned_workbook_deleted": "page",
+  "artifact.private_output_published": "page",
   "page.published": "page",
   "page.link_revoked": "page",
   "page.public_view": "page",
@@ -400,6 +409,7 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "provisioning.build_failed": "provisioning",
   "provisioning.step": "provisioning",
   "sidecar.stale": "provisioning",
+  "sidecar.recreated": "provisioning",
   "image.stale": "provisioning",
 
   // ── Skills.
@@ -516,6 +526,7 @@ export const TYPE_PILL_LABEL: Record<string, string> = {
   "crew.member_changed": "crew member",
   "member.role_changed": "role",
   "member.removed": "member removed",
+  "workspace.deleted": "workspace−",
   "provisioning.queued": "prov·queue",
   "provisioning.building": "prov·build",
   "provisioning.complete": "prov·done",

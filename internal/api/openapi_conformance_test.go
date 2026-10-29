@@ -53,6 +53,17 @@ var conditionalSpecRoutes = map[string][]string{
 	// container provider, log writer AND internal token are all wired —
 	// i.e. a real server boot, never a bare NewRouter.
 	"/api/v1/webhooks/{crewId}/{agentId}/trigger": {"POST"},
+	// router_mooring_collab.go: default-off and requires verified runtime assets.
+	// TestMooringHTTPAuthenticatesAndChecksPageBeforeBody asserts all six exact
+	// registrations, four mutation policies and the same generated operations.
+	// TestMooringHTTPDefaultDisabledRegistersNoRoutes and
+	// TestMooringHTTPEnabledStartupMustFailClosed require zero routes.
+	"/api/v1/pages/{slug}/mooring/session":             {"POST"},
+	"/api/v1/pages/{slug}/mooring/command-session":     {"POST"},
+	"/api/v1/pages/{slug}/mooring/session/reauthorize": {"POST"},
+	"/api/v1/pages/{slug}/mooring/ws":                  {"GET"},
+	"/api/v1/pages/{slug}/mooring/provenance":          {"GET"},
+	"/api/v1/pages/{slug}/mooring/tasks":               {"POST"},
 }
 
 // loadGeneratedSpec reads the embedded spec as path -> set of upper-case
@@ -205,6 +216,7 @@ func TestOpenAPISpecMatchesRegisteredRoutes(t *testing.T) {
 		t.Fatalf("NewRouter: %v", err)
 	}
 	r.RegisterSlidesHuman(true)
+	registerGridCraftTestRoutes(r)
 
 	spec := loadGeneratedSpec(t)
 	registered := registeredPublicRoutes(r)
@@ -285,6 +297,7 @@ func TestRegisteredPathsRejectUnlistedMethods(t *testing.T) {
 		t.Fatalf("NewRouter: %v", err)
 	}
 	r.RegisterSlidesHuman(true)
+	registerGridCraftTestRoutes(r)
 
 	for _, shape := range r.mux.shapeOrder {
 		declared := r.mux.shapeMethods[shape]
@@ -376,6 +389,7 @@ func TestMethodGuard_DeclaredMethodsStillReachHandlers(t *testing.T) {
 		t.Fatalf("NewRouter: %v", err)
 	}
 	r.RegisterSlidesHuman(true)
+	registerGridCraftTestRoutes(r)
 
 	for _, shape := range r.mux.shapeOrder {
 		spelling := r.mux.shapeSpelling[shape]

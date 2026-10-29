@@ -37,6 +37,54 @@ const ROWS = [
   { id: "ws-b", name: "Beta", slug: "beta", currentUserRole: "MEMBER", currentUserAccessMode: "trusted", restricted_session: true, restricted_surfaces: SURFACES },
 ]
 
+// Browser interaction and exact HTTP intent only. Real grant/issuer authority
+// and transactional publication remain native Router tests; no provider runs.
+for (const width of [1280, 390]) {
+  test(`Guest publishes the reviewed saved draft at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const unexpected: string[] = [], writes: string[] = []
+    let draft = { draft_id: "browser-draft", revision: 3, base_revision: 2, name: "Shared candidate", description: "Reviewed description", definition: { name: "Candidate", steps: [] }, can_edit: true, can_publish: true }
+    const item = { id: "shared", slug: "shared", name: "Shared candidate", status: "active", can_view: true, can_edit: true, can_results: false, can_run: false, runtime_ready: false }
+    const base = "/api/v1/workspaces/ws-a/restricted-routine-library"
+    await page.route("**/api/**", async route => {
+      const req = route.request(), path = new URL(req.url()).pathname, key = `${req.method()} ${path}`
+      let body: unknown = []
+      if (key === `GET ${base}`) body = [item]
+      else if (key === `GET ${base}/shared`) body = { ...item, definition: draft.definition, definition_hash: "browser-fixture", version: 1 }
+      else if (key === `GET ${base}/shared/draft`) body = draft
+      else if (key === `PUT ${base}/shared/draft`) {
+        const value = req.postDataJSON(); writes.push("save")
+        expect(value).toEqual({ draft_id: "browser-draft", revision: 3, base_revision: 2, name: "Reviewed browser draft", description: draft.description, definition: draft.definition })
+        draft = { ...draft, ...value, revision: 4 }; body = draft
+      } else if (key === `POST ${base}/shared/draft/validate` || key === `POST ${base}/shared/draft/publish`) {
+        expect(req.postDataJSON()).toEqual({ draft_id: "browser-draft", revision: 4, base_revision: 2 })
+        const publishing = path.endsWith("/publish"); writes.push(publishing ? "publish" : "validate")
+        body = publishing ? { id: "shared", version: 2, publication_revision: 3 } : { valid: true, scope: "structure_only" }
+      } else if (!ALLOWED.some(pattern => pattern.test(key))) {
+        unexpected.push(key)
+        return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Resource not found" }) })
+      } else if (path === "/api/auth/session") body = { user: { id: "u-r", name: "Rita", email: "rita@example.test" }, expires: "2099-01-01T00:00:00Z" }
+      else if (path === "/api/v1/workspaces") body = ROWS
+      else if (path === "/api/auth/csrf") body = { csrfToken: "t" }
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
+    })
+    await page.goto("/routines")
+    await page.getByLabel("Routine definition", { exact: true }).selectOption("shared")
+    await page.getByRole("button", { name: "Edit shared draft", exact: true }).click()
+    await page.getByRole("textbox", { name: "Draft name", exact: true }).fill("Reviewed browser draft")
+    await expect(page.getByRole("button", { name: "Publish reviewed draft" })).toBeDisabled()
+    await page.getByRole("button", { name: "Save shared draft", exact: true }).click()
+    await expect(page.getByText("Draft revision 4 · Based on publication 2")).toBeVisible()
+    await page.getByRole("button", { name: "Check saved draft structure" }).click()
+    await expect(page.getByText(/Structural check passed.*not a test run/)).toBeVisible()
+    await page.getByRole("button", { name: "Publish reviewed draft" }).click()
+    await expect(page.getByText(/Published version 2.*No run was started/)).toBeVisible()
+    expect(writes).toEqual(["save", "validate", "publish"])
+    expect(unexpected).toEqual([])
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+  })
+}
+
 
 // #3330: browser pairing is account security for a verified Guest session.
 // These fixtures exercise visible menu/dialog behavior; real session/token
@@ -470,7 +518,7 @@ for (const width of [1280, 390]) {
     if (width === 1280) {
       // An open Issue belongs to Work and must not cover other side panels.
       await page.getByRole("tab", { name: "Artifacts", exact: true }).click()
-      await expect(page.getByText("No artifacts yet. Documents, sheets and pages the agent writes appear here.")).toBeVisible()
+      await expect(page.getByText("No output files yet.")).toBeVisible()
       await expect(page.getByRole("button", { name: "Back to Work" })).toHaveCount(0)
       await page.getByRole("tab", { name: "Work", exact: true }).click()
       await expect(page.getByRole("button", { name: "Back to Work" })).toBeVisible()

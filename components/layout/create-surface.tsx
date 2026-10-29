@@ -237,6 +237,8 @@ export interface CreateSurfaceProps {
   ariaLabel?: string
   /** Restore the opener when the caller does not use a Radix DialogTrigger. */
   restoreOpenerFocus?: boolean
+  /** A stable opener when a transient menu item disappears after opening. */
+  restoreFocusTo?: HTMLElement | null
   /**
    * How the surface is mounted.
    *
@@ -281,6 +283,7 @@ export function CreateSurface({
   onSubmit,
   ariaLabel,
   restoreOpenerFocus = false,
+  restoreFocusTo,
   presentation = "dialog",
   blocking = false,
   phoneHeight = "auto",
@@ -445,9 +448,10 @@ export function CreateSurface({
           contentRef.current?.focus({ preventScroll: true })
         }}
         onCloseAutoFocus={(e) => {
-          if (restoreOpenerFocus && openerRef.current?.isConnected) {
+          const opener = restoreFocusTo ?? openerRef.current
+          if (restoreOpenerFocus && opener?.isConnected) {
             e.preventDefault()
-            openerRef.current.focus({ preventScroll: true })
+            opener.focus({ preventScroll: true })
           }
         }}
         className={cn(SHELL_BASE, "p-0", "sm:max-h-[min(85vh,720px)]", SIZE_CLASS[size], SHELL_SHEET, phoneHeight === "full" && SHELL_SHEET_FULL, className)}
