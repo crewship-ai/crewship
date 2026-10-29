@@ -150,7 +150,7 @@ it("a click on desktop peeks at the item on the right and the list stays with it
   ])
   expect(screen.getByRole("button", { name: "Open Partner brief" }).getAttribute("aria-current")).toBe("true")
   peekOpen()
-  expect(state.select).toHaveBeenCalledWith("brief")
+  expect(state.select).toHaveBeenCalledWith("page-brief")
 })
 
 it("the peek shares and stars the item it shows, and closes", () => {
@@ -182,7 +182,7 @@ it("J and K move the peek, Enter opens the peeked item, Escape closes the peek",
   fireEvent.keyDown(window, { key: "j" })
   expect(within(peek()).getByRole("heading", { name: "Partner brief" })).toBeTruthy()
   fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Enter" })
-  expect(state.select).toHaveBeenLastCalledWith("brief")
+  expect(state.select).toHaveBeenLastCalledWith("page-brief")
 })
 
 it("on a phone a click opens the detail directly, with no peek", () => {
@@ -190,7 +190,7 @@ it("on a phone a click opens the detail directly, with no peek", () => {
   renderLibrary()
   openAll()
   fireEvent.click(screen.getByRole("button", { name: "Open Partner brief" }))
-  expect(state.select).toHaveBeenCalledWith("brief")
+  expect(state.select).toHaveBeenCalledWith("page-brief")
   expect(screen.queryByRole("complementary", { name: "Preview" })).toBeNull()
 })
 
@@ -321,14 +321,14 @@ it.each(["project", "dashboard", "slides"] as const)("keeps %s routed through it
   openAll()
   fireEvent.click(screen.getByRole("button", { name: "Open Owner artifact" }))
   peekOpen()
-  expect(state.select).toHaveBeenLastCalledWith("ordinary-owner-page")
+  expect(state.select).toHaveBeenLastCalledWith("owner-page")
   state.select.mockReset()
   fireEvent.click(screen.getByRole("radio", { name: "Table" }))
   fireEvent.keyDown(document.body, { key: "Escape" })
   fireEvent.click(screen.getByRole("button", { name: "Owner artifact" }))
   peekOpen()
-  expect(state.select).toHaveBeenLastCalledWith("ordinary-owner-page")
-  state.item = "ordinary-owner-page"
+  expect(state.select).toHaveBeenLastCalledWith("owner-page")
+  state.item = "owner-page"
   view.rerender(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
   expect(screen.getByRole("link", { name: "Open in Pages" })).toHaveAttribute("href", "/pages/%40owner-page?workspace_id=ws1&artifact=1")
   expect(screen.queryByTestId("viewer-panel")).toBeNull()
@@ -359,7 +359,7 @@ it("J and K move between items, Enter opens, Escape leaves the detail, never fro
   expect(document.activeElement?.getAttribute("aria-label")).toBe("Open Partner brief")
   // The peeked row's second click opens it, as Enter does.
   fireEvent.click(document.activeElement as HTMLElement)
-  expect(state.select).toHaveBeenLastCalledWith("brief")
+  expect(state.select).toHaveBeenLastCalledWith("page-brief")
   const search = screen.getByRole("textbox", { name: "Search artifacts" })
   search.focus()
   fireEvent.keyDown(search, { key: "j" })

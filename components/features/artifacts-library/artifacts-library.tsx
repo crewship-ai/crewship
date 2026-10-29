@@ -485,9 +485,9 @@ function useLibraryKeys(root: React.RefObject<HTMLElement | null>, keys: Library
 
 interface ArtifactsLibraryProps {
   workspaceId: string
-  /** The open artifact's slug, or null for the library. Kept in the URL by the route. */
+  /** The open artifact's immutable page ID (or, for an item without one, its slug), or null for the library. Kept in the URL by the route. */
   item: string | null
-  onSelect: (slug: string | null) => void
+  onSelect: (id: string | null) => void
   /** Controlled filters, when the route keeps them in the URL; otherwise the library holds them. */
   filters?: LibraryFilters
   onFiltersChange?: (next: LibraryFilters) => void
@@ -529,7 +529,8 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
     opened: new Map(Array.isArray(recent) ? recent.filter(entry => typeof entry?.slug === "string" && Number.isFinite(entry?.at)).map(entry => [entry.slug, entry.at]) : []),
     favorites: new Set(Array.isArray(favorites) ? favorites.filter(slug => typeof slug === "string") : []),
   }), [recent, favorites])
-  const selected = item !== null ? items.find(entry => entry.slug === item) ?? null : null
+  // The ID survives a renamed or reassigned slug; a slug still opens links made before IDs.
+  const selected = item !== null ? items.find(entry => entry.pageId === item) ?? items.find(entry => entry.slug === item) ?? null : null
   const contentRef = useRef<HTMLDivElement>(null)
   const openedSlug = selected?.slug
   useEffect(() => {
@@ -546,7 +547,7 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
   const mobile = useIsMobile()
   const [peek, setPeek] = useState<string | null>(null)
   const peeked = !mobile && item === null ? items.find(entry => entry.slug === peek) ?? null : null
-  const open = (slug: string) => { setPeek(null); onSelect(slug) }
+  const open = (slug: string) => { setPeek(null); onSelect(items.find(entry => entry.slug === slug)?.pageId ?? slug) }
   const pick = (slug: string) => { if (mobile || peek === slug) open(slug); else setPeek(slug) }
   useLibraryKeys(contentRef, { detailOpen: item !== null, onBack: () => onSelect(null), peek: peeked?.slug ?? null, onPeek: mobile ? null : setPeek, onOpen: open })
   // A selection and a peek belong to the list they were made in.
