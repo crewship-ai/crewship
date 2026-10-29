@@ -31,12 +31,17 @@ func craftNativeSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"NativeCraftEmptyRequest":      empty,
 		"NativeCraftGenerationRequest": generationRequest,
 		"NativeCraftHandoffRequest":    handoffRequest,
-		"NativeCraftAvailability":      obj(map[string]any{"enabled": boolean(), "agents_enabled": boolean()}, "enabled", "agents_enabled"),
+		"NativeCraftAvailability":      obj(map[string]any{"enabled": boolean(), "preview_enabled": boolean(), "agents_enabled": boolean()}, "enabled", "preview_enabled", "agents_enabled"),
 		"NativeCraftSession":           obj(map[string]any{"session_token": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Private mounted host admission bearer; never deliver to an iframe or local draft."}, "session_id": str(), "application_id": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft", "deckcraft"}}, "page_id": str()}, "session_token", "session_id", "application_id", "page_id"),
 		"NativeCraftRenewal":           obj(map[string]any{"renewed": boolean()}, "renewed"),
 		"NativeCraftHandoffReceipt":    obj(map[string]any{"request_id": str(), "generation": generation(false)}, "request_id", "generation"),
-		"NativeCraftLease":             obj(map[string]any{"can_stop_agent": boolean(), "holder": nullableHolder, "mine": boolean(), "generation": generation(true), "expires_at": map[string]any{"type": "string", "format": "date-time", "nullable": true}, "can_write": boolean(), "acquired_at": map[string]any{"type": "string", "nullable": true, "description": "Currently always null: acquisition wall time is not persisted."}, "handoff_requested_kind": map[string]any{"type": "string", "nullable": true, "enum": []any{"human", nil}}, "handoff_requested_by": map[string]any{"type": "array", "items": ref("NativeCraftRequest")}}, "holder", "mine", "generation", "expires_at", "can_stop_agent", "can_write", "acquired_at", "handoff_requested_kind", "handoff_requested_by"),
+		"NativeCraftLease":             obj(map[string]any{"can_stop_agent": boolean(), "holder": nullableHolder, "mine": boolean(), "generation": generation(true), "expires_at": map[string]any{"type": "string", "format": "date-time", "nullable": true}, "can_write": boolean(), "can_edit": boolean(), "acquired_at": map[string]any{"type": "string", "nullable": true, "description": "Currently always null: acquisition wall time is not persisted."}, "handoff_requested_kind": map[string]any{"type": "string", "nullable": true, "enum": []any{"human", nil}}, "handoff_requested_by": map[string]any{"type": "array", "items": ref("NativeCraftRequest")}}, "holder", "mine", "generation", "expires_at", "can_stop_agent", "can_write", "can_edit", "acquired_at", "handoff_requested_kind", "handoff_requested_by"),
 	}
+
+	schemas["NativeCraftPreview"] = obj(map[string]any{"version": generation(false), "bytes": map[string]any{"type": "string", "format": "byte"}, "applicationId": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}}, "enginePin": str(), "editorBundle": str(), "editorURL": str()}, "version", "bytes", "applicationId", "enginePin", "editorBundle", "editorURL")
+	schemas["NativeCraftShareRequest"] = obj(map[string]any{"workspaceId": str(), "pageId": str(), "applicationId": str(), "enginePin": str(), "sessionId": str(), "generation": generation(false), "baseVersion": generation(false), "targetVersion": generation(false)}, "workspaceId", "pageId", "applicationId", "enginePin", "sessionId", "generation", "baseVersion", "targetVersion")
+	schemas["NativeCraftShareRequest"].(map[string]any)["additionalProperties"] = false
+	schemas["NativeCraftShareReceipt"] = obj(map[string]any{"version": generation(false), "durability": map[string]any{"type": "string", "enum": []string{"node"}}, "issuedBy": map[string]any{"type": "string", "enum": []string{"crewship"}}, "phase": map[string]any{"type": "string", "enum": []string{"shared"}}}, "version", "durability", "issuedBy", "phase")
 	prefix := "/api/v1/pages/{slug}/craft"
 	routes := map[string]DomainSchema{}
 	add := func(method, path, req, res, status string, admission bool) {
@@ -53,6 +58,8 @@ func craftNativeSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		routes[method+" "+prefix+path] = d
 	}
 	add("GET", "/availability", "", "NativeCraftAvailability", "200", false)
+	add("GET", "/preview", "", "NativeCraftPreview", "200", false)
+	add("POST", "/document/share", "NativeCraftShareRequest", "NativeCraftShareReceipt", "200", true)
 	add("POST", "/sessions", "NativeCraftEmptyRequest", "NativeCraftSession", "201", false)
 	add("POST", "/sessions/reauthorize", "", "NativeCraftRenewal", "200", true)
 	add("GET", "/lease", "", "NativeCraftLease", "200", true)

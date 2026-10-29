@@ -11,7 +11,14 @@ import (
 )
 
 func TestCraftNativeCommentOnlyNeverGetsLatestOrLease(t *testing.T) {
-	f, native, _ := craftNativeHTTPFixture(t)
+	testCraftNativeCommentOnlyNeverGetsLatestOrLease(t, "wordcraft")
+}
+func TestCraftNativeDeckCommentOnlyNeverGetsLatestOrLease(t *testing.T) {
+	testCraftNativeCommentOnlyNeverGetsLatestOrLease(t, "deckcraft")
+}
+func testCraftNativeCommentOnlyNeverGetsLatestOrLease(t *testing.T, application string) {
+	t.Helper()
+	f, native, _ := craftNativeHTTPFixtureForApplication(t, application)
 	user := "native-comment-person"
 	mustExec(t, f.db, `INSERT INTO users(id,email,full_name) VALUES(?,'native-comment@example.test','Commenter')`, user)
 	mustExec(t, f.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, generateCUID(), f.wsID, user)
@@ -61,4 +68,48 @@ func TestCraftNativeCommentOnlyNeverGetsLatestOrLease(t *testing.T) {
 	if got := craftNativeLeaseCall(native, ctx, token, "native-page", "renew", fmt.Sprintf(`{"generation":%q}`, lease.Generation)); got.Code != 403 {
 		t.Fatalf("downgraded writer renewed: %d %s", got.Code, got.Body)
 	}
+}
+
+func TestCraftNativeLeaseReportsCurrentEditCapability(t *testing.T) {
+	testCraftNativeLeaseReportsCurrentEditCapability(t, "wordcraft")
+}
+func TestCraftNativeDeckLeaseReportsCurrentEditCapability(t *testing.T) {
+	testCraftNativeLeaseReportsCurrentEditCapability(t, "deckcraft")
+}
+func testCraftNativeLeaseReportsCurrentEditCapability(t *testing.T, application string) {
+	t.Helper()
+	f, native, owner := craftNativeHTTPFixtureForApplication(t, application)
+	ownerToken, _ := craftNativeIssued(t, native, owner)
+	read := func(ctx context.Context, token string, wantEdit bool) {
+		t.Helper()
+		got := craftNativeLeaseCall(native, ctx, token, "native-page", "read", `{}`)
+		var view map[string]any
+		if got.Code != 200 || json.Unmarshal(got.Body.Bytes(), &view) != nil || view["can_edit"] != wantEdit {
+			t.Fatalf("edit capability want %v: %d %s", wantEdit, got.Code, got.Body)
+		}
+	}
+	read(owner, ownerToken, true)
+	mustExec(t, f.db, `INSERT INTO users(id,email) VALUES('native-preview-user','native-preview@example.test')`)
+	mustExec(t, f.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,'native-preview-user','MEMBER')`, generateCUID(), f.wsID)
+	expiry := time.Now().Add(time.Hour).UTC()
+	mustExec(t, f.db, `INSERT INTO user_sessions(id,user_id,expires_at) VALUES('native-preview-source','native-preview-user',?)`, expiry.Format(time.RFC3339Nano))
+	mustExec(t, f.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('native-page','user','native-preview-user','read',?)`, f.userID)
+	u := &AuthUser{ID: "native-preview-user", SessionID: "native-preview-source", CredentialExpiresAt: expiry}
+	source, err := captureOriginalHumanCredential(t.Context(), f.db, u, AuthKindSession, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.OriginalCredential = source
+	ctx := auth.WithOriginalCredential(context.WithValue(context.WithValue(context.WithValue(t.Context(), ctxUser, u), ctxAuthKind, AuthKindSession), ctxWorkspaceID, f.wsID), *source)
+	token, _ := craftNativeIssued(t, native, ctx)
+	read(ctx, token, false)
+	ownerToken, _ = craftNativeIssued(t, native, owner)
+	if got := craftNativeLeaseCall(native, owner, ownerToken, "native-page", "acquire", `{}`); got.Code != 200 {
+		t.Fatal(got.Code, got.Body)
+	}
+	read(ctx, token, false)
+	// A fresh editor admission can request custody even while someone else holds it.
+	mustExec(t, f.db, `UPDATE page_grants SET level='write' WHERE page_id='native-page' AND subject_id='native-preview-user'`)
+	token, _ = craftNativeIssued(t, native, ctx)
+	read(ctx, token, true)
 }

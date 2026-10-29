@@ -17,6 +17,10 @@ import (
 
 func craftNativeHTTPFixture(t *testing.T) (*pagesTransferRig, *craftNativeHTTP, context.Context) {
 	t.Helper()
+	return craftNativeHTTPFixtureForApplication(t, "wordcraft")
+}
+func craftNativeHTTPFixtureForApplication(t *testing.T, application string) (*pagesTransferRig, *craftNativeHTTP, context.Context) {
+	t.Helper()
 	copy := testutil.MigratedDB(t)
 	path := copy.Path()
 	if err := copy.Close(); err != nil {
@@ -29,7 +33,7 @@ func craftNativeHTTPFixture(t *testing.T) (*pagesTransferRig, *craftNativeHTTP, 
 	t.Cleanup(func() { db.Close() })
 	f := pagesTransferSetupWithDB(t, db)
 	f.seedPage(t, "native-page", "native-page", "Native", f.userID, "")
-	mustExec(t, f.db, `INSERT INTO craft_native_documents(page_id,workspace_id,application_id,engine_revision,engine_sha256,editor_bundle) VALUES('native-page',?,'wordcraft',?,?,?)`, f.wsID, strings.Repeat("a", 40), strings.Repeat("b", 64), strings.Repeat("c", 64))
+	mustExec(t, f.db, `INSERT INTO craft_native_documents(page_id,workspace_id,application_id,engine_revision,engine_sha256,editor_bundle) VALUES('native-page',?,?,?,?,?)`, f.wsID, application, strings.Repeat("a", 40), strings.Repeat("b", 64), strings.Repeat("c", 64))
 	mustExec(t, f.db, `INSERT INTO user_sessions(id,user_id,expires_at) VALUES('native-source',?,?)`, f.userID, time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano))
 	u := &AuthUser{ID: f.userID, SessionID: "native-source", CredentialExpiresAt: time.Now().Add(time.Hour)}
 	source, err := captureOriginalHumanCredential(t.Context(), f.db, u, AuthKindSession, "")

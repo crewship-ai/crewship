@@ -150,3 +150,24 @@ it('preserves a native Deck ZIP and its original session binding without a text 
  expect(JSON.parse(send.mock.calls[2][1].body).bytes).toBe(snapshot.bytes)
  expect(send.mock.calls[2][1].redirect).toBe('error');client.close()
 })
+
+describe('native shared preview publication',()=>{
+ const share={workspaceId:'ws',pageId:'page',applicationId:'wordcraft',enginePin:'e'.repeat(64),sessionId:'public-session',generation:'9007199254740995',baseVersion:'9007199254740993',targetVersion:'9007199254740993'}
+ const admission=()=>new Response(JSON.stringify({session_token:'b'.repeat(64),session_id:'public-session',application_id:'wordcraft',page_id:'page'}))
+ it('publishes one explicit committed version without putting the bearer in the body',async()=>{
+  const send=vi.fn().mockResolvedValueOnce(admission()).mockResolvedValueOnce(new Response(JSON.stringify({version:share.targetVersion,durability:'node',issuedBy:'crewship',phase:'shared'})))
+  const client=createNativeDocumentClient({workspaceId:'ws',pageId:'page',fetch:send});await client.open(signal())
+  await expect(client.share(share,signal())).resolves.toMatchObject({version:share.targetVersion,phase:'shared'})
+  expect(String(send.mock.calls[1][0])).toBe('/api/v1/pages/%40page/craft/document/share?workspace_id=ws')
+  expect(send.mock.calls[1][1]).toMatchObject({method:'POST',redirect:'error',cache:'no-store',body:JSON.stringify(share)})
+  expect(new Headers(send.mock.calls[1][1].headers).get('X-Craft-Session')).toBe('b'.repeat(64))
+  expect(send.mock.calls[1][1].body).not.toContain('b'.repeat(64))
+ })
+ it.each(['network','403','409','wrong-version'])('does not retry or accept unconfirmed preview publication %s',async(reason)=>{
+  const send=vi.fn().mockResolvedValueOnce(admission())
+  if(reason==='network')send.mockRejectedValueOnce(Error('lost publication'))
+  else send.mockResolvedValueOnce(new Response(reason==='wrong-version'?JSON.stringify({version:'1',durability:'node',issuedBy:'crewship',phase:'shared'}):'{}',{status:reason==='wrong-version'?200:Number(reason)}))
+  const client=createNativeDocumentClient({workspaceId:'ws',pageId:'page',fetch:send});await client.open(signal())
+  await expect(client.share(share,signal())).rejects.toThrow();expect(send).toHaveBeenCalledTimes(2)
+ })
+})

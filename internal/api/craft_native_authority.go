@@ -23,6 +23,12 @@ type craftNativeProof struct {
 // Canonical Page policy, evaluated in the caller's protected SQL transaction.
 // This has no collaboration document, Yrs session, or agent admission dependency.
 func (m *craftNativeHTTP) pageAuthority(ctx context.Context, tx *sql.Tx, source auth.OriginalCredential, scope mooring.EditLeaseScope, write bool) (craftNativeProof, error) {
+	return m.pageAuthorityForView(ctx, tx, source, scope, write, false)
+}
+
+// sharedPreview permits canonical Comment visibility only for the separate
+// shared snapshot selector. It cannot open a native editor admission.
+func (m *craftNativeHTTP) pageAuthorityForView(ctx context.Context, tx *sql.Tx, source auth.OriginalCredential, scope mooring.EditLeaseScope, write, sharedPreview bool) (craftNativeProof, error) {
 	var result craftNativeProof
 	required := "pages:read"
 	if write {
@@ -59,7 +65,7 @@ func (m *craftNativeHTTP) pageAuthority(ctx context.Context, tx *sql.Tx, source 
 	if err != nil {
 		return result, err
 	}
-	if !write && !m.pages.mayReadNativeWithoutComment(ctx, scope.WorkspaceID, rec, viewer) {
+	if !write && !sharedPreview && !m.pages.mayReadNativeWithoutComment(ctx, scope.WorkspaceID, rec, viewer) {
 		return result, errCraftNativeAccess
 	}
 	if !visible || write && !m.pages.mayEditSpec(ctx, scope.WorkspaceID, source.UserID, role, rec) {

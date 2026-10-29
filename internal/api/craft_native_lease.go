@@ -13,8 +13,9 @@ import (
 )
 
 type craftNativeAvailabilityResponse struct {
-	Enabled       bool `json:"enabled"`
-	AgentsEnabled bool `json:"agents_enabled"`
+	Enabled        bool `json:"enabled"`
+	PreviewEnabled bool `json:"preview_enabled"`
+	AgentsEnabled  bool `json:"agents_enabled"`
 }
 type craftNativeRenewalResponse struct {
 	Renewed bool `json:"renewed"`
@@ -39,6 +40,7 @@ type craftNativeLeaseResponse struct {
 	Mine                 bool                         `json:"mine"`
 	Generation           *string                      `json:"generation"`
 	ExpiresAt            *string                      `json:"expires_at"`
+	CanEdit              bool                         `json:"can_edit"`
 	CanWrite             bool                         `json:"can_write"`
 	AcquiredAt           *string                      `json:"acquired_at"`
 	HandoffRequestedKind *string                      `json:"handoff_requested_kind"`
@@ -59,6 +61,7 @@ func craftNativeGeneration(raw string) (int64, error) {
 }
 func (m *craftNativeHTTP) availability(w http.ResponseWriter, r *http.Request) {
 	enabled := false
+	previewEnabled := false
 	agentsEnabled := false
 	if m.enabled && m.pages != nil {
 		source, err := craftNativeHuman(r.Context())
@@ -72,6 +75,8 @@ func (m *craftNativeHTTP) availability(w http.ResponseWriter, r *http.Request) {
 				if e == nil {
 					proof, authorityErr := m.pageAuthority(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, false)
 					enabled = authorityErr == nil
+					_, previewErr := m.pageAuthorityForView(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, false, true)
+					previewEnabled = previewErr == nil
 					if enabled && craftNativeAgentApplicationSupported(proof.application) && m.agents != nil && m.agents.runtimeReady() {
 						_, writeErr := m.pageAuthority(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, true)
 						agentsEnabled = writeErr == nil
@@ -81,7 +86,7 @@ func (m *craftNativeHTTP) availability(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, craftNativeAvailabilityResponse{Enabled: enabled, AgentsEnabled: agentsEnabled})
+	writeJSON(w, 200, craftNativeAvailabilityResponse{Enabled: enabled, PreviewEnabled: previewEnabled, AgentsEnabled: agentsEnabled})
 }
 func craftNativeHTTPError(w http.ResponseWriter, err error) {
 	if errors.Is(err, mooring.ErrEditLeaseBusy) || errors.Is(err, mooring.ErrEditLeaseStale) {
@@ -148,8 +153,16 @@ func (m *craftNativeHTTP) leaseView(r *http.Request, entry *craftNativeSession, 
 	}
 	// The lease core has no durable acquisition timestamp. Renewal time would
 	// falsely describe custody age, so the dormant API reports unknown explicitly.
-	canStop := m.agents != nil && m.agents.canStop(r.Context(), entry, l)
-	return craftNativeLeaseResponse{Holder: holder, Mine: mine, Generation: generation, ExpiresAt: expiry, CanWrite: mine, HandoffRequestedKind: requestedKind, HandoffRequestedBy: requests, CanStopAgent: canStop}
+	// Edit permission is distinct from current custody. Observers must not be
+	// offered takeover/handoff controls even when the lease happens to be free.
+	canEdit := false
+	if tx, err := m.pages.db.BeginTx(r.Context(), nil); err == nil {
+		_, err = m.checkEntry(r.Context(), tx, entry, true)
+		canEdit = err == nil
+		_ = tx.Rollback()
+	}
+	canStop := canEdit && m.agents != nil && m.agents.canStop(r.Context(), entry, l)
+	return craftNativeLeaseResponse{Holder: holder, Mine: mine, Generation: generation, ExpiresAt: expiry, CanEdit: canEdit, CanWrite: mine && canEdit, HandoffRequestedKind: requestedKind, HandoffRequestedBy: requests, CanStopAgent: canStop}
 }
 func (m *craftNativeHTTP) lease(w http.ResponseWriter, r *http.Request) {
 	entry, err := m.bound(r)

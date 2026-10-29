@@ -29,7 +29,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 
 | Method | Path | Request | Response / success status |
 |---|---|---|---|
-| GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean, agents_enabled: boolean}`, 200. |
+| GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean, preview_enabled: boolean, agents_enabled: boolean}`, 200. |
 | POST | `/api/v1/pages/{slug}/craft/sessions` | `{}`. | `session_token`, public `session_id`, `application_id`, `page_id`, 201. |
 | POST | `/api/v1/pages/{slug}/craft/sessions/reauthorize` | Separately refreshed original authentication; no body consumed. | `{renewed: boolean}`, 200. |
 | GET | `/api/v1/pages/{slug}/craft/lease` | Craft admission header. | Lease status described below, 200. |
@@ -60,7 +60,7 @@ Renew/release require `{generation: "1"}`. Handoff requires
 numbers. Before the first acquisition, the status generation is `null`.
 
 A lease status has `holder: {actor_id, display_name, kind} | null`, `mine`,
-`generation`, `expires_at`, `can_write`, `acquired_at`,
+`generation`, `expires_at`, `can_write`, `can_edit`, `acquired_at`,
 `handoff_requested_kind`, `handoff_requested_by`, and `can_stop_agent`. An agent holder also has public `agent_id` and `run_id`; its `kind` is `agent`. Requests are an **array**
 of `{request_id, actor_id, display_name, kind}`, visible to the holder. Current
 editor admissions are human-only; an agent uses the separate confirmed task binding below. `acquired_at` is presently `null`: the lease does not
@@ -69,6 +69,41 @@ persist acquisition wall time, and renewal time must not impersonate it.
 Competing acquisition and stale generations return 409. A handoff advances the
 server generation; a late renew or write from the old connection is rejected.
 Neither a display name nor a public request ID establishes write authority.
+
+## Shared previews and edit capability
+
+`can_edit` is current original-credential and Page edit authority, independent of
+whether someone else holds the lease. `can_write` additionally requires this
+connection to hold custody. Observers receive no takeover, handoff, publish or
+agent controls. An older response without `can_edit: true` grants no UI edit
+capability. Server mutations continue to recheck the live authority and lease.
+
+`GET /api/v1/pages/{slug}/craft/preview` uses ordinary human authentication and
+`workspace_id`, without a Craft admission. It accepts canonical Read or Comment
+visibility and returns only the current shared native version: `version`, base64
+`bytes`, `applicationId`, `enginePin`, `editorBundle` and `editorURL`. The live
+credential, Page rights, captured authority epochs and immutable native profile
+are checked in the same protected transaction as the shared pin. No private
+latest version, history, quota, admission or custody metadata is returned. A
+missing shared pin returns 404, denied access 403 and disabled/unqualified
+profiles 503; there is no fallback to the latest bytes. `preview_enabled` in
+availability advertises this separately from the existing native observer path.
+The existing explicit Read observer path remains compatible; Comment alone never
+opens an editor admission or receives private latest native bytes.
+
+`POST /api/v1/pages/{slug}/craft/document/share` requires ordinary human auth and
+`X-Craft-Session`. Its strict JSON request contains `workspaceId`, `pageId`,
+`applicationId`, `enginePin`, `sessionId`, `generation`, `baseVersion` and
+`targetVersion` (canonical positive decimal strings for generations/versions).
+It publishes an existing committed version with current write authority, the
+current lease generation and latest-version CAS inside the same transaction.
+The same transaction records the original human actor, selected version and
+Page in the authorization audit and journal. Unsupported or failed audit writes
+roll back publication. It cannot create content or grant access. Rejected publication preserves both
+content and the prior shared pin. Success returns `{version, durability:"node",
+issuedBy:"crewship", phase:"shared"}`; it is a preview publication receipt,
+not acknowledgement of an unsaved native buffer. Clients must first confirm the
+exact current native snapshot and must not retry an ambiguous publication.
 
 ## Authorization and lifetime
 
