@@ -47,14 +47,15 @@ try {
     // Restore updates existing CRDT structures, preserving connected clients.
     const restored = new Y.Doc()
     Y.applyUpdate(restored, Buffer.from(request.replace, 'base64'))
-    const target = restored.getMap('nodes').toJSON()
+    const target = restored.getMap('nodes')
     doc.transact(() => {
-      for (const id of nodes.keys()) if (!(id in target)) nodes.delete(id)
-      for (const [id, values] of Object.entries(target)) {
+      for (const id of nodes.keys()) if (!target.has(id)) nodes.delete(id)
+      for (const [id, values] of target.entries()) {
+        if (!(values instanceof Y.Map)) throw new Error('invalid restored node')
         let node = nodes.get(id)
         if (!(node instanceof Y.Map)) { node = new Y.Map(); nodes.set(id, node) }
-        for (const key of node.keys()) if (!(key in values)) node.delete(key)
-        for (const [key, value] of Object.entries(values)) node.set(key, value)
+        for (const key of node.keys()) if (!values.has(key)) node.delete(key)
+        for (const [key, value] of values.entries()) node.set(key, value)
       }
       order.delete(0, order.length)
       order.push(restored.getArray('order').toArray())

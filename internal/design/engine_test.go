@@ -113,3 +113,60 @@ func TestEngineMergesIndependentClientsWithoutLosingNodes(t *testing.T) {
 		t.Fatalf("retry duplicated nodes/order: %s / %s", again.Nodes, again.Order)
 	}
 }
+
+func TestEngineRestorePreservesPrototypeNamedNodeIDs(t *testing.T) {
+	for _, id := range []string{"__proto__", "constructor", "toString", "ordinary"} {
+		t.Run(id, func(t *testing.T) {
+			apply := func(state []byte, node map[string]any) Result {
+				t.Helper()
+				ops, _ := json.Marshal([]map[string]any{{"op": "upsert", "node": node}})
+				out, err := Run(t.Context(), Request{State: state, Operations: ops})
+				if err != nil {
+					t.Fatal(err)
+				}
+				return out
+			}
+			saved := apply(nil, map[string]any{"id": id, "type": "text", "x": 0, "y": 0, "width": 100, "height": 30, "text": "SAVED_ORIGINAL", "fill": "#ff0000"})
+			changed := apply(saved.State, map[string]any{"id": id, "text": "CURRENT_CHANGED", "fill": "#00ff00", "name": "CURRENT_ONLY"})
+			empty, err := Run(t.Context(), Request{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertSaved := func(out Result) {
+				t.Helper()
+				if len(out.Nodes) != 1 || len(out.Order) != 1 || out.Order[0] != id {
+					t.Fatalf("restore identity: nodes=%s order=%v", out.Nodes, out.Order)
+				}
+				var node map[string]any
+				if err := json.Unmarshal(out.Nodes[0], &node); err != nil {
+					t.Fatal(err)
+				}
+				if node["id"] != id || node["text"] != "SAVED_ORIGINAL" || node["fill"] != "#ff0000" {
+					t.Fatalf("restore lost saved values: %s", out.Nodes[0])
+				}
+				if _, exists := node["name"]; exists {
+					t.Fatalf("restore kept later-only field: %s", out.Nodes[0])
+				}
+			}
+			for _, state := range [][]byte{changed.State, empty.State} {
+				restored, err := Run(t.Context(), Request{State: state, Replace: saved.State})
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertSaved(restored)
+				live, err := Run(t.Context(), Request{State: state, Frame: restored.Frame})
+				if err != nil {
+					t.Fatal(err)
+				}
+				assertSaved(live)
+			}
+			cleared, err := Run(t.Context(), Request{State: changed.State, Replace: empty.State})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(cleared.Nodes) != 0 || len(cleared.Order) != 0 {
+				t.Fatalf("empty restore retained prototype-named node: %s %v", cleared.Nodes, cleared.Order)
+			}
+		})
+	}
+}
