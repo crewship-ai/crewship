@@ -197,3 +197,32 @@ func TestNativeProposalRefusesOldBaseHumanAuthorAndFlood(t *testing.T) {
 		t.Fatal("unbounded open proposals", err)
 	}
 }
+
+// The editor saves its holder's state before accepting. When that save only
+// repeats the proposal's base bytes, the document did not change and the
+// proposal still applies on top of the new head (dev3 D1, #4491).
+func TestNativeProposalAcceptAfterUnchangedSaveApplies(t *testing.T) {
+	s, _, _, scope, acting, _ := nativeProposalFixture(t)
+	human := *acting
+	l, _, err := s.Initialize(t.Context(), scope, human, []byte(`{"v":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	*acting = nativeProposalAgent
+	p, err := s.Propose(t.Context(), scope, 1, "req-same", "", []byte(`{"v":"agent"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	*acting = human
+	if _, err = s.SaveSnapshot(t.Context(), l, 1, "flush", nativeReceiptHash([]byte(`{"v":1}`)), []byte(`{"v":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	accepted, receipt, err := s.AcceptProposal(t.Context(), l, p.ID)
+	if err != nil || accepted.State != "accepted" || accepted.ResultVersion != 3 || receipt.Version != "3" || receipt.BaseVersion != "2" {
+		t.Fatalf("unchanged save made the proposal stale: %+v %+v %v", accepted, receipt, err)
+	}
+	state, _ := s.Read(t.Context(), scope)
+	if state.LatestVersion != 3 || string(state.Manifest.Files["document.json"].Content) != `{"v":"agent"}` {
+		t.Fatalf("accepted content missing: %+v", state)
+	}
+}
