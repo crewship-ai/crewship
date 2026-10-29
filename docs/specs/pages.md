@@ -1464,7 +1464,17 @@ changes supplied fields of a stable node; new nodes need complete geometry:
 Delete uses `{"op":"delete","id":"cart"}`; reorder uses
 `{"op":"reorder","order":["cart"]}`. Keep existing IDs when changing colors,
 text or geometry. A snapshot creates an ordinary retained artifact version;
-restore creates a new version and preserves history.
+restore creates a new version and preserves history. The CLI reads at most
+1 MiB from `--file`; the HTTP route accepts up to 4 MiB.
+
+Persistence has two layers. The live Yjs head (at most 4 MiB encoded) is
+written on every accepted websocket update and REST operation. Each `apply` and
+`restore` also commits a retained version. Browser edits become a retained
+version through `snapshot` or through an automatic `Automatic Design checkpoint`
+snapshot, taken while an editor's websocket is open once the live head has been
+idle for about 10 seconds. Engine limits (500 operations per request, 2,000
+nodes, 4,000 order entries, unknown node fields) answer 400; history quota
+answers 413 and keeps existing versions.
 
 The corresponding agent tools are `design_get`, `design_apply`,
 `design_snapshot`, `design_versions` and `design_restore`. CLI invocations with a
@@ -1476,7 +1486,11 @@ agents edit an explicitly selected existing Design. The host rejects calls when 
 not enabled. A failed response is never automatically retried.
 The agent tool's `slug` accepts a Page slug or the exact immutable Page ID
 selected by that run's original human mandate, with or without `@`. This does
-not permit selecting another Page.
+not permit selecting another Page. Tool arguments are closed objects of at most
+1 MiB. When the run was triggered by a `--send-to-agent` comment, a successful
+`design_apply` that commits a newer version answers that one bound comment task
+with the reply "Updated the selected Design element."; snapshot and restore do
+not.
 
 Additional human CLI commands list or create anchored comments, pin a shared
 version, and connect the owner's private chat:
