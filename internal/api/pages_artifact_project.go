@@ -606,7 +606,7 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 			kind = "slides"
 		}
 	}
-	writeJSON(w, 200, artifactProjectSnapshotResponse{ArtifactKind: kind, PageID: k.PageID, Name: name, Slug: slug, Origin: origin, Enabled: true, CanWrite: canWrite, CanShare: owner && canWrite, CanRestore: owner && canWrite, CanSendToAgent: owner && canWrite && origin != nil, CanComment: h.artifactProjectCanComment(r, k, view.State.Manifest.Version), LatestVersion: view.State.LatestVersion, SharedVersion: view.State.SharedVersion, Manifest: artifactProjectManifest(view.State.Manifest), Versions: artifactProjectVersionInfos(view.Versions), Quota: view.State.Quota, Comments: comments})
+	writeJSON(w, 200, artifactProjectSnapshotResponse{ArtifactKind: kind, PageID: k.PageID, Name: name, Slug: slug, Origin: origin, Enabled: true, CanWrite: canWrite, CanShare: owner && canWrite, CanRestore: owner && canWrite, CanSendToAgent: owner && canWrite && origin != nil, CanComment: h.artifactProjectCanComment(r, k, view.State.Manifest.Version), LatestVersion: view.State.LatestVersion, SharedVersion: view.State.SharedVersion, Manifest: artifactProjectManifest(view.State.Manifest), Versions: artifactProjectVersionInfos(view.Versions), Quota: view.State.Quota, RetentionPreview: view.Retention, Comments: comments})
 }
 
 func (h *PageHandler) artifactProjectAttached(ctx context.Context, page string) (bool, error) {
