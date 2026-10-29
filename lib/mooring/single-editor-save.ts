@@ -277,10 +277,30 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       const deadline = setTimeout(() => finish(false), timeoutMs)
       lifetime.signal.addEventListener("abort", abort, { once: true })
       if (lifetime.signal.aborted) { abort(); return }
-      void save().then(() => finish(active && lastPersistedSequence >= sequence), () => finish(false))
+      void save().then(async () => {
+        const captured = active && lastPersistedSequence >= sequence
+        if (captured && !finished) { clearTimeout(deadline); await proveLost() }
+        finish(captured)
+      }, () => finish(false))
     })
     emit("read-only", "write_revoked")
     return writeRetirement
+  }
+  // A reply lost while the lease expired is still provable for its exact
+  // successor. Confirm only that attempt and an identical fresh capture; any
+  // other capture stays a draft to compare. Never sends the snapshot again.
+  async function proveLost() {
+    const attempt = unconfirmed
+    if (!attempt || !options.transport.reconcile) return
+    try {
+      const raw = await bounded(signal => options.transport.reconcile!(attempt.draft, signal), new AbortController())
+      const receipt: unknown = raw && typeof raw === "object" ? { ...raw } : raw
+      if (!active || unconfirmed !== attempt || !validReceipt(receipt, attempt)) return
+      unconfirmed = undefined
+      await options.journal.confirm(attempt.draft)
+      const capture = latest?.draft
+      if (active && capture && capture !== attempt.draft && capture.contentHash === attempt.draft.contentHash) await options.journal.confirm(capture)
+    } catch { /* Unproven: the captured draft remains for comparison. */ }
   }
   function revokeRead() { stop(); unregister(); return options.journal.revokeRead() }
   return {
