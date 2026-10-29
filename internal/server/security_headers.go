@@ -36,8 +36,9 @@ func securityHeadersMiddleware(next http.Handler, pageRuntimeOrigin ...string) h
 type securityHeaderOptions struct {
 	pageRuntimeOrigin string
 	// pageRuntimeLoopbackOnly: pageRuntimeOrigin was derived for a localhost
-	// Studio (#3108), so only documents served on a loopback host may frame
-	// it; a Studio reached on any other host gets no loopback frame-src.
+	// Studio (#3108), so only documents served directly on a loopback host
+	// may frame it; a Studio reached on any other host, or through a proxy
+	// (forwarding headers), gets no loopback frame-src.
 	pageRuntimeLoopbackOnly bool
 	// editorFrameSrc returns the embedded workbook editor's frame-src source
 	// for a request; nil while the editor is off. It is a dedicated editor
@@ -72,7 +73,7 @@ func securityHeadersMiddlewareWith(next http.Handler, o securityHeaderOptions) h
 			editorFrameSrc = o.editorFrameSrc(r)
 		}
 		runtimeFrameSrc := o.pageRuntimeOrigin
-		if o.pageRuntimeLoopbackOnly && !pagebuild.LoopbackHost(r.Host) {
+		if o.pageRuntimeLoopbackOnly && !pagebuild.DerivedRuntimeApplies(r) {
 			runtimeFrameSrc = ""
 		}
 		frameSrc := appendFrameSrc(appendFrameSrc(pages.FrameSrcDirective(), runtimeFrameSrc), editorFrameSrc)

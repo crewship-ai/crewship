@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/pagebuild"
 	pageprofile "github.com/crewship-ai/crewship/tools/pages-build"
 	"github.com/spf13/cobra"
 )
@@ -25,10 +26,14 @@ const (
 )
 
 // fakePageDocker replaces every Docker-facing hook for one test. images maps
-// image ID to its profile label value.
+// image ID to its profile label value; tags maps image ID to its RepoTags
+// (default: the exact compiler tag for its label). recorded is written to the
+// record in the config's page project storage (a temp dir) before the test.
 type fakePageDocker struct {
 	pingErr   error
 	images    map[string]string
+	tags      map[string][]string
+	recorded  map[string]string
 	order     []string
 	buildOut  string
 	buildErr  error
@@ -46,10 +51,10 @@ type fakePageDocker struct {
 
 func (f *fakePageDocker) install(t *testing.T) {
 	t.Helper()
-	saved := []any{pageDockerPing, pageLabeledImages, pageDockerBuild, pageDockerRemove, pageLoadConfig, pageImageFinger, pageDockerHost, pageConfirm}
+	saved := []any{pageDockerPing, pageInspectImage, pageDockerBuild, pageDockerRemove, pageLoadConfig, pageImageFinger, pageDockerHost, pageConfirm}
 	t.Cleanup(func() {
 		pageDockerPing = saved[0].(func(context.Context) error)
-		pageLabeledImages = saved[1].(func(context.Context, string) ([]string, error))
+		pageInspectImage = saved[1].(func(context.Context, string) (pagebuild.ImageInfo, error))
 		pageDockerBuild = saved[2].(func(context.Context, string, string, string, string, io.Writer) error)
 		pageDockerRemove = saved[3].(func(context.Context, string, io.Writer) error)
 		pageLoadConfig = saved[4].(func(string) (*config.Config, error))
@@ -60,15 +65,32 @@ func (f *fakePageDocker) install(t *testing.T) {
 	if f.images == nil {
 		f.images = map[string]string{}
 	}
-	pageDockerPing = func(context.Context) error { return f.pingErr }
-	pageLabeledImages = func(_ context.Context, fp string) ([]string, error) {
-		var out []string
-		for _, id := range f.order {
-			if label, ok := f.images[id]; ok && (fp == "" || label == fp) {
-				out = append(out, id)
+	if f.tags == nil {
+		f.tags = map[string][]string{}
+	}
+	if f.cfg != nil && f.cfg.Storage.PageProjectsPath != "" {
+		f.cfg.Storage.PageProjectsPath = t.TempDir()
+		if len(f.recorded) > 0 {
+			rec := &pagebuild.BuildImageRecord{Images: map[string]pagebuild.RecordedImage{}}
+			for fp, id := range f.recorded {
+				rec.Images[fp] = pagebuild.RecordedImage{ID: id, Tag: pagebuild.ImageTag(fp)}
+			}
+			if err := pagebuild.WriteBuildImageRecord(f.cfg.Storage.PageProjectsPath, rec); err != nil {
+				t.Fatal(err)
 			}
 		}
-		return out, nil
+	}
+	pageDockerPing = func(context.Context) error { return f.pingErr }
+	pageInspectImage = func(_ context.Context, ref string) (pagebuild.ImageInfo, error) {
+		label, ok := f.images[ref]
+		if !ok {
+			return pagebuild.ImageInfo{}, errors.New("No such image: " + ref)
+		}
+		tags, ok := f.tags[ref]
+		if !ok {
+			tags = []string{pagebuild.ImageTag(label)}
+		}
+		return pagebuild.ImageInfo{ID: ref, RepoTags: tags, Labels: map[string]string{pageprofile.ImageLabel: label}}, nil
 	}
 	pageDockerBuild = func(_ context.Context, dir, label, tag, iidfile string, w io.Writer) error {
 		f.builds++
@@ -115,6 +137,19 @@ func readyPagesConfig() *config.Config {
 }
 
 func TestPageEnable(t *testing.T) {
+	const attackerID = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	noOrigin := func() *config.Config {
+		c := readyPagesConfig()
+		c.Storage.PageRuntimeOrigin = ""
+		c.Auth.NextjsURL = "https://studio.example.com"
+		return c
+	}
+	noProjects := func() *config.Config {
+		c := readyPagesConfig()
+		c.Storage.PageProjectsPath = ""
+		c.Storage.BasePath = "/var/lib/crewship/crews"
+		return c
+	}
 	for _, tc := range []struct {
 		name       string
 		fake       fakePageDocker
@@ -126,57 +161,70 @@ func TestPageEnable(t *testing.T) {
 	}{
 		{
 			name:       "already enabled builds nothing",
-			fake:       fakePageDocker{images: map[string]string{fakeCurrentID: fakeFingerprint}, order: []string{fakeCurrentID}, cfg: readyPagesConfig()},
+			fake:       fakePageDocker{images: map[string]string{fakeCurrentID: fakeFingerprint}, recorded: map[string]string{fakeFingerprint: fakeCurrentID}, cfg: readyPagesConfig()},
 			wantStdout: fakeCurrentID + "\n",
 			stderrHas:  []string{"already enabled"},
-			stderrNot:  []string{"Still needed", "older"},
+			stderrNot:  []string{"Still needed", "rollback"},
 		},
 		{
-			name:       "builds, labels and reports older images",
-			fake:       fakePageDocker{images: map[string]string{fakeOldID: "oldprofile"}, order: []string{fakeOldID}, buildOut: "Step 1/9 : FROM node\n", cfg: readyPagesConfig()},
+			name:       "builds, records and reports other versions",
+			fake:       fakePageDocker{images: map[string]string{fakeOldID: "oldprofile"}, recorded: map[string]string{"oldprofile": fakeOldID}, buildOut: "Step 1/9 : FROM node\n", cfg: readyPagesConfig()},
 			wantStdout: fakeBuiltID + "\n",
 			wantBuilds: 1,
-			stderrHas:  []string{"Step 1/9", "Pages Apps enabled", "No restart needed", "kept for rollback", "docker image rm " + fakeOldID, "https://pages.example.com"},
+			stderrHas:  []string{"Step 1/9", "Pages Apps enabled", "recorded in", "No restart needed", "kept for rollback", "disable --all", "https://pages.example.com"},
 		},
 		{
-			name: "names missing projects path and runtime origin",
-			fake: fakePageDocker{cfg: func() *config.Config {
-				c := config.Default()
-				c.Storage.BasePath = "/var/lib/crewship/crews"
-				c.Auth.NextjsURL = "https://studio.example.com"
-				return c
-			}()},
+			// #3108 security review: an image carrying this release's label
+			// (a crew image built FROM a labelled base) is not the compiler.
+			name:       "a label-only image is never adopted",
+			fake:       fakePageDocker{images: map[string]string{attackerID: fakeFingerprint}, tags: map[string][]string{attackerID: {"crewship-cache:crew-1"}}, cfg: readyPagesConfig()},
 			wantStdout: fakeBuiltID + "\n",
 			wantBuilds: 1,
-			stderrHas:  []string{"CREWSHIP_PAGE_PROJECTS_PATH", "absolute directory outside storage.base_path (/var/lib/crewship/crews)", "CREWSHIP_PAGE_RUNTIME_ORIGIN", "--config"},
 		},
 		{
-			name:       "unreadable config is advisory",
-			fake:       fakePageDocker{cfgErr: errors.New("config validation: boom")},
+			name:       "a recorded image that lost its tag is rebuilt and re-recorded",
+			fake:       fakePageDocker{images: map[string]string{fakeCurrentID: fakeFingerprint}, tags: map[string][]string{fakeCurrentID: {"evil/runtime:latest"}}, recorded: map[string]string{fakeFingerprint: fakeCurrentID}, cfg: readyPagesConfig()},
 			wantStdout: fakeBuiltID + "\n",
 			wantBuilds: 1,
-			stderrHas:  []string{"config validation: boom", "crewship doctor"},
+			stderrHas:  []string{"not usable", "not tagged"},
+		},
+		{
+			name:       "names a missing runtime origin",
+			fake:       fakePageDocker{cfg: noOrigin()},
+			wantStdout: fakeBuiltID + "\n",
+			wantBuilds: 1,
+			stderrHas:  []string{"CREWSHIP_PAGE_RUNTIME_ORIGIN", "--config"},
+		},
+		{
+			name:    "no project storage refuses before building",
+			fake:    fakePageDocker{cfg: noProjects()},
+			wantErr: "page project storage is not configured",
+		},
+		{
+			name:    "unreadable config refuses",
+			fake:    fakePageDocker{cfgErr: errors.New("config validation: boom")},
+			wantErr: "config validation: boom",
 		},
 		{
 			name:    "docker missing writes nothing",
-			fake:    fakePageDocker{pingErr: errors.New("the Docker daemon is not reachable")},
+			fake:    fakePageDocker{pingErr: errors.New("the Docker daemon is not reachable"), cfg: readyPagesConfig()},
 			wantErr: "cannot enable Pages Apps: the Docker daemon is not reachable",
 		},
 		{
 			name:       "build failure",
-			fake:       fakePageDocker{buildErr: errors.New("exit status 1"), buildOut: "ERROR: failed to solve: pnpm install\n"},
+			fake:       fakePageDocker{buildErr: errors.New("exit status 1"), buildOut: "ERROR: failed to solve: pnpm install\n", cfg: readyPagesConfig()},
 			wantErr:    "docker build failed",
 			wantBuilds: 1,
 		},
 		{
 			name:       "socket proxy refuses builds",
-			fake:       fakePageDocker{buildErr: errors.New("exit status 1"), buildOut: "Error response from daemon: <html><body><h1>403 Forbidden</h1>Request forbidden by administrative rules.</body></html>\n", dockerEnv: "tcp://docker-socket-proxy:2375"},
-			wantErr:    "on the Docker host itself with the same crewship version",
+			fake:       fakePageDocker{buildErr: errors.New("exit status 1"), buildOut: "Error response from daemon: <html><body><h1>403 Forbidden</h1>Request forbidden by administrative rules.</body></html>\n", dockerEnv: "tcp://docker-socket-proxy:2375", cfg: readyPagesConfig()},
+			wantErr:    "--image-only",
 			wantBuilds: 1,
 		},
 		{
 			name:       "invalid image id from build",
-			fake:       fakePageDocker{buildID: "latest"},
+			fake:       fakePageDocker{buildID: "latest", cfg: readyPagesConfig()},
 			wantErr:    "pinned local image ID",
 			wantBuilds: 1,
 		},
@@ -206,13 +254,26 @@ func TestPageEnable(t *testing.T) {
 				if f.label != pageprofile.ImageLabel+"="+fakeFingerprint {
 					t.Errorf("label = %q", f.label)
 				}
-				// Untagged images are pruned and, on the containerd store,
-				// invisible to the label lookup.
 				if f.tag != "crewship-pages-build:"+fakeFingerprint {
 					t.Errorf("tag = %q", f.tag)
 				}
 				if _, err := os.Stat(f.buildDir); !os.IsNotExist(err) {
 					t.Errorf("build context %s not removed (stat err %v)", f.buildDir, err)
+				}
+			}
+			if tc.wantErr == "" {
+				// The server trusts only the record: it must name the
+				// printed image, with the exact tag, in a 0600 file.
+				dir := f.cfg.Storage.PageProjectsPath
+				rec, err := pagebuild.ReadBuildImageRecord(dir)
+				if err != nil {
+					t.Fatalf("record: %v", err)
+				}
+				if got := rec.Images[fakeFingerprint]; got.ID+"\n" != tc.wantStdout || got.Tag != pagebuild.ImageTag(fakeFingerprint) {
+					t.Errorf("record entry = %+v, want %s", got, strings.TrimSpace(tc.wantStdout))
+				}
+				if info, err := os.Stat(pagebuild.BuildImageRecordPath(dir)); err != nil || info.Mode().Perm() != 0o600 {
+					t.Errorf("record mode = %v (err %v), want 0600", info.Mode().Perm(), err)
 				}
 			}
 			for _, want := range tc.stderrHas {
@@ -226,6 +287,21 @@ func TestPageEnable(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPageEnableImageOnlyRecordsNothing(t *testing.T) {
+	f := &fakePageDocker{cfg: readyPagesConfig()}
+	f.install(t)
+	var stdout, stderr bytes.Buffer
+	if err := runPageEnableImageOnly(context.Background(), &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if stdout.String() != fakeBuiltID+"\n" || !strings.Contains(stderr.String(), "CREWSHIP_PAGE_BUILD_IMAGE="+fakeBuiltID) {
+		t.Fatalf("stdout %q stderr %q", stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(pagebuild.BuildImageRecordPath(f.cfg.Storage.PageProjectsPath)); !os.IsNotExist(err) {
+		t.Fatalf("--image-only wrote a record (stat err %v)", err)
 	}
 }
 
@@ -261,8 +337,23 @@ func runDisableForTest(t *testing.T, args ...string) (string, string, error) {
 }
 
 func TestPageDisable(t *testing.T) {
+	both := func() *fakePageDocker {
+		return &fakePageDocker{
+			images:   map[string]string{fakeCurrentID: fakeFingerprint, fakeOldID: "old"},
+			recorded: map[string]string{fakeFingerprint: fakeCurrentID, "old": fakeOldID},
+			cfg:      readyPagesConfig(),
+		}
+	}
+	recordOf := func(t *testing.T, f *fakePageDocker) map[string]pagebuild.RecordedImage {
+		t.Helper()
+		rec, err := pagebuild.ReadBuildImageRecord(f.cfg.Storage.PageProjectsPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rec.Images
+	}
 	t.Run("keeps other versions' images by default", func(t *testing.T) {
-		f := &fakePageDocker{images: map[string]string{fakeCurrentID: fakeFingerprint, fakeOldID: "old"}, order: []string{fakeCurrentID, fakeOldID}}
+		f := both()
 		f.install(t)
 		stdout, _, err := runDisableForTest(t, "--yes")
 		if err != nil {
@@ -274,44 +365,63 @@ func TestPageDisable(t *testing.T) {
 		if _, kept := f.images[fakeOldID]; !kept || len(f.images) != 1 {
 			t.Errorf("images left: %v, want only the other version's", f.images)
 		}
+		if rec := recordOf(t, f); len(rec) != 1 || rec["old"].ID != fakeOldID {
+			t.Errorf("record = %v, want only the other version", rec)
+		}
 	})
-	t.Run("--all removes every Pages image", func(t *testing.T) {
-		f := &fakePageDocker{images: map[string]string{fakeCurrentID: fakeFingerprint, fakeOldID: "old"}, order: []string{fakeCurrentID, fakeOldID}}
+	t.Run("--all removes every recorded image", func(t *testing.T) {
+		f := both()
 		f.install(t)
 		stdout, stderr, err := runDisableForTest(t, "--yes", "--all")
 		if err != nil {
 			t.Fatalf("disable: %v", err)
 		}
-		if stdout != fakeCurrentID+"\n"+fakeOldID+"\n" {
+		if stdout != fakeCurrentID+"\n"+fakeOldID+"\n" && stdout != fakeOldID+"\n"+fakeCurrentID+"\n" {
 			t.Errorf("stdout = %q, want the removed IDs", stdout)
 		}
-		if len(f.images) != 0 {
-			t.Errorf("images left: %v", f.images)
+		if len(f.images) != 0 || len(recordOf(t, f)) != 0 {
+			t.Errorf("images left: %v, record %v", f.images, recordOf(t, f))
 		}
 		if !strings.Contains(stderr, "published applications keep serving") || !strings.Contains(stderr, "crewship page enable") {
 			t.Errorf("stderr does not explain the result:\n%s", stderr)
 		}
 	})
+	t.Run("a recorded ID whose image no longer verifies is forgotten, not removed", func(t *testing.T) {
+		f := both()
+		f.tags = map[string][]string{fakeCurrentID: {"crewship-cache:crew-1"}}
+		f.install(t)
+		stdout, stderr, err := runDisableForTest(t, "--yes")
+		if err != nil {
+			t.Fatalf("disable: %v", err)
+		}
+		if stdout != "" || len(f.removed) != 0 || !strings.Contains(stderr, "not removing") {
+			t.Fatalf("stdout %q removed %v stderr %q", stdout, f.removed, stderr)
+		}
+		if _, still := recordOf(t, f)[fakeFingerprint]; still {
+			t.Error("record still names this version")
+		}
+	})
 	t.Run("refuses without confirmation", func(t *testing.T) {
-		f := &fakePageDocker{images: map[string]string{fakeCurrentID: fakeFingerprint}, order: []string{fakeCurrentID}}
+		f := both()
 		f.install(t)
 		if _, _, err := runDisableForTest(t); err == nil {
 			t.Fatal("disable without --yes succeeded")
 		}
-		if len(f.removed) != 0 {
-			t.Errorf("removed %v without confirmation", f.removed)
+		if len(f.removed) != 0 || len(recordOf(t, f)) != 2 {
+			t.Errorf("removed %v / record %v without confirmation", f.removed, recordOf(t, f))
 		}
 	})
-	t.Run("nothing to remove", func(t *testing.T) {
-		f := &fakePageDocker{}
+	t.Run("nothing recorded", func(t *testing.T) {
+		f := &fakePageDocker{images: map[string]string{fakeCurrentID: fakeFingerprint}, cfg: readyPagesConfig()}
 		f.install(t)
-		stdout, stderr, err := runDisableForTest(t)
-		if err != nil || stdout != "" || !strings.Contains(stderr, "not enabled") {
-			t.Fatalf("err=%v stdout=%q stderr=%q", err, stdout, stderr)
+		stdout, stderr, err := runDisableForTest(t, "--yes", "--all")
+		if err != nil || stdout != "" || !strings.Contains(stderr, "not enabled") || len(f.removed) != 0 {
+			t.Fatalf("err=%v stdout=%q stderr=%q removed=%v", err, stdout, stderr, f.removed)
 		}
 	})
 	t.Run("an image in use is reported and fails the command", func(t *testing.T) {
-		f := &fakePageDocker{images: map[string]string{fakeCurrentID: fakeFingerprint, fakeOldID: "old"}, order: []string{fakeCurrentID, fakeOldID}, removeErr: map[string]error{fakeCurrentID: errors.New("image is being used by running container")}}
+		f := both()
+		f.removeErr = map[string]error{fakeCurrentID: errors.New("image is being used by running container")}
 		f.install(t)
 		stdout, stderr, err := runDisableForTest(t, "--yes", "--all")
 		if err == nil || !strings.Contains(err.Error(), "1 of 2") {
@@ -322,7 +432,7 @@ func TestPageDisable(t *testing.T) {
 		}
 	})
 	t.Run("docker missing", func(t *testing.T) {
-		f := &fakePageDocker{pingErr: errors.New("not reachable")}
+		f := &fakePageDocker{pingErr: errors.New("not reachable"), cfg: readyPagesConfig()}
 		f.install(t)
 		if _, _, err := runDisableForTest(t, "--yes"); err == nil || !strings.Contains(err.Error(), "cannot disable") {
 			t.Fatalf("err = %v", err)
@@ -340,27 +450,59 @@ func TestCheckPagesApps(t *testing.T) {
 	noOrigin.Auth.NextjsURL = "https://studio.example.com"
 	explicit := readyPagesConfig()
 	explicit.Storage.PageBuildImage = fakeOldID
+	enabled := pagesImageState{recorded: fakeCurrentID}
 	for _, tc := range []struct {
-		name          string
-		current, all  []string
-		cfg           *config.Config
-		cfgErr        error
-		status, has   string
-		hintHas       string
-		notFailOrWarn bool
+		name        string
+		state       pagesImageState
+		cfg         *config.Config
+		cfgErr      error
+		status, has string
+		hintHas     string
 	}{
 		{name: "not enabled is informational", cfg: ready, status: "INFO", has: "not enabled", hintHas: "crewship page enable"},
-		{name: "outdated", all: []string{fakeOldID}, cfg: ready, status: "WARN", has: "outdated", hintHas: "crewship page enable"},
-		{name: "enabled", current: []string{fakeCurrentID}, cfg: ready, status: "PASS", has: "enabled (111111111111), runtime origin https://pages.example.com"},
-		{name: "projects path missing", current: []string{fakeCurrentID}, cfg: noProjects, status: "WARN", has: "page project storage is not configured", hintHas: "CREWSHIP_PAGE_PROJECTS_PATH"},
-		{name: "runtime origin missing", current: []string{fakeCurrentID}, cfg: noOrigin, status: "WARN", has: "no Page runtime origin", hintHas: "CREWSHIP_PAGE_RUNTIME_ORIGIN"},
+		{name: "outdated", state: pagesImageState{outdated: true}, cfg: ready, status: "WARN", has: "outdated", hintHas: "crewship page enable"},
+		{name: "record does not verify", state: pagesImageState{problem: "(image 111111111111 is not tagged crewship-pages-build:f00d)"}, cfg: ready, status: "WARN", has: "not tagged", hintHas: "crewship page enable"},
+		{name: "enabled", state: enabled, cfg: ready, status: "PASS", has: "enabled (111111111111), runtime origin https://pages.example.com"},
+		{name: "projects path missing", state: enabled, cfg: noProjects, status: "WARN", has: "page project storage is not configured", hintHas: "CREWSHIP_PAGE_PROJECTS_PATH"},
+		{name: "runtime origin missing", state: enabled, cfg: noOrigin, status: "WARN", has: "no Page runtime origin", hintHas: "CREWSHIP_PAGE_RUNTIME_ORIGIN"},
 		{name: "explicit image wins", cfg: explicit, status: "PASS", has: "CREWSHIP_PAGE_BUILD_IMAGE"},
-		{name: "unreadable config", current: []string{fakeCurrentID}, cfgErr: errors.New("bad yaml"), status: "WARN", has: "unreadable", hintHas: "bad yaml"},
+		{name: "unreadable config", state: enabled, cfgErr: errors.New("bad yaml"), status: "WARN", has: "unreadable", hintHas: "bad yaml"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := checkPagesApps(tc.current, tc.all, tc.cfg, tc.cfgErr)
+			got := checkPagesApps(tc.state, tc.cfg, tc.cfgErr)
 			if got.name != pagesCheckName || got.status != tc.status || !strings.Contains(got.detail, tc.has) || !strings.Contains(got.hint, tc.hintHas) {
 				t.Errorf("got %+v, want status %s detail ~%q hint ~%q", got, tc.status, tc.has, tc.hintHas)
+			}
+		})
+	}
+}
+
+func TestPagesRecordState(t *testing.T) {
+	const attackerID = "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	for _, tc := range []struct {
+		name string
+		fake fakePageDocker
+		want pagesImageState
+		has  string
+	}{
+		{name: "verified", fake: fakePageDocker{images: map[string]string{fakeCurrentID: fakeFingerprint}, recorded: map[string]string{fakeFingerprint: fakeCurrentID}}, want: pagesImageState{recorded: fakeCurrentID}},
+		{name: "label-only image is not enabled", fake: fakePageDocker{images: map[string]string{attackerID: fakeFingerprint}, tags: map[string][]string{attackerID: {"crewship-cache:x"}}}, want: pagesImageState{}},
+		{name: "other version only", fake: fakePageDocker{images: map[string]string{fakeOldID: "old"}, recorded: map[string]string{"old": fakeOldID}}, want: pagesImageState{outdated: true}},
+		{name: "recorded image gone", fake: fakePageDocker{recorded: map[string]string{fakeFingerprint: fakeCurrentID}}, has: "No such image"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := tc.fake
+			f.cfg = readyPagesConfig()
+			f.install(t)
+			got := pagesRecordState(context.Background(), f.cfg.Storage.PageProjectsPath)
+			if tc.has != "" {
+				if got.recorded != "" || !strings.Contains(got.problem, tc.has) {
+					t.Fatalf("got %+v, want a problem naming %q", got, tc.has)
+				}
+				return
+			}
+			if got != tc.want {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
 			}
 		})
 	}

@@ -75,6 +75,19 @@ func TestPageRuntimeOriginReachesTheHandler(t *testing.T) {
 			if derived := tc.configured == "" && tc.runtime != ""; derived == strings.Contains(remote, "http://"+tc.runtime) && tc.runtime != "" {
 				t.Fatalf("CSP for a remote Studio host (derived %v): %s", derived, remote)
 			}
+			// A reverse proxy that rewrites Host to localhost still serves
+			// remote browsers; its forwarding headers say so.
+			for _, header := range []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Forwarded"} {
+				r = httptest.NewRequest("GET", "/", nil)
+				r.Host = "localhost:8080"
+				r.Header.Set(header, "for=203.0.113.7")
+				w = httptest.NewRecorder()
+				h.ServeHTTP(w, r)
+				proxied := w.Header().Get("Content-Security-Policy")
+				if derived := tc.configured == "" && tc.runtime != ""; derived == strings.Contains(proxied, "http://"+tc.runtime) && tc.runtime != "" {
+					t.Fatalf("CSP behind a proxy (%s, derived %v): %s", header, derived, proxied)
+				}
+			}
 		})
 	}
 }

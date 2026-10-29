@@ -16,7 +16,7 @@ přijaté 2026-10-29 delegovaným rozhodnutím maintainera.
 | Lokální instalace a vývoj | zdrojový checkout, ruční `docker build`, 2–3 proměnné, restart | `crewship page enable` |
 | Produkce | totéž + DNS/TLS pro druhý web | `crewship page enable` + `CREWSHIP_PAGE_RUNTIME_ORIGIN` + DNS/TLS |
 | Upgrade binárky | build stránky selže obecnou chybou | server, `doctor` i API řeknou „spusťte `crewship page enable`“ |
-| Bez internetu | ruční build a digest | `docker save`/`docker load` image vyrobeného příkazem `enable` |
+| Bez internetu | ruční build a digest | `docker save`/`docker load` image z `enable --image-only` + `CREWSHIP_PAGE_BUILD_IMAGE` |
 
 Nemění se: build nikdy nestahuje image ani závislosti (`--pull=never`,
 `--network=none`), běží z neměnného image ID, otisk profilu musí odpovídat
@@ -71,26 +71,32 @@ instalace při startu je proto vyloučena; zapnutí musí být výslovný krok.
 
 ## 4. Návrh
 
-### 4.1 Image se hledá podle štítku, ne podle konfigurace
+### 4.1 Image zapisuje správce do záznamu, ne do konfigurace
 
-`crewship page enable` postaví image a označí ho štítkem
-`ai.crewship.pages.image=<pageprofile.ImageFingerprint()>`.
+`crewship page enable` postaví image, otaguje ho přesným lokálním tagem
+`crewship-pages-build:<otisk[:12]>`, označí štítkem
+`ai.crewship.pages.image=<pageprofile.ImageFingerprint()>` a **zapíše jeho přesné
+ID** do `<CREWSHIP_PAGE_PROJECTS_PATH>/pages-build-image.json` (atomicky, 0600,
+vlastník = vlastník adresáře).
 
 Server hledá image takto:
 
-1. Je-li nastaven `CREWSHIP_PAGE_BUILD_IMAGE`, platí jako dnes (přepsání pro speciální případy).
-2. Jinak najde lokální image se štítkem rovným vlastnímu otisku
-   (`docker image ls --filter label=… --format '{{.ID}}'`, při více shodách nejnovější).
-   Nalezené ID si zafixuje; build dál běží z neměnného `sha256:` ID.
-3. Hledá při startu a znovu tehdy, když by build jinak vrátil 503. Po
+1. Je-li nastaven `CREWSHIP_PAGE_BUILD_IMAGE`, platí jako dnes (přepsání; cesta
+   pro Docker Compose a offline hostitele).
+2. Jinak přečte záznam pro vlastní otisk a přes `docker image inspect` ověří, že
+   image má zaznamenané ID, přesný tag i štítek. Nikdy nehledá podle štítku a
+   nikdy nebere „nejnovější“.
+3. Záznam čte znovu nejpozději po 2 s (zamítnutí) / 10 s (nalezený image). Po
    `crewship page enable` proto **není potřeba restart**.
-4. Nenajde-li nic, Pages Apps jsou vypnuté. Existence image tedy je výslovné
-   zapnutí správcem.
+4. Chybí-li záznam, nebo neodpovídá (jiné ID, chybí tag, jiný štítek, soubor
+   zapisovatelný skupinou/ostatními), Pages Apps jsou vypnuté (fail closed).
 
-Bezpečnost: vyrobit image s tímto štítkem může jen ten, kdo má přístup k Docker
-daemonu, tedy fakticky root na hostiteli. To je stejná úroveň důvěry jako dnešní
-lokálně postavený digest. Pojistka po buildu (`decodeWorkerArtifact`) zůstává.
-Tuto změnu pravidla „digest v konfiguraci“ je potřeba zapsat jako rozhodnutí.
+Bezpečnost: štítek sám o sobě nic nedokazuje. Otisk je veřejný a štítek dědí
+každý image postavený `FROM` označeného základu; Crewship sám stahuje na stejný
+daemon runtime image crew, které volí správce workspace (bezpečnostní revize
+#4497). Kotvou důvěry je proto ID, které zapsal správce serveru do chráněného
+úložiště, spolu s přesným tagem a štítkem. Pojistka po buildu
+(`decodeWorkerArtifact`) zůstává jako kontrola konzistence.
 
 ### 4.2 Výchozí runtime origin pro lokální instalaci
 
@@ -132,17 +138,19 @@ crewship page disable    # odstraní image této verze (vypne Pages Apps); --all
 `enable`:
 
 1. Ověří Docker (stejná detekce jako `crewship doctor`).
-2. Když image pro aktuální otisk existuje, vypíše „already enabled“ a skončí.
+2. Když zaznamenaný image pro aktuální otisk existuje a ověří se, vypíše
+   „already enabled“ a skončí.
 3. Zapíše embedovaný build context do dočasného adresáře a spustí
-   `docker build --label ai.crewship.pages.image=<otisk> --iidfile …`.
+   `docker build --label ai.crewship.pages.image=<otisk> --tag crewship-pages-build:<otisk[:12]> --iidfile …`,
+   výsledek ověří přes `docker image inspect` a ID zapíše do záznamu.
    Síť je potřeba jen teď (base image, pnpm), ne při buildech stránek.
 4. Na stdout vypíše jen ID image (pro skripty: `image=$(crewship page enable)`),
-   vše ostatní na stderr. Starší Pages image ponechá kvůli rollbacku a vypíše,
-   jak je odstranit.
+   vše ostatní na stderr. Záznamy jiných verzí ponechá kvůli rollbacku.
 5. Vypíše, co ještě chybí: typicky runtime origin v produkci.
 
-Nezapisuje žádnou konfiguraci, a proto nepotřebuje práva k souborům služby.
-Stačí přístup k Dockeru.
+Konfiguraci nemění, ale zapisuje do úložiště projektů, proto běží pod účtem
+serveru (nebo přes `sudo`). `--image-only` záznam nezapisuje (Docker Compose).
+`disable` maže jen zaznamenané a ověřené image, nikdy image jen se štítkem.
 
 `crewship doctor` dostane řádek Pages: `enabled` / `not enabled` /
 `outdated (image for another version)` / `runtime origin missing` /
@@ -184,12 +192,12 @@ se zelenou verifikační smyčkou (`go test ./... -count=1 -timeout 40m`, `go ve
 
 | Krok | Obsah | Soubory | Testy |
 | --- | --- | --- | --- |
-| 0 | Rozhodnutí o hledání image podle štítku | `docs/decisions/` | — |
+| 0 | Rozhodnutí o zaznamenaném image (ID + tag + štítek) | `docs/decisions/` | — |
 | 1 | Embedovaný build context | `tools/pages-build/profile.go` (+ `Dockerfile`, `pnpm-workspace.yaml`), funkce pro zápis contextu | embedovaný context je bajtově shodný se soubory v repu |
 | 2 | Kódy chyb a texty | `internal/api/pages_build.go`, `pages_project_publish.go`, `pages_project_review.go`, `internal/pagebuild/docker.go` | odpovědi 503 obsahují kód a příkaz |
 | 3 | Seed jedna zpráva | `cmd/crewship/cmd_seed_data_pages.go` | rozšířit `cmd_seed_data_pages_test.go` (vzor: storage 503 na řádku 646) |
 | 4 | `crewship page enable` / `disable` | `cmd/crewship/cmd_page_enable.go`, `docs/cli/page.mdx` | idempotence, bez Dockeru nenulový exit; Docker test se přeskočí bez daemonu |
-| 5 | Hledání image podle štítku + opětovné hledání místo 503 | `internal/pagebuild/` (resolver), `internal/api/router_pages.go`, `pages_build.go` | štítek pro jiný otisk se ignoruje; explicitní env má přednost; zapnutí bez restartu |
+| 5 | Ověření zaznamenaného image + opětovné čtení místo 503 | `internal/pagebuild/` (resolver), `internal/api/router_pages.go`, `pages_build.go` | image jen se štítkem (jiné ID/tag, novější Created) se nepoužije; chybějící/neodpovídající záznam = vypnuto; explicitní env má přednost; zapnutí bez restartu |
 | 6 | Výchozí runtime origin a projects path | `internal/config/page_projects.go`, `config.go`, `packaging/crewship.service` | tabulka případů: localhost / LAN IP / HTTPS / vlastní host / base_path překryv |
 | 7 | `doctor` | `cmd/crewship/cmd_doctor*.go` | všechny stavy řádku Pages |
 | 8 | Dev a CI | `dev.sh`, `scripts/test-pages-apps.sh`, `.github/workflows/ci.yml` | `scripts/test-pages-apps.sh` zelený |
@@ -208,14 +216,18 @@ Kroky 1–3 mají hodnotu samy o sobě a lze je mergnout dřív než zbytek.
 4. Druhé `enable` stejnou verzí nic nestaví.
 5. Po výměně binárky za verzi s jiným otiskem: `doctor` hlásí `outdated`, API vrací
    `page_apps_not_enabled`, po `enable` vše funguje. Starý image zůstal.
-6. `docker rmi` image: `doctor` hlásí `not enabled` před prvním buildem.
+6. `docker rmi` image: `doctor` hlásí, že zaznamenaný image se neověřil; server je vypnutý.
 7. Bez `enable` server nespouští žádný Pages kontejner a nevytváří projects adresář.
-8. Bez internetu: `docker save` image z online stroje se stejnou verzí, `docker load`
-   na cílovém stroji → Pages Apps zapnuté bez dalšího kroku.
+8. Bez internetu: `crewship page enable --image-only` + `docker save` na online stroji se
+   stejnou verzí, `docker load` na cílovém stroji a `CREWSHIP_PAGE_BUILD_IMAGE=<ID>`
+   → Pages Apps zapnuté (načtený image se nezaznamenává).
 9. (Odloženo s krokem 8.) `./dev.sh start` + `crewship seed` na čistém dev stroji s Dockerem → demo
    aplikace publikované; s `CREWSHIP_DEV_PAGES=0` seed vypíše jednu zprávu.
 10. Build stránky dál běží s `--pull=never`, `--network=none` a neměnným ID
     (stávající `internal/pagebuild/docker_test.go` beze změny).
+11. Image se štítkem aktuálního otisku, ale jiným ID/tagem a novějším `Created`
+    (např. cache image crew postavený `FROM` označeného základu) se nikdy nepoužije
+    a `disable --all` ho nesmaže.
 
 ## 7. Rizika
 

@@ -18,17 +18,26 @@ crewship page enable
 ```
 
 The binary carries the compiler's build context. `enable` builds the Pages tools
-image from it and labels it `ai.crewship.pages.image=<build context fingerprint>`. It
+image from it, tags it `crewship-pages-build:<fingerprint prefix>`, labels it
+`ai.crewship.pages.image=<build context fingerprint>` and **records its exact image
+ID** in `<CREWSHIP_PAGE_PROJECTS_PATH>/pages-build-image.json` (mode `0600`). Run
+it as the account the server runs as (with `sudo` the record is given to the
+storage directory's owner) and with the server's configuration (`--config`). It
 needs Docker access, and network access only during this step (base image and
 compiler dependencies). It prints only the immutable `sha256:…` image ID on stdout;
 progress and hints go to stderr. Running it again with the same release does
-nothing, and it exits nonzero when Docker is unavailable.
+nothing, and it exits nonzero when Docker is unavailable or project storage is
+not configured.
 
-The server finds the labelled image for its own release by itself and notices it
-within seconds, so no restart and no configuration edit is needed. Until such an
-image exists Pages applications are disabled: the server starts no Pages container
-and the build, review and publish endpoints answer `503` with
-`code: page_apps_not_enabled`. `crewship doctor` reports the state.
+The server reads the record and notices it within seconds, so no restart and no
+configuration edit is needed. It uses an image only when its ID equals the
+recorded ID **and** it carries the exact tag and its release's label; the label
+alone is never trusted, because images built `FROM` a labelled base — such as a
+crew's runtime or cache image, which workspace managers choose — inherit it.
+Without a verified record Pages applications are disabled: the server starts no
+Pages container and the build, review and publish endpoints answer `503` with
+`code: page_apps_not_enabled`. `crewship doctor` reports the state, including a
+record that no longer verifies.
 
 The compiler never pulls an image or installs project dependencies during a Page
 build (`--pull=never`, `--network=none`) and always runs from the immutable image
@@ -36,8 +45,9 @@ ID. After each build the server verifies that the image's SDK/compiler/dependenc
 fingerprint matches its own; a mismatch is an installation error that asks you to
 run `crewship page enable`.
 
-To turn Pages applications off again, remove this version's Pages image
-(`--all` also removes the images of other versions on the same Docker host):
+To turn Pages applications off again, remove this version from the record and
+delete the image it names (`--all` also removes the recorded images of other
+versions; an image that only carries the label is never removed):
 
 ```bash
 crewship page disable
@@ -45,14 +55,14 @@ crewship page disable
 
 ### Pin an image explicitly
 
-`CREWSHIP_PAGE_BUILD_IMAGE` overrides discovery. When it is set, the server uses
-exactly that image and never looks for a labelled one. It must be an immutable
+`CREWSHIP_PAGE_BUILD_IMAGE` overrides the record. When it is set, the server uses
+exactly that image and never reads the record. It must be an immutable
 `sha256:…` ID or digest, never a mutable tag, and the image must be built for this
 release (the post-build fingerprint check still applies). Use it to pin one
 specific image or when change control requires the ID in configuration:
 
 ```bash
-CREWSHIP_PAGE_BUILD_IMAGE="$(crewship page enable)"
+CREWSHIP_PAGE_BUILD_IMAGE="$(crewship page enable --image-only)"
 ```
 
 ### Hosts without internet access
@@ -61,22 +71,28 @@ Run `crewship page enable` on a connected machine with the **same Crewship
 version**, then move the image:
 
 ```bash
-image="$(crewship page enable)"
+image="$(crewship page enable --image-only)"
 docker save "$image" -o crewship-pages-build.tar
 # on the target host:
 docker load -i crewship-pages-build.tar
 ```
 
-The label travels with the image, so the target server enables Pages applications
-without further configuration.
+Then pin it on the target with `CREWSHIP_PAGE_BUILD_IMAGE=<that sha256 ID>` and
+restart the server. A loaded image is not recorded: the record is written only by
+a build on the server's own host.
 
 ### Docker Compose
 
 The production Compose stack (`docker/docker-compose.prod.yml`) reaches Docker
 through a socket proxy with `BUILD=0`, so `crewship page enable` cannot build from
-inside the Crewship container. Run it on the Docker host with a `crewship` binary of
-the same version; the server container sees the image on the shared daemon. Do not
-grant the proxy `BUILD` only for this step.
+inside the Crewship container, and the container does not read the host's files.
+Run `crewship page enable --image-only` on the Docker host with a `crewship` binary
+of the same version and set `CREWSHIP_PAGE_BUILD_IMAGE` to the printed ID in the
+stack's environment; the server container runs that image on the shared daemon.
+Do not grant the proxy `BUILD` only for this step. (Mounting the record into the
+container is possible — `pages-build-image.json` in the container's
+`CREWSHIP_PAGE_PROJECTS_PATH` — but the record also needs `docker image inspect`
+through the proxy; the explicit image is the documented route.)
 
 ### Host requirements
 
@@ -93,8 +109,10 @@ listens on loopback or all interfaces needs no origin setting: when
 `http://127.0.0.1:<server port>`. A literal loopback IP is a different browser site
 from `localhost`, so this is real site isolation, not the development same-origin
 exception. The derived origin applies only to browsers that reach the server on
-a loopback host (`localhost`, `127.0.0.1`, `::1`): Studio reached on any other
-host does not frame it and publication answers as if no runtime origin were
+a loopback host (`localhost`, `127.0.0.1`, `::1`) directly. A request carrying a
+proxy header (`Forwarded`, any `X-Forwarded-*`, `X-Real-IP`) counts as remote even
+when the proxy rewrote `Host` to localhost. Studio reached on any other host or
+through a proxy does not frame it and publication answers as if no runtime origin were
 configured, and the same-host workbook editor is never served on it.
 
 Every other installation (remote viewers, HTTPS, a custom domain) sets the runtime

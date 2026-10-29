@@ -50,7 +50,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 )
 
-// validateExplicitPageBuildImage accepts an unset image (resolve by label) or
+// validateExplicitPageBuildImage accepts an unset image (use the recorded one) or
 // a pinned one; a mutable tag leaves the worker unwired, as before.
 func validateExplicitPageBuildImage(image string) error {
 	if image == "" {
@@ -78,13 +78,14 @@ func (r *Router) registerPageRoutes() {
 
 	// The worker is always wired with project storage. Whether it may build is
 	// decided per request: an explicit CREWSHIP_PAGE_BUILD_IMAGE, or else the
-	// image `crewship page enable` labelled for this release. Without either,
-	// only `docker image ls` ever runs — no Pages container (#3108).
+	// image `crewship page enable` recorded for this release. Without either,
+	// only the record is read (and `docker image inspect` run) — no Pages
+	// container (#3108).
 	if r.pageProjectsPath != "" {
 		if err := validateExplicitPageBuildImage(r.pageBuildImage); err != nil {
 			r.logger.Error("Page build configuration", "error", err)
 		} else {
-			builder := &pagebuild.DockerBuilder{Resolver: &pagebuild.ImageResolver{Explicit: r.pageBuildImage, Lookup: r.pageBuildImageLookup}}
+			builder := &pagebuild.DockerBuilder{Resolver: &pagebuild.ImageResolver{Explicit: r.pageBuildImage, RecordDir: r.pageProjectsPath, Lookup: r.pageBuildImageLookup}}
 			p.SetBuildWorker(builder, &pagebuild.Store{Directory: filepath.Join(r.pageProjectsPath, "artifacts")})
 			if err := p.recoverPageBuilds(context.Background()); err != nil {
 				r.logger.Error("recover Page builds", "error", err)

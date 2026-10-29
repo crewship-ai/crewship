@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -254,16 +255,19 @@ func TestPagePreviewWhenNotEnabled(t *testing.T) {
 // one missing setting: storage (not enabled) or the runtime origin.
 func TestPagePublicationRefusalCodes(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		strip  func(h *PageHandler)
-		code   string
-		remedy string
+		name      string
+		strip     func(h *PageHandler)
+		host      string // request Host; "" keeps httptest's example.com
+		forwarded bool   // add X-Forwarded-For, as a reverse proxy does
+		code      string
+		remedy    string
 	}{
 		{name: "no artifact store", strip: func(h *PageHandler) { h.pageArtifacts = nil }, code: pagebuild.CodeNotEnabled, remedy: pagebuild.EnableCommand},
 		{name: "no runtime origin", strip: func(h *PageHandler) { h.pageRuntimeOrigin = "" }, code: pagebuild.CodeRuntimeOriginMissing, remedy: "CREWSHIP_PAGE_RUNTIME_ORIGIN"},
 		// A runtime origin derived for a localhost Studio names the visitor's
 		// own machine for any browser that reached a non-loopback host.
 		{name: "derived runtime origin on a remote host", strip: func(h *PageHandler) { h.pageRuntimeDerived = true }, code: pagebuild.CodeRuntimeOriginMissing, remedy: "CREWSHIP_PAGE_RUNTIME_ORIGIN"},
+		{name: "derived runtime origin behind a proxy on loopback", strip: func(h *PageHandler) { h.pageRuntimeDerived = true }, host: "localhost:8080", forwarded: true, code: pagebuild.CodeRuntimeOriginMissing, remedy: "CREWSHIP_PAGE_RUNTIME_ORIGIN"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, _, ws, user := reviewFixture(t)
@@ -271,16 +275,26 @@ func TestPagePublicationRefusalCodes(t *testing.T) {
 				t.Fatal(w.Body.String())
 			}
 			tc.strip(h)
+			proxied := func(r *http.Request) {
+				if tc.host != "" {
+					r.Host = tc.host
+				}
+				if tc.forwarded {
+					r.Header.Set("X-Forwarded-For", "203.0.113.7")
+				}
+			}
 			body := `{"build_id":"missing","expected_revision":1}`
 			for name, handler := range map[string]func(*httptest.ResponseRecorder, *PageHandler, string){
 				"check": func(w *httptest.ResponseRecorder, h *PageHandler, body string) {
 					r := pagesRequest(t, "POST", "/", ws, user, "OWNER", body)
 					r.SetPathValue("slug", "health")
+					proxied(r)
 					h.CheckProject(w, r)
 				},
 				"publish": func(w *httptest.ResponseRecorder, h *PageHandler, body string) {
 					r := pagesRequest(t, "POST", "/", ws, user, "OWNER", `{"build_id":"missing","expected_revision":1,"expected_publication":0,"reviewed_code":true,"expected_definition_digest":"`+strings.Repeat("a", 64)+`","expected_routine_digests":{}}`)
 					r.SetPathValue("slug", "health")
+					proxied(r)
 					h.PublishProject(w, r)
 				},
 			} {
@@ -310,6 +324,7 @@ func TestRuntimeOriginForDerived(t *testing.T) {
 	for _, tc := range []struct {
 		host    string
 		derived bool
+		header  string // a proxy forwarding header, "Name: value"
 		want    string
 	}{
 		{host: "localhost:8080", derived: true, want: origin},
@@ -318,12 +333,67 @@ func TestRuntimeOriginForDerived(t *testing.T) {
 		{host: "crewship.example.com", derived: true, want: ""},
 		{host: "192.168.1.10:8080", derived: true, want: ""},
 		{host: "crewship.example.com", derived: false, want: origin},
+		// A reverse proxy in front (nginx `proxy_pass http://localhost:8080`
+		// sends Host: localhost) serves remote browsers: forwarding headers
+		// mean the loopback Host is not where the browser is.
+		{host: "localhost:8080", derived: true, header: "X-Forwarded-For: 203.0.113.7", want: ""},
+		{host: "localhost:8080", derived: true, header: "X-Forwarded-Host: studio.example.com", want: ""},
+		{host: "127.0.0.1:8080", derived: true, header: "X-Forwarded-Proto: https", want: ""},
+		{host: "localhost:8080", derived: true, header: "Forwarded: for=203.0.113.7;host=studio.example.com", want: ""},
+		{host: "crewship.example.com", derived: false, header: "X-Forwarded-For: 203.0.113.7", want: origin},
 	} {
 		h := &PageHandler{pageRuntimeOrigin: origin, pageRuntimeDerived: tc.derived}
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Host = tc.host
-		if got := h.runtimeOriginFor(r); got != tc.want {
-			t.Errorf("host %s derived %v: %q, want %q", tc.host, tc.derived, got, tc.want)
+		if name, value, ok := strings.Cut(tc.header, ": "); ok {
+			r.Header.Set(name, value)
 		}
+		if got := h.runtimeOriginFor(r); got != tc.want {
+			t.Errorf("host %s derived %v header %q: %q, want %q", tc.host, tc.derived, tc.header, got, tc.want)
+		}
+	}
+}
+
+// TestPageBuildWorkerTrustsOnlyTheRecord — the router wires the resolver to
+// the record `crewship page enable` writes in page_projects_path. An image
+// that only carries this release's label (a crew image built FROM a labelled
+// base) never enables builds; the recorded, tagged image does (#3108 security
+// review).
+func TestPageBuildWorkerTrustsOnlyTheRecord(t *testing.T) {
+	fp := pageprofile.ImageFingerprint()
+	genuine := "sha256:" + strings.Repeat("a", 64)
+	dir := t.TempDir()
+	inspect := func(id string, tags []string) {
+		body, _ := json.Marshal([]map[string]any{{"Id": id, "RepoTags": tags, "Config": map[string]any{"Labels": map[string]string{pageprofile.ImageLabel: fp}}}})
+		if err := os.WriteFile(filepath.Join(dir, "inspect-"+strings.TrimPrefix(id, "sha256:")), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inspect(genuine, []string{pagebuild.ImageTag(fp)})
+	// Every label listing would return this one first; nothing may list.
+	script := "#!/bin/sh\nd='" + dir + "'\nprintf '%s\\n' \"$*\" >> \"$d/calls\"\nif [ \"$1 $2\" = 'image inspect' ]; then f=\"$d/inspect-${3#sha256:}\"; [ -f \"$f\" ] && exec cat \"$f\"; echo \"No such image: $3\" >&2; exit 1; fi\nif [ \"$1 $2\" = 'image ls' ]; then echo sha256:" + strings.Repeat("e", 64) + "; exit 0; fi\nexit 2\n"
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	projects := storageDir(t)
+	router, err := NewRouter(setupTestDB(t), "this-is-a-32-char-test-secret-pad", newTestLogger(), WithPageProjectsPath(projects))
+	if err != nil {
+		t.Fatal(err)
+	}
+	available := router.pages.builds.worker.(pagebuild.Availability)
+	if err := available.Available(t.Context()); !errors.Is(err, pagebuild.ErrNotEnabled) {
+		t.Fatalf("without a record: %v, want ErrNotEnabled", err)
+	}
+	if err := pagebuild.WriteBuildImageRecord(projects, &pagebuild.BuildImageRecord{Images: map[string]pagebuild.RecordedImage{fp: {ID: genuine, Tag: pagebuild.ImageTag(fp)}}}); err != nil {
+		t.Fatal(err)
+	}
+	router.pages.builds.worker.(*pagebuild.DockerBuilder).Resolver.Invalidate()
+	if err := available.Available(t.Context()); err != nil {
+		t.Fatalf("with the record: %v", err)
+	}
+	calls, _ := os.ReadFile(filepath.Join(dir, "calls"))
+	if strings.Contains(string(calls), "image ls") {
+		t.Fatalf("the server listed images by label:\n%s", calls)
 	}
 }

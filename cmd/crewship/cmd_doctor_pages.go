@@ -5,14 +5,16 @@ package main
 // The `pages apps` row of `crewship doctor` (#3108).
 //
 // Pages Apps are optional, so "not enabled" is INFO, never a warning: an
-// installation that never ran `crewship page enable` is healthy. Once an image
-// exists, what stands between it and a working Page application — an image
-// built by another version, no project storage, no runtime origin — is a WARN
-// with the exact remedy. The check only lists images; it never starts a
-// container or builds anything.
+// installation that never ran `crewship page enable` is healthy. Once a
+// compiler image is recorded, what stands between it and a working Page
+// application — a record that no longer verifies, only another version
+// recorded, no project storage, no runtime origin — is a WARN with the exact
+// remedy. The check reads the record and inspects one image; it never starts
+// a container or builds anything.
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/config"
@@ -21,27 +23,41 @@ import (
 
 const pagesCheckName = "pages apps"
 
+// pagesImageState is what the record says about this version's compiler.
+type pagesImageState struct {
+	recorded string // verified image ID for this version
+	problem  string // a record exists for this version but does not verify
+	outdated bool   // only other versions are recorded
+}
+
 func runCheckPagesApps(ctx context.Context) checkResult {
 	if err := pageDockerPing(ctx); err != nil {
 		return checkResult{name: pagesCheckName, status: "INFO", detail: "not checked: Docker is not reachable (Pages Apps need Docker)"}
 	}
-	current, err := pageLabeledImages(ctx, pageImageFinger())
-	if err != nil {
-		return checkResult{name: pagesCheckName, status: "WARN", detail: "could not list Pages compiler images: " + err.Error()}
-	}
-	var all []string
-	if len(current) == 0 {
-		if all, err = pageLabeledImages(ctx, ""); err != nil {
-			return checkResult{name: pagesCheckName, status: "WARN", detail: "could not list Pages compiler images: " + err.Error()}
-		}
-	}
 	cfg, cfgErr := pageLoadConfig("")
-	return checkPagesApps(current, all, cfg, cfgErr)
+	var state pagesImageState
+	if cfgErr == nil && cfg != nil && cfg.Storage.PageProjectsPath != "" {
+		state = pagesRecordState(ctx, cfg.Storage.PageProjectsPath)
+	}
+	return checkPagesApps(state, cfg, cfgErr)
 }
 
-// checkPagesApps is the pure decision: current are images for this binary's
-// profile, all every Pages image (only consulted when current is empty).
-func checkPagesApps(current, all []string, cfg *config.Config, cfgErr error) checkResult {
+func pagesRecordState(ctx context.Context, dir string) pagesImageState {
+	fingerprint := pageImageFinger()
+	id, err := pageRecordedImage(ctx, dir, fingerprint)
+	switch {
+	case err == nil:
+		return pagesImageState{recorded: id}
+	case errors.Is(err, pagebuild.ErrNotRecorded):
+		rec, readErr := pagebuild.ReadBuildImageRecord(dir)
+		return pagesImageState{outdated: readErr == nil && len(rec.Images) > 0}
+	default:
+		return pagesImageState{problem: strings.TrimPrefix(err.Error(), pagebuild.ErrNotEnabled.Error()+" ")}
+	}
+}
+
+// checkPagesApps is the pure decision.
+func checkPagesApps(state pagesImageState, cfg *config.Config, cfgErr error) checkResult {
 	explicit := ""
 	if cfgErr == nil && cfg != nil {
 		explicit = cfg.Storage.PageBuildImage
@@ -50,13 +66,20 @@ func checkPagesApps(current, all []string, cfg *config.Config, cfgErr error) che
 	switch {
 	case explicit != "":
 		detail = "explicit image " + explicit + " (CREWSHIP_PAGE_BUILD_IMAGE)"
-	case len(current) > 0:
-		detail = "enabled (" + shortImageID(current[0]) + ")"
-	case len(all) > 0:
+	case state.recorded != "":
+		detail = "enabled (" + shortImageID(state.recorded) + ")"
+	case state.problem != "":
 		return checkResult{
 			name:   pagesCheckName,
 			status: "WARN",
-			detail: "outdated: compiler image built for another crewship version",
+			detail: "not enabled: the recorded compiler image does not verify " + state.problem,
+			hint:   "run `" + pagebuild.EnableCommand + "` on the Docker host as the server's account",
+		}
+	case state.outdated:
+		return checkResult{
+			name:   pagesCheckName,
+			status: "WARN",
+			detail: "outdated: only compiler images of other crewship versions are recorded",
 			hint:   "run `" + pagebuild.EnableCommand + "` with this version; the old image is kept for rollback",
 		}
 	default:

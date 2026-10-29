@@ -198,11 +198,12 @@ const (
 
 // runtimeOriginFor is the runtime origin that serves the browser behind r. A
 // derived origin (http://127.0.0.1:<port> for a localhost Studio) applies only
-// to requests that reached the server on a loopback host: for any other
+// to requests that reached the server on a loopback host without a proxy in
+// between (no Forwarded / X-Forwarded-* / X-Real-IP header): for any other
 // browser it would name the visitor's own machine, so it is treated as
 // unconfigured there.
 func (h *PageHandler) runtimeOriginFor(r *http.Request) string {
-	if h.pageRuntimeDerived && !pagebuild.LoopbackHost(r.Host) {
+	if h.pageRuntimeDerived && !pagebuild.DerivedRuntimeApplies(r) {
 		return ""
 	}
 	return h.pageRuntimeOrigin

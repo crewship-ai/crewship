@@ -23,12 +23,16 @@ crewship page enable
 ```
 
 The binary embeds this directory's build context (`profile.go`,
-`WriteBuildContext`). `enable` builds the image from it, labels it
-`ai.crewship.pages.image=<build context fingerprint>` and prints only the `sha256:…`
-image ID on stdout. The server picks up the labelled image for its own
-fingerprint within seconds, without a restart; with no such image, Pages Apps
-are disabled and no Pages container starts. `crewship page disable` removes this
-version's image (`--all`: every Pages-labelled image). Mutable tags are rejected and the worker never pulls. The
+`WriteBuildContext`). `enable` builds the image from it, tags it
+`crewship-pages-build:<fingerprint prefix>`, labels it
+`ai.crewship.pages.image=<build context fingerprint>`, records the exact image ID
+in `<CREWSHIP_PAGE_PROJECTS_PATH>/pages-build-image.json` and prints only the
+`sha256:…` image ID on stdout. The server uses only the recorded image, and only
+while it keeps that ID, tag and label (the label alone is inherited by images
+built `FROM` it and is never trusted); it notices the record within seconds,
+without a restart. Without a verified record, Pages Apps are disabled and no
+Pages container starts. `crewship page disable` removes this version's recorded
+image (`--all`: every recorded version); unrecorded images are never removed. Mutable tags are rejected and the worker never pulls. The
 image and server must come from the same release: a post-build fingerprint check
 refuses a mismatch. Air-gapped hosts and Docker Compose deployments are covered in
 the [operations guide](../../docs/guides/pages-apps-operations.mdx).
@@ -37,9 +41,9 @@ Configuration:
 
 - `CREWSHIP_PAGE_PROJECTS_PATH`: absolute protected directory outside crew storage;
   do not mount it into agent containers.
-- `CREWSHIP_PAGE_BUILD_IMAGE` (optional): explicit override of the labelled image,
+- `CREWSHIP_PAGE_BUILD_IMAGE` (optional): explicit override of the recorded image,
   a locally installed `sha256:…` image ID or `repository@sha256:…` digest. When
-  set, discovery is skipped.
+  set, the record is not read (Docker Compose: `crewship page enable --image-only`).
 - `CREWSHIP_PAGE_RUNTIME_ORIGIN`: dedicated HTTP(S) origin on a **different site**
   from Studio; e.g. Studio `https://studio.example.com`, runtime
   `https://apps.example.net`. `apps.example.com` or another port is insufficient.

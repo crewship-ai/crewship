@@ -29,7 +29,7 @@ func ValidateImage(image string) error {
 
 // DockerBuilder compiles in a locked-down container. Image, when set, is the
 // pinned image to run (explicit configuration and tests); otherwise Resolver
-// finds the image labelled by `crewship page enable`. With neither, the
+// finds the image recorded by `crewship page enable`. With neither, the
 // builder is not enabled and never starts a container.
 type DockerBuilder struct {
 	Image    string
@@ -53,7 +53,7 @@ func (d *DockerBuilder) image(ctx context.Context) (string, error) {
 }
 
 // Available reports whether a build could start now. At most one
-// `docker image ls` runs per resolver TTL, however many requests ask.
+// record lookup (`docker image inspect`) runs per resolver TTL, however many requests ask.
 func (d *DockerBuilder) Available(ctx context.Context) error {
 	_, err := d.image(ctx)
 	return err
@@ -104,7 +104,7 @@ func (d *DockerBuilder) Build(ctx context.Context, p *pages.SourceProject) (*Art
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("Page build stopped: %w", ctx.Err())
 		}
-		// Only a labelled image is replaced by `crewship page enable`; a
+		// Only a recorded image is replaced by `crewship page enable`; a
 		// missing explicit image keeps Docker's own message.
 		if d.Image == "" && d.Resolver != nil && d.Resolver.Explicit == "" && imageMissing(logs.buffer.String()) {
 			// Removed since it was resolved (`crewship page disable`, docker rmi):

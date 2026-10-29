@@ -23,7 +23,10 @@ gitignored outputs) and are linked, not copied.
   as a reproducible experiment. Cited from `internal/database` and
   `internal/work` as the reason the queue stays on SQLite primitives.
 - [`ADR-PAGES-IMAGE-BY-LABEL-2026-10-14.md`](ADR-PAGES-IMAGE-BY-LABEL-2026-10-14.md) —
-  **accepted** (2026-10-29, delegated maintainer decision): the Pages compiler image is found by its profile label, set by
-  `crewship page enable`, instead of a configured digest (issue #3108). Motivated by
+  **accepted** (2026-10-29, delegated maintainer decision; amended before merge
+  after the security review): `crewship page enable` builds the Pages compiler
+  image and records its exact ID in page project storage; the server uses only
+  that recorded ID with the exact tag and label — never an image found by label
+  alone — instead of a configured digest (issue #3108). Motivated by
   [`docs/prd/pages-build-worker-install-2026-10-14.md`](../prd/pages-build-worker-install-2026-10-14.md);
   `CREWSHIP_PAGE_BUILD_IMAGE` stays as an explicit override.

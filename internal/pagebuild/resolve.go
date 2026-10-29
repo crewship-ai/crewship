@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
-	"strings"
 	"sync"
 	"time"
 
@@ -24,42 +22,21 @@ const EnableCommand = "crewship page enable"
 
 var ErrNotEnabled = errors.New("Pages Apps are not enabled: run `" + EnableCommand + "` on the server host")
 
-// LabeledImages lists local tools images built by `crewship page enable`,
-// newest first, as immutable sha256 IDs. The fingerprint is
-// pageprofile.ImageFingerprint(); an empty one lists images of every release.
-func LabeledImages(ctx context.Context, fingerprint string) ([]string, error) {
-	filter := "label=" + pageprofile.ImageLabel
-	if fingerprint != "" {
-		filter += "=" + fingerprint
-	}
-	// --all: with the containerd image store an untagged image (a plain
-	// `docker build --label …`) is otherwise invisible to `image ls`.
-	out, err := exec.CommandContext(ctx, "docker", "image", "ls", "--all", "--quiet", "--no-trunc", "--filter", filter).Output()
-	if err != nil {
-		return nil, fmt.Errorf("list Pages tools images: %w", err)
-	}
-	var ids []string
-	seen := map[string]bool{}
-	for _, id := range strings.Fields(string(out)) {
-		// One ID repeats once per tag; keep Docker's newest-first order.
-		if seen[id] || ValidateImage(id) != nil {
-			continue
-		}
-		seen[id] = true
-		ids = append(ids, id)
-	}
-	return ids, nil
-}
-
 // ImageResolver picks the tools image for a build. An explicitly configured
-// image always wins. Otherwise the image labelled with this server's build
-// context fingerprint is used: its presence is the operator's opt-in, so a server
-// without it never starts a Pages container. The chosen value is always an
-// immutable ID; builds still never pull.
+// image always wins. Otherwise the image `crewship page enable` recorded in
+// RecordDir for this server's build context fingerprint is used, after
+// verifying its ID, exact tag and label (RecordedCompilerImage): the record is
+// the operator's opt-in, so a server without a verified record never starts a
+// Pages container. The chosen value is always an immutable ID; builds still
+// never pull.
 type ImageResolver struct {
 	Explicit string
-	// Lookup lists candidate IDs newest first; nil uses LabeledImages for
-	// this binary's fingerprint. Tests replace it.
+	// RecordDir is page_projects_path, where `crewship page enable` writes
+	// BuildImageRecordFile.
+	RecordDir string
+	// Lookup returns the verified image (first element); nil uses
+	// RecordedCompilerImage for RecordDir and this binary's fingerprint.
+	// Tests replace it.
 	Lookup func(context.Context) ([]string, error)
 	// TTL bounds how long a found image is reused; zero means 10s.
 	// NegativeTTL bounds how long "not enabled" is reused; zero means 2s, so
@@ -101,7 +78,11 @@ func (r *ImageResolver) Image(ctx context.Context) (string, error) {
 	lookup := r.Lookup
 	if lookup == nil {
 		lookup = func(ctx context.Context) ([]string, error) {
-			return LabeledImages(ctx, pageprofile.ImageFingerprint())
+			id, err := RecordedCompilerImage(ctx, r.RecordDir, pageprofile.ImageFingerprint())
+			if err != nil {
+				return nil, err
+			}
+			return []string{id}, nil
 		}
 	}
 	// Detached from the request: one caller's disconnect must not be cached
@@ -111,6 +92,8 @@ func (r *ImageResolver) Image(ctx context.Context) (string, error) {
 	cancel()
 	r.checked = now()
 	switch {
+	case errors.Is(err, ErrNotEnabled):
+		r.image, r.err = "", err
 	case err != nil:
 		r.image, r.err = "", fmt.Errorf("%w (%v)", ErrNotEnabled, err)
 	case len(ids) == 0:
