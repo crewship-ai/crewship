@@ -17,6 +17,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.
 
+- **Artifacts is the single home for a page and its Word or Sheet.** Behind the same two flags, `/pages/<slug>` resolves the page's immutable ID and opens `/artifacts/<id>` in the same workspace for a Page, a native Word or Sheet or a versioned project. Reference links, pinned versions, edit addresses, restricted members and any page whose ID cannot be resolved stay on Pages. A native Word or Sheet is edited inside its Artifacts detail in the single Craft editor with its lease (who edits now, ask for the handoff) when the server confirms the editor is available; otherwise the detail keeps its lock bar and saved preview. Off by default.
+
 - **Shared artifact commenters can post feedback in the preview.** Comments stay anchored to the shared version without granting editing or agent execution rights; changing accounts, workspace or permissions retires an unfinished selection.
 
 - **Test Design canvases can be identified in the library.** Human canvas creation now retains the explicit test-item marker for catalog filtering.
