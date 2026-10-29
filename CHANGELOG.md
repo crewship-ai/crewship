@@ -19,6 +19,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Shared artifact commenters can post feedback in the preview.** Comments stay anchored to the shared version without granting editing or agent execution rights; changing accounts, workspace or permissions retires an unfinished selection.
 
+- **Every Dashboard number shows where it came from.** With `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` on, hovering or keyboard-focusing a bound value in a Dashboard preview shows its dataset, row and field, its producer (`You`, `Contributor` or `Agent`) and its last update time in UTC; the same text is the value's accessible description and appears in the Data sources list. Values whose producer is unknown, or whose document is not loaded, are marked "zdroj neuveden" and drawn with a dashed underline instead of looking authoritative. The provenance comes from the reader-safe fields the data API already returns; no API or storage change.
+
 - **Test Design canvases can be identified in the library.** Human canvas creation now retains the explicit test-item marker for catalog filtering.
 
 - Add human Comment grants for shared artifact feedback without edit or agent execution rights, explicit QA item markers and catalog filters, and confirmed archive and folder-move previews with live access checks. Access reports include effective capabilities and their sources; existing content, history and grants remain intact.

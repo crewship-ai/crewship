@@ -69,6 +69,28 @@ export function installDashboardBindings(config: DashboardPreviewOptions & { tok
     if (element instanceof HTMLMeterElement) meter(element)
     else element.textContent = "Unavailable"
   }
+  // Every rendered value carries its source on hover, keyboard focus and in its accessible description.
+  // The tooltip and source list are host-owned; data-row="" keeps them out of comment selection.
+  const prefix = `crewship-provenance-${String(config.token).replace(/[^0-9a-f]/g, "").slice(0, 12)}`
+  const style = document.createElement("style")
+  style.textContent = `[data-crewship-provenance]{text-decoration:underline dotted;text-underline-offset:2px;cursor:help}[data-crewship-provenance=missing]{text-decoration-style:dashed;opacity:.75}[data-crewship-provenance]:focus-visible{outline:2px solid #2563eb;outline-offset:2px}#${prefix}-tip{position:fixed;z-index:2147483647;max-width:min(32rem,90vw);padding:4px 8px;border-radius:4px;background:#111827;color:#fff;font:12px/1.4 system-ui,sans-serif;pointer-events:none;overflow-wrap:anywhere}`
+  document.head.append(style)
+  const tip = document.createElement("div"); tip.id = `${prefix}-tip`; tip.setAttribute("role", "tooltip"); tip.setAttribute("data-row", ""); document.body.append(tip)
+  const tipNotes = new WeakMap<Element, string>()
+  function hideTip() { tip.style.setProperty("display", "none", "important") }
+  function showTip(event: Event) {
+    const target = event.target instanceof Element ? event.target.closest("[data-crewship-provenance]") : null
+    const note = target ? tipNotes.get(target) : undefined
+    if (!target || !note) return
+    tip.textContent = note; tip.style.setProperty("display", "block", "important")
+    const box = target.getBoundingClientRect(), width = tip.offsetWidth, height = tip.offsetHeight
+    const top = box.bottom + 4 + height <= window.innerHeight ? box.bottom + 4 : Math.max(4, box.top - 4 - height)
+    tip.style.left = `${Math.max(4, Math.min(box.left, window.innerWidth - width - 4))}px`; tip.style.top = `${top}px`
+  }
+  hideTip()
+  document.addEventListener("mouseover", showTip); document.addEventListener("focusin", showTip)
+  document.addEventListener("mouseout", hideTip); document.addEventListener("focusout", hideTip)
+  document.addEventListener("keydown", event => { if (event.key === "Escape") hideTip() })
   const provenance = document.createElement("aside"); provenance.setAttribute("aria-label", "Data sources"); provenance.setAttribute("data-row", ""); document.body.append(provenance)
   // Static count is captured without previous rows/notes; each refresh replaces them.
   // Two extra elements per field conservatively cover meter statuses and provenance lines.
@@ -107,8 +129,12 @@ export function installDashboardBindings(config: DashboardPreviewOptions & { tok
     const value = doc && validField(field) && doc.value && Object.hasOwn(doc.value, field) ? doc.value[field] : undefined
     const numeric = typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= Number.MAX_SAFE_INTEGER && (!Number.isInteger(value) || Number.isSafeInteger(value))
     const text = typeof value === "string" ? value : numeric || typeof value === "boolean" ? String(value) : value === null ? "—" : "Unavailable"
-    const note = `${collection ?? "Unknown source"}/${row ?? "?"}.${field ?? "?"} · ${doc?.source_label ?? "Unavailable"} · ${doc?.updated_at ?? "not loaded"}`
-    return { value, numeric, text, note }
+    // A value is attributed only when the server named its producer. Otherwise it must not look authoritative.
+    const known = Boolean(doc && (doc.source_kind === "human" || doc.source_kind === "agent") && typeof doc.source_label === "string" && doc.source_label)
+    const stamp = doc && typeof doc.updated_at === "string" && Number.isFinite(Date.parse(doc.updated_at)) ? `updated ${new Date(doc.updated_at).toISOString().slice(0, 16).replace("T", " ")} UTC` : "not loaded"
+    const location = `${collection || "?"}/${row || "?"}.${field || "?"}`
+    const note = known ? `Source: ${location} · ${doc!.source_label} · ${stamp}` : `zdroj neuveden · ${location} · ${stamp}`
+    return { value, numeric, text, note, known }
   }
   function withinTextBudget(feeds: Map<string, DashboardCollection>): boolean {
     let remaining = 16 * 1024 * 1024 - staticBytes
@@ -120,8 +146,8 @@ export function installDashboardBindings(config: DashboardPreviewOptions & { tok
       const { value, numeric, text, note } = binding(element, feeds, repeat, rowId)
       // Value text (or meter aria-label), both note attributes and one provenance line.
       // Count provenance per field even when the actual renderer deduplicates it.
-      // Fixed overhead also covers generated attribute names and meter status/style attributes.
-      return size(text) + 3 * size(note) + 128 + (element instanceof HTMLMeterElement ? size(numeric ? String(value) : "Unavailable") + 11 : 0)
+      // Fixed overhead also covers generated provenance attributes, the description id and meter status/style attributes.
+      return size(text) + 3 * size(note) + 256 + (element instanceof HTMLMeterElement ? size(numeric ? String(value) : "Unavailable") + 11 : 0)
     }
     if (remaining < 0) return false
     for (const element of staticFields) if (!charge(fieldCost(element))) return false
@@ -164,16 +190,18 @@ export function installDashboardBindings(config: DashboardPreviewOptions & { tok
         repeat.marker.parentNode?.insertBefore(row, repeat.marker); repeat.rows.push(row)
       }
     }
-    provenance.replaceChildren()
-    const notes = new Set<string>()
+    provenance.replaceChildren(); hideTip()
+    const notes = new Map<string, string>()
     for (const element of document.querySelectorAll("[data-field]")) {
-      const { value, numeric, text, note } = binding(element, feeds)
+      const { value, numeric, text, note, known } = binding(element, feeds)
       if (element instanceof HTMLMeterElement) {
         meter(element, numeric ? value as number : undefined)
         element.setAttribute("aria-label", text)
       } else element.textContent = text
-      element.setAttribute("title", note); element.setAttribute("aria-description", note)
-      if (!notes.has(note)) { const line = document.createElement("p"); line.textContent = note; provenance.append(line); notes.add(note) }
+      let id = notes.get(note)
+      if (!id) { id = `${prefix}-${notes.size + 1}`; const line = document.createElement("p"); line.id = id; line.textContent = note; provenance.append(line); notes.set(note, id) }
+      element.setAttribute("data-crewship-provenance", known ? "known" : "missing"); element.setAttribute("tabindex", "0"); element.setAttribute("aria-describedby", id)
+      tipNotes.set(element, note)
     }
   })
 }
