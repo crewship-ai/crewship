@@ -7,9 +7,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/dispatch"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/runauthority"
+	"github.com/crewship-ai/crewship/internal/work"
 )
 
 func captureReviewOrigin(t *testing.T, h *InternalIssueHandler, ws, agent, run string) string {
@@ -179,15 +183,49 @@ func TestChannelJobAdmissionRetainsHumanMutationFence(t *testing.T) {
 	if err := h.db.QueryRow(`SELECT assignment_id FROM workspace_conversation_agent_jobs WHERE id=?`, job).Scan(&assignment); err != nil {
 		t.Fatal(err)
 	}
+	workID, err := assignmentWorkID(t.Context(), h.db, assignment)
+	if err != nil || workID == "" {
+		t.Fatalf("channel admission must hand the assignment to a fenced work owner: work=%q err=%v", workID, err)
+	}
+	// The compatibility entrance must not start a second, unfenced execution
+	// of work that already has a durable owner.
 	recorder := &recordingEmitter{}
 	h.SetJournal(recorder)
-	if err := h.dispatchByID(t.Context(), assignment); err != nil {
+	if err = h.dispatchByID(t.Context(), assignment); err != nil {
 		t.Fatal(err)
 	}
 	h.WaitDispatches()
-	started := findRunStartedEntry(t, recorder, assignment)
-	if started.Payload["requester_authority_missing"] != true || started.Payload["created_by_user_id"] != user {
-		t.Fatalf("real channel requester lost: %+v", started.Payload)
+	for _, e := range recorder.entries {
+		if e.Type == journal.EntryRunStarted {
+			t.Fatalf("legacy dispatch started owned channel work: %+v", e.Payload)
+		}
+	}
+	// The real owner carries the channel requester into run.started. With no
+	// orchestrator wired the attempt then fails before process creation.
+	writer := journal.NewWriter(h.db, newTestLogger(), journal.WriterOptions{FlushSize: 1})
+	t.Cleanup(func() { _ = writer.Close() })
+	h.SetJournal(writer)
+	internal := NewInternalHandler(h.db, "token", newTestLogger())
+	internal.SetJournal(writer)
+	base := NewWebhookRuntime(NewWebhookHandler(h.db, newTestLogger(), &outcomeProjectionResolver{handler: internal}, nil, nil, nil, nil))
+	runtime := &agentWorkRuntime{WebhookRuntime: base, assignment: &AssignmentRuntime{base: base, h: h}}
+	d := dispatch.New(work.NewStore(h.db), runtime, assignmentWorkAuthorizer{h: h}, dispatch.Config{Owner: "channel-fence", Limits: work.SerialAgentLimits(), Kinds: []work.Kind{{Source: work.SourceAssignment, DomainKind: work.DomainAssignment}}}, newTestLogger())
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if worked, err := d.RunOne(ctx); err != nil || !worked {
+		t.Fatalf("owned channel work did not run: worked=%v err=%v", worked, err)
+	}
+	h.WaitDispatches()
+	if err = writer.Flush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var missing bool
+	var requester string
+	if err = h.db.QueryRow(`SELECT COALESCE(json_extract(payload,'$.requester_authority_missing'),0)<>0,COALESCE(json_extract(payload,'$.created_by_user_id'),'') FROM journal_entries WHERE entry_type='run.started' AND json_extract(payload,'$.assignment_id')=?`, assignment).Scan(&missing, &requester); err != nil {
+		t.Fatalf("no durable run.started for owned channel work: %v", err)
+	}
+	if !missing || requester != user {
+		t.Fatalf("real channel requester lost: missing=%v requester=%q want %q", missing, requester, user)
 	}
 }
 
