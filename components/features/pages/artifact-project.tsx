@@ -12,7 +12,8 @@ import { ArtifactDashboardPreview } from "@/components/features/chat/artifact-co
 import { artifactSlidesMode } from "@/lib/pages/artifact-slides"
 import { ArtifactSlidesPreview } from "@/components/features/chat/artifact-context/viewer/artifact-slides-preview"
 
-export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspaceId: string; slug: string; initialVersion?: number }) {
+/** `back` is where the header returns: the Page by default, the artifact when Artifacts opened the source. */
+export function ArtifactProject({ workspaceId, slug, initialVersion, back }: { workspaceId: string; slug: string; initialVersion?: number; back?: { href: string; label: string } }) {
  const session = useSessionSafe()
  const [version, setVersion] = useState<number | undefined>(initialVersion)
  const { query, restore, share, comment, save } = useArtifactProject(workspaceId, slug, version)
@@ -105,7 +106,7 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  }
  return <main className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] min-h-0 flex-col">
   <header className="flex flex-wrap items-center gap-3 border-b p-4">
-   <Link href={`/pages/${encodeURIComponent(slug)}?workspace_id=${encodeURIComponent(workspaceId)}`} className="inline-flex items-center text-sm underline coarse:min-h-[44px]">Back to Page</Link>
+   <Link href={back?.href ?? `/pages/${encodeURIComponent(slug)}?workspace_id=${encodeURIComponent(workspaceId)}`} className="inline-flex items-center text-sm underline coarse:min-h-[44px]">{back?.label ?? "Back to Page"}</Link>
    <h1 className="mr-auto text-lg font-semibold">{slug} · {slidesMode === "slides" ? "Slides" : "Artifact project"}</h1>
    {!data.can_write && <span className="text-sm text-muted-foreground">Read only</span>}
    <label className="flex items-center gap-2 text-sm">Version<select aria-label="Version" className="rounded border bg-background p-2 coarse:min-h-[44px]" value={viewedVersion} onChange={event => selectVersion(Number(event.target.value))}>{data.versions.map(item => <option key={item.version} value={item.version}>Version {item.version}{item.version === data.shared_version ? " · shared" : ""}</option>)}</select></label>

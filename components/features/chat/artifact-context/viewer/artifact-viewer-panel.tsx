@@ -15,7 +15,7 @@ import { timeAgo } from "@/lib/time"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { cn } from "@/lib/utils"
-import { artifactDashboards } from "@/lib/feature-flags"
+import { artifactDashboards, artifactsLibrary } from "@/lib/feature-flags"
 import { parseDashboardManifest } from "@/lib/pages/artifact-dashboard"
 import { artifactSlidesMode } from "@/lib/pages/artifact-slides"
 import { useArtifactViewer, type ArtifactViewerTarget } from "../projects/artifact-viewer-context"
@@ -463,7 +463,7 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
       <Clock className="size-3.5" aria-hidden />History
     </Button>}
     <div className="flex-1" />
-    {canWrite && <Link className="inline-flex items-center px-2 text-sm underline coarse:min-h-[44px]" href={`/pages/${encodeURIComponent(target.slug)}?${new URLSearchParams({artifact:"1",workspace_id:workspaceId})}`}>Edit source</Link>}
+    {canWrite && <Link className="inline-flex items-center px-2 text-sm underline coarse:min-h-[44px]" href={artifactsLibrary() ? `/artifacts/edit?${new URLSearchParams({page_id:data.page_id,artifact:"1",workspace_id:workspaceId})}` : `/pages/${encodeURIComponent(target.slug)}?${new URLSearchParams({artifact:"1",workspace_id:workspaceId})}`}>Edit source</Link>}
     {canShare && <Popover open={confirmShare} onOpenChange={setConfirmShare}>
       <PopoverTrigger asChild><Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5"><Link2 className="size-3.5" aria-hidden />Share</Button></PopoverTrigger>
       <PopoverContent align="end" className="w-72 space-y-3 text-sm">

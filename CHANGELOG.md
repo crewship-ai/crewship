@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Word, Sheet and older decks open and edit inside Artifacts.** A Sheet shows its workbook in the library detail, a deck made before projects its slides, and a native Word's Edit opens its editor at `/artifacts/edit` behind the same lock. "Open in Pages" and the hints that sent people to Pages are gone; a kind whose viewer is off says so.
+- **Word, Sheet and older decks open and edit inside Artifacts.** A Sheet shows its workbook in the library detail, a deck made before projects its slides, and a native Word's Edit opens its editor at `/artifacts/edit` behind the same lock. A project's Edit source opens there too, with a way back to the artifact. "Open in Pages" and the hints that sent people to Pages are gone; a kind whose viewer is off says so.
 
 - **A Page opens with its content inside Artifacts.** Its application or panels show in the library detail with the same views Pages uses, read by the page's immutable ID; the detail no longer sends you to Pages.
 

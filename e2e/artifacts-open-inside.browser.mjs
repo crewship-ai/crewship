@@ -111,6 +111,13 @@ try {
   await page.getByText("Team", { exact: true }).waitFor()
   assert.equal(path(), "/artifacts/page-model")
   assert.equal(await page.locator('a[href^="/pages"]').count(), 0, "no link into /pages from a Sheet")
+  // A project's Edit source stays inside Artifacts too.
+  await page.goto(`${origin}/artifacts/page-site`)
+  await projectContent()
+  await page.getByRole("link", { name: "Edit source" }).click()
+  await page.getByText("Editor route").waitFor()
+  assert.equal(path(), "/artifacts/edit")
+  assert.deepEqual(Object.fromEntries(new URL(page.url()).searchParams), { page_id: "page-pricing-site", artifact: "1", workspace_id: "ws-fixture" })
   await page.goto(`${origin}/artifacts/page-brief`)
   await page.getByRole("button", { name: "Edit", exact: true }).click()
   await page.getByText("Editor route").waitFor()

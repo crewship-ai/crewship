@@ -240,6 +240,10 @@ it("keeps source editing available to an Edit user without owner queue, sharing 
  state.snapshot.data=snap({can_share:false,can_restore:false,can_send_to_agent:false})
  renderLibrary()
  expect(screen.getByRole("link",{name:"Edit source"})).toHaveAttribute("href","/pages/launch?artifact=1&workspace_id=ws1")
+ // With the library on, the source editor opens inside Artifacts by the immutable page ID.
+ cleanup();vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY","true");renderLibrary()
+ expect(screen.getByRole("link",{name:"Edit source"})).toHaveAttribute("href","/artifacts/edit?page_id=p1&artifact=1&workspace_id=ws1")
+ vi.unstubAllEnvs()
  selectHero();fireEvent.change(screen.getByRole("textbox",{name:"Comment"}),{target:{value:"Local feedback"}})
  expect(screen.queryByRole("button",{name:"Add to queue"})).toBeNull()
  expect(screen.queryByRole("button",{name:"Send to agent"})).toBeNull()
