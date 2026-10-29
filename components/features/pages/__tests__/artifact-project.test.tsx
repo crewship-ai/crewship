@@ -218,6 +218,21 @@ it("keeps the preview and the source draft when history quota is full",async()=>
  expect(screen.getByRole("alert")).toHaveTextContent("quota is full")
 })
 
+it("offers the source draft as a file when history quota is full",async()=>{
+ const create=vi.fn(()=>"blob:draft"),revoke=vi.fn(),click=vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(()=>{})
+ vi.stubGlobal("URL",Object.assign(URL,{createObjectURL:create,revokeObjectURL:revoke}))
+ render(<ArtifactProject workspaceId="w" slug="demo" />)
+ fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+ fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"Work kept at full quota"}})
+ fireEvent.click(screen.getByRole("button",{name:"Save project"}))
+ await act(async()=>state.save.mock.calls[0][1].onError(Object.assign(Error("Project history quota is full."),{status:413})))
+ fireEvent.click(screen.getByRole("button",{name:"Download source files"}))
+ expect(click).toHaveBeenCalledOnce()
+ const blob=(create.mock.calls[0] as unknown as [Blob])[0]
+ expect(JSON.parse(await blob.text()).files.some((file:{content:string})=>file.content==="Work kept at full quota")).toBe(true)
+ click.mockRestore();vi.unstubAllGlobals()
+})
+
 it("keeps a conflicting source draft and requires an explicit retry",async()=>{
  render(<ArtifactProject workspaceId="w" slug="demo" />)
  fireEvent.click(screen.getByRole("button",{name:"Edit source"}))

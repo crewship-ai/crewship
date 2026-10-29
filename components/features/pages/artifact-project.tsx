@@ -26,7 +26,7 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  const frame = useRef<HTMLIFrameElement>(null)
  const sourceScope=useMemo(()=>({human:session?.data?.user?.id,workspaceId,slug}),[session?.data?.user?.id,workspaceId,slug])
  const [sourceDraft,setSourceDraft]=useState<{scope:object;body:ArtifactProjectSave;path:string}>()
- const [sourceError,setSourceError]=useState<{scope:object;message:string;hidePreview:boolean}>()
+ const [sourceError,setSourceError]=useState<{scope:object;message:string;hidePreview:boolean;quotaFull?:boolean}>()
  const activeSource=sourceDraft?.scope===sourceScope?sourceDraft:undefined
  const sourceCurrent=useRef({scope:sourceScope,draft:activeSource,canWrite:false})
  const data = query.data
@@ -84,7 +84,8 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
    },
    onError:(error)=>{
     if(sourceCurrent.current.scope!==submitted.scope)return
-    setSourceError({scope:submitted.scope,message:error.message,hidePreview:![409,413].includes((error as Error&{status?:number}).status??0)})
+    const status=(error as Error&{status?:number}).status??0
+    setSourceError({scope:submitted.scope,message:error.message,hidePreview:![409,413].includes(status),quotaFull:status===413})
    },
   })
  }
@@ -121,6 +122,8 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
     <p className="text-xs">Draft from version {activeSource.body.base_version}. Keep a copy before leaving this page.</p>
    </div>}
    {sourceError?.scope===sourceScope&&<p role="alert">{sourceError.message}</p>}
+   {/* Full history refuses new versions; the draft can still leave as a file. */}
+   {sourceError?.scope===sourceScope&&sourceError.quotaFull&&activeSource&&<Button variant="outline" onClick={()=>{const url=URL.createObjectURL(new Blob([JSON.stringify({slug,base_version:activeSource.body.base_version,entrypoint:activeSource.body.entrypoint,files:activeSource.body.files},null,2)],{type:"application/json"}));const link=document.createElement("a");link.href=url;link.download=`${slug}-source-draft.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}}>Download source files</Button>}
   </section>}
   {mutationError && <p role="alert" className="px-4 py-2 text-sm text-destructive">{mutationError.message}</p>}
   <div className="flex min-h-0 flex-1 flex-col md:flex-row">
