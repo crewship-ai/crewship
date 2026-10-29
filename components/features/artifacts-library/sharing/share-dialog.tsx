@@ -14,6 +14,7 @@ import {
   entryKey, SHARE_LEVEL_LABEL, SHARE_LEVEL_MEANING, useAccess, useSharingHuman, useSharingMutation,
   type AccessEntry, type ShareInput, type ShareLevel,
 } from "./sharing-api"
+import { shownLabel } from "./share-controls"
 
 const SELECT = "h-8 rounded-md border bg-transparent px-2 text-xs disabled:opacity-50"
 const EVERYONE = "workspace:"
@@ -42,6 +43,7 @@ export function ShareDialog({ workspaceId, item, open, onOpenChange }: ShareDial
 type RowChange = { entry: AccessEntry; level: ShareLevel | null }
 
 function ShareBody({ workspaceId, item }: { workspaceId: string; item: LibraryItem }) {
+  const { humanId } = useSharingHuman()
   const { people } = useIssuePeople(workspaceId)
   const access = useAccess(workspaceId, item)
   const [subject, setSubject] = useState("")
@@ -69,7 +71,7 @@ function ShareBody({ workspaceId, item }: { workspaceId: string; item: LibraryIt
         <select aria-label="Share with" className={`${SELECT} min-w-0 flex-1`} value={subject} disabled={add.isPending} onChange={e => setSubject(e.target.value)}>
           <option value="">Add a person…</option>
           <option value={EVERYONE}>Everyone in this workspace</option>
-          {people.map(p => <option key={p.id} value={`user:${p.id}`}>{p.name}</option>)}
+          {people.filter(p => p.id !== humanId).map(p => <option key={p.id} value={`user:${p.id}`}>{p.name}</option>)}
         </select>
         <select aria-label="Level" className={SELECT} value={level} disabled={add.isPending} onChange={e => setLevel(e.target.value as ShareLevel)}>
           {LEVELS_DESC.map(l => <option key={l} value={l}>{SHARE_LEVEL_LABEL[l]}</option>)}
@@ -92,7 +94,7 @@ function ShareBody({ workspaceId, item }: { workspaceId: string; item: LibraryIt
             const busy = busyKey === key
             return <li key={`${key}:${entry.via}:${entry.folderSlug ?? ""}`} data-entry={key} aria-busy={busy || undefined} className="flex flex-wrap items-center gap-2 py-2">
               <div className="min-w-0 flex-1">
-                <p className="truncate text-xs font-medium">{entry.label}</p>
+                <p className="truncate text-xs font-medium">{shownLabel(entry, humanId)}</p>
                 <p className="text-micro text-muted-foreground">{accessVia(entry)}{locked && entry.via !== "owner" ? ` · ${locked}` : ""}</p>
               </div>
               {locked ? <span title={locked} className="flex items-center gap-1.5">
