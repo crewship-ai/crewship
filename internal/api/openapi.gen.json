@@ -127166,6 +127166,159 @@
         "operationId": "get_api_v1_pages",
         "parameters": [
           {
+            "description": "Explicit private_audience classification, independent of ownership or folder. Repeat the parameter or separate values with commas; values are ORed within this facet.",
+            "explode": true,
+            "in": "query",
+            "name": "access",
+            "required": false,
+            "schema": {
+              "items": {
+                "enum": [
+                  "private",
+                  "open"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "archived",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "audience",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact folder slug, or ~unfiled. An omitted parameter includes every folder.",
+            "in": "query",
+            "name": "folder",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Caller-visible kind, derived from the same selected metadata as the index row. Repeat the parameter or separate values with commas; values are ORed within this facet.",
+            "explode": true,
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "items": {
+                "enum": [
+                  "project",
+                  "dashboard",
+                  "page",
+                  "word",
+                  "sheet",
+                  "slides"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Canonical index owner reference user/ID or crew/slug; me means the authenticated human's user reference. Repeat the parameter or separate values with commas; values are ORed within this facet.",
+            "explode": true,
+            "in": "query",
+            "name": "owner",
+            "required": false,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "description": "Case-insensitive literal substring of the Page name or slug; query operators are not interpreted.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Stable order: updated descending (default), case-folded name ascending, or library kind order. Ties use updated descending and slug ascending.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "enum": [
+                "updated",
+                "name",
+                "kind"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "test_items",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Version-store state; legacy storage without a typed version head is unversioned. Repeat the parameter or separate values with commas; values are ORed within this facet.",
+            "explode": true,
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "items": {
+                "enum": [
+                  "shared",
+                  "unshared",
+                  "unversioned"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "style": "form"
+          },
+          {
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Workspace ID or slug.",
             "in": "header",
             "name": "X-Workspace-ID",
@@ -127365,7 +127518,16 @@
                 }
               }
             },
-            "description": "OK"
+            "description": "OK",
+            "headers": {
+              "X-Total-Count": {
+                "description": "Authorized rows matching all catalog filters, before limit and offset.",
+                "schema": {
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              }
+            }
           },
           "400": {
             "content": {

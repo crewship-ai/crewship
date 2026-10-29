@@ -119,6 +119,22 @@ Pages reachable through the OWNER override. Optional `--limit` (1–500) and
 legacy unpaged JSON array is preserved. Counts and pagination follow current
 authorization; no hidden private title is included.
 
+Optional catalog filters run on the server before pagination. `--query` (`-q`)
+searches Page names and slugs as plain text; it is not a query language.
+`--kind project|dashboard|page|word|sheet|slides`, `--access private|open`,
+`--version-state shared|unshared|unversioned`, and `--owner me|user/<id>|crew/<slug>`
+accept repeated flags or comma-separated values. Values within one filter are ORed;
+different filters are ANDed. Owners use canonical identifiers, never display names;
+`me` means the signed-in human. `--folder <slug>` selects a folder and
+`--folder '~unfiled'` selects Pages outside folders. `--sort updated|name|kind`
+orders the authorized filtered results. These flags preserve the JSON array response
+and the existing `--audience`, `--test-items`, `--archived`, `--limit`, and `--offset` options.
+
+```bash
+crewship page list -q 'Quarterly & launch' --kind project,slides --kind word --owner me --sort name --limit 25
+crewship page list --access private --version-state unshared --folder '~unfiled'
+```
+
 Columns are `SLUG  NAME  PANELS  STATE
 OWNER  REACH  LAST DATA`, where `PANELS` counts every panel on the page
 including the ones sealed to you, and `REACH` says how *you* reach the page —

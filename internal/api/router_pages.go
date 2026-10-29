@@ -122,8 +122,7 @@ func (r *Router) registerPageRoutes() {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-pages", authed(wsCtx(http.HandlerFunc(p.RestrictedCatalog))))
 
 	// Catalog filters and paging run after existing per-object authorization.
-	// openapi: query audience:string test_items:string archived:string limit:integer offset:integer
-	// openapi: responses 200,400,401,403,404,500
+	// openapi: query workspace_id:string audience:string test_items:string archived:string limit:integer offset:integer q:string kind:string access:string version:string owner:string folder:string sort:string; responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/pages", authed(wsCtx(http.HandlerFunc(p.List))))
 	r.mux.Handle("GET /api/v1/pages/{slug}", authed(wsCtx(http.HandlerFunc(p.Get))))
 	r.mux.Handle("GET /api/v1/pages/{slug}/grants", authed(wsCtx(http.HandlerFunc(p.ListGrants))))

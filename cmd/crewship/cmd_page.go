@@ -317,6 +317,9 @@ var pageListCmd = &cobra.Command{
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		query := url.Values{}
+		if err := pageCatalogFilters(cmd, query); err != nil {
+			return err
+		}
 		audience, _ := cmd.Flags().GetString("audience")
 		if audience != "" {
 			if audience != "all" && audience != "personal" {
@@ -1002,6 +1005,13 @@ func init() {
 	pageSetCmd.Flags().String("data", "-", `Payload: "-" for stdin, "@path" for a file, or a literal JSON document`)
 	pageSetCmd.Flags().String("state", "", `The producer's own verdict: "ok" (default) or "failed"`)
 
+	pageListCmd.Flags().StringP("query", "q", "", "Plain substring search in Page name and slug")
+	pageListCmd.Flags().StringSlice("kind", nil, "Artifact kinds: project,dashboard,page,word,sheet,slides (repeatable or comma-separated)")
+	pageListCmd.Flags().StringSlice("access", nil, "Access state: private,open (repeatable or comma-separated)")
+	pageListCmd.Flags().StringSlice("version-state", nil, "Version state: shared,unshared,unversioned (repeatable or comma-separated)")
+	pageListCmd.Flags().StringSlice("owner", nil, "Canonical owner: me,user/<id>,crew/<slug> (repeatable or comma-separated)")
+	pageListCmd.Flags().String("folder", "", "Folder slug, or ~unfiled for Pages outside folders")
+	pageListCmd.Flags().String("sort", "", "Catalog order: updated,name,kind")
 	pageListCmd.Flags().String("test-items", "exclude", "Test item filter (exclude|only|include)")
 	pageListCmd.Flags().String("archived", "exclude", "Archive filter (exclude|only|include)")
 	pageListCmd.Flags().String("audience", "", "List all accessible Pages or only your explicitly private Pages (all|personal)")
