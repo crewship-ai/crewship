@@ -141,7 +141,13 @@ Examples:
 			}
 		}
 
-		if !interactive && prompt == "" {
+		extras := readRunExtrasFlags(cmd)
+		if err := extras.validate(prompt, existingChat, interactive, documentTarget != nil); err != nil {
+			return err
+		}
+		// An attachment-only send is a real message (a file with no caption),
+		// and an ask form brings its own text.
+		if !interactive && prompt == "" && len(extras.attach) == 0 && extras.askForm == "" {
 			return fmt.Errorf("prompt is required (provide as argument, --prompt flag, or use --interactive)")
 		}
 
@@ -207,6 +213,9 @@ Examples:
 			if documentTarget != nil {
 				return fmt.Errorf("targeted Document edits require a trusted human chat")
 			}
+			if extras.any() {
+				return fmt.Errorf("--attach, --page, --ask-form and --create-document require a trusted human chat")
+			}
 			if interactive {
 				return fmt.Errorf("restricted text interactive mode is not yet supported")
 			}
@@ -231,6 +240,11 @@ Examples:
 
 		if len(projectVersions) > 0 {
 			return fmt.Errorf("project file versions require a restricted native run")
+		}
+		defer func() { runMessageExtras = nil }()
+		prompt, err = prepareRunExtras(cmd.Context(), client, agentID, chatID, prompt, extras)
+		if err != nil {
+			return err
 		}
 		// Get WS token
 		wsToken, err := cli.WSTokenFromServer(client)
@@ -317,18 +331,16 @@ func runStream(serverURL, wsToken, agentID, agentSlug, chatID, prompt string, qu
 		fmt.Fprintf(os.Stderr, "%s[agent: %s]%s Starting run...\n", cli.Dim, agentSlug, cli.Reset)
 	}
 
-	// Handle Ctrl+C: first cancels the run, second terminates the process
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, syscall.SIGINT)
-	go func() {
-		<-sig
-		ws.CancelMessage(chatID)
-		fmt.Fprintf(os.Stderr, "\n%s[cancelled]%s\n", cli.Yellow, cli.Reset)
-		signal.Reset(syscall.SIGINT)
-	}()
+	// SIGINT/SIGTERM: the first asks the server to stop the run and keeps
+	// reading until the run confirms it; the second terminates the process.
+	// See cmd_chat_stop.go.
+	stop, detach := installRunStop(ws, chatID)
+	defer detach()
+	activeRunStop = stop
+	defer func() { activeRunStop = nil }()
 
 	agentChannel := "agent:" + agentID
-	if err := sendRunMessage(ws, agentChannel, chatID, prompt, maxTurns, targets...); err != nil {
+	if err := sendRunMessageWithExtras(ws, agentChannel, chatID, prompt, maxTurns, targets...); err != nil {
 		return fmt.Errorf("send message: %w", err)
 	}
 
@@ -347,8 +359,11 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 		return fmt.Errorf("subscribe: %w", err)
 	}
 
+	stop, detach := installRunStop(ws, chatID)
+	defer detach()
+
 	agentChannel := "agent:" + agentID
-	if err := sendRunMessage(ws, agentChannel, chatID, prompt, maxTurns, targets...); err != nil {
+	if err := sendRunMessageWithExtras(ws, agentChannel, chatID, prompt, maxTurns, targets...); err != nil {
 		return fmt.Errorf("send message: %w", err)
 	}
 
@@ -359,6 +374,23 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 	// (collectAgentStream, #998); timeout 0 = block until the server closes
 	// the stream, the historical interactive behaviour.
 	res := collectAgentStream(ws, 0)
+	if stop.didTimeOut() {
+		return fmt.Errorf("stop was requested but the run did not confirm it within %s", runStopGrace)
+	}
+	if stop.wasRequested() && res.GotDone && res.StreamErr == "" {
+		// A confirmed stop: whatever text arrived is the answer, and an empty
+		// reply is not the "agent returned no text" failure below.
+		if res.Text != "" {
+			fmt.Print(sanitizeTerminal(res.Text))
+			if !strings.HasSuffix(res.Text, "\n") {
+				fmt.Println()
+			}
+		}
+		if !quiet {
+			fmt.Fprintf(os.Stderr, "%s[cancelled]%s\n", cli.Yellow, cli.Reset)
+		}
+		return nil
+	}
 	streamErr := res.StreamErr
 	gotDone := res.GotDone
 	readErr := res.ReadErr
@@ -571,6 +603,9 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			if closeReason != "" {
 				return joinErrs(fmt.Errorf("server rejected the connection: %s", closeReason))
 			}
+			if activeRunStop.didTimeOut() {
+				return joinErrs(fmt.Errorf("stop was requested but the run did not confirm it within %s", runStopGrace))
+			}
 			return joinErrs(fmt.Errorf("ws read: %w", err))
 		}
 
@@ -632,6 +667,27 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			if !quiet {
 				fmt.Fprintf(os.Stderr, "%s[status]%s %s\n", cli.Dim, cli.Reset, sanitizeTerminal(event.Content))
 			}
+		case "result":
+			// The run's summary (cost, tokens, turns) — what the web chat shows
+			// under the reply.
+			if summary := formatResultSummary(event.Metadata); !quiet && summary != "" {
+				flush()
+				fmt.Fprintf(os.Stderr, "%s[summary]%s %s\n", cli.Dim, cli.Reset, sanitizeTerminal(summary))
+			}
+		case "user_message":
+			// The server's echo of this send, emitted once it is persisted. For
+			// an ask form it is the delivery confirmation (the web sheet waits
+			// for exactly this); otherwise it repeats what was just typed.
+			if id := askSubmissionIDFromExtras(); id != "" && metaStr(eventMeta(event.Metadata), "ask_submission_id") == id && !quiet {
+				fmt.Fprintf(os.Stderr, "%s[form delivered]%s\n", cli.Green, cli.Reset)
+			}
+		case "ask_submission_error":
+			// A refused form: private to this sender, nothing was saved, and the
+			// server sends no done after it — so it ends the exchange here.
+			flush()
+			notice := sanitizeTerminal(askSubmissionErrorText(event.Content, event.Metadata))
+			fmt.Fprintf(os.Stderr, "%s[form refused]%s %s\n", cli.Red, cli.Reset, notice)
+			return joinErrs(fmt.Errorf("form refused: %s", notice))
 		case wsproto.AgentBusyEventType:
 			// The send bounced off the per-agent run lock (#2269): the agent
 			// already has a live run, this message was NOT persisted, and the
@@ -683,6 +739,15 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 					fmt.Fprintf(os.Stderr, "%s[save]%s commit failed: %v\n", cli.Yellow, cli.Reset, err)
 				}
 			}
+			if activeRunStop.wasRequested() {
+				// The run's own terminal frame after a stop request: this is
+				// the confirmation, so only now is "cancelled" true.
+				if !quiet {
+					fmt.Fprintf(os.Stderr, "\n%s[cancelled]%s\n", cli.Yellow, cli.Reset)
+				}
+				maybeNotifyRunComplete(startedAt, "", "CANCELLED")
+				return saveErr
+			}
 			if !quiet {
 				fmt.Fprintf(os.Stderr, "\n%s[done]%s\n", cli.Green, cli.Reset)
 			}
@@ -695,7 +760,11 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			// `done` that the server had already decided not to send. Under
 			// -v, say what arrived so the next unhandled frame is one grep
 			// away instead of an unexplained stall.
-			if flagVerbose {
+			if label, detail, ok := describeSessionEvent(event.Type, event.Content, event.Metadata); ok {
+				if !quiet {
+					fmt.Fprintf(os.Stderr, "%s[%s]%s %s\n", cli.Dim, label, cli.Reset, sanitizeTerminal(detail))
+				}
+			} else if flagVerbose {
 				fmt.Fprintf(os.Stderr, "%s[unhandled event]%s type=%q content=%s\n",
 					cli.Gray, cli.Reset, event.Type, truncate(sanitizeTerminal(event.Content), 120))
 			}
@@ -1204,6 +1273,7 @@ func init() {
 	runCmd.Flags().Bool("plan", false, "Ask for a step-by-step plan (prompt-guided; tools remain available)")
 	runCmd.Flags().String("effort", "", "Reasoning effort: minimal|low|medium|high|xhigh")
 	runCmd.Flags().Bool("show-thinking", false, "Surface reasoning blocks on stdout (not truncated)")
+	addRunExtrasFlags(runCmd, true, true)
 
 	runInsightsCmd.Flags().String("window", "24h", "Aggregation window: 24h, 7d, or 30d")
 	runInsightsCmd.Flags().String("agent", "", "Only this agent's runs (slug or ID)")

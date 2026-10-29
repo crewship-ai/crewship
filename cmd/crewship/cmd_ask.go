@@ -192,8 +192,16 @@ Examples:
 		timeoutSecs, _ := cmd.Flags().GetInt("timeout")
 		maxTurns, _ := cmd.Flags().GetInt("max-turns")
 
+		extras := readRunExtrasFlags(cmd)
+		if err := extras.validate(prompt, "", false, false); err != nil {
+			return err
+		}
+
 		// Fan-out path: --agents takes precedence over --agent / default-agent.
 		if len(fanoutAgents) > 0 {
+			if extras.any() {
+				return fmt.Errorf("--attach and --page apply to one chat and cannot be used with --agents")
+			}
 			agentsByID := map[string]string{}
 			for _, slug := range fanoutAgents {
 				slug = strings.TrimSpace(slug)
@@ -229,6 +237,12 @@ Examples:
 			ID string `json:"id" yaml:"id"`
 		}
 		if err := cli.ReadJSON(resp, &chatResult); err != nil {
+			return err
+		}
+
+		defer func() { runMessageExtras = nil }()
+		prompt, err = prepareRunExtras(cmd.Context(), client, agentID, chatResult.ID, prompt, extras)
+		if err != nil {
 			return err
 		}
 
@@ -332,4 +346,5 @@ func init() {
 	askCmd.Flags().Bool("plan", false, "Ask for a step-by-step plan (prompt-guided; tools remain available)")
 	askCmd.Flags().String("effort", "", "Reasoning effort: minimal|low|medium|high|xhigh")
 	askCmd.Flags().Bool("show-thinking", false, "Surface reasoning blocks on stdout (not truncated)")
+	addRunExtrasFlags(askCmd, false, false)
 }
