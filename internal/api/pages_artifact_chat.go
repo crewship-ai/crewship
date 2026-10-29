@@ -13,6 +13,25 @@ import (
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
+// Feedback is captured separately from the owner's current content base.
+// The same tuple must survive every write of one admission transaction.
+type artifactFeedbackIdentity struct {
+	task, author string
+	version      int64
+}
+
+func artifactProjectFeedbackIdentity(ctx context.Context, tx *sql.Tx, workspace string, intent artifacts.ProjectIntent) (artifactFeedbackIdentity, error) {
+	var identity artifactFeedbackIdentity
+	if intent.CommentID == "" {
+		return identity, nil
+	}
+	err := tx.QueryRowContext(ctx, `SELECT t.id,c.author,c.version FROM artifact_project_comments c JOIN users author ON author.id=c.author JOIN artifact_project_comment_tasks t ON t.id=c.task_id AND t.comment_id=c.id AND t.workspace_id=c.workspace_id AND t.page_id=c.page_id AND t.base_version=c.version WHERE c.id=? AND c.workspace_id=? AND c.page_id=?`, intent.CommentID, workspace, intent.PageID).Scan(&identity.task, &identity.author, &identity.version)
+	if err != nil {
+		return identity, errArtifactProjectAccess
+	}
+	return identity, nil
+}
+
 // The host calls this only after persisting the original human message and
 // before dispatch. It is not exposed as a model-callable route.
 func (h *PageHandler) RecordArtifactProjectIntent(ctx context.Context, receipt *chataudience.Receipt, message string, intent artifacts.ProjectIntent) error {
@@ -36,6 +55,10 @@ func (h *PageHandler) RecordArtifactProjectIntent(ctx context.Context, receipt *
 	if err = h.artifactProjectMessageAuthority(ctx, tx, receipt, message, intent, originalRun.String); err != nil {
 		return err
 	}
+	feedback, err := artifactProjectFeedbackIdentity(ctx, tx, receipt.WorkspaceID, intent)
+	if err != nil {
+		return err
+	}
 	var page, comment any
 	if intent.PageID != "" {
 		page = intent.PageID
@@ -43,7 +66,7 @@ func (h *PageHandler) RecordArtifactProjectIntent(ctx context.Context, receipt *
 	if intent.CommentID != "" {
 		comment = intent.CommentID
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO artifact_project_message_intents(message_id,workspace_id,human_user_id,chat_id,submission_id,page_id,comment_id,base_version,created_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(message_id) DO NOTHING`, message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, intent.SubmissionID, page, comment, intent.BaseVersion, tsformat.Format(time.Now()))
+	_, err = tx.ExecContext(ctx, `INSERT INTO artifact_project_message_intents(message_id,workspace_id,human_user_id,chat_id,submission_id,page_id,comment_id,base_version,created_by_test,created_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(message_id) DO NOTHING`, message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, intent.SubmissionID, page, comment, intent.BaseVersion, intent.CreatedByTest, tsformat.Format(time.Now()))
 	if err != nil {
 		return err
 	}
@@ -53,8 +76,12 @@ func (h *PageHandler) RecordArtifactProjectIntent(ctx context.Context, receipt *
 	if err = h.artifactProjectMessageAuthority(ctx, tx, receipt, message, intent, originalRun.String); err != nil {
 		return err
 	}
+	finalFeedback, err := artifactProjectFeedbackIdentity(ctx, tx, receipt.WorkspaceID, intent)
+	if err != nil || finalFeedback != feedback {
+		return errArtifactProjectAccess
+	}
 	var same int
-	err = tx.QueryRowContext(ctx, `SELECT count(*) FROM artifact_project_message_intents WHERE message_id=? AND workspace_id=? AND human_user_id=? AND chat_id=? AND submission_id=? AND COALESCE(page_id,'')=? AND COALESCE(comment_id,'')=? AND base_version=? AND revoked_at IS NULL`, message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, intent.SubmissionID, intent.PageID, intent.CommentID, intent.BaseVersion).Scan(&same)
+	err = tx.QueryRowContext(ctx, `SELECT count(*) FROM artifact_project_message_intents WHERE message_id=? AND workspace_id=? AND human_user_id=? AND chat_id=? AND submission_id=? AND COALESCE(page_id,'')=? AND COALESCE(comment_id,'')=? AND base_version=? AND created_by_test=? AND revoked_at IS NULL`, message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, intent.SubmissionID, intent.PageID, intent.CommentID, intent.BaseVersion, intent.CreatedByTest).Scan(&same)
 	if err != nil || same != 1 {
 		return errArtifactProjectAccess
 	}
@@ -87,12 +114,15 @@ func (h *PageHandler) artifactProjectMessageAuthority(ctx context.Context, tx *s
 		return nil
 	}
 	var allowed int
-	err = tx.QueryRowContext(ctx, `SELECT count(*) FROM pages p JOIN artifact_version_heads v ON v.page_id=p.id AND v.workspace_id=p.workspace_id AND v.content_type=? WHERE p.id=? AND p.workspace_id=? AND p.owner_user_id=? AND p.owner_crew_id IS NULL AND p.folder_id IS NULL AND v.latest_version=?`, contentType, intent.PageID, receipt.WorkspaceID, receipt.UserID, intent.BaseVersion).Scan(&allowed)
+	err = tx.QueryRowContext(ctx, `SELECT count(*) FROM pages p JOIN artifact_version_heads v ON v.page_id=p.id AND v.workspace_id=p.workspace_id AND v.content_type=? WHERE p.id=? AND p.workspace_id=? AND p.owner_user_id=? AND p.owner_crew_id IS NULL AND v.latest_version=?`, contentType, intent.PageID, receipt.WorkspaceID, receipt.UserID, intent.BaseVersion).Scan(&allowed)
 	if err != nil || allowed != 1 {
 		return artifacts.ErrVersionConflict
 	}
 	if intent.CommentID != "" {
-		err = tx.QueryRowContext(ctx, `SELECT count(*) FROM artifact_project_comments c JOIN artifact_project_comment_tasks t ON t.comment_id=c.id AND t.workspace_id=c.workspace_id AND t.page_id=c.page_id AND t.base_version=c.version WHERE c.id=? AND c.workspace_id=? AND c.page_id=? AND c.author=? AND c.version=? AND ((t.status='pending' AND t.active_run_id IS NULL) OR (t.status='working' AND t.active_run_id=? AND ?<>'') OR (t.status='working' AND EXISTS(SELECT 1 FROM journal_entries ended WHERE ended.workspace_id=t.workspace_id AND ended.trace_id=t.active_run_id AND ended.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop'))))`, intent.CommentID, receipt.WorkspaceID, intent.PageID, receipt.UserID, intent.BaseVersion, run, run).Scan(&allowed)
+		// The owner's explicit current editing mandate is the latest version
+		// above. Feedback keeps its original human author and immutable shared
+		// task base; that author never lends a credential or owner-chat consent.
+		err = tx.QueryRowContext(ctx, `SELECT count(*) FROM artifact_project_comments c JOIN users author ON author.id=c.author JOIN artifact_project_comment_tasks t ON t.id=c.task_id AND t.comment_id=c.id AND t.workspace_id=c.workspace_id AND t.page_id=c.page_id AND t.base_version=c.version WHERE c.id=? AND c.workspace_id=? AND c.page_id=? AND ((t.status='pending' AND t.active_run_id IS NULL) OR (t.status='working' AND t.active_run_id=? AND ?<>'') OR (t.status='working' AND EXISTS(SELECT 1 FROM journal_entries ended WHERE ended.workspace_id=t.workspace_id AND ended.trace_id=t.active_run_id AND ended.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop'))))`, intent.CommentID, receipt.WorkspaceID, intent.PageID, run, run).Scan(&allowed)
 		if err != nil || allowed != 1 {
 			return errArtifactProjectAccess
 		}
@@ -124,8 +154,12 @@ func (h *InternalHandler) admitArtifactProjectStart(r *http.Request, entry journ
 	if err = pages.artifactProjectMessageAuthority(ctx, tx, receipt, message, intent, entry.TraceID); err != nil {
 		return 403, err
 	}
+	feedback, err := artifactProjectFeedbackIdentity(ctx, tx, receipt.WorkspaceID, intent)
+	if err != nil {
+		return 403, err
+	}
 	var bound sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT run_id FROM artifact_project_message_intents WHERE message_id=? AND workspace_id=? AND human_user_id=? AND chat_id=? AND submission_id=? AND COALESCE(page_id,'')=? AND COALESCE(comment_id,'')=? AND base_version=? AND revoked_at IS NULL`, message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, intent.SubmissionID, intent.PageID, intent.CommentID, intent.BaseVersion).Scan(&bound)
+	err = tx.QueryRowContext(ctx, `SELECT run_id FROM artifact_project_message_intents WHERE message_id=? AND workspace_id=? AND human_user_id=? AND chat_id=? AND submission_id=? AND COALESCE(page_id,'')=? AND COALESCE(comment_id,'')=? AND base_version=? AND created_by_test=? AND revoked_at IS NULL`, message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, intent.SubmissionID, intent.PageID, intent.CommentID, intent.BaseVersion, intent.CreatedByTest).Scan(&bound)
 	if err != nil || bound.Valid && bound.String != entry.TraceID {
 		return 403, errArtifactProjectAccess
 	}
@@ -167,7 +201,7 @@ func (h *InternalHandler) admitArtifactProjectStart(r *http.Request, entry journ
 		return 403, err
 	}
 	if intent.CommentID != "" {
-		result, e := tx.ExecContext(ctx, `UPDATE artifact_project_comment_tasks SET status='working',active_run_id=? WHERE comment_id=? AND workspace_id=? AND page_id=? AND base_version=? AND ((status='pending' AND active_run_id IS NULL) OR (status='working' AND active_run_id=?) OR (status='working' AND EXISTS(SELECT 1 FROM journal_entries ended WHERE ended.workspace_id=artifact_project_comment_tasks.workspace_id AND ended.trace_id=artifact_project_comment_tasks.active_run_id AND ended.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop'))))`, entry.TraceID, intent.CommentID, entry.WorkspaceID, intent.PageID, intent.BaseVersion, entry.TraceID)
+		result, e := tx.ExecContext(ctx, `UPDATE artifact_project_comment_tasks SET status='working',active_run_id=? WHERE comment_id=? AND workspace_id=? AND page_id=? AND EXISTS(SELECT 1 FROM artifact_project_comments feedback JOIN users author ON author.id=feedback.author WHERE feedback.id=artifact_project_comment_tasks.comment_id AND feedback.task_id=artifact_project_comment_tasks.id AND feedback.workspace_id=artifact_project_comment_tasks.workspace_id AND feedback.page_id=artifact_project_comment_tasks.page_id AND feedback.version=artifact_project_comment_tasks.base_version) AND ((status='pending' AND active_run_id IS NULL) OR (status='working' AND active_run_id=?) OR (status='working' AND EXISTS(SELECT 1 FROM journal_entries ended WHERE ended.workspace_id=artifact_project_comment_tasks.workspace_id AND ended.trace_id=artifact_project_comment_tasks.active_run_id AND ended.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop'))))`, entry.TraceID, intent.CommentID, entry.WorkspaceID, intent.PageID, entry.TraceID)
 		if e != nil {
 			return 500, e
 		}
@@ -182,6 +216,10 @@ func (h *InternalHandler) admitArtifactProjectStart(r *http.Request, entry journ
 	}
 	if err = pages.checkArtifactProjectRunConsent(ctx, a, intent.PageID); err != nil {
 		return 403, err
+	}
+	finalFeedback, err := artifactProjectFeedbackIdentity(ctx, tx, receipt.WorkspaceID, intent)
+	if err != nil || finalFeedback != feedback {
+		return 403, errArtifactProjectAccess
 	}
 	if err = tx.Commit(); err != nil {
 		return 500, err

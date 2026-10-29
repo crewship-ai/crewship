@@ -172,6 +172,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	sharedMetadata := map[string]any{"type": "integer", "minimum": 1, "description": "Current shared code pin; omitted when nothing has been shared."}
 	page := obj(map[string]any{
 		"artifact_kind": kindMetadata, "artifact_shared_version": sharedMetadata,
+		"created_by_test": boolean(), "archived": boolean(), "archived_at": timeString(),
 		"has_document":             boolean(),
 		"native_craft_application": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}, "description": "Existing whole-native Craft profile; open through the native editor and its independent admission."},
 		"has_workbook":             map[string]any{"type": "boolean", "description": "This Page holds a workbook (read through GET /api/v1/pages/{slug}/workbook). A workbook Page carries no panels."},
@@ -189,6 +190,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 
 	pageRow := obj(map[string]any{
 		"artifact_kind": kindMetadata, "artifact_shared_version": sharedMetadata,
+		"created_by_test": boolean(), "archived": boolean(), "archived_at": timeString(),
 		"private_audience":         map[string]any{"type": "boolean", "readOnly": true, "description": "Explicit private-audience classification of this authorized index row. A personal view also requires that the caller is its owner; workspace OWNER custody is separate. This read-only field does not grant permission to publish, move or change an audience."},
 		"has_document":             boolean(),
 		"native_craft_application": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}, "description": "Existing whole-native Craft profile; open through the native editor and its independent admission."},
@@ -273,7 +275,8 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	})
 
 	createBody := obj(mergeProps(writeBody["properties"].(map[string]any), map[string]any{
-		"allow_empty": map[string]any{"type": "boolean", "description": "Explicitly stage an empty Page owned by the current human for a Document. Panels are refused in this mode."},
+		"created_by_test": map[string]any{"type": "boolean", "description": "Explicit creation-only QA marker. No naming heuristic or legacy backfill. Human creation only unless server-recorded intent authorizes it."},
+		"allow_empty":     map[string]any{"type": "boolean", "description": "Explicitly stage an empty Page owned by the current human for a Document. Panels are refused in this mode."},
 	}))
 
 	// ── Grants (§7.1, §7.1b) ────────────────────────────────────────────────
@@ -284,10 +287,10 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	// that cached `level` and skipped `live` would show a permission that
 	// stopped working the moment its issuer left the crew.
 	grant := obj(map[string]any{
-		"subject_type":       map[string]any{"type": "string", "enum": []string{"user", "crew", "agent"}},
+		"subject_type":       map[string]any{"type": "string", "enum": []string{"user", "crew", "agent", "workspace"}},
 		"subject":            str(),
 		"subject_id":         str(),
-		"level":              map[string]any{"type": "string", "enum": []string{"read", "produce", "write"}},
+		"level":              map[string]any{"type": "string", "enum": []string{"read", "comment", "produce", "write"}},
 		"panels":             arr(str()),
 		"granted_by":         str(),
 		"granted_by_user_id": str(),
@@ -313,23 +316,27 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 	// which crew owns a panel the caller may not read.
 	accessPath := map[string]any{"type": "string",
 		"description": "One path: `owner`, `role`, `crew:<slug>` (member of the owning crew), `panel_crew:<slug>` (member of a crew owning a panel), `grant:page:<level>` (a live grant of that level), or `panel_crew:withheld` (a crew the caller may not see). For a crew subject `owner` means the crew owns the page and `panel_crew:<its slug>` that it owns a panel; an agent reaches only through `grant:page:<level>`."}
+	permissions := pageManagementPermissionsSchema()
 	accessSubject := obj(map[string]any{
-		"subject_type": map[string]any{"type": "string", "enum": []string{"user", "crew", "agent"}},
-		"subject_id":   map[string]any{"type": "string", "description": "The stored id, or `withheld` on the anonymous row that stands for the crews the caller cannot see."},
-		"label":        map[string]any{"type": "string", "description": "An email, a crew slug or an agent slug. Absent on the withheld row."},
-		"paths":        arr(accessPath),
+		"subject_type":          map[string]any{"type": "string", "enum": []string{"user", "crew", "agent", "workspace"}},
+		"subject_id":            map[string]any{"type": "string", "description": "The stored id, or `withheld` on the anonymous row that stands for the crews the caller cannot see."},
+		"label":                 map[string]any{"type": "string", "description": "An email, a crew slug or an agent slug. Absent on the withheld row."},
+		"paths":                 arr(accessPath),
+		"effective_permissions": permissions,
+		"sources":               arr(obj(map[string]any{"path": str(), "inherited": boolean(), "permissions": permissions})),
 	})
 	accessResponse := obj(map[string]any{
-		"page":     str(),
+		"page":    str(),
+		"page_id": str(), "pages_version": integer(),
 		"subjects": arr(accessSubject),
 		"next_cursor": map[string]any{"type": "string",
 			"description": "Present when more rows follow; pass it back as `cursor`. Opaque."},
 	})
-	accessResponse["required"] = []string{"page", "subjects"}
-	accessSubject["required"] = []string{"subject_type", "subject_id", "paths"}
+	accessResponse["required"] = []string{"page", "page_id", "pages_version", "subjects"}
+	accessSubject["required"] = []string{"subject_type", "subject_id", "paths", "effective_permissions", "sources"}
 	subjectAccessResponse := obj(map[string]any{
 		"subject": obj(map[string]any{
-			"subject_type": map[string]any{"type": "string", "enum": []string{"user", "crew", "agent"}},
+			"subject_type": map[string]any{"type": "string", "enum": []string{"user", "crew", "agent", "workspace"}},
 			"subject_id":   str(),
 			"label":        str(),
 		}),
@@ -386,7 +393,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		}),
 		"references": map[string]any{"type": "array", "items": bundleRef,
 			"description": "Every reference the page makes to something outside itself. The importer must bind each one explicitly; an unbound reference is refused (422), because guessing would hand the page to whoever happens to hold that name in the receiving workspace."},
-		"metadata": obj(map[string]any{"exported_at": timeString(), "panel_count": integer()}),
+		"metadata": obj(map[string]any{"exported_at": timeString(), "panel_count": integer(), "created_by_test": boolean()}),
 	}
 	bundle := obj(bundleProps)
 
@@ -473,7 +480,12 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"ref":                               obj(map[string]any{"kind": str(), "id": str()}),
 	})
 
+	archiveRequest, archiveResponse, folderReview := pageManagementSchemas(accessSubject)
+	page["required"] = []string{"created_by_test", "archived"}
+	pageRow["required"] = []string{"created_by_test", "archived"}
 	return map[string]DomainSchema{
+		"POST /api/v1/pages/{slug}/archive":   {Request: archiveRequest, RequestRequired: true, Response: archiveResponse},
+		"POST /api/v1/pages/{slug}/unarchive": {Request: archiveRequest, RequestRequired: true, Response: archiveResponse},
 		"GET /api/v1/pages": {
 			Response: arr(pageRow),
 		},
@@ -485,9 +497,10 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"GET /api/v1/pages/{slug}/grants": {Response: grantsResponse},
 		"PUT /api/v1/pages/{slug}/grants": {
 			Request: obj(map[string]any{
-				"subject_type": map[string]any{"type": "string", "enum": []string{"user", "crew", "agent"}},
+				"subject_type": map[string]any{"type": "string", "enum": []string{"user", "crew", "agent", "workspace"}},
 				"subject":      str(),
-				"level":        map[string]any{"type": "string", "enum": []string{"read", "produce", "write"}},
+				"subject_id":   str(),
+				"level":        map[string]any{"type": "string", "enum": []string{"read", "comment", "produce", "write"}},
 				"panels": map[string]any{"type": "array", "items": str(),
 					"description": "Optional. Restricts a produce grant to named panels; omitted means every panel on the page."},
 			}),
@@ -531,9 +544,10 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 				"page":          map[string]any{"type": "string", "description": "The slug of the page to file here; it leaves any other folder it was in."},
 				"pages_version": map[string]any{"type": "integer", "description": "The page's pages_version as last read. Required."},
 				"acl_version":   map[string]any{"type": "integer", "description": "The folder's acl_version as last read. Required."},
+				"dry_run":       boolean(), "confirm": boolean(), "review_token": str(),
 			}),
 			RequestRequired: true,
-			Response:        folderPage,
+			Response:        map[string]any{"oneOf": []any{folderPage, folderReview}},
 		},
 		"POST /api/v1/page-folders/{slug}/pages:batch": {
 			Request: obj(map[string]any{

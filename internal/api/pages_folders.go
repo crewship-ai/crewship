@@ -62,6 +62,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pages"
 )
@@ -181,9 +182,13 @@ type pageFolderWriteRequest struct {
 // pointers so an omitted one is a 400 rather than a zero that happens to
 // match a page that has never moved.
 type pageFolderMoveRequest struct {
-	Page         string `json:"page"`
-	PagesVersion *int64 `json:"pages_version"`
-	ACLVersion   *int64 `json:"acl_version"`
+	Page            string `json:"page"`
+	PagesVersion    *int64 `json:"pages_version"`
+	ACLVersion      *int64 `json:"acl_version"`
+	DryRun          bool   `json:"dry_run,omitempty"`
+	Confirm         bool   `json:"confirm,omitempty"`
+	ReviewToken     string `json:"review_token,omitempty"`
+	reviewRequested bool
 }
 
 // ── Loading ────────────────────────────────────────────────────────────────
@@ -394,6 +399,11 @@ func (h *PageHandler) ListFolders(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "list page folders", err)
 		return
 	}
+	index.rows, err = pageCatalogVisibilityRows(r, index.rows)
+	if err != nil {
+		replyError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	counts := map[string]int{}
 	for i := range index.rows {
 		if id := index.rows[i].rec.FolderID; id != "" {
@@ -434,6 +444,11 @@ func (h *PageHandler) GetFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(index.rows) == 0 && !folderStanding(viewer, f, index.acl[f.ID]) {
 		replyError(w, http.StatusNotFound, fmt.Sprintf("folder %q not found", slug))
+		return
+	}
+	index.rows, err = pageCatalogVisibilityRows(r, index.rows)
+	if err != nil {
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	out := pageFolderShowWire{pageFolderWire: f.wire(len(index.rows), index.acl[f.ID], viewer), Pages: make([]pageListWire, 0, len(index.rows))}
@@ -739,6 +754,10 @@ func (h *PageHandler) AddFolderPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if req.reviewRequested {
+		h.reviewFolderMove(w, r, req)
+		return
+	}
 	if strings.TrimSpace(req.Page) == "" {
 		replyError(w, http.StatusBadRequest, "page is required: the slug of the page to file here")
 		return
@@ -823,6 +842,10 @@ func (h *PageHandler) RemoveFolderPage(w http.ResponseWriter, r *http.Request) {
 	}
 	req, ok := h.decodeFolderMove(w, r)
 	if !ok {
+		return
+	}
+	if req.reviewRequested {
+		replyError(w, 400, "reviewed removal is not supported; no Page was changed")
 		return
 	}
 	if req.PagesVersion == nil {
@@ -1018,6 +1041,13 @@ func (h *PageHandler) decodeFolderMove(w http.ResponseWriter, r *http.Request) (
 	if err := json.Unmarshal(body, &req); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return nil, false
+	}
+	if hasPageReviewFields(body) {
+		if len(body) > 16<<10 || !pageReviewFieldsNonNull(body) || artifacts.DecodeDataJSON(body, &req, "page", "pages_version", "acl_version", "dry_run", "confirm", "review_token") != nil {
+			replyError(w, 400, "invalid folder review request")
+			return nil, false
+		}
+		req.reviewRequested = true
 	}
 	return &req, true
 }

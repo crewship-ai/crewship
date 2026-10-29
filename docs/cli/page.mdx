@@ -47,7 +47,10 @@ exception in the other direction: it prints YAML unless you ask for
 | `set <slug>/<panel> --data -` | Push a panel's data — the single write path |
 | `actions <slug>/<panel>` | List the actions a panel declares, and the routine each one runs |
 | `action <slug>/<panel> <action-id>` | Dispatch a declared action |
-| `grant <slug> --user\|--crew\|--agent <subject>\|--workspace --level <level>` | Grant read, produce, or write on a page |
+| `grant <slug> --user\|--crew\|--agent <subject>\|--workspace --level <level>` | Grant read, comment, produce, or write on a page |
+| `share <slug> --user\|--crew <subject>\|--workspace --level read\|comment\|write` | Share inside the workspace; Comment never grants edit or execution authority |
+| `archive <page> --dry-run --pages-version <n>` | Preview removal from default lists without deleting content |
+| `unarchive <page> --dry-run --pages-version <n>` | Preview restoration to default lists |
 | `revoke <slug> --agent <agent-slug>` | Remove a grant |
 | `access <slug> --me` | How you reach a page: your own paths |
 | `grants <slug>` | List a page's grants |
@@ -124,6 +127,141 @@ workspace. A page whose only path is `grant` is one somebody shared with you. `-
 the form the next command in a pipe wants.
 
 ---
+
+## Catalog review and QA items
+
+`crewship page list --test-items exclude|only|include --archived exclude|only|include`
+filters after access checks and before pagination; both default to `exclude`.
+`created_by_test` is stored explicitly, independent of names. New QA belongs in
+a dedicated workspace. Use `crewship page create --allow-empty --test-item` for
+a staged native document or `crewship page artifact create --test-item` for a
+human-created typed artifact. The marker is creation-only and survives content
+changes; exporting a marked Page preserves it on import without copying archive
+state. No legacy rows are automatically retagged.
+
+`crewship page archive <page> --dry-run --pages-version N` calls
+`POST /api/v1/pages/{slug}/archive`; `crewship page unarchive <page> --dry-run
+--pages-version N` calls `POST /api/v1/pages/{slug}/unarchive`. Review the returned
+impact, then confirm with `--yes --pages-version N --review-token TOKEN`.
+A changed version or authority requires another preview. Archiving changes
+catalog discovery only; content, history, grants and direct authorized reads
+remain available. Neither operation deletes data.
+
+`crewship page folder add <folder> <page> --dry-run` previews the full effective
+access before and after filing, using the current Page and folder ACL versions.
+Confirmation requires `--yes --pages-version N --acl-version M --review-token
+TOKEN`; it does not silently retry a stale review. Hidden folder ACL identities
+stay withheld. The existing fenced legacy filing command remains supported;
+review mode is currently single-item only.
+
+`crewship page share <page> --user <member> --level comment` uses the same
+`PUT /api/v1/pages/{slug}/grants` authorization as `page grant`. Read cannot submit
+artifact feedback; Comment can submit feedback on the current shared version,
+with the commenter's actual identity, without editing, restoring, sharing or
+starting an owner run. Produce remains separate. Sharing offers workspace
+members only, with no guest or expiry options. Access output retains its
+existing `subjects` shape and adds effective read/comment/edit/produce rights
+and their sources.
+
+---
+
+## `crewship page archive <page>`
+
+Authenticated workspace request `POST /api/v1/pages/{slug}/archive` requires a
+fresh human Page owner or authorized administrator; private/native custody
+restrictions remain effective. Request body uses `pages_version` and either
+`dry_run: true` or `confirm: true` with the returned `review_token`.
+Response 200 contains `dry_run`, `page_id`, `page`, `pages_version`, `before`,
+`after`, `impact`, `changed` and a preview-only `review_token`. Impact records
+removal from default lists; access and content are retained.
+Statuses: 400 invalid review request, 401 unauthenticated, 403 forbidden,
+404 hidden/missing Page, 409 stale version or changed authority, 500 storage
+failure. Preview never mutates; confirmation never silently retries a stale
+review. The artifact spelling is an alias of the same Page API.
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Preview without mutation. |
+| `--pages-version <n>` | Exact Page version read before the preview; required. |
+| `--review-token <token>` | Exact server token returned by the matching preview. |
+| `--yes` | Confirm the reviewed change, with version and token. |
+
+## `crewship page unarchive <page>`
+
+Authenticated workspace request `POST /api/v1/pages/{slug}/unarchive` requires a
+fresh human Page owner or authorized administrator; private/native custody
+restrictions remain effective. Request body uses `pages_version` and either
+`dry_run: true` or `confirm: true` with the returned `review_token`.
+Response 200 contains `dry_run`, `page_id`, `page`, `pages_version`, `before`,
+`after`, `impact`, `changed` and a preview-only `review_token`. Impact records
+removal from default lists; access and content are retained.
+Statuses: 400 invalid review request, 401 unauthenticated, 403 forbidden,
+404 hidden/missing Page, 409 stale version or changed authority, 500 storage
+failure. Preview never mutates; confirmation never silently retries a stale
+review. The artifact spelling is an alias of the same Page API.
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Preview without mutation. |
+| `--pages-version <n>` | Exact Page version read before the preview; required. |
+| `--review-token <token>` | Exact server token returned by the matching preview. |
+| `--yes` | Confirm the reviewed change, with version and token. |
+
+## `crewship page artifact archive <page>`
+
+Authenticated workspace request `POST /api/v1/pages/{slug}/archive` requires a
+fresh human Page owner or authorized administrator; private/native custody
+restrictions remain effective. Request body uses `pages_version` and either
+`dry_run: true` or `confirm: true` with the returned `review_token`.
+Response 200 contains `dry_run`, `page_id`, `page`, `pages_version`, `before`,
+`after`, `impact`, `changed` and a preview-only `review_token`. Impact records
+removal from default lists; access and content are retained.
+Statuses: 400 invalid review request, 401 unauthenticated, 403 forbidden,
+404 hidden/missing Page, 409 stale version or changed authority, 500 storage
+failure. Preview never mutates; confirmation never silently retries a stale
+review. The artifact spelling is an alias of the same Page API.
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Preview without mutation. |
+| `--pages-version <n>` | Exact Page version read before the preview; required. |
+| `--review-token <token>` | Exact server token returned by the matching preview. |
+| `--yes` | Confirm the reviewed change, with version and token. |
+
+## `crewship page artifact unarchive <page>`
+
+Authenticated workspace request `POST /api/v1/pages/{slug}/unarchive` requires a
+fresh human Page owner or authorized administrator; private/native custody
+restrictions remain effective. Request body uses `pages_version` and either
+`dry_run: true` or `confirm: true` with the returned `review_token`.
+Response 200 contains `dry_run`, `page_id`, `page`, `pages_version`, `before`,
+`after`, `impact`, `changed` and a preview-only `review_token`. Impact records
+removal from default lists; access and content are retained.
+Statuses: 400 invalid review request, 401 unauthenticated, 403 forbidden,
+404 hidden/missing Page, 409 stale version or changed authority, 500 storage
+failure. Preview never mutates; confirmation never silently retries a stale
+review. The artifact spelling is an alias of the same Page API.
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Preview without mutation. |
+| `--pages-version <n>` | Exact Page version read before the preview; required. |
+| `--review-token <token>` | Exact server token returned by the matching preview. |
+| `--yes` | Confirm the reviewed change, with version and token. |
+
+## `crewship page share <slug>`
+
+Share with an existing workspace member, crew or the entire workspace using
+`PUT /api/v1/pages/{slug}/grants`. This human command uses the existing live
+issuer authorization. A grant is immediately inert after its issuer loses
+standing. It offers no guest or expiry options and cannot grant agent Produce.
+
+| Flag | Description |
+|---|---|
+| `--user <member>` | Existing member email or ID. |
+| `--crew <crew>` | Existing crew slug or ID. |
+| `--workspace` | All current human workspace members. |
+| `--level <read\|comment\|write>` | Human sharing capability; Comment grants feedback only. |
 
 ## `crewship page get <slug>`
 
@@ -738,7 +876,7 @@ crewship page grant fleet-201 --user  ops@example.com --level write
 | `--crew <slug>` | Grant to a crew |
 | `--agent <slug>` | Grant to an agent |
 | `--workspace` | Grant to everyone in the workspace — every current human member, never an agent. `read` or `write` only; `produce` names a producer, and everyone is not one. |
-| `--level <read\|produce\|write>` | The verb being granted — see [the permission model](/guides/pages#the-three-verbs) |
+| `--level <read\|comment\|produce\|write>` | The verb being granted — see [the permission model](/guides/pages#the-three-verbs) |
 | `--panels <id,id,...>` | Restricts a `produce` grant to these panel ids. Omitted = every panel the subject is otherwise eligible to write. Only meaningful for `--level produce`. |
 
 <Note>
@@ -914,6 +1052,14 @@ crewship page folder add ops-board fleet-201
 The same as `crewship page move fleet-201 --folder ops-board`. See
 [`page move`](#crewship-page-move-page) for the two authorities it needs and
 the fences it carries.
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Preview effective access before and after the move without mutation. |
+| `--pages-version <n>` | Exact Page version for the reviewed move. |
+| `--acl-version <n>` | Exact target folder ACL version. |
+| `--review-token <token>` | Token from that matching preview. |
+| `--yes` | Confirm the same reviewed move with its versions and token. |
 
 ### `crewship page folder remove <folder> <page>`
 

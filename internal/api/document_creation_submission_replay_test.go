@@ -221,6 +221,7 @@ func TestDocumentCreationSubmissionReplayThroughWebSocketAndBinary(t *testing.T)
 	binary := filepath.Join(dir, "crewship")
 	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./cmd/crewship")
 	build.Dir = "../.."
+	build.Env = nestedGoBuildEnv(t)
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("actual binary build:%s %v", out, err)
 	}
