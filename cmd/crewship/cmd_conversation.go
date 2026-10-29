@@ -48,13 +48,24 @@ shipped are indexed (there is no backfill of older history).
 Examples:
   crewship conversation search "deploy pipeline"
   crewship conversation search "rate limit" --agent backend-bot --limit 50
-  crewship conversation search "auth" --format json`,
+  crewship conversation search "auth" --format json
+  crewship conversation search "invoice" --from agent --has link --after 2026-10-01
+  crewship conversation search "rollback" --chat c_abc123
+
+--chat, --from, --has, --after and --before narrow the returned page on the
+client, exactly as the chat search box does; when they remove hits from a full
+page the result is marked partial.`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
 		}
 		if err := requireWorkspace(); err != nil {
+			return err
+		}
+
+		filters, err := readConversationSearchFilters(cmd)
+		if err != nil {
 			return err
 		}
 
@@ -127,17 +138,46 @@ Examples:
 				ToolSummary string `json:"tool_summary" yaml:"tool_summary"`
 				Timestamp   string `json:"ts" yaml:"ts"`
 			} `json:"hits" yaml:"hits"`
+			// Partial: the client-side filters below removed hits from a full
+			// server page, so matches the server never sent may exist.
+			Partial bool `json:"partial,omitempty" yaml:"partial,omitempty"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
+		}
+
+		// The endpoint understands only query, agent_id and limit. The chat
+		// search box's other filters (lib/chat-search.ts applyClientFilters)
+		// narrow the returned page here, the same way and with the same
+		// caveat: a filtered full page is reported as partial, never as all
+		// there is.
+		if filters.active() {
+			kept := result.Hits[:0]
+			for _, h := range result.Hits {
+				if filters.match(h.SessionID, h.Role, h.AgentSlug, h.AgentName, h.Content, h.ToolSummary, h.Timestamp) {
+					kept = append(kept, h)
+				}
+			}
+			serverFull := result.Count >= limit
+			result.Partial = serverFull && len(kept) < len(result.Hits)
+			result.Hits = kept
+			result.Count = len(kept)
 		}
 
 		f := newFormatter()
 		return f.AutoHuman(result, func() {
 			if result.Count == 0 {
 				fmt.Printf("No conversation matches for %q.\n", query)
+				if result.Partial {
+					fmt.Printf("%s(filters applied to the first %d server hits only — raise --limit to look further)%s\n", cli.Dim, limit, cli.Reset)
+				}
 				return
 			}
+			defer func() {
+				if result.Partial {
+					fmt.Printf("%s(partial: filters applied to the first %d server hits only — raise --limit to look further)%s\n", cli.Dim, limit, cli.Reset)
+				}
+			}()
 
 			scope := "this workspace"
 			if agentID != "" {
@@ -176,5 +216,10 @@ Examples:
 func init() {
 	conversationSearchCmd.Flags().Int("limit", 20, "Maximum number of hits (1-100)")
 	conversationSearchCmd.Flags().String("agent", "", "Narrow the search to one agent (slug or ID); default is every agent in the workspace")
+	conversationSearchCmd.Flags().String("chat", "", "Only hits from this chat session id (filtered client-side)")
+	conversationSearchCmd.Flags().String("from", "", "Only the agent's replies: \"agent\", or an agent slug or name (filtered client-side)")
+	conversationSearchCmd.Flags().StringSlice("has", nil, "Only hits that contain: link, code, tool (repeatable; filtered client-side)")
+	conversationSearchCmd.Flags().String("after", "", "Only hits on or after this date, YYYY-MM-DD UTC (filtered client-side)")
+	conversationSearchCmd.Flags().String("before", "", "Only hits before this date, YYYY-MM-DD UTC (filtered client-side)")
 	conversationCmd.AddCommand(conversationSearchCmd)
 }

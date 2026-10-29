@@ -43,6 +43,10 @@ The version 1 envelope identifies the workspace, source kind, source ID and orig
 | `chat react add <chat-id> <msg-id> <emoji>` | Add an emoji reaction to a single message. |
 | `chat react remove <chat-id> <msg-id> <emoji>` | Remove your reaction (`rm` / `delete` aliases). |
 | `chat react list <chat-id> <msg-id>` | List reactions with counts and whether the caller already reacted. |
+| `chat export <chat-id>` | Write the transcript as Markdown — the chat's Export dialog. `-o file.md` writes it atomically. |
+| `chat retry <chat-id>` | Resend the last message for a fresh answer — Regenerate. Alias: `regenerate`. |
+| `chat edit <chat-id> -m <text>` | Send a corrected version of your message and stream the answer — Edit and resend. |
+| `chat stop <chat-id>` | Stop the run you started in a chat — the Stop button. `--wait` stays connected until the run confirms. |
 | `chat steer <chat-id>` | Queue a mid-turn steering message for a chat (applied on the next turn if a run is in flight). |
 | `chat stream <chat-id>` | Watch the session's agent run live over HTTP — no WebSocket client needed. See [Watching agent runs](/guides/watching-agent-runs). |
 | `chat participants list <chat-id>` | List the humans in a group chat (columns `USER ID` / `EMAIL` / `NAME` / `ROLE`). Prints `No participants (private chat).` when empty. Alias: `members`. |
@@ -74,6 +78,7 @@ crewship chat refs <chat-id> --cursor '<next_cursor>' --limit 25 --format yaml
 | --- | --- | --- |
 | `--limit` | `100` | Maximum references per page; accepts 1–100. |
 | `--cursor` | empty | Opaque `next_cursor` from the preceding response. |
+| `--watch` | `false` | Print the page, then print it again whenever the chat's cards change (`chat-hints:<chat-id>`, the web chat's invalidation channel). Ctrl-C ends it with exit 0. |
 
 Calls `GET /api/v1/chats/{chatId}/entity-refs`. The response retains `refs`,
 `reset`, `next_cursor`, `snapshot_id`, `has_more` and `snapshot_complete`.
@@ -102,8 +107,9 @@ rules and [Operation](/cli/operation) for operation metadata.
 | `--markdown` | `false` | Force markdown ANSI styling (overrides config). |
 | `--no-markdown` | `false` | Disable markdown ANSI styling. |
 | `--filter <jq>` | (unset) | jq expression applied to the raw `[]message` JSON. Implies JSON output. |
+| `--parts` | `false` | Print each message's structure instead of its flattened text: thinking, every tool call (`[tool <name>] …`) and its result, images. |
 
-The transcript renders assistant / `model` messages through the markdown ANSI renderer; user and system messages stay plain. Each block carries a coloured `role · timestamp` header (yellow for user, green for assistant, dim for system).
+The transcript renders assistant / `model` messages through the markdown ANSI renderer; user and system messages stay plain. Each block carries a coloured `role · timestamp` header (yellow for user, green for assistant, dim for system). The time is the message's `ts` field (UTC), which is also what `--since` compares against.
 
 ### `chat attach <chat-id> <path>`
 
@@ -156,6 +162,7 @@ crewship chat list daniel --chat c_abc123
 | `--with-source` | bool | `false` | Attach each chat's work source — the routine (with run/step) or issue it belongs to — to every row: a `SOURCE` column in table output, a `source` object in `--format json`. |
 | `--kind <kinds>` | string | all | Narrow to one or more kinds (`direct`, `routine`, `issue`, `agent`); comma-separates. |
 | `--limit <n>` / `--offset <n>` | int | `100` / `0` | Paging; the server's default and ceiling are 100. |
+| `--counts` | bool | `false` | Also report the agent's chat totals per kind (`direct`, `routine`, `issue`, `agent`) — the sidebar's tab numbers, over every chat you may see, not just this page. Printed under the table as `totals: direct 3 · routine 150 · …`; `--format json` wraps the output as `{"chats": [...], "kind_counts": {...}}`. |
 
 See [List an agent's recent chats](#list-an-agents-recent-chats) below for what the rows mean and how to read `KIND` first.
 
@@ -209,6 +216,77 @@ crewship chat steer c_abc123 --message "focus on the auth bug first"
 crewship chat steer c_abc123 -m "use the staging DB, not prod"
 ```
 
+### `chat export <chat-id>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `-o`, `--output <file>` | stdout | Write the Markdown to this file, atomically (an interrupted export leaves no half-written file). |
+
+The document is the one the web chat's Export dialog downloads: a
+`# Conversation with <agent>` title and `Exported <time>` stamp, your messages
+under `## You`, the agent's under `## <agent>` with thinking quoted as
+`> _Thinking:_` and each tool call as `` > _Tool:_ `name` ``. Tool results are
+not exported, as in the dialog. Reads the same 500 messages as `chat <chat-id>`.
+
+```bash
+crewship chat export c_abc123 -o incident.md
+```
+
+### `chat retry <chat-id>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--no-stream` | `false` | Wait for completion and print only the final text. |
+| `-q`, `--quiet` | `false` | Only the agent's text; no stderr chatter. |
+| `--markdown` / `--no-markdown` | config | Force or disable markdown styling. |
+| `--agent <slug-or-id>` | from the transcript | Override the agent the send goes to. |
+
+Sends the chat's last user message again — the web chat's Regenerate. The
+stored transcript keeps the earlier answer; this is a new turn. If the message
+was sent with a Page, the server's appended snapshot is stripped and the Page
+is requested again by slug, so access is re-checked and the snapshot is fresh.
+An ask-form envelope is not resent: its submission id belonged to the original
+send. Restricted chats refuse it (their history is immutable).
+
+### `chat edit <chat-id>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `-m`, `--message <text>` | (required) | The replacement text. |
+| `--no-stream` | `false` | Wait for completion and print only the final text. |
+| `-q`, `--quiet` | `false` | Only the agent's text; no stderr chatter. |
+| `--markdown` / `--no-markdown` | config | Force or disable markdown styling. |
+| `--agent <slug-or-id>` | from the transcript | Override the agent the send goes to. |
+
+The web chat's Edit and resend: the corrected text is sent as a new message
+with no metadata — a form envelope that described the original answers would
+be false about edited text. The stored transcript keeps the original turn.
+
+```bash
+crewship chat retry c_abc123
+crewship chat edit c_abc123 -m "use the staging database, not prod"
+```
+
+### `chat stop <chat-id>`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--wait` | `false` | Stay connected until the run's terminal event confirms the stop. |
+| `--timeout <duration>` | `30s` | With `--wait`: exit non-zero if no confirmation arrives within this long. |
+
+Sends `cancel_message` over the WebSocket, the frame the chat's Stop button
+sends. The server scopes a cancel to its sender: it stops a run **you** started
+on that chat — from this terminal, another one or a browser tab — and is ignored
+for a run another member started. Without `--wait` the command returns once the
+request is sent. With `--wait` it subscribes to the session first and returns
+when the run's `done` arrives; a timeout means no run of yours was active.
+`--format json` prints `{"chat_id": …, "status": "requested" | "stopped"}`.
+
+```bash
+crewship chat stop c_abc123
+crewship chat stop c_abc123 --wait
+```
+
 ### `chat stream <chat-id>`
 
 | Flag | Default | Effect |
@@ -231,6 +309,13 @@ Any run that has a chat can be watched this way — a chat message, `crewship ru
 agent. A run executed with no chat row has no session channel to attach to, and a
 delegated sub-agent's output is reported as part of the delegating agent's turn
 rather than as a stream of its own.
+
+Besides text, thinking and tools, the human renderer prints one stderr line for
+each other session event: the human's own line (`[user] …`), the run summary
+(`[summary] $… · … tokens`), a busy bounce, an environment build, a refused
+form, and delegation, escalation, peer-query and port-exposure progress
+(`[delegated] → lucy · …`, `[escalation] from lucy · …`). Unknown types are
+named under `-v`.
 
 `--format ndjson` (or `json`) switches to passthrough: every server frame is
 printed verbatim, one JSON object per line. That is the mode to script against.
@@ -423,6 +508,7 @@ crewship chat room messages ROOM_ID --after-sequence 150     # catch up after a 
 | `--limit <n>` | `100` | Page size, `1..100`. The envelope's `has_more` says whether the page filled the limit. |
 | `--before-sequence <n>` | (unset) | Messages older than this sequence (must be positive). |
 | `--after-sequence <n>` | (unset) | Messages newer than this sequence; `0` starts at the beginning. |
+| `--follow` | `false` | Print the latest page (or, with `--after-sequence`, everything after that cursor), then each new message as it lands, one line per message (`#12 Ana: …`; `--format ndjson` prints each message object). New messages are announced on your own `user:<user-id>` channel as `conversation.updated`. Not with `--before-sequence`. Ctrl-C ends it with exit 0. |
 
 Calls `GET /api/v1/conversations/{conversationId}/messages`. The two cursor
 flags are mutually exclusive — the CLI refuses both before making a request.
@@ -740,7 +826,7 @@ uses `GET /api/v1/shared-chats/{shareId}/messages` with a dedicated share bearer
 ## Issue proposals
 
 ```bash
-crewship chat proposal list <chat-id> [--cursor opaque]
+crewship chat proposal list <chat-id> [--cursor opaque] [--watch]
 crewship chat proposal show <chat-id> <proposal-id>
 crewship chat proposal edit <chat-id> <proposal-id> --file proposal.json --version 1 --idempotency-key edit-1
 crewship chat proposal confirm <chat-id> <proposal-id> --version 2 --idempotency-key confirm-1
@@ -777,6 +863,13 @@ preserves the source expiry and original run/trigger provenance.
 Late edit retries after a later revision or terminal transition return the current
 authorized card, preserving the original operation receipt; confirmation retries preserve
 the original accepted outcome and Issue IDs.
+
+### crewship chat proposal list
+
+| Flag | Meaning |
+| --- | --- |
+| `--cursor` | Opaque `next_cursor` from the preceding page. |
+| `--watch` | Print the list, then again whenever the chat's cards change (`chat-hints:<chat-id>`). Ctrl-C ends it with exit 0. |
 
 ### crewship chat proposal propose
 
