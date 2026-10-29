@@ -59,6 +59,7 @@ func (r *Router) registerPageRoutes() {
 	// sweeper has to run against the same clock and journal.
 	r.pages = p
 	r.registerArtifactProjectCreateRoutes()
+	r.registerDesignRoutes()
 	r.registerArtifactProjectVersionRoutes()
 	r.registerArtifactSlidesRoutes()
 	r.registerArtifactDataRoutes()

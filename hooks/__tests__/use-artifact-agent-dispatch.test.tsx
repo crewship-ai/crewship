@@ -22,3 +22,13 @@ it("retains the queued task if there is no source chat or live connection",async
  expect(await hook.result.current.dispatch(comment)).toBe(false)
  expect(state.send).not.toHaveBeenCalled()
 })
+it("dispatches Design edits with an exact Design intent and Design tools",async()=>{
+ const hook=renderHook(()=>useArtifactAgentDispatch("workspace","page",{chat_id:"chat",agent_id:"agent"},true,"design"))
+ let result:Promise<boolean>
+ act(()=>{result=hook.result.current.dispatch({...comment,path:"design.json",selector:"frame-cart"})})
+ const [prompt,metadata]=state.send.mock.calls[0]
+ expect(prompt).toContain("design_apply")
+ expect(prompt).toContain("design_snapshot")
+ expect(metadata).toEqual({artifact_project_intent:{kind:"design",submission_id:"artifact-comment-comment-1",page_id:"page",comment_id:"comment-1",base_version:2}})
+ await act(async()=>{state.options.onOwnMessageSaved("saved",metadata);expect(await result!).toBe(true)})
+})

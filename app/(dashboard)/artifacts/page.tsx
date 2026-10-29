@@ -14,7 +14,8 @@ export default function ArtifactsPage() {
 function ArtifactsEntry() {
   const params = useSearchParams()
   const router = useRouter()
-  const legacy = params?.get("item") || null
+  // A shared Design version opens full screen at /artifacts?design=1&item=<slug>; only other ?item= links are from before.
+  const legacy = params?.get("design") === "1" ? null : params?.get("item") || null
   useEffect(() => {
     if (!legacy) return
     const rest = new URLSearchParams(params?.toString())
