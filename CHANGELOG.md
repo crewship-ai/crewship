@@ -11,8 +11,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - ⚠️ **Behaviour change: notification channel URLs are checked more strictly.** The delivery library (shoutrrr 0.22.1) rejects a channel URL that could never send when a channel is created from the provider form or tested, and at send time for raw URLs: Gotify needs a real application token (15 characters starting with `A`, or a Gotify 3 `gtfya.` token), Google Chat needs both `key` and `token`, Mattermost needs a host, and ntfy topics follow ntfy's naming rule. Saved channels are never checked at startup or when listed; a Google Chat channel saved without `key` or `token` now reports a delivery error. SQLite driver updated to modernc.org/sqlite 1.61.0.
 
-- **"Send to agent" on Design and Project comments reports delivery correctly.** A delivered comment no longer turns into "Retry when the source chat is connected" after 15 seconds, and a busy agent is reported at once instead of after a timeout.
-
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.
 
 - **Shared artifact commenters can post feedback in the preview.** Comments stay anchored to the shared version without granting editing or agent execution rights; changing accounts, workspace or permissions retires an unfinished selection.
@@ -24,6 +22,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Home-installed agent CLIs remain visible during startup checks.** Offline qualification uses a separate temporary home while preserving read-only executable paths from the immutable image.
 
 - **Design artifacts gain an opt-in collaborative canvas.** People and agents can edit frames, shapes, text and images through Yjs, with live presence and normal artifact version history. Agents can address their selected canvas by its immutable ID. Disabled by default. Long-running cookie sessions renew only their collaborative transport after fresh authority checks, retaining unsaved work. Restoring saved canvases preserves prototype-named node IDs and their original contents.
+
+- **"Send to agent" on Design and Project comments reports delivery correctly.** A delivered comment no longer turns into "Retry when the source chat is connected" after 15 seconds, and a busy agent is reported at once instead of after a timeout.
 
 - **Native Craft editing can continue past access-token expiry.** The browser refreshes its cookie before admitting or renewing the same editing connection and replaces only its authenticated metadata stream. Unsaved work, the lease generation and in-flight saves remain in place; document mutations are never replayed.
 - **Read-only Craft viewers saw editing controls.** Native Craft previews now show edit actions only when the server confirms current edit access. Comment viewers can open an explicitly published native preview without acquiring an editor lock or reading private drafts. The CLI exposes the same shared preview and publication paths. ⚠️ **Behaviour change:** admitted native CLI actions and shared preview reads reject HTTP redirects.
