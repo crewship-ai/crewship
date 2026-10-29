@@ -207,6 +207,17 @@ it("lets an editor save a whole manifest while withholding owner controls", () =
   expect(state.save).toHaveBeenCalledWith({base_version:2,entrypoint:"index.html",files:[{path:"index.html",media_type:"text/html",content:"<h1>Edited by human</h1>"},previous.manifest.files[1]]},expect.anything())
  } finally {state.data=previous}
 })
+it("keeps the preview and the source draft when history quota is full",async()=>{
+ render(<ArtifactProject workspaceId="w" slug="demo" />)
+ fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+ fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"Work kept at full quota"}})
+ fireEvent.click(screen.getByRole("button",{name:"Save project"}))
+ await act(async()=>state.save.mock.calls[0][1].onError(Object.assign(Error("Project history quota is full."),{status:413})))
+ expect(screen.getByTitle("Artifact preview")).toBeInTheDocument()
+ expect(screen.getByLabelText("Source file")).toHaveValue("Work kept at full quota")
+ expect(screen.getByRole("alert")).toHaveTextContent("quota is full")
+})
+
 it("keeps a conflicting source draft and requires an explicit retry",async()=>{
  render(<ArtifactProject workspaceId="w" slug="demo" />)
  fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
@@ -251,15 +262,4 @@ it("removes the private iframe after a refused source save",async()=>{
  await act(async()=>state.save.mock.calls[0][1].onError(Object.assign(Error("Revoked"),{status:403})))
  expect(screen.queryByTitle("Artifact preview")).toBeNull()
  expect(screen.getByLabelText("Source file")).toHaveValue("Private draft")
-})
-
-it("keeps the preview and the source draft when history quota is full",async()=>{
- render(<ArtifactProject workspaceId="w" slug="demo" />)
- fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
- fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"Work kept at full quota"}})
- fireEvent.click(screen.getByRole("button",{name:"Save project"}))
- await act(async()=>state.save.mock.calls[0][1].onError(Object.assign(Error("Project history quota is full."),{status:413})))
- expect(screen.getByTitle("Artifact preview")).toBeInTheDocument()
- expect(screen.getByLabelText("Source file")).toHaveValue("Work kept at full quota")
- expect(screen.getByRole("alert")).toHaveTextContent("quota is full")
 })
