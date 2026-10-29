@@ -6,6 +6,7 @@ import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useLayoutBand } from "@/hooks/use-layout-breakpoint"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useAppStore } from "@/lib/store"
 import { PanelSpaces, type PanelSpacesConfig } from "@/components/layout/panel-spaces"
@@ -15,24 +16,12 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
  *  takes the 48 px toolbar shape and appends the panel's collapse button. */
 export const SecondaryPanelContext = React.createContext<{ toggle: React.ReactNode; claim: () => () => void } | null>(null)
 
-/** Tablet width (Harbor 2 breakpoints, #3358): between the phone and 1280. */
-const TABLET_QUERY = "(min-width: 768px) and (max-width: 1279px)"
-
 /**
  * True at tablet width. There the SecondaryPanel starts closed and floats
  * over the content, opened from the top bar's panel button (COM-05).
  */
 export function useIsTabletPanel(): boolean {
-  const [on, setOn] = React.useState(false)
-  React.useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return
-    const mql = window.matchMedia(TABLET_QUERY)
-    const update = () => setOn(mql.matches)
-    update()
-    mql.addEventListener?.("change", update)
-    return () => mql.removeEventListener?.("change", update)
-  }, [])
-  return on
+  return useLayoutBand("tablet")
 }
 
 /**

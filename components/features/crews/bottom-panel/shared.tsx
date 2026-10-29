@@ -2,7 +2,7 @@
 
 // Tiny presentational + formatting helpers shared by every tab.
 
-export function EmptyState({ children }: { children: React.ReactNode }) {
+export function PanelEmptyText({ children }: { children: React.ReactNode }) {
   return (
     <div className="h-full flex items-center justify-center text-xs text-muted-foreground p-4 text-center">
       {children}

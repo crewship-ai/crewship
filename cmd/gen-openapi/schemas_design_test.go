@@ -84,7 +84,7 @@ func TestDesignSchemasValidateNodePatchesAndExactReceipts(t *testing.T) {
 		{"DesignOperationsRequest", `{"operations":[{"op":"upsert","node":{"id":"existing","fill":"#2563eb"}}]}`, `{"operations":[{"op":"execute","command":"arbitrary"}]}`},
 		{"DesignNode", `{"id":"screen","type":"frame","x":0,"y":0,"width":360,"height":640}`, `{"id":"screen","type":"script","x":0,"y":0,"width":360,"height":640}`},
 		{"DesignVersionReceipt", `{"version":2,"actor":"user"}`, `{"Version":2,"Actor":"user"}`},
-		{"DesignCreateRequest", `{"slug":"checkout","name":"Checkout"}`, `{"slug":"checkout","name":"Checkout","actor":"forged"}`},
+		{"DesignCreateRequest", `{"slug":"checkout","name":"Checkout","created_by_test":true}`, `{"slug":"checkout","name":"Checkout","actor":"forged"}`},
 		{"DesignSnapshot", `{"page_id":"page","authority_revision":"9007199254740993","origin":null,"can_edit":false,"can_comment":false,"nodes":[],"order":[],"version":1,"latest_version":1,"shared_version":0,"actor":{"id":"user","name":"Reader"}}`, `{"page_id":"page","nodes":[]}`},
 	}
 	for _, fixture := range fixtures {

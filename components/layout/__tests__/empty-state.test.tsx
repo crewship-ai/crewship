@@ -37,3 +37,13 @@ describe("EmptyState", () => {
     expect(screen.getByRole("heading", { name: "Old" }).closest("[data-slot=empty-state]")).toHaveAttribute("data-size", "compact")
   })
 })
+
+// Optional description is retained from the former detail-kit EmptyState.
+it("supports a title-only state without an empty paragraph in every size", () => {
+  for (const size of ["card", "compact", "inline"] as const) {
+    const { container, unmount } = render(<EmptyState size={size} icon={Webhook} title="Only a title" />)
+    expect(screen.getByRole("heading", { name: "Only a title" })).toBeInTheDocument()
+    expect(container.querySelector("p")).toBeNull()
+    unmount()
+  }
+})

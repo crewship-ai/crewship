@@ -13,9 +13,13 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
 
+- ⚠️ **Behaviour change: notification channel URLs are checked more strictly.** The delivery library (shoutrrr 0.22.1) rejects a channel URL that could never send when a channel is created from the provider form or tested, and at send time for raw URLs: Gotify needs a real application token (15 characters starting with `A`, or a Gotify 3 `gtfya.` token), Google Chat needs both `key` and `token`, Mattermost needs a host, and ntfy topics follow ntfy's naming rule. Saved channels are never checked at startup or when listed; a Google Chat channel saved without `key` or `token` now reports a delivery error. SQLite driver updated to modernc.org/sqlite 1.61.0.
+
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.
 
 - **Shared artifact commenters can post feedback in the preview.** Comments stay anchored to the shared version without granting editing or agent execution rights; changing accounts, workspace or permissions retires an unfinished selection.
+
+- **Test Design canvases can be identified in the library.** Human canvas creation now retains the explicit test-item marker for catalog filtering.
 
 - Add human Comment grants for shared artifact feedback without edit or agent execution rights, explicit QA item markers and catalog filters, and confirmed archive and folder-move previews with live access checks. Access reports include effective capabilities and their sources; existing content, history and grants remain intact.
 
@@ -376,6 +380,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Prepare a static App preview boundary with scripts, navigation and external resources disabled, pinned revisions and immediate removal on access loss; it is not mounted in app routes and stays behind `NEXT_PUBLIC_STATIC_APP_PREVIEW` until a Page endpoint serves publication HTML.
 
 - **Password changes, HTTP and local CLI password resets, workspace/folder deletion and folder ACL changes fail atomically when their required chained audit cannot be recorded.** Passwords, reset-proof consumption and session/token revocations commit together; existing CLI commands retain their request shapes. Session disconnects are notified only after commit. Workspace deletion and workspace member removal recheck current authority inside the writer transaction.
+
+- **Routine schedules say how their last fire ended.** Each schedule in a routine's Triggers tab now ends with "last fire <time> · <outcome>": "queued for capacity" when a full routine queued it, "skipped: capacity or catch-up" when a waiting occurrence or catch-up after downtime dropped it, and "skipped: routine inactive" (or "previous run busy or routine inactive" for an active routine) when nothing was counted as missed. The schedule does not record which cause applied, so the label names both. The scheduling, routines and manifest guides now describe capacity queueing, catch-up alerts and replay with edited inputs and metadata.
 
 - **Terminal and restricted text streams stop at credential loss.** CLI terminal tickets use the shared source-token registry; revocation, suspension and original expiry close open shells. Source-credential checks remain in memory. Terminals additionally recheck live resource authority with one SQL query per PTY data/control frame and check idle shells on the 30-second watcher. Resource queries configure a five-second context deadline, but native SQLite busy handling can outlast it; no hard maximum closure time is guaranteed. This security fallback does not complete the H1 zero-SQL goal.
 - **Filter My space.** The private Document catalog can be narrowed by type, scope, owner and state; groups that cannot vary on the list are hidden. Counts only reflect items the server returned.
