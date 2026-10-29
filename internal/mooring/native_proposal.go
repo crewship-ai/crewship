@@ -20,6 +20,10 @@ var ErrNativeProposalDecided = errors.New("native Craft proposal already decided
 // may hold a full native document, so a busy human is never flooded.
 const MaxOpenNativeProposals = 16
 
+// nativeProposalSuperseded records that no person decided a stale proposal:
+// the document moved past its base before anyone accepted it.
+const nativeProposalSuperseded = "system:superseded"
+
 // NativeProposal is an agent's complete candidate document over one exact
 // version. It is not a version: nothing changes until a human accepts it.
 type NativeProposal struct {
@@ -97,6 +101,12 @@ func (s *NativeStore) Propose(ctx context.Context, k EditLeaseScope, base int64,
 		}
 		if latest != base {
 			return "", artifacts.ErrVersionConflict
+		}
+		// Open proposals over an older version can never be accepted; record
+		// them as stale so they stop holding places under the cap. Rows are
+		// kept for review and history.
+		if _, err = tx.ExecContext(ctx, `UPDATE craft_native_proposals SET state='stale',decided_by=?,decided_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE page_id=? AND workspace_id=? AND state='open' AND base_version<?`, nativeProposalSuperseded, k.ArtifactID, k.WorkspaceID, latest); err != nil {
+			return "", err
 		}
 		var open int
 		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM craft_native_proposals WHERE page_id=? AND state='open'`, k.ArtifactID).Scan(&open); err != nil {

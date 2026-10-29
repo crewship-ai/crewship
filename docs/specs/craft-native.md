@@ -364,8 +364,10 @@ When a person holds the lease, an agent never waits for, steals or retries it.
 `craft_propose` runs the same allowlisted original-engine commands over the
 exact `base_version` the agent read and stores the complete candidate in
 `craft_native_proposals`; the document, its versions and the lease are
-unchanged. At most 16 proposals per document may be open. The same agent
-`request_id` returns the original proposal.
+unchanged. At most 16 proposals per document may be open. Before counting, a
+new proposal marks every open proposal over an older version `stale` (decided
+by `system:superseded`; rows are kept), because such a proposal can no longer
+be accepted. The same agent `request_id` returns the original proposal.
 
 A person with an admitted session reviews them (`GET .../craft/proposals`,
 candidate bytes at `GET .../craft/proposals/{id}`) and decides once. Accept is
@@ -373,5 +375,10 @@ the person's own fenced save: Page write rights, the immutable profile, this
 admission's lease generation, base == latest and the open state are checked and
 the version and decision commit in one transaction. If the document moved on,
 the proposal becomes `stale` and nothing is applied; it is never rebased.
-Reject needs write rights but no lease. The agent cannot decide its own
-proposal.
+Reject needs write rights but no lease: any co-editor with current Page write
+rights may reject a proposal while another person holds the lease, and the
+document is never changed. Reading the list and a candidate uses the same
+session-bound read gate as the document, so a Read-only admission can review
+but not decide; Comment-only access is not admitted at all. A proposal id is
+resolved only within the admitted page and workspace; another page's id
+answers 404. The agent cannot decide its own proposal.

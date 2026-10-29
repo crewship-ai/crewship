@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -41,7 +42,14 @@ type craftNativeProposalAcceptResponse struct {
 func (d *craftNativeDocumentsHTTP) proposalView(r *http.Request, workspaceID string, p mooring.NativeProposal) craftNativeProposalResponse {
 	agent := strings.TrimPrefix(p.AuthorActorID, "agent:")
 	name := "Agent"
-	_ = d.human.pages.db.QueryRowContext(r.Context(), `SELECT COALESCE(NULLIF(name,''),'Agent') FROM agents WHERE id=? AND workspace_id=?`, agent, workspaceID).Scan(&name)
+	// A removed agent keeps the generic label; any other failure is logged
+	// and still answers with the label rather than failing the review.
+	if err := d.human.pages.db.QueryRowContext(r.Context(), `SELECT COALESCE(NULLIF(name,''),'Agent') FROM agents WHERE id=? AND workspace_id=?`, agent, workspaceID).Scan(&name); err != nil {
+		name = "Agent"
+		if !errors.Is(err, sql.ErrNoRows) && d.human.pages.logger != nil {
+			d.human.pages.logger.Warn("craft native: proposal author name lookup failed", "proposal", p.ID, "error", err)
+		}
+	}
 	return craftNativeProposalResponse{ID: p.ID, Author: craftNativeHolderResponse{ActorID: p.AuthorActorID, DisplayName: name, Kind: "agent", AgentID: agent}, BaseVersion: p.BaseVersion, Summary: p.Summary, CreatedAt: p.CreatedAt, State: p.State, ResultVersion: p.ResultVersion}
 }
 

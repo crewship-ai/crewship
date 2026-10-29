@@ -197,3 +197,48 @@ func TestNativeProposalRefusesOldBaseHumanAuthorAndFlood(t *testing.T) {
 		t.Fatal("unbounded open proposals", err)
 	}
 }
+
+// #4500: open proposals over a version the document has moved past can never
+// be accepted, so they must not keep holding places under the cap. They stay
+// on record as stale.
+func TestNativeProposalSupersededOpenProposalsStopCountingTowardCap(t *testing.T) {
+	s, _, _, scope, acting, _ := nativeProposalFixture(t)
+	human := *acting
+	l, _, err := s.Initialize(t.Context(), scope, human, []byte(`{"v":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	*acting = nativeProposalAgent
+	for i := 0; i < MaxOpenNativeProposals; i++ {
+		if _, err = s.Propose(t.Context(), scope, 1, "old"+string(rune('a'+i)), "", []byte(`{}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	*acting = human
+	if _, err = s.SaveSnapshot(t.Context(), l, 1, "r1", nativeReceiptHash([]byte(`{"v":2}`)), []byte(`{"v":2}`)); err != nil {
+		t.Fatal(err)
+	}
+	*acting = nativeProposalAgent
+	fresh, err := s.Propose(t.Context(), scope, 2, "new", "", []byte(`{"v":"new"}`))
+	if err != nil || fresh.State != "open" {
+		t.Fatalf("superseded proposals still fill the cap: %+v %v", fresh, err)
+	}
+	*acting = human
+	list, err := s.Proposals(t.Context(), scope)
+	if err != nil || len(list) != MaxOpenNativeProposals+1 {
+		t.Fatalf("proposal rows lost: %d %v", len(list), err)
+	}
+	for _, p := range list {
+		want := "stale"
+		if p.ID == fresh.ID {
+			want = "open"
+		}
+		if p.State != want {
+			t.Fatalf("proposal %s over v%d is %q, want %q", p.ID, p.BaseVersion, p.State, want)
+		}
+	}
+	// A stale proposal is final: it can be neither accepted nor rejected.
+	if _, err = s.RejectProposal(t.Context(), scope, list[len(list)-1].ID); !errors.Is(err, ErrNativeProposalDecided) {
+		t.Fatal("stale proposal decided again", err)
+	}
+}
