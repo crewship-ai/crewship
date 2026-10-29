@@ -28,6 +28,9 @@ type NativeProposal struct {
 	BaseVersion, ResultVersion                                        int64
 	CreatedAt                                                         string
 	Content                                                           []byte
+	// Replayed is set by Propose when the request ID returned an earlier
+	// proposal instead of recording one. It is never stored.
+	Replayed bool
 }
 
 const nativeProposalColumns = `id,page_id,author_actor_id,request_id,summary,content_hash,state,base_version,COALESCE(result_version,0),created_at`
@@ -87,6 +90,7 @@ func (s *NativeStore) Propose(ctx context.Context, k EditLeaseScope, base int64,
 				return "", artifacts.ErrVersionConflict
 			}
 			out = prior
+			out.Replayed = true
 			return actor, nil
 		}
 		if !errors.Is(err, sql.ErrNoRows) {

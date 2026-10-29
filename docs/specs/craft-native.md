@@ -258,7 +258,9 @@ of execution or a save. The same original human can inspect
 `GET /api/v1/pages/{slug}/craft/tasks/{workID}?workspace_id=…` under fresh current
 Page write rights. This read-only projection contains actual bounded tool
 outcomes and `last_committed_receipt`, never prompt or command bodies, native document
-bytes or credentials. The last receipt is explicitly historical; an uncertain
+bytes or credentials. `outcome` is `saved` once the run has a committed receipt,
+or `proposal` with `proposal_id` when it recorded a proposal instead; it is
+absent while the run has neither. The last receipt is explicitly historical; an uncertain
 or in-flight later attempt is not Saved. Append `craft_task_id=<work_id>` to the
 normal native editor URL to inspect this task in the editor. That selector is
 not authority and never starts or resumes a run.
@@ -307,8 +309,11 @@ SQL writer before acknowledging. It cannot force a human holder. The response
 reports `grant_revoked`, `lease_retired`, `cancel_requested`, `stopped` and
 `stop_pending`; physical process termination is not assumed from cancellation.
 The human editor exposes Stop only when `can_stop_agent` is true. A stopped
-process is successful only with a qualified actual Node receipt and retired
-custody; no-receipt and uncertain outcomes remain distinct.
+process is successful only with retired custody and either a qualified actual
+Node receipt (`native_outcome: "saved"`) or a proposal this run recorded
+(`native_outcome: "proposal"`, `native_proposal_id`); a run with neither fails
+with "native agent finished without a committed native receipt", and uncertain
+outcomes remain distinct.
 
 This pilot retains at most 128 captured task entries per process and at most 64
 apply IDs per task. It refuses further work instead of evicting uncertain
@@ -366,6 +371,13 @@ exact `base_version` the agent read and stores the complete candidate in
 `craft_native_proposals`; the document, its versions and the lease are
 unchanged. At most 16 proposals per document may be open. The same agent
 `request_id` returns the original proposal.
+
+A proposal is a successful task outcome: the work item and run succeed with
+`native_outcome: "proposal"` and `native_proposal_id`, and the task status shows
+`outcome: "proposal"` with `proposal_id`. Only a proposal recorded by this run's
+own session counts. Reusing another run's `request_id` returns that run's
+proposal but does not make it this task's outcome, so such a run still fails
+without a receipt.
 
 A person with an admitted session reviews them (`GET .../craft/proposals`,
 candidate bytes at `GET .../craft/proposals/{id}`) and decides once. Accept is
