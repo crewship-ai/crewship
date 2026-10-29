@@ -9,7 +9,7 @@ import { resolveWsBase } from "@/lib/server-base"
 import type { ArtifactComment } from "@/hooks/use-artifact-project"
 
 export interface ArtifactOrigin { chat_id: string; agent_id: string; agent_slug?: string }
-export function useArtifactAgentDispatch(workspaceId: string, pageId: string | undefined, origin: ArtifactOrigin | undefined, enabled: boolean) {
+export function useArtifactAgentDispatch(workspaceId: string, pageId: string | undefined, origin: ArtifactOrigin | undefined, enabled: boolean, kind: "project" | "design" = "project") {
  const user = useSessionSafe()?.data?.user?.id
  const scope = JSON.stringify([user,workspaceId,pageId,origin?.chat_id])
  const pending = useRef(new Map<string,{resolve:(ok:boolean)=>void;timer:ReturnType<typeof setTimeout>}>())
@@ -37,7 +37,8 @@ export function useArtifactAgentDispatch(workspaceId: string, pageId: string | u
   const submissionId=`artifact-comment-${comment.id}`
   if(pending.current.has(submissionId))return false
   const confirmation=new Promise<boolean>(resolve=>{const timer=setTimeout(()=>{pending.current.delete(submissionId);resolve(false)},15000);pending.current.set(submissionId,{resolve,timer})})
-  const sent=await chat.sendMessage(`Update the artifact project according to this exact comment. Page: @${pageId}. Base version: ${comment.version}. File: ${comment.path}. Element: ${comment.selector}. Selected text: ${comment.quote}\nRequested change: ${comment.text}\nPublish a new version with base_version ${comment.version}, then reply to comment ${comment.id} with the new version and what changed. If the anchor no longer matches, ask for clarification.`,{artifact_project_intent:{submission_id:submissionId,page_id:pageId,comment_id:comment.id,base_version:comment.version}})
+  const prompt = kind === "design" ? `Update Design @${pageId} according to comment ${comment.id}: ${comment.text}. Selected node: ${comment.selector}, original version: ${comment.version}. Use design_get, design_apply, then design_snapshot to save a new version. Preserve concurrent changes and report the confirmed version.` : `Update the artifact project according to this exact comment. Page: @${pageId}. Base version: ${comment.version}. File: ${comment.path}. Element: ${comment.selector}. Selected text: ${comment.quote}\nRequested change: ${comment.text}\nPublish a new version with base_version ${comment.version}, then reply to comment ${comment.id} with the new version and what changed. If the anchor no longer matches, ask for clarification.`
+  const sent=await chat.sendMessage(prompt,{artifact_project_intent:{...(kind === "design" ? {kind:"design"} : {}),submission_id:submissionId,page_id:pageId,comment_id:comment.id,base_version:comment.version}})
   if(sent===false){const entry=pending.current.get(submissionId);if(entry){clearTimeout(entry.timer);entry.resolve(false);pending.current.delete(submissionId)}}
   return confirmation
  }

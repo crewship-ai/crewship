@@ -79,7 +79,24 @@ func artifactCLIRequestWithResultTransport(cmd *cobra.Command, method, path stri
 		}
 	}
 	operation := ""
-	if parsed.Path == "/api/v1/pages/artifacts" {
+	if parsed.Path == "/api/v1/pages/design" {
+		return errors.New("Design creation requires human authentication; an agent can edit an explicitly selected Design")
+	} else if len(parts) >= 5 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "pages" && parts[4] == "design" {
+		arguments["slug"] = parts[3]
+		suffix := strings.Join(parts[5:], "/")
+		switch {
+		case method == "GET" && suffix == "":
+			operation = "design_get"
+		case method == "GET" && suffix == "versions":
+			operation = "design_versions"
+		case method == "POST" && suffix == "operations":
+			operation = "design_apply"
+		case method == "POST" && suffix == "snapshots":
+			operation = "design_snapshot"
+		case method == "POST" && suffix == "restore":
+			operation = "design_restore"
+		}
+	} else if parsed.Path == "/api/v1/pages/artifacts" {
 		operation = "artifact_create"
 	} else if len(parts) >= 5 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "pages" && parts[4] == "artifact" {
 		arguments["slug"] = parts[3]

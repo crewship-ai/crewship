@@ -1,4 +1,5 @@
 "use client"
+import dynamic from "next/dynamic"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ArrowLeft, FolderInput, LayoutGrid, Library, List, Lock, Maximize2, Plus, Settings2, Share2, Star, Table2, X } from "lucide-react"
@@ -16,7 +17,7 @@ import { useUserPreference } from "@/hooks/use-user-preference"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { DocumentReadonly } from "@/components/features/pages/document-readonly/document-readonly"
 import { formatRelativeShort } from "@/lib/time"
-import { artifactDashboards, artifactSlides } from "@/lib/feature-flags"
+import { artifactDashboards, artifactSlides, artifactsDesign } from "@/lib/feature-flags"
 import { cn } from "@/lib/utils"
 import { ArtifactViewerProvider } from "@/components/features/chat/artifact-context/projects/artifact-viewer-context"
 import { useArtifactProjectsAvailable } from "@/components/features/chat/artifact-context/projects/use-artifact-project-data"
@@ -43,6 +44,8 @@ import {
 } from "./library-filter"
 import { LibraryPanel } from "./library-panel"
 import { KindThumb } from "./kind-thumb"
+
+const DesignEditor = dynamic(() => import("@/components/features/artifacts-design/design-editor").then(module => module.DesignEditor), { ssr: false })
 
 /** Each kind wears its registry colour, so Word reads blue and Sheet green before the label is read. */
 function KindTile({ kind, large }: { kind: LibraryKind; large?: boolean }) {
@@ -336,7 +339,7 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
     {dialog === "move" && <MoveToFolderDialog workspaceId={workspaceId} item={item} folders={folders} open
       onOpenChange={open => { if (!open) setDialog(null) }} onDone={() => setDialog(null)} />}
     {tab === "access" ? <AccessTab workspaceId={workspaceId} item={item} onShare={() => setDialog("share")} /> : <>
-    {projectPreview
+    {item.kind === "design" && artifactsDesign() ? <DesignEditor workspaceId={workspaceId} slug={item.pageId ? "@" + item.pageId : item.slug} /> : projectPreview
       ? <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
         <div className="flex min-h-[520px] flex-1 overflow-hidden rounded-card border"><ArtifactViewerPanel variant="library" /></div>
       </ArtifactViewerProvider>
@@ -359,7 +362,7 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
     {!projectPreview && item.native && item.kind === "word" && item.pageId && <LockLostDraft workspaceId={workspaceId} slug={"@" + item.pageId} />}
     {item.kind === "word" && !item.empty && item.pageId && <WordPreview workspaceId={workspaceId} item={item} />}
     {/* An old-editor Word has nowhere to edit it; its notice says so on its own. */}
-    {!inline && !(item.kind === "sheet" && item.pageId) && !legacySlides && !(item.kind === "word" && !item.native) && <p className="text-sm text-muted-foreground">
+    {!inline && item.kind !== "design" && !(item.kind === "sheet" && item.pageId) && !legacySlides && !(item.kind === "word" && !item.native) && <p className="text-sm text-muted-foreground">
       {DETAIL_HINT[item.kind] ?? "Its viewer is not switched on in this workspace."}
     </p>}
     </>}
@@ -516,7 +519,7 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
   // Archive, test origin and mock moves; re-read whenever a sharing write settles.
   const stateTick = useQuery({ queryKey: sharingKeys.state(workspaceId), queryFn: () => Date.now(), staleTime: Infinity }).data
   const items = useMemo(() => {
-    const base = libraryItems(pages)
+    const base = libraryItems(pages).filter(entry => entry.kind !== "design" || artifactsDesign())
     return withLibraryState(base, sharing.libraryState(base))
   }, [pages, sharing, stateTick]) // eslint-disable-line react-hooks/exhaustive-deps -- stateTick is the re-read signal
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())

@@ -322,6 +322,7 @@ var BackupTables = []string{
 	"pages",
 	"craft_native_documents", // immutable native profile, Page/workspace FKs remap on fork
 	"artifact_version_heads",
+	"artifact_design_documents",
 	"artifact_version_blobs",
 	"artifact_versions",
 	"artifact_data_collections",

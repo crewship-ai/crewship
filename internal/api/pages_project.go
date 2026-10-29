@@ -50,7 +50,7 @@ func (h *PageHandler) projectPage(w http.ResponseWriter, r *http.Request) (*page
 		replyInternalError(w, h.logger, "load project page", err)
 		return nil, false
 	}
-	attached, e := h.artifactProjectAttached(r.Context(), rec.ID)
+	attached, e := h.artifactContentAttached(r.Context(), rec.ID)
 	if e != nil {
 		replyInternalError(w, h.logger, "check artifact content", e)
 		return nil, false

@@ -505,7 +505,7 @@ export interface PageView {
   /** Confirmed GridCraft workbook storage; the Page renders the read-only workbook preview. */
   hasWorkbook?: boolean
   /** Versioned artifact kind from the version head; undefined for any other Page. */
-  artifactKind?: "project" | "word" | "sheet" | "dashboard" | "slides"
+  artifactKind?: "project" | "word" | "sheet" | "dashboard" | "slides" | "design"
   /** The version readers see; undefined when nothing is shared. */
   artifactSharedVersion?: number
   hasMooring?: boolean
@@ -665,7 +665,7 @@ export function toPageView(raw: WirePage): PageView {
     hasSlides: raw.has_slides === true,
     hasWorkbook: raw.has_workbook === true,
     ...(raw.native_craft_application === "wordcraft" || raw.native_craft_application === "gridcraft" ? { nativeCraftApplication: raw.native_craft_application } : {}),
-    ...(raw.artifact_kind === "project" || raw.artifact_kind === "word" || raw.artifact_kind === "sheet" || raw.artifact_kind === "dashboard" || raw.artifact_kind === "slides" ? { artifactKind: raw.artifact_kind } : {}),
+    ...(raw.artifact_kind === "project" || raw.artifact_kind === "word" || raw.artifact_kind === "sheet" || raw.artifact_kind === "dashboard" || raw.artifact_kind === "slides" || raw.artifact_kind === "design" ? { artifactKind: raw.artifact_kind } : {}),
     ...(Number.isSafeInteger(raw.artifact_shared_version) && raw.artifact_shared_version! > 0 ? { artifactSharedVersion: raw.artifact_shared_version } : {}),
     hasMooring: raw.has_mooring === true,
     hasCollaboration: raw.has_collaboration === true,

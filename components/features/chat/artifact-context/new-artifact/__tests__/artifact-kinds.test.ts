@@ -8,7 +8,7 @@ describe("artifact kind registry", () => {
   it("is one ordered list with the library's keys and families", () => {
     expect(ARTIFACT_KINDS.map(k => [k.key, k.family])).toEqual([
       ["project", "web"], ["dashboard", "web"], ["page", "web"],
-      ["word", "document"], ["sheet", "document"], ["slides", "document"],
+      ["word", "document"], ["sheet", "document"], ["slides", "document"], ["design", "document"],
     ])
     for (const k of ARTIFACT_KINDS) {
       expect(k.label && k.plural && k.description && k.viewer).toBeTruthy()
@@ -42,6 +42,15 @@ describe("artifact kind registry", () => {
     expect(artifactKind("project").live({ ...ALL, projects: false })).toBe(false)
     expect(artifactKind("dashboard").live({ ...ALL, projects: false })).toBe(false)
     expect(artifactKind("dashboard").live({ ...ALL, dashboards: false })).toBe(false)
+  })
+
+  it("offers Design only with its build capability and Page creation access", () => {
+    expect(artifactKind("design").make).toBe("canvas")
+    expect(artifactKind("design").live(ALL)).toBe(false)
+    expect(artifactKind("design").live({ ...ALL, designs: true })).toBe(true)
+    expect(artifactKind("design").live({ ...ALL, designs: true, pages: false })).toBe(false)
+    expect(comingKinds(NO_CAPABILITIES).map(k => k.key)).not.toContain("design")
+    expect(artifactKindOfPage(toPageView({ id: "canvas", slug: "canvas", name: "Canvas", artifact_kind: "design" } as WirePage))).toBe("design")
   })
 
   it("reads a Page's kind from what the server says it stores", () => {

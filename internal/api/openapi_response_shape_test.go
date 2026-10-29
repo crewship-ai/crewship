@@ -52,6 +52,18 @@ var responseShapeContracts = []struct {
 	value any
 }{
 
+	{name: "DesignCreateResponse", pointer: "/components/schemas/DesignCreateResponse", value: designCreateResponse{}},
+	{name: "DesignSnapshot", pointer: "/components/schemas/DesignSnapshot", value: designSnapshotResponse{}},
+	{name: "DesignActor", pointer: "/components/schemas/DesignActor", value: designActorResponse{}},
+	{name: "DesignOrigin", pointer: "/components/schemas/ArtifactProjectOrigin", value: designOriginResponse{}},
+	{name: "DesignOperationsResponse", pointer: "/components/schemas/DesignOperationsResponse", value: designOperationsResponse{}},
+	{name: "DesignVersionList", pointer: "/components/schemas/DesignVersionList", value: designVersionListResponse{}},
+	{name: "DesignVersion", pointer: "/components/schemas/DesignVersion", value: artifacts.VersionInfo{}},
+	{name: "DesignVersionReceipt", pointer: "/components/schemas/DesignVersionReceipt", value: artifacts.VersionReceipt{}},
+	{name: "DesignCommentsResponse", pointer: "/components/schemas/DesignCommentsResponse", value: designCommentsResponse{}},
+	{name: "DesignShareResponse", pointer: "/components/schemas/DesignShareResponse", value: designShareResponse{}},
+	{name: "DesignAgentResponse", pointer: "/components/schemas/DesignAgentResponse", value: designAgentResponse{}},
+
 	{name: "ArtifactSlidesProjection", pointer: "/components/schemas/ArtifactSlidesProjection", value: artifacts.ArtifactSlidesProjection{}},
 	{name: "ArtifactSlideAnchor", pointer: "/components/schemas/ArtifactSlideAnchor", value: artifacts.ArtifactSlideAnchor{}},
 	{name: "ArtifactDataCollections", pointer: "/components/schemas/ArtifactDataCollections", value: artifactDataCollectionsResponse{}},

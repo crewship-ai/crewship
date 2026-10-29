@@ -25,6 +25,7 @@ const LIST = [
   row({ id: "page-site", slug: "pricing-site", name: "Pricing site", artifact_kind: "project", artifact_shared_version: 1, updated_at: ago(12) }),
   row({ id: "page-weekly", slug: "weekly-report", name: "Weekly report", panel_count: 1, panel_states: { fresh: 1, stale: 0, failed: 0, never_produced: 0 }, updated_at: ago(40) }),
   row({ id: "page-model", slug: "price-model", name: "Price model", artifact_kind: "sheet", has_workbook: true, artifact_shared_version: 1, updated_at: ago(60) }),
+  row({ id: "page-wire", slug: "checkout-wireframe", name: "Checkout wireframe", artifact_kind: "design", artifact_shared_version: 1, updated_at: ago(70) }),
   row({ id: "page-brief", slug: "partner-brief", name: "Partner brief", artifact_kind: "word", has_document: true, artifact_shared_version: 1, updated_at: ago(95) }),
 ]
 

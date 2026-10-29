@@ -30,7 +30,10 @@ export const useSearchParams = () => { useAddress(); return new URLSearchParams(
 export const usePathname = () => { useAddress(); return location.pathname }
 export const useParams = () => { useAddress(); const m = /^\\/artifacts\\/([^/]+)/.exec(location.pathname); return m ? { id: m[1] } : {} }`,
 }
-const stubOf = path => path.includes("use-page-workspace") ? "use-page-workspace" : path.includes("use-auth") ? "use-auth" : path.includes("use-workspace") ? "use-workspace" : path === "next/navigation" ? "next-navigation" : null
+// The Design editor needs its Yjs socket; its own browser test covers it. Here it only has to show which design opened.
+STUBS["design-editor"] = `import { jsx } from "react/jsx-runtime"
+export const DesignEditor = ({ slug }) => jsx("section", { "aria-label": "Design canvas", children: "Design " + slug })`
+const stubOf = path => path.endsWith("artifacts-design/design-editor") ? "design-editor" : path.includes("use-page-workspace") ? "use-page-workspace" : path.includes("use-auth") ? "use-auth" : path.includes("use-workspace") ? "use-workspace" : path === "next/navigation" ? "next-navigation" : null
 
 const output = await mkdtemp(join(tmpdir(), "crewship-artifacts-open-"))
 let server, browser
@@ -41,9 +44,9 @@ try {
   await build({
     entryPoints: ["e2e/artifacts-open-inside.fixture.tsx"], bundle: true, outfile: join(output, "bundle.js"), platform: "browser", format: "esm", jsx: "automatic",
     alias: { "@": process.cwd() }, logLevel: "error", external: ["/fonts/*"],
-    define: { "process.env": JSON.stringify({ NODE_ENV: "test", NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS: "true", NEXT_PUBLIC_CHAT_CRAFT_LEASE: "true", NEXT_PUBLIC_ARTIFACTS_LIBRARY: "true" }) },
+    define: { "process.env": JSON.stringify({ NODE_ENV: "test", NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS: "true", NEXT_PUBLIC_CHAT_CRAFT_LEASE: "true", NEXT_PUBLIC_ARTIFACTS_LIBRARY: "true", NEXT_PUBLIC_ARTIFACTS_DESIGN: "true" }) },
     plugins: [{ name: "fixture-neighbours", setup(b) {
-      b.onResolve({ filter: /(?:^@\/hooks\/use-auth$|\/hooks\/use-auth(?:\.tsx?)?$|^@\/hooks\/use-workspace$|^@\/hooks\/use-page-workspace$|^next\/navigation$)/ }, args => ({ path: stubOf(args.path), namespace: "fixture" }))
+      b.onResolve({ filter: /(?:^@\/hooks\/use-auth$|\/hooks\/use-auth(?:\.tsx?)?$|^@\/hooks\/use-workspace$|^@\/hooks\/use-page-workspace$|^next\/navigation$|artifacts-design\/design-editor$)/ }, args => ({ path: stubOf(args.path), namespace: "fixture" }))
       b.onLoad({ filter: /.*/, namespace: "fixture" }, args => ({ loader: "js", contents: STUBS[args.path], resolveDir: process.cwd() }))
     } }],
   })
@@ -127,6 +130,15 @@ try {
   await page.getByRole("button", { name: "Edit", exact: true }).waitFor()
   assert.equal(path(), "/artifacts/page-brief", "Back from the editor returns to the Word")
   step("sheet and word edit", { url: page.url() })
+
+  // 6. A Design opens its canvas inside Artifacts.
+  await page.goto(`${origin}/artifacts?view=all`)
+  await list.getByRole("button", { name: "Open Checkout wireframe" }).click()
+  await page.getByRole("complementary", { name: "Preview" }).getByRole("button", { name: "Open", exact: true }).click()
+  await page.getByRole("region", { name: "Design canvas" }).getByText("Design @page-wire").waitFor()
+  assert.equal(path(), "/artifacts/page-wire")
+  assert.equal(await page.locator('a[href^="/pages"]').count(), 0, "no link into /pages from a Design")
+  step("design opened", { url: page.url() })
 
   // 6. A link from before IDs moves to the artifact's address and opens it.
   await page.goto(`${origin}/artifacts?item=pricing-site`)

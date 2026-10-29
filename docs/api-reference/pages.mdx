@@ -2640,6 +2640,127 @@ Responses include `400` for invalid input, `401` for missing authentication,
 Restore quota refusal is `413` and preserves retained versions. Human CLI
 commands are `page artifact comments`, `comment`, `reply`, `restore` and `share`.
 
+## Collaborative Design (disabled by default)
+
+The server `artifacts_design` feature enables standard Yjs sync and awareness.
+Slugs and immutable `@page_id` references use existing workspace Page grants.
+Nodes have stable IDs and types `frame`, `rect`, `text` or `image`. Live content
+is separate from retained snapshots; awareness is transient and never grants
+write permission. CLI equivalents are under `crewship page design`.
+
+### `POST /api/v1/pages/design`
+
+**Auth:** authenticated human with current Page creation permission and CLI
+`pages:write` scope. **Request:** JSON `{slug,name}` and workspace selection.
+**Response:** HTTP 201 `{page_id,slug,version}` for an empty Design Page and its
+initial retained version. **Statuses:** 201 created, 400 invalid input, 401
+unauthenticated, 403 missing authority, 404 disabled, 409 occupied slug, 413
+capacity, 500 persistence failure, 503 unavailable engine.
+
+### `GET /api/v1/pages/{slug}/design`
+
+**Auth:** current Page read access and CLI `pages:read` scope. **Request:** no
+body; optional positive `version` selects a retained snapshot. Editors may read
+history; readers may select only the shared pin. Without `version`, authorized
+readers see the live canvas. **Response:** `{page_id,nodes,order,can_edit,
+can_comment,version,latest_version,shared_version,authority_revision,actor,origin}`.
+`authority_revision` is an opaque string; a fresh authorized read establishes
+a new connection after rights change. `origin` is null unless available to
+the authorized editor. **Statuses:** 200 success, 400
+invalid version, 401 unauthenticated, 403 invalid scope, 404 disabled or missing
+accessible content, 500 internal failure, 503 unavailable engine.
+
+### `POST /api/v1/pages/{slug}/design/operations`
+
+**Auth:** current Page Edit permission and CLI `pages:write`; agents additionally
+need their original live run and exact selected-Page mandate. **Request:**
+`{operations:[...],message?}`. An upsert has `{op:"upsert",node:{id,...}}`; delete
+has `{op:"delete",id}`; reorder has `{op:"reorder",order:[ids]}`. Partial upserts
+preserve other fields. New nodes need type and finite geometry; supported string
+fields are `name`, `parentId`, `fill`, `text` and `src`. **Response:** committed
+`{nodes,order,version}`. Works without an open browser. **Statuses:** 200 success,
+400 invalid update, 401 unauthenticated, 403 no current Edit authority, 404
+unavailable Page, 409 concurrent head, 413 capacity, 500 persistence failure,
+503 engine unavailable. Failed publication preserves the previous live head.
+
+### `POST /api/v1/pages/{slug}/design/snapshots`
+
+**Auth:** current Page Edit and CLI `pages:write`; agents need their exact live
+mandate. **Request:** `{message?}`. **Response:** retained `{version,actor}`
+receipt; no change to the shared pin. **Statuses:** 200 success, 400 invalid
+request, 401 unauthenticated, 403 no Edit authority, 404 unavailable Page, 409
+concurrent head, 413 capacity, 500 persistence failure, 503 engine unavailable.
+
+### `GET /api/v1/pages/{slug}/design/versions`
+
+**Auth:** current Page read and CLI `pages:read`. **Request:** no body.
+**Response:** `{versions,latest_version,shared_version}`. Editors receive retained
+history; readers receive only their authorized shared snapshot. **Statuses:**
+200 success, 401 unauthenticated, 403 invalid scope, 404 unavailable Page or
+shared content, 500 internal failure.
+
+### `POST /api/v1/pages/{slug}/design/restore`
+
+**Auth:** current Page Edit and CLI `pages:write`; an agent also needs its exact
+live mandate. **Request:** `{version}` for a positive retained snapshot.
+**Response:** new retained `{version,actor}` receipt. Restore changes the live
+canvas, preserves history and leaves the shared pin unchanged. **Statuses:**
+200 success, 400 invalid request, 401 unauthenticated, 403 no Edit authority,
+404 unavailable snapshot, 409 concurrent head, 413 capacity, 500 persistence
+failure, 503 engine unavailable.
+
+### `GET /api/v1/pages/{slug}/design/comments`
+
+**Auth:** current Page read and CLI `pages:read`. **Request:** no body.
+**Response:** `{comments:[...]}` with exact version, stable node selector,
+quoted text, feedback, task status and authorized replies. Readers see only
+feedback and replies for the shared pin. **Statuses:** 200 success, 401
+unauthenticated, 403 invalid scope, 404 unavailable Page, 500 internal failure.
+
+### `POST /api/v1/pages/{slug}/design/comments`
+
+**Auth:** current Page feedback authority and CLI `pages:write`; Read and Produce
+never grant comment permission. **Request:** `{version,path:"design.json",
+selector,quote,text,send_to_agent}`. The selector is a stable node ID; an optional
+empty quote skips text matching. The node and quote are checked against the
+latest retained version, never unsaved live state. Canonical Comment grants
+allow feedback when that shared grant feature is installed; `send_to_agent`
+additionally requires Edit. **Response:** HTTP 201 stored comment and
+optional pending task. Queuing is not proof of agent delivery. **Statuses:**
+201 created, 400 invalid input, 401 unauthenticated, 403 missing feedback
+permission, 404 unavailable Page, 409 stale version or changed node, 500 internal
+failure, 503 engine unavailable.
+
+### `POST /api/v1/pages/{slug}/design/share`
+
+**Auth:** current human Page owner and CLI `pages:write`. **Request:** positive
+retained `{version}`. **Response:** `{version,shared_version}`. Existing Page
+grants remain in force; this operation never grants an unrelated caller access.
+**Statuses:** 200 success, 400 invalid request, 401 unauthenticated, 403 not the
+current owner, 404 unavailable snapshot, 409 concurrent head, 500 persistence
+failure.
+
+### `POST /api/v1/pages/{slug}/design/agent`
+
+**Auth:** current human Page owner and CLI `pages:write`. **Request:** `{chat_id}`
+for an existing private chat owned by that same human in this workspace.
+**Response:** `{origin:{chat_id,agent_id}}`. This informational origin never
+replaces a fresh message intent and exact live-run mandate. **Statuses:**
+200 success, 400 invalid request, 401 unauthenticated, 403 invalid owner/chat,
+404 unavailable Page, 500 persistence failure.
+
+### `GET /api/v1/pages/{slug}/design/ws`
+
+**Auth:** authenticated current Page reader with same-origin browser
+credentials or CLI `pages:read`; every update additionally checks current Edit
+permission under the database writer fence. **Request:** WebSocket upgrade;
+binary standard y-protocols sync and awareness messages only. **Response:**
+HTTP 101 followed by standard binary frames. Read clients may send presence and
+sync requests, never document updates. Revocation blocks writes and stops
+content delivery on the old socket. **Statuses:** 101 upgraded, 400 malformed
+upgrade, 401 unauthenticated, 403 invalid origin or scope, 404 unavailable Page,
+500 internal failure, 503 engine unavailable. Invalid protocol messages or
+revoked authority close the socket with code 1008.
 
 ## Dashboard JSON collections (disabled by default)
 
@@ -2693,7 +2814,7 @@ CLI commands are `crewship page artifact data collections`, `data get` and
 ## Artifact kind metadata
 
 Page lists and authenticated detail responses include `artifact_kind` for a
-versioned artifact (`project`, `dashboard`, `word`, `sheet`) and
+versioned artifact (`project`, `dashboard`, `slides`, `word`, `sheet`, `design`) and
 `artifact_shared_version` when a shared pin exists. Dashboard classification
 requires the enabled Dashboard data backend and a valid bounded `dashboard.json`
 declaration in the selected code manifest. The current human owner uses latest

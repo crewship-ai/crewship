@@ -36,3 +36,28 @@ func TestProjectIntentTestOriginIsExplicitAndCreationOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectIntentDesignPreservesTestOriginBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		fields map[string]any
+		valid  bool
+	}{
+		{"selected design", map[string]any{"kind": "design", "submission_id": "edit", "page_id": "canvas", "base_version": 1}, true},
+		{"explicit false", map[string]any{"kind": "design", "submission_id": "edit", "page_id": "canvas", "base_version": 1, "created_by_test": false}, true},
+		{"cannot mark existing design", map[string]any{"kind": "design", "submission_id": "edit", "page_id": "canvas", "base_version": 1, "created_by_test": true}, false},
+		{"cannot create design through agent intent", map[string]any{"kind": "design", "submission_id": "create", "created_by_test": true}, false},
+		{"unknown kind", map[string]any{"kind": "other", "submission_id": "edit", "page_id": "canvas", "base_version": 1}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ProjectIntentFromMetadata(map[string]any{ProjectIntentMetadataKey: tc.fields})
+			if tc.valid {
+				if err != nil || got == nil || got.Kind != "design" || got.CreatedByTest {
+					t.Fatalf("valid Design intent: %#v %v", got, err)
+				}
+			} else if err == nil {
+				t.Fatalf("invalid Design intent accepted: %#v", got)
+			}
+		})
+	}
+}
