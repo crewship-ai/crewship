@@ -9,8 +9,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Design artifacts gain an opt-in collaborative canvas.** People and agents can edit frames, shapes, text and images through Yjs, with live presence and normal artifact version history. Disabled by default.
+- **Shared artifact commenters can post feedback in the preview.** Comments stay anchored to the shared version without granting editing or agent execution rights; changing accounts, workspace or permissions retires an unfinished selection.
+
 - Add human Comment grants for shared artifact feedback without edit or agent execution rights, explicit QA item markers and catalog filters, and confirmed archive and folder-move previews with live access checks. Access reports include effective capabilities and their sources; existing content, history and grants remain intact.
+
+- **Design artifacts gain an opt-in collaborative canvas.** People and agents can edit frames, shapes, text and images through Yjs, with live presence and normal artifact version history. Disabled by default.
 
 - **Native Craft editing can continue past access-token expiry.** The browser refreshes its cookie before admitting or renewing the same editing connection and replaces only its authenticated metadata stream. Unsaved work, the lease generation and in-flight saves remain in place; document mutations are never replayed.
 - **Workspace backups now preserve experimental workbooks.** Encrypted portable restore and forks retain snapshots, published audience and immutable mutation receipts; recovery fences unfinished edits and requires fresh editor sessions and run permissions.
@@ -21,6 +24,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Require actual Chromium execution of native document privacy regressions in frontend CI while preserving the strict browser-dialog guard.
 
 - Add an opt-in Artifacts library at `/artifacts` (`NEXT_PUBLIC_ARTIFACTS_LIBRARY`): a gallery or table of projects, Word, Sheet, Slides and dashboards with kind and shared version, a project detail on its version history and the edit lock of a native Word; the Pages list reports `artifact_kind` and `artifact_shared_version`.
+- Rebuild the opt-in Artifacts library on the Harbor 2 panel: Home, Mine, Favorites, Clean up, Test items, Empty and Archive views kept in the URL, a colour and drawn thumbnail per kind, folder icons, J/K navigation, and one New artifact dialog that offers only kinds this workspace can create, including Slides through an agent. Share with Read, Comment or Edit inside the workspace, an Access tab that says why each person can open an item, folder settings, and Move, Share, Archive and Unarchive on a selection, each confirmed after a preview of who gains or loses access; archiving hides and never deletes. `NEXT_PUBLIC_ARTIFACTS_SHARING_MOCK` runs sharing in the browser until the backend routes ship. New Doc and New artifact create Word documents through one shared hook.
 - Add opt-in inert Dashboard previews (`NEXT_PUBLIC_ARTIFACT_DASHBOARDS`): authorized collection data refreshes numbers, tables and native meter charts without publishing new code; shared readers stay on their shared manifest and data has source and freshness labels.
 - Add Preview, History and Comments tabs to the opt-in Artifacts library; sending an anchored comment starts the source agent, with delivery confirmation and retry of the saved task.
 - Add a bounded Slides artifact import adapter for a closed `deck.json` and authored HTML profile, reusing the existing slide schema and static comment anchors without enabling a new editor or preview.
