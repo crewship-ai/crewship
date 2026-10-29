@@ -698,12 +698,17 @@ export function useSharingMutation<T, R>(workspaceId: string, run: (api: Sharing
     const operations = running.current
     return () => { for (const operation of operations) operation.abort(); operations.clear() }
   }, [humanId, workspaceId, scope])
+  // A caller that unmounts in the same tick as mutate() is gone before the
+  // mutation starts: its operation is born retired and sends nothing (#4460).
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const qc = useQueryClient()
   return useMutation<R, Error, T>({
     retry: false,
     mutationFn: async input => {
       const started = generation.current
       const operation = new AbortController()
+      if (!mounted.current) operation.abort()
       running.current.add(operation)
       const guard = () => { if (operation.signal.aborted || generation.current !== started) throw new SharingError(SESSION_CHANGED, 401) }
       try {
