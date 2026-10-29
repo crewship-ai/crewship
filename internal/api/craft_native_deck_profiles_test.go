@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/dispatch"
+	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
 func TestCraftNativeDeckProfileRequiresQualification(t *testing.T) {
@@ -66,10 +67,10 @@ func TestCraftNativeDeckProfileDoesNotEnableAgentCommands(t *testing.T) {
 func TestCraftNativeDeckInitializeUnqualifiedOrDisabledLeavesNoAuthority(t *testing.T) {
 	for _, enabled := range []bool{false, true} {
 		t.Run(map[bool]string{false: "disabled", true: "unqualified"}[enabled], func(t *testing.T) {
-			f, _, _ := craftNativeHTTPFixture(t)
+			f, native, _ := craftNativeHTTPFixture(t)
 			const page = "deck-unqualified-init"
 			f.seedPage(t, page, page, "Unqualified Deck", f.userID, "")
-			router, err := NewRouter(f.db, "deck-unqualified-fixture-secret32", newTestLogger(), WithCraftNativeHTTP(CraftNativeHTTPConfig{Enabled: enabled}))
+			router, err := NewRouter(f.db, "deck-unqualified-fixture-secret32", newTestLogger(), WithCraftNativeHTTP(CraftNativeHTTPConfig{Enabled: enabled, newOwnerClock: func() (mooring.OwnerClock, error) { return native.clock, nil }}))
 			if err != nil {
 				t.Fatal(err)
 			}
