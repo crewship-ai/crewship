@@ -31,7 +31,7 @@ func craftNativeSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"NativeCraftEmptyRequest":      empty,
 		"NativeCraftGenerationRequest": generationRequest,
 		"NativeCraftHandoffRequest":    handoffRequest,
-		"NativeCraftAvailability":      obj(map[string]any{"enabled": boolean(), "preview_enabled": boolean(), "agents_enabled": boolean()}, "enabled", "preview_enabled", "agents_enabled"),
+		"NativeCraftAvailability":      obj(map[string]any{"enabled": boolean(), "can_edit": boolean(), "preview_enabled": boolean(), "agents_enabled": boolean()}, "enabled", "can_edit", "preview_enabled", "agents_enabled"),
 		"NativeCraftSession":           obj(map[string]any{"session_token": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Private mounted host admission bearer; never deliver to an iframe or local draft."}, "session_id": str(), "application_id": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft", "deckcraft"}}, "page_id": str()}, "session_token", "session_id", "application_id", "page_id"),
 		"NativeCraftRenewal":           obj(map[string]any{"renewed": boolean()}, "renewed"),
 		"NativeCraftHandoffReceipt":    obj(map[string]any{"request_id": str(), "generation": generation(false)}, "request_id", "generation"),

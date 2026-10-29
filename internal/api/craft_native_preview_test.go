@@ -321,3 +321,28 @@ func TestCraftNativeDeckPreviewPinnedZIPAndLiveAuthority(t *testing.T) {
 		})
 	}
 }
+
+func TestCraftNativeAvailabilitySeparatesEditFromLegacyRead(t *testing.T) {
+	f, h, _, owner, _, _, _ := craftNativeDocumentsFixture(t)
+	check := func(ctx context.Context, enabled, edit, preview bool) {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/pages/native-page/craft/availability", nil).WithContext(ctx)
+		request.SetPathValue("slug", "native-page")
+		response := httptest.NewRecorder()
+		h.availability(response, request)
+		var got map[string]any
+		if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &got) != nil || got["enabled"] != enabled || got["can_edit"] != edit || got["preview_enabled"] != preview {
+			t.Fatalf("availability enabled=%v edit=%v preview=%v: %d %s", enabled, edit, preview, response.Code, response.Body)
+		}
+	}
+	check(owner, true, true, true)
+	for _, level := range []string{"read", "comment", "write"} {
+		ctx := craftNativePreviewPeer(t, f, level)
+		check(ctx, level != "comment", level == "write", true)
+		check(context.WithValue(ctx, ctxWorkspaceID, "foreign-workspace"), false, false, false)
+		mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='native-page' AND subject_id=?`, UserFromContext(ctx).ID)
+		check(ctx, false, false, false)
+	}
+	h.enabled = false
+	check(owner, false, false, false)
+}
