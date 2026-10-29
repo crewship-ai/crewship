@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -34,7 +35,13 @@ Filters compose: --category=CODING --maturity=OFFICIAL returns OFFICIAL skills
 in CODING. --installed-for restricts to skills currently assigned to a single
 agent (slug or ID); --installed alone returns the workspace-wide installed set.
 
+--lifecycle keeps only skills in one curator state (active, stale, archived or
+deprecated — the keeper sweep's verdict, see 'skill archive'). The server
+returns every state; the filter is applied to its rows, so the machine
+formats carry the same rows the table shows.
+
 Examples:
+  crewship skill list --lifecycle stale
   crewship skill list --maturity OFFICIAL
   crewship skill list --vendor anthropic --category DESIGN
   crewship skill list --installed-for viktor
@@ -56,6 +63,11 @@ Examples:
 		search, _ := cmd.Flags().GetString("search")
 		installedFlag, _ := cmd.Flags().GetBool("installed")
 		installedForRaw, _ := cmd.Flags().GetString("installed-for")
+		lifecycle, _ := cmd.Flags().GetString("lifecycle")
+		lifecycle = strings.ToLower(strings.TrimSpace(lifecycle))
+		if lifecycle != "" && !validSkillLifecycle[lifecycle] {
+			return fmt.Errorf("invalid --lifecycle %q (want active|stale|archived|deprecated)", lifecycle)
+		}
 
 		var installedFor string
 		if installedForRaw != "" {
@@ -85,6 +97,14 @@ Examples:
 			return err
 		}
 
+		raw, err := readServerDocument(resp)
+		if err != nil {
+			return err
+		}
+		docs, err := serverRows(raw)
+		if err != nil {
+			return err
+		}
 		var skills []struct {
 			ID         string  `json:"id" yaml:"id"`
 			Slug       string  `json:"slug" yaml:"slug"`
@@ -95,6 +115,9 @@ Examples:
 			Vendor     *string `json:"vendor" yaml:"vendor"`
 			Maturity   string  `json:"maturity" yaml:"maturity"`
 			ScanStatus string  `json:"scan_status" yaml:"scan_status"`
+			// LifecycleState is the keeper sweep's verdict; empty from a
+			// server that predates it (read as active).
+			LifecycleState string `json:"lifecycle_state" yaml:"lifecycle_state"`
 			// Workspace-scoped (#3032): agents of this workspace holding
 			// the skill, and this workspace's invocations.
 			InstalledOn []struct {
@@ -109,22 +132,34 @@ Examples:
 				LastUsedAt *string `json:"last_used_at" yaml:"last_used_at"`
 			} `json:"usage" yaml:"usage"`
 		}
-		if err := cli.ReadJSON(resp, &skills); err != nil {
-			return err
+		if err := json.Unmarshal(raw, &skills); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
+		if len(skills) != len(docs) {
+			return fmt.Errorf("decode response: %d rows read as %d", len(docs), len(skills))
 		}
 
+		// The machine formats carry the server's rows, not this struct: it
+		// declares what the table needs, and the server's skill row has
+		// grown well past it (#4508). docs[i] and skills[i] are the same row.
 		f := newFormatter()
-		headers := []string{"SLUG", "VENDOR", "NAME", "CATEGORY", "MATURITY", "SOURCE", "SCAN", "AGENTS", "USES 7D", "USES 30D"}
+		headers := []string{"SLUG", "VENDOR", "NAME", "CATEGORY", "MATURITY", "SOURCE", "SCAN", "LIFECYCLE", "AGENTS", "USES 7D", "USES 30D"}
 		var rows [][]string
-		for _, s := range skills {
+		kept := []cli.RawJSON{}
+		for i, s := range skills {
+			state := skillLifecycleOf(s.LifecycleState)
+			if lifecycle != "" && state != lifecycle {
+				continue
+			}
+			kept = append(kept, docs[i])
 			vendor := "—"
 			if s.Vendor != nil && *s.Vendor != "" {
 				vendor = *s.Vendor
 			}
-			rows = append(rows, []string{s.Slug, vendor, s.Name, s.Category, s.Maturity, s.Source, s.ScanStatus,
+			rows = append(rows, []string{s.Slug, vendor, s.Name, s.Category, s.Maturity, s.Source, s.ScanStatus, state,
 				strconv.Itoa(len(s.InstalledOn)), strconv.Itoa(s.Usage.Uses7d), strconv.Itoa(s.Usage.Uses30d)})
 		}
-		return f.Auto(skills, headers, rows)
+		return f.Auto(kept, headers, rows)
 	},
 }
 
@@ -147,6 +182,10 @@ var skillGetCmd = &cobra.Command{
 			return err
 		}
 
+		raw, err := readServerDocument(resp)
+		if err != nil {
+			return err
+		}
 		var skill struct {
 			ID          string  `json:"id" yaml:"id"`
 			Name        string  `json:"display_name" yaml:"display_name"`
@@ -158,9 +197,24 @@ var skillGetCmd = &cobra.Command{
 			Author      *string `json:"author" yaml:"author"`
 			ToolCount   *int    `json:"tool_count" yaml:"tool_count"`
 			CreatedAt   string  `json:"created_at" yaml:"created_at"`
+			Maturity    string  `json:"maturity" yaml:"maturity"`
+			ScanStatus  string  `json:"scan_status" yaml:"scan_status"`
+			// LifecycleState, NeedsCredentials, Usage and InstalledOn are the
+			// workspace view the library card shows (#3032).
+			LifecycleState   string   `json:"lifecycle_state" yaml:"lifecycle_state"`
+			NeedsCredentials []string `json:"needs_credentials" yaml:"needs_credentials"`
+			Usage            struct {
+				Uses7d     int     `json:"uses_7d" yaml:"uses_7d"`
+				Uses30d    int     `json:"uses_30d" yaml:"uses_30d"`
+				Errors7d   int     `json:"errors_7d" yaml:"errors_7d"`
+				Errors30d  int     `json:"errors_30d" yaml:"errors_30d"`
+				UsesTotal  int     `json:"uses_total" yaml:"uses_total"`
+				LastUsedAt *string `json:"last_used_at" yaml:"last_used_at"`
+			} `json:"usage" yaml:"usage"`
+			InstalledOn []skillInstallation `json:"installed_on" yaml:"installed_on"`
 		}
-		if err := cli.ReadJSON(resp, &skill); err != nil {
-			return err
+		if err := json.Unmarshal(raw, &skill); err != nil {
+			return fmt.Errorf("decode response: %w", err)
 		}
 
 		f := newFormatter()
@@ -182,9 +236,19 @@ var skillGetCmd = &cobra.Command{
 			{"Source", skill.Source},
 			{"Author", author},
 			{"Tools", tools},
+			{"Maturity", dashIfEmpty(skill.Maturity)},
+			{"Scan", dashIfEmpty(skill.ScanStatus)},
+			{"Lifecycle", skillLifecycleOf(skill.LifecycleState)},
+			{"Needs credentials", dashIfEmpty(strings.Join(skill.NeedsCredentials, ", "))},
+			{"Uses 7d/30d", fmt.Sprintf("%d / %d (errors %d / %d, total %d)", skill.Usage.Uses7d, skill.Usage.Uses30d,
+				skill.Usage.Errors7d, skill.Usage.Errors30d, skill.Usage.UsesTotal)},
+			{"Last used", skillLastUsed(skill.Usage.LastUsedAt)},
+			{"Installed on", skillInstalledOnLine(skill.InstalledOn)},
 			{"Created", skill.CreatedAt},
 		}
-		if err := f.AutoDetail(skill, pairs); err != nil {
+		// Machine formats get the server's document; the struct above is the
+		// human view's reading of it (#4508).
+		if err := f.AutoDetail(cli.RawJSON(raw), pairs); err != nil {
 			return err
 		}
 
@@ -693,7 +757,52 @@ Example:
 	},
 }
 
+// skillLastUsed is the human "Last used" value: the time, or "never".
+func skillLastUsed(at *string) string {
+	if at == nil || *at == "" {
+		return "never"
+	}
+	return *at
+}
+
+// validSkillLifecycle is internal/skills' LifecycleState vocabulary.
+var validSkillLifecycle = map[string]bool{"active": true, "stale": true, "archived": true, "deprecated": true}
+
+// skillLifecycleOf reads an empty state (a server predating the sweep) as
+// active, which is what that server meant.
+func skillLifecycleOf(state string) string {
+	if state == "" {
+		return "active"
+	}
+	return strings.ToLower(state)
+}
+
+// skillInstalledOnLine names the agents holding a skill, each with the
+// credentials it still lacks for it: "viktor, alex (missing GITHUB_TOKEN)".
+func skillInstalledOnLine(agents []skillInstallation) string {
+	if len(agents) == 0 {
+		return "-"
+	}
+	parts := make([]string, 0, len(agents))
+	for _, a := range agents {
+		part := a.AgentSlug
+		if len(a.MissingCredentials) > 0 {
+			part += " (missing " + strings.Join(a.MissingCredentials, ", ") + ")"
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// skillInstallation is one installed_on entry: an agent of this workspace
+// holding the skill, and the credentials it needs but does not hold.
+type skillInstallation struct {
+	AgentSlug          string   `json:"agent_slug" yaml:"agent_slug"`
+	MissingCredentials []string `json:"missing_credentials" yaml:"missing_credentials"`
+}
+
 func init() {
+	skillListCmd.Flags().String("lifecycle", "", "Filter by curator lifecycle state (active, stale, archived, deprecated)")
 	skillListCmd.Flags().String("category", "", "Filter by category (CODING, DATA, DEVOPS, ...)")
 	skillListCmd.Flags().String("source", "", "Filter by source (BUNDLED, CUSTOM, GENERATED, MARKETPLACE, MANAGED)")
 	skillListCmd.Flags().String("vendor", "", "Filter by vendor namespace (e.g. anthropic, community)")
