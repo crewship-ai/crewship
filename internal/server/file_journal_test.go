@@ -122,8 +122,15 @@ func TestEmitFileWrittenEntry_Projection(t *testing.T) {
 		entry_hash TEXT NOT NULL DEFAULT '',
 		-- v166: immutable priority the hash-chain commits to; the writer
 		-- INSERTs it unconditionally, so a fixture missing it drops every row.
-		priority_at_emit TEXT
-	)`)
+		priority_at_emit TEXT,
+        chain_key_id TEXT,
+        chain_mac_version INTEGER
+    );
+    CREATE TABLE journal_chain_checkpoints (
+      id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, created_at TEXT NOT NULL,
+      removed_json TEXT NOT NULL, mac TEXT NOT NULL,
+      chain_key_id TEXT, chain_mac_version INTEGER
+    )`)
 
 	emitFileWrittenEntry(w, "crew-1", fileserver.FileEvent{
 		Event: "file_created",

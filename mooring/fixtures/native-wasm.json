@@ -1,0 +1,12 @@
+[
+  {"kind":"identifier","unit":"😀","repeat":200,"expected":{"ok":true}},
+  {"kind":"identifier","unit":"😀","repeat":201,"expected":{"ok":false}},
+  {"kind":"identifier","unit":"\u0000","repeat":1,"expected":{"ok":false}},
+  {"kind":"counter","input":"\"9007199254740993\"","expected":{"ok":true,"value":"9007199254740993"}},
+  {"kind":"counter","input":"\"18446744073709551615\"","expected":{"ok":true,"value":"18446744073709551615"}},
+  {"kind":"counter","input":"\"18446744073709551616\"","expected":{"ok":false}},
+  {"kind":"reader","frame":[0,1,2,0,0],"expected":{"ok":false}},
+  {"kind":"reader","frame":[0,2,2,0,0],"expected":{"ok":false}},
+  {"kind":"reader","frame":[0,0,1,0],"expected":{"ok":true}},
+  {"kind":"recovery","confirmed":"Confirmed — česky","draft":"Draft B 👩‍💻","expected":{"ok":true,"drafts":[{"op_id":"B","target_id":"rejected-A","text":"A:Draft B 👩‍💻","reason":"dependency_rejected:A:permission_revoked"}]}}
+]

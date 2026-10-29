@@ -94,7 +94,8 @@ func (s Store) PlanPresetIn(ctx context.Context, tx *sql.Tx, actor, user, worksp
 	if administrator {
 		return result, ErrDenied
 	}
-	if err = resourceExists(ctx, tx, workspace, Right{req.Resource.Kind, req.Resource.ID, ops[0]}); err != nil {
+	// A removal level has no operations; every definition manages at least one.
+	if err = resourceExists(ctx, tx, workspace, Right{req.Resource.Kind, req.Resource.ID, d.ManagedOperations[0]}); err != nil {
 		return result, err
 	}
 	// Bind independent role/capability floors and account liveness, even when
@@ -116,6 +117,9 @@ func (s Store) PlanPresetIn(ctx context.Context, tx *sql.Tx, actor, user, worksp
 	query := `SELECT json_object('id',id,'updated_at',updated_at) FROM projects WHERE id=? AND workspace_id=?`
 	if d.Kind == "routine" {
 		query = `SELECT json_object('id',id,'publication_revision',publication_revision,'definition_hash',definition_hash,'status',status) FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL`
+	}
+	if d.Kind == "crew" {
+		query = `SELECT json_object('id',id,'updated_at',updated_at,'kind',kind) FROM crews WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND kind<>'setup'`
 	}
 	if err = tx.QueryRowContext(ctx, query, req.Resource.ID, workspace).Scan(&resourceSnapshot); err != nil {
 		return result, err
@@ -192,6 +196,9 @@ func (s Store) PlanPresetIn(ctx context.Context, tx *sql.Tx, actor, user, worksp
 			union[r] = true
 		}
 	}
+	if err := publicationDependencies(desired); err != nil {
+		return PresetPreview{}, err
+	}
 	slices.SortFunc(result.AfterRights, less)
 	keys := []Right{}
 	for r := range union {
@@ -217,7 +224,9 @@ func (s Store) PlanPresetIn(ctx context.Context, tx *sql.Tx, actor, user, worksp
 		return result, err
 	}
 	for _, choice := range selections {
-		if choice.Kind == d.Kind && choice.ResourceID == req.Resource.ID {
+		// Each preset version keeps its own record; another version's choice
+		// on the same resource is reported by the policy, not replaced here.
+		if choice.Kind == d.Kind && choice.ResourceID == req.Resource.ID && choice.PresetID == d.ID && choice.Version == d.Version {
 			result.CurrentSelection = &choice
 		}
 	}
@@ -230,16 +239,26 @@ func (s Store) PlanPresetIn(ctx context.Context, tx *sql.Tx, actor, user, worksp
 		return desired[r] && (!exists || renew[r] || g.Live)
 	}
 	if d.Kind == "routine" {
-		result.Warnings = append(result.Warnings, PresetWarning{Code: "ROUTINE_RESULTS_HISTORY", Message: "View with Results includes eligible past and future regular outputs, possibly input material; live issuer and private-audience gates still apply."})
+		if desired[Right{d.Kind, req.Resource.ID, "results"}] {
+			result.Warnings = append(result.Warnings, PresetWarning{Code: "ROUTINE_RESULTS_HISTORY", Message: "View with Results includes eligible past and future regular outputs, possibly input material; live issuer and private-audience gates still apply."})
+		}
 		if slices.Contains(ops, "run") {
 			result.Warnings = append(result.Warnings, PresetWarning{Code: "EXECUTION_GATES", Message: "Run also needs current agent, provider, delegation and runtime authority; this preview does not execute work."})
 		}
-		if slices.Contains(ops, "edit") {
+		if slices.Contains(ops, "publish") {
+			result.Warnings = append(result.Warnings, PresetWarning{Code: "PUBLISH_GATES", Message: "Publish requires current View and Edit shares, active grant issuers and supported execution configuration. This preset adds neither View, Results nor Run and preserves their existing shares. Structural validation does not execute a test run."})
+		} else if slices.Contains(ops, "edit") {
 			result.Warnings = append(result.Warnings, PresetWarning{Code: "DRAFT_ONLY", Message: "Edit allows draft changes, never publication."})
 		}
-	} else if g, retained := before[Right{"project", req.Resource.ID, "delete_issues"}]; retained {
+		if _, held := before[Right{d.Kind, req.Resource.ID, "publish"}]; held && !desired[Right{d.Kind, req.Resource.ID, "publish"}] {
+			result.Warnings = append(result.Warnings, PresetWarning{Code: "PUBLISH_REVOKED", Message: "Publish is removed. Already published versions stay unchanged; no run is started or stopped."})
+		}
+	} else if g, retained := before[Right{"project", req.Resource.ID, "delete_issues"}]; d.Kind == "project" && retained {
 		was, will := g.Live && live("read", false) && live("manage", false), g.Live && live("read", true) && live("manage", true)
 		result.Warnings = append(result.Warnings, PresetWarning{Code: "RETAINED_DELETE_ISSUES", Message: "The separate destructive right remains unchanged; Read and Manage affect eligibility. Disposable-work and active-execution guards still apply.", BeforeEligible: &was, AfterEligible: &will})
+	}
+	if d.Kind == "crew" {
+		result.Warnings = append(result.Warnings, PresetWarning{Code: "CREW_DYNAMIC_AUDIENCE", Message: "Crew shares apply to current and future agents. View shares crew and agent identities/status; Use adds Chat and Run subject to each agent's authority and execution preflight. It grants neither Delegate, credential visibility, existing conversations, activity nor administration. This preview starts no work."})
 	}
 	if d.Kind == "project" && role != "MANAGER" && role != "ADMIN" && role != "OWNER" {
 		for _, g := range result.OrthogonalRights {

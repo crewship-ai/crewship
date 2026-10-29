@@ -280,6 +280,10 @@ var backupRestoreCmd = &cobra.Command{
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		recoverServices, _ := cmd.Flags().GetBool("recover-services")
 		replace, _ := cmd.Flags().GetBool("replace")
+		discardWorkbooks, _ := cmd.Flags().GetBool("discard-workbooks")
+		if discardWorkbooks && !replace {
+			return fmt.Errorf("--discard-workbooks applies only to --replace")
+		}
 		filesOnly, _ := cmd.Flags().GetBool("files-only")
 		if filesOnly && (asWorkspace != "" || asCrew != "" || replace) {
 			return fmt.Errorf("--files-only cannot be combined with --as-workspace, --as-crew or --replace: it lands container state into crews that already exist")
@@ -293,6 +297,9 @@ var backupRestoreCmd = &cobra.Command{
 			"dry_run":          dryRun,
 			"files_only":       filesOnly,
 			"recover_services": recoverServices,
+		}
+		if discardWorkbooks {
+			body["discard_workbooks"] = true
 		}
 		client := newAPIClient()
 		resp, err := client.Post(backupRoute("/api/v1/admin/backups/restore"), body)

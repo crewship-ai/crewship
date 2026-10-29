@@ -228,3 +228,7 @@ __pycache__/
 
 # Local chat worker bundles are generated before Next dev/build.
 /public/chat-workers/
+
+# Source-pinned optional Mooring release artifacts.
+/internal/mooringassets/embedded/generated/
+/public/mooring-sdk/generated/

@@ -71,3 +71,15 @@ it("treats a synchronous throw from the lock request as no lock available", asyn
   expect(store.exclusive).toBe(false)
   store.close()
 })
+
+it("fails native exclusive mode closed on an unavailable lock without opening IndexedDB", async () => {
+  const dbs = fakeBrowser(() => Promise.reject(new DOMException("denied", "SecurityError")))
+  await expect(openDocumentDrafts("h", "w", "p", { requireExclusive: true })).rejects.toThrow()
+  expect(dbs).toHaveLength(0)
+  vi.stubGlobal("navigator", {})
+  await expect(openDocumentDrafts("h", "w", "p", { requireExclusive: true })).rejects.toThrow()
+  expect(dbs).toHaveLength(0)
+  vi.stubGlobal("navigator", { locks: { request: () => { throw new TypeError("denied") } } })
+  await expect(openDocumentDrafts("h", "w", "p", { requireExclusive: true })).rejects.toThrow()
+  expect(dbs).toHaveLength(0)
+})

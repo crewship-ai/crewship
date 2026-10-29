@@ -433,17 +433,23 @@ bind-mounting a stale sidecar, and sidecar-side features shipped since (egress
 client, the memory-auth chokepoint, `token_fp` used by orphan-container reaping)
 may be running from an older binary.
 
-Fix — rebuild and recopy the sidecar to the path the server actually uses, then
-restart agents so new containers pick it up:
+Fix — rebuild and recopy the sidecar to the path the server actually uses,
+then restart the server:
 
 ```bash
 make build:sidecar          # rebuild crewship-sidecar for this deploy
 # copy it to $CREWSHIP_SIDECAR_PATH (or point that env at the fresh artifact)
-crewship crew restart-agents   # remount the fresh sidecar into containers
 ```
 
-Restarting agents **without** recopying the binary remounts the same stale
-file, so the rebuild step is the one that matters. On dev slots `dev.sh`
+You do not need to recycle crews by hand. Each crew container is stamped with
+the hash of the sidecar it mounts; at a crew's next start, a container whose
+stamp differs from the staged sidecar (or that has no stamp) is recreated when
+it is stopped or idle, and recorded as `sidecar.recreated` in the activity
+feed. A container with an active run is never interrupted: it keeps its
+`sidecar.stale` signal and is replaced at its next idle start. Run
+`crewship crew restart-agents` only to recycle a busy crew immediately.
+Recreating **without** recopying the binary remounts the same stale file, so
+the rebuild step is the one that matters. On dev slots `dev.sh`
 rebuilds the sidecar alongside the server on every start and forces
 `CREWSHIP_SIDECAR_PATH` to that fresh, co-located binary (ignoring any stale pin
 in `.env.local`, since #1402), so this warning should not normally appear

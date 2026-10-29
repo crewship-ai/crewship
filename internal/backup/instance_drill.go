@@ -96,6 +96,12 @@ func (r *DrillReport) Failures() []string {
 // complete even when the result is failed; the error is reserved for
 // problems before a restore could start (bad options, unreadable bundle).
 func DrillInstance(ctx context.Context, opts DrillOptions) (*DrillReport, error) {
+	ctx, release, limitErr := BeginRestoreRead(ctx)
+	if limitErr != nil {
+		return nil, limitErr
+	}
+	defer release()
+
 	rep := &DrillReport{
 		Result: RestoreResultFailed, BundlePath: opts.BundlePath, StartedAt: time.Now().UTC(),
 		Isolation: "throwaway data directory; no server, scheduler, container or network client started",
@@ -140,7 +146,7 @@ func DrillInstance(ctx context.Context, opts DrillOptions) (*DrillReport, error)
 		drillAttachments(ctx, db.DB, RecoveredStoreDir(dataDir, StoreOutput)),
 		drillMemory(ctx, db.DB),
 		drillCredentials(ctx, db.DB, keys, source),
-		drillJournal(ctx, db.DB, chainSeed),
+		drillJournal(ctx, db.DB, chainSeed, restore.Kit()),
 		drillHeld(ctx, db.DB),
 	)
 	if restore.ServiceSnapshots > 0 {
@@ -313,14 +319,26 @@ func drillCredentials(ctx context.Context, db *sql.DB, keys map[string][]byte, s
 	return c
 }
 
-func drillJournal(ctx context.Context, db *sql.DB, chainSeed string) DrillCheck {
+func drillJournal(ctx context.Context, db *sql.DB, chainSeed string, kits ...*RecoveryKit) DrillCheck {
 	c := DrillCheck{Name: DrillCheckJournal}
-	if chainSeed == "" {
+	var keys *journal.SigningKeys
+	var keyErr error
+	if len(kits) == 1 && kits[0] != nil {
+		keys, keyErr = kits[0].AuditSigningKeys()
+	} else if chainSeed != "" {
+		if len(kits) == 0 {
+			keys = journal.LegacySigningKeys(journal.DeriveChainKey(chainSeed))
+		} else {
+			keys, keyErr = journal.SigningKeysForContext(ctx)
+		}
+	} else {
+		keyErr = journal.ErrSigningKeyUnavailable
+	}
+	if keyErr != nil {
 		c.Status = DrillStatusSkipped
-		c.Detail = "the journal chain is keyed by ENCRYPTION_KEY, which the drill does not have"
+		c.Detail = "the drill has no usable audit keyring; historical MACs remain unverified"
 		return c
 	}
-	chainKey := journal.DeriveChainKey(chainSeed)
 	rows, err := db.QueryContext(ctx, `SELECT id FROM workspaces WHERE deleted_at IS NULL ORDER BY id`)
 	if err != nil {
 		c.Status, c.Detail = DrillStatusFailed, err.Error()
@@ -337,7 +355,7 @@ func drillJournal(ctx context.Context, db *sql.DB, chainSeed string) DrillCheck 
 	var bad []string
 	entries := 0
 	for _, id := range ids {
-		res, err := journal.VerifyChainWithKey(ctx, db, id, chainKey)
+		res, err := journal.VerifyChainWithKeys(ctx, db, id, keys)
 		c.Checked++
 		if err != nil {
 			c.Failed++
@@ -352,9 +370,21 @@ func drillJournal(ctx context.Context, db *sql.DB, chainSeed string) DrillCheck 
 			}
 		}
 	}
-	c = finishCheck(c, "workspace journal(s) verify", "workspace journal(s) do not verify", bad)
+	instance, instanceErr := journal.VerifyInstanceAuditWithKeys(ctx, db, keys)
+	c.Checked++
+	if instanceErr != nil {
+		c.Failed++
+		bad = append(bad, "instance: "+instanceErr.Error())
+	} else {
+		entries += instance.Count
+		if !instance.OK {
+			c.Failed++
+			bad = append(bad, "instance: historical or current integrity not verified")
+		}
+	}
+	c = finishCheck(c, "audit chain(s) verify", "audit chain(s) do not verify", bad)
 	if c.Status == DrillStatusOK {
-		c.Detail = fmt.Sprintf("%d workspace journal(s) verify (%d entries)", c.Checked, entries)
+		c.Detail = fmt.Sprintf("%d audit chain(s) verify (%d entries)", c.Checked, entries)
 	}
 	return c
 }

@@ -46,6 +46,12 @@ func (p *Provider) AcquireCrewRuntimeUse(ctx context.Context, cfg provider.CrewC
 			return provider.NewRuntimeUse(cfg.ID, id, release), nil
 		}
 		release()
+		var refresh *sidecarRefreshPendingError
+		if errors.As(err, &refresh) {
+			// Never waits: a runtime in use keeps its outdated sidecar.
+			ctx = p.recycleStaleSidecarRuntime(ctx, cfg, refresh)
+			continue
+		}
 		var pending *provider.RuntimeImageUpdatePendingError
 		if !errors.As(err, &pending) {
 			return nil, err
@@ -124,7 +130,7 @@ func (p *Provider) verifyUnusedCrewRuntime(ctx context.Context, crewID, containe
 		return fmt.Errorf("%w: runtime ownership or state is unconfirmed", provider.ErrRuntimeImageUpdatePending)
 	}
 	if p.cfg.OwnerActive != nil {
-		if err := p.cfg.OwnerActive(ctx, p.cfg.InstanceID); err != nil {
+		if err := p.cfg.OwnerActive(ctx, crewID); err != nil {
 			return err
 		}
 	}

@@ -63,21 +63,28 @@ func (e *Executor) runCodeStep(ctx context.Context, step Step, parentRender Rend
 	if timeoutSec <= 0 {
 		timeoutSec = 300
 	}
+	code := step.Code.Code
+	var variables map[string]any
+	if step.Code.Runtime == "cel" || step.Code.Runtime == "expr" {
+		// Expression source belongs to the author. Inputs and outputs are
+		// scoped values, never text substituted into the program.
+		variables = codeContextVariables(parentRender)
+	} else {
+		// Reserved external runtimes retain their existing request contract;
+		// none are wired in production.
+		code = Render(code, parentRender)
+	}
 
 	res, err := e.codeRunner.RunCode(ctx, CodeRunRequest{
 		WorkspaceID: in.WorkspaceID,
 		Runtime:     step.Code.Runtime,
 		Version:     step.Code.Version,
-		// Render the body so {{ inputs.x }} / {{ steps.y.output }} substitute
-		// exactly like agent_run prompts (executor renders step.Prompt the same
-		// way). Inputs ALSO flow as CREWSHIP_INPUT_* env (below) for runners
-		// that prefer env over substitution. Without this, templated code
-		// reaches the runtime literally.
-		Code:       Render(step.Code.Code, parentRender),
-		InputEnv:   envIn,
-		Inputs:     parentRender.Inputs, // typed inputs for the CEL runner (expr ignores)
-		TimeoutSec: timeoutSec,
-		MaxBytes:   1_000_000, // 1 MB stdout cap; matches HTTP step default
+		Code:        code,
+		InputEnv:    envIn,
+		Inputs:      parentRender.Inputs,
+		Variables:   variables,
+		TimeoutSec:  timeoutSec,
+		MaxBytes:    1_000_000, // 1 MB stdout cap; matches HTTP step default
 	})
 	dur = time.Since(stepStart).Milliseconds()
 	if err != nil {

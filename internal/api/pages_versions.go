@@ -101,7 +101,7 @@ func (h *PageHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	slug := r.PathValue("slug")
 
-	rec, err := h.loadPage(r.Context(), wsID, slug)
+	rec, err := h.loadPageForRead(r.Context(), wsID, slug)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, fmt.Sprintf("page %q not found", slug))
@@ -110,9 +110,13 @@ func (h *PageHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "load page for versions", err)
 		return
 	}
-	if !h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec) {
+	if !rec.PrivateAudience && !h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec) {
 		h.refusePageAction(w, r, rec, "a version carries the page's whole arrangement, including panels sealed to you; "+
 			"only the page owner, a workspace admin, or a write grantee may read the history", "")
+		return
+	}
+	if !workbookPageOwnerOnly(rec, user.ID) {
+		h.refusePageAction(w, r, rec, workbookPageRefusal, "")
 		return
 	}
 
@@ -234,6 +238,10 @@ func (h *PageHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 	// the same gate PATCH runs (§7.1b rule 2).
 	if !h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec) {
 		h.refusePageAction(w, r, rec, "only the page owner, a workspace admin, or a write grantee may roll this page back", "")
+		return
+	}
+	if !workbookPageOwnerOnly(rec, user.ID) {
+		h.refusePageAction(w, r, rec, workbookPageRefusal, "")
 		return
 	}
 

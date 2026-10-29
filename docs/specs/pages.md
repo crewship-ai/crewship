@@ -297,6 +297,24 @@ reads return 404 and catalogs omit the name and entry. OWNER opening another
 human's private output writes a content-free audit before metadata or content is
 released; unavailable audit storage refuses that access. Ordinary grants,
 folders and legacy public links cannot silently publish a private artifact. Private grant administration and production are also limited to the custodian and workspace OWNER; an ADMIN role or a legacy producer grant does not widen those controls.
+The only explicit publication path is the experimental workbook share
+(`docs/cli/workbook.mdx`). The owner confirms it, it is audited and one-way, and
+it names editors as owner-issued user `write` grants. Workbook contents remain
+limited to the owner, those editors, and the audited workspace OWNER. Generic
+write grants are refused on a workbook Page, and a write grant not issued by
+its current owner is inert. Deleting, renaming, rolling back, moving into or out
+of a folder and reading spec versions of a workbook Page remain owner-only,
+because workbooks have no backup; deleting also needs a current human
+credential. A workbook is a human-only private output for departure and
+erasure (§7.1 rule 1b): it is never transferred to a crew, and a workspace
+OWNER selects a human successor through the custody flow. Workbook custody opens
+only once the owner is no longer a live member (removed, suspended, restricted,
+or with a removal or erasure refused because of the workbook within 7 days,
+recorded as `artifact.workbook_custody_requested`); ADMINs are never workbook
+custodians, and each transfer is audited as
+`artifact.workbook_custody_transferred` in the same transaction. A workbook
+whose owner is no longer a member without such a transfer may be deleted only
+by a workspace OWNER, audited as `artifact.orphaned_workbook_deleted`.
 Shared Page authorization and workspace-wide storage accounting are unchanged.
 Private read checks require a live account, workspace and membership. Guest
 catalogs omit unauthorized private outputs without failing the whole listing.
@@ -400,12 +418,56 @@ into three independent verbs:
 | Verb | Means | Typical holder |
 |---|---|---|
 | `read` | may see the page and its panels | humans, crews, an agent that summarises it |
+| `comment` | may read the shared artifact and submit feedback, without edit or execution rights | humans and human crew/workspace members |
 | `produce` | may push payloads **into named panels** | the routine or script that owns those panels |
 | `write` | may edit the page spec — add, remove and re-arrange panels | the agent in charge of the page; a human owner |
 
 `page_grants.subject_type` therefore becomes `{user, crew, agent}` and `level` becomes
-`{read, produce, write}`. `produce` additionally carries the panel ids it covers, so an agent
+`{read, comment, produce, write}`. Human feedback follows Read < Comment < Edit;
+`comment` is accepted only for user, crew and workspace subjects. It permits
+feedback on the currently shared artifact version, without changing content,
+versions, restoration, sharing, editor leases or agent write authority. A plain
+reader cannot submit feedback. Revocation and issuer standing are rechecked in
+the final feedback transaction. `produce` remains an independent capability.
+`produce` additionally carries the panel ids it covers, so an agent
 granted `produce` on one panel cannot overwrite another agent's panel on the same page.
+
+Human artifact Project editors with a live `write` grant can read the latest
+manifest and save a complete new version using its exact `base_version`. The
+server records the editor's own identity; a competing save returns 409 without
+changing existing data. Editor reads expose only that latest manifest, not the
+owner's history, quota or source chat. Read and Comment remain pinned to the
+shared version. Restore, selecting a shared pin and sending an owner agent task
+are separately authorized owner operations, advertised by `can_restore`,
+`can_share` and `can_send_to_agent`; `can_write` alone never grants them.
+
+Artifact comments retain their actual human author and immutable shared-version
+anchor. Creating feedback does not dispatch an owner run or borrow the owner's
+credentials. Processing another member's feedback requires a fresh explicit
+owner message in the owner's private chat and the existing live run admission.
+Native Craft comment-only observer access remains denied until its independent
+shared snapshot and feedback contract is implemented; ordinary native read and
+write paths retain their existing semantics.
+
+Catalog state is independent of content and access. `created_by_test` is an
+explicit server-stored, creation-only boolean with no name-based backfill;
+`test_items=exclude|only|include` defaults to `exclude`. `archived` and optional
+`archived_at` describe discovery state; `archived=exclude|only|include` also
+defaults to `exclude`. Filters run after authorization and before pagination and
+folder counts. Direct authorized reads and version history remain available.
+QA creates marked items only in a dedicated QA workspace.
+
+Archive/unarchive requests first use `dry_run=true` with `pages_version`.
+Confirmation requires `confirm=true`, the matching `review_token` and the same
+version and live authority. Preview does not mutate; archive retains content,
+ACLs and history. Folder filing supports the same review fields plus the target
+`acl_version`, with before/after effective access and changes. Changed versions,
+authority or access invalidate the token. Hidden ACL identities remain withheld.
+The existing legacy fenced folder request remains supported; unsupported bulk
+preview fields are rejected rather than silently ignored. Access responses keep
+`page`, `subjects` and pagination and add `page_id`, `pages_version`, per-subject
+`effective_permissions` and permission `sources`. No guest or expiry mechanism
+is offered.
 
 **The invariant that makes this safe: an agent's authority is a subset of the authorising human's,
 never a superset.** A grant to an agent is evaluated against the granting human's own rights at
@@ -1098,6 +1160,8 @@ Repo rule: every endpoint gets a CLI command, and the acceptance test drives the
 | `POST /api/v1/pages` | `crewship page create` |
 | `PATCH /api/v1/pages/{slug}` | `crewship page update <slug>` |
 | `DELETE /api/v1/pages/{slug}` | `crewship page delete <slug>` |
+| `POST /api/v1/pages/{slug}/archive` | `crewship page archive <slug>` |
+| `POST /api/v1/pages/{slug}/unarchive` | `crewship page unarchive <slug>` |
 | `PUT /api/v1/pages/{slug}/panels/{id}/data` | `crewship page set <slug>/<panel> --data -` |
 | `GET/PUT/DELETE …/grants` | `crewship page grant` / `revoke` |
 | `PUT /api/v1/internal/pages/{slug}/data` | sidecar path for container scripts (panel is a body field, not a path segment — `internal/api/pages_internal.go`) |
@@ -1359,3 +1423,74 @@ projection without Page identity. Full-text List/Count excludes private-output a
 unclassified folder entries before matching, preventing title confirmation.
 Canonical backup/recovery data retains its existing OWNER/instance-admin gates;
 this does not introduce Page folder ACL mutation auditing or change its atomicity.
+
+### Design canvases (opt-in)
+
+Design uses the same Page identity, grants and retained artifact versions. The
+server `CREWSHIP_ARTIFACTS_DESIGN_ENABLED` flag and browser
+`NEXT_PUBLIC_ARTIFACTS_DESIGN` flag are disabled by default. The server also
+accepts the workspace-scoped `artifacts_design` feature flag. The embedded Yjs
+engine uses an existing Node runtime; no additional service is started.
+The browser uses standard Yjs sync and awareness; frame, rectangle, text and
+image nodes have stable IDs. Live operations also work without an open browser.
+Cookie-authenticated collaboration refreshes credentials before each connection
+and replaces only its websocket every five minutes, preserving the Yjs document
+and unsaved draft. Fresh metadata must confirm the same actor, immutable Page,
+Edit capability and opaque authority revision. Browser websocket admission sends
+that `authority_revision`; the host rejects a mismatch before upgrading, including
+a revoke-and-regrant gap. Revocation never restores an earlier writer draft.
+Credential renewal does not replay an HTTP snapshot or mutation.
+Human Design creation accepts the optional create-only `created_by_test` boolean
+and retains it in Page catalog metadata, just like other artifact creation.
+
+The authenticated CLI surface is:
+
+```bash
+crewship page design create checkout --name "Checkout"
+crewship page design get checkout
+crewship page design apply checkout --file changes.json
+crewship page design snapshot checkout --message "Added cart"
+crewship page design versions checkout
+crewship page design restore checkout --version 1
+```
+
+`changes.json` contains an `operations` array and optional `message`. An upsert
+changes supplied fields of a stable node; new nodes need complete geometry:
+
+```json
+{"operations":[{"op":"upsert","node":{"id":"cart","type":"frame","name":"Cart","x":20,"y":20,"width":390,"height":844,"fill":"#ffffff"}}]}
+```
+
+Delete uses `{"op":"delete","id":"cart"}`; reorder uses
+`{"op":"reorder","order":["cart"]}`. Keep existing IDs when changing colors,
+text or geometry. A snapshot creates an ordinary retained artifact version;
+restore creates a new version and preserves history.
+
+The corresponding agent tools are `design_get`, `design_apply`,
+`design_snapshot`, `design_versions` and `design_restore`. CLI invocations with a
+live agent token use those same tools through the sidecar. The original live
+run capability and exact Page mandate are forwarded to the host; an agent
+cannot choose a human identity, workspace, alternate profile or server. A
+visible tool never grants access. Creating a Design requires human authentication;
+agents edit an explicitly selected existing Design. The host rejects calls when Design is
+not enabled. A failed response is never automatically retried.
+The agent tool's `slug` accepts a Page slug or the exact immutable Page ID
+selected by that run's original human mandate, with or without `@`. This does
+not permit selecting another Page.
+
+Additional human CLI commands list or create anchored comments, pin a shared
+version, and connect the owner's private chat:
+
+```bash
+crewship page design comments checkout
+crewship page design comment checkout --version 2 --node cart --text "Use brand colors"
+crewship page design share checkout --version 2
+crewship page design agent checkout --chat-id private-chat-id
+crewship page design watch checkout --count 1
+```
+
+`watch` exposes unchanged standard Yjs frames as base64 NDJSON and stops after
+`--count` binary frames (zero watches until interrupted). It uses the saved
+human credential with the normal server-host guard; agent runs use the bounded
+MCP read/apply tools. `get` returns the current canvas, while `versions` lists
+immutable retained snapshots. Sharing never grants a reader edit rights.

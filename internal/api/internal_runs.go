@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/featureflags"
@@ -40,6 +41,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		ChatOriginID            string                     `json:"chat_origin_id"`
 		DocumentCreationIntent  *documents.CreationIntent  `json:"document_creation_intent"`
 		DocumentIterationIntent *documents.IterationIntent `json:"document_iteration_intent"`
+		ArtifactProjectIntent   *artifacts.ProjectIntent   `json:"artifact_project_intent"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON")
@@ -53,6 +55,16 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		body.TriggerType = "USER"
 	}
 
+	if body.ArtifactProjectIntent != nil {
+		if body.DocumentCreationIntent != nil || body.DocumentIterationIntent != nil || body.ArtifactProjectIntent.Validate() != nil {
+			replyError(w, 400, "one explicit artifact project purpose required")
+			return
+		}
+		if body.TriggerType != "USER" || body.ChatOriginID != "" || body.HumanAuthority == nil || body.TriggerMessageID == "" || InternalTokenWorkspaceFromContext(r.Context()) != "" || InternalTokenCrewFromContext(r.Context()) != "" {
+			replyError(w, 403, "host human artifact project admission required")
+			return
+		}
+	}
 	if body.DocumentCreationIntent != nil && body.DocumentIterationIntent != nil {
 		replyError(w, http.StatusBadRequest, "one Document purpose required")
 		return
@@ -148,7 +160,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	// If the journal cannot commit, do not flip the agent to RUNNING.
 	{
 		synchronous, ok := h.journal.(journal.SyncEmitter)
-		if !ok && body.DocumentCreationIntent == nil && body.DocumentIterationIntent == nil {
+		if !ok && body.DocumentCreationIntent == nil && body.DocumentIterationIntent == nil && body.ArtifactProjectIntent == nil {
 			replyError(w, http.StatusServiceUnavailable, "Durable run journal unavailable")
 			return
 		}
@@ -171,6 +183,9 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 				payload["metadata"] = md
 			}
 		}
+		if body.ArtifactProjectIntent != nil {
+			payload["artifact_project_intent"] = body.ArtifactProjectIntent
+		}
 		if body.DocumentCreationIntent != nil {
 			payload["document_creation_intent"] = body.DocumentCreationIntent
 		}
@@ -191,7 +206,12 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 			Payload:   payload,
 			TraceID:   body.ID,
 		}
-		if body.DocumentCreationIntent != nil {
+		if body.ArtifactProjectIntent != nil {
+			if status, err := h.admitArtifactProjectStart(r, entry, body.HumanAuthority, body.TriggerMessageID, *body.ArtifactProjectIntent); err != nil {
+				replyError(w, status, "artifact project admission refused")
+				return
+			}
+		} else if body.DocumentCreationIntent != nil {
 			if status, err := h.admitDocumentCreationStart(r, entry, body.HumanAuthority, body.TriggerMessageID, *body.DocumentCreationIntent); err != nil {
 				if status == http.StatusInternalServerError {
 					replyInternalError(w, h.logger, "create document run admission", err)

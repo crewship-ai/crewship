@@ -665,7 +665,7 @@ The response body is byte-for-byte identical for "no such email", "mailer disabl
 
 ### `POST /api/v1/auth/reset`
 
-Consumes the reset token and sets a new password. The token row is burned inside a transaction (race-protected: two concurrent calls with the same token serialise on the DELETE, only one wins). On success, **every** active session for the user is revoked so a stolen cookie can't outlive the reset.
+Consumes the reset token and sets a new password. The token row is burned inside a transaction (race-protected: two concurrent calls with the same token serialise on the DELETE, only one wins). On success, **every** active session and **every** live CLI token of the user are revoked, so neither a stolen cookie nor a token minted under the old password outlives the reset. Password, sessions, tokens (each with an `auth.cli_token_revoked` entry) and the `auth.password_reset` audit entry (`cli_tokens_revoked` count in its metadata) commit in one transaction; open streams authenticated by those credentials close after the commit.
 
 **Auth:** none -- the token IS the credential.
 

@@ -20,7 +20,7 @@ var AllEntryTypes = []EntryType{
 	EntryAgentError,
 	EntryAgentMentioned,
 	EntryAgentStatus,
-	EntryType("approval.auto_tuning_reset"), // journalApprovalAutoTuningReset, internal/api/approvals_handler.go:28:7
+	EntryType("approval.auto_tuning_reset"), // journalApprovalAutoTuningReset, internal/api/approvals_handler.go:29:7
 	EntryApprovalCancelled,
 	EntryApprovalDenied,
 	EntryApprovalGranted,
@@ -29,6 +29,11 @@ var AllEntryTypes = []EntryType{
 	EntryApprovalTimeout,
 	EntryTrustGranted,
 	EntryTrustRevoked,
+	EntryType("artifact.mooring_committed"),        // mooringCommitted, internal/api/mooring.go:22:2
+	EntryType("artifact.mooring_created"),          // mooringCreated, internal/api/mooring.go:21:2
+	EntryType("artifact.mooring_mandate_admitted"), // mooringMandateAdmitted, internal/api/mooring.go:23:2
+	EntryType("artifact.mooring_mandate_revoked"),  // mooringMandateRevoked, internal/api/mooring.go:24:2
+	EntryType("artifact.project_shared"),           // journalArtifactProjectShared, internal/api/pages_artifact_project.go:23:7
 	EntryAssignmentCancel,
 	EntryAssignmentDone,
 	EntryAssignmentCreate,
@@ -53,6 +58,7 @@ var AllEntryTypes = []EntryType{
 	EntryContainerSnapshot,
 	EntryConversationCompacted,
 	EntryCostIncurred,
+	EntryType("craft.native_preview_shared"), // journalCraftNativePreviewShared, internal/api/craft_native_preview.go:19:7
 	EntryCredentialAutoAssignEmpty,
 	EntryCredentialAutoAssignFailed,
 	EntryCredentialLeaseIssued,
@@ -115,9 +121,9 @@ var AllEntryTypes = []EntryType{
 	EntryNotificationFailed,
 	EntryType("onboarding.proposal_applied"), // journalEntryOnboardingProposalApplied, internal/api/onboarding_proposal.go:43:7
 	EntryPageActionDispatched,
-	EntryType("page.folder_acl_changed"),        // entryPageFolderACLChanged, internal/api/pages_folder_acl.go:83:7
-	EntryType("page.folder_changed"),            // entryPageFolderChanged, internal/api/pages_folders.go:75:2
-	EntryType("page.folder_membership_changed"), // entryPageFolderMembershipChanged, internal/api/pages_folders.go:79:2
+	EntryType("page.folder_acl_changed"),        // entryPageFolderACLChanged, internal/api/pages_folder_acl.go:84:7
+	EntryType("page.folder_changed"),            // entryPageFolderChanged, internal/api/pages_folders.go:77:2
+	EntryType("page.folder_membership_changed"), // entryPageFolderMembershipChanged, internal/api/pages_folders.go:81:2
 	EntryPageGrantAdded,
 	EntryPageGrantRemoved,
 	EntryType("page.link_revoked"),      // journalPageLinkRevoked, internal/api/pages_public_tokens.go:797:2
@@ -166,6 +172,7 @@ var AllEntryTypes = []EntryType{
 	EntryRunSessionInit,
 	EntryRunStarted,
 	EntryRunTimeout,
+	EntrySidecarRecreated,
 	EntrySidecarStale,
 	EntrySkillArchived,
 	EntrySkillAssigned,
@@ -185,4 +192,5 @@ var AllEntryTypes = []EntryType{
 	EntryWorkClaimed,
 	EntryWorkLeaseLost,
 	EntryWorkNeedsReconciliation,
+	EntryType("workspace.deleted"), // internal/api/workspaces_delete.go:138:35
 }

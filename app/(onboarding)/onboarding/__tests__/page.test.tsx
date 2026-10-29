@@ -293,6 +293,25 @@ it("expires pairing locally, copies the complete command, and stops polling in b
   await act(async () => { await vi.advanceTimersByTimeAsync(2000) })
   expect(fetchMock).toHaveBeenCalledTimes(count)
 })
+it("clears pending copied-command feedback before the browser environment is torn down", async () => {
+  vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
+  vi.stubGlobal("isSecureContext", true)
+  mocks.server.mockImplementation(async (path: string) => reply(path.endsWith("/pair/start") ? { code: "COPY-CODE", expires_at: new Date(Date.now() + 120000).toISOString() } : { available: true, in_use: true }))
+  vi.stubGlobal("fetch", vi.fn(async () => reply({ status: "pending" })))
+  await open(2)
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] })
+  await act(async () => { click("Also pair my CLI Optional — signs your terminal in too.") })
+  await act(async () => { click("Copy command") })
+  expect(screen.getByRole("button", { name: "Copy command" })).toHaveTextContent("Copied")
+  // Repeated copies must not leave a second delayed update behind either.
+  await act(async () => { click("Copy command") })
+  cleanup()
+  expect(vi.getTimerCount()).toBe(0)
+  // The real CI failure was React accessing window after happy-dom teardown.
+  vi.stubGlobal("window", undefined)
+  try { await vi.advanceTimersByTimeAsync(2000) }
+  finally { vi.unstubAllGlobals() }
+})
 it("ignores a credential response after leaving CLI mode", async () => {
   mocks.server.mockImplementation(async (path: string) => reply(path.endsWith("/pair/start") ? { code: "PAIR-CODE", expires_at: new Date(Date.now() + 120000).toISOString() } : { available: true, in_use: true }))
   vi.stubGlobal("fetch", vi.fn(async () => reply({ status: "consumed" })))

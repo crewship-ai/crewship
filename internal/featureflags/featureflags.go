@@ -19,6 +19,17 @@ import (
 // Mirrors the LEFT JOIN FeatureFlagHandler.List uses in
 // internal/api/feature_flags_handler.go.
 func IsEnabled(ctx context.Context, db *sql.DB, workspaceID, key string) (bool, error) {
+	return IsEnabledWith(ctx, db, workspaceID, key)
+}
+
+// RowQuerier is satisfied by *sql.DB and *sql.Tx.
+type RowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// IsEnabledWith is IsEnabled through any row querier, so a caller can read
+// the flag inside the transaction whose decision it gates.
+func IsEnabledWith(ctx context.Context, db RowQuerier, workspaceID, key string) (bool, error) {
 	var enabledInt int
 	var overrideNull sql.NullInt64
 	err := db.QueryRowContext(ctx, `

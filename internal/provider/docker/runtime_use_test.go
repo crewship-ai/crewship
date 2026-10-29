@@ -67,6 +67,58 @@ func TestRuntimeUseIdleStopCannotBypassReservation(t *testing.T) {
 	}
 }
 
+func TestRuntimeUseIdleStopChecksCrewOwner(t *testing.T) {
+	for _, active := range []bool{true, false} {
+		t.Run(map[bool]string{true: "active", false: "deleted"}[active], func(t *testing.T) {
+			var stops, owners, idle atomic.Int32
+			p, cleanup := newFakeDockerProvider(t, func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/json"):
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"Id": "runtime", "State": map[string]any{"Running": true, "Status": "running"},
+						"Config": map[string]any{"Labels": map[string]string{
+							resourcelifecycle.InstanceLabel: "installation", crewCrewIDLabel: "crew", crewKindLabel: crewRuntimeKind,
+						}},
+					})
+				case strings.HasSuffix(r.URL.Path, "/stop"):
+					stops.Add(1)
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Errorf("unexpected request %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			})
+			t.Cleanup(cleanup)
+			p.cfg.InstanceID = "installation"
+			denied := errors.New("crew owner unavailable")
+			p.SetCrewOwnerCheck(func(_ context.Context, id string) error {
+				owners.Add(1)
+				if id != "crew" {
+					t.Errorf("owner lookup used %q, want crew id", id)
+					return denied
+				}
+				if !active {
+					return denied
+				}
+				return nil
+			})
+			p.SetRuntimeIdleVerifier(func(context.Context, string, string) error { idle.Add(1); return nil })
+			stopped, err := p.StopUnusedCrewRuntime(t.Context(), "crew", "runtime")
+			if owners.Load() != 1 {
+				t.Fatalf("owner checks = %d", owners.Load())
+			}
+			if active {
+				if !stopped || err != nil || stops.Load() != 1 || idle.Load() != 1 {
+					t.Fatalf("active owner: stopped=%v err=%v stops=%d idle=%d", stopped, err, stops.Load(), idle.Load())
+				}
+			} else if stopped || !errors.Is(err, denied) || stops.Load() != 0 || idle.Load() != 0 {
+				t.Fatalf("denied owner: stopped=%v err=%v stops=%d idle=%d", stopped, err, stops.Load(), idle.Load())
+			}
+		})
+	}
+}
+
 func TestRuntimeUseReconcileNeverForceRemoves(t *testing.T) {
 	for _, status := range []string{"running", "restarting", "", "exited", "created"} {
 		t.Run(status, func(t *testing.T) {

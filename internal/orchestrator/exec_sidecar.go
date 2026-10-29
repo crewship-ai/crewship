@@ -979,6 +979,7 @@ type SidecarMemoryConfig struct {
 // ContainerID is the Docker container ID where this agent is running; the sidecar
 // forwards it to crewshipd so /keeper/execute can run commands in the right container.
 type SidecarIPCConfig struct {
+	GridCraftEnabled bool `json:"gridcraft_enabled,omitempty"`
 	// CrewOnly limits an agent-less script sidecar to fleet telemetry.
 	CrewOnly    bool   `json:"crew_only,omitempty"`
 	BaseURL     string `json:"base_url"`

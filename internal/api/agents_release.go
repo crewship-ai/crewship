@@ -70,9 +70,21 @@ func (h *AgentHandler) Release(w http.ResponseWriter, r *http.Request) {
 	if history != "" {
 		line = history + "\n" + line
 	}
+	userID := ""
+	if u := UserFromContext(r.Context()); u != nil {
+		userID = u.ID
+	}
+	// Releasing ends the hire's crew membership, so the write and its chained
+	// audit commit together; an audit failure leaves the hire live.
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "release: begin tx", err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
 	// The status guard repeats the check above so a run that starts between
 	// the read and the write is not ghosted.
-	res, err := h.db.ExecContext(r.Context(), `
+	res, err := tx.ExecContext(r.Context(), `
 		UPDATE agents
 		SET expires_at = ?, expired_at = ?, hire_reason = ?, updated_at = ?
 		WHERE id = ? AND workspace_id = ? AND ephemeral = 1 AND expired_at IS NULL
@@ -87,14 +99,20 @@ func (h *AgentHandler) Release(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusConflict, "The hire changed state; reload and try again")
 		return
 	}
-
-	userID := ""
-	if u := UserFromContext(r.Context()); u != nil {
-		userID = u.ID
-	}
-	WriteAuditLog(r.Context(), h.db, h.journal, "agent.released", "AGENT", agentID, userID, workspaceID, map[string]interface{}{
+	notify, err := appendAgentAudit(r.Context(), tx, h.journal, workspaceID, userID, "agent.released", agentID, map[string]any{
 		"crew_id": crewID, "released_at": now,
 	})
+	if err != nil {
+		replyInternalError(w, h.logger, "release: audit", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "release: commit", err)
+		return
+	}
+	if notify != nil {
+		notify()
+	}
 	h.broadcastAgentEvent("agent.expired", workspaceID, map[string]string{
 		"id": agentID, "crew_id": crewID, "name": name, "expired_at": now,
 	})

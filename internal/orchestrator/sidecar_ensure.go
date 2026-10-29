@@ -47,6 +47,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
@@ -82,6 +83,8 @@ func crewOnlySidecarMustBeReplaced(health *sidecarHealth, crewOnlyCaller bool) b
 // restart and cold start, and to boot a sidecar when it picks one of the
 // latter two.
 type sidecarSettleSpec struct {
+	// logger is selected by the trusted run caller; nil preserves crew callers.
+	logger      *slog.Logger
 	containerID string
 	// logID identifies the caller in the log line — the agent id on the agent
 	// path, the crew id on the crew path.
@@ -130,6 +133,10 @@ type sidecarSettleSpec struct {
 // double-starting it. The lock is released on return, so it never spans the
 // caller's own long-lived work (the agent exec, or the script step).
 func (o *Orchestrator) settleSidecar(ctx context.Context, spec sidecarSettleSpec) (started bool, err error) {
+	logger := spec.logger
+	if logger == nil {
+		logger = o.logger
+	}
 	unlock := o.lockSidecarLifecycle(spec.containerID)
 	defer unlock()
 
@@ -153,14 +160,14 @@ func (o *Orchestrator) settleSidecar(ctx context.Context, spec sidecarSettleSpec
 			// guaranteed kill+relaunch of an otherwise-healthy sidecar.
 			// sidecarNeedsRestart only says yes when the mode or the allowlist
 			// itself actually changed.
-			o.logger.Info("sidecar already running, reusing",
+			logger.Info("sidecar already running, reusing",
 				"id", spec.logID, "container_id", shortID(spec.containerID))
 			needStart = false
 			if spec.onReuse != nil {
 				spec.onReuse()
 			}
 		} else {
-			o.logger.Warn("sidecar runtime configuration changed, restarting",
+			logger.Warn("sidecar runtime configuration changed, restarting",
 				"running_mode", health.NetworkMode, "desired_mode", spec.desiredMode)
 			// Containers drop all capabilities: UID 0 cannot signal UID 1002
 			// without CAP_KILL. Stop as the sidecar owner, and refuse to launch
@@ -182,7 +189,7 @@ func (o *Orchestrator) settleSidecar(ctx context.Context, spec sidecarSettleSpec
 	}
 	if err := startSidecar(ctx, o.container, spec.containerID, spec.creds, spec.memoryCfg,
 		spec.ipcCfg, spec.routeAuth, spec.members, spec.networkPolicy, spec.mcpServers,
-		spec.configFingerprint, o.logger); err != nil {
+		spec.configFingerprint, logger); err != nil {
 		return false, err
 	}
 	return true, nil

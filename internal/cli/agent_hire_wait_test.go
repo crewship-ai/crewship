@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -66,6 +67,10 @@ func TestGetHireStatus_OKAndNotFound(t *testing.T) {
 func TestPollHireApproval_TerminatesOnResolution(t *testing.T) {
 	hits := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/agents/a_x" {
+			http.NotFound(w, r)
+			return
+		}
 		hits++
 		status := "PENDING_REVIEW"
 		if hits >= 3 {
@@ -76,38 +81,57 @@ func TestPollHireApproval_TerminatesOnResolution(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "tok", "ws")
+	// A concrete workspace ID avoids unrelated slug-discovery requests.
+	c := NewClient(srv.URL, "tok", "c000000000000000000000000")
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	got, err := c.PollHireApproval(ctx, "a_x", 5*time.Millisecond, nil)
+	var ticks []HireStatus
+	got, err := c.PollHireApproval(ctx, "a_x", 5*time.Millisecond, func(status *HireStatus) {
+		ticks = append(ticks, *status)
+	})
 	if err != nil {
 		t.Fatalf("PollHireApproval: %v", err)
 	}
 	if got.Status != "IDLE" {
 		t.Fatalf("status=%s", got.Status)
 	}
-	if hits < 3 {
-		t.Fatalf("expected >=3 polls, got %d", hits)
+	if hits != 3 {
+		t.Fatalf("expected 3 polls, got %d", hits)
+	}
+	// Resolved status is returned before onTick; only the two pending polls
+	// produce callbacks, preserving the existing polling contract.
+	if len(ticks) != 2 {
+		t.Fatalf("expected 2 pending callbacks, got %d", len(ticks))
+	}
+	for i, tick := range ticks {
+		if tick.ID != "a_x" || tick.Status != "PENDING_REVIEW" {
+			t.Errorf("callback %d = %+v", i, tick)
+		}
 	}
 }
 
 func TestPollHireApproval_ContextDeadline(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(HireStatus{ID: "a_slow", Status: "PENDING_REVIEW"})
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/agents/a_slow" {
+			http.NotFound(w, r)
+			return
+		}
+		// The first response legitimately cannot complete before cancellation.
+		<-r.Context().Done()
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL, "tok", "ws")
+	// A concrete workspace ID avoids unrelated slug-discovery requests.
+	c := NewClient(srv.URL, "tok", "c000000000000000000000000")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
 	var ticks int
 	_, err := c.PollHireApproval(ctx, "a_slow", 5*time.Millisecond, func(h *HireStatus) { ticks++ })
-	if err == nil {
-		t.Fatal("expected deadline error, got nil")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context deadline error, got %v", err)
 	}
-	if ticks == 0 {
-		t.Error("expected at least one onTick call before the deadline")
+	if ticks != 0 {
+		t.Errorf("blocked response produced %d callbacks, want 0", ticks)
 	}
 }

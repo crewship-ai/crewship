@@ -96,6 +96,6 @@ func (o *Orchestrator) recordSubscriptionUsage(ctx context.Context, req AgentRun
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if err := record(ctx, usage); err != nil {
-		o.logger.Warn("record subscription usage", "run_id", runID, "credential_id", usage.CredentialID, "error", err)
+		o.loggerForRun(req).Warn("record subscription usage", "run_id", runID, "credential_id", usage.CredentialID, "error", err)
 	}
 }

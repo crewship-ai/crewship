@@ -951,6 +951,20 @@ crewship admin instance backups vault-keys          # versions, sealed values pe
 crewship admin instance backups recovery-kit on     # audited; off by default
 ```
 
+The encrypted recovery kit also carries the independent audit keyring,
+including retained verification keys even when no sealed value references
+them. Normal instance recovery restores that keyring and preserves historical
+audit MACs; the recovery drill checks both workspace and instance chains.
+When `recover --force` lands on a data directory whose server already booted,
+that directory holds its own keyring: recovery replaces it with the kit's and
+keeps the previous one beside it as `audit-keyring.json.replaced-<UTC time>`,
+re-sealed under the recovered master key
+(never deleted). A keyring that is not a regular file (a symlink, a directory)
+is refused before anything in the directory changes.
+Workspace and crew bundles never carry signing keys. Without the historical
+audit keys, verification remains unverified and affected writes require an
+explicit OWNER checkpoint through [`audit reseal`](/cli/audit#crewship-audit-reseal).
+
 <Warning>
 Whoever holds a private backup key can read every secret in the instance.
 Keep the age private key on a different device from the live `ENCRYPTION_KEY`.

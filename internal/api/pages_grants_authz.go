@@ -72,6 +72,7 @@ import (
 // refuses.
 const (
 	pageGrantRead    = "read"
+	pageGrantComment = "comment"
 	pageGrantProduce = "produce"
 	pageGrantWrite   = "write"
 
@@ -87,7 +88,7 @@ const (
 
 func validPageGrantLevel(level string) bool {
 	switch level {
-	case pageGrantRead, pageGrantProduce, pageGrantWrite:
+	case pageGrantRead, pageGrantComment, pageGrantProduce, pageGrantWrite:
 		return true
 	}
 	return false
@@ -105,7 +106,7 @@ func validPageSubjectType(kind string) bool {
 // in Go, so the handler answers 400 in a sentence rather than a constraint
 // violation: read or write, never produce.
 func workspaceSubjectLevelAllowed(level string) bool {
-	return level == pageGrantRead || level == pageGrantWrite
+	return level == pageGrantRead || level == pageGrantComment || level == pageGrantWrite
 }
 
 // pageGrantRecord is one page_grants row PLUS the use-time verdict on its
@@ -125,6 +126,9 @@ type pageGrantRecord struct {
 	IssuerRole               string
 	IssuerAccountUnavailable bool
 	Live                     bool
+	// WorkbookInert marks a write grant on a workbook Page that the current
+	// owner did not issue to a user: it names no editor and reaches nothing.
+	WorkbookInert bool
 }
 
 // inertReason says, in a sentence a person can act on, why a stored grant is
@@ -139,6 +143,9 @@ type pageGrantRecord struct {
 func (g pageGrantRecord) inertReason() string {
 	if g.Live {
 		return ""
+	}
+	if g.WorkbookInert {
+		return "on a workbook page only a user write grant issued by the current owner (workbook share) names an editor"
 	}
 	if g.IssuerRole == "" {
 		return "the human who issued it is no longer a member of this workspace"
@@ -169,7 +176,7 @@ func (g pageGrantRecord) inertReason() string {
 // here — "does any live grant name you" — has no ordering in it.
 func reachesPage(level string) bool {
 	switch level {
-	case pageGrantRead, pageGrantProduce, pageGrantWrite:
+	case pageGrantRead, pageGrantComment, pageGrantProduce, pageGrantWrite:
 		return true
 	}
 	return false
@@ -262,7 +269,11 @@ func (h *PageHandler) loadPageGrantRecordsIn(ctx context.Context, wsID, pageID s
 		       g.granted_by_user_id, g.granted_at,
 		       COALESCE(wm.role, ''),
                (actor.id IS NULL OR actor.suspended_at IS NOT NULL OR COALESCE(wm.access_mode,'')<>'trusted' OR EXISTS(SELECT 1 FROM workspace_members ceiling WHERE ceiling.user_id=g.granted_by_user_id AND ceiling.access_mode='restricted')),
+		       (g.level = 'write' AND EXISTS(SELECT 1 FROM gridcraft_heads gh WHERE gh.page_id = p.id)
+		         AND (g.subject_type <> 'user' OR p.owner_user_id IS NULL OR g.granted_by_user_id <> p.owner_user_id)),
 		       CASE
+		         WHEN g.level = 'write' AND EXISTS(SELECT 1 FROM gridcraft_heads gh WHERE gh.page_id = p.id)
+		              AND (g.subject_type <> 'user' OR p.owner_user_id IS NULL OR g.granted_by_user_id <> p.owner_user_id) THEN 0
 		         WHEN wm.user_id IS NULL                                THEN 0
                  WHEN (actor.id IS NULL OR actor.suspended_at IS NOT NULL OR COALESCE(wm.access_mode,'')<>'trusted' OR EXISTS(SELECT 1 FROM workspace_members ceiling WHERE ceiling.user_id=g.granted_by_user_id AND ceiling.access_mode='restricted')) THEN 0
 		         WHEN wm.role IN ('OWNER', 'ADMIN')                     THEN 1
@@ -292,7 +303,7 @@ func (h *PageHandler) loadPageGrantRecordsIn(ctx context.Context, wsID, pageID s
 		var onPage, panelIDs string
 		var live int
 		if err := rows.Scan(&onPage, &g.SubjectType, &g.SubjectID, &g.Level, &panelIDs,
-			&g.GrantedBy, &g.GrantedAt, &g.IssuerRole, &g.IssuerAccountUnavailable, &live); err != nil {
+			&g.GrantedBy, &g.GrantedAt, &g.IssuerRole, &g.IssuerAccountUnavailable, &g.WorkbookInert, &live); err != nil {
 			return nil, err
 		}
 		g.Live = live == 1

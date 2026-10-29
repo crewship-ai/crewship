@@ -1,0 +1,970 @@
+{
+  "profile": "mooring-host-boundary-v1",
+  "status": "pure validator fixtures; trusted context is caller-attested, not cryptographic evidence or live integration",
+  "rules": {
+    "receipts": "Host transport independent of issuer; exact pending atomic membership; continuous per-op revisions inside each atomic range; old/new ranges may have gaps and reorder; no overlapping saved ranges.",
+    "durability": "Outer node permits replicated members without rewriting them; outer replicated requires all saved members replicated. All-rejected label is no Saved claim.",
+    "provenance": "crewship is logical host identity, stable across process restart; different issuer imports require a future provenance protocol."
+  },
+  "context": {
+    "request_id": "batch1",
+    "scope": {
+      "application_id": "editor",
+      "workspace_id": "w",
+      "artifact_id": "a"
+    },
+    "generation": "7",
+    "issuer": "crewship",
+    "allowed_durabilities": [
+      "node",
+      "replicated"
+    ],
+    "changes": [
+      {
+        "change_id": "old",
+        "op_ids": [
+          "o1",
+          "o2"
+        ]
+      },
+      {
+        "change_id": "fresh",
+        "op_ids": [
+          "n1",
+          "n2"
+        ]
+      }
+    ],
+    "required_durability": "node"
+  },
+  "base_receipt": {
+    "type": "commit_result",
+    "request_id": "batch1",
+    "scope": {
+      "application_id": "editor",
+      "workspace_id": "w",
+      "artifact_id": "a"
+    },
+    "generation": "7",
+    "revision": "12",
+    "issuer": "crewship",
+    "durability": "node",
+    "changes": [
+      {
+        "change_id": "old",
+        "status": "saved",
+        "first_revision": "1",
+        "last_revision": "2",
+        "operations": [
+          {
+            "op_id": "o1",
+            "status": "saved",
+            "revision": "1",
+            "issuer": "crewship",
+            "durability": "node"
+          },
+          {
+            "op_id": "o2",
+            "status": "saved",
+            "revision": "2",
+            "issuer": "crewship",
+            "durability": "node"
+          }
+        ]
+      },
+      {
+        "change_id": "fresh",
+        "status": "saved",
+        "first_revision": "11",
+        "last_revision": "12",
+        "operations": [
+          {
+            "op_id": "n1",
+            "status": "saved",
+            "revision": "11",
+            "issuer": "crewship",
+            "durability": "replicated"
+          },
+          {
+            "op_id": "n2",
+            "status": "saved",
+            "revision": "12",
+            "issuer": "crewship",
+            "durability": "replicated"
+          }
+        ]
+      }
+    ]
+  },
+  "receipt_cases": [
+    {
+      "id": "mixed-old-new-gapped-ranges-valid",
+      "expected_error": null,
+      "mutations": []
+    },
+    {
+      "id": "batch-order-does-not-change-membership",
+      "expected_error": null,
+      "mutations": [
+        {
+          "path": "/changes",
+          "value": [
+            {
+              "change_id": "fresh",
+              "status": "saved",
+              "first_revision": "11",
+              "last_revision": "12",
+              "operations": [
+                {
+                  "op_id": "n1",
+                  "status": "saved",
+                  "revision": "11",
+                  "issuer": "crewship",
+                  "durability": "replicated"
+                },
+                {
+                  "op_id": "n2",
+                  "status": "saved",
+                  "revision": "12",
+                  "issuer": "crewship",
+                  "durability": "replicated"
+                }
+              ]
+            },
+            {
+              "change_id": "old",
+              "status": "saved",
+              "first_revision": "1",
+              "last_revision": "2",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "saved",
+                  "revision": "1",
+                  "issuer": "crewship",
+                  "durability": "node"
+                },
+                {
+                  "op_id": "o2",
+                  "status": "saved",
+                  "revision": "2",
+                  "issuer": "crewship",
+                  "durability": "node"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "participant-cannot-forge-saved",
+      "expected_error": "Forbidden",
+      "mutations": [],
+      "transport": "participant"
+    },
+    {
+      "id": "runtime-cannot-forge-saved",
+      "expected_error": "Forbidden",
+      "mutations": [],
+      "transport": "runtime"
+    },
+    {
+      "id": "outer-issuer",
+      "expected_error": "Forbidden",
+      "mutations": [
+        {
+          "path": "/issuer",
+          "value": "attacker"
+        }
+      ]
+    },
+    {
+      "id": "member-issuer",
+      "expected_error": "Forbidden",
+      "mutations": [
+        {
+          "path": "/changes/0/operations/0/issuer",
+          "value": "attacker"
+        }
+      ]
+    },
+    {
+      "id": "scope",
+      "expected_error": "Binding",
+      "mutations": [
+        {
+          "path": "/scope/artifact_id",
+          "value": "other"
+        }
+      ]
+    },
+    {
+      "id": "generation",
+      "expected_error": "Binding",
+      "mutations": [
+        {
+          "path": "/generation",
+          "value": "8"
+        }
+      ]
+    },
+    {
+      "id": "request",
+      "expected_error": "Binding",
+      "mutations": [
+        {
+          "path": "/request_id",
+          "value": "other"
+        }
+      ]
+    },
+    {
+      "id": "foreign-operation",
+      "expected_error": "Binding",
+      "mutations": [
+        {
+          "path": "/changes/0/operations/0/op_id",
+          "value": "foreign"
+        }
+      ]
+    },
+    {
+      "id": "missing-member",
+      "expected_error": "Binding",
+      "mutations": [
+        {
+          "path": "/changes/0/operations",
+          "value": [
+            {
+              "op_id": "o1",
+              "status": "saved",
+              "revision": "1",
+              "issuer": "crewship",
+              "durability": "node"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "member-order",
+      "expected_error": "Binding",
+      "mutations": [
+        {
+          "path": "/changes/0/operations",
+          "value": [
+            {
+              "op_id": "o2",
+              "status": "saved",
+              "revision": "2",
+              "issuer": "crewship",
+              "durability": "node"
+            },
+            {
+              "op_id": "o1",
+              "status": "saved",
+              "revision": "1",
+              "issuer": "crewship",
+              "durability": "node"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "noncontiguous-revisions",
+      "expected_error": "Receipt",
+      "mutations": [
+        {
+          "path": "/changes/1/operations/1/revision",
+          "value": "13"
+        }
+      ]
+    },
+    {
+      "id": "head-inside-atomic",
+      "expected_error": "Receipt",
+      "mutations": [
+        {
+          "path": "/revision",
+          "value": "11"
+        }
+      ]
+    },
+    {
+      "id": "outer-overstates-node-replay",
+      "expected_error": "Durability",
+      "mutations": [
+        {
+          "path": "/durability",
+          "value": "replicated"
+        }
+      ]
+    },
+    {
+      "id": "overlapping-atomic-ranges",
+      "expected_error": "Receipt",
+      "mutations": [
+        {
+          "path": "/changes/1/first_revision",
+          "value": "2"
+        },
+        {
+          "path": "/changes/1/last_revision",
+          "value": "3"
+        },
+        {
+          "path": "/changes/1/operations/0/revision",
+          "value": "2"
+        },
+        {
+          "path": "/changes/1/operations/1/revision",
+          "value": "3"
+        }
+      ]
+    },
+    {
+      "id": "unnegotiated-member-durability",
+      "expected_error": "Durability",
+      "mutations": [],
+      "allowed_durabilities": [
+        "node"
+      ]
+    },
+    {
+      "id": "u64-final-boundary-valid",
+      "expected_error": null,
+      "mutations": [
+        {
+          "path": "/revision",
+          "value": "18446744073709551615"
+        },
+        {
+          "path": "/changes/1/first_revision",
+          "value": "18446744073709551614"
+        },
+        {
+          "path": "/changes/1/last_revision",
+          "value": "18446744073709551615"
+        },
+        {
+          "path": "/changes/1/operations/0/revision",
+          "value": "18446744073709551614"
+        },
+        {
+          "path": "/changes/1/operations/1/revision",
+          "value": "18446744073709551615"
+        }
+      ]
+    },
+    {
+      "id": "atomic-range-overflow",
+      "expected_error": "Receipt",
+      "mutations": [
+        {
+          "path": "/revision",
+          "value": "18446744073709551615"
+        },
+        {
+          "path": "/changes/1/first_revision",
+          "value": "18446744073709551615"
+        },
+        {
+          "path": "/changes/1/last_revision",
+          "value": "18446744073709551615"
+        }
+      ]
+    },
+    {
+      "id": "all-rejected-negotiated-label-is-not-saved",
+      "expected_error": null,
+      "mutations": [
+        {
+          "path": "/changes",
+          "value": [
+            {
+              "change_id": "old",
+              "status": "rejected",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "rejected",
+                  "reason": {
+                    "code": "forbidden",
+                    "message": "denied",
+                    "retry": "do_not_retry"
+                  }
+                },
+                {
+                  "op_id": "o2",
+                  "status": "rejected",
+                  "reason": {
+                    "code": "dependency_rejected",
+                    "message": "atomic abort",
+                    "retry": "do_not_retry",
+                    "root_op_id": "o1",
+                    "root_cause": {
+                      "op_id": "o1",
+                      "code": "forbidden",
+                      "message": "denied"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "change_id": "fresh",
+              "status": "rejected",
+              "operations": [
+                {
+                  "op_id": "n1",
+                  "status": "rejected",
+                  "reason": {
+                    "code": "dependency_rejected",
+                    "message": "atomic abort",
+                    "retry": "do_not_retry",
+                    "root_op_id": "o1",
+                    "root_cause": {
+                      "op_id": "o1",
+                      "code": "forbidden",
+                      "message": "denied"
+                    }
+                  }
+                },
+                {
+                  "op_id": "n2",
+                  "status": "rejected",
+                  "reason": {
+                    "code": "dependency_rejected",
+                    "message": "atomic abort",
+                    "retry": "do_not_retry",
+                    "root_op_id": "o1",
+                    "root_cause": {
+                      "op_id": "o1",
+                      "code": "forbidden",
+                      "message": "denied"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "path": "/durability",
+          "value": "replicated"
+        }
+      ]
+    },
+    {
+      "id": "dependency-root-mismatch",
+      "expected_error": "Receipt",
+      "mutations": [
+        {
+          "path": "/changes",
+          "value": [
+            {
+              "change_id": "old",
+              "status": "rejected",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "rejected",
+                  "reason": {
+                    "code": "forbidden",
+                    "message": "denied",
+                    "retry": "do_not_retry"
+                  }
+                },
+                {
+                  "op_id": "o2",
+                  "status": "rejected",
+                  "reason": {
+                    "code": "dependency_rejected",
+                    "message": "atomic abort",
+                    "retry": "do_not_retry",
+                    "root_op_id": "o1",
+                    "root_cause": {
+                      "op_id": "foreign",
+                      "code": "forbidden",
+                      "message": "denied"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "change_id": "fresh",
+              "status": "rejected",
+              "operations": [
+                {
+                  "op_id": "n1",
+                  "status": "rejected",
+                  "reason": {
+                    "code": "dependency_rejected",
+                    "message": "atomic abort",
+                    "retry": "do_not_retry",
+                    "root_op_id": "o1",
+                    "root_cause": {
+                      "op_id": "o1",
+                      "code": "forbidden",
+                      "message": "denied"
+                    }
+                  }
+                },
+                {
+                  "op_id": "n2",
+                  "status": "rejected",
+                  "reason": {
+                    "code": "dependency_rejected",
+                    "message": "atomic abort",
+                    "retry": "do_not_retry",
+                    "root_op_id": "o1",
+                    "root_cause": {
+                      "op_id": "o1",
+                      "code": "forbidden",
+                      "message": "denied"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "direct-reason-cannot-pretend-dependency-root",
+      "expected_error": "Receipt",
+      "mutations": [
+        {
+          "path": "/changes",
+          "value": [
+            {
+              "change_id": "old",
+              "status": "rejected",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "rejected",
+                  "reason": {
+                    "code": "forbidden",
+                    "message": "denied",
+                    "retry": "do_not_retry",
+                    "root_op_id": "o1"
+                  }
+                },
+                {
+                  "op_id": "o2",
+                  "status": "rejected",
+                  "reason": {
+                    "code": "dependency_rejected",
+                    "message": "atomic abort",
+                    "retry": "do_not_retry",
+                    "root_op_id": "o1",
+                    "root_cause": {
+                      "op_id": "o1",
+                      "code": "forbidden",
+                      "message": "denied"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "change_id": "fresh",
+              "status": "rejected",
+              "operations": [
+                {
+                  "op_id": "n1",
+                  "status": "rejected",
+                  "reason": {
+                    "code": "dependency_rejected",
+                    "message": "atomic abort",
+                    "retry": "do_not_retry",
+                    "root_op_id": "o1",
+                    "root_cause": {
+                      "op_id": "o1",
+                      "code": "forbidden",
+                      "message": "denied"
+                    }
+                  }
+                },
+                {
+                  "op_id": "n2",
+                  "status": "rejected",
+                  "reason": {
+                    "code": "dependency_rejected",
+                    "message": "atomic abort",
+                    "retry": "do_not_retry",
+                    "root_op_id": "o1",
+                    "root_cause": {
+                      "op_id": "o1",
+                      "code": "forbidden",
+                      "message": "denied"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "all-replicated-outer-node-required-node",
+      "expected_error": null,
+      "required_durability": "node",
+      "mutations": [
+        {
+          "path": "/changes",
+          "value": [
+            {
+              "change_id": "old",
+              "status": "saved",
+              "first_revision": "1",
+              "last_revision": "2",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "saved",
+                  "revision": "1",
+                  "issuer": "crewship",
+                  "durability": "replicated"
+                },
+                {
+                  "op_id": "o2",
+                  "status": "saved",
+                  "revision": "2",
+                  "issuer": "crewship",
+                  "durability": "replicated"
+                }
+              ]
+            },
+            {
+              "change_id": "fresh",
+              "status": "saved",
+              "first_revision": "11",
+              "last_revision": "12",
+              "operations": [
+                {
+                  "op_id": "n1",
+                  "status": "saved",
+                  "revision": "11",
+                  "issuer": "crewship",
+                  "durability": "replicated"
+                },
+                {
+                  "op_id": "n2",
+                  "status": "saved",
+                  "revision": "12",
+                  "issuer": "crewship",
+                  "durability": "replicated"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "all-replicated-outer-node-required-replicated",
+      "expected_error": "Durability",
+      "required_durability": "replicated",
+      "mutations": [
+        {
+          "path": "/changes",
+          "value": [
+            {
+              "change_id": "old",
+              "status": "saved",
+              "first_revision": "1",
+              "last_revision": "2",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "saved",
+                  "revision": "1",
+                  "issuer": "crewship",
+                  "durability": "replicated"
+                },
+                {
+                  "op_id": "o2",
+                  "status": "saved",
+                  "revision": "2",
+                  "issuer": "crewship",
+                  "durability": "replicated"
+                }
+              ]
+            },
+            {
+              "change_id": "fresh",
+              "status": "saved",
+              "first_revision": "11",
+              "last_revision": "12",
+              "operations": [
+                {
+                  "op_id": "n1",
+                  "status": "saved",
+                  "revision": "11",
+                  "issuer": "crewship",
+                  "durability": "replicated"
+                },
+                {
+                  "op_id": "n2",
+                  "status": "saved",
+                  "revision": "12",
+                  "issuer": "crewship",
+                  "durability": "replicated"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "all-replicated-outer-replicated-required-replicated",
+      "expected_error": null,
+      "required_durability": "replicated",
+      "mutations": [
+        {
+          "path": "/changes",
+          "value": [
+            {
+              "change_id": "old",
+              "status": "saved",
+              "first_revision": "1",
+              "last_revision": "2",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "saved",
+                  "revision": "1",
+                  "issuer": "crewship",
+                  "durability": "replicated"
+                },
+                {
+                  "op_id": "o2",
+                  "status": "saved",
+                  "revision": "2",
+                  "issuer": "crewship",
+                  "durability": "replicated"
+                }
+              ]
+            },
+            {
+              "change_id": "fresh",
+              "status": "saved",
+              "first_revision": "11",
+              "last_revision": "12",
+              "operations": [
+                {
+                  "op_id": "n1",
+                  "status": "saved",
+                  "revision": "11",
+                  "issuer": "crewship",
+                  "durability": "replicated"
+                },
+                {
+                  "op_id": "n2",
+                  "status": "saved",
+                  "revision": "12",
+                  "issuer": "crewship",
+                  "durability": "replicated"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "path": "/durability",
+          "value": "replicated"
+        }
+      ]
+    },
+    {
+      "id": "all-rejected-node-label-under-required-replicated-is-no-saved",
+      "expected_error": null,
+      "mutations": [
+        {
+          "path": "/changes",
+          "value": [
+            {
+              "change_id": "old",
+              "status": "rejected",
+              "operations": [
+                {
+                  "op_id": "o1",
+                  "status": "rejected",
+                  "reason": {
+                    "code": "forbidden",
+                    "message": "denied",
+                    "retry": "do_not_retry"
+                  }
+                },
+                {
+                  "op_id": "o2",
+                  "status": "rejected",
+                  "reason": {
+                    "code": "dependency_rejected",
+                    "message": "atomic abort",
+                    "retry": "do_not_retry",
+                    "root_op_id": "o1",
+                    "root_cause": {
+                      "op_id": "o1",
+                      "code": "forbidden",
+                      "message": "denied"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "change_id": "fresh",
+              "status": "rejected",
+              "operations": [
+                {
+                  "op_id": "n1",
+                  "status": "rejected",
+                  "reason": {
+                    "code": "dependency_rejected",
+                    "message": "atomic abort",
+                    "retry": "do_not_retry",
+                    "root_op_id": "o1",
+                    "root_cause": {
+                      "op_id": "o1",
+                      "code": "forbidden",
+                      "message": "denied"
+                    }
+                  }
+                },
+                {
+                  "op_id": "n2",
+                  "status": "rejected",
+                  "reason": {
+                    "code": "dependency_rejected",
+                    "message": "atomic abort",
+                    "retry": "do_not_retry",
+                    "root_op_id": "o1",
+                    "root_cause": {
+                      "op_id": "o1",
+                      "code": "forbidden",
+                      "message": "denied"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "path": "/durability",
+          "value": "node"
+        }
+      ],
+      "required_durability": "replicated"
+    }
+  ],
+  "base64_cases": [
+    {
+      "id": "empty",
+      "text": "",
+      "max_decoded_bytes": 0,
+      "decoded_bytes": 0,
+      "expected_error": null
+    },
+    {
+      "id": "one-byte",
+      "text": "AA==",
+      "max_decoded_bytes": 1,
+      "decoded_bytes": 1,
+      "expected_error": null
+    },
+    {
+      "id": "two-bytes",
+      "text": "AAA=",
+      "max_decoded_bytes": 2,
+      "decoded_bytes": 2,
+      "expected_error": null
+    },
+    {
+      "id": "three-bytes",
+      "text": "AAAA",
+      "max_decoded_bytes": 3,
+      "decoded_bytes": 3,
+      "expected_error": null
+    },
+    {
+      "id": "one-byte-nonzero-padbits",
+      "text": "AB==",
+      "max_decoded_bytes": 1,
+      "decoded_bytes": null,
+      "expected_error": "Encoding"
+    },
+    {
+      "id": "two-byte-nonzero-padbits",
+      "text": "AAB=",
+      "max_decoded_bytes": 2,
+      "decoded_bytes": null,
+      "expected_error": "Encoding"
+    },
+    {
+      "id": "urlsafe",
+      "text": "_AAA",
+      "max_decoded_bytes": 3,
+      "decoded_bytes": null,
+      "expected_error": "Encoding"
+    },
+    {
+      "id": "space",
+      "text": "AA A",
+      "max_decoded_bytes": 3,
+      "decoded_bytes": null,
+      "expected_error": "Encoding"
+    },
+    {
+      "id": "unpadded",
+      "text": "AA",
+      "max_decoded_bytes": 3,
+      "decoded_bytes": null,
+      "expected_error": "Encoding"
+    },
+    {
+      "id": "interior-padding",
+      "text": "A=AA",
+      "max_decoded_bytes": 3,
+      "decoded_bytes": null,
+      "expected_error": "Encoding"
+    },
+    {
+      "id": "too-many-padding",
+      "text": "A===",
+      "max_decoded_bytes": 3,
+      "decoded_bytes": null,
+      "expected_error": "Encoding"
+    },
+    {
+      "id": "unicode",
+      "text": "éAA",
+      "max_decoded_bytes": 3,
+      "decoded_bytes": null,
+      "expected_error": "Encoding"
+    },
+    {
+      "id": "decoded-over",
+      "text": "AAAA",
+      "max_decoded_bytes": 2,
+      "decoded_bytes": null,
+      "expected_error": "Capacity"
+    },
+    {
+      "id": "exact-padbits",
+      "text": "/w==",
+      "max_decoded_bytes": 1,
+      "decoded_bytes": 1,
+      "expected_error": null
+    }
+  ]
+}

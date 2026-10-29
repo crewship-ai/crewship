@@ -42,7 +42,12 @@ func (h *PageHandler) documentPage(w http.ResponseWriter, r *http.Request) (*pag
 		replyError(w, 503, "Docs are not enabled on this server")
 		return nil, false
 	}
-	rec, err := h.loadPage(r.Context(), WorkspaceIDFromContext(r.Context()), r.PathValue("slug"))
+	// Custody is a read audience, never permission for initialize/patch.
+	load := h.loadPage
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		load = h.loadPageForRead
+	}
+	rec, err := load(r.Context(), WorkspaceIDFromContext(r.Context()), r.PathValue("slug"))
 	if err != nil {
 		replyError(w, 404, "document page not found")
 		return nil, false
@@ -125,7 +130,12 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 	if operation == "read" {
 		value["page_id"] = rec.ID
 		user := UserFromContext(r.Context())
-		value["can_write"] = user != nil && h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID, RoleFromContext(r.Context()), rec)
+		canWrite := user != nil && h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID, RoleFromContext(r.Context()), rec)
+		if rec.PrivateAudience && user != nil {
+			role, err := h.liveContentHumanRole(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID)
+			canWrite = err == nil && h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID, role, rec)
+		}
+		value["can_write"] = canWrite
 		value["can_comment"] = false
 		value["can_resolve"] = false
 	}

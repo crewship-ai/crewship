@@ -14,5 +14,6 @@ cd -- "$repo_dir"
 CGO_ENABLED=0 GOMAXPROCS=2 go build -p 2 -o "$build_context/crewship-restricted-native-runner" ./cmd/crewship-restricted-native-runner
 cp -- "$codex_binary" "$build_context/codex"
 cp -- cmd/crewship-restricted-native-runner/Dockerfile "$build_context/Dockerfile"
+cp -- cmd/crewship-restricted-native-runner/bubblewrap/{atime-remount.patch,crewship-atime.h} "$build_context/"
 docker build --tag crewship-restricted-native:codex159 --iidfile "$build_context/image-id" "$build_context"
 cat "$build_context/image-id"

@@ -1,3 +1,5 @@
+import {QueryClient,QueryClientProvider} from "@tanstack/react-query"
+vi.mock("@/hooks/use-crew-management",()=>({useCrewManagement:()=>({trusted:true,actorID:"actor",canManage:false,loading:false,error:false,refresh:vi.fn()})}))
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
 
@@ -22,7 +24,7 @@ const crew = { id: "c1", name: "Research", slug: "research" } as never
 describe("Settings › Budget", () => {
   it.each([["OWNER", true], ["ADMIN", true], ["MANAGER", false], ["MEMBER", false]])("%s sees the card: %s", async (r, shown) => {
     role.value = r
-    render(<CrewSettings workspaceId="ws" crew={crew} agents={[]} patch={vi.fn()} onApplyAvatarStyle={vi.fn()} />)
+    render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{gcTime:0}}})}><CrewSettings workspaceId="ws" crew={crew} agents={[]} patch={vi.fn()} onApplyAvatarStyle={vi.fn()} /></QueryClientProvider>)
     if (shown) expect(await screen.findByRole("region", { name: "Budget" })).toBeInTheDocument()
     else expect(screen.queryByRole("region", { name: "Budget" })).toBeNull()
   })

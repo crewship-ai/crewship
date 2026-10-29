@@ -64,9 +64,9 @@ func TestPageChatContextIsServerBuiltAndRecheckedBeforePersist(t *testing.T) {
 	if resolver.calls != 1 {
 		t.Fatalf("resolver calls = %d", resolver.calls)
 	}
-	withForm := envelopeMetadata("sub-page")
+	withForm := envelopeMetadata("sub-page", "sess-page-form")
 	withForm["page_context"] = map[string]any{"slug": "fleet"}
-	if err := b.HandleChatMessage(context.Background(), "user-1", "sess-page-form", "Receipt", func(ws.ChatEvent) {}, ws.ChatMessageOption{Metadata: withForm}); err != nil {
+	if err := b.HandleChatMessage(context.Background(), "user-1", "sess-page-form", "Receipt from Acme for 12.50", func(ws.ChatEvent) {}, ws.ChatMessageOption{Metadata: withForm}); err != nil {
 		t.Fatal(err)
 	}
 	formMessages, err := b.convStore.Read(context.Background(), "sess-page-form", 0, 0)

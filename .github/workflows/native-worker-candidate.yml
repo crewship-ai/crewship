@@ -4,8 +4,12 @@ on:
   pull_request:
     paths:
       - .github/workflows/native-worker-candidate.yml
+      - .github/workflows/native-worker-release.yml
+      - scripts/ci/test_native_release.py
       - cmd/crewship-restricted-native-runner/**
       - scripts/ci/prepare-native-release.sh
+      - scripts/ci/native-noatime-fixture.sh
+      - internal/restricteddispatch/**
       - internal/restrictedruntime/**
       - go.mod
       - go.sum
@@ -15,7 +19,7 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -25,9 +29,20 @@ jobs:
       - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af
         with:
           go-version-file: go.mod
+      - name: Install the unchanged policy on this disposable runner only
+        run: |
+          sha256sum internal/restrictedruntime/nativepolicy/{apparmor.profile,seccomp.json}
+          sudo bash scripts/install-restricted-native-policy.sh
+      - name: Diagnose the exact loaded policy metadata without weakening readiness
+        run: |
+          sudo /usr/sbin/apparmor_parser --version
+          sudo bash -c 'for parameter in enabled hash_policy export_binary; do echo "$parameter"; cat "/sys/module/apparmor/parameters/$parameter"; done'
+          sudo bash -c 'for policy in /sys/kernel/security/apparmor/policy/profiles/crewship-native-codex-v159.*; do echo "$policy"; for field in name mode raw_sha256; do echo "$field"; cat "$policy/$field"; done; done'
+          sudo /usr/sbin/apparmor_parser --skip-kernel-load --skip-read-cache --stdout internal/restrictedruntime/nativepolicy/apparmor.profile | sha256sum
       - name: Test runner and authenticate upstream release context
         run: |
           go test ./cmd/crewship-restricted-native-runner -count=1 -timeout 5m
+          python3 -m unittest discover -s scripts/ci -p test_native_release.py
           bash scripts/ci/prepare-native-release.sh "$RUNNER_TEMP/native-context"
       - name: Build the candidate without publication
         run: docker build --pull --tag crewship-native-candidate:verify "$RUNNER_TEMP/native-context"
@@ -44,6 +59,68 @@ jobs:
           fail-build: true
           severity-cutoff: critical
           output-format: sarif
+      - name: Reproduce the Docker network-file source flags on this disposable VM only
+        run: |
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(docker info --format '{{.DockerRootDir}}')" = /var/lib/docker
+          sudo test -d /var/lib/docker/containers
+          sudo mount --bind /var/lib/docker/containers /var/lib/docker/containers
+          touch "$RUNNER_TEMP/native-docker-fixture-mounted"
+          sudo mount -o remount,bind,noatime /var/lib/docker/containers
+          sudo findmnt -T /var/lib/docker/containers
+      - name: Freeze the original application source for differential controls
+        run: |
+          git fetch --depth=1 --no-tags origin 6b39cadb8906fa797eb1503b351cc1ef07bb2501
+          git worktree add --detach "$RUNNER_TEMP/native-baseline-source" 6b39cadb8906fa797eb1503b351cc1ef07bb2501
+      - name: Reproduce the released image failure with the production canary
+        run: |
+          image='ghcr.io/crewship-ai/crewship-restricted-native@sha256:4acc8f2c982ae3d178b04509ab778c6960b8121f1b948d02d9bacc8d2982d5a9'
+          docker pull "$image"
+          image=$(docker image inspect --format '{{.Id}}' "$image")
+          cd "$RUNNER_TEMP/native-baseline-source"
+          sudo env "PATH=$PATH" GOTOOLCHAIN=local bash "$GITHUB_WORKSPACE/scripts/ci/native-noatime-fixture.sh" \
+            "$image" "$RUNNER_TEMP/native-red" red
+      - name: Require the production canary and negative sandbox checks on the candidate
+        run: |
+          sudo mount -o remount,bind,noatime /var/lib/docker/containers
+          sudo findmnt -T /var/lib/docker/containers
+          sudo env "PATH=$PATH" GOTOOLCHAIN=local bash scripts/ci/native-noatime-fixture.sh "$(docker image inspect --format '{{.Id}}' crewship-native-candidate:verify)" \
+            "$RUNNER_TEMP/native-green" green
+      - name: Prove the original image passes when only the fixture atime flag changes
+        run: |
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -e "$RUNNER_TEMP/native-docker-fixture-mounted"
+          # Use the legacy bind-remount syscall explicitly: util-linux may route
+          # this control through the new mount API instead of changing VFS flags.
+          sudo python3 - <<'PYCONTROL'
+          import ctypes, os
+          target = '/var/lib/docker/containers'
+          entries = [line.split() for line in open('/proc/self/mountinfo')]
+          current = next(entry[5].split(',') for entry in reversed(entries) if entry[4] == target)
+          bits = {'rw': 0, 'ro': 1, 'nosuid': 2, 'nodev': 4, 'noexec': 8,
+                  'noatime': 0, 'nodiratime': 0, 'relatime': 0}
+          assert all(flag in bits for flag in current), current
+          flags = 32 | 4096 | (1 << 21)  # MS_REMOUNT | MS_BIND | MS_RELATIME
+          for flag in current:
+              flags |= bits[flag]
+          libc = ctypes.CDLL(None, use_errno=True)
+          if libc.mount(b'none', os.fsencode(target), None, ctypes.c_ulong(flags), None):
+              error = ctypes.get_errno()
+              raise OSError(error, os.strerror(error), target)
+          PYCONTROL
+          sudo findmnt -T /var/lib/docker/containers
+          options=$(sudo findmnt -n -o VFS-OPTIONS -T /var/lib/docker/containers)
+          [[ ",$options," == *,relatime,* && ",$options," != *,noatime,* ]]
+          image=$(docker image inspect --format '{{.Id}}' ghcr.io/crewship-ai/crewship-restricted-native@sha256:4acc8f2c982ae3d178b04509ab778c6960b8121f1b948d02d9bacc8d2982d5a9)
+          cd "$RUNNER_TEMP/native-baseline-source"
+          sudo env "PATH=$PATH" GOTOOLCHAIN=local bash "$GITHUB_WORKSPACE/scripts/ci/native-noatime-fixture.sh" \
+            "$image" "$RUNNER_TEMP/native-relatime-control" green
+      - name: Release only the owned fixture mount
+        if: always()
+        run: |
+          if test -e "$RUNNER_TEMP/native-docker-fixture-mounted"; then
+            sudo umount /var/lib/docker/containers
+          fi
       - name: Record the tested source and local image identity
         env:
           SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
@@ -59,5 +136,8 @@ jobs:
             ${{ runner.temp }}/native-context/image-inspect.json
             ${{ runner.temp }}/native-context/tested-source.txt
             ${{ steps.scan.outputs.sarif }}
+            ${{ runner.temp }}/native-red/
+            ${{ runner.temp }}/native-green/
+            ${{ runner.temp }}/native-relatime-control/
           if-no-files-found: warn
           retention-days: 14

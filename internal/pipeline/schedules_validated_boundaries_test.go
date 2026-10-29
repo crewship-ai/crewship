@@ -179,7 +179,7 @@ func TestEnabledScheduleRechecksChangedWakeInputsAndTargetIdentity(t *testing.T)
 			t.Fatal(err)
 		}
 	}
-	base := Schedule{Enabled: true, TargetPipelineID: "main", InputsJSON: `{"who":"Alice"}`, WakePipelineID: "wake", WakeInputsJSON: `{"who":"Alice"}`}
+	base := Schedule{WorkspaceID: "ws_test", Enabled: true, TargetPipelineID: "main", InputsJSON: `{"who":"Alice"}`, WakePipelineID: "wake", WakeInputsJSON: `{"who":"Alice"}`}
 	for _, tc := range []struct {
 		name    string
 		change  func(*Schedule)

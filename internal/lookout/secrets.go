@@ -3,6 +3,7 @@ package lookout
 import (
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // secretRule pairs a compiled regex with the metadata used to redact and
@@ -79,7 +80,10 @@ func Redact(text string) (string, []Finding) {
 		if len(locs) == 0 {
 			continue
 		}
-		// Replace from the back so earlier offsets stay valid.
+		if len(locs) == 0 {
+			continue
+		}
+		// Keep the existing reverse finding order and intermediate offsets.
 		for i := len(locs) - 1; i >= 0; i-- {
 			loc := locs[i]
 			findings = append(findings, Finding{
@@ -92,9 +96,20 @@ func Redact(text string) (string, []Finding) {
 				Matched:  string(r.kind),
 				Position: loc[0],
 			})
-			replacement := fmt.Sprintf("***REDACTED:%s***", r.kind)
-			out = out[:loc[0]] + replacement + out[loc[1]:]
 		}
+		// Emit each untouched span once, preserving the exact whole-match
+		// and sequential rule semantics without repeatedly copying the suffix.
+		var next strings.Builder
+		next.Grow(len(out))
+		replacement := fmt.Sprintf("***REDACTED:%s***", r.kind)
+		previous := 0
+		for _, loc := range locs {
+			next.WriteString(out[previous:loc[0]])
+			next.WriteString(replacement)
+			previous = loc[1]
+		}
+		next.WriteString(out[previous:])
+		out = next.String()
 	}
 	return out, findings
 }

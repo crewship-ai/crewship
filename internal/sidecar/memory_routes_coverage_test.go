@@ -69,6 +69,8 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	// run" verb here to guard against in the first place.
 	"POST /agent/run/end":           guardHandlerIdentity,
 	"POST /api/v1/documents/create": guardHandlerIdentity,
+	"POST /api/v1/gridcraft":        guardHandlerIdentity,
+	"POST /api/v1/mooring":          guardHandlerIdentity, // handleMooring binds and forwards the signed live run
 	"GET /api/v1/documents/draft":   guardHandlerIdentity,
 	"POST /api/v1/documents/draft":  guardHandlerIdentity,
 	// Proposals require a verified token-bound live run in both handlers.
@@ -100,8 +102,10 @@ var sidecarRouteGuards = map[string]routeGuardKind{
 	"POST /keeper/execute":      guardHandlerIdentity,
 	// The escalation-outcome poll (#2574). guardHandlerIdentity: the handler
 	// resolves the acting agent so a sibling cannot read a peer's request.
-	"GET /keeper/request/": guardHandlerIdentity,
-	"POST /mcp/routines":   guardHandlerIdentity,
+	"GET /keeper/request/":   guardHandlerIdentity,
+	"POST /mcp/routines":     guardHandlerIdentity,
+	"POST /mcp/craft-native": guardHandlerIdentity,
+	"POST /mcp/mooring":      guardHandlerIdentity,
 	// notify_send is authorised by the agent↔channel pairing on the server,
 	// which keys on the ACTING agent — so this route must resolve identity or
 	// the grant model means nothing.

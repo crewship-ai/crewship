@@ -88,10 +88,10 @@ func TestExecutor_RuntimeCycle_Rejected(t *testing.T) {
 
 	a := fakePipeline(t, "cyc-a",
 		`{"dsl_version":"1.0","name":"cyc-a","steps":[{"id":"cb","type":"call_pipeline","pipeline_slug":"cyc-b"}]}`,
-		"crew_a", "agent_lead")
+		"crew_a", "agent_lead", store)
 	b := fakePipeline(t, "cyc-b",
 		`{"dsl_version":"1.0","name":"cyc-b","steps":[{"id":"ca","type":"call_pipeline","pipeline_slug":"cyc-a"}]}`,
-		"crew_a", "agent_lead")
+		"crew_a", "agent_lead", store)
 	exec.WithPipelineResolver(pipeResolverFn(func(_ context.Context, _, slug string) (*Pipeline, error) {
 		switch slug {
 		case "cyc-a":
@@ -139,7 +139,7 @@ func TestExecutor_ParentBudget_BoundsChild(t *testing.T) {
 		`{"dsl_version":"1.0","name":"child-c","steps":[`+
 			`{"id":"c1","type":"agent_run","agent_slug":"cagent","prompt":"1"},`+
 			`{"id":"c2","type":"agent_run","agent_slug":"cagent","prompt":"2"}]}`,
-		"crew_a", "agent_lead")
+		"crew_a", "agent_lead", store)
 	exec.WithPipelineResolver(pipeResolverFn(func(_ context.Context, _, slug string) (*Pipeline, error) {
 		if slug == "child-c" {
 			return child, nil

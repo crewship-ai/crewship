@@ -17,9 +17,8 @@ import (
 //	<operand> <op> <operand>      op ∈ {>, >=, <, <=, ==, !=}
 //
 // emitting "true" or "false" on stdout (exit 0). Operands are numeric or
-// string literals (the step body is rendered first, so {{ inputs.x }} has
-// already been substituted), or a CREWSHIP_INPUT_* env key which is resolved
-// from InputEnv. This is the wake-gate/probe surface (e.g. cost-spike-probe:
+// string literals, typed selectors, or a CREWSHIP_INPUT_* env key resolved
+// from InputEnv. Input values are never parsed as source. This is the wake-gate/probe surface (e.g. cost-spike-probe:
 // "spend > threshold").
 //
 // Every OTHER runtime (bash | python | go) is rejected fail-closed: no
@@ -47,7 +46,11 @@ func (ExprCodeRunner) RunCode(ctx context.Context, req CodeRunRequest) (CodeRunR
 				"(see docs/manifest/routine.md `Code steps`)", req.Runtime)
 	}
 
-	out, err := evalExprBool(req.Code, req.InputEnv)
+	code, err := normalizeCodeSource(req.Code)
+	if err != nil {
+		return CodeRunResult{Stderr: err.Error(), ExitCode: 1}, err
+	}
+	out, err := evalTypedExprBool(code, req.InputEnv, codeVariables(req))
 	if err != nil {
 		return CodeRunResult{Stderr: err.Error(), ExitCode: 1}, err
 	}
@@ -58,40 +61,86 @@ func (ExprCodeRunner) RunCode(ctx context.Context, req CodeRunRequest) (CodeRunR
 	return CodeRunResult{Stdout: s, ExitCode: 0}, nil
 }
 
-// evalExprBool parses and evaluates a single comparison. The body has already
-// been rendered, so operands are concrete literals (or CREWSHIP_INPUT_* keys
-// resolved from env). Unknown shapes fail closed.
-func evalExprBool(code string, env map[string]string) (bool, error) {
+func evalTypedExprBool(code string, env map[string]string, variables map[string]any) (bool, error) {
 	s := strings.TrimSpace(code)
 	if s == "" {
 		return false, fmt.Errorf("expr: empty expression")
 	}
-	for _, op := range exprOps {
-		i := strings.Index(s, op)
-		if i < 0 {
-			continue
-		}
-		// Validate the RAW token boundaries before resolution so a missing
-		// side (e.g. "> 5") fails closed, while a legitimately empty operand
-		// — an `""` literal or an input that resolves to "" — stays comparable.
-		rawLeft := strings.TrimSpace(s[:i])
-		rawRight := strings.TrimSpace(s[i+len(op):])
-		if rawLeft == "" || rawRight == "" {
-			return false, fmt.Errorf("expr: malformed comparison %q", s)
-		}
-		return compareOperands(resolveOperand(rawLeft, env), op, resolveOperand(rawRight, env))
+	i, op, err := exprComparison(s)
+	if err != nil {
+		return false, err
 	}
-	return false, fmt.Errorf("expr: no comparison operator (%s) in %q",
-		strings.Join(exprOps, " "), s)
+	rawLeft := strings.TrimSpace(s[:i])
+	rawRight := strings.TrimSpace(s[i+len(op):])
+	if rawLeft == "" || rawRight == "" {
+		return false, fmt.Errorf("expr: malformed comparison %q", s)
+	}
+	left, err := resolveCodeOperand(rawLeft, env, variables)
+	if err != nil {
+		return false, err
+	}
+	right, err := resolveCodeOperand(rawRight, env, variables)
+	if err != nil {
+		return false, err
+	}
+	return compareOperands(left, op, right)
 }
 
-// resolveOperand returns the env value when tok is a known CREWSHIP_INPUT_* key,
-// otherwise the literal token (quotes stripped).
-func resolveOperand(tok string, env map[string]string) string {
-	if v, ok := env[tok]; ok {
-		return v
+// Find the sole author-written comparison, ignoring operators inside quoted
+// literals and selectors. Resolving operands happens only after this scan.
+func exprComparison(source string) (int, string, error) {
+	position, brackets := -1, 0
+	operator := ""
+	var quote byte
+	for i := 0; i < len(source); i++ {
+		c := source[i]
+		if quote != 0 {
+			if c == '\\' {
+				i++
+				continue
+			}
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		if c == '"' || c == '\'' {
+			quote = c
+			continue
+		}
+		if c == '[' {
+			brackets++
+			continue
+		}
+		if c == ']' {
+			brackets--
+			if brackets < 0 {
+				return 0, "", fmt.Errorf("expr: malformed comparison")
+			}
+			continue
+		}
+		if brackets != 0 {
+			continue
+		}
+		for _, candidate := range exprOps {
+			if !strings.HasPrefix(source[i:], candidate) {
+				continue
+			}
+			if position >= 0 {
+				return 0, "", fmt.Errorf("expr: exactly one comparison is supported; use cel for compound expressions")
+			}
+			position, operator = i, candidate
+			i += len(candidate) - 1
+			break
+		}
 	}
-	return strings.Trim(tok, `"'`)
+	if quote != 0 || brackets != 0 {
+		return 0, "", fmt.Errorf("expr: malformed comparison")
+	}
+	if position < 0 {
+		return 0, "", fmt.Errorf("expr: no comparison operator (%s) in %q", strings.Join(exprOps, " "), source)
+	}
+	return position, operator, nil
 }
 
 func compareOperands(left, op, right string) (bool, error) {

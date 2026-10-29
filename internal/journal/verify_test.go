@@ -443,7 +443,7 @@ func TestVerifyChain_BreaksAreCapped(t *testing.T) {
 func TestVerifyChain_RecoversBackfilledPriority(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
-	w := NewWriter(db, quietLogger(), WriterOptions{FlushInterval: time.Hour})
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushInterval: time.Hour, ChainKey: ChainKeyFromEnv()})
 	defer w.Close()
 
 	ids := seedChain(t, w, "ws_test", 4)
@@ -520,7 +520,7 @@ func TestVerifyChain_RecoveryDoesNotHideRealTampering(t *testing.T) {
 func TestVerifyChain_RepairableIsCapped(t *testing.T) {
 	db := openTestDB(t)
 	defer db.Close()
-	w := NewWriter(db, quietLogger(), WriterOptions{FlushInterval: time.Hour})
+	w := NewWriter(db, quietLogger(), WriterOptions{FlushInterval: time.Hour, ChainKey: ChainKeyFromEnv()})
 	defer w.Close()
 
 	const n = maxReportedBreaks + 12

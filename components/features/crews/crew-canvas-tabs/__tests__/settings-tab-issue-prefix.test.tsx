@@ -18,6 +18,10 @@ import type { CrewRecord } from "@/components/features/crews/crew-canvas-tabs/ty
 // test.
 // =============================================================================
 
+vi.mock("@/components/features/settings/resource-share-dialog", () => ({
+  ResourceShareDialog: ({workspaceId,resource}:{workspaceId:string;resource:{kind:string;id:string}}) => <span data-testid="crew-share" data-workspace-id={workspaceId} data-kind={resource.kind} data-resource-id={resource.id} />,
+}))
+
 vi.mock("@/components/features/crews/crew-service-lifecycle", () => ({ CrewServiceLifecycle: () => null }))
 
 const permission = vi.hoisted(() => ({ role: "ADMIN" }))

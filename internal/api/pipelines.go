@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 	"github.com/crewship-ai/crewship/internal/runverdict"
@@ -23,6 +24,7 @@ import (
 // stub in tests) so the handler can be wired and tested before the
 // real orchestrator integration lands.
 type PipelineHandler struct {
+	diffs *diffComputeBudget
 	// runTokenSecret authenticates optional fresh invocation provenance.
 	runTokenSecret string
 	// queuedKeys serialises same-key manual starts around capacity queuing.
@@ -35,6 +37,7 @@ type PipelineHandler struct {
 	resolver           *pipeline.Resolver
 	runner             pipeline.AgentRunner
 	emitter            pipeline.Emitter
+	policyJournal      journal.Emitter          // router journal; origin-binding clears append their chained audit on the writer tx
 	waitpoints         pipeline.WaitpointStore  // optional; nil → wait approval steps fall back to in-memory timeout
 	ws                 pipeline.WSBroadcaster   // optional; nil → no live pipeline event push to frontend
 	schedules          *pipeline.ScheduleStore  // optional; nil → schedule endpoints return 503
@@ -120,6 +123,7 @@ func NewPipelineHandler(db *sql.DB, logger *slog.Logger, runner pipeline.AgentRu
 		db:              db,
 		logger:          logger,
 		store:           store,
+		diffs:           defaultDiffComputeBudget(),
 		resolver:        resolver,
 		runner:          runner,
 		emitter:         emitter,
@@ -225,6 +229,12 @@ func (h *PipelineHandler) SetJournal(e pipeline.Emitter) {
 // (useful for dev, broken for any real approval workflow).
 func (h *PipelineHandler) SetWaitpointStore(w pipeline.WaitpointStore) {
 	h.waitpoints = w
+	// Refused decisions append the workspace chain with the router's key.
+	if store, ok := w.(*pipeline.SQLWaitpointStore); ok {
+		if writer, ok := h.policyJournal.(journal.TransactionEmitter); ok {
+			store.SetAuditJournal(writer)
+		}
+	}
 }
 
 // SetWSBroadcaster wires the WebSocket hub so pipeline run + step

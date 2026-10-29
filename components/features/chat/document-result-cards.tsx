@@ -30,7 +30,7 @@ export function DocumentResultCards({ workspaceId, chatId, isStreaming, currentU
       onOpenDocument({ workspaceId, pageId: result.page_id, type: "document", mode: "latest" }, event.currentTarget)
     }}>
       <FileText className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden />
-      <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{result.title}</p><p className="mt-1 text-xs text-muted-foreground">Document · {result.agent_name || "Agent"}</p><p className="mt-1 text-xs text-muted-foreground">On behalf of {currentUserId && result.on_behalf_of_user_id === currentUserId ? "you" : "a human collaborator"}</p></div><ExternalLink className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+      <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{result.title}</p><p className="mt-1 text-xs text-muted-foreground">Document · {result.agent_name || "Agent"}</p><p className="mt-1 text-xs text-muted-foreground">On behalf of {currentUserId && result.on_behalf_of_user_id === currentUserId ? "you" : "a human collaborator"}</p>{/* Created as private-audience Pages (documents_creation.go); no path widens that audience later. */}<p className="mt-1 text-xs text-muted-foreground">Private to its owner and workspace owners</p></div><ExternalLink className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
     </a>)}</div>
     {results.length > 3 && <Button size="sm" variant="ghost" className="coarse:min-h-[44px]" onClick={() => setExpanded(value => !value)}>{expanded ? "Show fewer documents" : `Show all ${results.length} documents`}</Button>}
   </section>

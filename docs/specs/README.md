@@ -56,6 +56,9 @@ public contract here. Superseded a spec? Move it to
 
 ## Pages and project files
 
+- [Native Craft human sessions and edit leases](craft-native.md): separate default-off whole-native profile admission, named holders and requested handoff.
+- [Mooring session transport](mooring-session-transport.md): default-off Rust session HTTP/WS contracts and current qualification limits.
+- [Mooring pilot JSON profile](mooring-pilot.md): manifest-driven personal documents, typed commands, durable receipts and isolated editors.
 - [Pages](pages.md): panel schemas, freshness, permissions, data model and
   API/CLI surface. Code references its section anchors; preserve them.
   Explicit historical design sections are not claims of current implementation.
@@ -67,6 +70,8 @@ public contract here. Superseded a spec? Move it to
 - [Managed CLI launch](managed-cli-launch.md): explicit static native pilot, executable hashes and lock-bound admission.
 
 ## Storage and lifecycle
+
+- [Backup read budgets](backup-read-budgets.md): metadata-only inspection, bounded restore work and operator settings.
 
 - [Installation paths](installation-paths.md): explicit path precedence, data-preserving startup checks, dev layout and seed target isolation.
 - [Offline reset](offline-reset.md): explicit targets, lifetime locks, retained identity and management state, label-scoped Docker cleanup and interrupted-reset recovery.

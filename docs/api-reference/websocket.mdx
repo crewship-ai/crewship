@@ -185,6 +185,7 @@ Channels follow the format `type:id`. Access is validated against database membe
 | `mission` | `mission:{missionId}` | Member of mission's workspace | Mission status updates |
 | `keeper` | `keeper:{workspaceId}` | Workspace member | Keeper credential access events |
 | `files` | `files:{crewId}` | Member of crew's workspace | File change events |
+| `page` | `page:{pageId}` | Workspace member; for a private Page only its owner or a workspace OWNER, rechecked before every frame | Page refresh hints and workbook revisions |
 | `providers` | `providers` | Any authenticated user | Provider status updates |
 
 ---
@@ -402,6 +403,32 @@ The `files:{crewId}` channel exists for subscription (file change events) and
 shares its access rule with `crew`. File-change events are broadcast on the
 `crew:{crewId}` channel as `file.event`.
 </Note>
+
+### Workbook session closure (connection control)
+
+`session_closed` has no channel and carries only `{ artifact_id, session_ids, reason }`.
+Only the listed persisted editor session IDs are closed; a late control cannot
+terminate a newly authorized session. It carries no
+workbook content. A channel is removed only while current read access is denied; retained or
+restored read access and other subscriptions remain active.
+Grant removal closes the persisted editor session in the grant transaction,
+so granting access again cannot revive that session ID. The host rechecks
+current rights before each protected frame and drops queued frames after
+revocation. Active workbook subscriptions also receive a bounded authorization
+recheck every second, with one two-second budget for the entire pass; errors
+fail closed. The five-second closure target is measured in regression tests.
+
+### Page Channel (`page:{pageId}`)
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `workbook.committed` | A workbook revision was confirmed durably (experimental live workbook editing). Sent at most once per revision, and only while the live editor is on for the workspace; a push can be lost (a dropped connection, a restart), so treat it as a hint. Carries no cell content: read the revision through `GET /api/v1/pages/{slug}/workbook/commits?since=` under your own current access, and use that after a reconnect or a revision gap | `{ page_id, rev, generation, kind, cells }` |
+
+`kind` is `cells` or `snapshot` (an import: reread the workbook); `cells` is the
+number of cells the revision wrote. Access to the workbook Page is rechecked
+before every frame, so a frame is never delivered after the recipient lost
+access. A published workbook's channel admits only its owner, the editors the
+owner named and the workspace OWNER.
 
 ### Mission Channel (`mission:{id}`)
 

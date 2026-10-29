@@ -455,13 +455,13 @@ describe("useChat", () => {
     expect(onOwnMessageSaved).toHaveBeenCalledExactlyOnceWith("Inspect this Page\n\n[Page context]", { author_user_id: "me", page_context: { slug: "fleet" } })
   })
 
-  it("does not create an optimistic turn when the socket refuses the send", () => {
+  it("does not create an optimistic turn when the socket refuses the send", async () => {
     const { result } = renderHook(() =>
       useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
     )
     mockSend.mockReturnValueOnce(false)
     let sent: boolean | undefined
-    act(() => { sent = result.current.sendMessage("Keep this draft", { page_context: { slug: "fleet" } }) })
+    await act(async () => { sent = await result.current.sendMessage("Keep this draft", { page_context: { slug: "fleet" } }) })
     expect(sent).toBe(false)
     expect(result.current.turns).toHaveLength(0)
     expect(result.current.isStreaming).toBe(false)

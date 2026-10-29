@@ -53,8 +53,6 @@ func TestValidate_QueryStep(t *testing.T) {
 func TestExecutor_QueryStep_EndToEnd(t *testing.T) {
 	db := openResumeTestDB(t)
 	defer db.Close()
-	seedDigestRun(t, db, "run_a", "ws_e2e", "summarize-text", "completed", 0.05, time.Now().Add(-1*time.Hour))
-	seedDigestRun(t, db, "run_b", "ws_e2e", "cost-report", "failed", 0.0, time.Now().Add(-2*time.Hour))
 
 	deps := fullExecutorDeps(t, db, &stubAgentRunner{})
 	exec := NewWiredExecutor(deps)
@@ -72,10 +70,12 @@ func TestExecutor_QueryStep_EndToEnd(t *testing.T) {
 		]
 	}`
 	p := saveResumePipeline(t, deps.Store, "workspace-digest", def)
+	seedDigestRun(t, db, "run_a", p.WorkspaceID, "summarize-text", "completed", 0.05, time.Now().Add(-1*time.Hour))
+	seedDigestRun(t, db, "run_b", p.WorkspaceID, "cost-report", "failed", 0.0, time.Now().Add(-2*time.Hour))
 
 	res, err := exec.Run(context.Background(), RunInput{
 		PipelineID:  p.ID,
-		WorkspaceID: "ws_e2e",
+		WorkspaceID: p.WorkspaceID,
 		Mode:        ModeRun,
 	})
 	if err != nil {

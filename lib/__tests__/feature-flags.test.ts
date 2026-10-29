@@ -1,5 +1,45 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { crewsUnifiedUI, legacyMcpIntegrations } from "@/lib/feature-flags"
+import { readFileSync } from "node:fs"
+import { parseEnv } from "node:util"
+import { artifactSlides, artifactsLibrary, chatArtifactProjects, chatCraftLease, crewsUnifiedUI, legacyMcpIntegrations, pagesOpenArtifacts } from "@/lib/feature-flags"
+
+describe.each([
+  ["NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", chatArtifactProjects],
+  ["NEXT_PUBLIC_CHAT_CRAFT_LEASE", chatCraftLease],
+  ["NEXT_PUBLIC_ARTIFACTS_LIBRARY", artifactsLibrary],
+] as const)("production %s", (name, enabled) => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it("stays off with the checked-in production build configuration", () => {
+    const defaults = parseEnv(readFileSync(".env.production", "utf8"))
+    vi.stubEnv(name, defaults[name])
+    expect(enabled()).toBe(false)
+  })
+
+  it("allows an explicit build-time opt-in", () => {
+    vi.stubEnv(name, "true")
+    expect(enabled()).toBe(true)
+  })
+})
+
+describe("pagesOpenArtifacts", () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it("stays off with the checked-in production build configuration", () => {
+    const defaults = parseEnv(readFileSync(".env.production", "utf8"))
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", defaults.NEXT_PUBLIC_ARTIFACTS_LIBRARY)
+    vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", defaults.NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS)
+    expect(pagesOpenArtifacts()).toBe(false)
+  })
+
+  it("needs the library itself as well as its own opt-in", () => {
+    vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", "true")
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "false")
+    expect(pagesOpenArtifacts()).toBe(false)
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
+    expect(pagesOpenArtifacts()).toBe(true)
+  })
+})
 
 describe("crewsUnifiedUI", () => {
   afterEach(() => {
@@ -58,5 +98,21 @@ describe("legacyMcpIntegrations", () => {
   it("returns false for 'false'", () => {
     vi.stubEnv("NEXT_PUBLIC_LEGACY_MCP_INTEGRATIONS", "false")
     expect(legacyMcpIntegrations()).toBe(false)
+  })
+})
+
+describe("artifactSlides", () => {
+  afterEach(() => vi.unstubAllEnvs())
+  it.each(["", "false", "1", "TRUE", "yes"])("defaults off for %s", value => {
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACT_SLIDES", value)
+    expect(artifactSlides()).toBe(false)
+  })
+  it("requires literal true at build time", () => {
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACT_SLIDES", "true")
+    expect(artifactSlides()).toBe(true)
+  })
+  it("keeps the tracked production build configuration default-off", () => {
+    const production = readFileSync(".env.production", "utf8")
+    expect(production.match(/^NEXT_PUBLIC_ARTIFACT_SLIDES\s*=\s*(.*?)\s*$/m)?.[1]).not.toBe("true")
   })
 })

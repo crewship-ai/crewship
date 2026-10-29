@@ -33,6 +33,16 @@ func TestCapabilitiesFailClosed(t *testing.T) {
 	}
 }
 
+func TestArtifactPackageMetadataDoesNotGrantGenericOperations(t *testing.T) {
+	for _, id := range []string{"artifact-project", "artifact-dashboard", "artifact-slides"} {
+		for _, capability := range Capabilities(id, 1, EnabledTypes{id: true}) {
+			if capability.Supported || capability.Available {
+				t.Fatalf("package metadata enabled an unregistered generic operation: %s %+v", id, capability)
+			}
+		}
+	}
+}
+
 func TestEveryCompiledFormatHasExplicitOperationDeclarations(t *testing.T) {
 	for _, descriptor := range pages.ContentTypes() {
 		capabilities := Capabilities(descriptor.TypeID, descriptor.SchemaVersion, EnabledTypes{descriptor.TypeID: true})
@@ -40,7 +50,7 @@ func TestEveryCompiledFormatHasExplicitOperationDeclarations(t *testing.T) {
 			t.Fatalf("%s/%d: incomplete declarations: %#v", descriptor.TypeID, descriptor.SchemaVersion, capabilities)
 		}
 		for _, capability := range capabilities {
-			want := descriptor.TypeID == "doc" && capability.Operation != Export
+			want := descriptor.TypeID == "doc" && capability.Operation != Export || descriptor.TypeID == "gridcraft-workbook" && (capability.Operation == Create || capability.Operation == Read || capability.Operation == Apply)
 			if capability.Supported != want || capability.Available != want {
 				t.Fatalf("%#v: %#v", descriptor, capability)
 			}

@@ -603,6 +603,8 @@ func (h *OnboardingHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, services.ErrOnboardingAlreadyCompleted):
 			replyError(w, http.StatusConflict, "Onboarding already completed")
+		case errors.Is(err, services.ErrOnboardingDenied):
+			replyError(w, http.StatusForbidden, "Forbidden")
 		case errors.Is(err, services.ErrWorkspaceNotFound):
 			replyError(w, http.StatusBadRequest, "No workspace found for user")
 		default:

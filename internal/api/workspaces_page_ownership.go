@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/journal"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Custody metadata never includes private source, scene, spec or history.
@@ -49,17 +51,33 @@ type WorkspacePageOwnershipError struct {
 }
 
 func pageOwnershipRows(ctx context.Context, q pageAuthQueryer, ws, owner, page string) ([]pageOwnershipSummary, error) {
-	return pageOwnershipRowsAfter(ctx, q, ws, owner, page, "", -1)
+	return pageOwnershipRowsAfter(ctx, q, ws, owner, page, "", -1, false)
+}
+
+// pageOwnershipCustodyRows is the custody API's view: like pageOwnershipRows,
+// but a workbook appears only when workbookCustodySQL opens it to the actor.
+func pageOwnershipCustodyRows(ctx context.Context, q pageAuthQueryer, ws, owner, page string) ([]pageOwnershipSummary, error) {
+	return pageOwnershipRowsAfter(ctx, q, ws, owner, page, "", -1, true)
 }
 
 // Only departure conflict metadata uses an unrestricted row count; administrative
 // eligibility listing always supplies a validated page size and reads one extra.
-func pageOwnershipRowsAfter(ctx context.Context, q pageAuthQueryer, ws, owner, page, after string, limit int) ([]pageOwnershipSummary, error) {
+// custody restricts workbooks to the custody rule (workbookCustodySQL); the
+// departure conflict itself keeps describing every unresolved output.
+func pageOwnershipRowsAfter(ctx context.Context, q pageAuthQueryer, ws, owner, page, after string, limit int, custody bool) ([]pageOwnershipSummary, error) {
 	predicate, kind, err := privatePageOwnershipSQL(ctx, q, "p")
 	if err != nil {
 		return nil, err
 	}
-	rows, err := q.QueryContext(ctx, `SELECT p.id,p.slug,p.name,`+kind+`,COALESCE(p.owner_user_id,''),COALESCE(u.full_name,'') FROM pages p LEFT JOIN users u ON u.id=p.owner_user_id WHERE p.workspace_id=? AND (?='' OR p.owner_user_id=?) AND (?='' OR p.id=?) AND `+predicate+` AND (p.private_audience=0 OR EXISTS(SELECT 1 FROM workspace_members am WHERE am.workspace_id=p.workspace_id AND am.user_id=? AND am.role='OWNER')) AND (?='' OR p.id>?) ORDER BY p.id LIMIT ?`, ws, owner, owner, page, page, privateAudienceActorID(ctx), after, after, limit)
+	actor := privateAudienceActorID(ctx)
+	custodyTerm, custodyArgs := "", []any{}
+	if custody {
+		custodyTerm, custodyArgs = workbookCustodySQL("p", kind, actor, time.Now())
+		custodyTerm = " AND " + custodyTerm
+	}
+	args := append([]any{ws, owner, owner, page, page, actor}, custodyArgs...)
+	args = append(args, after, after, limit)
+	rows, err := q.QueryContext(ctx, `SELECT p.id,p.slug,p.name,`+kind+`,COALESCE(p.owner_user_id,''),COALESCE(u.full_name,'') FROM pages p LEFT JOIN users u ON u.id=p.owner_user_id WHERE p.workspace_id=? AND (?='' OR p.owner_user_id=?) AND (?='' OR p.id=?) AND `+predicate+` AND (p.private_audience=0 OR EXISTS(SELECT 1 FROM workspace_members am WHERE am.workspace_id=p.workspace_id AND am.user_id=? AND am.role='OWNER'))`+custodyTerm+` AND (?='' OR p.id>?) ORDER BY p.id LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -208,7 +226,7 @@ func (h *WorkspaceHandler) ListPageOwnership(w http.ResponseWriter, r *http.Requ
 		replyError(w, 400, err.Error())
 		return
 	}
-	pages, err := pageOwnershipRowsAfter(ctx, tx, ws, owner, "", after, limit+1)
+	pages, err := pageOwnershipRowsAfter(ctx, tx, ws, owner, "", after, limit+1, true)
 	nextCursor := ""
 	if len(pages) > limit {
 		pages = pages[:limit]
@@ -266,12 +284,20 @@ func (h *WorkspaceHandler) TransferPageOwnership(w http.ResponseWriter, r *http.
 	if !ok {
 		return
 	}
-	pages, err := pageOwnershipRows(ctx, tx, ws, "", id)
+	pages, err := pageOwnershipCustodyRows(ctx, tx, ws, "", id)
 	if err != nil {
 		replyInternalError(w, h.logger, "load output custody", err)
 		return
 	}
 	if len(pages) != 1 {
+		// A workspace OWNER is an audited reader of every output and may learn
+		// why a workbook is not offered; anyone else gets no confirmation.
+		if visible, err := pageOwnershipRows(ctx, tx, ws, "", id); err == nil && len(visible) == 1 && visible[0].Type == "workbook" {
+			if role, err := ph.liveContentHumanRole(ctx, ws, actor.ID); err == nil && role == "OWNER" {
+				replyError(w, 403, workbookCustodyRefusal)
+				return
+			}
+		}
 		replyError(w, 404, "output page not found")
 		return
 	}
@@ -297,7 +323,15 @@ func (h *WorkspaceHandler) TransferPageOwnership(w http.ResponseWriter, r *http.
 		return
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	result, err := tx.ExecContext(ctx, `UPDATE pages SET owner_user_id=?,owner_crew_id=NULL,updated_at=? WHERE id=? AND workspace_id=? AND owner_user_id=?`, body.SuccessorUserID, now, id, ws, body.ExpectedOwnerUserID)
+	// The UPDATE repeats the workbook custody rule (OWNER actor, owner no
+	// longer live or departing) so no interleaving can widen it.
+	_, pagesKind, err := privatePageOwnershipSQL(ctx, tx, "pages")
+	if err != nil {
+		replyInternalError(w, h.logger, "resolve output custody kind", err)
+		return
+	}
+	custodyTerm, custodyArgs := workbookCustodySQL("pages", pagesKind, actor.ID, time.Now())
+	result, err := tx.ExecContext(ctx, `UPDATE pages SET owner_user_id=?,owner_crew_id=NULL,updated_at=? WHERE id=? AND workspace_id=? AND owner_user_id=? AND `+custodyTerm, append([]any{body.SuccessorUserID, now, id, ws, body.ExpectedOwnerUserID}, custodyArgs...)...)
 	if err != nil {
 		replyInternalError(w, h.logger, "transfer output custody", err)
 		return
@@ -305,6 +339,23 @@ func (h *WorkspaceHandler) TransferPageOwnership(w http.ResponseWriter, r *http.
 	n, err := result.RowsAffected()
 	if err != nil || n != 1 {
 		writeJSON(w, 409, WorkspacePageOwnershipError{Error: "page ownership changed; refresh before transferring", Code: "owner_changed"})
+		return
+	}
+	// A workbook has no backup and its custody hands over write and delete
+	// rights, so every transfer is audited with the transfer itself.
+	if p.Type == "workbook" {
+		metadata, _ := json.Marshal(map[string]string{"from_user_id": p.OwnerUserID, "to_user_id": body.SuccessorUserID})
+		if err = execOneRow(ctx, tx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,?,?,?,?)`, generateCUID(), ws, actor.ID, workbookCustodyTransferredAction, "page", id, string(metadata), tsformat.Format(time.Now())); err != nil {
+			replyInternalError(w, h.logger, "audit workbook custody transfer", err)
+			return
+		}
+	}
+	notifyTransfer, err := appendAuthorizationAudit(ctx, tx, h.journal, journal.Entry{
+		WorkspaceID: ws, Type: entryPageOwnerTransferred, ActorType: journal.ActorUser, ActorID: actor.ID,
+		Summary: "Private output ownership transferred", Payload: map[string]any{"page_id": id, "from_user_id": p.OwnerUserID, "to_user_id": body.SuccessorUserID, "reason": "explicit_human_transfer"},
+	})
+	if err != nil {
+		replyInternalError(w, h.logger, "audit output custody transfer", err)
 		return
 	}
 	// The Page identifies a subject with new custody news, not a once-only
@@ -338,12 +389,12 @@ func (h *WorkspaceHandler) TransferPageOwnership(w http.ResponseWriter, r *http.
 		replyInternalError(w, h.logger, "commit output custody", err)
 		return
 	}
-	emitPageOwnerTransferJournals(ctx, h.journal, ws, actor.ID, p.OwnerUserID, []pageOwnerTransferResult{{PageID: id, PageSlug: p.Slug, PageName: p.Name, ToUserID: body.SuccessorUserID, Reason: "explicit_human_transfer"}})
+	notifyTransfer()
 	response := WorkspacePageOwnershipSummary(refreshed[0])
 	writeJSON(w, 200, response)
 }
 
-const pageOwnershipHelp = "Ask a workspace administrator to resolve ownership. For Docs, Artifacts and Boards, review eligible readers with crewship workspace page-ownership list and select a human successor with crewship workspace page-ownership transfer, then retry."
+const pageOwnershipHelp = "Ask a workspace administrator to resolve ownership. For Docs, Artifacts, Boards and Workbooks, review eligible readers with crewship workspace page-ownership list and select a human successor with crewship workspace page-ownership transfer, then retry."
 
 func replyPageOwnershipConflict(w http.ResponseWriter, prefix string, e *ErrPagesNeedManualTransfer) {
 	writeJSON(w, http.StatusConflict, pageOwnershipConflictPayload(prefix, e, true))

@@ -231,6 +231,10 @@ func TestAdminInvalidateSessions_NoActiveSessionsMessage(t *testing.T) {
 	if !strings.Contains(buf.String(), "no active sessions") {
 		t.Errorf("expected nothing-to-revoke note, got:\n%s", buf.String())
 	}
+	// A user who already logged out still gets the durable revocation marker.
+	if got := queryAdminString(t, dbURL, `SELECT COALESCE(access_revoked_at,'') FROM users WHERE id='u1'`); got == "" {
+		t.Error("invalidate-sessions did not record the access revocation marker")
+	}
 }
 
 func TestAdminInvalidateSessions_UnknownEmail(t *testing.T) {
@@ -485,6 +489,9 @@ func TestAdminResetPassword_PasswordStdin(t *testing.T) {
 	got := queryAdminString(t, dbURL, `SELECT hashed_password FROM users WHERE id='u1'`)
 	if err := bcrypt.CompareHashAndPassword([]byte(got), []byte("stdin-password-42")); err != nil {
 		t.Errorf("stdin password not applied: %v", err)
+	}
+	if marker := queryAdminString(t, dbURL, `SELECT COALESCE(access_revoked_at,'') FROM users WHERE id='u1'`); marker == "" {
+		t.Error("reset-password did not record the access revocation marker")
 	}
 }
 

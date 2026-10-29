@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/admission"
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/askforms"
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/crewstart"
@@ -90,7 +92,9 @@ type ChatInfo struct {
 	HumanAuthority *chataudience.Receipt
 	AgentID        string
 	AgentSlug      string
-	AgentRole      string
+	// AskForms comes from the authorized agent configuration, never message metadata.
+	AskForms  string
+	AgentRole string
 	// AgentStatus is the agents.status column at resolve time. Used by
 	// the bridge to refuse to start an agent that's PENDING_REVIEW
 	// (guided-autonomy hire waiting on operator approval). Empty when
@@ -315,8 +319,10 @@ type Bridge struct {
 	// unified inbox for users who aren't watching the session live.
 	// Optional (nil = disabled); wired via SetReplyNotifier. See
 	// notify.go.
-	replyNotifier       ReplyNotifier
-	pageContextResolver PageChatContextResolver
+	replyNotifier                 ReplyNotifier
+	pageContextResolver           PageChatContextResolver
+	documentIterationRecorder     DocumentIterationRecorder
+	artifactProjectIntentRecorder ArtifactProjectIntentRecorder
 }
 
 // SetPageChatContextResolver enables server-verified Page references in chat.
@@ -337,6 +343,7 @@ func (b *Bridge) SetProvisioningEnqueuer(p ProvisioningEnqueuer) {
 // Document creation is disabled unless explicitly enabled by the host.
 type BridgeConfig struct {
 	DocumentCreationEnabled bool
+	ArtifactProjectsEnabled bool
 	DefaultMemoryMB         int
 	DefaultCPUs             float64
 }
@@ -529,6 +536,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	if msgOpt.HumanResume && msgOpt.HumanAuthority == nil {
 		return fmt.Errorf("resolve chat: queued human authority required")
 	}
+	if msgOpt.HumanAuthority == nil && msgOpt.OriginalCredential != (auth.OriginalCredential{}) {
+		if !msgOpt.OriginalCredential.Valid() || msgOpt.OriginalCredential.UserID != userID {
+			return fmt.Errorf("resolve chat: original human credential required")
+		}
+		ctx = auth.WithOriginalCredential(ctx, msgOpt.OriginalCredential)
+	}
 	ctx = chataudience.WithReceipt(ctx, msgOpt.HumanAuthority)
 	info, err := resolver.ResolveHumanChat(ctx, userID, chatID)
 	if err != nil {
@@ -540,6 +553,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return fmt.Errorf("resolve chat: queued human authority changed")
 	}
 	msgOpt.HumanAuthority = info.HumanAuthority
+	askEnvelope, err := validateAskSubmission(info, chatID, content, msgOpt.Metadata)
+	if err != nil {
+		return err
+	}
 	b.logger.Debug("chat resolved", "agent_id", info.AgentID, "crew_id", info.CrewID)
 	pageSlug, hasPage, pageErr := requestedPageSlug(msgOpt.Metadata)
 	if pageErr != nil {
@@ -557,6 +574,25 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	msgOpt.OriginalTriggerMessageID = triggerMessageID
 	msgOpt.DocumentCreationIntent = documentCreation
+	documentIteration, err := documentIterationForSend(b.cfg.DocumentCreationEnabled, msgOpt, info, userID, chatID, hasPage, documentCreation)
+	if err != nil {
+		return err
+	}
+	if documentIteration != nil && b.documentIterationRecorder == nil {
+		return errors.New("Document iteration is unavailable")
+	}
+	msgOpt.DocumentIterationIntent = documentIteration
+	artifactProject, err := artifactProjectForSend(b.cfg.ArtifactProjectsEnabled, msgOpt, info, userID, chatID, hasPage, documentCreation != nil || documentIteration != nil)
+	if err != nil {
+		return err
+	}
+	if artifactProject != nil && b.artifactProjectIntentRecorder == nil {
+		return errors.New("artifact project admission unavailable")
+	}
+	msgOpt.ArtifactProjectIntent = artifactProject
+	// Replay the original human submission after provisioning; server Page
+	// context is rebuilt only after current form and access checks run again.
+	originalContent := content
 	var pageContext *PageChatContext
 	if hasPage {
 		if b.pageContextResolver == nil {
@@ -601,20 +637,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// that is the ask-form submission envelope: which form was answered, at
 	// what version, with what values, and which upload answered which field.
 	//
-	// It is REBUILT rather than copied. msgOpt.Metadata is a raw map straight
-	// off an untrusted socket, and storing it verbatim would let any client
-	// write arbitrary structure into a durable conversation record. Reading it
-	// back through askforms.EnvelopeFromMetadata means exactly one shape can
-	// survive the hop — a valid envelope — and anything else (junk, a partial
-	// envelope, a metadata map with no envelope in it) leaves the message
-	// exactly as it would have been persisted before any of this existed.
-	//
-	// Nothing here touches Content. A form submission is an ordinary user
-	// message; strip the metadata and the conversation reads identically,
-	// which is what lets every CLI adapter stay unaware of forms.
+	// The envelope is rebuilt by the authoritative current-form check above.
+	// Malformed explicit submissions have already been refused; messages with
+	// no ask_submission key retain their ordinary-message behavior.
 	var userMsgMetadata any
-	if env, ok := askforms.EnvelopeFromMetadata(msgOpt.Metadata); ok {
-		userMsgMetadata = map[string]any{askforms.EnvelopeMetadataKey: env}
+	if askEnvelope != nil {
+		userMsgMetadata = map[string]any{askforms.EnvelopeMetadataKey: *askEnvelope}
 	}
 	if pageContext != nil {
 		if userMsgMetadata == nil {
@@ -630,6 +658,30 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		userMsgMetadata.(map[string]any)[documents.CreationMetadataKey] = documentCreation
 	}
 
+	if documentIteration != nil {
+		if userMsgMetadata == nil {
+			userMsgMetadata = map[string]any{}
+		}
+		userMsgMetadata.(map[string]any)["document_iteration_intent"] = *documentIteration
+	}
+	// Reject a retained submission before container provisioning. A successful
+	// check grants nothing; the append rechecks live authority under its writer
+	// transaction, including races with another connection or revocation.
+	if documentCreation != nil {
+		candidate := conversation.Message{ID: triggerMessageID, AgentID: info.AgentID, Role: conversation.RoleUser, Content: content, Metadata: userMsgMetadata, AuthorUserID: userID}
+		if err := b.convStore.CheckDocumentCreationSubmission(ctx, chatID, candidate, *documentCreation, info.HumanAuthority); err != nil {
+			var accepted *conversation.DocumentCreationAlreadyAccepted
+			if errors.As(err, &accepted) || errors.Is(err, conversation.ErrDocumentCreationSubmissionConflict) {
+				return err
+			}
+			if errors.Is(err, conversation.ErrDocumentCreationConsentUnconfirmed) {
+				streamFn(ws.ChatEvent{Type: "error", Content: err.Error()})
+			} else {
+				streamFn(ws.ChatEvent{Type: "error", Content: "document creation request unavailable"})
+			}
+			return err
+		}
+	}
 	// The human turn is recorded and emitted regardless of whether the agent
 	// will respond. The sender also receives the event, which acknowledges
 	// persistence; its UI suppresses the duplicate optimistic turn.
@@ -649,10 +701,29 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		if err := b.convStore.Append(ctx, chatID, message); err != nil {
 			return err
 		}
-		return b.convStore.SyncSession(ctx, chatID)
+		if err := b.convStore.SyncSession(ctx, chatID); err != nil {
+			return err
+		}
+		if artifactProject != nil {
+			return b.artifactProjectIntentRecorder.RecordArtifactProjectIntent(ctx, info.HumanAuthority, triggerMessageID, *artifactProject)
+		}
+		if documentIteration != nil {
+			return b.documentIterationRecorder.RecordDocumentIteration(ctx, info.HumanAuthority, triggerMessageID, *documentIteration)
+		}
+		return nil
 	}
 	broadcastUserMsg := func() {
 		metadata := map[string]any{"author_user_id": userID, "message_id": triggerMessageID}
+		if askEnvelope != nil {
+			metadata["ask_submission_id"] = askEnvelope.SubmissionID
+		}
+		if documentIteration != nil {
+			metadata["document_iteration_intent"] = *documentIteration
+		}
+		if artifactProject != nil {
+			// The recorder accepted this typed purpose before the saved echo.
+			metadata[artifacts.ProjectIntentMetadataKey] = *artifactProject
+		}
 		if pageContext != nil {
 			// This event is emitted only after Append succeeds. Echo the
 			// server-derived Page identity so the sender can consume its
@@ -831,7 +902,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			if !b.provisioning.AttachPendingMessage(info.CrewID, PendingChatMessage{
 				UserID:  userID,
 				ChatID:  chatID,
-				Content: content,
+				Content: originalContent,
 				Opts:    msgOpt,
 			}) {
 				b.logger.Warn("could not attach deferred message to provisioning job",
@@ -916,6 +987,10 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// send owns the run slot. Persist + broadcast the human turn now that
 	// provisioning has cleared.
 	if err := persistUserMsg(); err != nil {
+		var accepted *conversation.DocumentCreationAlreadyAccepted
+		if errors.As(err, &accepted) || errors.Is(err, conversation.ErrDocumentCreationSubmissionConflict) {
+			return err
+		}
 		if errors.Is(err, conversation.ErrDocumentCreationConsentUnconfirmed) {
 			streamFn(ws.ChatEvent{Type: "error", Content: conversation.ErrDocumentCreationConsentUnconfirmed.Error()})
 			return err
@@ -1200,6 +1275,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	if documentCreation != nil {
 		req.UserMessage = documentCreationRunPrompt(content, documentCreation)
 	}
+	if documentIteration != nil {
+		req.UserMessage = documentIterationRunPrompt(content, documentIteration)
+	}
+	if artifactProject != nil {
+		req.UserMessage = artifactProjectRunPrompt(content, artifactProject)
+	}
 	req.RunID = runID
 	runMeta := map[string]interface{}{
 		"cli_adapter": info.CLIAdapter,
@@ -1210,6 +1291,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	if documentCreation != nil {
 		runMeta["document_creation_intent"] = documentCreation
+	}
+	if documentIteration != nil {
+		runMeta["document_iteration_intent"] = documentIteration
+	}
+	if artifactProject != nil {
+		runMeta["artifact_project_intent"] = artifactProject
 	}
 	ctx = runauthority.WithTriggerMessage(ctx, triggerMessageID)
 	ctx = chataudience.WithReceipt(ctx, info.HumanAuthority)

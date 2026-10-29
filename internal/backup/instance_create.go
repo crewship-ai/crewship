@@ -54,6 +54,7 @@ import (
 	"filippo.io/age"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/safepath"
 	"github.com/crewship-ai/crewship/internal/servicelifecycle"
@@ -576,7 +577,11 @@ func CreateInstanceBackup(ctx context.Context, db *sql.DB, opts InstanceOptions)
 	inst.VaultEnvelopes = scan.Versions
 	var kit *RecoveryKit
 	if opts.RecoveryKit {
-		k, missing, err := BuildRecoveryKit(scan, now)
+		auditKeys, err := journal.SigningKeysForContext(ctx)
+		if err != nil {
+			return nil, err
+		}
+		k, missing, err := BuildRecoveryKit(scan, now, auditKeys)
 		if err != nil {
 			return nil, err
 		}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // Vault keys and the recovery kit.
@@ -37,6 +38,8 @@ const IncompleteVaultKeyMissing = "vault_key_missing"
 // RecoveryKit is recovery-kit/keys.json.
 type RecoveryKit struct {
 	Versions []RecoveryKitKey `json:"versions"`
+	// AuditKeyring is present only inside the age-encrypted instance payload.
+	AuditKeyring json.RawMessage `json:"audit_keyring,omitempty"`
 	// CurrentVersion is the version new envelopes were minted with on the
 	// source (CREWSHIP_ENCRYPTION_KEY_VERSION, default v1).
 	CurrentVersion string    `json:"current_version,omitempty"`
@@ -202,8 +205,25 @@ func ScanVaultEnvelopes(ctx context.Context, db rowQuerier) (VaultScan, error) {
 // instance-audit MACs still depend on its exact string. A
 // version with envelopes and no resolvable key comes back in missing, with
 // its envelope count, so the bundle records it as incomplete.
-func BuildRecoveryKit(scan VaultScan, now time.Time) (*RecoveryKit, map[string]int, error) {
+func BuildRecoveryKit(scan VaultScan, now time.Time, snapshots ...*journal.SigningKeys) (*RecoveryKit, map[string]int, error) {
 	kit := &RecoveryKit{GeneratedAt: now.UTC()}
+	var keys *journal.SigningKeys
+	var keyErr error
+	if len(snapshots) > 1 {
+		return nil, nil, errors.New("backup: ambiguous audit key snapshot")
+	}
+	if len(snapshots) == 1 {
+		keys = snapshots[0]
+	} else {
+		keys, keyErr = journal.LoadSigningKeysFromEnv()
+	}
+	if keyErr != nil {
+		return nil, nil, keyErr
+	}
+	kit.AuditKeyring, keyErr = journal.ExportSigningKeys(keys)
+	if keyErr != nil {
+		return nil, nil, keyErr
+	}
 	missing := map[string]int{}
 	cur, err := encryption.CurrentKeyVersion()
 	if err != nil {
@@ -254,6 +274,11 @@ func ParseRecoveryKit(data []byte) (*RecoveryKit, error) {
 	var kit RecoveryKit
 	if err := json.Unmarshal(data, &kit); err != nil {
 		return nil, fmt.Errorf("backup: parse recovery kit: %w", err)
+	}
+	if len(kit.AuditKeyring) > 0 {
+		if _, err := journal.ParseSigningKeys(kit.AuditKeyring); err != nil {
+			return nil, fmt.Errorf("backup: invalid audit keyring: %w", err)
+		}
 	}
 	for _, v := range kit.Versions {
 		if !encryption.ValidKeyVersion(v.Version) {
@@ -325,4 +350,20 @@ ON CONFLICT(id) DO UPDATE SET recovery_kit_enabled = excluded.recovery_kit_enabl
 		return fmt.Errorf("backup: set recovery kit: %w", err)
 	}
 	return nil
+}
+
+// AuditSigningKeys returns the encrypted kit's immutable audit snapshot. An old
+// kit may contain only legacy vault-derived verification authority. It cannot
+// recreate an independently generated signing key that was never backed up.
+func (k *RecoveryKit) AuditSigningKeys() (*journal.SigningKeys, error) {
+	if k == nil {
+		return nil, journal.ErrSigningKeyUnavailable
+	}
+	if len(k.AuditKeyring) > 0 {
+		return journal.ParseSigningKeys(k.AuditKeyring)
+	}
+	if seed := k.ChainSeed(); seed != "" {
+		return journal.BootstrapSigningKeys(journal.DeriveChainKey(seed)), nil
+	}
+	return nil, journal.ErrSigningKeyUnavailable
 }

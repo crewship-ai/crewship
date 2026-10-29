@@ -29,7 +29,7 @@ func documentDraftMCPCatalog() []memoryMCPToolDescriptor {
 		name, description string
 		props             map[string]any
 	}{
-		{"doc_draft_view", "Read only this live run's explicitly admitted newly created Document drafting view. No arbitrary Page, human profile, raw Yjs or renewed authority.", map[string]any{}},
+		{"doc_draft_view", "Read only this live run's explicitly admitted new or existing Document drafting view. No arbitrary Page, human profile, raw Yjs or renewed authority.", map[string]any{}},
 		{"doc_draft_prepare", "Prepare UNSAVED replaceText and checkpoint packets from the permitted view. Select a paragraph/heading ID and text; the tool copies server hashes and original revision/generation/epoch. Retain this exact packet for uncertain retries.", map[string]any{"view": view, "target": stringField, "text": stringField, "mutation_id": stringField}},
 		{"doc_draft_apply", "Apply an immutable prepared packet, then pin its committed revision. No reread or rederived retries. committed_checkpoint_pending means the patch is already durable; retry checkpoint with the same packet.", map[string]any{"packet": packet}},
 		{"doc_draft_checkpoint", "Retry only the exact pin from a retained immutable packet. Does not apply new text or renew run authority; unknown responses do not mean rollback.", map[string]any{"packet": packet}},

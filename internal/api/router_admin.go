@@ -10,6 +10,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/backupplan"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/mailer"
 	"github.com/crewship-ai/crewship/internal/notify"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -21,6 +22,17 @@ import (
 // audit is grouped here because the audit_logs surface is a
 // workspace admin tool, not part of any feature domain.
 func (r *Router) registerAdminRoutes() {
+	// OWNER scope is selected and rechecked from the closed body inside the
+	// checkpoint transaction; neither instance ADMIN nor context role bypasses it.
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedSelfMut("POST", "/api/v1/admin/audit/reseal", r.resealAudit)
+	// Same instance OWNER + instance:admin authority as an instance reseal,
+	// rechecked inside the transaction that records the rotation.
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedSelfMut("POST", "/api/v1/admin/audit/signing-keys/rotate", r.rotateAuditSigningKey)
+	// Actual OWNER authority is checked inside the read-only snapshot.
+	// openapi: query scope:string workspace_id:string; responses 200,400,401,403,404,500
+	r.authedAdminAny("GET", "/api/v1/admin/audit/head", r.auditHead)
 	// Every admin READ route flows through authedAdmin (ADMIN+ floor, #865);
 	// every admin MUTATION through authedMut (roleManage). Neither the raw
 	// authed/wsCtx chain nor an inline-only role check is used here anymore —
@@ -70,7 +82,7 @@ func (r *Router) registerAdminRoutes() {
 	// devices and CLI tokens, signing one or all of them out, and lifting a
 	// sign-in lockout. Same session store the auth middleware checks, so a
 	// revoke takes effect on the next request.
-	people := NewAdminUsersHandler(r.db, r.logger, r.sessionsStore)
+	people := NewAdminUsersHandler(r.db, r.logger, r.sessionsStore).WithJournal(r.journal)
 	// openapi: responses 200,400,401,403,404,500
 	r.authedAdminPeople("GET", "/api/v1/admin/users/{userId}/sessions", people.Sessions)
 	// openapi: responses 204,400,401,403,404,500
@@ -115,6 +127,7 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("DELETE", "/api/v1/admin/instance/workspaces/{workspaceId}", inst.DeleteWorkspace)
 	// openapi: responses 200,401,403,500
 	r.authedInstance("GET", "/api/v1/admin/instance/audit", inst.AuditLog)
+	r.authedInstance("GET", "/api/v1/admin/instance/audit/verify", inst.AuditVerify)
 
 	// Admin › Security across workspaces: the Keeper of every workspace, set for
 	// one, several or all of them (dry_run previews what a save overwrites),
@@ -132,6 +145,11 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("GET", "/api/v1/admin/instance/keeper/requests", ik.ListRequests)
 	// openapi: responses 200,401,403,500
 	r.authedInstance("GET", "/api/v1/admin/instance/keeper/health", ik.Health)
+	// The embedded workbook editor: its mode and, in same-host mode, the
+	// proxy self-check of each public Studio origin with its cause. The
+	// public /healthz carries only the coarse state.
+	// openapi: responses 200,401,403
+	r.authedInstance("GET", "/api/v1/admin/instance/workbook-editor", r.workbookEditorStatus)
 
 	// Admin › Data retention: how long every workspace keeps each kind of
 	// data, set for one, several or every existing workspace (dry_run
@@ -198,7 +216,18 @@ func (r *Router) registerAdminRoutes() {
 	r.authedInstance("POST", "/api/v1/admin/instance/holds/resume", ib.ResumeHold)
 
 	// Admin observability: runtime log-level toggle + disk/health read.
-	obs := NewAdminObservabilityHandler(r.db, r.logger)
+	var obs *AdminObservabilityHandler
+	if provider, ok := r.journal.(interface {
+		SigningKeySnapshot() (*journal.SigningKeys, error)
+	}); ok {
+		keys, err := provider.SigningKeySnapshot()
+		if err != nil {
+			keys = nil
+		}
+		obs = NewAdminObservabilityHandler(r.db, r.logger, keys)
+	} else {
+		obs = NewAdminObservabilityHandler(r.db, r.logger)
+	}
 	r.authedAdminAny("GET", "/api/v1/admin/log-level", obs.GetLogLevel)
 	r.authedInstanceMut("PUT", "/api/v1/admin/log-level", obs.SetLogLevel)
 	r.authedAdminAny("GET", "/api/v1/admin/health", obs.Health)
@@ -409,6 +438,7 @@ func (r *Router) registerAdminRoutes() {
 		backupDockerOps = r.backupDockerOps(r.dockerClient)
 	}
 	backupH := NewBackupHandler(r.db, r.logger, backupDockerOps, os.Getenv("CREWSHIP_VERSION"))
+	backupH.mooringHTTPEnabled = r.mooringHTTPConfig.Enabled
 	if transport, ok := r.keeperContainer.(backup.ServiceSnapshotRuntime); ok {
 		backupH.serviceSnapshots = transport
 	}

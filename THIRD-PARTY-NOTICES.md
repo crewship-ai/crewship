@@ -32,6 +32,36 @@ It is distributed under the MIT License:
 > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 > SOFTWARE.
 
+## Mooring canonical JSON
+
+Mooring imports [`github.com/gowebpki/jcs` v1.0.2](https://github.com/gowebpki/jcs/tree/v1.0.2),
+licensed under Apache-2.0. Copyright 2021–2026 Bret Jordan & Benedikt Thoma;
+copyright 2006–2019 WebPKI.org. The [exact upstream license](internal/mooring/licenses/jcs-v1.0.2-LICENSE.txt)
+is retained with the [version and parser audit](internal/mooring/licenses/README.md).
+
+## Offline Slides PDF foundation
+
+The standalone Slides PDF renderer uses
+[`github.com/signintech/gopdf` v0.38.3](https://github.com/signintech/gopdf/tree/v0.38.3)
+(tag `072bc5c7fe48b44210dc81e1f029fd7bd2d710e0`, MIT, copyright 2015 signintech),
+with transitive [`github.com/phpdave11/gofpdi`](https://github.com/phpdave11/gofpdi/tree/1f10f9844311)
+(MIT, copyright 2019–2020 David Barnes and 2017 Setasign – Jan Slabon).
+Exact upstream notices are retained in
+[`internal/artifacts/slidespdf/licenses/`](internal/artifacts/slidespdf/licenses/).
+The fixed embedded Go Regular font comes from `golang.org/x/image` v0.47.0,
+copyright 2016 Bigelow & Holmes Inc., under its BSD-style Go font license;
+that exact font notice is retained in the same directory.
+The authored Slides read/export entrypoints link this renderer into the binary.
+Runtime access remains disabled by default behind `artifact_slides`; the Go
+dependency inventory below includes its linked dependencies.
+
+## Artifact Slides font
+
+The packaged Go Regular font in `public/fonts/go-regular/Go-Regular.ttf` is
+identical to `golang.org/x/image/font/gofont/goregular` v0.47.0, copyright
+2016 Bigelow & Holmes Inc. Its BSD-style Go font notice is retained in
+[`public/fonts/go-regular/LICENSE.txt`](public/fonts/go-regular/LICENSE.txt).
+
 ## Go dependencies
 
 Sections below list every direct + transitive Go dependency of the `crewship`
@@ -203,9 +233,16 @@ image processor before `pnpm build` — no source-code surgery in
 
 ## Manually verified
 
+The existing `go-licenses` scanner cannot load standard-library module metadata
+with the current Go toolchain. The newly linked PDF dependencies below were
+verified against their exact upstream license texts, retained in the Slides PDF
+license directory; the preceding generated inventory is preserved.
+
 | Package | License | Source URL |
 |---------|---------|------------|
 | `modernc.org/mathutil` | BSD-3-Clause | https://gitlab.com/cznic/mathutil |
+| `github.com/signintech/gopdf` v0.38.3 | MIT | https://github.com/signintech/gopdf/blob/v0.38.3/LICENSE |
+| `github.com/phpdave11/gofpdi` v1.0.14-0.20211212211723-1f10f9844311 | MIT | https://github.com/phpdave11/gofpdi/blob/1f10f9844311/LICENSE |
 
 ## Known accepted vulnerabilities
 
@@ -216,3 +253,16 @@ monitored for upstream resolution.
 | CVE | Module | Status | Notes |
 |-----|--------|--------|-------|
 | GO-2026-5932 | golang.org/x/crypto/openpgp | No upstream fix (Fixed in: N/A) | The openpgp package is unmaintained and unsafe by design; upstream will never ship a fix (advisory is "use a maintained alternative"). **Not reachable in Crewship**: we never import `golang.org/x/crypto/openpgp` (it is a transitive-graph presence only — `go mod why golang.org/x/crypto` reports "main module does not need package"), and govulncheck lists it under "modules you require, but your code doesn't appear to call". Bumping x/crypto does not help — every published version, including the latest, still ships openpgp with the same advisory. Accepted as known, non-reachable risk. Monitor https://pkg.go.dev/vuln/GO-2026-5932 |
+
+### Restricted native worker — bubblewrap
+
+The restricted native image distributes Debian bubblewrap 0.8.0 with Debian's
+`0.8.0-2+deb12u1` security patches and Crewship's atime-preserving remount patch.
+The rebuilt Debian package is versioned `0.8.0-2+deb12u1+crewship1`.
+Bubblewrap and the local derivative patch/header are LGPL-2.0-or-later; original
+copyright and license texts remain in the package's `/usr/share/doc/bubblewrap/`.
+The image also includes the complete modified corresponding source, Debian
+build files and image build recipe as
+`/usr/share/doc/bubblewrap/crewship-source.tar.xz`. The local patch and regression
+source are in `cmd/crewship-restricted-native-runner/bubblewrap/`.
+Upstream: https://github.com/containers/bubblewrap.

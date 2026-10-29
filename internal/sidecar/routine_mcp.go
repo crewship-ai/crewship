@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/manifest"
 	"github.com/crewship-ai/crewship/internal/pages"
 )
@@ -266,6 +267,11 @@ var routineMCPTools = append(append([]memoryMCPToolDescriptor{
 	{Name: "save_routine_draft", Description: "Save unpublished routine edits using the exact revision envelope returned by get_routine_draft. Put slug, name, definition and the proposed trigger inside draft.document. Never changes the live recipe or activates schedules. Return the editor_url to the user for Recipe / Test / Publish. A conflict preserves the existing draft; do not reload and blindly overwrite it. Prefer this for authoring in Chat; legacy save_routine publishes directly.", InputSchema: routineMCPSaveDraftSchema},
 }, documentCreateMCPCatalog()...), documentDraftMCPCatalog()...)
 
+func init() {
+	routineMCPTools = append(routineMCPTools, artifactProjectMCPCatalog()...)
+	routineMCPTools = append(routineMCPTools, designMCPCatalog()...)
+}
+
 // handleRoutinesMCP is the JSON-RPC 2.0 entry point in-container CLIs hit at
 // /mcp/routines. It mirrors handleMemoryMCP exactly — same envelope, same
 // localhost gate one level up in buildHandler — but serves the routine-
@@ -281,8 +287,8 @@ var routineMCPTools = append(append([]memoryMCPToolDescriptor{
 // Unknown methods return JSON-RPC -32601 (method not found).
 func (s *Server) handleRoutinesMCP(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(r.Body, (1<<20)+1)) // Bounded file patches, never an unbounded source upload
-	if err != nil || len(raw) > 1<<20 {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, artifacts.MaxDataToolRequestBytes+1)) // Bounded file patches, never an unbounded source upload
+	if err != nil || len(raw) > artifacts.MaxDataToolRequestBytes {
 		writeJSONResponse(w, http.StatusBadRequest, memoryMCPResponse{
 			JSONRPC: "2.0",
 			ID:      mcpNullID,
@@ -298,6 +304,17 @@ func (s *Server) handleRoutinesMCP(w http.ResponseWriter, r *http.Request) {
 			Error:   &memoryMCPRPCError{Code: -32700, Message: "invalid JSON: " + err.Error()},
 		})
 		return
+	}
+	// Only the closed Dashboard data tools receive RPC metadata headroom.
+	// All existing tools, including Project publishing, retain their 1 MiB cap.
+	if len(raw) > 1<<20 {
+		var call struct {
+			Name string `json:"name"`
+		}
+		if req.Method != "tools/call" || json.Unmarshal(req.Params, &call) != nil || !artifactDataMCPTool(call.Name) {
+			writeJSONResponse(w, http.StatusBadRequest, memoryMCPResponse{JSONRPC: "2.0", ID: mcpNullID, Error: &memoryMCPRPCError{Code: -32700, Message: "invalid or oversized MCP request"}})
+			return
+		}
 	}
 	if req.JSONRPC != "2.0" {
 		id := req.ID
@@ -354,7 +371,12 @@ func (s *Server) respondRoutinesMCPInitialize(w http.ResponseWriter, req memoryM
 }
 
 func (s *Server) respondRoutinesMCPToolsList(w http.ResponseWriter, req memoryMCPRequest) {
-	result, _ := json.Marshal(map[string]any{"tools": routineMCPTools})
+	tools := routineMCPTools
+	if s.ipc != nil && s.ipc.GridCraftEnabled {
+		tools = append(append([]memoryMCPToolDescriptor(nil), tools...), gridcraftMCPCatalog()...)
+		tools = append(tools, mooringMCPCatalog()...)
+	}
+	result, _ := json.Marshal(map[string]any{"tools": tools})
 	writeJSONResponse(w, http.StatusOK, memoryMCPResponse{
 		JSONRPC: "2.0",
 		ID:      req.ID,
@@ -378,7 +400,19 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if s.respondDesignMCPToolCall(w, r, req, params.Name, params.Arguments) {
+		return
+	}
+	if s.respondArtifactProjectMCPToolCall(w, r, req, params.Name, params.Arguments) {
+		return
+	}
 	if s.respondDocumentCreateMCPToolCall(w, r, req, params.Name, params.Arguments) {
+		return
+	}
+	if s.respondMooringMCPToolCall(w, r, req, params.Name, params.Arguments) {
+		return
+	}
+	if s.respondGridCraftMCPToolCall(w, r, req, params.Name, params.Arguments) {
 		return
 	}
 	if s.respondDocumentDraftMCPToolCall(w, r, req, params.Name, params.Arguments) {

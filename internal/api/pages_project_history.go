@@ -58,6 +58,14 @@ func (h *PageHandler) ProjectHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	canReplace := projectDefinitionVisible(liveSpec, auth) && projectDefinitionVisible(draftSpec, auth)
+	if rec.PrivateAudience {
+		user := UserFromContext(r.Context())
+		canReplace = false
+		if user != nil {
+			role, err := h.liveContentHumanRole(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID)
+			canReplace = err == nil && h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID, role, rec) && projectDefinitionVisible(liveSpec, auth) && projectDefinitionVisible(draftSpec, auth)
+		}
+	}
 	rows, err := h.db.QueryContext(r.Context(), `SELECT revision,source_digest,git_commit,COALESCE(actor_user_id,json_extract(actor_json,'$.agent_id'),''),COALESCE(actor_user_id,''),actor_json,created_at,spec_json FROM page_project_revisions WHERE page_id=? AND (?=0 OR revision<?) ORDER BY revision DESC LIMIT 51`, rec.ID, before, before)
 	if err != nil {
 		replyInternalError(w, h.logger, "read project history", err)
