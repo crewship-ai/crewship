@@ -237,8 +237,9 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var p struct {
-		Slug string `json:"slug"`
-		Name string `json:"name"`
+		Slug          string `json:"slug"`
+		Name          string `json:"name"`
+		CreatedByTest bool   `json:"created_by_test"`
 	}
 	if !designDecode(w, r, &p, 8192) {
 		return
@@ -283,7 +284,7 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 		}
 		if staged {
 			var unchanged bool
-			if e = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages WHERE id=? AND workspace_id=? AND owner_user_id=? AND owner_crew_id IS NULL AND folder_id IS NULL AND slug=? AND name=? AND spec_json=?)`, k.PageID, k.WorkspaceID, user.ID, p.Slug, p.Name, string(raw)).Scan(&unchanged); e != nil {
+			if e = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages WHERE id=? AND workspace_id=? AND owner_user_id=? AND owner_crew_id IS NULL AND folder_id IS NULL AND slug=? AND name=? AND spec_json=? AND created_by_test=?)`, k.PageID, k.WorkspaceID, user.ID, p.Slug, p.Name, string(raw), p.CreatedByTest).Scan(&unchanged); e != nil {
 				return "", e
 			}
 			if !unchanged {
@@ -300,7 +301,7 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 			return "", artifacts.ErrVersionQuota
 		}
 		stamp := tsformat.Format(time.Now())
-		if _, e = tx.ExecContext(ctx, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at,private_audience) VALUES(?,?,?,?,?,?,?,?,0)`, k.PageID, k.WorkspaceID, p.Slug, p.Name, user.ID, string(raw), stamp, stamp); e != nil {
+		if _, e = tx.ExecContext(ctx, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at,private_audience,created_by_test) VALUES(?,?,?,?,?,?,?,?,0,?)`, k.PageID, k.WorkspaceID, p.Slug, p.Name, user.ID, string(raw), stamp, stamp, p.CreatedByTest); e != nil {
 			if isUniqueViolation(e) {
 				return "", artifacts.ErrVersionConflict
 			}
