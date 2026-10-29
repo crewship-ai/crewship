@@ -28,6 +28,7 @@ import { LocalDraftBanner } from "@/components/features/chat/artifact-context/cr
 import { KIND_ACCENT, KIND_ICON, ARTIFACT_KINDS, type ArtifactKindKey } from "@/components/features/chat/artifact-context/new-artifact/artifact-kinds"
 import { useArtifactCapabilities } from "@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities"
 import { NewArtifactDialog } from "./new-artifact-dialog"
+import { ArtifactPageContent } from "./page-content"
 import { kindLabel, libraryItems, withLibraryState, type LibraryItem, type LibraryKind } from "./library-items"
 import { sharingKeys, useSharingApi } from "./sharing/sharing-api"
 import { ShareDialog } from "./sharing/share-dialog"
@@ -296,7 +297,6 @@ function RecoveredDraft({ userId, workspaceId, slug }: { userId: string; workspa
 const DETAIL_HINT: Partial<Record<LibraryKind, string>> = {
   word: "This is the saved version. Edit it in its editor from Open in Pages.",
   sheet: "Read and edit it in its editor; Open in Pages shows the saved document.",
-  page: "Its panels open on the page, where crews keep them filled.",
 }
 
 /** One artifact: a project shows its history in the project viewer, a native Word or Sheet its edit lock. */
@@ -307,13 +307,16 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
   const [dialog, setDialog] = useState<"share" | "move" | null>(null)
   const projects = useArtifactProjectsAvailable(workspaceId)
   const projectPreview = item.projectBacked && (item.kind === "project" || item.kind === "dashboard" && artifactDashboards() || item.kind === "slides" && artifactSlides()) && projects
+  // A Page shows its own content here, with the views Pages draws; it names itself in its breadcrumb.
+  const pageContent = item.kind === "page" && item.pageId
+  const inline = projectPreview || pageContent
   const target = useMemo(() => ({ slug: item.slug, tab: "preview" as const }), [item.slug])
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
       <Button type="button" variant="ghost" size="sm" className="-ml-2 coarse:min-h-[44px]" onClick={onBack}><ArrowLeft aria-hidden />All artifacts</Button>
       {/* The viewer names the artifact, its kind and version itself; here only what it does not say. */}
-      {projectPreview && meta(item) && <span className="ml-auto truncate text-xs text-muted-foreground">{meta(item)}</span>}
-      <Segmented<"content" | "access"> ariaLabel="Detail" value={tab} onChange={setTab} className={cn(!(projectPreview && meta(item)) && "ml-auto")} options={[
+      {inline && meta(item) && <span className="ml-auto truncate text-xs text-muted-foreground">{meta(item)}</span>}
+      <Segmented<"content" | "access"> ariaLabel="Detail" value={tab} onChange={setTab} className={cn(!(inline && meta(item)) && "ml-auto")} options={[
         { value: "content", label: "Content" }, { value: "access", label: "Access" },
       ]} />
       <Button type="button" variant="outline" size="sm" className="coarse:min-h-[44px]" onClick={() => setDialog("share")}><Share2 aria-hidden />Share</Button>
@@ -325,7 +328,7 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
         <Star aria-hidden className={cn("size-4", favorite && "fill-current text-warn")} />
       </Button>
     </div>
-    {!projectPreview && <header className="flex min-w-0 flex-wrap items-center gap-3">
+    {!inline && <header className="flex min-w-0 flex-wrap items-center gap-3">
       <KindTile kind={item.kind} large />
       <div className="grid min-w-0 flex-[1_1_220px] gap-1">
         <h1 className="truncate text-xl font-semibold">{item.name}</h1>
@@ -341,6 +344,7 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
       ? <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
         <div className="flex min-h-[520px] flex-1 overflow-hidden rounded-card border"><ArtifactViewerPanel variant="library" /></div>
       </ArtifactViewerProvider>
+      : pageContent ? <ArtifactPageContent workspaceId={workspaceId} pageId={item.pageId!} onBack={onBack} />
       : item.native && item.kind === "word" && item.pageId
         ? <div className="overflow-hidden rounded-card border">
           <CraftLockBar workspaceId={workspaceId} slug={"@" + item.pageId}
@@ -350,7 +354,7 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
     {!projectPreview && item.native && item.kind === "word" && item.pageId && <LockLostDraft workspaceId={workspaceId} slug={"@" + item.pageId} />}
     {item.kind === "word" && !item.empty && item.pageId && <WordPreview workspaceId={workspaceId} item={item} />}
     {/* An old-editor Word has nowhere to edit it; its notice says so on its own. */}
-    {!projectPreview && item.kind !== "project" && !(item.kind === "word" && !item.native) && <p className="text-sm text-muted-foreground">
+    {!inline && item.kind !== "project" && !(item.kind === "word" && !item.native) && <p className="text-sm text-muted-foreground">
       {DETAIL_HINT[item.kind] ?? "Open in Pages shows it with everything it contains."}
     </p>}
     </>}

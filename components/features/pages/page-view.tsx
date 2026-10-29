@@ -256,6 +256,8 @@ export interface PageViewProps {
   error: string | null
   notFound: boolean
   onBack: () => void
+  /** The breadcrumb's way back; Pages by default, the library when Artifacts shows the page. */
+  backLabel?: string
   /** Injected clock — absolute ages are computed, so a test can pin `now`. */
   now?: Date
   /**
@@ -295,6 +297,7 @@ export function PageView({
   error,
   notFound,
   onBack,
+  backLabel = "Back to pages",
   now,
   workspaceId,
   mayEditAvatar,
@@ -346,7 +349,7 @@ export function PageView({
           className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           <ChevronLeft className="h-3.5 w-3.5" />
-          Back to pages
+          {backLabel}
         </button>
         <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
         <span className="truncate text-xs font-medium text-foreground/85" title={page?.name ?? slug}>
@@ -431,10 +434,7 @@ export function PageView({
 export function artifactReaderHref(slug: string, kind: string, workspaceId?: string | null): string | null {
   const query = new URLSearchParams()
   if (workspaceId) query.set("workspace_id", workspaceId)
-  if (artifactsLibrary()) {
-    query.set("item", slug)
-    return `/artifacts?${query}`
-  }
+  if (artifactsLibrary()) return `/artifacts/${encodeURIComponent(slug)}${query.size ? `?${query}` : ""}`
   if (kind !== "project" && kind !== "dashboard" && kind !== "slides") return null
   query.set("artifact", "1")
   return `/pages/${encodeURIComponent(slug)}?${query}`
@@ -466,7 +466,7 @@ function PageBody({
   tabs,
   activeTab,
   tabIdScope,
-}: Omit<PageViewProps, "onBack"> & {
+}: Omit<PageViewProps, "onBack" | "backLabel"> & {
   tabs: PageTabView[]
   activeTab: string
   tabIdScope: string
