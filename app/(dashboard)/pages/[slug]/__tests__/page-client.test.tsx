@@ -2,7 +2,7 @@ import React from "react"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 const state=vi.hoisted(()=>({search:"artifact=1"}))
-vi.mock("next/navigation",()=>({useSearchParams:()=>new URLSearchParams(state.search)}))
+vi.mock("next/navigation",()=>({useSearchParams:()=>new URLSearchParams(state.search),useRouter:()=>({replace:vi.fn()})}))
 vi.mock("@/lib/use-url-segment",()=>({useUrlSegment:()=>"demo"}))
 vi.mock("@/hooks/use-page-workspace",()=>({usePageWorkspace:()=>({workspaceId:"w",loading:false})}))
 vi.mock("@/hooks/use-access-mode",()=>({useAccessMode:()=>"full"}))

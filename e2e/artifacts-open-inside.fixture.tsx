@@ -5,9 +5,10 @@
 import React from "react"
 import { createRoot } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { useParams } from "next/navigation"
+import { useParams, usePathname } from "next/navigation"
 import ArtifactsPage from "../app/(dashboard)/artifacts/page"
 import { ArtifactDetailRoute } from "../app/(dashboard)/artifacts/[id]/page-client"
+import { PageDetailClient } from "../app/(dashboard)/pages/[slug]/page-client"
 import { createArtifactMockServer } from "../components/features/chat/artifact-context/projects/mock-server"
 import type { ArtifactFile } from "../components/features/chat/artifact-context/projects/types"
 
@@ -44,9 +45,11 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 
-/** The app router's choice between the two route files, by the address bar. */
+/** The app router's choice between the route files, by the address bar: an old /pages/<slug> link, or Artifacts. */
 function Routes() {
   const id = useParams<{ id?: string }>()?.id
+  usePathname()
+  if (location.pathname.startsWith("/pages/")) return <PageDetailClient />
   return <div className="min-h-dvh bg-background text-foreground">{id ? <ArtifactDetailRoute /> : <ArtifactsPage />}</div>
 }
 

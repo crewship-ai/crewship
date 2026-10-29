@@ -1,7 +1,9 @@
 "use client"
 
 
-import { useSearchParams } from "next/navigation"
+import { useEffect } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { pagesOpenArtifacts } from "@/lib/feature-flags"
 import { ArtifactProject } from "@/components/features/pages/artifact-project"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useUrlSegment } from "@/lib/use-url-segment"
@@ -33,10 +35,25 @@ export function PageDetailClient() {
   // A restricted session cannot open the Studio page view (its endpoints are
   // not on the allowlist); it gets the same declared-actions surface as /pages.
   const accessMode = useAccessMode()
+  const router = useRouter()
+  // Behind its switch a single page opens inside Artifacts at its own address,
+  // so bookmarks and shared /pages/<slug> links keep working. A reference link
+  // and the panel editor stay here; a restricted member's surface is not this.
+  const toArtifacts = pagesOpenArtifacts() && accessMode === "trusted" && Boolean(slug) && !search.has("ref") && search.get("mode") !== "edit"
+  const linkedWorkspace = search.get("workspace_id")
+  useEffect(() => {
+    if (!toArtifacts || !slug) return
+    const query = new URLSearchParams()
+    if (linkedWorkspace) query.set("workspace_id", linkedWorkspace)
+    // An immutable reference is the artifact's ID; a slug resolves in the library.
+    const id = slug.startsWith("@") ? slug.slice(1) : slug
+    // The static export has no server redirect; replace, so Back does not return here.
+    router.replace(`/artifacts/${encodeURIComponent(id)}${query.size ? `?${query}` : ""}`)
+  }, [toArtifacts, slug, linkedWorkspace]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (linkUnavailable) return <p className="p-6" role="alert">Document unavailable.</p>
 
-  if (wsLoading || !workspaceId || !slug || accessMode === "loading") {
+  if (wsLoading || !workspaceId || !slug || accessMode === "loading" || toArtifacts) {
     return (
       <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] flex-col gap-3 p-4">
         <Skeleton className="h-9 w-full" />

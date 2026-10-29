@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Old `/pages/<slug>` links open the artifact inside Artifacts.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` on, a bookmark or shared link to a single page, an `@<id>` reference or a project link opens `/artifacts/<id>` instead, and Back does not return to Pages. Reference links (`?ref=`), the panel editor and restricted members stay on Pages. Off by default.
+
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, move to the new address.
 
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.

@@ -1,7 +1,7 @@
 import { cleanup, render, screen, fireEvent } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 const state = vi.hoisted(() => ({ kind: undefined as string | undefined, rawKind: undefined as string | undefined, error: null as string | null, loading: false, denied: false, query: "", workspace: "real-owner-workspace", slug: "ordinary-demo-owner-page", read: vi.fn() }))
-vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(state.query), useRouter: () => ({ push: vi.fn() }) }))
+vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(state.query), useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }))
 vi.mock("@/lib/use-url-segment", () => ({ useUrlSegment: () => state.slug }))
 vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ workspaceId: state.workspace, loading: false }) }))
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => "full" }))

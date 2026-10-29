@@ -7,7 +7,7 @@ const test = vi.hoisted(() => ({
   document: vi.fn(),
   metadata: vi.fn(),
 }))
-vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(window.location.search) }))
+vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(window.location.search), useRouter: () => ({ replace: vi.fn() }) }))
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => test.state }))
 vi.mock("@/lib/use-url-segment", () => ({ useUrlSegment: () => "document" }))
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => "standard" }))

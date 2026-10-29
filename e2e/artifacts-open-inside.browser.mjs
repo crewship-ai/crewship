@@ -1,6 +1,6 @@
 // Isolated browser test of opening artifacts inside Artifacts: a click in the library opens the
 // artifact at /artifacts/<id> with its content on screen, Back returns to the list, a reload of
-// that address opens it again, and a link from before IDs (/artifacts?item=<slug>) moves there.
+// that address opens it again, and a link from before IDs (/artifacts?item=<slug>) and an old /pages/<slug> link move there.
 // The real route code runs over in-memory mocks; anything unmocked fails the run.
 // Run: crewship-heavy node e2e/artifacts-open-inside.browser.mjs
 import { build } from "esbuild"
@@ -41,7 +41,7 @@ try {
   await build({
     entryPoints: ["e2e/artifacts-open-inside.fixture.tsx"], bundle: true, outfile: join(output, "bundle.js"), platform: "browser", format: "esm", jsx: "automatic",
     alias: { "@": process.cwd() }, logLevel: "error", external: ["/fonts/*"],
-    define: { "process.env": JSON.stringify({ NODE_ENV: "test", NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS: "true", NEXT_PUBLIC_CHAT_CRAFT_LEASE: "true", NEXT_PUBLIC_ARTIFACTS_LIBRARY: "true" }) },
+    define: { "process.env": JSON.stringify({ NODE_ENV: "test", NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS: "true", NEXT_PUBLIC_CHAT_CRAFT_LEASE: "true", NEXT_PUBLIC_ARTIFACTS_LIBRARY: "true", NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS: "true" }) },
     plugins: [{ name: "fixture-neighbours", setup(b) {
       b.onResolve({ filter: /(?:^@\/hooks\/use-auth$|\/hooks\/use-auth(?:\.tsx?)?$|^@\/hooks\/use-workspace$|^@\/hooks\/use-page-workspace$|^next\/navigation$)/ }, args => ({ path: stubOf(args.path), namespace: "fixture" }))
       b.onLoad({ filter: /.*/, namespace: "fixture" }, args => ({ loader: "js", contents: STUBS[args.path], resolveDir: process.cwd() }))
@@ -52,7 +52,7 @@ try {
     if (pathname === "/bundle.js") { response.writeHead(200, { "content-type": "text/javascript" }); return response.end(await readFile(join(output, "bundle.js"))) }
     if (pathname === "/bundle.css") { response.writeHead(200, { "content-type": "text/css" }); return response.end(await readFile(join(output, "bundle.css")).catch(() => "")) }
     if (pathname === "/app.css") { response.writeHead(200, { "content-type": "text/css" }); return response.end(css.css) }
-    if (pathname !== "/artifacts" && !pathname.startsWith("/artifacts/")) { response.writeHead(404); return response.end() }
+    if (pathname !== "/artifacts" && !pathname.startsWith("/artifacts/") && !pathname.startsWith("/pages/")) { response.writeHead(404); return response.end() }
     // Like the Go binary serving artifacts/_.html: every /artifacts address gets the same shell.
     response.writeHead(200, { "content-type": "text/html" })
     response.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Artifacts</title><link rel="stylesheet" href="/app.css"><link rel="stylesheet" href="/bundle.css"><body class="bg-background text-foreground antialiased"><div id="root"></div><script type="module" src="/bundle.js"></script></body></html>`)
@@ -99,7 +99,20 @@ try {
   assert.equal(path(), "/artifacts/pricing-site")
   step("legacy ?item= link")
 
-  // 5. Leaving the detail returns to the library at /artifacts.
+  // 5. Bookmarks and shared links to /pages/<slug> open the artifact inside Artifacts; Back skips Pages.
+  await page.goto(`${origin}/artifacts`)
+  await page.goto(`${origin}/pages/%40page-site?workspace_id=ws-fixture&artifact=1`)
+  await projectContent()
+  assert.equal(path(), "/artifacts/page-site")
+  await page.goto(`${origin}/pages/partner-brief`)
+  await page.getByText("Three partners, one launch date.").waitFor()
+  assert.equal(path(), "/artifacts/partner-brief")
+  await page.goBack()
+  await projectContent()
+  assert.equal(path(), "/artifacts/page-site", "Back does not return to /pages")
+  step("old /pages links")
+
+  // 6. Leaving the detail returns to the library at /artifacts.
   await page.getByRole("button", { name: "All artifacts" }).first().click()
   await list.waitFor()
   assert.equal(path(), "/artifacts")
