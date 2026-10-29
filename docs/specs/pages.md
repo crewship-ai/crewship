@@ -1424,6 +1424,8 @@ accepts the workspace-scoped `artifacts_design` feature flag. The embedded Yjs
 engine uses an existing Node runtime; no additional service is started.
 The browser uses standard Yjs sync and awareness; frame, rectangle, text and
 image nodes have stable IDs. Live operations also work without an open browser.
+Human Design creation accepts the optional create-only `created_by_test` boolean
+and retains it in Page catalog metadata, just like other artifact creation.
 
 The authenticated CLI surface is:
 
