@@ -22,6 +22,7 @@ export const APP_ROUTE_PATTERNS = [
   "/agents",
   "/approvals",
   "/artifacts",
+  "/artifacts/[id]",
   "/audit",
   "/bootstrap",
   "/calendar",
