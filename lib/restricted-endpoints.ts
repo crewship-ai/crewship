@@ -17,8 +17,22 @@
  * source: `{name}` matches one non-empty path segment.
  */
 export const RESTRICTED_FE_ENDPOINTS = [
+  "GET /api/v1/pages/{slug}/versions",
+  "GET /api/v1/pages/{slug}/export",
+  "GET /api/v1/pages/{slug}/document",
+  "GET /api/v1/pages/{slug}/document/checkpoints",
+  "GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}",
+  "GET /api/v1/pages/{slug}/project",
+  "GET /api/v1/pages/{slug}/project/source",
+  "GET /api/v1/pages/{slug}/project/history",
+  "GET /api/v1/pages/{slug}/project/history/{revision}",
+  "GET /api/v1/pages/{slug}/project/history/{revision}/source",
+
  "GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft",
  "PUT /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft",
+ "POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/validate",
+ "POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/publish",
+ "POST /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/unpublish",
  "GET /api/v1/workspaces/{workspaceId}/access/me",
  "POST /api/v1/auth/invitation/accept",
  "POST /api/v1/auth/cli-token",
@@ -52,6 +66,9 @@ export const RESTRICTED_FE_ENDPOINTS = [
   "POST /api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight",
   "GET /api/v1/chats/{chatId}/restricted-files",
   "GET /api/v1/chats/{chatId}/restricted-files/{fileId}/download",
+  "GET /api/v1/crews",
+  "GET /api/v1/crews/{crewId}",
+  "GET /api/v1/crews/{crewId}/access/me",
   "GET /api/v1/agents",
   "GET /api/v1/agents/{agentId}",
   "GET /api/v1/workspaces",

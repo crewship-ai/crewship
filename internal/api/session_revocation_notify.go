@@ -2,9 +2,32 @@ package api
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 )
+
+func (s *notifyingSessionStore) RevokeOthersTx(ctx context.Context, tx *sql.Tx, userID, keepID, reason string) ([]string, func(), error) {
+	store, ok := s.Store.(sessions.TransactionRevoker)
+	if !ok {
+		return nil, nil, errors.New("session store does not support atomic revocation")
+	}
+	ids, notify, err := store.RevokeOthersTx(ctx, tx, userID, keepID, reason)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ids, func() {
+		if notify != nil {
+			notify()
+		}
+		for _, id := range ids {
+			for _, n := range s.notifiers {
+				n.NotifySessionRevoked(id)
+			}
+		}
+	}, nil
+}
 
 // SessionRevocationNotifier receives an immediate, in-process signal when
 // a user session is revoked, so live transports (the WS hub's chat/event
@@ -89,4 +112,25 @@ func (s *notifyingSessionStore) RevokeAllForUser(ctx context.Context, userID, re
 		n.NotifyUserRevoked(userID)
 	}
 	return count, nil
+}
+
+func (s *notifyingSessionStore) RevokeSessionTx(ctx context.Context, tx *sql.Tx, user, id, reason string) (bool, func(), error) {
+	store, ok := s.Store.(sessions.SingleTransactionRevoker)
+	if !ok {
+		return false, nil, errors.New("session store does not support atomic revocation")
+	}
+	changed, notify, err := store.RevokeSessionTx(ctx, tx, user, id, reason)
+	if err != nil {
+		return false, nil, err
+	}
+	return changed, func() {
+		if notify != nil {
+			notify()
+		}
+		if changed {
+			for _, n := range s.notifiers {
+				n.NotifySessionRevoked(id)
+			}
+		}
+	}, nil
 }

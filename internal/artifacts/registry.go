@@ -11,15 +11,16 @@ var ErrUnavailable = errors.New("artifact adapter unavailable")
 // Format identity and supported schemas still come from the compiled Page
 // registry through Capabilities. No content can install an implementation.
 type Registry struct {
-	enabled  EnabledTypes
-	document DocumentOperations
+	enabled   EnabledTypes
+	document  DocumentOperations
+	gridcraft GridCraftOperations
 }
 
 // NewRegistry captures server flags and the concrete installed Document adapter.
 // The concrete constructor input makes nil adapters/stores unambiguous without
 // reflection or a new health/authorization protocol on every operation type.
 // Returned operations retain DocumentAdapter's own enablement checks as well.
-func NewRegistry(enabled EnabledTypes, document *DocumentAdapter) *Registry {
+func NewRegistry(enabled EnabledTypes, document *DocumentAdapter, gridcraft ...*GridCraftAdapter) *Registry {
 	r := &Registry{enabled: make(EnabledTypes, len(enabled))}
 	for id, value := range enabled {
 		r.enabled[id] = value
@@ -27,6 +28,10 @@ func NewRegistry(enabled EnabledTypes, document *DocumentAdapter) *Registry {
 	if document != nil && document.store != nil {
 		r.document = document
 		r.enabled["doc"] = r.enabled["doc"] && document.enabled
+	}
+	if len(gridcraft) == 1 && gridcraft[0] != nil && gridcraft[0].store != nil && gridcraft[0].engine != nil {
+		r.gridcraft = gridcraft[0]
+		r.enabled["gridcraft-workbook"] = r.enabled["gridcraft-workbook"] && gridcraft[0].enabled
 	}
 	return r
 }
@@ -48,7 +53,7 @@ func (r *Registry) Capabilities(typeID string, schema int) []Capability {
 	result := Capabilities(typeID, schema, enabled)
 	// A compiled implementation is supported even when no instance is installed;
 	// it must not be advertised as available just because its flag is true.
-	if typeID == "doc" && (r == nil || r.document == nil) {
+	if typeID == "doc" && (r == nil || r.document == nil) || typeID == "gridcraft-workbook" && (r == nil || r.gridcraft == nil) {
 		for i := range result {
 			if result[i].Supported {
 				result[i].Available = false
@@ -76,4 +81,11 @@ func (r *Registry) Check(typeID string, schema int, operation Operation) error {
 		return nil
 	}
 	return fmt.Errorf("%w: %s", ErrUnsupported, operation)
+}
+
+func (r *Registry) GridCraft() (GridCraftOperations, bool) {
+	if r == nil || r.gridcraft == nil || !r.enabled["gridcraft-workbook"] {
+		return nil, false
+	}
+	return r.gridcraft, true
 }

@@ -34,7 +34,7 @@ func (p *ExtractedPayload) extractServiceSnapshot(ctx context.Context, tr io.Rea
 		if _, exists := p.serviceMetadata[id]; exists {
 			return fmt.Errorf("backup: duplicate service snapshot metadata")
 		}
-		raw, err := io.ReadAll(io.LimitReader(tr, 4097))
+		raw, err := io.ReadAll(io.LimitReader(RestoreBufferedReader(ctx, tr), 4097))
 		if err != nil {
 			return err
 		}
@@ -65,7 +65,7 @@ func (p *ExtractedPayload) extractServiceSnapshot(ctx context.Context, tr io.Rea
 	if err != nil {
 		return err
 	}
-	if _, err = io.CopyN(file, tr, hdr.Size); err != nil {
+	if _, err = io.CopyN(RestoreWriter(ctx, file), tr, hdr.Size); err != nil {
 		_ = file.Close()
 		return err
 	}
@@ -92,7 +92,7 @@ func (p *ExtractedPayload) validateServiceSnapshotArchive(ctx context.Context, c
 			return err
 		}
 		h := sha256.New()
-		n, copyErr := io.Copy(h, io.LimitReader(f, meta.Bytes+1))
+		n, copyErr := io.Copy(h, io.LimitReader(&restoreReadGuard{ctx: ctx, r: f, b: readBudget(ctx), decoded: true}, meta.Bytes+1))
 		closeErr := f.Close()
 		if copyErr != nil {
 			return copyErr

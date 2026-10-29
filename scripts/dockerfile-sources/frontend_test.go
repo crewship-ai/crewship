@@ -135,8 +135,44 @@ func TestFrontendStagePreservesTypecheckAndBuildInputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A tracked input may be covered while another COPY names a directory that
+	// does not exist in this release. Docker rejects that COPY in a fresh build;
+	// ignored or untracked local files must not hide the missing source.
+	for _, source := range sources {
+		found := false
+		for _, file := range strings.Split(string(output), "\x00") {
+			if file != "" && copiedBy([]string{source}, file) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("frontend COPY source %s has no tracked input in this release", source)
+		}
+	}
 	jsonImports := regexp.MustCompile(`@/([^"'\s]+\.json)`)
 	relativeImports := regexp.MustCompile(`(?:from\s+|import\s*\(\s*)["'](\.{1,2}/[^"'\s]+\.(?:mjs|js|json))["']`)
+	// Follow shared JS modules transitively: a full checkout can otherwise hide
+	// a dependency omitted from the isolated frontend image.
+	seenModules := map[string]bool{}
+	var checkSharedModule func(string)
+	checkSharedModule = func(file string) {
+		if seenModules[file] {
+			return
+		}
+		seenModules[file] = true
+		content, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(file)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, match := range relativeImports.FindAllSubmatch(content, -1) {
+			dependency := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(file), string(match[1]))))
+			if !copiedBy(sources, dependency) {
+				t.Errorf("frontend COPY omits shared module %s referenced by %s", dependency, file)
+			}
+			checkSharedModule(dependency)
+		}
+	}
 	for _, file := range strings.Split(string(output), "\x00") {
 		if !strings.HasSuffix(file, ".ts") && !strings.HasSuffix(file, ".tsx") {
 			continue
@@ -164,6 +200,7 @@ func TestFrontendStagePreservesTypecheckAndBuildInputs(t *testing.T) {
 			if !copiedBy(sources, dependency) {
 				t.Errorf("frontend COPY omits shared module %s referenced by %s", dependency, file)
 			}
+			checkSharedModule(dependency)
 		}
 		if !copiedBy(sources, file) {
 			t.Errorf("frontend COPY omits existing TypeScript input %s", file)

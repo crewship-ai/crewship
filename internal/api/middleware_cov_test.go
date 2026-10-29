@@ -196,6 +196,9 @@ func TestRequireAuth_TouchLastUsedFailure_RequestStillSucceeds(t *testing.T) {
 	t.Parallel()
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
+	// The injected store fails only its best-effort touch. The original
+	// credential snapshot still has an authoritative, live backing row.
+	mustExec(t, db, `INSERT INTO user_sessions(id,user_id,expires_at) VALUES('sess-x',?,?)`, userID, time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano))
 	v := newCovValidator(t)
 
 	tok, err := v.IssueAccessToken(userID, "sess-x", "Test", "test@example.com")

@@ -32,7 +32,8 @@ func (w *Writer) AppendTx(ctx context.Context, tx *sql.Tx, e Entry) (func(), err
 // configured journal writer. Configured writers must use their method instead.
 // Its durable entry is discoverable by polling; no observer is configured here.
 func AppendTx(ctx context.Context, tx *sql.Tx, e Entry) (func(), error) {
-	w := &Writer{chainKey: ChainKeyFromEnv()}
+	keys, keyErr := SigningKeysForContext(ctx)
+	w := &Writer{signingKeys: keys, signingKeyError: keyErr}
 	e, err := prepareEntry(ctx, e)
 	if err != nil {
 		return nil, err
@@ -53,7 +54,12 @@ func acknowledgeTxInsert(ctx context.Context, tx *sql.Tx, expected []any) error 
 	for i := range actual {
 		dest[i] = &actual[i]
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT id,workspace_id,crew_id,agent_id,mission_id,ts,entry_type,severity,priority,actor_type,actor_id,summary,payload,refs,trace_id,span_id,expires_at,seq,prev_hash,entry_hash,priority_at_emit FROM journal_entries WHERE id=?`, expected[0]).Scan(dest...); err != nil {
+	query := `SELECT id,workspace_id,crew_id,agent_id,mission_id,ts,entry_type,severity,priority,actor_type,actor_id,summary,payload,refs,trace_id,span_id,expires_at,seq,prev_hash,entry_hash,priority_at_emit`
+	if len(expected) == 23 {
+		query += `,chain_key_id,chain_mac_version`
+	}
+	query += ` FROM journal_entries WHERE id=?`
+	if err := tx.QueryRowContext(ctx, query, expected[0]).Scan(dest...); err != nil {
 		return fmt.Errorf("journal: acknowledge transactional row: %w", err)
 	}
 	for i, v := range expected {

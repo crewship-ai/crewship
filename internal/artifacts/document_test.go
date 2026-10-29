@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/database"
@@ -73,7 +74,7 @@ func TestDocumentAdapterLifecycleAndLiveAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	versions, err := adapter.Versions(ctx, key, authorize)
-	if err != nil || len(versions) != 1 || versions[0]["id"] != "checkpoint" {
+	if err != nil || len(versions) != 2 || !strings.HasPrefix(versions[0]["id"].(string), "initial-") || versions[0]["rev"] != int64(0) || versions[1]["id"] != "checkpoint" {
 		t.Fatalf("versions %#v %v", versions, err)
 	}
 	commit := documents.Commit{Lease: lease, ID: "edit", Fingerprint: "edit-fingerprint", IfRev: 0, IfGeneration: &generation, Schema: documents.LatestSchema, Update: []byte("update"), CandidateSnapshot: []byte("edited"), Projection: create.Projection, Kind: "human"}

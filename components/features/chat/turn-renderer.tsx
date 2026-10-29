@@ -29,6 +29,7 @@ import { askProvenanceForTurn } from "./asks/ask-provenance"
 import { pageProvenanceForTurn } from "./page-provenance"
 import { AssistantTurn } from "./assistant-turn"
 import { EditableUserMessage } from "./messages/editable-user-message"
+import { RunInDocument } from "./run-in-document"
 import { CrewProvisioningCard } from "./crew-provisioning-card"
 import { useChatAgent } from "./chat-agent-context"
 import { ThinkingAvatar } from "./messages/thinking-avatar"
@@ -222,6 +223,7 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
         {authorName && (
           <div className="ml-auto mb-0.5 text-micro text-muted-foreground">{authorName}</div>
         )}
+        {workspaceId && chatId && turn.originalMessageId && turn.originalAuthorUserId && <RunInDocument workspaceId={workspaceId} chatId={chatId} messageId={turn.originalMessageId} authorId={turn.originalAuthorUserId} />}
         {onEditUserMessage && !authorName ? (
           <EditableUserMessage
             text={textContent}

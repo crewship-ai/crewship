@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/inbox"
@@ -553,7 +554,15 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		initialStatus = "PENDING_REVIEW"
 	}
 
-	_, err := h.db.ExecContext(r.Context(), `
+	// The new agent's crew membership, role and tool profile commit with
+	// their chained audit; an audit failure creates nothing.
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "begin internal create agent", err)
+		return
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(r.Context(), `
 		INSERT INTO agents (id, workspace_id, crew_id, name, slug, description, role_title, agent_role,
 			cli_adapter, llm_provider, llm_model, tool_profile, system_prompt_legacy, status,
 			timeout_seconds, memory_enabled, webhook_secret, created_at, updated_at)
@@ -567,6 +576,33 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		h.logger.Error("internal create agent", "error", err)
 		replyError(w, http.StatusInternalServerError, "failed to create agent")
 		return
+	}
+	audit := gate.auditFields()
+	audit["name"] = body.Name
+	audit["slug"] = body.Slug
+	audit["crew_id"] = body.CrewID
+	audit["initial_status"] = initialStatus
+	audit["pending_review"] = gate.held()
+	for k, v := range h.internalCallerAudit(r, wsID, body.CrewID) {
+		audit[k] = v
+	}
+	current, err := agentPrivileges(r.Context(), tx, wsID, agentID)
+	if err != nil {
+		replyInternalError(w, h.logger, "read created agent privileges", err)
+		return
+	}
+	audit["current"] = current
+	notify, err := appendAgentAudit(r.Context(), tx, h.journal, wsID, "", "agent.created", agentID, audit)
+	if err != nil {
+		replyInternalError(w, h.logger, "audit internal create agent", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit internal create agent", err)
+		return
+	}
+	if notify != nil {
+		notify()
 	}
 
 	status := http.StatusCreated
@@ -602,8 +638,7 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		if herr != nil {
 			h.logger.Error("internal create agent: autonomy hold failed — compensating delete",
 				"agent_id", agentID, "error", herr)
-			if _, derr := h.db.ExecContext(r.Context(),
-				`DELETE FROM agents WHERE id = ? AND workspace_id = ?`, agentID, wsID); derr != nil {
+			if derr := revertCreatedAgent(r.Context(), h.db, h.journal, wsID, agentID, "", "", "agent.create_reverted", "autonomy_hold_failed"); derr != nil {
 				h.logger.Error("internal create agent: compensating delete failed",
 					"agent_id", agentID, "error", derr)
 			}
@@ -624,14 +659,6 @@ func (h *InternalHandler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	// compensating-deletes the agent above) cannot strand an
 	// agent_credentials row pointing at a deleted agent.
 	autoAssignCredentials(r.Context(), h.db, h.logger, h.journal, wsID, agentID, now)
-
-	audit := gate.auditFields()
-	audit["name"] = body.Name
-	audit["slug"] = body.Slug
-	audit["crew_id"] = body.CrewID
-	audit["initial_status"] = initialStatus
-	audit["pending_review"] = gate.held()
-	WriteAuditLog(r.Context(), h.db, h.journal, "agent.created", "AGENT", agentID, "", wsID, audit)
 
 	h.logger.Info("agent created via coordinator", "agent_id", agentID, "name", body.Name,
 		"crew_id", body.CrewID, "decision", string(gate.Decision), "status", initialStatus)
@@ -763,4 +790,31 @@ func (h *InternalHandler) RecordMCPToolCall(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{"id": id})
+}
+
+// internalCallerAudit identifies the agent-side caller of an internal write
+// for forensics, from what its credentials prove rather than what it claims:
+// the workspace and crew the X-Internal-Token is bound to (empty for the
+// master token) and, when it carries a valid run token, the run and agent.
+// No token is recorded. An invalid run token is noted, not trusted.
+func (h *InternalHandler) internalCallerAudit(r *http.Request, workspaceID, crewID string) map[string]any {
+	caller := map[string]any{
+		"caller_token_workspace_id": InternalTokenWorkspaceFromContext(r.Context()),
+		"caller_token_crew_id":      InternalTokenCrewFromContext(r.Context()),
+	}
+	proof := r.Header.Get("X-Crewship-Run-Token")
+	if proof == "" {
+		return caller
+	}
+	crew := InternalTokenCrewFromContext(r.Context())
+	if crew == "" {
+		crew = crewID
+	}
+	ws, agent, run, ok := internaltoken.ValidateAgentRunToken(internaltoken.DeriveAgentRunKey(h.internalToken, workspaceID, crew), proof)
+	if !ok || ws != workspaceID {
+		caller["caller_run_token_invalid"] = true
+		return caller
+	}
+	caller["caller_run_id"], caller["caller_agent_id"] = run, agent
+	return caller
 }

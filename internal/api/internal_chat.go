@@ -1,14 +1,17 @@
 package api
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 )
 
@@ -193,7 +196,7 @@ func (h *InternalHandler) ResolveHumanChat(w http.ResponseWriter, r *http.Reques
 	userID := r.URL.Query().Get("user_id")
 	var expected *chataudience.Receipt
 	if encoded := r.URL.Query().Get("receipt"); encoded != "" {
-		if len(encoded) > 2048 {
+		if len(encoded) > 4096 {
 			replyError(w, http.StatusNotFound, "Chat not found")
 			return
 		}
@@ -203,7 +206,21 @@ func (h *InternalHandler) ResolveHumanChat(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
-	receipt, err := chataudience.CaptureTrusted(r.Context(), h.db, r.PathValue("chatId"), userID, expected)
+	var original *auth.OriginalCredential
+	if encoded := r.URL.Query().Get("source_credential"); encoded != "" {
+		if expected != nil || len(encoded) > 2048 {
+			replyError(w, http.StatusNotFound, "Chat not found")
+			return
+		}
+		raw, err := base64.RawURLEncoding.Strict().DecodeString(encoded)
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.DisallowUnknownFields()
+		if err != nil || decoder.Decode(&original) != nil || decoder.Decode(new(any)) != io.EOF || original == nil || !original.Valid() || original.UserID != userID {
+			replyError(w, http.StatusNotFound, "Chat not found")
+			return
+		}
+	}
+	receipt, err := h.originalHumanChatReceipt(r.Context(), r.PathValue("chatId"), userID, expected, original)
 	if err != nil {
 		replyInternalError(w, h.logger, "resolve human chat authority", err)
 		return

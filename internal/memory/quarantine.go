@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/literalfilter"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,6 +28,7 @@ type ScanHit struct {
 // rule is the internal scanner rule shape. Match runs the regex in
 // case-insensitive mode unless the rule body explicitly anchors.
 type rule struct {
+	filter   literalfilter.Filter
 	category string
 	name     string
 	re       *regexp.Regexp
@@ -51,46 +53,55 @@ var scannerRules = []rule{
 	{
 		category: "prompt_injection",
 		name:     "ignore_previous_instructions",
+		filter:   literalfilter.FoldedAll("ignore", "instructions"),
 		re:       regexp.MustCompile(`(?i)\bignore\s+(?:previous|all|prior)\s+instructions\b`),
 	},
 	{
 		category: "prompt_injection",
 		name:     "you_are_now",
+		filter:   literalfilter.FoldedAll("you", "are", "now"),
 		re:       regexp.MustCompile(`(?i)\byou\s+are\s+now\s+(?:DAN|[A-Z][A-Za-z]+,\s*an?\s+(?:AI|assistant|model)\s+without)`),
 	},
 	{
 		category: "prompt_injection",
 		name:     "disregard_rules",
+		filter:   literalfilter.FoldedAll("disregard"),
 		re:       regexp.MustCompile(`(?i)\bdisregard\s+(?:rules|instructions|the\s+(?:above|system|previous))\b`),
 	},
 	{
 		category: "prompt_injection",
 		name:     "html_ignore_comment",
+		filter:   literalfilter.FoldedAll("<!--", "ignore", "-->"),
 		re:       regexp.MustCompile(`(?is)<!--.*?\bignore\b.*?-->`),
 	},
 	{
 		category: "exfiltration",
 		name:     "curl_with_token",
+		filter:   literalfilter.ExactAll("curl", "$"),
 		re:       regexp.MustCompile(`curl[^\n]*\$(?:TOKEN|API_KEY|SECRET|PASSWORD|CREDENTIAL|AUTH)`),
 	},
 	{
 		category: "exfiltration",
 		name:     "cat_env_pipe_network",
+		filter:   literalfilter.FoldedAll("cat", ".env"),
 		re:       regexp.MustCompile(`(?i)\bcat\s+\.env\b[^\n]*(?:>|\|)[^\n]*(?:/dev/tcp|nc\b|curl|netcat|http)`),
 	},
 	{
 		category: "exfiltration",
 		name:     "aws_s3_exfil_ssh",
+		filter:   literalfilter.FoldedAll("aws", "s3", "cp"),
 		re:       regexp.MustCompile(`(?i)\baws\s+s3\s+cp[^\n]*(?:\.ssh|id_rsa|id_ed25519|\.aws/credentials)\b`),
 	},
 	{
 		category: "persistence",
 		name:     "authorized_keys_append",
+		filter:   literalfilter.ExactAll(">>", ".ssh/authorized_keys"),
 		re:       regexp.MustCompile(`>>\s*~?/?\.ssh/authorized_keys\b`),
 	},
 	{
 		category: "persistence",
 		name:     "crontab_register",
+		filter:   literalfilter.ExactAll("|", "crontab", "-"),
 		// Detects "<anything> | crontab -" — the canonical "install a
 		// cron job from stdin" gesture. Word boundary after the `-`
 		// would never match because `-` ends the typical line, so the
@@ -116,12 +127,14 @@ var scannerRules = []rule{
 	{
 		category: "exfiltration",
 		name:     "url_exfil_query_token",
+		filter:   literalfilter.ExactAll("http", "://", "?", "=$"),
 		// https://host[/path]?...=${TOKEN|...} OR ?...=$TOKEN
 		re: regexp.MustCompile(`https?://[^\s?]+\?[^\s=]+=\$\{?(?i:TOKEN|API_KEY|SECRET|PASSWORD|CREDENTIAL|AUTH|ENV)\b`),
 	},
 	{
 		category: "exfiltration",
 		name:     "url_exfil_path_token",
+		filter:   literalfilter.ExactAll("http", "://", "/$"),
 		// https://host/$TOKEN or https://host/path/${API_KEY}
 		// Anchored after a slash so a literal "$TOKEN" in prose
 		// without a URL doesn't match.
@@ -196,8 +209,9 @@ func ScanContent(body string) *ScanHit {
 	if hit := scanInvisibleUnicode(body); hit != nil {
 		return hit
 	}
+	view := literalfilter.NewView(body)
 	for _, r := range scannerRules {
-		if r.re.MatchString(body) {
+		if view.MayMatch(r.filter) && r.re.MatchString(body) {
 			return &ScanHit{Category: r.category, Pattern: r.name}
 		}
 	}
@@ -205,8 +219,9 @@ func ScanContent(body string) *ScanHit {
 	// substitute a single Cyrillic/Greek look-alike inside a known
 	// injection phrase (`іgnore previous instructions` etc.).
 	if folded := foldHomoglyphs(body); folded != body {
+		foldedView := literalfilter.NewView(folded)
 		for _, r := range scannerRules {
-			if r.re.MatchString(folded) {
+			if foldedView.MayMatch(r.filter) && r.re.MatchString(folded) {
 				return &ScanHit{
 					Category: r.category,
 					Pattern:  r.name + "_homoglyph",
@@ -333,10 +348,7 @@ func foldHomoglyphs(body string) string {
 const base64ScanMaxBlocks = 256
 
 func scanBase64Obfuscation(body string) *ScanHit {
-	matches := base64Block.FindAllString(body, -1)
-	if len(matches) > base64ScanMaxBlocks {
-		matches = matches[:base64ScanMaxBlocks]
-	}
+	matches := base64Block.FindAllString(body, base64ScanMaxBlocks)
 	for _, match := range matches {
 		// Strict StdEncoding; ignore decode errors (most random
 		// long base64-shaped strings won't decode cleanly).
@@ -351,8 +363,9 @@ func scanBase64Obfuscation(body string) *ScanHit {
 			continue
 		}
 		decodedStr := string(decoded)
+		decodedView := literalfilter.NewView(decodedStr)
 		for _, r := range scannerRules {
-			if r.re.MatchString(decodedStr) {
+			if decodedView.MayMatch(r.filter) && r.re.MatchString(decodedStr) {
 				return &ScanHit{
 					Category: "base64_obfuscation",
 					Pattern:  r.name + "_base64",

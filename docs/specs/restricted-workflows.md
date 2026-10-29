@@ -1,5 +1,21 @@
 # Restricted private workflows
 
+## V1 release scope
+
+Guest-initiated runs of published routines are deferred from the v1 release
+contract. Guests retain their explicitly shared View, Results, Edit and Publish
+operations on routines and drafts; publishing never starts a run. Routine
+execution in the v1 user flow is initiated by a team member or a crew trigger.
+This does not enable a trusted fallback for a Guest-published version: existing
+published-routine restrictions on generic execution and triggers still apply.
+
+A default installation has no qualified private runtime. A Guest's manual run
+request is refused with HTTP 503 and `restricted_runtime_unavailable`, without
+creating a run, chat, execution attempt or queued work. Guest execution requires
+a separately qualified runtime and an explicit operator opt-in. Existing
+implementation and qualification procedures below describe that optional
+runtime; they do not establish v1 acceptance of Guest execution.
+
 Status (2026-10-01): execution remains an explicit operator opt-in through immutable runtime image configuration. Manual routines, declared Page actions and assigned-issue preflight use the common `work` ledger and `dispatch.Dispatcher` for claims, capacity, leases and recovery. The isolated Docker manager still uses its own CLI transport; direct chat/CLI execution and provider lifecycle integration remain separate release work. This integration does not establish release-1.0 acceptance. Backup write barriers and post-recovery queue holds also apply to private dispatch. If a quiet window refuses runtime admission after a claim but before execution, the private job retains its authority and waits for the common dispatcher's bounded retry; graph failures are not automatically retried. A running private job holds its writer lease through completion, so a backup may time out and retry rather than snapshot active writes.
 
 Restricted members invoke manual routines through `POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run`. An explicit root-routine run grant is required; Guests do not need a workspace-wide `routine.run` capability. Each resolved leaf additionally requires current target-agent run authority; cross-agent delegation requires explicit delegate authority. Unsupported scripts, HTTP steps, cycles, cross-workspace targets and unavailable execution profiles fail before enqueue.
@@ -15,6 +31,79 @@ Declared Page actions use the same common dispatch ownership with private domain
 Execution is bounded to 16 agent leaves, 64 graph nodes and nesting depth four. Frozen server-selected provider slots and opaque completion proofs retain provenance across delegated calls and a return to the original agent. Revoked source authority, recipe publication or provider grants invalidate descendants. Queued work requires a live, unsuspended principal (NULL or empty suspension timestamp means active) and rechecks authority before launch and while running; uncertain interrupted execution is not automatically retried. Workspace budget reservations precede provider requests, and missing terminal usage retains the conservative debit.
 
 These projections use private context and delivery rather than shared activity streams. The routine UI selects them using the server-derived current membership access mode. Text and native execution require an explicitly installed typed adapter for the configured profile; unsupported profiles have no trusted fallback.
+
+## Guest-published routines
+
+A routine whose HEAD carries a Guest publication manifest runs only through the
+manual `POST /api/v1/workspaces/{workspaceId}/pipelines/{slug}/run` admission
+above (`crewship routine run <slug> --wait`). Page actions, issue preflight,
+schedules, webhooks, nested `call_pipeline` and resume refuse it. Admission
+recompiles the exact published version: every step must be a direct `agent_run`
+on the agent, crew and `responses_text`/`native_api_key` profile recorded at
+publication, and both the caller's grants (root-routine Run, agent Run and
+Delegate) and the publisher's frozen View/Edit/Publish and agent bindings must
+be live, with the same grant, publisher membership and issuer identities and a
+live trusted OWNER/ADMIN issuer. A run-only Guest can invoke another Guest's
+publication within both sets of grants.
+
+Run authority belongs to those grants and the accounts, not to a browser
+session or CLI token: logging out does not stop an accepted run. Every
+administrator session revocation (`POST /api/v1/admin/users/{userId}/sessions/revoke-all`,
+single-session revoke and host-side `crewship admin invalidate-sessions`) also
+writes a durable `users.access_revoked_at` marker in the same transaction, so a
+user who had already logged out is still stopped. Account recovery (web password
+reset and host-side `crewship admin reset-password`) and instance suspension
+write the same marker; reactivating the account does not revive runs accepted
+before it. A voluntary password change that signs out other sessions is treated
+like logout and does not stop runs. The acceptance time of a run is taken
+before admission reads any authority, so a revocation or withdrawal that lands
+during admission refuses it.
+
+At every step boundary, immediately before each provider call, ONE composite
+query rechecks the whole authority of the run: the origin attempt, member
+revision and account, private chat and agent profile, the caller's grants, the
+exact HEAD publication and every frozen authoring/execution binding (same grant,
+publisher membership and live trusted OWNER/ADMIN issuer), the revocation marker
+of the caller and publisher, the current provider declaration of every recorded
+agent (credential, grant, credential revision, model and profile must equal the
+manifest, so a rotated credential stops the run), the frozen recipe and provider
+slots, the dispatch lease and the run's parent attempt. A failed check stops the
+run before the next step; no further provider request is made. Published runs do
+not poll authority between boundaries: a provider call already in flight when
+authority is revoked finishes (bounded by its step timeout, capped at 5 minutes
+for published routines, and by the run deadline) and its output is discarded
+with the stopped run. The existing lease monitor still cancels a run whose
+dispatch ownership is lost. The manifest's recorded grant/key expiry is not used;
+provider slots keep their existing live expiry checks.
+
+A published run has a hard limit from its acceptance, fixed when it is
+accepted: the workspace's `guest_routine_max_run_minutes` (1-240, default 30),
+set by OWNER/ADMIN through `PATCH /api/v1/workspaces/{workspaceId}`.
+Withdrawing the publication (`POST .../restricted-routine-library/{routineId}/unpublish`,
+Publish holder or OWNER/ADMIN) refuses new runs and stops running ones with
+reason `unpublished`. It also advances the routine's publication revision, so a
+draft based on the withdrawn publication must be reloaded (409) before it can be
+published. Republishing clears the withdrawal for new runs only: the durable
+`publication_last_withdrawn_at` is never cleared, so runs accepted before the
+withdrawal stay stopped even when an identical republish reuses the same
+version. Deferred start is refused: `delay_seconds` other than 0 returns
+HTTP 422 for a published routine. Moving HEAD (republish or rollback) also stops
+an older run, as a changed recipe does for legacy runs. Results stay private to
+the run's caller; other Guests and the publisher receive the opaque 404. A
+completed run's receipt is also hidden once its authority is later revoked;
+this is accepted, the run itself is unaffected.
+
+Acceptance appends a chained `audit.entity_created` journal event
+(`action: published_run_started`) with the run, routine, version, version ID,
+authority fingerprint and publisher. A stop appends `audit.entity_updated`
+(`action: published_run_stopped`) in the same transaction as the failed state,
+with `reason` one of `grant_revoked`, `membership_changed`, `account_suspended`,
+`sessions_revoked`, `issuer_authority_lost`, `provider_changed`, `unpublished`,
+`publication_changed`, `max_duration`, `authority_changed` or
+`execution_failed`. Events carry no inputs or outputs. Exception: stopping
+never waits for the audit writer. If the stop event cannot be appended, the
+failed state still commits without it and the failure is logged; the start
+event, by contrast, is required for admission.
 
 ## Authorized routine catalog
 
@@ -115,3 +204,56 @@ shared agent capacity without retrying the graph or asserting that no paid
 request or external effect occurred. Failure before graph execution is likewise
 terminal. Failed physical cleanup and recovered start intents retain
 `needs_reconciliation` and their capacity hold until explicitly resolved.
+
+### Native bubblewrap atime compatibility
+
+The native worker retains its pinned Codex159 CLI and `--sandbox workspace-write`.
+A locally patched Debian bubblewrap0.8 package preserves all existing filesystem
+permissions and atime flags when adding read-only/nosuid/nodev flags. On Linux
+3.17 or newer, a remount with no explicit atime bits preserves the mount's atime
+policy. For noatime/nodiratime mounts the patch omits the unchanged atime bits
+from the syscall; normal relatime calls are unchanged. No container capabilities,
+seccomp or AppArmor bytes are added or changed.
+
+The package keeps Debian's authenticated security patches and uses a distinct
+`0.8.0-2+deb12u1+crewship1` version. The image includes the complete modified LGPL
+source and build recipe at `/usr/share/doc/bubblewrap/crewship-source.tar.xz`.
+The worker and Dockerfile must pin the rebuilt executable checksum before any
+candidate can pass. Build bootstrap failures are not accepted images.
+
+A disposable hosted runner reproduces the old image's resolver remount failure
+with Docker's actual autogenerated network files and unchanged container
+arguments. The patched image must execute the production canary and negative
+workspace/metadata/network/write-protection checks; SKIP fails. The publisher
+must run that canary against the exact published digest before signing it.
+Image regression tests do not release the infrastructure hold or establish
+provider-backed Guest acceptance.
+
+## Independent text worker candidates
+
+The manual `Text Worker Release` workflow (`text-worker-release.yml`) prepares
+a Linux/amd64 `responses_text` image from the exact main source after CI,
+Security and CodeQL succeed on that commit. Preparation produces the static
+runner, pinned base recipe, runner SHA-256, source/profile identity and Go/project
+license texts. It refuses an existing output directory.
+
+Publication is off by default. An explicitly authorized `publish=true` dispatch
+builds a unique `responses-text-v1-<SHA>-<run>-<attempt>` candidate under
+`ghcr.io/<owner>/crewship-restricted-text`, with provenance and SBOM. It checks
+the distributed binary checksum and legal contents and refuses critical scan
+findings and requires the actual published-digest worker accounting canary to
+execute and pass before keyless signing. The retained JSON test report refuses
+missing, skipped or failed execution. The candidate artifact records its digest,
+source, profile, runner checksum and publisher run. No mutable latest tag is
+promoted. The separate PR candidate workflow builds without publication or
+signing permissions and requires the production text-worker accounting canary
+to execute and pass against synthetic TLS data; SKIP is failure.
+
+Before runtime use, review the publisher/source and verify the immutable digest
+signature against
+`https://github.com/<owner>/<repo>/.github/workflows/text-worker-release.yml@refs/heads/main`
+and issuer `https://token.actions.githubusercontent.com`. Candidate publication
+does not approve or activate the image. Host configuration and real image
+qualification use the supported infrastructure process. Provider-backed Guest
+browser/CLI publication, run, revocation and deadline acceptance are separate
+requirements; the synthetic PR canary does not establish them.

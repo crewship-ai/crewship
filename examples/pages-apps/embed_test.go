@@ -15,8 +15,51 @@ import (
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/crewship-ai/crewship/internal/pages"
 )
+
+// The process budget covers the entire script, including Node startup,
+// eight 150ms accounting samples and the optional eight-second fleet request.
+// Keep it in sync with the shipped collect step, rather than imposing a
+// shorter deadline on a valid production execution.
+const operationsCollectorProcessTimeout = 15 * time.Second
+
+func TestOperationsCollectorProcessBudgetMatchesRoutine(t *testing.T) {
+	var routine struct {
+		Steps []struct {
+			ID             string `yaml:"id"`
+			TimeoutSeconds int    `yaml:"timeout_seconds"`
+		} `yaml:"steps"`
+	}
+	if err := yaml.Unmarshal(Routine, &routine); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range routine.Steps {
+		if step.ID == "collect" {
+			if step.TimeoutSeconds <= 0 {
+				t.Fatal("collect step must have a bounded positive timeout")
+			}
+			if got, want := operationsCollectorProcessTimeout, time.Duration(step.TimeoutSeconds)*time.Second; got != want {
+				t.Fatalf("collector test budget %s differs from shipped collect step %s", got, want)
+			}
+			return
+		}
+	}
+	t.Fatal("shipped routine has no collect step")
+}
+
+// Diagnostics must not hang again when a saturated runner killed Node.
+func operationsCollectorNodeVersion(node string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, node, "--version").Output()
+	if err != nil {
+		return "unknown (" + err.Error() + ")"
+	}
+	return strings.TrimSpace(string(out))
+}
 
 func TestOperationsCollectorPayloads(t *testing.T) {
 	node, err := exec.LookPath("node")
@@ -45,7 +88,7 @@ func TestOperationsCollectorPayloads(t *testing.T) {
 	source = strings.Replace(source, fleetURL, server.URL, 1)
 	run := func(t *testing.T) ([]byte, []byte, error) {
 		t.Helper()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), operationsCollectorProcessTimeout)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, node, "--input-type=module")
 		cmd.Stdin = strings.NewReader(source)
@@ -54,11 +97,11 @@ func TestOperationsCollectorPayloads(t *testing.T) {
 		started := time.Now()
 		out, err := cmd.Output()
 		// Cancellation is a failed test execution, not evidence that the
-		// collector rejected invalid accounting. Keep the original timeout;
-		// report its cause separately from an external kill or Node error.
+		// collector rejected invalid accounting. Report the bounded routine
+		// deadline separately from an external kill or Node error.
 		if ctx.Err() != nil {
-			t.Fatalf("collector execution after %s: context=%v, process=%v, stderr=%q",
-				time.Since(started), ctx.Err(), err, stderr.String())
+			t.Fatalf("collector execution after %s: node=%s, context=%v, process=%v, stdout=%q, stderr=%q",
+				time.Since(started), operationsCollectorNodeVersion(node), ctx.Err(), err, out, stderr.String())
 		}
 		return out, stderr.Bytes(), err
 	}
@@ -158,6 +201,15 @@ func TestOperationsCollectorPayloads(t *testing.T) {
 }
 
 func TestOperationsCollectorFleetTelemetry(t *testing.T) {
+	testOperationsCollectorFleetTelemetry(t, false)
+}
+
+func TestOperationsCollectorSlowFleetWithinRoutineBudget(t *testing.T) {
+	testOperationsCollectorFleetTelemetry(t, true)
+}
+
+func testOperationsCollectorFleetTelemetry(t *testing.T, slow bool) {
+	t.Helper()
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("Node required for collector test")
@@ -168,20 +220,34 @@ func TestOperationsCollectorFleetTelemetry(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if slow {
+			// A real local response near the optional fleet request's eight-second
+			// deadline must still publish the measured container and fleet payload.
+			timer := time.NewTimer(7 * time.Second)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-r.Context().Done():
+				return
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"crews":[{"name":"Ops","slug":"ops","available":true,"containers":[{"name":"crew-ops","kind":"crew","status":"running","cpu_percent":1.26,"memory_mb":50}]},{"name":"Quality","slug":"quality","available":false,"containers":[]}]}`))
 	}))
 	defer server.Close()
 	source := strings.ReplaceAll(string(Collector), "/sys/fs/cgroup/", filepath.ToSlash(dir)+"/")
 	source = strings.Replace(source, "http://127.0.0.1:9119/crews/telemetry", server.URL, 1)
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), operationsCollectorProcessTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, node, "--input-type=module")
 	cmd.Stdin = strings.NewReader(source)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	started := time.Now()
 	out, err := cmd.Output()
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || ctx.Err() != nil || stderr.Len() != 0 {
+		t.Fatalf("fleet collector after %s: node=%s context=%v process=%v stdout=%q stderr=%q", time.Since(started), operationsCollectorNodeVersion(node), ctx.Err(), err, out, stderr.String())
 	}
 	var payload struct {
 		Fleet struct {

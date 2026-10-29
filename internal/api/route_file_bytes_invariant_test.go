@@ -1,6 +1,8 @@
 package api
 
 import (
+	"go/scanner"
+	"go/token"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -123,42 +125,72 @@ func scanFileBytesHandlers(t *testing.T) []fileBytesHandler {
 	return found
 }
 
-// extractBraceBody returns the source text from the opening line (index
-// start, whose own brace-count is included) up to and including the line
-// that closes it, by counting braces character by character. Go source
-// inside this package does not put unbalanced braces in string literals or
-// comments in a way that would defeat this within a handler body — the same
-// assumption route_authz_invariant_test.go's neighbours make about simpler
-// line-oriented scans, traded here for something that cannot bleed into the
-// NEXT function the way a fixed-line lookahead can (see
-// readRouteWrapperLookahead's own note on that failure mode).
+// extractBraceBody returns source through the matching body brace. Go lexical
+// tokens distinguish real braces from strings, rune literals and comments, so
+// an unmatched brace in DATA cannot truncate a handler or absorb the next one.
+// Malformed source fails closed; handler discovery/classification is unchanged.
 func extractBraceBody(lines []string, start int) (string, bool) {
+	if start < 0 || start >= len(lines) {
+		return "", false
+	}
+	source := strings.Join(lines[start:], "\n")
+	file := token.NewFileSet().AddFile("handler.go", -1, len(source))
+	var scan scanner.Scanner
+	scan.Init(file, []byte(source), func(token.Position, string) {}, 0)
 	depth := 0
-	var b strings.Builder
-	for i := start; i < len(lines); i++ {
-		line := lines[i]
-		b.WriteString(line)
-		b.WriteByte('\n')
-		for _, r := range line {
-			switch r {
-			case '{':
-				depth++
-			case '}':
-				depth--
+	for {
+		pos, kind, _ := scan.Scan()
+		if scan.ErrorCount != 0 || kind == token.EOF {
+			return "", false
+		}
+		switch kind {
+		case token.LBRACE:
+			depth++
+		case token.RBRACE:
+			depth--
+			if depth < 0 {
+				return "", false
+			}
+			if depth == 0 {
+				return source[:file.Offset(pos)+1], true
 			}
 		}
-		if depth <= 0 && i > start {
-			return b.String(), true
-		}
-		// The signature line itself opens at least one brace; if depth already
-		// dropped back to 0 on that same line (a one-line body, which does not
-		// occur for these handlers but should not hang if it ever did) treat it
-		// as closed too.
-		if i == start && depth <= 0 {
-			return b.String(), true
+	}
+}
+
+func TestExtractBraceBodyIgnoresLiteralAndCommentBraces(t *testing.T) {
+	for _, tc := range []struct {
+		name, statements string
+		fileBytes        bool
+	}{
+		{"quoted opening", `_ = "{"`, false},
+		{"raw opening", "_ = `{" + "`", false},
+		{"rune opening", `_ = '{'`, false},
+		{"line comment", "// {", false},
+		{"block comment", "/* { */", false},
+		{"escaped quote", `_ = "\\\"{"`, false},
+		{"quoted closing before header", "_ = \"}\"\n w.Header().Set(\"Content-Disposition\", \"attachment\")", true},
+		{"known header control", `w.Header().Set("Content-Disposition", "attachment")`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := "// preamble {\nfunc (h *Fixture) Download(w http.ResponseWriter, r *http.Request) {\n" + tc.statements + "\n}\nfunc next() { panic(\"next-handler-sentinel\") }"
+			body, ok := extractBraceBody(strings.Split(source, "\n"), 1)
+			if !ok || !strings.HasSuffix(body, "}\n") && !strings.HasSuffix(body, "}") {
+				t.Fatalf("handler boundary not found: ok=%v body=%q", ok, body)
+			}
+			if strings.Contains(body, "next-handler-sentinel") || strings.Contains(body, "Content-Disposition") != tc.fileBytes {
+				t.Fatalf("handler classification crossed lexical boundary: %q", body)
+			}
+		})
+	}
+}
+
+func TestExtractBraceBodyRejectsIncompleteSource(t *testing.T) {
+	for _, body := range []string{"", "func x() {", "func x() { _ = \"unterminated", "func x() { /* unterminated }"} {
+		if _, ok := extractBraceBody(strings.Split(body, "\n"), 0); ok {
+			t.Errorf("accepted incomplete source %q", body)
 		}
 	}
-	return "", false
 }
 
 // TestEveryFileBytesHandlerIsClassified is the invariant: a handler that

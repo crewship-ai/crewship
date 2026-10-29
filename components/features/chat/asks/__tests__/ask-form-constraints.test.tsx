@@ -26,6 +26,7 @@ vi.mock("sonner", () => ({
   toast: { error: (m: string) => toastError(m), success: vi.fn(), info: vi.fn() },
 }))
 
+import { AskSubmissionError } from "@/lib/ask-submission-error"
 import { renderAskTemplate } from "@/lib/ask-template"
 import { useComposerStore } from "@/stores/composer-store"
 
@@ -110,7 +111,8 @@ describe("ask form constraints at submit", () => {
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
-  it("refuses a value that does not match the pattern, anchored at both ends", async () => {
+  it("preserves the sheet when the server refuses a whole-value pattern mismatch", async () => {
+    onSubmit.mockRejectedValueOnce(new AskSubmissionError("VAT ID is not in the expected format.", [{ field: "vat", code: "pattern", message: "VAT ID is not in the expected format." }]))
     renderSheet(constrained)
     fireEvent.change(screen.getByLabelText("VAT ID"), { target: { value: "xxCZ25788001xx" } })
 
@@ -118,7 +120,9 @@ describe("ask form constraints at submit", () => {
 
     await waitFor(() => expect(toastError).toHaveBeenCalled())
     expect(toastError.mock.calls[0][0]).toBe("VAT ID is not in the expected format.")
-    expect(onSubmit).not.toHaveBeenCalled()
+    expect(onSubmit).toHaveBeenCalledTimes(1)
+    expect(screen.getByLabelText("VAT ID")).toHaveValue("xxCZ25788001xx")
+    expect(screen.getByRole("alert")).toHaveTextContent("VAT ID is not in the expected format.")
   })
 
   it("refuses more answers than a multi-valued field allows", async () => {

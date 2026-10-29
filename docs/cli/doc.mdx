@@ -40,7 +40,10 @@ on a phone, use Back to chat. Modified clicks and native links open that saved
 identity in your current workspace and native editor. An unavailable document never falls back to another page or the catalog.
 If confirmation is lost,
 retry the same input with the same mutation ID. Changing that input conflicts;
-a retry never creates another document. Creation keeps the requesting human as
+a retry never creates another document, including when the connection closes
+after the document has been saved but before its response reaches the agent.
+Retry from the same live run; do not generate a replacement mutation ID.
+Creation keeps the requesting human as
 owner. A one-shot admission grants no later access. If the original human request
 explicitly includes drafting, the same live run may save further guarded drafts
 of that one new document; it receives no access to another Page.
@@ -48,6 +51,11 @@ of that one new document; it receives no access to another Page.
 An agent can also call `doc_create` in the Crewship routines MCP tools with the
 same four fields. The tool uses the same run permission and saved result; an
 exact retry can recover that result across the CLI and MCP interfaces.
+
+An admitted run of an agent added to an already running crew can create and
+draft its Document without restarting the shared crew container. The host still
+checks the run capability, the requesting human's current access and the original
+creation or drafting permission; startup roster labels do not grant access.
 
 ## `crewship doc draft`
 
@@ -187,6 +195,17 @@ The composer carries `document_creation_intent` metadata with a `submission_id`
 and `drafting: true`; it leaves the message text unchanged. The older
 `document_creation` metadata shape remains supported for existing clients.
 Sending both shapes is rejected. Text returned by a model does not grant consent.
+
+If a connection loses the reply, resending the same explicit submission key and
+request is refused as already accepted, with the original human message ID.
+Reload the conversation and inspect its saved result; the retry does not append
+a second human turn, start another run, or renew drafting permission. Reusing the
+key with different text or drafting permission is refused as a conflict. Current
+human and chat authority are checked before either refusal. A message saved
+before a consent-persistence failure remains visible, but its retry cannot mint
+permission or start a run; report the unconfirmed request instead of silently
+issuing a new key.
+
 
 The narrow command `vytvoř dokument o plánu uvedení produktu` remains a fallback.
 Its topic must be a single line containing letters, digits, spaces or hyphens;

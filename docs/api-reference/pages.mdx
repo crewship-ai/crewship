@@ -1855,7 +1855,26 @@ bounds.
 | 200 | Correct password; the page follows. |
 | 400 | Malformed JSON body. |
 | 401 | Wrong password, unknown token, or a link that carries no password — deliberately one answer through one code path, so the cases the design requires to be indistinguishable literally are. |
-| 429 | Rate limited. The limit is applied *before* the password is checked, and keyed on the token hash for an unknown token, so guessing is the case that is limited rather than the one that is not. |
+| 429 | Per-link rate limit or password-work capacity exhausted. Global and per-link concurrency admission runs before a real or dummy password check; capacity refusal is immediate with `Retry-After: 1`. Unknown links use a token hash too. |
+
+Password-work capacity is process-wide for public Pages, not a cluster-wide CPU
+quota and not a limit on other authentication endpoints. The automatic global
+limit uses `max(1, min(4, GOMAXPROCS / 2))`, with one check per link. An existing
+one-time background authentication hash warmup can overlap; a request holds its
+slot through any lazy dummy-hash lookup and synchronous comparison, including
+when its context is cancelled. The slot is released before serving the page.
+Set `auth.public_page_passwords` in YAML or the corresponding
+`CREWSHIP_PUBLIC_PAGE_PASSWORD_*` environment variables and restart to override.
+
+For an anonymous CLI request, put the JSON password body in an owner-only file
+or explicit stdin, then use the existing API command:
+
+```bash
+crewship api request POST /api/v1/public/pages/TOKEN/unlock --anonymous --input unlock.json --yes
+```
+
+The CLI reports capacity refusal as a rate-limited failure (exit 6), does not
+retry automatically, and does not attach configured credentials or workspace.
 
 ---
 
@@ -2475,7 +2494,12 @@ request; 422 invalid content; 429 temporary operation limit; 500 storage failure
 `Cache-Control: no-store`. CLI: `crewship doc patch <page-slug> --file <request.json>`.
 
 Page read and list responses include `has_document`, which identifies saved native
-document content. Page creation accepts `allow_empty: true` to stage a human-owned
+document content. They also include `has_slides` and `slides_schema`: saved Slides
+content is reported even for an unknown schema, so a viewer can refuse unsupported
+content explicitly. Pages without a saved deck return `false` and `0`. The list also carries `artifact_kind`
+(`project`, `word` or `sheet`) for a Page with a version head and `artifact_shared_version`
+for the version shared with readers; both are omitted otherwise. The latest version is not
+in the list: a reader sees only the shared version, and the artifact read decides who sees more. Page creation accepts `allow_empty: true` to stage a human-owned
 Page without panels; combining this flag with panels or a crew owner is refused.
 
 ## Saved documents from a chat
@@ -2507,3 +2531,334 @@ The index accepts `audience=personal` for explicitly private Pages owned by the 
 Optional `limit` and `offset` apply after authorization and audience filtering. The default limit is 100 when either paging parameter is present, the maximum is 500, and negative offsets become zero. With neither paging parameter the existing unpaged JSON array is preserved. `crewship api request GET /api/v1/pages --query audience=personal --query limit=20 --format json` requests a personal catalog page.
 
 The private-chat document composer shows the target personal space and its audience before submission. This view and label do not publish a Document, change its audience, enable shared-chat creation, or provide a work-folder sharing operation.
+
+## Artifact project creation
+
+The `artifact_projects` workspace feature is disabled by default. Page creation
+authority and existing workspace policy apply when it is enabled.
+
+### GET /api/v1/pages/artifacts/availability
+
+**Auth:** authenticated workspace member; CLI credentials require `pages:read`.
+**Request:** no body. Select the workspace with `workspace_id` or `X-Workspace-ID`.
+**Response:** JSON `{ "enabled": false }`, or `true` for an enabled workspace.
+**Statuses:** 200 success, 401 invalid authentication, 403 unavailable workspace
+or read scope, 500 internal failure. Availability grants no write authority.
+CLI: `crewship page artifact availability`.
+
+### POST /api/v1/pages/artifacts
+
+**Auth:** authenticated current workspace Page creation authority; CLI
+credentials require `pages:write`. The server determines the human owner.
+**Request:** JSON `slug`, `name`, `entrypoint`, complete `files` and optional
+`message`. Each file requires string `path`, `content` and `media_type`; empty
+content is valid. A new project uses `base_version: 0` when supplied. Paths must
+be unique, relative and safe. Authored HTML can use stable `artifact-`-prefixed
+element IDs for later precise selection; files are preserved as authored.
+**Response:** HTTP 201 JSON `{ "page_id": "...", "slug": "demo", "version": 1,
+"url": "/pages/demo?artifact=1&workspace_id=..." }`. The Page is private and the
+complete version commits atomically. A failure does not acknowledge a version.
+**Statuses:** 201 created, 400 invalid manifest or request, 401 invalid
+authentication, 403 missing current authority, 404 disabled feature, 409 occupied
+address, 413 request/history limit, 500 internal failure, 503 unavailable durable
+storage. Retain the candidate after a refusal. CLI:
+`crewship page artifact create demo --name "Demo" --file manifest.json`.
+
+## Artifact project versions
+
+| Method | Route | Behavior |
+| --- | --- | --- |
+| GET | `/api/v1/pages/{slug}/artifact` | Authorized snapshot; optional `version` selects retained content |
+| GET | `/api/v1/pages/{slug}/artifact/versions` | Snapshot with the authorized retained version list |
+| POST | `/api/v1/pages/{slug}/artifact/versions` | Atomically publish a complete successor manifest |
+
+**Auth:** reads apply the current Page ACL and require CLI `pages:read` scope.
+Publication requires the human owner and current `pages:write` authority.
+A read-scoped owner can read history with `can_write: false`. Other authorized
+readers receive only the shared pin and no private history or quota usage.
+**Request:** reads take a Page slug or `@page_id`, workspace selection and an
+optional positive `version` query. Publication takes the exact positive latest
+`base_version`, `entrypoint`, complete `files` and optional `message`. Every file
+requires `path`, UTF-8 `content` and `media_type`; omitted files are absent from
+the successor. Existing versions remain retained.
+**Response:** reads return `page_id`, `name`, `slug`, `origin`, `enabled`,
+`can_write`, `latest_version`, `shared_version`, `manifest`, `versions`, `quota`
+and `comments`. Publication returns `{page_id,slug,version,url,actor}` and leaves
+the shared pin unchanged. It does not retry a conflicting candidate.
+**Statuses:** 200 success; 400 invalid request or version; 401 invalid credential;
+403 missing current authority; 404 disabled, missing or inaccessible content;
+409 stale publication base; 413 publication quota/request limit; 500 internal
+failure; 503 unavailable durable storage. Keep a refused candidate locally.
+
+CLI: `crewship page artifact get demo --version 1`,
+`crewship page artifact versions demo`, and
+`crewship page artifact publish demo --base-version 1 --file manifest.json`.
+
+## Version-bound artifact project feedback (pilot)
+
+Artifact projects are disabled by default; these workspace routes return `404`
+until enabled.
+The current human owner may mutate the project; an authorized reader sees
+only the shared pin and cannot mutate it, even with an ordinary Page write grant.
+
+| Method | Path | Body / result |
+| --- | --- | --- |
+| GET | `/api/v1/pages/{slug}/artifact/comments` | No body; optional `?version=N`. Returns the same authorized, pinned `ArtifactProjectSnapshot`, including comments. |
+| POST | `/api/v1/pages/{slug}/artifact/restore` | `{base_version,version}` → a new latest version receipt; retained history and the shared pin remain. |
+| POST | `/api/v1/pages/{slug}/artifact/share` | `{base_version,version}` → `{shared_version,url}`. Page grants remain required. |
+| POST | `/api/v1/pages/{slug}/artifact/comments` | `{version,path,selector,quote,text,send_to_agent?}` → `201` with the stored comment and optional exact-version task. |
+| POST | `/api/v1/pages/{slug}/artifact/comments/{commentId}/reply` | `{text,version,needs_clarification?}` → the stored reply. |
+
+Restore and share require the exact latest `base_version`. A stale base returns
+`409`; keep the candidate and reconcile deliberately. Sharing an existing
+retained version does not grant an unrelated workspace member access.
+
+Comments require the latest version and a unique stable ID selector whose
+quoted text still matches that file. A stale version or selection returns
+`409` and stores no comment. `send_to_agent:true` queues a version-bound task;
+it does not by itself prove agent delivery. A normal reply names a newer
+retained version; `needs_clarification:true` may address the original version
+without claiming an edit. Readers cannot inspect unpublished reply metadata
+or request another private version through the comments endpoint.
+
+Snapshot comments include the required boolean `delivery_retryable`. It is true
+only for the current human owner's exact pending task on the selected latest
+version, with current Page write access and a readable private source chat,
+when no delivery message has already been accepted. Shared readers always see
+false. Claimed, answered, stale-version and already accepted tasks are not
+retryable, including the interval before an accepted message starts its run.
+The creation response conservatively returns false until a fresh snapshot read.
+
+Retry rereads this metadata before sending the same saved comment and stable
+submission ID through the existing chat admission. It does not create another
+comment or grant execution rights. Clients treat an absent field as false;
+old cached responses cannot authorize a resend.
+
+All requests use the existing Page authentication and workspace context.
+Responses include `400` for invalid input, `401` for missing authentication,
+`403` for a known reader's write, and `404` for disabled or inaccessible projects.
+Restore quota refusal is `413` and preserves retained versions. Human CLI
+commands are `page artifact comments`, `comment`, `reply`, `restore` and `share`.
+
+## Collaborative Design (disabled by default)
+
+The server `artifacts_design` feature enables standard Yjs sync and awareness.
+Slugs and immutable `@page_id` references use existing workspace Page grants.
+Nodes have stable IDs and types `frame`, `rect`, `text` or `image`. Live content
+is separate from retained snapshots; awareness is transient and never grants
+write permission. CLI equivalents are under `crewship page design`.
+
+### `POST /api/v1/pages/design`
+
+**Auth:** authenticated human with current Page creation permission and CLI
+`pages:write` scope. **Request:** JSON `{slug,name}` and workspace selection.
+**Response:** HTTP 201 `{page_id,slug,version}` for an empty Design Page and its
+initial retained version. **Statuses:** 201 created, 400 invalid input, 401
+unauthenticated, 403 missing authority, 404 disabled, 409 occupied slug, 413
+capacity, 500 persistence failure, 503 unavailable engine.
+
+### `GET /api/v1/pages/{slug}/design`
+
+**Auth:** current Page read access and CLI `pages:read` scope. **Request:** no
+body; optional positive `version` selects a retained snapshot. Editors may read
+history; readers may select only the shared pin. Without `version`, authorized
+readers see the live canvas. **Response:** `{page_id,nodes,order,can_edit,
+can_comment,version,latest_version,shared_version,authority_revision,actor,origin}`.
+`authority_revision` is an opaque string; a fresh authorized read establishes
+a new connection after rights change. `origin` is null unless available to
+the authorized editor. **Statuses:** 200 success, 400
+invalid version, 401 unauthenticated, 403 invalid scope, 404 disabled or missing
+accessible content, 500 internal failure, 503 unavailable engine.
+
+### `POST /api/v1/pages/{slug}/design/operations`
+
+**Auth:** current Page Edit permission and CLI `pages:write`; agents additionally
+need their original live run and exact selected-Page mandate. **Request:**
+`{operations:[...],message?}`. An upsert has `{op:"upsert",node:{id,...}}`; delete
+has `{op:"delete",id}`; reorder has `{op:"reorder",order:[ids]}`. Partial upserts
+preserve other fields. New nodes need type and finite geometry; supported string
+fields are `name`, `parentId`, `fill`, `text` and `src`. **Response:** committed
+`{nodes,order,version}`. Works without an open browser. **Statuses:** 200 success,
+400 invalid update, 401 unauthenticated, 403 no current Edit authority, 404
+unavailable Page, 409 concurrent head, 413 capacity, 500 persistence failure,
+503 engine unavailable. Failed publication preserves the previous live head.
+
+### `POST /api/v1/pages/{slug}/design/snapshots`
+
+**Auth:** current Page Edit and CLI `pages:write`; agents need their exact live
+mandate. **Request:** `{message?}`. **Response:** retained `{version,actor}`
+receipt; no change to the shared pin. **Statuses:** 200 success, 400 invalid
+request, 401 unauthenticated, 403 no Edit authority, 404 unavailable Page, 409
+concurrent head, 413 capacity, 500 persistence failure, 503 engine unavailable.
+
+### `GET /api/v1/pages/{slug}/design/versions`
+
+**Auth:** current Page read and CLI `pages:read`. **Request:** no body.
+**Response:** `{versions,latest_version,shared_version}`. Editors receive retained
+history; readers receive only their authorized shared snapshot. **Statuses:**
+200 success, 401 unauthenticated, 403 invalid scope, 404 unavailable Page or
+shared content, 500 internal failure.
+
+### `POST /api/v1/pages/{slug}/design/restore`
+
+**Auth:** current Page Edit and CLI `pages:write`; an agent also needs its exact
+live mandate. **Request:** `{version}` for a positive retained snapshot.
+**Response:** new retained `{version,actor}` receipt. Restore changes the live
+canvas, preserves history and leaves the shared pin unchanged. **Statuses:**
+200 success, 400 invalid request, 401 unauthenticated, 403 no Edit authority,
+404 unavailable snapshot, 409 concurrent head, 413 capacity, 500 persistence
+failure, 503 engine unavailable.
+
+### `GET /api/v1/pages/{slug}/design/comments`
+
+**Auth:** current Page read and CLI `pages:read`. **Request:** no body.
+**Response:** `{comments:[...]}` with exact version, stable node selector,
+quoted text, feedback, task status and authorized replies. Readers see only
+feedback and replies for the shared pin. **Statuses:** 200 success, 401
+unauthenticated, 403 invalid scope, 404 unavailable Page, 500 internal failure.
+
+### `POST /api/v1/pages/{slug}/design/comments`
+
+**Auth:** current Page feedback authority and CLI `pages:write`; Read and Produce
+never grant comment permission. **Request:** `{version,path:"design.json",
+selector,quote,text,send_to_agent}`. The selector is a stable node ID; an optional
+empty quote skips text matching. The node and quote are checked against the
+latest retained version, never unsaved live state. Canonical Comment grants
+allow feedback when that shared grant feature is installed; `send_to_agent`
+additionally requires Edit. **Response:** HTTP 201 stored comment and
+optional pending task. Queuing is not proof of agent delivery. **Statuses:**
+201 created, 400 invalid input, 401 unauthenticated, 403 missing feedback
+permission, 404 unavailable Page, 409 stale version or changed node, 500 internal
+failure, 503 engine unavailable.
+
+### `POST /api/v1/pages/{slug}/design/share`
+
+**Auth:** current human Page owner and CLI `pages:write`. **Request:** positive
+retained `{version}`. **Response:** `{version,shared_version}`. Existing Page
+grants remain in force; this operation never grants an unrelated caller access.
+**Statuses:** 200 success, 400 invalid request, 401 unauthenticated, 403 not the
+current owner, 404 unavailable snapshot, 409 concurrent head, 500 persistence
+failure.
+
+### `POST /api/v1/pages/{slug}/design/agent`
+
+**Auth:** current human Page owner and CLI `pages:write`. **Request:** `{chat_id}`
+for an existing private chat owned by that same human in this workspace.
+**Response:** `{origin:{chat_id,agent_id}}`. This informational origin never
+replaces a fresh message intent and exact live-run mandate. **Statuses:**
+200 success, 400 invalid request, 401 unauthenticated, 403 invalid owner/chat,
+404 unavailable Page, 500 persistence failure.
+
+### `GET /api/v1/pages/{slug}/design/ws`
+
+**Auth:** authenticated current Page reader with same-origin browser
+credentials or CLI `pages:read`; every update additionally checks current Edit
+permission under the database writer fence. **Request:** WebSocket upgrade;
+binary standard y-protocols sync and awareness messages only. **Response:**
+HTTP 101 followed by standard binary frames. Read clients may send presence and
+sync requests, never document updates. Revocation blocks writes and stops
+content delivery on the old socket. **Statuses:** 101 upgraded, 400 malformed
+upgrade, 401 unauthenticated, 403 invalid origin or scope, 404 unavailable Page,
+500 internal failure, 503 engine unavailable. Invalid protocol messages or
+revoked authority close the socket with code 1008.
+
+## Dashboard JSON collections (disabled by default)
+
+These routes require both `artifact_projects` and `artifact_dashboard_data`.
+Select the workspace with `workspace_id`; `{slug}` also accepts `@page_id`.
+
+| Method | Route | Request / result |
+| --- | --- | --- |
+| GET | `/api/v1/pages/{slug}/artifact/data` | Required `version` query; returns `{code_version,collections}` for initialized collections declared by that code manifest. |
+| GET | `/api/v1/pages/{slug}/artifact/data/{collection}` | Required `version` query; returns `{collection,code_version,documents}`. |
+| POST | `/api/v1/pages/{slug}/artifact/data/{collection}` | `{base_version,documents:[{id,ifVersion,value}]}`; returns the changed documents with their new versions. |
+
+A project code manifest declares up to 32 unique collections with
+`dashboard.json`: `{"schema_version":1,"collections":["sales"]}`. Collection and
+document IDs are 1–128 ASCII letters, digits, `_` or `-`, starting with a letter
+or digit. `value` is a JSON object. Each document response includes `id`,
+`version`, `value`, `updated_at`, `source_label` and `source_kind`; private
+account and run IDs are omitted for every reader, including owners.
+
+**Authority:** reads require current Page read access and `pages:read` scope.
+Owners may select retained code versions. Other readers must select the current
+shared pin and can read only collections declared there. Pin selection,
+declaration and current ACL are checked together in the data transaction and
+again before commit. Writes require the current human owner or an admitted
+original signed agent run with the exact Page mandate and `pages:write` scope.
+The supplied `base_version` must still be the latest code version. Clients
+cannot set attribution or timestamps.
+
+**Concurrency:** `ifVersion:0` creates a new document; otherwise it must equal
+the current document version. Counters are exact integers no greater than
+9007199254740991. A conflict rolls back the entire batch. Data changes do not
+publish code versions, change shared pins or append comment versions. Restoring
+code preserves the independently mutable datasets.
+
+**Limits:** 256 KiB JSON per document; 50 writes / 1 MiB per batch; 4096 documents
+and 8 MiB stored JSON per collection; 32 collections per Page. GET responses are
+bounded at 16 MiB, including metadata. Duplicate keys, case aliases of transport
+fields, invalid UTF-8 and excessive nesting fail closed. JSON scalar numbers in
+values are carried without conversion through floating point.
+
+**Statuses:** 200 success; 400 invalid body or version; 401 unauthenticated;
+403 current write authority denied; 404 disabled, inaccessible, missing or
+undeclared collection; 409 stale document/code base or shared pin; 413 byte/count
+limit; 500 internal failure; 503 durable transaction unavailable. Existing data
+is retained after a rejection. A collection is created by its first successful
+batch; there is no delete operation.
+
+CLI commands are `crewship page artifact data collections`, `data get` and
+`data batch`. Original-run MCP tools are `artifact_data_collections`,
+`artifact_data_read` and `artifact_data_batch`.
+## Artifact kind metadata
+
+Page lists and authenticated detail responses include `artifact_kind` for a
+versioned artifact (`project`, `dashboard`, `slides`, `word`, `sheet`, `design`) and
+`artifact_shared_version` when a shared pin exists. Dashboard classification
+requires the enabled Dashboard data backend and a valid bounded `dashboard.json`
+declaration in the selected code manifest. The current human owner uses latest
+code; other Page readers use only the current shared pin. A private latest
+Dashboard therefore does not change the kind shown to a shared Project reader.
+No artifact kind is inferred from Page names or addresses. Classification does
+not change the artifact's version storage, data authority or editor profile.
+
+### Authored Slides and PDF export
+
+The `artifact_slides` workspace flag is disabled by default and requires
+`artifact_projects`. `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true` enables the backend
+explicitly; the separate build-time UI flag is `NEXT_PUBLIC_ARTIFACT_SLIDES=true`.
+The existing artifact VersionStore and CommentQueue retain code, sharing pins,
+restores and anchored comments. No native Slides editor or storage is created.
+
+| Method | Path | Result |
+| --- | --- | --- |
+| GET | `/api/v1/pages/{slug}/artifact/slides?version=N` | `{deck,anchors}` read-only projection; at most 16 MiB. |
+| GET | `/api/v1/pages/{slug}/artifact/export.pdf?version=N` | Vector `application/pdf` attachment; at most 8 MiB. |
+
+Both operations require an explicit canonical positive version at most
+9007199254740991. Owners can select retained code versions; readers can select
+only the current shared version. Current Page credentials, workspace rights,
+run consent, feature flags, selection mode and selected source bytes are checked
+again after parsing, rendering and response encoding, before delivery. Missing
+or private reader pins return 404. Unsupported source and text overflow return
+422; resource caps return 413. Failed exports never return a partial PDF.
+
+The closed authoring profile uses `deck.json` with
+`{"schema_version":1,"order":["intro"]}` and exactly the referenced
+`slides/intro.html` files. Each authored slide has a matching section ID and
+stable element IDs. The projection uses the existing schema-1 1920×1080 deck,
+fixed embedded Go Regular font, text, rectangle, ellipse and table elements.
+Scripts, external assets, imported PDFs and supplied fonts are unsupported.
+The bounds are 100 slides, 200 elements per slide, 1000 elements total and
+2 MiB of source. Selected snapshots emit `artifact_kind:"slides"` only after
+full profile validation. Page list/detail classification reads only the bounded
+selected index and manifest references; invalid or ambiguous source retains
+ordinary Project metadata and cannot authorize a Slides preview.
+
+Original signed-run tools `artifact_slides_read` and `artifact_export_pdf` take
+only `{slug:"@pageID",version:N}` and retain the exact original human/run Page
+mandate. Requests remain bounded to 1 MiB. The PDF tool returns
+`{media_type:"application/pdf",encoding:"base64",code_version,byte_length,sha256,data}`;
+only these two tools allow the bounded 32 MiB outer response. A caller-local CLI
+output path is never forwarded to the host.

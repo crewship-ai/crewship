@@ -21,8 +21,8 @@ import (
 // "current" one.
 //
 // Version is monotonic per pipeline_id (1, 2, 3, ...). Content-hash
-// dedup at save time means re-saving already-versioned DSL creates no
-// new row — UNIQUE (pipeline_id, definition_hash) catches it and
+// dedup within the legacy authority means re-saving its archived DSL creates
+// no new row. Bounded publications retain their separate identity, and
 // head_version REPOINTS at the existing row (#996). The author fields
 // capture provenance so the diff UI can render
 // "v3 by agent xyz on 2026-05-07" rows.
@@ -71,7 +71,7 @@ func (s *Store) SaveVersion(ctx context.Context, in SaveVersionInput) (*Pipeline
 	var existingVersionNum int
 	err := s.db.QueryRowContext(ctx, `
 SELECT id, version FROM pipeline_versions
-WHERE pipeline_id = ? AND definition_hash = ?
+WHERE pipeline_id = ? AND definition_hash = ? AND authority_fingerprint = 'legacy-trusted:v1'
 LIMIT 1`, in.PipelineID, hash).Scan(&existingVersionID, &existingVersionNum)
 	if err == nil {
 		// Already exists — repoint head at the existing row (#996)
@@ -247,9 +247,10 @@ func (s *Store) Rollback(ctx context.Context, pipelineID string, targetVersion i
 	now := tsformat.Format(time.Now())
 	res, err := tx.ExecContext(ctx, `
 UPDATE pipelines
-SET head_version = ?, definition_json = ?, definition_hash = ?, updated_at = ?
+SET head_version = ?, definition_json = ?, definition_hash = ?, updated_at = ?,
+    publication_authority_fingerprint = (SELECT authority_fingerprint FROM pipeline_versions WHERE pipeline_id=? AND version=?)
 WHERE id = ? AND deleted_at IS NULL`,
-		target.Version, target.DefinitionJSON, target.DefinitionHash, now, pipelineID,
+		target.Version, target.DefinitionJSON, target.DefinitionHash, now, pipelineID, targetVersion, pipelineID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("Rollback: update pipeline: %w", err)

@@ -327,7 +327,8 @@ func stageAgentChatTranscripts(ctx context.Context, storage string, payload *Ext
 		}
 	}
 	seen := map[string]bool{}
-	tr := tar.NewReader(f)
+	tr := newRestoreTarReader(ctx, f)
+	defer tr.Close()
 	for {
 		hdr, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -370,10 +371,10 @@ func (state *transcriptRestore) prepareOne(ctx context.Context, target, source s
 			return err
 		}
 		defer temp.Close()
-		dst = temp
+		dst = RestoreWriter(ctx, temp)
 	}
 	hash := sha256.New()
-	scanner := bufio.NewScanner(src)
+	scanner := bufio.NewScanner(RestoreBufferedReader(ctx, src))
 	scanner.Buffer(make([]byte, 64<<10), 64<<20)
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {

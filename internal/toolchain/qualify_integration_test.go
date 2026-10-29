@@ -20,6 +20,15 @@ import (
 )
 
 func TestQualificationThroughDockerRuntime(t *testing.T) {
+	testQualificationThroughDockerRuntime(t, false)
+}
+
+func TestQualificationHomeInstalledCLIThroughDockerRuntime(t *testing.T) {
+	testQualificationThroughDockerRuntime(t, true)
+}
+
+func testQualificationThroughDockerRuntime(t *testing.T, homeInstalled bool) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	d, err := client.New(client.FromEnv)
@@ -45,17 +54,43 @@ func TestQualificationThroughDockerRuntime(t *testing.T) {
 	})
 	var archive bytes.Buffer
 	tw := tar.NewWriter(&archive)
-	content := []byte("#!/bin/sh\necho 'codex-cli 0.152.0'\n")
-	if err := tw.WriteHeader(&tar.Header{Name: "codex", Mode: 0755, Size: int64(len(content))}); err != nil {
-		t.Fatal(err)
+	binaryPath := "/usr/local/bin/codex"
+	if homeInstalled {
+		binaryPath = "/home/agent/.local/bin/codex"
 	}
-	if _, err := tw.Write(content); err != nil {
-		t.Fatal(err)
+	content := []byte(`#!/bin/sh
+test -w "$HOME" || exit 41
+test ! -w /home/agent || exit 42
+case "$MISE_STATE_DIR:$MISE_CACHE_DIR" in "$HOME"/*:"$HOME"/*) ;; *) exit 43;; esac
+mkdir -p "$MISE_STATE_DIR" "$MISE_CACHE_DIR" || exit 44
+echo 'codex-cli 0.152.0'
+`)
+	headers := []tar.Header{{Name: "usr/local/bin/codex", Mode: 0755, Size: int64(len(content))}}
+	if homeInstalled {
+		headers = []tar.Header{
+			{Name: "home", Typeflag: tar.TypeDir, Mode: 0755},
+			{Name: "home/agent", Typeflag: tar.TypeDir, Mode: 0700, Uid: 1001, Gid: 1001},
+			{Name: "home/agent/.local", Typeflag: tar.TypeDir, Mode: 0755, Uid: 1001, Gid: 1001},
+			{Name: "home/agent/.local/bin", Typeflag: tar.TypeDir, Mode: 0755, Uid: 1001, Gid: 1001},
+			{Name: "home/agent/.local/share", Typeflag: tar.TypeDir, Mode: 0755, Uid: 1001, Gid: 1001},
+			{Name: "home/agent/.local/bin/codex", Typeflag: tar.TypeSymlink, Linkname: "../share/codex", Mode: 0777, Uid: 1001, Gid: 1001},
+			{Name: "home/agent/.local/share/codex", Mode: 0755, Uid: 1001, Gid: 1001, Size: int64(len(content))},
+		}
+	}
+	for _, header := range headers {
+		if err := tw.WriteHeader(&header); err != nil {
+			t.Fatal(err)
+		}
+		if header.Size > 0 {
+			if _, err := tw.Write(content); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	if err := tw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := d.CopyToContainer(ctx, source.ID, client.CopyToContainerOptions{DestinationPath: "/usr/local/bin", Content: &archive}); err != nil {
+	if _, err := d.CopyToContainer(ctx, source.ID, client.CopyToContainerOptions{DestinationPath: "/", Content: &archive}); err != nil {
 		t.Fatal(err)
 	}
 	committed, err := d.ContainerCommit(ctx, source.ID, client.ContainerCommitOptions{Reference: tag})
@@ -67,7 +102,7 @@ func TestQualificationThroughDockerRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer p.Close()
-	inventory := &devcontainer.ToolchainInventory{SchemaVersion: 1, Status: "recorded", ImageID: committed.ID, Tools: []devcontainer.ToolchainTool{{Binary: "codex", Path: "/usr/local/bin/codex", Version: "0.152.0", Status: "observed"}}}
+	inventory := &devcontainer.ToolchainInventory{SchemaVersion: 1, Status: "recorded", ImageID: committed.ID, Tools: []devcontainer.ToolchainTool{{Binary: "codex", Path: binaryPath, Version: "0.152.0", Status: "observed"}}}
 	got := Qualify(ctx, p, inventory, "")
 	if got.Status != "passed" {
 		t.Fatalf("synthetic CLI qualification: %+v", got)

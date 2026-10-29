@@ -59,6 +59,7 @@ func TestPrivateArtifactConversationAudienceThroughBinary(t *testing.T) {
 	binary := filepath.Join(dir, "crewship")
 	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./cmd/crewship")
 	build.Dir = "../.."
+	build.Env = nestedGoBuildEnv(t)
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build actual binary: %v %s", err, out)
 	}

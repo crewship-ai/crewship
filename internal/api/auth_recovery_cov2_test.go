@@ -241,7 +241,7 @@ func TestCov2ARReset_UserUpdateBlocked500(t *testing.T) {
 	}
 }
 
-// --- Reset: session revoke failure → 500 with partial-success message ---
+// --- Reset: session revoke failure → 500 and atomic rollback ---
 
 func TestCov2ARReset_RevokeFailure500(t *testing.T) {
 	db := setupTestDB(t)
@@ -249,6 +249,10 @@ func TestCov2ARReset_RevokeFailure500(t *testing.T) {
 	store := sessions.NewDBStore(db)
 	h := newRecoveryHandler(t, db, &stubMailer{configured: true}, store)
 	cov2ARSeedToken(t, db, "rev@example.com", "rev-token", time.Now().Add(time.Hour))
+	var originalHash string
+	if err := db.QueryRow(`SELECT hashed_password FROM users WHERE id = ?`, userID).Scan(&originalHash); err != nil {
+		t.Fatalf("read original password: %v", err)
+	}
 	if _, err := db.Exec(`DROP TABLE user_sessions`); err != nil {
 		t.Fatalf("drop user_sessions: %v", err)
 	}
@@ -258,16 +262,22 @@ func TestCov2ARReset_RevokeFailure500(t *testing.T) {
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500 (revoke failed), body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "Password was updated") {
-		t.Errorf("body = %s, want partial-success message", rr.Body.String())
+	if strings.Contains(rr.Body.String(), "Password was updated") {
+		t.Errorf("body = %s, must not report a committed password change", rr.Body.String())
 	}
-	// Password change itself committed before the revoke failure.
 	var hashed string
 	if err := db.QueryRow(`SELECT hashed_password FROM users WHERE id = ?`, userID).Scan(&hashed); err != nil {
 		t.Fatalf("read: %v", err)
 	}
-	if hashed == "" {
-		t.Error("hashed_password empty")
+	if hashed != originalHash {
+		t.Error("password changed despite failed session revocation")
+	}
+	var proofs int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM verification_tokens WHERE token = ? AND purpose = 'password_reset'`, hashResetToken("rev-token")).Scan(&proofs); err != nil {
+		t.Fatalf("read reset proof: %v", err)
+	}
+	if proofs != 1 {
+		t.Errorf("reset proof count = %d, want 1 after rollback", proofs)
 	}
 }
 

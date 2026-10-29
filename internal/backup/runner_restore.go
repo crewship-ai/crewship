@@ -76,6 +76,11 @@ type RestoreOptions struct {
 	// to FORK the workspace under a new slug; --replace exists to
 	// REASSERT the bundle's identity over whatever the target has.
 	Replace bool
+	// DiscardWorkbooks acknowledges that Replace destroys the target
+	// workspace's experimental workbooks. Their target-only history may not
+	// appear in the incoming bundle; Replace refuses a target holding any workbook
+	// (ErrWorkbookTargetReplacement) and names the workbook Pages.
+	DiscardWorkbooks bool
 	// Logger, if set, receives human-readable progress/warning
 	// messages (e.g. "docker phase skipped …"). The CLI wires this
 	// into stderr; the REST handler can log to slog.
@@ -284,6 +289,18 @@ func warnSecurityLevelClamps(logger func(string), clamps []SecurityLevelClamp, t
 // rejected up-front because it requires cross-workspace orchestration
 // that lives outside this package.
 func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result *RestoreResult, retErr error) {
+	ctx, release, limitErr := BeginRestoreRead(ctx)
+	if limitErr != nil {
+		return nil, limitErr
+	}
+	defer release()
+	operationCtx := ctx
+	defer func() {
+		if retErr == nil {
+			retErr = restoreOperationError(operationCtx)
+		}
+	}()
+
 	if opts.Actor.UserID == "" {
 		return nil, fmt.Errorf("backup: RestoreOptions.Actor.UserID required")
 	}
@@ -307,6 +324,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// observe a DryRun — it is not a "real" restore and would skew the
 	// restored_total counter.
 	defer func() {
+		if retErr == nil {
+			retErr = restoreOperationError(operationCtx)
+		}
 		if opts.DryRun {
 			return
 		}
@@ -348,7 +368,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	}
 	defer func() { _ = f.Close() }()
 
-	manifest, sealedReader, closeBundle, err := ReadBundleStream(f)
+	manifest, sealedReader, closeBundle, err := ReadBundleStream(f, ctx)
 	if err != nil {
 		return nil, WithConvertHint(opts.Path, manifest, err)
 	}
@@ -440,6 +460,19 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		return nil, err
 	}
 	defer func() { _ = extracted.Close() }()
+	// Refuse unqualified scope transformation or history collision before any
+	// destination admission, replacement, service import or database write.
+	if !opts.FilesOnly {
+		if opts.AsWorkspace != "" || opts.AsCrew != "" {
+			if err := rejectMooringCollaborationRemap(extracted.DBDump); err != nil {
+				return nil, err
+			}
+		}
+		if err := rejectMooringCollaborationCollision(ctx, db, extracted.DBDump); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := runAdmissionBundlePreflight(ctx, db, extracted.DBDump, manifest.SchemaMigrationVersions, opts.ResumeWorkspaceID); err != nil {
 		return nil, err
 	}
@@ -480,7 +513,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// Reject replacement before dry-run success or any service/file effects.
 	// ReplaceWorkspaceContents repeats this under its deleting transaction.
 	if opts.Replace && !opts.FilesOnly && extracted.DBDump != nil {
-		if err := rejectPrivateArtifactWorkspaceReplacement(ctx, db, firstWorkspaceID(extracted.DBDump), firstWorkspaceSlug(extracted.DBDump)); err != nil {
+		if err := rejectPrivateArtifactWorkspaceReplacement(ctx, db, firstWorkspaceID(extracted.DBDump), firstWorkspaceSlug(extracted.DBDump), opts.DiscardWorkbooks); err != nil {
 			return nil, err
 		}
 	}
@@ -585,6 +618,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 	// UNIQUE collision (#2274). Non-empty only on a forked restore.
 	var capabilityTokensReminted map[string]int
 	var checkpointSourceWorkspaces []string
+	var checkpointSourceIDs []string
 	if extracted.DBDump != nil && !opts.FilesOnly {
 		for _, r := range extracted.DBDump.Tables["crews"] {
 			slug, _ := r["slug"].(string)
@@ -600,6 +634,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		for _, r := range extracted.DBDump.Tables[journalCheckpointsTable] {
 			ws, _ := r["workspace_id"].(string)
 			checkpointSourceWorkspaces = append(checkpointSourceWorkspaces, ws)
+			checkpointSourceIDs = append(checkpointSourceIDs, rowString(r, "id"))
 		}
 		if opts.AsWorkspace != "" {
 			rewriteWorkspaceSlug(extracted.DBDump, opts.AsWorkspace)
@@ -675,7 +710,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			chainProv.BundleSHA256 = manifest.Checksums.PayloadSHA256
 			chainProv.Actor = opts.Actor
 			chainProv.CheckpointSourceWorkspaces = checkpointSourceWorkspaces
-			chainStats, err := rechainForkedJournal(ctx, db, extracted.DBDump, journal.ChainKeyFromEnv(), chainProv)
+			chainProv.CheckpointSourceIDs = checkpointSourceIDs
+			auditKeys, keyErr := journal.SigningKeysForContext(ctx)
+			if keyErr != nil {
+				return nil, keyErr
+			}
+			chainStats, err := rechainForkedJournalWithKeys(ctx, db, extracted.DBDump, auditKeys, chainProv)
 			if err != nil {
 				return nil, err
 			}
@@ -797,6 +837,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		}
 		if envOutcomes == nil && opts.DryRun {
 			envOutcomes = restoreBundleEnvironments(ctx, opts, extracted, true)
+			if retErr == nil {
+				retErr = restoreOperationError(ctx)
+			}
 		}
 		result.Environments = envOutcomes
 	}()
@@ -826,6 +869,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 		// for. Never fatal — each crew reports restored, rebuilt or
 		// skipped with its reason.
 		envOutcomes = restoreBundleEnvironments(ctx, opts, extracted, false)
+		if err := restoreOperationError(ctx); err != nil {
+			return err
+		}
 		// Preflight: every target container that ACTUALLY HAS DATA in
 		// the bundle must exist before we start writing. Crews whose
 		// manifest entries report WorkspaceIncluded=false AND
@@ -1228,9 +1274,12 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 				return nil, fmt.Errorf("backup: --replace requires the bundle to carry a workspace row; this one does not")
 			}
 			preInsertSteps = append(preInsertSteps, func(ctx context.Context, tx *sql.Tx) error {
-				deleted, err := ReplaceWorkspaceContents(ctx, tx, bundleID, bundleSlug)
+				deleted, err := ReplaceWorkspaceContentsWithOptions(ctx, tx, bundleID, bundleSlug, ReplaceOptions{DiscardWorkbooks: opts.DiscardWorkbooks})
 				if err != nil {
 					return err
+				}
+				if opts.Logger != nil && deleted["gridcraft_heads"] > 0 {
+					opts.Logger(fmt.Sprintf("--replace --discard-workbooks: discarded %d target workbook(s) before restoring bundle content", deleted["gridcraft_heads"]))
 				}
 				if opts.Logger != nil && len(deleted) > 0 {
 					opts.Logger(fmt.Sprintf("--replace: wiped target workspace state before restore (%d tables touched)", len(deleted)))

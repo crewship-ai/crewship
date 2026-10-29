@@ -24,7 +24,11 @@ crewship recover --bundle b.tar.zst --passphrase-file pass.txt --data-dir ./rest
 What it does, in order:
 
 1. Verifies the bundle's checksum, then decrypts it with your key.
-2. Refuses a non-empty `--data-dir` unless `--force`.
+2. Refuses a non-empty `--data-dir` unless `--force`. With `--force` it still
+   refuses a target database that holds any workbook, naming the workbook page
+   IDs: backups never contain workbooks, so replacing the database would
+   destroy them. Save them first (`crewship workbook read`) or add
+   `--discard-workbooks` to acknowledge the loss.
 3. Writes the database and every file store — attachments and workspace files
    (`output/`), memory and its version history (`memory/`), page projects
    (`page-projects/`), chats and skills — checking each file against the
@@ -63,6 +67,7 @@ until the crews are started.
 | `--passphrase-file` | `string` | | Read the passphrase that opens the bundle from a file. |
 | `--data-dir` | `string` | | Where to write the restored instance (required). Must be empty unless `--force`. |
 | `--force` | `bool` | `false` | Allow a non-empty data directory: its database is replaced and files the bundle carries are overwritten. |
+| `--discard-workbooks` | `bool` | `false` | With `--force` only: acknowledge that workbooks in the replaced database are destroyed. Without it, a forced recovery over a database holding workbooks refuses and names their page IDs. |
 
 See [Instance backup and recovery](/guides/backup#instance-backup-and-recovery)
 for the recovery kit, the quiet window and holds.

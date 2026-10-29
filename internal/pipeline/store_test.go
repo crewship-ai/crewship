@@ -40,6 +40,8 @@ chat_origin_id TEXT,
     slug                     TEXT NOT NULL,
     name                     TEXT NOT NULL,
     description              TEXT,
+    publication_authority_fingerprint TEXT NOT NULL DEFAULT 'legacy-trusted:v1',
+    head_version             INTEGER NOT NULL DEFAULT 1,
     dsl_version              TEXT NOT NULL DEFAULT '1.0',
     definition_json          TEXT NOT NULL,
     definition_hash          TEXT NOT NULL,
@@ -125,7 +127,7 @@ func openStoreTestDB(t *testing.T) *sql.DB {
 	// the test DB behave like a single shared in-memory DB.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	if _, err := db.ExecContext(context.Background(), schemaSQL); err != nil {
+	if _, err := db.ExecContext(context.Background(), schemaSQL+versioningSchemaSQL); err != nil {
 		_ = db.Close()
 		t.Fatalf("schema: %v", err)
 	}

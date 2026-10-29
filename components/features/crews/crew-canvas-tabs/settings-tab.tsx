@@ -9,6 +9,7 @@ import { CrewPolicyControls } from "@/components/features/crews/crew-policy-cont
 import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE, isAnimatableAvatarStyle, resolveAvatarStyle } from "@/lib/agent-avatar"
 import { backfillAgentAvatars } from "@/lib/agent-avatar-persist"
 import { AvatarBackfillButton } from "@/components/features/crews/avatar-backfill-button"
+import { ResourceShareDialog } from "@/components/features/settings/resource-share-dialog"
 
 import { CanvasRow as Row } from "../canvas-base"
 import type { AgentSummary, CrewRecord } from "./types"
@@ -54,7 +55,10 @@ export function SettingsTab({
     <div className="space-y-7">
       {/* Profile */}
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Profile</h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">Profile</h2>
+          <ResourceShareDialog workspaceId={workspaceId} resource={{ kind: "crew", id: crew.id, name: crew.name }} />
+        </div>
         <div className="rounded-xl border border-foreground/8 bg-card divide-y divide-foreground/5">
           <Row label="Name">
             <EditableField value={crew.name} onSave={(v) => patch({ name: v })} ariaLabel="Name" />

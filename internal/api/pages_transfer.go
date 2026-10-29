@@ -158,7 +158,7 @@ func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	slug := r.PathValue("slug")
 
-	rec, err := h.loadPage(r.Context(), wsID, slug)
+	rec, err := h.loadPageForRead(r.Context(), wsID, slug)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			replyError(w, http.StatusNotFound, fmt.Sprintf("page %q not found", slug))
@@ -167,7 +167,7 @@ func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "load page for export", err)
 		return
 	}
-	if !h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec) {
+	if !rec.PrivateAudience && !h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec) {
 		h.refusePageAction(w, r, rec, "exporting a page requires page edit permission", "")
 		return
 	}
@@ -219,8 +219,9 @@ func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 			Panels:      make([]pageBundlePanel, 0, len(doc.Spec.Panels)),
 		},
 		Meta: pageBundleMetadata{
-			ExportedAt: h.evaluator().Now().UTC().Format(time.RFC3339),
-			PanelCount: len(doc.Spec.Panels),
+			CreatedByTest: rec.CreatedByTest,
+			ExportedAt:    h.evaluator().Now().UTC().Format(time.RFC3339),
+			PanelCount:    len(doc.Spec.Panels),
 		},
 	}
 	if project != nil {
@@ -409,6 +410,13 @@ func (h *PageHandler) Import(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(body, &req); err != nil {
 		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return
+	}
+	if req.Meta.CreatedByTest {
+		agent, _ := pageGrantCallerIsAgent(r)
+		if agent || projectAgentFrom(r.Context()) != nil {
+			replyError(w, http.StatusForbidden, "test origin requires explicit human creation")
+			return
+		}
 	}
 	if strings.TrimSpace(req.Format) != pageBundleFormat && req.Format != pages.TransferV2 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{
@@ -602,10 +610,10 @@ func (h *PageHandler) Import(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(r.Context(), `
-		INSERT INTO pages (id, workspace_id, slug, name, description, owner_user_id, owner_crew_id, spec_json, created_at, updated_at)
-		VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)`,
+		INSERT INTO pages (id, workspace_id, slug, name, description, owner_user_id, owner_crew_id, spec_json, created_at, updated_at, created_by_test)
+		VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?)`,
 		pageID, wsID, doc.Metadata.Slug, doc.Metadata.Name, doc.Metadata.Description,
-		ownerUserID, ownerCrewID, string(specJSON), now, now); err != nil {
+		ownerUserID, ownerCrewID, string(specJSON), now, now, req.Meta.CreatedByTest); err != nil {
 		if isUniqueViolation(err) {
 			replyError(w, http.StatusConflict, fmt.Sprintf(
 				"a page with slug %q already exists in this workspace; import under another slug with --slug",

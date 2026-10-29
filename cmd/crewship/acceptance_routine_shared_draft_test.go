@@ -13,7 +13,7 @@ import (
 )
 
 func TestAcceptanceGuestRoutineDraftCLI(t *testing.T) {
-	snapshot := `{"draft_id":"d1","revision":3,"base_revision":2,"name":"Client draft","description":"Reviewed notes","definition":{"steps":[],"name":"Candidate"},"can_edit":true}`
+	snapshot := `{"draft_id":"d1","revision":3,"base_revision":2,"name":"Client draft","description":"Reviewed notes","definition":{"steps":[],"name":"Candidate"},"can_edit":true,"can_publish":true}`
 	for _, method := range []string{"GET", "PUT"} {
 		for _, format := range []string{"table", "json", "yaml"} {
 			t.Run(method+"-"+format, func(t *testing.T) {
@@ -48,7 +48,7 @@ func TestAcceptanceGuestRoutineDraftCLI(t *testing.T) {
 					t.Fatalf("calls=%d err=%v output=%s", calls.Load(), err, out)
 				}
 				if format == "table" {
-					for _, column := range []string{"NAME", "DRAFT", "REVISION", "BASE", "EDIT", "Client draft", "d1", "true"} {
+					for _, column := range []string{"NAME", "DRAFT", "REVISION", "BASE", "EDIT", "PUBLISH", "Client draft", "d1", "true"} {
 						if !strings.Contains(out, column) {
 							t.Fatalf("missing %q: %s", column, out)
 						}
@@ -60,7 +60,7 @@ func TestAcceptanceGuestRoutineDraftCLI(t *testing.T) {
 					} else {
 						err = yaml.Unmarshal([]byte(out), &body)
 					}
-					if err != nil || body["draft_id"] != "d1" || body["definition"].(map[string]any)["name"] != "Candidate" || body["can_edit"] != true {
+					if err != nil || body["draft_id"] != "d1" || body["definition"].(map[string]any)["name"] != "Candidate" || body["can_edit"] != true || body["can_publish"] != true {
 						t.Fatalf("incomplete snapshot: %+v %v", body, err)
 					}
 				}

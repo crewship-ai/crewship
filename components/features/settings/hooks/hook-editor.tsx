@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useIsInstanceAdmin } from "@/hooks/use-auth"
 import { Bot, Globe, Lock, ShieldAlert, Terminal } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -36,7 +37,7 @@ const stepNo = "grid h-5 w-5 shrink-0 place-items-center rounded-full bg-primary
  *
  * What it offers follows what the server will accept and actually run:
  *   - HTTP for OWNER and ADMIN (the route is roleManage);
- *   - Shell only for OWNER (validateHandlerKind), with the warning that it
+ *   - Shell only for instance administrators (validateHandlerKind), with the warning that it
  *     runs on the Crewship host outside any container;
  *   - "Hand to an agent" is shown but not selectable: the subagent handler
  *     is never wired in this build (hooks.SetSubagentHandler has no caller),
@@ -80,13 +81,15 @@ export function HookEditor({
     if (open) { setD(fresh()); setError(null); setTouched(false); setPickEvent(!(presetEvent && !editing)) }
   }, [open, fresh, presetEvent, editing])
 
-  const isOwner = role === "OWNER"
+  const isHostAdmin = useIsInstanceAdmin() === true
+  const canManage = role === "OWNER" || role === "ADMIN"
   const set = (patch: Partial<HookDraft>) => setD((prev) => ({ ...prev, ...patch }))
   const info = d.event ? eventInfo(d.event) : null
   const problems = draftProblems(d)
   // An edit of someone else's shell hook by an ADMIN would be refused; say so
   // rather than offering a Save that 403s.
-  const shellLocked = d.kind === "shell" && !isOwner
+  const editingHost = editing?.handler_kind === "shell"
+  const shellLocked = (d.kind === "shell" || editingHost) ? !isHostAdmin : !canManage
 
   async function save() {
     setTouched(true)
@@ -168,12 +171,12 @@ export function HookEditor({
           <section aria-label="Do what">
             <h3 className={stepHead}><span className={stepNo}>2</span>Do what</h3>
             <div role="radiogroup" aria-label="Handler" className="mt-3 grid gap-2 sm:grid-cols-3">
-              <HandlerOption checked={d.kind === "http"} onPick={() => set({ kind: "http" })} icon={Globe} title="Send a webhook"
+              <HandlerOption checked={d.kind === "http"} disabled={!canManage && !editingHost} onPick={() => set({ kind: "http" })} icon={Globe} title="Send a webhook"
                 body="POST the event as JSON to a URL — Slack, PagerDuty, your own API." />
               <HandlerOption checked={false} disabled icon={Bot} title="Hand to an agent"
                 body="Not available in this build yet." note="Coming later" />
-              <HandlerOption checked={d.kind === "shell"} disabled={!isOwner} onPick={() => set({ kind: "shell" })} icon={Terminal} title="Run a command on the server" danger
-                body={isOwner ? "Runs on the Crewship host, outside any container. Owner only." : "Only the workspace owner can add a shell hook."} />
+              <HandlerOption checked={d.kind === "shell"} disabled={!isHostAdmin} onPick={() => set({ kind: "shell" })} icon={Terminal} title="Run a command on the server" danger
+                body={isHostAdmin ? "Runs on the Crewship host. Instance administrator only." : "Only an instance administrator can add or edit a host hook."} />
             </div>
           </section>
 
@@ -192,7 +195,7 @@ export function HookEditor({
                 </>
               ) : (
                 <Field label="Command" hint="sh -c on the host, 30 s timeout, event details in CREWSHIP_* variables.">
-                  <Input value={d.command} onChange={(e) => set({ command: e.target.value })} placeholder="/usr/local/bin/notify.sh" className="font-mono text-xs" aria-label="Command" disabled={!isOwner} />
+                  <Input value={d.command} onChange={(e) => set({ command: e.target.value })} placeholder="/usr/local/bin/notify.sh" className="font-mono text-xs" aria-label="Command" disabled={!isHostAdmin} />
                 </Field>
               )}
 

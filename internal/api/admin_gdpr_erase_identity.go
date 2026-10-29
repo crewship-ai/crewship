@@ -213,6 +213,12 @@ var identitySteps = []identityStep{
 	{key: "user_model_provenance_removed", deletes: true,
 		sql:  `DELETE FROM user_model_provenance WHERE workspace_id = ? AND user_id = ?`,
 		args: []identityArg{argWorkspace, argSubject}},
+	// Live workbook editor sessions: runtime state naming the subject and
+	// the sign-in or token that opened each one. The erasure ends any use
+	// of them, so they simply go.
+	{key: "gridcraft_sessions_removed", deletes: true,
+		sql:  `DELETE FROM gridcraft_sessions WHERE workspace_id = ? AND user_id = ?`,
+		args: []identityArg{argWorkspace, argSubject}},
 
 	// ── Capabilities — revoked ─────────────────────────────────────────
 	// invited_by is NOT NULL REFERENCES users(id): a pending invitation is
@@ -468,6 +474,10 @@ func (h *AdminGDPRHandler) eraseSubjectIdentity(ctx context.Context, actionID, a
 		`SELECT EXISTS (SELECT 1 FROM keeper_governance_settings WHERE workspace_id = ? AND security_contact_user_id = ?)`,
 		wsID, targetID).Scan(&contactCleared); err != nil {
 		return zeroIdentityErasure(), fmt.Errorf("read keeper security contact: %w", err)
+	}
+
+	if err := anonymiseArtifactProjectIdentity(ctx, tx, wsID, targetID); err != nil {
+		return zeroIdentityErasure(), err
 	}
 
 	bound := map[identityArg]any{argSubject: targetID, argWorkspace: wsID, argCustodian: custodian}

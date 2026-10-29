@@ -7,7 +7,7 @@ import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-li
  *
  * What it must keep true:
  *   - every member can READ the registry; every write is ADMIN+, and a shell
- *     handler OWNER only (internal/api/hooks_write.go validateHandlerKind) —
+ *     handler restricted to instance administrators (internal/api/hooks_write.go validateHandlerKind) —
  *     so the page never offers a control the server would refuse;
  *   - the "subagent" handler is never wired in this build, so it is shown but
  *     not selectable;
@@ -18,8 +18,9 @@ const api = vi.fn()
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: (...a: unknown[]) => api(...a) }))
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 vi.mock("sonner", () => ({ toast }))
-const h = vi.hoisted(() => ({ role: "ADMIN" as string | null, mobile: false }))
+const h = vi.hoisted(() => ({ role: "ADMIN" as string | null, mobile: false, instanceAdmin: false }))
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "ws1", role: h.role, loading: false }) }))
+vi.mock("@/hooks/use-auth", () => ({ useIsInstanceAdmin: () => h.instanceAdmin }))
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => h.mobile }))
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
@@ -50,7 +51,7 @@ const writes = () => api.mock.calls.filter(([, init]) => (init as RequestInit | 
 beforeEach(() => {
   api.mockReset(); toast.success.mockReset(); toast.error.mockReset()
   hooks = HOOKS
-  h.role = "ADMIN"; h.mobile = false
+  h.role = "ADMIN"; h.mobile = false; h.instanceAdmin = false
   window.history.replaceState(null, "", "/settings/hooks")
   api.mockImplementation(async (url: string, init?: RequestInit) => {
     if (init?.method) return ok({ id: "hk-new" })
@@ -118,16 +119,37 @@ describe("Hooks page — the lifecycle map", () => {
     expect(writes()[0][0]).toBe("/api/v1/hooks/hk-slack/disable?workspace_id=ws1")
   })
 
-  it("lets an ADMIN edit a webhook but not a shell hook (OWNER only)", async () => {
+  it("lets an ADMIN edit a webhook but not a shell hook (instance administrators only)", async () => {
     render(<HooksPage />)
     await openHook("hk-gate")
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull()
-    expect(screen.queryByRole("button", { name: /delete hook/i })).toBeNull()
+    expect(screen.getByRole("button", { name: /delete hook/i })).toBeInTheDocument()
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
     cleanup()
     render(<HooksPage />)
     await openHook("hk-slack")
     expect(await screen.findByRole("button", { name: "Edit" })).toBeInTheDocument()
+  })
+
+  it("shows review guidance and refuses a workspace owner re-enabling a host hook", async () => {
+    h.role = "OWNER"
+    hooks = [{ ...HOOKS[1], enabled: false, host_review_required: true }]
+    render(<HooksPage />)
+    await openHook("hk-gate")
+    expect(screen.getByRole("switch", { name: "Enable the pre_llm_call hook" })).toBeDisabled()
+    expect(screen.getByRole("status")).toHaveTextContent("instance administrator review")
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull()
+    expect(screen.getByText(/crewship hooks enable ID/)).toBeInTheDocument()
+  })
+
+  it("lets an instance administrator with MEMBER workspace role review a host hook", async () => {
+    h.role = "MEMBER"; h.instanceAdmin = true
+    hooks = [{ ...HOOKS[1], enabled: false, host_review_required: true }]
+    render(<HooksPage />)
+    await openHook("hk-gate")
+    expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: "Enable the pre_llm_call hook" })).toBeEnabled()
+    expect(screen.queryByRole("button", { name: /delete hook/i })).toBeNull()
   })
 
   it("is read-only below ADMIN", async () => {
@@ -234,12 +256,16 @@ describe("New hook", () => {
     expect(within(dialog).getByRole("switch", { name: "Block the action" })).toBeInTheDocument()
   })
 
-  it("keeps Shell for the OWNER and never offers the unwired agent handler", async () => {
+  it("keeps Shell for instance administrators and never offers the unwired agent handler", async () => {
     const dialog = await openEditor()
     expect(within(dialog).getByRole("radio", { name: "Run a command on the server" })).toBeDisabled()
     expect(within(dialog).getByRole("radio", { name: "Hand to an agent" })).toBeDisabled()
     cleanup()
     h.role = "OWNER"
+    const workspaceOwner = await openEditor()
+    expect(within(workspaceOwner).getByRole("radio", { name: "Run a command on the server" })).toBeDisabled()
+    cleanup()
+    h.instanceAdmin = true
     const owner = await openEditor()
     expect(within(owner).getByRole("radio", { name: "Run a command on the server" })).toBeEnabled()
     expect(within(owner).getByRole("radio", { name: "Hand to an agent" })).toBeDisabled()

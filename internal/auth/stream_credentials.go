@@ -36,6 +36,7 @@ type streamCredentialState struct {
 	cancel                     context.CancelFunc
 	timer                      *time.Timer
 	stopContext                func() bool
+	validate                   func(context.Context) bool
 }
 
 // Epoch captures an admission snapshot before database validation. The caller
@@ -88,7 +89,9 @@ func (r *StreamCredentials) releaseEpochLocked(epoch uint64) {
 // with no deadline; parent cancellation and revocation still apply. The caller
 // must defer the returned cleanup. Rejected admission returns a canceled tracked
 // context, so it cannot become an untracked legacy allow.
-func (r *StreamCredentials) Track(ctx context.Context, expectedEpoch uint64, userID, sessionID, tokenID string, expiresAt time.Time) (context.Context, func()) {
+// An optional fresh validator runs at each delivery fence, outside registry locks;
+// its failure cancels only this tracked context. It must use its supplied context.
+func (r *StreamCredentials) Track(ctx context.Context, expectedEpoch uint64, userID, sessionID, tokenID string, expiresAt time.Time, validate ...func(context.Context) bool) (context.Context, func()) {
 	if ctx == nil {
 		r.ReleaseEpoch(expectedEpoch)
 		ctx = context.Background()
@@ -104,13 +107,16 @@ func (r *StreamCredentials) Track(ctx context.Context, expectedEpoch uint64, use
 		r.revocations[streamRevocationKey{"user-" + kind, userID}] > expectedEpoch ||
 		r.revocations[streamRevocationKey{"account", userID}] > expectedEpoch
 	r.releaseEpochLocked(expectedEpoch)
-	if !pending || stale || ctx.Err() != nil || userID == "" ||
+	if !pending || stale || ctx.Err() != nil || userID == "" || len(validate) > 1 ||
 		(sessionID == "") == (tokenID == "") || (!expiresAt.IsZero() && !time.Now().Before(expiresAt)) {
 		r.mu.Unlock()
 		return rejectedStreamCredential(ctx)
 	}
 	child, cancel := context.WithCancel(ctx)
 	s := &streamCredentialState{userID: userID, sessionID: sessionID, tokenID: tokenID, expiresAt: expiresAt, cancel: cancel}
+	if len(validate) == 1 {
+		s.validate = validate[0]
+	}
 	s.valid.Store(true)
 	if r.active == nil {
 		r.active = make(map[*streamCredentialState]struct{})
@@ -142,7 +148,20 @@ func StreamCredentialCurrent(ctx context.Context) bool {
 	if !ok {
 		return ctx.Err() == nil
 	}
-	return s != nil && s.valid.Load() && ctx.Err() == nil && (s.expiresAt.IsZero() || time.Now().Before(s.expiresAt))
+	current := func() bool {
+		return s != nil && s.valid.Load() && ctx.Err() == nil && (s.expiresAt.IsZero() || time.Now().Before(s.expiresAt))
+	}
+	if !current() {
+		return false
+	}
+	// Never hold the registry mutex across external I/O. Notify/expiry may
+	// invalidate this same state during the check; recheck it before delivery.
+	if s.validate != nil && !s.validate(ctx) {
+		s.valid.Store(false)
+		s.cancel()
+		return false
+	}
+	return current()
 }
 
 func (r *StreamCredentials) remove(s *streamCredentialState) {

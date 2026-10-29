@@ -1,0 +1,28 @@
+[package]
+name = "smallstr"
+version = "0.3.1"
+authors = ["Murarth <murarth@gmail.com>"]
+edition = "2018"
+
+description = "String-like container based on smallvec"
+
+documentation = "https://docs.rs/smallstr/"
+homepage = "https://github.com/murarth/smallstr"
+repository = "https://github.com/murarth/smallstr"
+
+categories = ["data-structures"]
+keywords = ["small", "str", "string"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+
+[features]
+ffi = []
+std = ["serde/std"]
+union = ["smallvec/union"]
+
+[dependencies]
+serde = { version = "1.0", default-features = false, features = ["alloc"], optional = true }
+smallvec = { version = "1.1" }
+
+[dev-dependencies]
+bincode = "1.0"

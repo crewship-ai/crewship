@@ -47,6 +47,12 @@ func Capabilities(typeID string, schema int, enabled EnabledTypes) []Capability 
 		switch {
 		case !known:
 			c.Reason = "unsupported-type-or-schema"
+		case typeID == "gridcraft-workbook" && (operation == Create || operation == Read || operation == Apply):
+			c.Supported = true
+			c.Available = enabled[typeID]
+			if !c.Available {
+				c.Reason = "type-disabled"
+			}
 		case typeID != "doc" || operation == Export:
 			c.Reason = "adapter-unavailable"
 		default:

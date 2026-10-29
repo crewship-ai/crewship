@@ -113,6 +113,10 @@ func (h *PageHandler) serveRestrictedPageWorkflow(w http.ResponseWriter, req *ht
 	return true
 }
 func replyRestrictedWorkflowError(w http.ResponseWriter, err error) {
+	if errors.Is(err, restrictedworkflow.ErrPublishedDeferral) {
+		replyError(w, http.StatusUnprocessableEntity, "Published routines start immediately; delay_seconds is not supported")
+		return
+	}
 	if errors.Is(err, restrictedworkflow.ErrUnsupported) {
 		replyError(w, 400, "restricted routine declaration uses unsupported steps or resources")
 		return

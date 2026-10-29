@@ -28,7 +28,9 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	// draft with a workspace-scoped save proof; the internal test_run route
 	// serves agent authoring. Neither dispatches a real run; /run does.
 	pipes := NewPipelineHandler(r.db, r.logger, nil, nil)
+	pipes.diffs = r.diffs
 	pipes.runTokenSecret = r.internalToken
+	pipes.policyJournal = r.journal
 	pipes.restrictedWorkflow = func() *restrictedworkflow.Service { return r.restrictedWorkflow }
 	pipes.storagePath = r.storagePath
 	// The routine detail's `files` member reads the author crew's shared
@@ -72,6 +74,13 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineDraft))))
 	// openapi: responses 200,400,401,403,404,409,500
 	r.authedMut("PUT", "/api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft", roleInline, r.restrictedRoutineDraft)
+	// openapi: responses 200,400,401,403,404,409,422,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/validate", roleInline, r.routinePublicationValidate)
+	// openapi: responses 200,400,401,403,404,409,422,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/draft/publish", roleInline, r.routinePublicationPublish)
+	// Publish holder or trusted OWNER/ADMIN; checked in the writer transaction.
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/restricted-routine-library/{routineId}/unpublish", roleInline, r.routinePublicationUnpublish)
 	// 503 carries code restricted_runtime_unavailable when no private runtime is installed (#2877).
 	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/restricted-routines", authed(wsCtx(http.HandlerFunc(r.restrictedRoutineCatalog))))
@@ -137,6 +146,7 @@ func (r *Router) registerPipelineRoutes() *PipelineHandler {
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/versions/{n}", authed(wsCtx(http.HandlerFunc(pipes.GetVersion))))
 	// #1422 item 5: native version diff (`?from=N&to=M`) — unified diff of
 	// two versions' definitions, no external round-trip needed.
+	// openapi: responses 413,429
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/pipelines/{slug}/diff", authed(wsCtx(http.HandlerFunc(pipes.DiffVersions))))
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/pipelines/{slug}/rollback", roleManage, pipes.Rollback)
 	// Marketplace prep: portable JSON bundles for cross-workspace

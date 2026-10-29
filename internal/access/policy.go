@@ -80,7 +80,7 @@ func (s Store) policyIn(ctx context.Context, tx *sql.Tx, actor, user, workspace 
 		return Policy{}, err
 	}
 	p := Policy{Membership: m, Rights: []Right{}}
-	rows, err := tx.QueryContext(ctx, `SELECT g.resource_kind,COALESCE(g.agent_id,g.project_id,g.routine_id),g.operation,g.created_by,COALESCE(issuer.full_name,''),g.created_at,EXISTS(SELECT 1 FROM live_access_grants live WHERE live.id=g.id) FROM access_grants g JOIN users issuer ON issuer.id=g.created_by WHERE g.member_id=? ORDER BY g.resource_kind,COALESCE(g.agent_id,g.project_id,g.routine_id),g.operation`, m.ID)
+	rows, err := tx.QueryContext(ctx, `SELECT g.resource_kind,COALESCE(g.agent_id,g.project_id,g.routine_id,g.crew_id),g.operation,g.created_by,COALESCE(issuer.full_name,''),g.created_at,EXISTS(SELECT 1 FROM live_access_grants live WHERE live.id=g.id) FROM access_grants g JOIN users issuer ON issuer.id=g.created_by WHERE g.member_id=? ORDER BY g.resource_kind,COALESCE(g.agent_id,g.project_id,g.routine_id,g.crew_id),g.operation`, m.ID)
 	if err != nil {
 		return Policy{}, err
 	}

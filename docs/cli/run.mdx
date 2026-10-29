@@ -66,6 +66,33 @@ Fields are omitted entirely when unknown (older runs, and non-Claude adapters, w
 
 The same provenance is recorded twice more: as a `run.session_init` journal entry at session start (`crewship journal --type run.session_init`, severity `error` when a server was skipped), and on the chat's "Session started" card while the run is live. The journal entry and the run record are the durable copies — the chat card is live-stream only.
 
+## Update one existing Document
+
+With Docs enabled, read your saved personal Document with
+`crewship doc read @<page-id> --format json`. Copy its schema, revision and
+generation into a target file, using the immutable Page ID:
+
+```json
+{"submission_id":"introduction-pass-1","page_id":"<page-id>","schema":3,"rev":7,"generation":2}
+```
+
+```bash
+crewship run ada --chat <chat-id> --document-target target.json "Rewrite the introduction and preserve the rest"
+```
+
+The file is a closed JSON object of at most 1024 bytes. The server checks your
+current authority and retains this explicit purpose before admitting the run.
+Only your own native personal Document in your own private chat is supported;
+shared, folder, crew and application targets require a different workflow.
+The Document retains its existing private audience, including workspace owners.
+Interactive, plan and restricted runs cannot use this flag. Ordinary follow-up
+text and Page context do not authorize an update.
+
+A stale revision or revoked permission stops the edit. Keep the original target
+packet when investigating an uncertain result; check the saved Document before
+starting another run. Reopen its Latest panel to see the saved revision. The
+browser composer’s targeted Update action is not enabled by this CLI slice.
+
 ## Flags
 
 | Flag | Default | Effect |
@@ -74,6 +101,7 @@ The same provenance is recorded twice more: as a `run.session_init` journal entr
 | `--interactive` | `false` | Drop into a REPL after the first prompt. Ctrl-D exits, Ctrl-C cancels the current turn. |
 | `--project-file-version <version-id>` | (unset) | Explicit immutable project input for a restricted native run; repeat up to 16 times. Trusted runs reject this selection. |
 | `--chat <chat-id>` | (unset) | Continue an existing chat instead of creating one. |
+| `--document-target <file>` | (unset) | Explicit original Document target for one trusted, non-interactive update in an existing private chat. |
 | `--no-stream` | `false` | Wait for completion and print the final text only. |
 | `--wait` | `false` | Alias for `--no-stream` — same spelling as `crewship pipeline run --wait` / `crewship hire --wait` / `crewship mission start --wait`, for scripts that want one consistent "block until done" flag across commands. |
 | `--max-turns <n>` | `0` | Cap the agent loop at N turns for this run (`0` = adapter default, `50` interactive). |

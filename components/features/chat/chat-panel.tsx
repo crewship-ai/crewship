@@ -1,8 +1,11 @@
 "use client"
 
+import { useArtifactProjectAvailability } from "@/hooks/use-artifact-project-availability"
+
+import Link from "next/link"
 import { useAttachmentScope } from "@/hooks/use-attachment-scope"
 import { ChatSessionSource } from "./chat-session-source"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { AnimatePresence } from "motion/react"
 import {
   Bot,
@@ -73,6 +76,10 @@ import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 import { ArtifactContextCards, type OpenLinked } from "./artifact-context/artifact-context-cards"
 import { ArtifactLibraryHost } from "./artifact-context/artifact-library-host"
 import { LinkedArtifactPanel, type LinkedActive } from "./artifact-context/linked-artifact-panel"
+import { ArtifactViewerProvider, type ArtifactViewerTarget } from "./artifact-context/projects/artifact-viewer-context"
+import { artifactCommentMessage, type ArtifactAgentRequest } from "./artifact-context/viewer/agent-dispatch"
+import { ArtifactViewerPanel } from "./artifact-context/viewer"
+import { chatArtifactProjects } from "@/lib/feature-flags"
 import { ComposerArtifactContextStrip } from "./artifact-context/composer/composer-artifact-context"
 import { useComposerArtifactState } from "./artifact-context/use-composer-artifact-state"
 import { useServerConfirmedPrivate } from "./artifact-context/use-server-chat-visibility"
@@ -117,6 +124,10 @@ function getWsUrl(): string {
 interface ChatPanelProps {
   agentId: string
   sessionId: string
+  /** The caller minted `sessionId` itself and nothing has been sent into it,
+   *  so the server has no row for it yet. Read once, at mount: the panel then
+   *  requests nothing chat-scoped until its first send creates the row. */
+  draft?: boolean
   agentName?: string
   /** Canonical agent slug used to build URLs (`/chat/[agentSlug]`).
    *  Required because SlashPalette commands like /new-session navigate
@@ -199,7 +210,7 @@ export function ChatPanel(props: ChatPanelProps) {
   return parent ? <ChatPanelBody {...props} /> : <QueryClientProvider client={client}><ChatPanelBody {...props} /></QueryClientProvider>
 }
 
-function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, agentMeta, sessionKind = "direct", initialInput, autoSendInitial, pageContextSlug, mobilePanel, onSend, onReplySettled, onNewConversation, onMobilePanelChange }: ChatPanelProps) {
+function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, agentMeta, sessionKind = "direct", initialInput, autoSendInitial, pageContextSlug, mobilePanel, onSend, onReplySettled, onNewConversation, onMobilePanelChange }: ChatPanelProps) {
   const suggestionPack = getSuggestions(agentRole, suggestedPrompts)
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
@@ -262,9 +273,19 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   // was memoised. Scoped keys prevent another viewer/workspace from reusing
   // existence evidence after the panel context changes.
   const confirmedRowsRef = useRef<Set<string>>(new Set())
+  // A draft the caller minted has no row, so every chat-scoped read of it
+  // would ask for a resource that does not exist (#4369). It stays a draft
+  // until ensureSession creates the row; the panel is remounted per session.
+  const [isDraft] = useState(!!draft)
   // In-flight create per viewer/workspace/session, so two sends in the same tick (a
   // suggestion chip plus a fast Enter) share one POST — and one re-subscribe.
   const createInFlightRef = useRef<Map<string, Promise<boolean>>>(new Map())
+  // Scopes whose create the server refused (403/404: someone else's session ID,
+  // or one that is gone). Arriving cannot tell a draft from such a chat, so the
+  // refusal is the first definitive answer; the ref serves the click-time read,
+  // the state the notice.
+  const refusedRowsRef = useRef<Set<string>>(new Set())
+  const [refusedScopes, setRefusedScopes] = useState<ReadonlySet<string>>(() => new Set())
 
   // Cutoff: turns whose timestamp is BEFORE this number skip the arrival
   // animation. Bumped on every session swap so loaded-from-history turns
@@ -338,6 +359,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   const session = useSession()
   const currentUserId = session.data?.user?.id ?? null
   const documentsAvailability = useDocumentsAvailability(currentUserId ? workspaceId ?? "" : "")
+  const artifactProjectAvailable = useArtifactProjectAvailability(currentUserId ? workspaceId ?? "" : "")
   const artifactScope = JSON.stringify([currentUserId, workspaceId, agentId, sessionId])
   const artifactContextNonce = useRef(0)
   const [artifactContext, setArtifactContext] = useState<{ id: number; text: string; scope: string } | null>(null)
@@ -368,12 +390,14 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     return () => { soundScopeRef.current = null }
   }, [soundIdentity])
   const onAgentReplyCompleted = useCallback((reply: { sessionId: string; repliedAt: string }) => {
+    // Reload canonical IDs/authors after completion; never match an own echo by text.
+    if (reply.sessionId === sessionId) requestHistoryReload()
     if (!soundScope || reply.sessionId !== sessionId || sessionKind !== "direct") return
     void playSoundOnce(soundScope, {
       key: `agent-reply:${reply.sessionId}:${Date.parse(reply.repliedAt)}`,
       category: "chat",
     }, () => soundScopeRef.current === soundIdentity)
-  }, [soundScope, soundIdentity, sessionId, sessionKind])
+  }, [soundScope, soundIdentity, sessionId, sessionKind, requestHistoryReload])
 
   // The server's echo of our own message is what spends a targeted-edit intent (set once the artifact composer state exists).
   const artifactEchoRef = useRef<(content: string, metadata?: Record<string, unknown>) => void>(() => {})
@@ -409,6 +433,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     setProfileProbeSettled(false)
     setSharedRestrictedChat(false)
     if (!sessionId || !workspaceId || !currentUserId) return
+    // Nothing to probe: the answer for a draft is known, and the first send
+    // reads the profile right after it creates the row (ensureSessionForSend).
+    if (isDraft) { setProfileProbeSettled(true); return }
     const sessionSegment = encodeApiPathSegment(sessionId)
     if (!sessionSegment) return
     const controller = new AbortController()
@@ -421,7 +448,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       if (profile.mode === "trusted" || profile.mode === "restricted") {executionProfileRef.current = profile.mode;setExecutionProfile(profile.mode);setSharedRestrictedChat(profile.mode === "restricted" && profile.audience === "group")}
     }).catch(() => {}).finally(() => { if (!controller.signal.aborted && currentChatReadScopeRef.current === chatReadScope) setProfileProbeSettled(true) })
     return () => controller.abort()
-  }, [sessionId,workspaceId,currentUserId,chatReadScope])
+  }, [sessionId,workspaceId,currentUserId,chatReadScope,isDraft])
 
   const { turns, sendMessage, stopGeneration, stopping, regenerateLastTurn, editAndResend, loadHistory, markHistoryUnavailable, markHistoryDenied, historyDenied, resubscribeSession, isStreaming, connectionStatus, connectionReason, retryConnection } = useChat({
     canSend: canChat,
@@ -489,11 +516,25 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         toast.error(sizeCheck.message)
         return false
       }
-      if (sendMessage(text, withPage) === false) {
+      // The durable user_message receipt consumes Page context synchronously,
+      // before an Ask send's confirmation promise resolves.
+      const pendingText = text.trim()
+      pendingPageSendRef.current = pendingText
+      const clearPending = () => {
+        if (pendingPageSendRef.current === pendingText) pendingPageSendRef.current = null
+      }
+      let sent
+      try { sent = sendMessage(text, withPage) }
+      catch (error) { clearPending(); throw error }
+      if (sent instanceof Promise) return sent.then((accepted) => {
+        if (!accepted) clearPending()
+        return accepted
+      }, (error: unknown) => { clearPending(); throw error })
+      if (sent === false) {
+        clearPending()
         toast.error("Not connected — your message is still here. Try again when chat reconnects.")
         return false
       }
-      pendingPageSendRef.current = text.trim()
       return true
     } else {
       const sent = metadata ? sendMessage(text, metadata) : sendMessage(text)
@@ -525,12 +566,21 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     // re-runs when workspaceId arrives) rather than firing a doomed request.
     historySignatureRef.current = null
     if (!sessionId || !workspaceId) return
+    // A draft's history is empty by definition. Settle it without asking; a
+    // reload requested after the first send has a row to read.
+    if (isDraft && !confirmedRowsRef.current.has(chatReadScope)) {
+      historySignatureRef.current = messagesSignature([])
+      loadHistory([])
+      setHistoryLoading(false)
+      return
+    }
     const sessionSegment = encodeApiPathSegment(sessionId)
     if (!sessionSegment) return
     let cancelled = false
 
     type HistoryMessage = {
       id: string
+      author_user_id?: string
       role: string
       content: string
       parts?: HistoryPart[]
@@ -614,6 +664,8 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       // session — so visible turns swap cleanly between sessions.
       loadHistory(messages.map((m) => ({
         id: m.id,
+        originalMessageId: m.role === "user" ? m.id : undefined,
+        originalAuthorUserId: m.role === "user" ? m.author_user_id : undefined,
         role: m.role as "user" | "assistant" | "system" | "tool",
         content: m.content,
         parts: m.parts,
@@ -627,7 +679,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
     void run()
     return () => { cancelled = true }
-  }, [sessionId, workspaceId, chatReadScope, loadHistory, markHistoryUnavailable, markHistoryDenied, historyReloadNonce])
+  }, [sessionId, workspaceId, chatReadScope, isDraft, loadHistory, markHistoryUnavailable, markHistoryDenied, historyReloadNonce])
 
   // No WebSocket for this chat — a restricted chat never opens one, and a
   // restricted account has none at all — so messages this tab did not send
@@ -650,6 +702,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   const [participantNames, setParticipantNames] = useState<Record<string, string>>({})
   // What this session's participants read said, for this session only. Nothing is assumed from a missing or failed read.
   const [participantsLoad, setParticipantsLoad] = useState<ParticipantsLoad | null>(null)
+  // A draft has participants once its first send has created the row and
+  // resolved the profile; until then there is nothing to read.
+  const participantsReadable = !isDraft || executionProfile !== "pending"
   const participantsScope = `${workspaceId ?? ""}:${sessionId ?? ""}`
   const privacyInput = { scope: participantsScope, sessionKind, sharedRestricted: sharedRestrictedChat, probeSettled: profileProbeSettled, profileKnown: executionProfile !== "pending", participants: participantsLoad, currentUserId }
   const privacyInputRef = useRef(privacyInput)
@@ -670,6 +725,10 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     const prepared = prepareArtifactSend(text, metadata, deriveChatPrivacy({ ...privacyInputRef.current, now: refreshParticipantsRef.current ? Date.now() : undefined }))
     if (!prepared.ok) { toast.error(prepared.message); return false }
     const sent = sendMessageWithPage(text, prepared.metadata)
+    if (sent instanceof Promise) return sent.then((accepted) => {
+      if (accepted) artifactMarkSent(text, prepared.intent)
+      return accepted
+    })
     if (sent !== false) artifactMarkSent(text, prepared.intent)
     return sent
   }, [prepareArtifactSend, artifactMarkSent, sendMessageWithPage])
@@ -677,7 +736,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     // A different session never inherits the previous one's participants.
     setParticipantNames({})
     setParticipantsLoad(null)
-    if (!sessionId || !workspaceId) return
+    if (!sessionId || !workspaceId || !participantsReadable) return
     const sessionSegment = encodeApiPathSegment(sessionId)
     if (!sessionSegment) return
     let cancelled = false
@@ -702,7 +761,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     const interval = refreshParticipants ? window.setInterval(load, PARTICIPANTS_MAX_AGE_MS / 2) : null
     if (refreshParticipants) window.addEventListener("focus", load)
     return () => { cancelled = true; if (interval !== null) window.clearInterval(interval); window.removeEventListener("focus", load) }
-  }, [sessionId, workspaceId, refreshParticipants])
+  }, [sessionId, workspaceId, refreshParticipants, participantsReadable])
 
   const resolveAuthorName = useCallback(
     (userId: string): string | null => {
@@ -766,7 +825,11 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           `/api/v1/agents/${requireApiPathSegment(agentId)}/chats?workspace_id=${encodeURIComponent(workspaceId)}`,
           { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: sid, origin: "UI" }) },
         )
-        if (!res.ok) return false
+        if (!res.ok) {
+          if (res.status === 403 || res.status === 404) { refusedRowsRef.current.add(chatReadScope); setRefusedScopes(new Set(refusedRowsRef.current)) }
+          return false
+        }
+        if (refusedRowsRef.current.has(chatReadScope)) { refusedRowsRef.current.delete(chatReadScope); setRefusedScopes(new Set(refusedRowsRef.current)) }
         confirmedRowsRef.current.add(chatReadScope)
         if (currentChatReadScopeRef.current !== chatReadScope) return false
         // The conversation begins here, not at mount: a draft session is a URL
@@ -826,7 +889,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         else {
           const profile = await response.json() as {mode:string;audience?:string}
           if (currentChatReadScopeRef.current !== chatReadScope) return false
-          // A draft's mount probe answered 404, so this authoritative answer is
+          // A draft has no mount probe (or, for an older row, it 404ed), so this answer is
           // the first one for the scope; without it chat-scoped reads (linked
           // issues, proposals, decisions) stay off until a reload.
           if (profile.mode === "trusted") setVerifiedChatScope(chatReadScope)
@@ -844,7 +907,9 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     if (ok && executionProfileRef.current === "trusted") ok = await waitForConnection(sid)
     if (currentChatReadScopeRef.current !== chatReadScope) return false
     if (!ok) {
-      toast.error("Couldn't start this conversation. Check your connection and try again.")
+      toast.error(refusedRowsRef.current.has(chatReadScope)
+        ? "This conversation isn't available to you. Start a new chat to continue."
+        : "Couldn't start this conversation. Check your connection and try again.")
     }
     return ok
   }, [canChat,waitingForSignIn,ensureSession,sessionId,workspaceId,chatReadScope,waitForConnection])
@@ -1118,8 +1183,30 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     setDocumentExpanded(false)
     setLinked({ target, title, scope: artifactScope, activation: ++documentActivation.current })
   }, [artifactContextOn, workspaceId, artifactScope])
-  const viewerOpen = Boolean(documentTarget || linkedTarget)
-  const viewerPanel = linkedTarget && workspaceId && sessionId && currentUserId
+  // Artifact project cards and their side viewer (build flag + server availability, both default off).
+  const artifactProjectsOn = chatArtifactProjects() && verifiedChatReadScope && Boolean(workspaceId && currentUserId)
+  const [project, setProject] = useState<{ target: ArtifactViewerTarget; scope: string } | null>(null)
+  const projectTarget = artifactProjectsOn && project?.scope === artifactScope ? project.target : null
+  const changeProject = useCallback((target: ArtifactViewerTarget | null) => {
+    if (target) { setDocumentPreview(null); setLinked(null) }
+    setProject(target ? { target, scope: artifactScope } : null)
+  }, [artifactScope])
+  // Opening a saved document or linked item replaces the project in the one side pane.
+  useEffect(() => { if (documentPreview || linked) setProject(null) }, [documentPreview, linked])
+  // A comment saved for the agent starts its run here, in the chat that holds the project.
+  const sendCommentToAgent = useCallback(async ({ pageId, comment }: ArtifactAgentRequest) => {
+    const { text, metadata } = artifactCommentMessage(pageId, comment)
+    return (await sendMessageWithPage(text, metadata)) !== false
+  }, [sendMessageWithPage])
+  // The provider stays mounted under the build flag: toggling it with access
+  // would change the root element and remount the whole chat (composer, scroll).
+  const withProjects = (node: ReactNode) => chatArtifactProjects()
+    ? <ArtifactViewerProvider workspaceId={workspaceId ?? ""} enabled={artifactProjectsOn} target={projectTarget} onTargetChange={changeProject} sendToAgent={sendCommentToAgent}>{node}</ArtifactViewerProvider>
+    : node
+  const viewerOpen = Boolean(documentTarget || linkedTarget || projectTarget)
+  const viewerPanel = projectTarget
+    ? <ArtifactViewerPanel variant={mobilePanel === "chat" ? "fullscreen" : "pane"} />
+    : linkedTarget && workspaceId && sessionId && currentUserId
     ? <LinkedArtifactPanel workspaceId={workspaceId} chatId={sessionId} currentUserId={currentUserId} active={linkedTarget} links={conversationLinks.links}
       layout={mobilePanel === "chat" ? "mobile" : "side"} expanded={documentExpanded} onExpandedChange={setDocumentExpanded} openerRef={documentOpener}
       onSwitch={(target, title) => setLinked(previous => previous && { ...previous, target, title, activation: ++documentActivation.current })}
@@ -1407,7 +1494,17 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
     </Conversation>
   )
 
-  const prepareProjectInputs = executionProfile === "pending" && sessionKind === "direct" && currentUserId && sessionId && workspaceId ? (
+  const conversationUnavailable = refusedScopes.has(chatReadScope)
+  const unavailableNotice = conversationUnavailable ? (
+    <div role="alert" className="mx-4 mb-2 rounded-md border p-3 text-sm">
+      <p>This conversation isn&apos;t available to you. It may be private to someone else, or it no longer exists. Your draft is still in the box below.</p>
+      {onNewConversation
+        ? <button type="button" onClick={onNewConversation} className="mt-1 inline-flex items-center font-medium underline underline-offset-2 coarse:min-h-[44px]">Start a new chat</button>
+        : <Link href={`/chat/${encodeURIComponent(agentSlug)}?new=1`} className="mt-1 inline-flex items-center font-medium underline underline-offset-2 coarse:min-h-[44px]">Start a new chat</Link>}
+    </div>
+  ) : null
+
+  const prepareProjectInputs = !conversationUnavailable && executionProfile === "pending" && sessionKind === "direct" && currentUserId && sessionId && workspaceId ? (
     <div className="px-4 pb-2">
       <Button variant="outline" size="sm" className="coarse:min-h-[44px]" disabled={preparingProjectInputs || isStreaming} onClick={async () => {
         setPreparingProjectInputs(true)
@@ -1429,9 +1526,11 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
       <div className="relative h-full">
         {mobileDecisionPanel}
         <RightPanel
-          key={`${workspaceId}:${agentId}:${sessionId}`}
+          key={`${currentUserId}:${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
           workspaceId={workspaceId}
+          chatId={sessionId}
+          viewerId={currentUserId}
           initialTab={mobilePanel}
           workHeader={waitingForYou}
           style={{ width: "100%", height: "100%" }}
@@ -1442,7 +1541,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
   }
 
   if (mobilePanel === "chat") {
-    return (
+    return withProjects(
       <div className="relative flex flex-col h-full">
         <div className="flex min-h-0 flex-1 flex-col" style={{ display: viewerOpen ? "none" : undefined }} inert={viewerOpen}>
         {mobileIssuePanel}{mobileProposalPanel}{mobileDecisionPanel}
@@ -1490,6 +1589,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
             />
           </div>
         )}
+        {unavailableNotice}
         {prepareProjectInputs}
         {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {pageContextChip}
@@ -1501,6 +1601,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           sessionId={sessionId}
           agentName={agentName}
           documentCreationEnabled={documentsAvailability.data === true && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
+          artifactCreationEnabled={artifactProjectAvailable && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
           variant="mobile"
           mentionMembers={mentionMembers}
           isStreaming={isStreaming}
@@ -1549,7 +1650,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
 
   // Desktop: chat + icon rail; drawer overlays (or pushes) when open
   const pushOpen = drawerOpen && drawerMode === "push"
-  return (
+  return withProjects(
     <div className="relative flex h-full">
       <div className={cn("flex flex-col overflow-hidden min-w-0", (viewerOpen ? documentExpanded : executionProfile === "trusted" && artifactFocus && artifactOpen) ? "hidden" : "flex-1")}>
         <ReconnectBanner status={connectionStatus} reason={connectionReason} onRetry={retryConnection} />
@@ -1628,6 +1729,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           }
         />
         </div>
+        {unavailableNotice}
         {prepareProjectInputs}
         {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {pageContextChip}
@@ -1639,6 +1741,7 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
           sessionId={sessionId}
           agentName={agentName}
           documentCreationEnabled={documentsAvailability.data === true && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
+          artifactCreationEnabled={artifactProjectAvailable && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
           variant="desktop"
           isStreaming={isStreaming}
           connectionStatus={connectionStatus}
@@ -1660,15 +1763,17 @@ function ChatPanelBody({ agentId, sessionId, agentName, agentSlug, agentRole, su
         /> : <p role="status" className="border-t px-4 py-4 text-sm text-muted-foreground">You can discover this agent. Ask your administrator for chat access to send messages.</p>}
       </div>
 
-      <aside aria-label={viewerOpen ? "Saved document panel" : undefined} hidden={!viewerOpen}
+      <aside aria-label={projectTarget ? "Artifact viewer" : viewerOpen ? "Saved document panel" : undefined} hidden={!viewerOpen}
         className={cn("min-h-0 min-w-0 shrink-0", documentExpanded ? "w-full" : "w-[45%] min-w-[20rem] max-w-full")}>{viewerPanel}</aside>
       <div style={{ display: viewerOpen ? "none" : "contents" }} inert={viewerOpen}>
       {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} expanded={artifactFocus} />}
       {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightDrawer>
         {(drawerActiveTab === "work" ? decisionPanel ?? proposalPanel ?? issuePanel : null) ?? <RightPanel
-          key={`${workspaceId}:${agentId}:${sessionId}`}
+          key={`${currentUserId}:${workspaceId}:${agentId}:${sessionId}`}
           agentId={agentId}
           workspaceId={workspaceId}
+          chatId={sessionId}
+          viewerId={currentUserId}
           initialTab={drawerActiveTab}
           workHeader={waitingForYou}
           hideTabs

@@ -1,0 +1,107 @@
+{
+  "profile": "mooring.session-causal.v1",
+  "base_receipt_fixture": "boundary-semantics-fixtures.json",
+  "checkpoint_bytes": "actual-app-restore-still-required",
+  "rules": [
+    "These are pure binding/encoding cases, not application or transport qualification.",
+    "Checkpoint digest is opaque-content-sha256 in this private profile.",
+    "Caller retains original pending order and operation membership; unknown outcome cannot consume pending intent."
+  ],
+  "mutations": [
+    {
+      "path": "/request_id",
+      "value": "late",
+      "expected": "reject"
+    },
+    {
+      "path": "/scope/artifact_id",
+      "value": "other",
+      "expected": "reject"
+    },
+    {
+      "path": "/session_id",
+      "value": "other",
+      "expected": "reject"
+    },
+    {
+      "path": "/runtime_ref",
+      "value": "other",
+      "expected": "reject"
+    },
+    {
+      "path": "/fence/generation",
+      "value": "8",
+      "expected": "reject"
+    },
+    {
+      "path": "/fence/token",
+      "value": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+      "expected": "reject"
+    },
+    {
+      "path": "/versions/model_version",
+      "value": "0.1.0",
+      "expected": "reject"
+    },
+    {
+      "path": "/receipt/issuer",
+      "value": "forged",
+      "expected": "reject"
+    },
+    {
+      "path": "/receipt/generation",
+      "value": "8",
+      "expected": "reject"
+    },
+    {
+      "path": "/receipt/changes/0/operations/0/op_id",
+      "value": "foreign",
+      "expected": "reject"
+    },
+    {
+      "path": "/receipt/changes/0/operations",
+      "value": [],
+      "expected": "reject"
+    },
+    {
+      "path": "/receipt/changes",
+      "value": [],
+      "expected": "reject"
+    },
+    {
+      "path": "/checkpoint/revision",
+      "value": "11",
+      "expected": "reject"
+    },
+    {
+      "path": "/checkpoint/generation",
+      "value": "0",
+      "expected": "reject"
+    },
+    {
+      "path": "/checkpoint/scope/artifact_id",
+      "value": "other",
+      "expected": "reject"
+    },
+    {
+      "path": "/checkpoint/versions/engine_version",
+      "value": "0.9.0",
+      "expected": "reject"
+    },
+    {
+      "path": "/checkpoint/state",
+      "value": "YQ==",
+      "expected": "reject"
+    },
+    {
+      "path": "/targets/0/revision",
+      "value": "13",
+      "expected": "reject"
+    },
+    {
+      "path": "/targets/0/structure_revision",
+      "value": "13",
+      "expected": "reject"
+    }
+  ]
+}

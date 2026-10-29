@@ -242,19 +242,29 @@ func applyFTS(q Query, conds []string, args []any) ([]string, []any, string) {
 		if q.WorkspaceID != "" {
 			workspace = "j.workspace_id=? AND "
 		}
-		const protected = "?,?,?,?,?,?,?"
+		// Generic audit events hide metadata only for these security actions.
+		// Invalid historical JSON and absent/null actions remain ordinary search;
+		// the predicate must be non-NULL in both the positive and NOT branch.
+		const protected = `j.entry_type IN (?,?,?,?,?,?,?,?,?,?,?,?) OR
+ (j.entry_type IN (?,?,?,?) AND
+ CASE WHEN json_valid(j.payload) THEN COALESCE(json_extract(j.payload,'$.action'),'') ELSE '' END IN (?,?,?))`
 		conds = append(conds, `journal_entries.rowid IN (
  SELECT j.rowid FROM journal_entries j JOIN journal_entries_fts ON journal_entries_fts.rowid=j.rowid
- WHERE `+workspace+`j.entry_type IN (`+protected+`) AND journal_entries_fts.summary MATCH ?
+ WHERE `+workspace+`(`+protected+`) AND journal_entries_fts.summary MATCH ?
  UNION ALL
  SELECT j.rowid FROM journal_entries j JOIN journal_entries_fts ON journal_entries_fts.rowid=j.rowid
- WHERE `+workspace+`j.entry_type NOT IN (`+protected+`) AND journal_entries_fts MATCH ?)`)
+ WHERE `+workspace+`NOT (`+protected+`) AND journal_entries_fts MATCH ?)`)
 		for range 2 {
 			if q.WorkspaceID != "" {
 				args = append(args, q.WorkspaceID)
 			}
 			args = append(args, string(EntryMemberCapabilitiesChanged), string(EntryPageGrantAdded),
-				string(EntryPageGrantRemoved), "page.folder_acl_changed", string(EntryMemberAdded), string(EntryMemberAccessChanged), string(EntryMemberOwnerCreated), match)
+				string(EntryPageGrantRemoved), "page.folder_acl_changed", string(EntryMemberAdded),
+				string(EntryMemberAccessChanged), string(EntryMemberOwnerCreated),
+				string(EntryMemberRemoved), string(EntryInvitationCreated), string(EntryInvitationReissued),
+				string(EntryInvitationRevoked), string(EntryInvitationAccepted),
+				string(EntryAuditEntityCreated), string(EntryAuditEntityUpdated), string(EntryAuditEntityDeleted), string(EntryAuditEntityRestored),
+				"user.session_revoked", "user.sessions_revoked", "user.unlocked", match)
 		}
 	}
 	return conds, args, from

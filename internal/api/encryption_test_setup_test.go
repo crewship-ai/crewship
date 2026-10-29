@@ -32,6 +32,7 @@ var encKeyOnce sync.Once
 // Tests that need encryption to be *unavailable* still override it with
 // t.Setenv("ENCRYPTION_KEY", ""), which restores this value afterwards.
 func TestMain(m *testing.M) {
+	apiTestOriginalHome = os.Getenv("HOME")
 	installTestEncryptionKey()
 	lowerBcryptCostForTests()
 	cleanupHome := isolateHomeForTests()

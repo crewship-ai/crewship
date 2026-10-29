@@ -467,7 +467,9 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	// paths set err=nil (they return c.ID/resp.ID, nil) so no failed event
 	// fires; they emit ready explicitly at their return site.
 	defer func() {
-		if err != nil {
+		// A runtime waiting for its sidecar refresh is not a failed start:
+		// AcquireCrewRuntimeUse recycles or reuses it and asks again.
+		if err != nil && !isSidecarRefreshPending(err) {
 			emitProv(devcontainer.ProvisionEvent{
 				Step:   devcontainer.ProvStepFailed,
 				Status: devcontainer.ProvStatusFailed,
@@ -753,6 +755,7 @@ func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConf
 	p.runPostStartCommands(ctx, resp.ID, hooks)
 
 	p.setWarm(team.ID, resp.ID, runtimeImage)
+	p.reportSidecarRecreate(ctx, team.ID, resp.ID)
 	emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: resp.ID, Tag: runtimeImage, Digest: runtimeDigest})
 	return resp.ID, nil
 }
@@ -1046,6 +1049,35 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						"drift", drift,
 					)
 				}
+				// Outdated sidecar (#3964, sidecar_refresh.go). The sidecar is
+				// bind-mounted and the mount pins the binary the container was
+				// created with, so after an upgrade only a new container runs
+				// the new one. A container without the stamp predates it and
+				// is treated as outdated: that is exactly the fleet an upgrade
+				// to this version leaves behind.
+				sidecarOutdated := false
+				if want := p.mountedSidecarHash(); want != "" {
+					if have := sidecarHashOf(inspect.Config); have != want {
+						if crewContainerHoldsNoProcesses(c.State) {
+							p.logger.Info("recreating stopped container (crewship-sidecar changed since it was created)",
+								"container", containerName, "crew_id", team.ID,
+								"container_sidecar_hash", have, "sidecar_hash", want)
+							if err := p.removeForReconcile(ctx, c.ID, team.ID); err != nil {
+								return "", false, err
+							}
+							p.noteSidecarRecreate(team, c.ID, have, want)
+							break // fall through to create new container
+						}
+						if c.State == container.StateRunning && sidecarRefreshRequested(ctx) {
+							return "", false, &sidecarRefreshPendingError{ContainerID: c.ID, CurrentHash: have, DesiredHash: want}
+						}
+						sidecarOutdated = true
+						p.logger.Warn("crew container still serves the crewship-sidecar it was created with and is in use; "+
+							"it is recreated automatically at its next idle start",
+							"container", containerName, "crew_id", team.ID,
+							"container_sidecar_hash", have, "sidecar_hash", want)
+					}
+				}
 				if c.State == container.StateRunning {
 					// A restart this provider did not perform (daemon restart,
 					// restart policy, an operator) recreates the namespace and
@@ -1054,7 +1086,12 @@ func (p *Provider) reconcileExistingContainer(ctx context.Context, team provider
 						p.stopUnfenced(ctx, team, c.ID, err)
 						return "", false, err
 					}
-					p.setWarm(team.ID, c.ID, warmImage)
+					// An outdated runtime is not cached as ready: the next start,
+					// even inside the warm TTL, must reconcile and retry the
+					// sidecar refresh.
+					if !sidecarOutdated {
+						p.setWarm(team.ID, c.ID, warmImage)
+					}
 					emitProv(devcontainer.ProvisionEvent{Step: devcontainer.ProvStepReady, Status: devcontainer.ProvStatusCompleted, Detail: "reused running container", Tag: reusedImage})
 					return c.ID, true, nil
 				}
@@ -1410,6 +1447,12 @@ func (p *Provider) buildCrewContainerConfig(ctx context.Context, team provider.C
 	// what it is.
 	if digest := p.crewRuntimeContractDigest(); digest != "" {
 		cfg.Labels[crewRuntimeContractLabel] = digest
+	}
+	// The sidecar this container mounts, so a later reconcile can tell it was
+	// created before an upgrade replaced the binary (#3964). Same rule as the
+	// contract digest: no hash, no label.
+	if h := p.mountedSidecarHash(); h != "" {
+		cfg.Labels[crewSidecarHashLabel] = h
 	}
 	// Installation attribution is not runtime-contract drift: existing legacy
 	// containers remain report-only until naturally replaced.

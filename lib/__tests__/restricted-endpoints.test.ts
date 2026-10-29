@@ -34,12 +34,29 @@ describe("RESTRICTED_FE_ENDPOINTS", () => {
   })
 
   it.each([
+    ["GET", "/api/v1/pages/private-page/versions"],
+    ["GET", "/api/v1/pages/private-page/export"],
+    ["GET", "/api/v1/pages/private-page/document"],
+    ["GET", "/api/v1/pages/private-page/document/checkpoints"],
+    ["GET", "/api/v1/pages/private-page/document/checkpoints/pin"],
+    ["GET", "/api/v1/pages/private-page/project"],
+    ["GET", "/api/v1/pages/private-page/project/source"],
+    ["GET", "/api/v1/pages/private-page/project/history"],
+    ["GET", "/api/v1/pages/private-page/project/history/rev"],
+    ["GET", "/api/v1/pages/private-page/project/history/rev/source"],
+
     ["GET", "/api/v1/workspaces"],
+    ["POST", "/api/v1/workspaces/ws-1/restricted-routine-library/routine-1/draft/validate"],
+    ["POST", "/api/v1/workspaces/ws-1/restricted-routine-library/routine-1/draft/publish"],
+    ["POST", "/api/v1/workspaces/ws-1/restricted-routine-library/routine-1/unpublish"],
     ["GET", "/api/v1/workspaces/ws-1/restricted-routines"],
     ["GET", "/api/v1/workspaces/ws-1/restricted-routine-runs/run-9?x=1"],
     ["GET", "/api/v1/chats/c-1/messages?workspace_id=ws-1"],
     ["POST", "/api/v1/chats/c-1/restricted-run?workspace_id=ws-1"],
     ["GET", "http://localhost:8082/api/v1/agents?workspace_id=ws-1"],
+    ["GET", "/api/v1/crews?workspace_id=ws-1"],
+    ["GET", "/api/v1/crews/crew-1"],
+    ["GET", "/api/v1/crews/crew-1/access/me"],
     ["GET", "/api/auth/session"],
     ["POST", "/api/auth/token/refresh"],
   ])("allows %s %s", (method, url) => {
@@ -55,9 +72,15 @@ describe("RESTRICTED_FE_ENDPOINTS", () => {
     ["GET", "/api/v1/system/license"],
     ["GET", "/api/v1/workspaces/ws-1/pipelines/runs?status=all"],
     ["GET", "/api/v1/crewshipd?workspace_id=ws-1"],
-    ["GET", "/api/v1/crews?workspace_id=ws-1"],
+    ["POST", "/api/v1/crews"],
+    ["GET", "/api/v1/crews/crew-1/credentials"],
+    ["GET", "/api/v1/crews/crew-1/members"],
     ["POST", "/api/v1/workspaces"],
     ["DELETE", "/api/v1/chats/c-1/messages"],
+    ["POST", "/api/v1/pages/private-page/document/initialize"],
+    ["POST", "/api/v1/pages/private-page/document/patch"],
+    ["POST", "/internal/docs/v1/private-page/state"],
+    ["GET", "/api/v1/pages/private-page/project/review"],
   ])("refuses %s %s", (method, url) => {
     expect(serverAllowsRestricted(method, url)).toBe(false)
   })

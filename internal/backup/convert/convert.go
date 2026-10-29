@@ -201,6 +201,11 @@ type Options struct {
 // only read. A bundle already at the target version is reported with no
 // steps and nothing is written.
 func Convert(ctx context.Context, opts Options) (*Report, error) {
+	ctx, release, limitErr := backup.BeginRestoreRead(ctx)
+	if limitErr != nil {
+		return nil, limitErr
+	}
+	defer release()
 	if opts.BundlePath == "" {
 		return nil, errors.New("convert: bundle path required")
 	}
@@ -218,7 +223,7 @@ func Convert(ctx context.Context, opts Options) (*Report, error) {
 	}
 
 	// Pass 1: verify the checksum and index the payload.
-	src, err := openBundle(opts.BundlePath)
+	src, err := openBundle(opts.BundlePath, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +239,7 @@ func Convert(ctx context.Context, opts Options) (*Report, error) {
 		_ = src.Close()
 		return nil, fmt.Errorf("%w: bundle is v%d, this converter targets v%d", backup.ErrFormatTooNew, manifest.FormatVersion, target)
 	}
-	idx, err := indexPayload(src, opts)
+	idx, err := indexPayload(src, opts, ctx)
 	_ = src.Close()
 	if err != nil {
 		return nil, err
@@ -287,7 +292,7 @@ func Convert(ctx context.Context, opts Options) (*Report, error) {
 	}
 	defer func() { _ = sealedTmp.Close(); _ = os.Remove(sealedTmp.Name()) }()
 
-	src2, err := openBundle(opts.BundlePath)
+	src2, err := openBundle(opts.BundlePath, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +316,7 @@ func Convert(ctx context.Context, opts Options) (*Report, error) {
 		}()
 		inner = pr
 	}
-	sum, size, err := backup.SealPayload(sealedTmp, inner, sealOpts)
+	sum, size, err := backup.SealPayload(backup.RestoreWriter(ctx, sealedTmp), inner, sealOpts)
 	if rewriteErr != nil {
 		// Sealing can fail before consuming the rewrite stream (for example,
 		// when a recipient refuses the key or the destination fills). Release
@@ -354,7 +359,7 @@ func Convert(ctx context.Context, opts Options) (*Report, error) {
 	}
 	outTmpName := outTmp.Name()
 	defer func() { _ = os.Remove(outTmpName) }()
-	if err := backup.WriteBundleStream(outTmp, out, sealedTmp, size); err != nil {
+	if err := backup.WriteBundleStream(backup.RestoreWriter(ctx, outTmp), out, sealedTmp, size); err != nil {
 		_ = outTmp.Close()
 		return nil, fmt.Errorf("convert: write bundle: %w", err)
 	}
@@ -426,12 +431,16 @@ func (s *sourceBundle) Close() error {
 
 // openBundle positions a reader at the sealed payload without applying
 // the direct-read compatibility gate.
-func openBundle(path string) (*sourceBundle, error) {
+func openBundle(path string, contexts ...context.Context) (*sourceBundle, error) {
+	ctx := context.Background()
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("convert: open bundle: %w", err)
 	}
-	outer, err := backup.NewTarZstReader(f)
+	outer, err := backup.NewTarZstReader(f, contexts...)
 	if err != nil {
 		_ = f.Close()
 		return nil, err
@@ -448,7 +457,7 @@ func openBundle(path string) (*sourceBundle, error) {
 		}
 		switch hdr.Name {
 		case manifestMember:
-			data, err := io.ReadAll(io.LimitReader(outer, maxManifestBytes))
+			data, err := io.ReadAll(io.LimitReader(backup.RestoreBufferedReader(ctx, outer), maxManifestBytes))
 			if err != nil {
 				_ = s.Close()
 				return nil, fmt.Errorf("convert: read manifest: %w", err)
@@ -489,7 +498,11 @@ func decryptPayload(sealed io.Reader, m *backup.Manifest, opts Options) (io.Read
 	}
 }
 
-func indexPayload(src *sourceBundle, opts Options) (*PayloadIndex, error) {
+func indexPayload(src *sourceBundle, opts Options, contexts ...context.Context) (*PayloadIndex, error) {
+	ctx := context.Background()
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
 	plain, err := decryptPayload(src.payload, src.manifest, opts)
 	if err != nil {
 		return nil, err
@@ -499,7 +512,7 @@ func indexPayload(src *sourceBundle, opts Options) (*PayloadIndex, error) {
 		SectionFiles:    map[string]map[string]int{},
 		CrewMemoryFiles: map[string]int{},
 	}
-	tr, err := backup.NewTarZstReader(plain)
+	tr, err := backup.NewTarZstReader(plain, contexts...)
 	if err != nil {
 		return nil, err
 	}
@@ -518,7 +531,7 @@ func indexPayload(src *sourceBundle, opts Options) (*PayloadIndex, error) {
 			var d struct {
 				Tables map[string][]json.RawMessage `json:"tables"`
 			}
-			data, err := io.ReadAll(io.LimitReader(tr, maxDumpBytes))
+			data, err := io.ReadAll(io.LimitReader(backup.RestoreBufferedReader(ctx, tr), maxDumpBytes))
 			if err != nil {
 				return nil, err
 			}
@@ -577,7 +590,7 @@ func indexPayload(src *sourceBundle, opts Options) (*PayloadIndex, error) {
 // rewritePayload re-packs the decrypted inner tar.zst entry by entry,
 // applying every step's Entry and Dump rewrite in chain order.
 func rewritePayload(ctx context.Context, plain io.Reader, w io.Writer, chain []Step, reports []StepReport) error {
-	tr, err := backup.NewTarZstReader(plain)
+	tr, err := backup.NewTarZstReader(plain, ctx)
 	if err != nil {
 		return err
 	}
@@ -611,7 +624,7 @@ func rewritePayload(ctx context.Context, plain io.Reader, w io.Writer, chain []S
 		out := *hdr
 		out.Name = name
 		if name == dumpEntry && hdr.Typeflag == tar.TypeReg {
-			data, err := io.ReadAll(io.LimitReader(tr, maxDumpBytes))
+			data, err := io.ReadAll(io.LimitReader(backup.RestoreBufferedReader(ctx, tr), maxDumpBytes))
 			if err != nil {
 				return err
 			}

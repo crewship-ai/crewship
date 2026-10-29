@@ -1,4 +1,6 @@
 import { PageDetailClient } from "./page-client"
+import { Suspense } from "react"
+import { Skeleton } from "@/components/ui/skeleton"
 
 // A dynamic route under `output: "export"` must declare its params at build
 // time, so the shell is a server component and the client half lives next
@@ -14,5 +16,5 @@ export function generateStaticParams() {
 }
 
 export default function PageDetailRoute() {
-  return <PageDetailClient />
+  return <Suspense fallback={<Skeleton className="m-6 h-12" />}><PageDetailClient /></Suspense>
 }

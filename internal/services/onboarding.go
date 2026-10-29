@@ -4,14 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 var (
 	ErrOnboardingAlreadyCompleted = errors.New("onboarding already completed")
+	ErrOnboardingDenied           = errors.New("onboarding requires current crew creation authority")
 	ErrWorkspaceNotFound          = errors.New("workspace membership not found")
 )
 
@@ -43,9 +46,10 @@ type SetupResult struct {
 
 // OnboardingService handles the business logic for user onboarding.
 type OnboardingService struct {
-	db     *sql.DB
-	logger *slog.Logger
-	idFunc func() string
+	db      *sql.DB
+	logger  *slog.Logger
+	idFunc  func() string
+	journal journal.Emitter
 }
 
 // NewOnboardingService creates a new OnboardingService.
@@ -54,16 +58,38 @@ func NewOnboardingService(db *sql.DB, logger *slog.Logger, idFunc func() string)
 	return &OnboardingService{db: db, logger: logger, idFunc: idFunc}
 }
 
+// SetJournal uses the router's configured transactional audit writer.
+// A nil emitter persists through the native default-key AppendTx path.
+func (s *OnboardingService) SetJournal(emitter journal.Emitter) { s.journal = emitter }
+
+func onboardingAuthority(ctx context.Context, tx *sql.Tx, p SetupParams) error {
+	var role string
+	var allowed bool
+	err := tx.QueryRowContext(ctx, `SELECT m.role,
+ u.suspended_at IS NULL AND w.deleted_at IS NULL AND NOT EXISTS(
+ SELECT 1 FROM workspace_members g WHERE g.user_id=m.user_id AND g.access_mode='restricted')
+ FROM workspace_members m JOIN users u ON u.id=m.user_id
+ JOIN workspaces w ON w.id=m.workspace_id WHERE m.workspace_id=? AND m.user_id=?`,
+		p.WorkspaceID, p.UserID).Scan(&role, &allowed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrWorkspaceNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if !allowed || (role != "OWNER" && role != "ADMIN" && role != "MANAGER") {
+		return ErrOnboardingDenied
+	}
+	return nil
+}
+
 // Setup creates the initial crew, agent, and credential for a user's workspace.
 // It atomically claims onboarding (CAS guard) to prevent TOCTOU races.
 func (s *OnboardingService) Setup(ctx context.Context, p SetupParams) (*SetupResult, error) {
-	return database.WithTxResult(ctx, s.db, func(tx *sql.Tx) (*SetupResult, error) {
-		// Re-verify workspace membership inside transaction (prevents TOCTOU with membership removal)
-		var memberExists int
-		if err := tx.QueryRowContext(ctx,
-			"SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ?",
-			p.WorkspaceID, p.UserID).Scan(&memberExists); err != nil {
-			return nil, ErrWorkspaceNotFound
+	var notify func()
+	result, err := database.WithTxResult(ctx, s.db, func(tx *sql.Tx) (*SetupResult, error) {
+		if err := onboardingAuthority(ctx, tx, p); err != nil {
+			return nil, err
 		}
 
 		// Atomic guard: claim onboarding (prevents TOCTOU race)
@@ -102,11 +128,12 @@ func (s *OnboardingService) Setup(ctx context.Context, p SetupParams) (*SetupRes
 			return nil, err
 		}
 
-		// Add user as crew member
+		// Add user as crew member, preserving the native NULL inherited role.
+		memberID := s.idFunc()
 		if _, err = tx.ExecContext(ctx, `
 			INSERT INTO crew_members (id, crew_id, user_id, created_at)
 			VALUES (?, ?, ?, ?)
-		`, s.idFunc(), crewID, p.UserID, p.Now); err != nil {
+		`, memberID, crewID, p.UserID, p.Now); err != nil {
 			s.logger.Error("insert crew member", "error", err)
 			return nil, err
 		}
@@ -157,6 +184,43 @@ func (s *OnboardingService) Setup(ctx context.Context, p SetupParams) (*SetupRes
 			}
 		}
 
+		entry := journal.Entry{WorkspaceID: p.WorkspaceID, CrewID: crewID,
+			ActorType: journal.ActorUser, ActorID: p.UserID, Type: journal.EntryCrewMemberChanged,
+			Summary: "Added onboarding crew member", Payload: map[string]any{
+				"subject_user_id": p.UserID, "member_id": memberID, "action": "added",
+				"previous_membership": nil, "membership": map[string]any{"role": nil}}}
+		if s.journal == nil {
+			notify, err = journal.AppendTx(ctx, tx, entry)
+		} else if writer, ok := s.journal.(journal.TransactionEmitter); ok {
+			notify, err = writer.AppendTx(ctx, tx, entry)
+		} else {
+			return nil, fmt.Errorf("onboarding journal does not support atomic writes")
+		}
+		if err != nil {
+			return nil, err
+		}
+		// Audit triggers run before these final business receipts. Check the
+		// membership business key as well as its generated identity, and the CAS
+		// and newly created resource links before allowing the transaction out.
+		var valid bool
+		err = tx.QueryRowContext(ctx, `SELECT
+          (SELECT COUNT(*) FROM crew_members WHERE crew_id=? AND user_id=?)=1
+          AND EXISTS(SELECT 1 FROM crew_members WHERE id=? AND crew_id=? AND user_id=? AND role IS NULL)
+          AND EXISTS(SELECT 1 FROM users WHERE id=? AND onboarding_completed=1)
+          AND EXISTS(SELECT 1 FROM crews WHERE id=? AND workspace_id=? AND name=? AND slug=? AND deleted_at IS NULL)
+          AND EXISTS(SELECT 1 FROM agents WHERE id=? AND crew_id=? AND workspace_id=? AND name=? AND slug=? AND cli_adapter=? AND llm_provider=? AND llm_model IS ? AND deleted_at IS NULL)`,
+			crewID, p.UserID, memberID, crewID, p.UserID, p.UserID,
+			crewID, p.WorkspaceID, p.CrewName, p.CrewSlug, agentID, crewID, p.WorkspaceID, p.AgentName, p.AgentSlug, p.CliAdapter, p.LLMProvider, p.LLMModel).Scan(&valid)
+		if err != nil {
+			return nil, err
+		}
+		if !valid {
+			return nil, fmt.Errorf("onboarding final business state changed")
+		}
+		if err = onboardingAuthority(ctx, tx, p); err != nil {
+			return nil, err
+		}
+
 		return &SetupResult{
 			WorkspaceID:  p.WorkspaceID,
 			CrewID:       crewID,
@@ -164,4 +228,8 @@ func (s *OnboardingService) Setup(ctx context.Context, p SetupParams) (*SetupRes
 			CredentialID: credentialID,
 		}, nil
 	})
+	if err == nil && notify != nil {
+		notify()
+	}
+	return result, err
 }

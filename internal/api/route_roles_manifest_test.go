@@ -32,6 +32,7 @@ func TestMutationRouteRolesMatchManifest(t *testing.T) {
 		t.Fatalf("NewRouter: %v", err)
 	}
 	r.RegisterSlidesHuman(true)
+	registerGridCraftTestRoutes(r)
 	got := make(map[string]string, len(r.mutationRoutes))
 	for _, route := range r.mutationRoutes {
 		key := route.Method + " " + route.Pattern
