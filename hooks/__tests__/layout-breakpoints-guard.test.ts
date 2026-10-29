@@ -105,7 +105,7 @@ describe("layout breakpoints come from one hook", () => {
     const offenders: string[] = []
     for (const { file, text } of CODE) {
       if (isChatOwned(file)) continue
-      for (const h of hits(text, /(?<![\w-])(?:min|max)-\[\d+(?:px|rem)\]:/)) {
+      for (const h of hits(text, /(?<![\w@-])(?:min|max)-\[\d+(?:px|rem)\]:/)) {
         offenders.push(`${file}:${h.line}: ${h.text}`)
       }
     }

@@ -43,3 +43,34 @@ export function useLayoutBreakpoint(): LayoutBreakpoint {
 
   return breakpoint
 }
+
+/** Media queries for the bands code asks about directly, built from LAYOUT_BREAKPOINTS. */
+export const LAYOUT_BAND_QUERIES = {
+  tablet: `(min-width: ${LAYOUT_BREAKPOINTS.tablet}px) and (max-width: ${LAYOUT_BREAKPOINTS.desktop - 1}px)`,
+  wide: `(min-width: ${LAYOUT_BREAKPOINTS.wide}px)`,
+} as const
+
+export type LayoutBand = keyof typeof LAYOUT_BAND_QUERIES
+
+/** Whether the viewport is in `band` now; false on the server or without matchMedia. */
+export function matchesLayoutBand(band: LayoutBand): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(LAYOUT_BAND_QUERIES[band]).matches
+}
+
+/**
+ * Whether the viewport is in `band`, following it across edges. The first
+ * render uses `initial` (false by default, the server's answer); pass
+ * `() => matchesLayoutBand(band)` to read the viewport synchronously instead.
+ */
+export function useLayoutBand(band: LayoutBand, initial: boolean | (() => boolean) = false): boolean {
+  const [on, setOn] = React.useState(initial)
+  React.useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return
+    const mql = window.matchMedia(LAYOUT_BAND_QUERIES[band])
+    const update = () => setOn(mql.matches)
+    update()
+    mql.addEventListener?.("change", update)
+    return () => mql.removeEventListener?.("change", update)
+  }, [band])
+  return on
+}

@@ -4,6 +4,7 @@ import * as React from "react"
 import { PanelLeftIcon } from "lucide-react"
 
 import { useIsMobile } from "@/hooks/use-mobile"
+import { matchesLayoutBand, useLayoutBand } from "@/hooks/use-layout-breakpoint"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -51,24 +52,8 @@ const SIDEBAR_MODE_KEY = "crewship_sidebar_mode"
 const SIDEBAR_RAIL_MODE_KEY = "crewship_sidebar_rail_mode"
 
 
-const TABLET_WIDTH_QUERY = "(min-width: 768px) and (max-width: 1279px)"
-
-function isTabletWidth(): boolean {
-  return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(TABLET_WIDTH_QUERY).matches
-}
-
-function useTabletWidth(): boolean {
-  const [on, setOn] = React.useState(isTabletWidth)
-  React.useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return
-    const mql = window.matchMedia(TABLET_WIDTH_QUERY)
-    const update = () => setOn(mql.matches)
-    update()
-    mql.addEventListener?.("change", update)
-    return () => mql.removeEventListener?.("change", update)
-  }, [])
-  return on
-}
+const isTabletWidth = () => matchesLayoutBand("tablet")
+const useTabletWidth = () => useLayoutBand("tablet", isTabletWidth)
 
 type SidebarMode = "hover" | "collapsed" | "pinned"
 

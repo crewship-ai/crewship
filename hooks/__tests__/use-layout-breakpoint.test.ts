@@ -9,10 +9,11 @@ const listeners = new Map<string, Set<Listener>>()
 
 function mqlFor(query: string) {
   const min = Number(/min-width:\s*(\d+)px/.exec(query)?.[1] ?? NaN)
+  const max = Number(/max-width:\s*(\d+)px/.exec(query)?.[1] ?? Infinity)
   return {
     media: query,
     get matches() {
-      return window.innerWidth >= min
+      return window.innerWidth >= min && window.innerWidth <= max
     },
     addEventListener: vi.fn((_event: string, handler: Listener) => {
       if (!listeners.has(query)) listeners.set(query, new Set())
@@ -27,8 +28,11 @@ function mqlFor(query: string) {
 vi.stubGlobal("matchMedia", vi.fn(mqlFor))
 
 import {
+  LAYOUT_BAND_QUERIES,
   LAYOUT_BREAKPOINTS,
   layoutBreakpointFor,
+  matchesLayoutBand,
+  useLayoutBand,
   useLayoutBreakpoint,
 } from "@/hooks/use-layout-breakpoint"
 import { useIsMobile } from "@/hooks/use-mobile"
@@ -123,5 +127,42 @@ describe("layout breakpoints", () => {
     vi.mocked(matchMedia).mockClear()
     expect(renderToString(createElement(Probe))).toContain("desktop")
     expect(matchMedia).not.toHaveBeenCalled()
+  })
+
+  it("builds the band queries from the same edges", () => {
+    expect(LAYOUT_BAND_QUERIES).toEqual({
+      tablet: "(min-width: 768px) and (max-width: 1279px)",
+      wide: "(min-width: 1536px)",
+    })
+  })
+
+  it.each([
+    [767, false, false],
+    [768, true, false],
+    [1279, true, false],
+    [1280, false, false],
+    [1536, false, true],
+  ])("at %ipx: tablet %s, wide %s", (width, tablet, wide) => {
+    setWidth(width)
+    expect(matchesLayoutBand("tablet")).toBe(tablet)
+    expect(matchesLayoutBand("wide")).toBe(wide)
+  })
+
+  it("follows a band across its edges and starts from the server answer", () => {
+    setWidth(1024)
+    const { result, unmount } = renderHook(() => useLayoutBand("tablet"))
+    expect(result.current).toBe(true)
+    resize(1280)
+    expect(result.current).toBe(false)
+    resize(800)
+    expect(result.current).toBe(true)
+    unmount()
+    expect([...listeners.values()].reduce((n, s) => n + s.size, 0)).toBe(0)
+
+    function Probe() {
+      return createElement("span", null, String(useLayoutBand("wide")))
+    }
+    setWidth(1600)
+    expect(renderToString(createElement(Probe))).toContain("false")
   })
 })
