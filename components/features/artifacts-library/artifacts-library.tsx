@@ -264,9 +264,15 @@ function WordPreview({ workspaceId, item }: { workspaceId: string; item: Library
  */
 function LockLostDraft({ workspaceId, slug }: { workspaceId: string; slug: string }) {
   const userId = useSessionSafe()?.data?.user?.id ?? ""
+  // Keyed by who, where and what: another person signing in remounts the whole
+  // recovery in the same render, so no draft or open comparison of theirs survives it.
+  return userId ? <OwnLockLostDraft key={JSON.stringify([userId, workspaceId, slug])} userId={userId} workspaceId={workspaceId} slug={slug} /> : null
+}
+
+function OwnLockLostDraft({ userId, workspaceId, slug }: { userId: string; workspaceId: string; slug: string }) {
   const [present, setPresent] = useState(false)
   // Read after mount: storage does not exist during prerender.
-  useEffect(() => { setPresent(Boolean(userId && readLocalDraft(userId, workspaceId, slug))) }, [userId, workspaceId, slug])
+  useEffect(() => { setPresent(Boolean(readLocalDraft(userId, workspaceId, slug))) }, [userId, workspaceId, slug])
   return present ? <RecoveredDraft userId={userId} workspaceId={workspaceId} slug={slug} /> : null
 }
 
