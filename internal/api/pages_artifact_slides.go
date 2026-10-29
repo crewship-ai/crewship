@@ -29,6 +29,7 @@ type artifactSlidesProcess func(context.Context, artifacts.ArtifactSlidesProject
 type artifactSlidesSelection struct {
 	actor   string
 	owner   bool
+	editor  bool
 	version int64
 	source  [sha256.Size]byte
 }
@@ -48,6 +49,7 @@ func (h *PageHandler) artifactSlidesEnabled(ctx context.Context) bool {
 // actual source bytes, not just the actor identity. The writer fence makes its
 // per-transaction source digest cache valid through View's final authorization.
 func (h *PageHandler) artifactSlidesAuthority(r *http.Request, k artifacts.VersionKey, version int64) artifacts.VersionViewAuthorize {
+	authority := h.artifactProjectAuthority(r, k, false, false)
 	var selected artifactSlidesSelection
 	checked := false
 	var lastTx *sql.Tx
@@ -57,13 +59,13 @@ func (h *PageHandler) artifactSlidesAuthority(r *http.Request, k artifacts.Versi
 		if !h.artifactSlidesEnabled(ctx) {
 			return "", artifacts.VersionSelection{}, artifacts.ErrDisabled
 		}
-		actor, err := h.artifactProjectAuthority(r, k, false, false)(ctx, tx)
+		actor, err := authority(ctx, tx)
 		if err != nil {
 			return "", artifacts.VersionSelection{}, err
 		}
 		var owner string
-		var shared int64
-		err = tx.QueryRowContext(ctx, `SELECT p.owner_user_id,h.shared_version FROM pages p JOIN artifact_version_heads h ON h.workspace_id=p.workspace_id AND h.page_id=p.id WHERE p.workspace_id=? AND p.id=?`, k.WorkspaceID, k.PageID).Scan(&owner, &shared)
+		var latest, shared int64
+		err = tx.QueryRowContext(ctx, `SELECT p.owner_user_id,h.latest_version,h.shared_version FROM pages p JOIN artifact_version_heads h ON h.workspace_id=p.workspace_id AND h.page_id=p.id WHERE p.workspace_id=? AND p.id=?`, k.WorkspaceID, k.PageID).Scan(&owner, &latest, &shared)
 		if err != nil {
 			return "", artifacts.VersionSelection{}, err
 		}
@@ -72,7 +74,19 @@ func (h *PageHandler) artifactSlidesAuthority(r *http.Request, k artifacts.Versi
 		if run, _ := ctx.Value(artifactRunKey{}).(*artifactRunAuthority); run != nil {
 			isOwner = run.HumanUserID == owner
 		}
-		if !isOwner && shared != version {
+		isEditor := false
+		if user != nil && !isOwner && ctx.Value(artifactRunKey{}) == nil {
+			rec, e := h.loadPageForRead(ctx, k.WorkspaceID, "@"+k.PageID)
+			if e != nil {
+				return "", artifacts.VersionSelection{}, e
+			}
+			viewer, e := h.loadViewer(ctx, k.WorkspaceID, user.ID)
+			if e != nil {
+				return "", artifacts.VersionSelection{}, e
+			}
+			isEditor = h.artifactProjectHumanEditor(ctx, k, rec, viewer)
+		}
+		if !isOwner && ((!isEditor && shared != version) || (isEditor && latest != version)) {
 			return "", artifacts.VersionSelection{}, artifacts.ErrVersionNotFound
 		}
 		if lastTx != tx {
@@ -82,13 +96,13 @@ func (h *PageHandler) artifactSlidesAuthority(r *http.Request, k artifacts.Versi
 			}
 			lastTx = tx
 		}
-		current := artifactSlidesSelection{actor: actor, owner: isOwner, version: version, source: source}
+		current := artifactSlidesSelection{actor: actor, owner: isOwner, editor: isEditor, version: version, source: source}
 		if checked && selected != current {
 			return "", artifacts.VersionSelection{}, artifacts.ErrVersionAuthority
 		}
 		selected = current
 		checked = true
-		return actor, artifacts.VersionSelection{Version: version, SharedOnly: !isOwner}, nil
+		return actor, artifacts.VersionSelection{Version: version, SharedOnly: !isOwner && !isEditor}, nil
 	}
 }
 

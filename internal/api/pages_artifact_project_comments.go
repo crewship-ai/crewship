@@ -117,7 +117,11 @@ func artifactProjectAnchor(content []byte, selector, quote string) bool {
 	return false
 }
 func (h *PageHandler) artifactProjectCommentTx(r *http.Request, k artifacts.VersionKey, write bool, fn func(context.Context, *sql.Tx, string) error) error {
-	return h.artifactProjectCommentTxAuthorized(r, k, h.artifactProjectAuthority(r, k, write, false), fn)
+	authority := h.artifactProjectAuthority(r, k, false, false)
+	if write {
+		authority = h.artifactProjectOwnerAuthority(r, k)
+	}
+	return h.artifactProjectCommentTxAuthorized(r, k, authority, fn)
 }
 
 func (h *PageHandler) artifactProjectCommentTxAuthorized(r *http.Request, k artifacts.VersionKey, authorize artifacts.VersionAuthorize, fn func(context.Context, *sql.Tx, string) error) error {
@@ -213,7 +217,20 @@ func (h *PageHandler) artifactProjectComments(r *http.Request, k artifacts.Versi
 		}
 		if owner != user.ID {
 			sharedOnly = true
-			if version != pin {
+			rec, e := h.loadPageForRead(ctx, k.WorkspaceID, "@"+k.PageID)
+			if e != nil {
+				return e
+			}
+			viewer, e := h.loadViewer(ctx, k.WorkspaceID, user.ID)
+			if e != nil {
+				return e
+			}
+			latestEditor := h.artifactProjectHumanEditor(ctx, k, rec, viewer)
+			var latest int64
+			if e := tx.QueryRowContext(ctx, `SELECT latest_version FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&latest); e != nil {
+				return e
+			}
+			if (!latestEditor && version != pin) || (latestEditor && version != latest) {
 				return artifacts.ErrVersionNotFound
 			}
 		}
@@ -318,7 +335,7 @@ func (h *PageHandler) CreateArtifactProjectComment(w http.ResponseWriter, r *htt
 	}
 	out := artifactProjectComment{ID: generateCUID(), Version: p.Version, Path: p.Path, Selector: p.Selector, Quote: p.Quote, Text: p.Text, Replies: []artifactProjectReply{}, CreatedAt: tsformat.Format(h.clock.Now()), Status: "comment"}
 	err := h.artifactProjectCommentTxAuthorized(r, k, h.artifactProjectCommentAuthority(r, k), func(ctx context.Context, tx *sql.Tx, actor string) error {
-		head, err := artifactCommentVersion(ctx, tx, k, actor)
+		head, err := h.artifactCommentVersion(ctx, tx, k, actor)
 		if err != nil {
 			return err
 		}
@@ -374,7 +391,7 @@ func (h *PageHandler) ReplyArtifactProjectComment(w http.ResponseWriter, r *http
 	if !ok {
 		return
 	}
-	if err := h.artifactProjectCheck(r, k, true); err != nil {
+	if _, err := h.artifactProjectStore(r.Context()).Quota(r.Context(), k, h.artifactProjectOwnerAuthority(r, k)); err != nil {
 		artifactProjectError(w, err)
 		return
 	}

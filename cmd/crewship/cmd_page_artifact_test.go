@@ -11,7 +11,10 @@ import (
 func TestPageArtifactPublishPreservesManifestCAS(t *testing.T) {
 	stub := pageStub(t)
 	route := "/api/v1/pages/demo/artifact/versions"
-	stub.OnPost(route, func(_ *http.Request, raw []byte) (int, []byte, string) {
+	stub.OnPost(route, func(r *http.Request, raw []byte) (int, []byte, string) {
+		if r.Header.Get("Authorization") != "Bearer page-acceptance-token" || r.URL.Query().Get("workspace_id") != covWSCli3 {
+			t.Error("publish lost the editor's authenticated workspace transport")
+		}
 		var body map[string]any
 		if json.Unmarshal(raw, &body) != nil || body["base_version"] != float64(7) || body["entrypoint"] != "index.html" {
 			t.Errorf("lost manifest CAS: %s", raw)

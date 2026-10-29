@@ -138,6 +138,7 @@ func (h *PageHandler) artifactProjectStart(w http.ResponseWriter, r *http.Reques
 // Every path checks live credentials, membership and Page ACL under the store's
 // writer fence. A retained chat principal alone never grants a Page mutation.
 func (h *PageHandler) artifactProjectAuthority(r *http.Request, k artifacts.VersionKey, write, share bool) artifacts.VersionAuthorize {
+	var admittedEpoch string
 	return func(ctx context.Context, tx *sql.Tx) (string, error) {
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
 		if !h.artifactProjectEnabled(ctx) {
@@ -186,11 +187,20 @@ func (h *PageHandler) artifactProjectAuthority(r *http.Request, k artifacts.Vers
 		if err != nil {
 			return "", artifacts.ErrVersionNotFound
 		}
+		if (write && !share) || rec.OwnerUserID != user.ID {
+			var epoch string
+			if err := tx.QueryRowContext(ctx, `SELECT CAST(authority_revision AS TEXT) FROM workspaces WHERE id=? AND deleted_at IS NULL`, k.WorkspaceID).Scan(&epoch); err != nil {
+				return "", err
+			}
+			if admittedEpoch != "" && epoch != admittedEpoch {
+				return "", errArtifactProjectAccess
+			}
+			admittedEpoch = epoch
+		}
 		if rec.OwnerUserID == user.ID {
 			return user.ID, nil
 		}
-		// A reader sees only the selected shared version. Private history stays with
-		// its owner, even for an administrator or a holder of an ordinary write grant.
+		// Private audience remains a separate boundary even for an Edit grant.
 		if rec.PrivateAudience {
 			return "", artifacts.ErrVersionNotFound
 		}
@@ -202,6 +212,10 @@ func (h *PageHandler) artifactProjectAuthority(r *http.Request, k artifacts.Vers
 		allowed, err := h.canSeePage(ctx, k.WorkspaceID, rec, nil, viewer)
 		if err != nil || !allowed {
 			return "", artifacts.ErrVersionNotFound
+		}
+		editor := h.artifactProjectHumanEditor(ctx, k, rec, viewer)
+		if editor && !share {
+			return user.ID, nil
 		}
 		var pin int64
 		if tx.QueryRowContext(ctx, `SELECT shared_version FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&pin) != nil || pin == 0 {
@@ -403,7 +417,7 @@ func (h *PageHandler) RestoreArtifactProject(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	if err := h.artifactProjectCheck(r, k, true); err != nil {
+	if _, err := h.artifactProjectStore(r.Context()).Quota(r.Context(), k, h.artifactProjectOwnerAuthority(r, k)); err != nil {
 		artifactProjectError(w, err)
 		return
 	}
@@ -418,7 +432,7 @@ func (h *PageHandler) RestoreArtifactProject(w http.ResponseWriter, r *http.Requ
 		artifactProjectError(w, artifacts.ErrVersionInvalid)
 		return
 	}
-	out, err := h.artifactProjectStore(r.Context()).Restore(r.Context(), k, *p.BaseVersion, p.Version, h.artifactProjectMutationAuthority(r, k, *p.BaseVersion))
+	out, err := h.artifactProjectStore(r.Context()).Restore(r.Context(), k, *p.BaseVersion, p.Version, h.artifactProjectOwnerMutationAuthority(r, k, *p.BaseVersion))
 	if err != nil {
 		artifactProjectError(w, err)
 		return
@@ -518,6 +532,7 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 	auth := h.artifactProjectAuthority(r, k, false, false)
 	owner := false
 	canWrite := false
+	editor := false
 	var origin any
 	var name, slug string
 	view, err := h.artifactProjectStore(r.Context()).View(r.Context(), k, func(ctx context.Context, tx *sql.Tx) (string, artifacts.VersionSelection, error) {
@@ -536,12 +551,23 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 		// as the version selection, including the final authorization recheck.
 		origin = nil
 		canWrite = false
-		if owner {
+		rec, loadErr := h.loadPageForRead(context.WithValue(ctx, pageAuthReaderKey{}, tx), k.WorkspaceID, "@"+k.PageID)
+		if loadErr != nil {
+			return "", artifacts.VersionSelection{}, loadErr
+		}
+		viewer, viewerErr := h.loadViewer(context.WithValue(ctx, pageAuthReaderKey{}, tx), k.WorkspaceID, user.ID)
+		if viewerErr != nil {
+			return "", artifacts.VersionSelection{}, viewerErr
+		}
+		editor = !owner && h.artifactProjectHumanEditor(context.WithValue(ctx, pageAuthReaderKey{}, tx), k, rec, viewer)
+		if owner || editor {
 			_, writeErr := h.artifactProjectAuthority(r, k, true, false)(ctx, tx)
 			if writeErr != nil && !errors.Is(writeErr, errArtifactProjectAccess) {
 				return "", artifacts.VersionSelection{}, writeErr
 			}
 			canWrite = writeErr == nil
+		}
+		if owner {
 			var chat, agent sql.NullString
 			e = tx.QueryRowContext(ctx, `SELECT chat_id,agent_id FROM artifact_project_origins WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&chat, &agent)
 			if e == nil && chat.Valid && agent.Valid {
@@ -551,7 +577,16 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 				return "", artifacts.VersionSelection{}, e
 			}
 		}
-		return actor, artifacts.VersionSelection{Version: selected, SharedOnly: !owner, IncludeHistory: owner}, nil
+		if editor && selected != 0 {
+			var latest int64
+			if e = tx.QueryRowContext(ctx, `SELECT latest_version FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&latest); e != nil {
+				return "", artifacts.VersionSelection{}, e
+			}
+			if selected != latest {
+				return "", artifacts.VersionSelection{}, artifacts.ErrVersionNotFound
+			}
+		}
+		return actor, artifacts.VersionSelection{Version: selected, SharedOnly: !owner && !editor, IncludeHistory: owner}, nil
 	})
 	if err != nil {
 		artifactProjectError(w, err)
@@ -562,13 +597,16 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 		artifactProjectError(w, err)
 		return
 	}
+	if editor {
+		view.State.Quota = artifacts.VersionQuota{Retention: "latest-version-only"}
+	}
 	kind := ""
 	if h.artifactSlidesEnabled(r.Context()) {
 		if _, err := artifacts.ParseSlidesArtifact(k.PageID, view.State.Manifest.Files); err == nil {
 			kind = "slides"
 		}
 	}
-	writeJSON(w, 200, artifactProjectSnapshotResponse{ArtifactKind: kind, PageID: k.PageID, Name: name, Slug: slug, Origin: origin, Enabled: true, CanWrite: canWrite, CanComment: h.artifactProjectCanComment(r, k, view.State.Manifest.Version), LatestVersion: view.State.LatestVersion, SharedVersion: view.State.SharedVersion, Manifest: artifactProjectManifest(view.State.Manifest), Versions: artifactProjectVersionInfos(view.Versions), Quota: view.State.Quota, Comments: comments})
+	writeJSON(w, 200, artifactProjectSnapshotResponse{ArtifactKind: kind, PageID: k.PageID, Name: name, Slug: slug, Origin: origin, Enabled: true, CanWrite: canWrite, CanShare: owner && canWrite, CanRestore: owner && canWrite, CanSendToAgent: owner && canWrite && origin != nil, CanComment: h.artifactProjectCanComment(r, k, view.State.Manifest.Version), LatestVersion: view.State.LatestVersion, SharedVersion: view.State.SharedVersion, Manifest: artifactProjectManifest(view.State.Manifest), Versions: artifactProjectVersionInfos(view.Versions), Quota: view.State.Quota, Comments: comments})
 }
 
 func (h *PageHandler) artifactProjectAttached(ctx context.Context, page string) (bool, error) {
@@ -630,4 +668,55 @@ func artifactProjectVersionInfos(infos []artifacts.VersionInfo) []map[string]any
 		out = append(out, map[string]any{"version": v.Version, "entrypoint": v.EntryPoint, "message": v.Message, "actor": v.Actor, "created_at": v.CreatedAt, "restored_from": v.RestoredFrom})
 	}
 	return out
+}
+
+// Edit requires a current explicit Page or inherited folder write entitlement;
+// workspace management and read visibility alone do not grant private head access.
+func (h *PageHandler) artifactProjectHumanEditor(ctx context.Context, k artifacts.VersionKey, rec *pageRecord, viewer *pageViewer) bool {
+	if rec == nil || rec.PrivateAudience || viewer == nil {
+		return false
+	}
+	grants, err := h.grantsFor(ctx, k.WorkspaceID, rec, viewer)
+	if err != nil {
+		return false
+	}
+	for _, grant := range grants {
+		if grant.Level == pageGrantWrite {
+			return true
+		}
+	}
+	folder, err := h.folderACLVerdictFor(ctx, rec, viewer)
+	return err == nil && folder.write
+}
+
+func (h *PageHandler) artifactProjectOwnerAuthority(r *http.Request, k artifacts.VersionKey) artifacts.VersionAuthorize {
+	authority := h.artifactProjectAuthority(r, k, true, false)
+	return func(ctx context.Context, tx *sql.Tx) (string, error) {
+		actor, err := authority(ctx, tx)
+		if err != nil {
+			return "", err
+		}
+		var owner string
+		if err = tx.QueryRowContext(ctx, `SELECT owner_user_id FROM pages WHERE workspace_id=? AND id=?`, k.WorkspaceID, k.PageID).Scan(&owner); err != nil {
+			return "", err
+		}
+		if actor != owner {
+			run, _ := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
+			if run == nil || run.HumanUserID != owner {
+				return "", errArtifactProjectAccess
+			}
+		}
+		return actor, nil
+	}
+}
+
+func (h *PageHandler) artifactProjectOwnerMutationAuthority(r *http.Request, k artifacts.VersionKey, base int64) artifacts.VersionAuthorize {
+	owner := h.artifactProjectOwnerAuthority(r, k)
+	mutation := h.artifactProjectMutationAuthority(r, k, base)
+	return func(ctx context.Context, tx *sql.Tx) (string, error) {
+		if _, err := owner(ctx, tx); err != nil {
+			return "", err
+		}
+		return mutation(ctx, tx)
+	}
 }

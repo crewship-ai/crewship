@@ -29,20 +29,21 @@ func (h *PageHandler) artifactDataEnabled(ctx context.Context) bool {
 
 type artifactDataSelection struct {
 	owner       bool
+	editor      bool
 	collections []string
 }
 
 func (h *PageHandler) artifactDataAuthority(r *http.Request, k artifacts.VersionKey, collection string, version int64, write bool) (artifacts.VersionAuthorize, *artifactDataSelection) {
+	authority := h.artifactProjectAuthority(r, k, write, false)
+	if write {
+		authority = h.artifactProjectOwnerMutationAuthority(r, k, version)
+	}
 	selected := &artifactDataSelection{}
 	checked := false
 	return func(ctx context.Context, tx *sql.Tx) (string, error) {
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
 		if !h.artifactDataEnabled(ctx) {
 			return "", artifacts.ErrDisabled
-		}
-		authority := h.artifactProjectAuthority(r, k, write, false)
-		if write {
-			authority = h.artifactProjectMutationAuthority(r, k, version)
 		}
 		actor, err := authority(ctx, tx)
 		if err != nil {
@@ -58,7 +59,19 @@ func (h *PageHandler) artifactDataAuthority(r *http.Request, k artifacts.Version
 		if run, _ := ctx.Value(artifactRunKey{}).(*artifactRunAuthority); run != nil {
 			isOwner = run.HumanUserID == owner
 		}
-		if write && latest != version || !isOwner && shared != version {
+		isEditor := false
+		if user != nil && !isOwner && ctx.Value(artifactRunKey{}) == nil {
+			rec, e := h.loadPageForRead(ctx, k.WorkspaceID, "@"+k.PageID)
+			if e != nil {
+				return "", e
+			}
+			viewer, e := h.loadViewer(ctx, k.WorkspaceID, user.ID)
+			if e != nil {
+				return "", e
+			}
+			isEditor = h.artifactProjectHumanEditor(ctx, k, rec, viewer)
+		}
+		if write && latest != version || !isOwner && ((!isEditor && shared != version) || (isEditor && latest != version)) {
 			return "", artifacts.ErrVersionConflict
 		}
 		collections, err := artifacts.DashboardCollectionsTx(ctx, tx, k, version)
@@ -68,10 +81,11 @@ func (h *PageHandler) artifactDataAuthority(r *http.Request, k artifacts.Version
 		if collection != "" && !slices.Contains(collections, collection) {
 			return "", artifacts.ErrVersionNotFound
 		}
-		if checked && (selected.owner != isOwner || !slices.Equal(selected.collections, collections)) {
+		if checked && (selected.owner != isOwner || selected.editor != isEditor || !slices.Equal(selected.collections, collections)) {
 			return "", artifacts.ErrVersionAuthority
 		}
 		selected.owner = isOwner
+		selected.editor = isEditor
 		selected.collections = collections
 		checked = true
 		return actor, nil

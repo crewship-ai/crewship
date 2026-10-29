@@ -432,6 +432,15 @@ the final feedback transaction. `produce` remains an independent capability.
 `produce` additionally carries the panel ids it covers, so an agent
 granted `produce` on one panel cannot overwrite another agent's panel on the same page.
 
+Human artifact Project editors with a live `write` grant can read the latest
+manifest and save a complete new version using its exact `base_version`. The
+server records the editor's own identity; a competing save returns 409 without
+changing existing data. Editor reads expose only that latest manifest, not the
+owner's history, quota or source chat. Read and Comment remain pinned to the
+shared version. Restore, selecting a shared pin and sending an owner agent task
+are separately authorized owner operations, advertised by `can_restore`,
+`can_share` and `can_send_to_agent`; `can_write` alone never grants them.
+
 Artifact comments retain their actual human author and immutable shared-version
 anchor. Creating feedback does not dispatch an owner run or borrow the owner's
 credentials. Processing another member's feedback requires a fresh explicit

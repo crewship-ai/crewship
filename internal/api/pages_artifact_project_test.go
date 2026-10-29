@@ -24,7 +24,7 @@ func artifactProjectFixture(t *testing.T) (*PageHandler, string, string, func(st
 		req := httptest.NewRequest(method, "/api/v1/pages/"+path, strings.NewReader(body))
 		tok := tokens[user]
 		if tok == "" {
-			tok = mintTokenFor(t, h.db, user, "artifact-reader")
+			tok = mintTokenFor(t, h.db, user, "artifact-reader-"+user)
 			tokens[user] = tok
 		}
 		req.Header.Set("Authorization", "Bearer "+tok)

@@ -2014,9 +2014,15 @@ contains `path`, UTF-8 `content` and `media_type`; for example:
 {"entrypoint":"index.html","files":[{"path":"index.html","media_type":"text/html","content":"<h1 id=hero>Home</h1><a href=details.html>Details</a>"},{"path":"details.html","media_type":"text/html","content":"<h1 id=details>Details</h1><a href=settings.html>Settings</a>"},{"path":"settings.html","media_type":"text/html","content":"<h1 id=settings>Settings</h1><a href=index.html>Home</a>"}]}
 ```
 
+An explicit human Edit grant can use `get` to read the latest manifest and
+`publish --base-version` to save it under the editor's own identity. A 409
+preserves the candidate file and never causes an automatic retry. Edit alone
+does not expose owner history or allow owner agent execution.
+
 Restore appends a new version. Share selects an existing immutable version and
-leaves the latest version unchanged; an ordinary Page read grant reaches only
-the current shared pin. Readers cannot publish, comment, restore or share.
+leaves the latest version unchanged; both require owner authority. Read and
+Comment grants reach only the current shared pin. Readers cannot publish,
+comment, restore or share; Comment permits feedback without content writes.
 Storage usage and the keep-all policy are returned with the owner snapshot.
 Quota rejection retains every prior version; keep the candidate manifest file
 until publication is acknowledged.
