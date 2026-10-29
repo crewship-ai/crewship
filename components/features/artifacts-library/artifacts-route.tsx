@@ -2,11 +2,14 @@
 
 import { useEffect } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
+import dynamic from "next/dynamic"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePageWorkspace } from "@/hooks/use-page-workspace"
-import { artifactsLibrary } from "@/lib/feature-flags"
+import { artifactsDesign, artifactsLibrary } from "@/lib/feature-flags"
 import { ArtifactsLibrary } from "./artifacts-library"
 import { filtersFromParams, filtersToParams } from "./library-filter"
+
+const DesignEditor = dynamic(() => import("@/components/features/artifacts-design/design-editor").then(module => module.DesignEditor), { ssr: false })
 
 /** Where one artifact opens: its own address inside Artifacts, with the view it was opened from. */
 export function artifactHref(id: string, params: URLSearchParams) {
@@ -22,7 +25,8 @@ export function artifactHref(id: string, params: URLSearchParams) {
 export function ArtifactsRoute({ item }: { item: string | null }) {
   const params = useSearchParams()
   const router = useRouter()
-  const enabled = artifactsLibrary()
+  const design = artifactsDesign()
+  const enabled = artifactsLibrary() || design
   const { workspaceId, loading, linkUnavailable } = usePageWorkspace()
   const workspaceQuery = new URLSearchParams()
   const linked = params?.get("workspace_id")
@@ -47,5 +51,8 @@ export function ArtifactsRoute({ item }: { item: string | null }) {
     const next = filtersToParams(nextFilters, workspaceQuery)
     router.replace(`/artifacts${next.size ? `?${next}` : ""}`)
   }
+  const designSlug = design && params?.get("design") === "1" ? params.get("item") : null
+  const version = Number(params?.get("version"))
+  if (designSlug) return <div className="h-full p-4"><DesignEditor workspaceId={workspaceId} slug={designSlug} initialVersion={Number.isSafeInteger(version) && version > 0 ? version : undefined} /></div>
   return <ArtifactsLibrary workspaceId={workspaceId} item={item} onSelect={select} filters={filters} onFiltersChange={filter} />
 }

@@ -16,6 +16,7 @@ func anonymiseArtifactProjectIdentity(ctx context.Context, tx *sql.Tx, workspace
 		{"artifact_project_run_consents", `DELETE FROM artifact_project_run_consents WHERE workspace_id=? AND human_user_id=?`},
 		{"artifact_versions", `UPDATE artifact_versions SET actor='erased' WHERE workspace_id=?1 AND actor IN (?2,'user:'||?2)`},
 		{"artifact_data_documents", `UPDATE artifact_data_documents SET updated_by='erased' WHERE workspace_id=?1 AND updated_by IN (?2,'user:'||?2)`},
+		{"artifact_design_documents", `UPDATE artifact_design_documents SET updated_by='erased' WHERE workspace_id=?1 AND updated_by IN (?2,'user:'||?2)`},
 		{"artifact_project_comment_replies", `UPDATE artifact_project_comment_replies SET author='erased' WHERE comment_id IN(SELECT id FROM artifact_project_comments WHERE workspace_id=?) AND author=?`},
 		{"artifact_project_comments", `UPDATE artifact_project_comments SET author='erased' WHERE workspace_id=? AND author=?`},
 		{"artifact_project_origins", `UPDATE artifact_project_origins SET human_user_id='erased',chat_id=NULL,agent_id=NULL,message_id='' WHERE workspace_id=? AND human_user_id=?`},

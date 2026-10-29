@@ -5,7 +5,7 @@ import type { PageFolderRef, PageView } from "@/hooks/use-pages"
  * A legacy Page whose body is panels is its own kind, Page, and is never
  * called a dashboard: only the server's explicit kind names a Dashboard.
  */
-export type LibraryKind = "project" | "dashboard" | "page" | "word" | "sheet" | "slides"
+export type LibraryKind = "project" | "dashboard" | "page" | "word" | "sheet" | "slides" | "design"
 
 /** Web things run in a sandbox; documents are Crafts or decks. */
 export type LibraryFamily = "web" | "document"
@@ -17,6 +17,7 @@ export const LIBRARY_KINDS: { kind: LibraryKind; label: string; plural: string; 
   { kind: "word", label: "Word", plural: "Word", family: "document" },
   { kind: "sheet", label: "Sheet", plural: "Sheets", family: "document" },
   { kind: "slides", label: "Slides", plural: "Slides", family: "document" },
+  { kind: "design", label: "Design", plural: "Designs", family: "document" },
 ]
 
 export const kindLabel = (kind: LibraryKind) => LIBRARY_KINDS.find(entry => entry.kind === kind)!.label
@@ -80,7 +81,7 @@ export function libraryItems(pages: PageView[]): LibraryItem[] {
       ...(page.immutablePageId ? { pageId: page.immutablePageId } : {}),
       sharedVersion: page.artifactSharedVersion ?? null,
       native: typedKind === "word" || typedKind === "sheet",
-      projectBacked: typedKind === "project" || typedKind === "dashboard" || typedKind === "slides",
+      projectBacked: typedKind === "project" || typedKind === "dashboard" || typedKind === "slides" || typedKind === "design",
       empty: isEmpty(page),
       // Only the server's explicit classification; ownership or a missing folder is not privacy.
       private: page.privateAudience === true,
