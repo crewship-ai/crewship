@@ -1,7 +1,6 @@
 "use client"
 
 import { useMemo } from "react"
-import Image from "next/image"
 import { motion } from "motion/react"
 import { cn } from "@/lib/utils"
 import type { JournalEntry } from "@/lib/types/journal"
@@ -11,8 +10,8 @@ import {
   groupOf,
   severityOf,
 } from "@/lib/journal-style"
-import { getAgentAvatarUrl, seedColor } from "@/lib/agent-avatar"
-import { useAvatarStylesVersion } from "@/hooks/use-avatar-styles"
+import { seedColor } from "@/lib/agent-avatar"
+import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { useJournalLookup } from "@/hooks/use-journal-lookup"
 import { LogsNetworkCard } from "./logs-network-card"
 import { shortenId } from "./ids"
@@ -38,9 +37,6 @@ interface LogsStatsRailProps {
 export function LogsStatsRail({ entries, agentLookup, showNetworkCard }: LogsStatsRailProps) {
   const stats = useMemo(() => deriveStats(entries), [entries])
   const lookup = useJournalLookup()
-  // Re-render when a lazy DiceBear collection lands so placeholder discs
-  // become real avatars.
-  useAvatarStylesVersion()
 
   return (
     <motion.div
@@ -121,13 +117,14 @@ export function LogsStatsRail({ entries, agentLookup, showNetworkCard }: LogsSta
                   // matches nothing else on the rail by accident.
                   color={seedColor(seed)}
                   swatch={
-                    <Image
-                      src={getAgentAvatarUrl(seed, a?.avatar_style ?? null)}
-                      alt=""
+                    <AgentAvatar
+                      seed={seed}
+                      style={a?.avatar_style ?? null}
                       width={16}
                       height={16}
+                      loading="lazy"
+                      decoding="async"
                       className="h-4 w-4 rounded-[3px] shrink-0 bg-muted/40"
-                      unoptimized
                     />
                   }
                 />
