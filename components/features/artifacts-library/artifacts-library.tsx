@@ -339,7 +339,8 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
         : null}
     {!projectPreview && item.native && item.kind === "word" && item.pageId && <LockLostDraft workspaceId={workspaceId} slug={"@" + item.pageId} />}
     {item.kind === "word" && !item.empty && item.pageId && <WordPreview workspaceId={workspaceId} item={item} />}
-    {!projectPreview && item.kind !== "project" && <p className="text-sm text-muted-foreground">
+    {/* An old-editor Word has nowhere to edit it; its notice says so on its own. */}
+    {!projectPreview && item.kind !== "project" && !(item.kind === "word" && !item.native) && <p className="text-sm text-muted-foreground">
       {DETAIL_HINT[item.kind] ?? "Open in Pages shows it with everything it contains."}
     </p>}
     </>}

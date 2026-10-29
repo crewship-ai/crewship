@@ -234,6 +234,8 @@ it.each(["unavailable", "error"])("an old-editor Word that answers %s says so pl
   renderLibrary()
   expect(screen.getByRole("status")).toHaveTextContent("This document is from an older version of the editor and does not open here.")
   expect(screen.getByRole("status").textContent).not.toMatch(/engine|503|service/i)
+  // Nothing next to it sends the reader to an editor that cannot open it.
+  expect(screen.queryByText(/Edit it in its editor/)).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: /All artifacts/ }))
   expect(state.select).toHaveBeenCalledWith(null)
 })
