@@ -32,7 +32,7 @@ func (s *Server) handleNativeCraftMCP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusAccepted)
 	case "tools/list":
 		tools := []memoryMCPToolDescriptor{}
-		for _, op := range []string{"read", "acquire", "renew", "apply", "release"} {
+		for _, op := range []string{"read", "acquire", "renew", "apply", "propose", "release"} {
 			tools = append(tools, memoryMCPToolDescriptor{Name: "craft_" + op, Description: nativeCraftToolDescription(op), InputSchema: nativeCraftToolSchema(op)})
 		}
 		writeJSONResponse(w, 200, memoryMCPResponse{JSONRPC: "2.0", ID: req.ID, Result: mustJSON(map[string]any{"tools": tools})})
@@ -88,6 +88,10 @@ func nativeCraftToolPacket(name string, args json.RawMessage) ([]byte, bool) {
 		for _, key := range []string{"generation", "base_version", "request_id", "commands"} {
 			allowed[key] = true
 		}
+	case "propose":
+		for _, key := range []string{"base_version", "request_id", "commands", "summary"} {
+			allowed[key] = true
+		}
 	default:
 		return nil, false
 	}
@@ -101,7 +105,13 @@ func nativeCraftToolPacket(name string, args json.RawMessage) ([]byte, bool) {
 			return nil, false
 		}
 	}
-	if op == "apply" {
+	if summary := fields["summary"]; len(summary) > 0 {
+		var text string
+		if json.Unmarshal(summary, &text) != nil || len(text) > 500 {
+			return nil, false
+		}
+	}
+	if op == "apply" || op == "propose" {
 		var id string
 		if !nativeCraftPositive(fields["base_version"]) || json.Unmarshal(fields["request_id"], &id) != nil || len(id) == 0 || len(id) > 128 {
 			return nil, false
@@ -150,6 +160,8 @@ func nativeCraftToolDescription(op string) string {
 		return "Renew this agent's exact current generation. Expired, revoked or handed-off authority is refused."
 	case "release":
 		return "Release this agent's exact current generation after inspecting the save receipt."
+	case "propose":
+		return "When acquire is refused because a human holds the document, prepare a separate proposal instead: the same allowlisted commands over the exact base_version you read, a new request_id and a short summary. The document stays unchanged; the human reviews, accepts or rejects it, and acceptance re-checks rights, the lease and the current version. Report the proposal_id; never claim the edit was saved."
 	default:
 		return "Apply allowlisted original-engine commands using exact generation, base_version and a new request_id. Word caret.docStart/docEnd params{} and text.insert params{text}; Sheet cell.set params{cell,input} accepts scalar literals; formulas are unavailable in this initial tool. Only a committed Node receipt proves Saved. Retain the exact original request for uncertain reconciliation; never blindly retry or change its base."
 	}
@@ -166,11 +178,14 @@ func nativeCraftToolSchema(op string) json.RawMessage {
 	if op == "read" {
 		props["query"] = command
 	}
-	if op == "apply" {
+	if op == "apply" || op == "propose" {
 		props["base_version"] = positive
 		props["request_id"] = map[string]any{"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[A-Za-z0-9_.:-]+$"}
 		props["commands"] = map[string]any{"type": "array", "minItems": 1, "maxItems": 64, "items": command}
 		required = append(required, "base_version", "request_id", "commands")
+	}
+	if op == "propose" {
+		props["summary"] = map[string]any{"type": "string", "maxLength": 500}
 	}
 	return mustJSON(map[string]any{"type": "object", "additionalProperties": false, "properties": props, "required": required})
 }

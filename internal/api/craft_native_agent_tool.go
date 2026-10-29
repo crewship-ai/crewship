@@ -24,6 +24,7 @@ type craftNativeAgentToolRequest struct {
 	RequestID   string          `json:"request_id,omitempty"`
 	Commands    json.RawMessage `json:"commands,omitempty"`
 	Query       json.RawMessage `json:"query,omitempty"`
+	Summary     string          `json:"summary,omitempty"`
 }
 type craftNativeAgentToolAttempt struct {
 	input     [32]byte
@@ -85,6 +86,10 @@ func parseCraftNativeAgentTool(raw []byte) (craftNativeAgentToolRequest, error) 
 		for _, key := range []string{"generation", "base_version", "request_id", "commands"} {
 			allowed[key] = true
 		}
+	case "propose":
+		for _, key := range []string{"base_version", "request_id", "commands", "summary"} {
+			allowed[key] = true
+		}
 	default:
 		return out, mooring.ErrInvalid
 	}
@@ -98,7 +103,7 @@ func parseCraftNativeAgentTool(raw []byte) (craftNativeAgentToolRequest, error) 
 			return out, mooring.ErrInvalid
 		}
 	}
-	if out.Operation == "apply" {
+	if out.Operation == "apply" || out.Operation == "propose" {
 		if _, err = craftNativeVersion(out.BaseVersion); err != nil || len(out.RequestID) == 0 || len(out.RequestID) > 128 {
 			return out, mooring.ErrInvalid
 		}
@@ -111,6 +116,9 @@ func parseCraftNativeAgentTool(raw []byte) (craftNativeAgentToolRequest, error) 
 		if len(out.Commands) > 64<<10 || json.Unmarshal(out.Commands, &commands) != nil || len(commands) == 0 || len(commands) > 64 {
 			return out, mooring.ErrInvalid
 		}
+	}
+	if len(out.Summary) > 500 || strings.ContainsRune(out.Summary, 0) {
+		return out, mooring.ErrInvalid
 	}
 	if len(out.Query) > 0 && (len(out.Query) > 64<<10 || bytes.TrimSpace(out.Query)[0] != '{') {
 		return out, mooring.ErrInvalid
@@ -229,6 +237,17 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		writeJSON(w, 200, receipt)
+	case "propose":
+		proposal, err := m.proposeTool(bound.Context(), e, store, profile, input)
+		if err != nil {
+			if errors.Is(err, ErrCraftNativeAgentEngine) {
+				replyError(w, 422, "original native engine operation refused")
+			} else {
+				craftNativeDocumentError(w, err)
+			}
+			return
+		}
+		writeJSON(w, 201, map[string]string{"proposal_id": proposal.ID, "base_version": strconv.FormatInt(proposal.BaseVersion, 10), "state": proposal.State, "note": "The document is unchanged. The person holding the editor will review, accept or reject this proposal."})
 	case "read":
 		state, err := store.Read(bound.Context(), e.grant.Scope)
 		if err != nil {
@@ -378,6 +397,39 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	e.tool.uncertain = false
 	return receipt, nil
 }
+
+// proposeTool prepares a complete candidate over the exact read base without
+// touching the lease, so a human holder keeps editing. It is recorded once per
+// request ID; the engine output is never published as a version here.
+func (m *craftNativeAgentManager) proposeTool(ctx context.Context, e *craftNativeAgentEntry, store *mooring.NativeStore, profile CraftNativeDocumentProfile, input craftNativeAgentToolRequest) (mooring.NativeProposal, error) {
+	base, _ := craftNativeVersion(input.BaseVersion)
+	state, err := store.Read(ctx, e.grant.Scope)
+	if err != nil {
+		return mooring.NativeProposal{}, err
+	}
+	if state.LatestVersion != base {
+		return mooring.NativeProposal{}, artifacts.ErrVersionConflict
+	}
+	native, err := nativeAgentDocumentBytes(state)
+	if err != nil {
+		return mooring.NativeProposal{}, err
+	}
+	active, cancel := context.WithTimeout(ctx, 65*time.Second)
+	defer cancel()
+	candidate, err := m.config.AgentApply(active, profile, native, input.Commands)
+	if err != nil {
+		return mooring.NativeProposal{}, err
+	}
+	if len(candidate) == 0 || len(candidate) > 32<<20 {
+		return mooring.NativeProposal{}, ErrCraftNativeAgentEngine
+	}
+	// Run authority is checked again after the external engine call.
+	if err = m.toolAuthority(ctx, e); err != nil {
+		return mooring.NativeProposal{}, err
+	}
+	return store.Propose(ctx, e.grant.Scope, base, input.RequestID, input.Summary, candidate)
+}
+
 func knownNativeAgentRefusal(err error) bool {
 	for _, known := range []error{mooring.ErrInvalid, mooring.ErrNativeValidation, mooring.ErrNativeProfile, mooring.ErrEditLeaseDenied, mooring.ErrEditLeaseStale, artifacts.ErrVersionConflict, artifacts.ErrVersionQuota, errCraftNativeAgentDenied} {
 		if errors.Is(err, known) {

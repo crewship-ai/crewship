@@ -197,7 +197,7 @@ func (rt *craftNativeAgentRuntime) Run(ctx context.Context, a dispatch.Assignmen
 	if err = rt.h.resolver.CreateRun(runCtx, a.RunID, g.AgentID, g.Original.ChatID, g.Scope.WorkspaceID, "CHAT", map[string]interface{}{"native_craft_task": true}); err != nil {
 		return err
 	}
-	prompt := "Use only the provided native Craft tools for this explicit whole-document task. Acquire the lease first; if busy, report busy without stealing or retrying. Inspect, apply only the requested edit, retain the original request_id for uncertain results, and release after a committed receipt. Never claim Saved without that receipt.\n\n" + g.Instruction
+	prompt := "Use only the provided native Craft tools for this explicit whole-document task. Acquire the lease first; if a human holds it, never steal or retry: read the current version and call craft_propose with the requested edit over that exact base_version, then report the proposal for the human to review. Inspect, apply only the requested edit, retain the original request_id for uncertain results, and release after a committed receipt. Never claim Saved without that receipt.\n\n" + g.Instruction
 	req := info.ToAgentRunRequest(chatbridge.AgentRunOverrides{ChatID: g.Original.ChatID, ContainerID: use.ContainerID(), UserMessage: prompt, LLMModel: info.LLMModel, TimeoutSecs: info.TimeoutSecs, MemoryMB: info.MemoryMB, CPUs: info.CPUs, MaxTurns: orchestrator.RoutineMaxTurns}).WithStrictContentPrivacy()
 	req.RunID, req.RuntimeUse = a.RunID, use
 	req, err = req.WithNativeCraftTools()
