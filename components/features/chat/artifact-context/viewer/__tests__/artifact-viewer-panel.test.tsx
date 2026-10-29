@@ -703,3 +703,22 @@ it("offers only editors an escaped unpinned source editor link",()=>{
  cleanup();state.snapshot.data=snap({can_write:false});render(<ArtifactViewerPanel variant="library" />)
  expect(screen.queryByRole("link",{name:"Edit source"})).toBeNull()
 })
+
+it("offers an unsent comment back after the tab was lost, only to the same person", () => {
+  const storage = new Map<string,string>()
+  vi.mocked(localStorage.getItem).mockImplementation(key => storage.get(key) ?? null)
+  vi.mocked(localStorage.setItem).mockImplementation((key,value) => { storage.set(key,value) })
+  vi.mocked(localStorage.removeItem).mockImplementation(key => { storage.delete(key) })
+  const first = render(<ArtifactViewerPanel />)
+  selectHero()
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Typed before the crash" } })
+  first.unmount()
+  render(<ArtifactViewerPanel />)
+  selectHero()
+  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Typed before the crash")
+  cleanup()
+  state.userId = "someone-else"
+  render(<ArtifactViewerPanel />)
+  selectHero()
+  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("")
+})

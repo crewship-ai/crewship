@@ -202,6 +202,11 @@ function LibraryLoadedViewer(props: LoadedProps & { dispatchEnabled: boolean }) 
   return <LoadedViewer {...props} library sendToOrigin={data.origin && dispatchEnabled ? request => agent.dispatch(request.comment) : undefined} />
 }
 
+function readCommentDraft(key: string | null): string {
+  if (!key) return ""
+  try { return localStorage.getItem(key) ?? "" } catch { return "" }
+}
+
 function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, shell, fullscreen, writeEnabled, library = false, sendToOrigin }: LoadedProps) {
   const me = useSessionSafe()?.data?.user?.id
   const canWrite = writeEnabled && data.can_write === true
@@ -235,7 +240,15 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
   const [screenPath, setScreenPath] = useState<string | null>(null)
   const [selectMode, setSelectMode] = useState(false)
   const [anchor, setAnchor] = useState<Anchor | null>(null)
-  const [draft, setDraft] = useState("")
+  // An unsent comment survives a crash or closed tab in this browser, per
+  // person, workspace and Page; the selected place must be picked again.
+  const draftKey = me ? `artifact-viewer-comment:${me}:${workspaceId}:${data.page_id}` : null
+  const [draftState, setDraftState] = useState<{ key: string | null; text: string }>(() => ({ key: draftKey, text: readCommentDraft(draftKey) }))
+  const draft = draftState.key === draftKey ? draftState.text : readCommentDraft(draftKey)
+  const setDraft = (text: string) => {
+    setDraftState({ key: draftKey, text })
+    try { if (draftKey) { if (text) localStorage.setItem(draftKey, text); else localStorage.removeItem(draftKey) } } catch { /* the in-memory draft and Copy my comment remain */ }
+  }
   const [banner, setBanner] = useState<Banner | null>(null)
   // A comment notice belongs to the version it was sent on and to that selection; see below.
   const [notice, setNotice] = useState<{ text: string; commentOn?: number }>({ text: "" })
