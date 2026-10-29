@@ -99,7 +99,7 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
     setDelivery(previous => ({...previous,[posted.id]:"Sending to agent…"}))
     const accepted = await agent.dispatch(posted)
     if (current.current.submissionScope !== submitted.submissionScope || !current.current.canWrite) return
-    setDelivery(previous => ({...previous,[posted.id]:accepted ? "Sent to agent" : "Comment saved. Agent delivery could not be confirmed. Retry when the source chat is connected."}))
+    setDelivery(previous => ({...previous,[posted.id]:accepted ? "Sent to agent" : agent.refusal?.(posted.id) === "busy" ? "Comment saved. The agent is busy; retry when it finishes." : "Comment saved. Agent delivery could not be confirmed. Retry when the source chat is connected."}))
    }
   } })
  }
