@@ -4,11 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { tryRefresh } from "@/lib/api-fetch"
 import { useDesign } from "../use-design"
 import { designNodes, upsertDesignNode } from "../design-document"
-const server = vi.hoisted(() => ({ actorId: "same-user", bearer: false, pageId: "old-private-page", authorityRevision: "1", canEdit: true, providers: [] as { admittedEdit: boolean; editable: boolean; destroyed: boolean; deny: () => void; connect: () => void; prepare?: () => Promise<string> }[], urls: [] as string[], calls: [] as { url: string; method: string }[] }))
+const server = vi.hoisted(() => ({ post401: false, actorId: "same-user", bearer: false, pageId: "old-private-page", authorityRevision: "1", canEdit: true, providers: [] as { admittedEdit: boolean; editable: boolean; destroyed: boolean; deny: () => void; connect: () => void; prepare?: () => Promise<string> }[], urls: [] as string[], calls: [] as { url: string; method: string; skipRefresh?: boolean }[] }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "same-user", name: "Owner" } } }) }))
 vi.mock("@/lib/server-base", () => ({ resolveWsBase: () => "ws://localhost", getAuthMode: () => server.bearer ? "bearer" : "cookie" }))
-vi.mock("@/lib/api-fetch", () => ({ tryRefresh: vi.fn(async () => "ok"), apiFetch: async (url: string, init?: RequestInit) => {
- server.calls.push({ url, method: init?.method ?? "GET" })
+vi.mock("@/lib/api-fetch", () => ({ tryRefresh: vi.fn(async () => "ok"), apiFetch: async (url: string, init?: RequestInit & { skipRefresh?: boolean }) => {
+ server.calls.push({ url, method: init?.method ?? "GET", skipRefresh: init?.skipRefresh })
+ if (init?.method === "POST" && server.post401) return new Response(JSON.stringify({ error: "session_expired" }), { status: 401 })
  if (init?.method === "POST" && url.includes("/@old-private-page/") && server.pageId !== "old-private-page") return new Response(JSON.stringify({ error: "not found" }), { status: 404 })
  const common = { latest_version: 1, shared_version: 0 }
  const data = url.includes("/comments?") ? { comments: [] } : url.includes("/versions?") ? { ...common, versions: [] } : { ...common, page_id: server.pageId, authority_revision: server.authorityRevision, can_edit: server.canEdit, version: 1, nodes: [], order: [], actor: { id: server.actorId, name: "Owner" } }
@@ -39,6 +40,7 @@ beforeEach(() => {
  server.urls = []
  server.calls = []
  server.providers = []
+ server.post401 = false
  server.actorId = "same-user"
  server.bearer = false
  vi.mocked(tryRefresh).mockClear().mockResolvedValue("ok")
@@ -129,6 +131,19 @@ describe("Design local draft identity", () => {
   vi.mocked(tryRefresh).mockClear()
   server.bearer = true
   expect(await original.prepare!()).toBe("ready")
+  expect(tryRefresh).not.toHaveBeenCalled()
+ })
+ it("does not let the shared HTTP wrapper replay a snapshot after credential expiry", async () => {
+  server.pageId = "old-private-page"
+  const view = mount()
+  await waitFor(() => expect(view.result.current.doc).not.toBeNull())
+  server.post401 = true
+  let outcome: PromiseSettledResult<unknown>[] = []
+  await act(async () => { outcome = await Promise.allSettled([view.result.current.save.mutateAsync("Keep pending work")]) })
+  const writes = server.calls.filter(call => call.method === "POST")
+  expect(writes).toHaveLength(1)
+  expect(writes[0].skipRefresh).toBe(true)
+  expect(outcome[0].status).toBe("rejected")
   expect(tryRefresh).not.toHaveBeenCalled()
  })
  it("pins private mutation requests to the loaded Page during the slug reuse refetch gap", async () => {
