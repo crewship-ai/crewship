@@ -71,6 +71,13 @@ func migrationDeckNativeKinds(ctx context.Context, db *sql.DB, logger *slog.Logg
 	if len(changes) == 0 {
 		return nil
 	}
+	// Historical databases can contain unrelated, already tolerated orphans.
+	// Preserve their exact identities; this schema-only change must introduce
+	// neither a new violation nor another occurrence of an existing one.
+	beforeFK, err := deckNativeForeignKeyViolations(ctx, tx)
+	if err != nil {
+		return err
+	}
 	var version int64
 	if err = tx.QueryRowContext(ctx, `PRAGMA schema_version`).Scan(&version); err != nil {
 		return err
@@ -100,8 +107,14 @@ func migrationDeckNativeKinds(ctx context.Context, db *sql.DB, logger *slog.Logg
 	if _, err = tx.ExecContext(ctx, fmt.Sprintf(`PRAGMA schema_version=%d`, version+1)); err != nil {
 		return err
 	}
-	if err = checkForeignKeys(ctx, tx); err != nil {
+	afterFK, err := deckNativeForeignKeyViolations(ctx, tx)
+	if err != nil {
 		return err
+	}
+	for violation, count := range afterFK {
+		if count > beforeFK[violation] {
+			return fmt.Errorf("native family migration introduced foreign key violation: %s", violation)
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return err
@@ -111,4 +124,32 @@ func migrationDeckNativeKinds(ctx context.Context, db *sql.DB, logger *slog.Logg
 		logger.Info("admitted native presentation family without changing existing data", "tables", len(changes))
 	}
 	return nil
+}
+
+func deckNativeForeignKeyViolations(ctx context.Context, tx *sql.Tx) (map[string]uint64, error) {
+	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	violations := make(map[string]uint64)
+	for rows.Next() {
+		var table, parent string
+		var rowid sql.NullInt64
+		var foreignKey int64
+		if err := rows.Scan(&table, &rowid, &parent, &foreignKey); err != nil {
+			return nil, err
+		}
+		// WITHOUT ROWID tables report NULL rowids. Keep multiplicity as well
+		// as identity so an additional violation cannot hide behind that NULL.
+		identity := fmt.Sprintf("table=%q rowid=%v parent=%q fk=%d", table, rowid, parent, foreignKey)
+		violations[identity]++
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return violations, nil
 }

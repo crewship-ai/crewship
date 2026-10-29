@@ -122,57 +122,77 @@ func TestRunHandler_List_RequiresWorkspace(t *testing.T) {
 }
 
 func TestRunHandler_List_HappyPath(t *testing.T) {
-	f := newRunsTestFixture(t)
-	now := time.Now().UTC()
-	f.emitRunRow(t, "run_a", "COMPLETED", "USER", now.Add(-3*time.Minute))
-	f.emitRunRow(t, "run_b", "FAILED", "WEBHOOK", now.Add(-2*time.Minute))
-	f.emitRunRow(t, "run_c", "", "USER", now.Add(-1*time.Minute)) // running
+	for _, tc := range []struct {
+		name     string
+		seedTime func() time.Time
+	}{
+		{"current_time", func() time.Time { return time.Now().UTC() }},
+		// Reproduce a CI run just after midnight without changing the clock:
+		// both the starts and the failure terminal event belong to yesterday.
+		{"previous_day_events", func() time.Time { return time.Now().UTC().Truncate(24 * time.Hour).Add(13 * time.Second) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 
-	req := httptest.NewRequest("GET", "/api/v1/runs", nil)
-	req = withWorkspaceUser(req, f.user, f.wsID, "OWNER")
-	rr := httptest.NewRecorder()
-	beforeList := time.Now().UTC()
-	f.h.List(rr, req)
-	afterList := time.Now().UTC()
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
-	}
-	var resp runListResponse
-	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(resp.Data) != 3 {
-		t.Fatalf("data len=%d want 3", len(resp.Data))
-	}
-	// Ordered started_at DESC → run_c (running) first.
-	if resp.Data[0].ID != "run_c" || resp.Data[0].Status != "RUNNING" {
-		t.Errorf("first row: %+v", resp.Data[0])
-	}
-	// The three starts can straddle UTC midnight. Count the actual fixtures,
-	// and allow either observed day only if midnight occurred during the call.
-	countToday := func(at time.Time) int {
-		day := at.Truncate(24 * time.Hour)
-		count := 0
-		for _, age := range []time.Duration{3 * time.Minute, 2 * time.Minute, time.Minute} {
-			if !now.Add(-age).Before(day) {
-				count++
+			f := newRunsTestFixture(t)
+			now := tc.seedTime()
+			f.emitRunRow(t, "run_a", "COMPLETED", "USER", now.Add(-3*time.Minute))
+			f.emitRunRow(t, "run_b", "FAILED", "WEBHOOK", now.Add(-2*time.Minute))
+			f.emitRunRow(t, "run_c", "", "USER", now.Add(-1*time.Minute)) // running
+
+			req := httptest.NewRequest("GET", "/api/v1/runs", nil)
+			req = withWorkspaceUser(req, f.user, f.wsID, "OWNER")
+			rr := httptest.NewRecorder()
+			beforeList := time.Now().UTC()
+			f.h.List(rr, req)
+			afterList := time.Now().UTC()
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 			}
-		}
-		return count
-	}
-	beforeToday, afterToday := countToday(beforeList), countToday(afterList)
-	if resp.Stats.Running != 1 || (resp.Stats.Today != beforeToday && resp.Stats.Today != afterToday) || resp.Stats.Failed != 1 {
-		t.Errorf("stats: %+v want running=1 today=%d (or %d across midnight) failed=1", resp.Stats, beforeToday, afterToday)
-	}
-	if resp.Pagination.Total != 3 {
-		t.Errorf("pagination.total=%d want 3", resp.Pagination.Total)
-	}
-	// Enrichment populated for the seeded agent.
-	if resp.Data[0].AgentName == nil || *resp.Data[0].AgentName != "Thomas" {
-		t.Errorf("agent_name not enriched: %v", resp.Data[0].AgentName)
-	}
-	if resp.Data[0].CrewName == nil || *resp.Data[0].CrewName != "Engineering" {
-		t.Errorf("crew_name not enriched: %v", resp.Data[0].CrewName)
+			var resp runListResponse
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if len(resp.Data) != 3 {
+				t.Fatalf("data len=%d want 3", len(resp.Data))
+			}
+			// Ordered started_at DESC → run_c (running) first.
+			if resp.Data[0].ID != "run_c" || resp.Data[0].Status != "RUNNING" {
+				t.Errorf("first row: %+v", resp.Data[0])
+			}
+			// Starts and failure terminal events use separate UTC-day counters.
+			// Accept either observed day only when the call straddles midnight.
+			countsForDay := func(at time.Time) (today, failed int) {
+				day := at.UTC().Truncate(24 * time.Hour)
+				for _, age := range []time.Duration{3 * time.Minute, 2 * time.Minute, time.Minute} {
+					if !now.Add(-age).Before(day) {
+						today++
+					}
+				}
+				// emitRunRow timestamps the failure one minute after its start.
+				if !now.Add(-time.Minute).Before(day) {
+					failed = 1
+				}
+				return today, failed
+			}
+			beforeToday, beforeFailed := countsForDay(beforeList)
+			afterToday, afterFailed := countsForDay(afterList)
+			matchesDay := func(today, failed int) bool {
+				return resp.Stats.Today == today && resp.Stats.Failed == failed
+			}
+			if resp.Stats.Running != 1 || (!matchesDay(beforeToday, beforeFailed) && !matchesDay(afterToday, afterFailed)) {
+				t.Errorf("stats: %+v want running=1 (today,failed)=(%d,%d) or (%d,%d) across midnight", resp.Stats, beforeToday, beforeFailed, afterToday, afterFailed)
+			}
+			if resp.Pagination.Total != 3 {
+				t.Errorf("pagination.total=%d want 3", resp.Pagination.Total)
+			}
+			// Enrichment populated for the seeded agent.
+			if resp.Data[0].AgentName == nil || *resp.Data[0].AgentName != "Thomas" {
+				t.Errorf("agent_name not enriched: %v", resp.Data[0].AgentName)
+			}
+			if resp.Data[0].CrewName == nil || *resp.Data[0].CrewName != "Engineering" {
+				t.Errorf("crew_name not enriched: %v", resp.Data[0].CrewName)
+			}
+		})
 	}
 }
 
