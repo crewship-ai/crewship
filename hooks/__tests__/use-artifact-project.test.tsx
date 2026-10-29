@@ -6,7 +6,7 @@ import {afterEach,expect,it,vi} from 'vitest'
 import {useArtifactProject} from '../use-artifact-project'
 const m=vi.hoisted(()=>({human:'A',fetch:vi.fn()}))
 vi.mock('@/hooks/use-auth',()=>({useSessionSafe:()=>({data:{user:{id:m.human}}})}))
-vi.mock('@/lib/api-fetch',()=>({apiFetch:m.fetch}))
+vi.mock('@/lib/api-fetch',()=>({tryRefresh:async()=>"ok",apiFetch:(url:string,init:RequestInit)=>url==='/api/auth/session'?Promise.resolve(new Response(JSON.stringify({user:{id:m.human}}))):m.fetch(url,init)}))
 const snapshot={page_id:'p',can_write:true,latest_version:2,manifest:{version:2,entrypoint:'index.html',files:[]}}
 function setup(){const client=new QueryClient({defaultOptions:{queries:{retry:false},mutations:{retry:false}}});return renderHook(()=>useArtifactProject('w','demo'),{wrapper:({children}:{children:React.ReactNode})=><QueryClientProvider client={client}>{children}</QueryClientProvider>})}
 afterEach(()=>{cleanup();m.fetch.mockReset();m.human='A'})
@@ -17,7 +17,7 @@ it('sends one CAS save with AbortSignal and no credential replay',async()=>{
  act(()=>hook.result.current.save.mutate(body))
  await waitFor(()=>expect(m.fetch.mock.calls.some(([,init])=>init.method==='POST')).toBe(true))
  const [url,init]=m.fetch.mock.calls.find(([,init])=>init.method==='POST')!
- expect(url).toBe('/api/v1/pages/demo/artifact/versions?workspace_id=w')
+ expect(url).toBe('/api/v1/pages/%40p/artifact/versions?workspace_id=w')
  expect(init).toMatchObject({signal:expect.any(AbortSignal),redirect:'error',skipRefresh:true,body:JSON.stringify(body)})
 })
 it('aborts delivery and rejects stale mutation callbacks across A to B to A',async()=>{

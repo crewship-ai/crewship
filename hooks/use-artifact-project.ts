@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient, type MutateOptions } from "@tanstack/react-query"
 import type { ArtifactOrigin } from "@/hooks/use-artifact-agent-dispatch"
 import { useSessionSafe } from "@/hooks/use-auth"
-import { apiFetch } from "@/lib/api-fetch"
+import { apiFetch, tryRefresh } from "@/lib/api-fetch"
+import { getBearerToken } from "@/lib/server-base"
+import { assertWorkspaceRequest, captureWorkspaceRequest } from "@/lib/workspace-availability"
 
 export interface ArtifactFile { path: string; content: string; media_type: string }
 export type ArtifactAuthorKind = "human" | "agent"
@@ -32,7 +34,8 @@ export function useArtifactProject(workspace: string, slug: string, version?: nu
  const client = useQueryClient()
  const session = useSessionSafe()
  const human = session?.data?.user?.id
- const scope = useMemo(() => ({binding:[workspace,slug,human,version],id:++projectScopeSequence,active:true, controllers:new Set<AbortController>()}), [workspace,slug,human,version])
+ const credential = getBearerToken()
+ const scope = useMemo(() => ({binding:[workspace,slug,human,version],id:++projectScopeSequence,active:true, controllers:new Set<AbortController>(),credential,pageId:undefined as string|undefined,refreshedAt:undefined as number|undefined}), [workspace,slug,human,version,credential])
  const current = useRef(scope)
  if(current.current !== scope) {
   current.current.active=false
@@ -47,23 +50,56 @@ export function useArtifactProject(workspace: string, slug: string, version?: nu
  const key = ["artifact-project", workspace, slug, human ?? "anonymous"]
  const endpoint = `/api/v1/pages/${encodeURIComponent(slug)}/artifact`
  const params = new URLSearchParams({ workspace_id: workspace })
- const valid = () => scope.active && current.current === scope && Boolean(human && workspace && slug)
+ const valid = () => scope.active && current.current === scope && scope.credential === getBearerToken() && Boolean(human && workspace && slug)
  const request = async <T,>(path: string, body?: unknown, signal?:AbortSignal): Promise<T> => {
   if(!valid()||signal?.aborted)throw new Error("Project request retired.")
   const controller=new AbortController()
   const abort=()=>controller.abort()
   signal?.addEventListener("abort",abort,{once:true});scope.controllers.add(controller)
   try {
-   if(!valid()||signal?.aborted)throw new Error("Project request retired.")
-   const response = await apiFetch(`${endpoint}${path}${path.includes("?") ? "&" : "?"}${params}`, {signal:controller.signal,cache:"no-store",redirect:"error",skipRefresh:body !== undefined,...(body === undefined ? {} : {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})})
+   const assertActive=()=>{if(!valid()||controller.signal.aborted)throw new Error("Project request retired.")}
+   assertActive()
+   const writing=body!==undefined
+   // A draft stays bound to the page we read, even if its slug is reassigned.
+   if(writing&&!scope.pageId)throw new Error("Load the project before saving.")
+   const target=writing?`/api/v1/pages/${encodeURIComponent("@"+scope.pageId)}/artifact`:endpoint
+   const url=`${target}${path}${path.includes("?") ? "&" : "?"}${params}`
+   const captured=captureWorkspaceRequest(url,writing?{method:"POST"}:undefined)
+   if(writing&&scope.credential===null){
+    // Refresh BEFORE dispatch: a failed or ambiguous artifact write is never
+    // replayed. Polling cannot guarantee a fresh cookie at the next save.
+    const now=Date.now()
+    if(scope.refreshedAt===undefined||now<scope.refreshedAt||now-scope.refreshedAt>=5*60_000){
+     const refreshed=await tryRefresh()
+     assertActive();assertWorkspaceRequest(captured)
+     if(refreshed!=="ok")throw Object.assign(new Error("Could not confirm fresh authentication. Your draft is preserved."),{status:refreshed==="auth_failed"?401:503})
+     scope.refreshedAt=Date.now()
+    }
+    // Refresh cookies may belong to another identity. Never trust the cached
+    // React session, an empty response, or a failed identity read for a write.
+    const identity=await apiFetch("/api/auth/session",{signal:controller.signal,cache:"no-store",redirect:"error",skipRefresh:true})
+    assertActive();assertWorkspaceRequest(captured)
+    const authenticated=await identity.json().catch(()=>null)
+    assertActive();assertWorkspaceRequest(captured)
+    if(!identity.ok||authenticated?.user?.id!==human)throw Object.assign(new Error("Could not confirm the original project editor. Your draft is preserved."),{status:identity.ok?403:identity.status})
+   }
+   assertActive();assertWorkspaceRequest(captured)
+   const response = await apiFetch(url, {signal:controller.signal,cache:"no-store",redirect:"error",skipRefresh:writing,...(!writing ? {} : {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})})
    const data = await response.json().catch(() => null)
    if(!valid()||controller.signal.aborted)throw new Error("Project request retired.")
    if (!response.ok) {
     const error=Object.assign(new Error(response.status === 409 ? "This project changed. Your draft is preserved. Load the latest version before saving again." : data?.error ?? "Could not load the artifact project."), { status: response.status })
-    if(response.status===401||response.status===403)setRefusal({scope,error})
     throw error
    }
+   if(!writing&&typeof data?.page_id==="string"){
+    if(scope.pageId&&scope.pageId!==data.page_id)throw new Error("Project identity changed. Reload before saving.")
+    scope.pageId=data.page_id
+   }
    return data
+  } catch(error) {
+   const status=(error as Error&{status?:number}).status
+   if(valid()&&(status===401||status===403))setRefusal({scope,error:error as Error})
+   throw error
   } finally {scope.controllers.delete(controller);signal?.removeEventListener("abort",abort)}
  }
  const query = useQuery({ queryKey: [...key, version ?? "latest",scope.id], enabled: Boolean(human && workspace && slug), retry: false, gcTime: 0, refetchInterval: 15_000, queryFn: ({signal}) => request<ArtifactProjectSnapshot>(version ? `?version=${version}` : "",undefined,signal) })

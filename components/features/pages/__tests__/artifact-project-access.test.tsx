@@ -5,7 +5,7 @@ import {afterEach,expect,it,vi} from 'vitest'
 import {ArtifactProject} from '../artifact-project'
 const m=vi.hoisted(()=>({human:'owner',fetch:vi.fn()}))
 vi.mock('@/hooks/use-auth',()=>({useSessionSafe:()=>({data:{user:{id:m.human}}})}))
-vi.mock('@/lib/api-fetch',()=>({apiFetch:m.fetch}))
+vi.mock('@/lib/api-fetch',()=>({tryRefresh:async()=>"ok",apiFetch:(url:string,init:RequestInit)=>url==='/api/auth/session'?Promise.resolve(new Response(JSON.stringify({user:{id:m.human}}))):m.fetch(url,init)}))
 vi.mock('@/hooks/use-artifact-agent-dispatch',()=>({useArtifactAgentDispatch:()=>({dispatch:vi.fn(),ready:false})}))
 vi.mock('@/components/features/chat/artifact-context/viewer/artifact-slides-preview',()=>({ArtifactSlidesPreview:()=>null}))
 vi.mock('@/components/features/chat/artifact-context/viewer/artifact-dashboard-preview',()=>({ArtifactDashboardPreview:()=>null}))
