@@ -107,3 +107,8 @@ try {
   assert.deepEqual(errors, [], "no page errors")
   assert.deepEqual(await page.evaluate(() => window.__unmocked), [], "every request was mocked")
   step("done")
+} finally {
+  await browser?.close()
+  server?.close()
+  await rm(output, { recursive: true, force: true })
+}
