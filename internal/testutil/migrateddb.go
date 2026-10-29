@@ -260,6 +260,10 @@ func openMigratedCopy(path string) (*database.DB, error) {
 
 func templatePath() (string, error) {
 	migratedTemplateOnce.Do(func() {
+		if dir, configured := os.LookupEnv(importBundleEnv); configured {
+			migratedTemplatePath, migratedTemplateErr = importMigratedBundle(dir)
+			return
+		}
 		if path, ok := inheritedTemplate(); ok {
 			migratedTemplatePath = path
 			return

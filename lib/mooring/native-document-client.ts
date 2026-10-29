@@ -12,6 +12,10 @@ export interface NativeDocumentSnapshot {
  version:string;bytes:Uint8Array;applicationId:"wordcraft"|"gridcraft";enginePin:string;editorBundle:string;editorURL:string
  quota:{usedBytes:string;limitBytes:string;warning:boolean;retention:string}
 }
+export interface NativeShareRequest {
+ workspaceId:string;pageId:string;applicationId:string;enginePin:string;sessionId:string;generation:string;baseVersion:string;targetVersion:string
+}
+export interface NativeShareReceipt {version:string;durability:'node';issuedBy:'crewship';phase:'shared'}
 export interface NativeDocumentClient {
  open(signal: AbortSignal): Promise<{sessionId: string; applicationId: string}>
  read(signal:AbortSignal):Promise<NativeDocumentSnapshot>
@@ -19,6 +23,7 @@ export interface NativeDocumentClient {
  reauthorize(signal:AbortSignal):Promise<boolean>
  lease(signal:AbortSignal):Promise<unknown>
  leaseAction(action:"acquire"|"release"|"request-handoff"|"handoff",body:{generation?:string;request_id?:string},signal:AbortSignal):Promise<unknown>
+ share(request:NativeShareRequest,signal:AbortSignal):Promise<NativeShareReceipt>
  save(request: NativeSaveRequest,signal: AbortSignal): Promise<unknown>
  reconcile(request: NativeSaveRequest,signal: AbortSignal): Promise<unknown>
  close(): void
@@ -91,6 +96,20 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
     return {sessionId,applicationId}
    })()
    return opening
+  },
+  async share(request,signal){
+   ready()
+   if(!request||Object.keys(request).length!==8||request.workspaceId!==options.workspaceId||request.pageId!==options.pageId||request.applicationId!==applicationId||request.sessionId!==sessionId||!/^[a-f0-9]{64}$/.test(request.enginePin)||![request.generation,request.baseVersion,request.targetVersion].every(v=>validNativeVersion(v)&&v!=='0'))throw new Error('invalid_native_share_binding')
+   const response=await send(`${base}document/share?${query}`,{method:'POST',cache:'no-store',signal,headers:{'Content-Type':'application/json','X-Craft-Session':token!},body:JSON.stringify({...request})})
+   ready()
+   if(response.status===409)throw new NativeSaveError('conflict')
+   if(response.status===401||response.status===403)throw new NativeSaveError('write_revoked')
+   if(!response.ok)throw new Error('native_share_unconfirmed')
+   const value:unknown=await response.json();ready()
+   if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('native_share_unconfirmed')
+   const v=value as Record<string,unknown>
+   if(Object.keys(v).length!==4||v.version!==request.targetVersion||v.durability!=='node'||v.issuedBy!=='crewship'||v.phase!=='shared')throw new Error('native_share_unconfirmed')
+   return v as unknown as NativeShareReceipt
   },
   async lease(signal){
    ready();const response=await send(`${base}lease?${query}`,{method:"GET",cache:"no-store",signal,headers:{"X-Craft-Session":token!}})

@@ -1,6 +1,6 @@
 "use client"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { AlertTriangle, ChevronLeft, Clock, Eye, Gauge, Info, Link2, MessageSquare, MousePointerClick, OctagonAlert, X } from "lucide-react"
+import { AlertTriangle, ArrowLeft, ChevronLeft, Clock, Eye, Gauge, Info, Link2, Lock, MessageSquare, MousePointerClick, OctagonAlert, Search, Send, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -35,11 +35,11 @@ export function commentQueueChip(comment: ArtifactComment): { label: string; ton
     case "working": return { label: "Agent working", tone: "blue", live: true }
     case "answered": {
       const version = comment.answered_version ?? replyVersion
-      return { label: version ? `Done → v${version}` : "Done", tone: "success" }
+      return { label: version ? `Done · v${version}` : "Done", tone: "success" }
     }
     case "needs_clarification": return { label: "Needs a new selection", tone: "warn" }
   }
-  if (replyVersion) return { label: `Done → v${replyVersion}`, tone: "success" }
+  if (replyVersion) return { label: `Done · v${replyVersion}`, tone: "success" }
   if (comment.task_id) return { label: "Sent to agent", tone: "blue" }
   return null
 }
@@ -81,6 +81,45 @@ function authorLabel(author: string | undefined, me: string | undefined): string
   return OPAQUE_ID.test(author) ? null : author
 }
 
+/** A whole-viewer state: what happened and what to do next, without anything of the artifact itself. */
+function ViewerState({ icon: Icon, title, text, action, children }: { icon: typeof Info; title: string; text: string; action?: React.ReactNode; children?: React.ReactNode }) {
+  return <div className="grid content-start justify-items-start gap-2.5 p-6 text-sm">
+    <span aria-hidden className="flex size-10 items-center justify-center rounded-full border bg-muted text-muted-foreground"><Icon className="size-5" /></span>
+    <h2 className="text-sm font-semibold">{title}</h2>
+    <p className="max-w-prose text-muted-foreground">{text}</p>
+    {action}
+    {children}
+  </div>
+}
+
+/**
+ * 403: the artifact exists and this person may not open it. There is no access
+ * request route yet, so Request access hands them a ready request to send the owner.
+ */
+function NoAccess({ slug }: { slug: string }) {
+  const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle")
+  const request = async () => {
+    const link = typeof window === "undefined" ? "" : window.location.href
+    try {
+      await navigator.clipboard.writeText(`Could you give me access to the artifact ${slug}? ${link}`.trim())
+      setCopied("copied")
+    } catch { setCopied("failed") }
+  }
+  return <ViewerState icon={Lock} title="You can't open this artifact" text="Ask the owner for access. Nothing of it is shown until they share it with you."
+    action={<Button type="button" size="sm" onClick={() => void request()}>Request access</Button>}>
+    <p role="status" className="text-xs text-muted-foreground empty:hidden">
+      {copied === "copied" ? "Access request copied. Paste it to the owner." : copied === "failed" ? "Could not copy the request. Ask the owner for access." : ""}
+    </p>
+  </ViewerState>
+}
+
+/** True when the element a comment anchors to is still in that file. */
+function hasAnchor(html: string, selector: string): boolean {
+  if (!isValidAnchorSelector(selector)) return false
+  if (typeof DOMParser === "undefined") return true
+  try { return new DOMParser().parseFromString(html, "text/html").querySelector(selector) !== null } catch { return false }
+}
+
 const PIN = "inline-flex shrink-0 items-center justify-center rounded-[999px_999px_999px_4px] font-semibold tabular-nums"
 
 /** The right-side viewer for the artifact project the chat opened. Renders nothing without a target. */
@@ -107,7 +146,7 @@ function ViewerBody({ workspaceId, target, onClose, className, variant }: BodyPr
 
   const shell: Shell = (header, body) =>
     <section aria-label="Artifact viewer" data-variant={variant} className={cn("@container flex h-full w-full min-w-0 flex-col overflow-hidden bg-background", className)}>
-      <header className="flex h-11 shrink-0 items-center gap-2 border-b px-2.5">
+      <header className={cn("flex shrink-0 items-center gap-2 border-b px-2.5", variant === "library" ? "min-h-11 flex-wrap py-1.5" : "h-11")}>
         {fullscreen && closeButton}
         {header}
         {!fullscreen && closeButton}
@@ -117,8 +156,12 @@ function ViewerBody({ workspaceId, target, onClose, className, variant }: BodyPr
 
   const status = errorOf(snapshot.error).status
   // Lost access wins over the cached copy: a background 403/404 must not leave the old preview on screen.
-  if (snapshot.error && (status === 403 || status === 404)) {
-    return shell(<div className="flex-1" />, <p className="p-6 text-sm text-muted-foreground">You don’t have access to this project</p>)
+  if (snapshot.error && status === 403) return shell(<div className="flex-1" />, <NoAccess slug={target.slug} />)
+  // A 404 never says whether the artifact exists: archived and private look the same.
+  if (snapshot.error && status === 404) {
+    return shell(<div className="flex-1" />, <ViewerState icon={Search} title="This artifact isn't available"
+      text="It was archived, or the link points to a private version. We don't say which, so private work stays private."
+      action={variant === "library" && <Button type="button" size="sm" variant="secondary" onClick={onClose}><ArrowLeft aria-hidden />All artifacts</Button>} />)
   }
   if (!data) {
     if (snapshot.error) {
@@ -158,7 +201,7 @@ function LibraryLoadedViewer(props: LoadedProps & { dispatchEnabled: boolean }) 
   return <LoadedViewer {...props} library sendToOrigin={data.origin && dispatchEnabled ? request => agent.dispatch(request.comment) : undefined} />
 }
 
-function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspaceId, shell, fullscreen, writeEnabled, library = false, sendToOrigin }: LoadedProps) {
+function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, shell, fullscreen, writeEnabled, library = false, sendToOrigin }: LoadedProps) {
   const me = useSessionSafe()?.data?.user?.id
   const canWrite = writeEnabled && data.can_write === true
   const scope = JSON.stringify([me, workspaceId, data.page_id, data.origin?.chat_id ?? null, data.origin?.agent_id ?? null])
@@ -246,15 +289,18 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
     if (banner === "anchor") setBanner(null)
   }
   const resetComposer = () => { setAnchor(null); setDraft(""); setSelectMode(false) }
-  // B's API dispatches to the agent only at creation (send_to_agent) and has no later "send queued" route,
-  // so the choice is made per comment here instead of a batch "Send n to agent".
-  const submit = (send: boolean) => {
+  // The API admits an agent run only for a comment saved with send_to_agent. The library saves it as a
+  // waiting task (Add to queue) and Send to agent starts the waiting ones; there is no batch route.
+  // "queue" saves the agent's task without starting it (Waiting); Send to agent in the queue starts it.
+  const submit = (mode: "send" | "queue" | "save") => {
     if (!writeAllowed() || viewingOld || !anchor || !draft.trim()) return
+    const send = mode !== "save"
     comment.mutate({ version: anchor.version, path: anchor.path, selector: anchor.selector, quote: anchor.quote, text: draft.trim(), send_to_agent: send }, {
       onSuccess: saved => {
         if (!writeAllowed()) return
         resetComposer(); setBanner(null)
-        if (send && sendToAgent) void dispatch(saved)
+        if (mode === "send" && sendToAgent) void dispatch(saved)
+        else if (mode === "queue" && sendToAgent) setNotice({ text: "Added to the queue. The agent starts when you send it.", commentOn: anchor.version })
         // Without a chat to start it, a comment for the agent waits as its task.
         else setNotice({ text: send ? "Comment saved for the agent" : "Comment saved", commentOn: anchor.version })
       },
@@ -269,20 +315,28 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
   // Authoritative task progress wins over a missing or late socket ACK. Clear
   // the old failure before it paints, so Retry cannot launch an answered task.
   if (undispatched && deliveryConfirmed(undispatched)) setUndispatched(null)
-  const dispatch = async (saved: ArtifactComment) => {
-    if (!writeAllowed() || deliveryConfirmed(saved)) return
+  /** Starts the agent on one saved task; a failure keeps it for Retry. */
+  const deliver = async (saved: ArtifactComment): Promise<boolean> => {
     setUndispatched(null)
     const started = sendToAgent ? await sendToAgent({ pageId: data.page_id, comment: saved }).catch(() => false) : false
-    if (!writeAllowed()) return
-    if (started) { confirmedDeliveries.current.add(deliveryKey(saved)); setNotice({ text: "Comment sent to the agent", commentOn: saved.version }) }
+    if (!writeAllowed()) return false
+    if (started) confirmedDeliveries.current.add(deliveryKey(saved))
     else setUndispatched(saved)
+    return started
+  }
+  const dispatch = async (saved: ArtifactComment) => {
+    if (!writeAllowed() || deliveryConfirmed(saved)) return
+    if (await deliver(saved)) setNotice({ text: "Comment sent to the agent", commentOn: saved.version })
   }
   const recoverable = (snapshot: ArtifactProjectSnapshot, saved: ArtifactComment) =>
     snapshot.can_write === true && snapshot.origin?.chat_id && snapshot.origin.agent_id &&
     snapshot.manifest.version === snapshot.latest_version && saved.version === snapshot.latest_version &&
     saved.delivery_retryable === true && saved.status === "pending" && Boolean(saved.task_id) &&
     saved.author === me && !saved.answered_version && !saved.replies?.length
-  const queuedRetry = sendToAgent ? data.comments.find(saved => recoverable(data, saved) && !deliveryConfirmed(saved)) : undefined
+  // Tasks saved for the agent and not started yet. The library queues them on purpose (Send to agent
+  // starts them); a chat pane only gets them from a send that did not go out, so it offers Retry.
+  const waitingTasks = sendToAgent ? data.comments.filter(saved => recoverable(data, saved) && !deliveryConfirmed(saved)) : []
+  const queuedRetry = library ? undefined : waitingTasks[0]
   // A legacy immediate failure remains visible until the fresh server snapshot
   // classifies it. Reopening recovers only explicitly eligible persisted tasks.
   const localRetry = undispatched && !deliveryConfirmed(undispatched) &&
@@ -309,6 +363,46 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
       }
     }
   }
+  // One fresh read, then each waiting task in order; the first that does not start stops the run and offers Retry.
+  const sendWaiting = async () => {
+    if (!writeAllowed() || retryInFlight.current || waitingTasks.length === 0) return
+    retryInFlight.current = true; setCheckingRetry(true)
+    try {
+      const chosen = new Set(waitingTasks.map(saved => saved.id))
+      const fresh = await readForRetry().catch(() => undefined)
+      if (!writeAllowed() || !fresh || fresh.page_id !== data.page_id ||
+        fresh.origin?.chat_id !== data.origin?.chat_id || fresh.origin?.agent_id !== data.origin?.agent_id) return
+      let sent = 0
+      for (const saved of fresh.comments.filter(c => chosen.has(c.id) && recoverable(fresh, c) && !deliveryConfirmed(c))) {
+        if (!writeAllowed() || !await deliver(saved)) break
+        sent++
+      }
+      if (sent && writeAllowed()) setNotice({ text: `Sent ${sent} ${sent === 1 ? "comment" : "comments"} to the agent` })
+    } finally {
+      if (mounted.current && permission.current.epoch === epoch) {
+        retryInFlight.current = false
+        setCheckingRetry(false)
+      }
+    }
+  }
+  // 409: read the newest version and put the kept comment back on the same element there.
+  const reapply = async () => {
+    if (!writeAllowed()) return
+    setBanner(null); setViewing(undefined)
+    const fresh = await readForRetry().catch(() => undefined)
+    if (!writeAllowed() || !fresh || !anchor) return
+    const file = fresh.manifest.files.find(f => f.path === anchor.path)
+    if (fresh.manifest.version === fresh.latest_version && file && hasAnchor(file.content, anchor.selector)) setAnchor({ ...anchor, version: fresh.latest_version })
+    else { setAnchor(null); setSelectMode(true); setBanner("anchor") }
+  }
+  const openHistory = () => {
+    if (library) setActiveTab("versions")
+    else setHistoryOpen(true)
+    window.requestAnimationFrame(() => historyRef.current?.focus())
+  }
+  const copyDraft = async () => {
+    try { await navigator.clipboard.writeText(draft); if (writeAllowed()) setNotice({ text: "Comment copied" }) } catch { if (writeAllowed()) setNotice({ text: "Could not copy the comment" }) }
+  }
   const jumpTo = (c: ArtifactComment) => {
     if (library) setActiveTab("preview")
     if (screens.includes(c.path)) setScreenPath(c.path)
@@ -330,13 +424,6 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
     })
   }
 
-  const header = <>
-    <h2 className="min-w-0 truncate text-sm font-semibold">{data.name ?? data.slug ?? target.slug}</h2>
-    <Badge variant="outline" className="shrink-0">{slidesMode === "slides" ? "Slides" : slidesMode === "unsupported" ? "Artifact" : artifactDashboards() && parseDashboardManifest(data.manifest.files) ? "Dashboard" : "Project"}</Badge>
-    <StatusPill tone={isShared ? "success" : "muted"} label={isShared ? "Shared" : "Draft"} />
-    <div className="flex-1" />
-  </>
-
   // Latest and the shared version are the two versions people talk about; another one only via history.
   const versionValue = !viewingOld ? "latest" : shown === sharedVersion ? "shared" : `v${shown}`
   const versionOptions = [
@@ -344,12 +431,27 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
     ...(sharedVersion > 0 && sharedVersion !== latest ? [{ value: "shared", label: `Shared · v${sharedVersion}` }] : []),
     ...(viewingOld && shown !== sharedVersion ? [{ value: `v${shown}`, label: `v${shown}` }] : []),
   ]
+  const pickVersion = (value: string) => setViewing(value === "latest" ? undefined : value === "shared" ? sharedVersion : Number(value.slice(1)))
+  const versionNumber = (text: string) => <b className="font-mono font-semibold">{text}</b>
+  // The library detail names both versions in its header, Shared even when there is none yet.
+  const librarySwitch = <Segmented ariaLabel="Version" size="xs" value={versionValue} onChange={pickVersion} options={[
+    { value: "latest", label: <>Latest {versionNumber(`v${latest}`)}</> },
+    { value: "shared", label: <>Shared {versionNumber(sharedVersion > 0 ? `v${sharedVersion}` : "—")}</>, disabled: sharedVersion === 0, title: sharedVersion === 0 ? "No version is shared yet" : undefined },
+    ...(viewingOld && shown !== sharedVersion ? [{ value: `v${shown}`, label: versionNumber(`v${shown}`) }] : []),
+  ]} />
+
+  const header = <>
+    <h2 className="min-w-0 truncate text-sm font-semibold">{data.name ?? data.slug ?? target.slug}</h2>
+    <Badge variant="outline" className="shrink-0">{slidesMode === "slides" ? "Slides" : slidesMode === "unsupported" ? "Artifact" : artifactDashboards() && parseDashboardManifest(data.manifest.files) ? "Dashboard" : "Project"}</Badge>
+    <StatusPill tone={isShared ? "success" : "muted"} label={isShared ? "Shared" : "Draft"} />
+    <div className="flex-1" />
+    {library && librarySwitch}
+  </>
   const shareTarget = shown
   const canShare = canWrite && shareTarget !== sharedVersion
 
   const toolbar = <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b px-3 py-2">
-    <Segmented ariaLabel="Version" size="xs" value={versionValue} options={versionOptions}
-      onChange={value => setViewing(value === "latest" ? undefined : value === "shared" ? sharedVersion : Number(value.slice(1)))} />
+    {!library && <Segmented ariaLabel="Version" size="xs" value={versionValue} options={versionOptions} onChange={pickVersion} />}
     {!library && versions.length > 0 && <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5" aria-pressed={historyOpen} onClick={() => setHistoryOpen(open => !open)}>
       <Clock className="size-3.5" aria-hidden />History
     </Button>}
@@ -390,12 +492,18 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
   const quota = data.quota
   const pct = quota && quota.limit_bytes > 0 ? Math.min(100, Math.round(quota.used_bytes / quota.limit_bytes * 100)) : 100
   const banners = <>
-    {banner === "conflict" && <ViewerBanner tone="warn" title="Changed meanwhile" action={<Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" onClick={() => { setBanner(null); setViewing(undefined); refetch() }}>Reload and reapply</Button>}>
-      <span>Someone saved a newer version while you were working. Nothing was overwritten.</span>
+    {banner === "conflict" && <ViewerBanner tone="warn" title="Changed meanwhile" action={<Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" onClick={() => void reapply()}>Reload and reapply</Button>}>
+      <span>Someone saved a newer version while you were working. Nothing was overwritten. Your comment and selection are kept; Reload and reapply puts them on the newest version.</span>
     </ViewerBanner>}
-    {banner === "quota_full" && <ViewerBanner tone="bad">History is full. Your changes were not saved and remain here.</ViewerBanner>}
-    {quota?.warning && banner !== "quota_full" && <ViewerBanner tone="warn" icon={Gauge} title="This project is close to its limit">
-      <span>{fmtSize(quota.used_bytes)} of {fmtSize(quota.limit_bytes)} ({pct}%). Old versions stay until someone decides.</span>
+    {banner === "quota_full" && <ViewerBanner tone="bad" title="Saving is paused" action={<span className="flex shrink-0 flex-wrap gap-1.5">
+      {canWrite && versions.length > 0 && <Button type="button" size="sm" variant="secondary" className="h-7" onClick={openHistory}>Manage versions</Button>}
+      {draft.trim() && <Button type="button" size="sm" variant="ghost" className="h-7" onClick={() => void copyDraft()}>Copy my comment</Button>}
+    </span>}>
+      <span>History is full, so this was not saved. Your comment stays here; nothing in the history is deleted without you.</span>
+    </ViewerBanner>}
+    {quota?.warning && banner !== "quota_full" && <ViewerBanner tone="warn" icon={Gauge} title="This project is close to its limit"
+      action={canWrite && versions.length > 0 && <Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" onClick={openHistory}>Review versions</Button>}>
+      <span>{fmtSize(quota.used_bytes)} of {fmtSize(quota.limit_bytes)} ({pct}%). History is never deleted without you. Choose what to do before saving fails.</span>
       <div role="progressbar" aria-label="History storage used" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} className="h-1.5 overflow-hidden rounded-full bg-background/60">
         <div className="h-full rounded-full bg-warn" style={{ width: `${pct}%` }} />
       </div>
@@ -414,6 +522,7 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
   </>
 
   const history = (library || historyOpen) && versions.length > 0 && <div ref={historyRef} tabIndex={-1} role="region" aria-label="Version history" className="rounded-card border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    <p className="border-b px-3 py-2 text-xs text-muted-foreground">{versions.length} {versions.length === 1 ? "version" : "versions"} · restore makes a new version, nothing is deleted</p>
     <ul>{versions.map(v => <li key={v.version} className="flex flex-wrap items-center gap-2.5 border-t px-3 py-2 first:border-t-0">
       <span data-slot="version-number" className="shrink-0 rounded-sm border bg-muted px-[5px] font-mono text-micro font-semibold text-foreground/80">v{v.version}</span>
       <div className="grid min-w-0 flex-[1_1_180px] grid-cols-[minmax(0,1fr)]">
@@ -428,7 +537,7 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
   </div>
 
   const pinNumber = data.comments.length + 1
-  const pinCard = canWrite && (anchor || draft) && !viewingOld && <form aria-label="New comment" onSubmit={event => { event.preventDefault(); submit(true) }}
+  const pinCard = canWrite && (anchor || draft) && !viewingOld && <form aria-label="New comment" onSubmit={event => { event.preventDefault(); submit("send") }}
     className="z-[2] mt-2.5 flex flex-wrap items-start gap-2 rounded-card border bg-card px-2.5 py-2 shadow-md @md:absolute @md:right-[18px] @md:top-[18px] @md:mt-0 @md:max-w-[min(320px,calc(100%-36px))]">
     <span aria-hidden className={cn(PIN, "size-6 bg-primary text-xs text-primary-foreground")}>{pinNumber}</span>
     <div className="grid min-w-0 flex-[1_1_160px] gap-1.5">
@@ -437,7 +546,9 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
     </div>
     <div className="flex w-full flex-wrap justify-end gap-1.5">
       <Button type="button" size="sm" variant="ghost" onClick={resetComposer}>Cancel</Button>
-      <Button type="button" size="sm" variant="secondary" disabled={!anchor || !draft.trim() || comment.isPending} onClick={() => submit(false)}>Save comment</Button>
+      {library
+        ? <Button type="button" size="sm" variant="secondary" disabled={!anchor || !draft.trim() || comment.isPending} onClick={() => submit("queue")}>Add to queue</Button>
+        : <Button type="button" size="sm" variant="secondary" disabled={!anchor || !draft.trim() || comment.isPending} onClick={() => submit("save")}>Save comment</Button>}
       <Button type="submit" size="sm" disabled={!anchor || !draft.trim() || comment.isPending}>Send to agent</Button>
     </div>
   </form>
@@ -454,31 +565,52 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
     {pinCard}
   </div>
 
-  const queue = <div ref={queueRef} tabIndex={-1} role="region" aria-label="Comment queue" className="rounded-card border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-    <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
-      <MessageSquare className="size-4 text-muted-foreground" aria-hidden />
-      <b className="text-sm font-semibold">Comments for agent</b>
-      <span className="text-xs tabular-nums text-muted-foreground">{data.comments.length}</span>
-    </div>
-    {data.comments.length === 0
-      ? <p className="px-3 py-2.5 text-sm text-muted-foreground">{canWrite ? "No comments yet. Turn on Select and click a part of the screen." : "No comments yet."}</p>
-      : <ul>{data.comments.map((c, index) => {
-        const chip = commentQueueChip(c)
-        return <li key={c.id} className="border-t first:border-t-0">
-          <button type="button" className="flex w-full flex-wrap items-center gap-2.5 px-3 py-2 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" onClick={() => jumpTo(c)}>
-            <span aria-hidden className={cn(PIN, "size-5 bg-muted text-micro text-foreground/80 ring-1 ring-border")}>{index + 1}</span>
-            <span className="grid min-w-0 flex-[1_1_180px] grid-cols-[minmax(0,1fr)]">
-              <b className="text-sm font-semibold">{c.text}</b>
-              <small className="truncate text-xs text-muted-foreground">{[authorLabel(c.author, me), labelOf(c.path), c.selector && elementLabel(c.selector, c.quote), c.created_at && timeAgo(c.created_at)].filter(Boolean).join(" · ")}</small>
-            </span>
-            {chip && <StatusPill tone={chip.tone} label={chip.label} live={chip.live} />}
-          </button>
-          {!!c.replies?.length && <ul className="space-y-1 px-3 pb-2 pl-[42px]">{c.replies.map((reply, i) => <li key={i} className="text-xs">
-            <span className="text-muted-foreground">{[authorLabel(reply.author, me), reply.version > 0 && `v${reply.version}`].filter(Boolean).join(" · ")}{(authorLabel(reply.author, me) || reply.version > 0) && ": "}</span>{reply.text}
-          </li>)}</ul>}
-        </li>
-      })}</ul>}
+  const queueItems = data.comments.length === 0
+    ? <p className="px-3 py-2.5 text-sm text-muted-foreground">{canWrite ? "No comments yet. Turn on Select and click a part of the screen." : "No comments yet."}</p>
+    : <ul>{data.comments.map((c, index) => {
+      const chip = commentQueueChip(c)
+      return <li key={c.id} className="border-t first:border-t-0">
+        <button type="button" className="flex w-full flex-wrap items-center gap-2.5 px-3 py-2 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" onClick={() => jumpTo(c)}>
+          <span aria-hidden className={cn(PIN, "size-5 bg-muted text-micro text-foreground/80 ring-1 ring-border")}>{index + 1}</span>
+          <span className="grid min-w-0 flex-[1_1_180px] grid-cols-[minmax(0,1fr)]">
+            <b className="text-sm font-semibold">{c.text}</b>
+            <small className="truncate text-xs text-muted-foreground">{[authorLabel(c.author, me), labelOf(c.path), c.selector && elementLabel(c.selector, c.quote), c.created_at && timeAgo(c.created_at)].filter(Boolean).join(" · ")}</small>
+          </span>
+          {chip && <StatusPill tone={chip.tone} label={chip.label} live={chip.live} />}
+        </button>
+        {!!c.replies?.length && <ul className="space-y-1 px-3 pb-2 pl-[42px]">{c.replies.map((reply, i) => <li key={i} className="text-xs">
+          <span className="text-muted-foreground">{[authorLabel(reply.author, me), reply.version > 0 && `v${reply.version}`].filter(Boolean).join(" · ")}{(authorLabel(reply.author, me) || reply.version > 0) && ": "}</span>{reply.text}
+        </li>)}</ul>}
+      </li>
+    })}</ul>
+  // In the library a comment waits until Send to agent starts it (decision 5); the chat pane sends from the pin card.
+  const sendBar = library && canWrite && sendToAgent && <div className="grid gap-1.5 border-t px-3 py-2.5">
+    <Button type="button" size="sm" className="justify-self-start" disabled={waitingTasks.length === 0 || checkingRetry} onClick={() => void sendWaiting()}>
+      <Send aria-hidden className="size-3.5" />Send {waitingTasks.length} to agent
+    </Button>
+    <p className="text-xs text-muted-foreground">A comment starts the agent only when you send it.</p>
   </div>
+  const queueHead = <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2">
+    <MessageSquare className="size-4 text-muted-foreground" aria-hidden />
+    <b className="text-sm font-semibold">Comments for agent</b>
+    <span className="text-xs tabular-nums text-muted-foreground">{data.comments.length}</span>
+  </div>
+
+  const queue = <div ref={queueRef} tabIndex={-1} role="region" aria-label="Comment queue" className="rounded-card border bg-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    {queueHead}
+    {queueItems}
+    {sendBar}
+  </div>
+
+  // Beside Preview on a wide detail; a narrow one (app ≤ 1180 px) hides it and keeps the queue under Comments.
+  const rail = library && activeTab === "preview" && <aside aria-label="Comments beside preview" className="hidden w-[300px] shrink-0 flex-col overflow-auto border-l @min-[56rem]:flex">
+    {queueHead}
+    <div className="min-h-0 flex-1">{queueItems}</div>
+    {sendBar}
+  </aside>
+
+  const waitingCount = data.comments.filter(c => c.status === "pending").length
+  const tabCount = (n: number) => n > 0 && <span aria-hidden className="ml-1.5 font-mono text-micro text-muted-foreground">{n}</span>
 
   return shell(header, <>
     {library && <div role="tablist" aria-label="Artifact detail" className="flex gap-1 border-b px-3 py-2" onKeyDown={event => {
@@ -487,29 +619,33 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
       const next = event.key === "ArrowRight" ? (index + 1) % tabs.length : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1
       if (next >= 0) { event.preventDefault(); tabs[next].focus(); tabs[next].click() }
     }}>
-      {([['preview', 'Preview'], ['versions', 'History'], ['comments', 'Comments']] as const).map(([tab, label]) => <button key={tab} type="button" role="tab" aria-selected={activeTab === tab}
+      {([['preview', 'Preview', 0], ['versions', 'History', versions.length], ['comments', 'Comments', waitingCount]] as const).map(([tab, label, count]) => <button key={tab} type="button" role="tab" aria-selected={activeTab === tab}
         id={`artifact-detail-tab-${tab}`} aria-controls={`artifact-detail-panel-${tab}`} onClick={() => setActiveTab(tab)}
         tabIndex={activeTab === tab ? 0 : -1}
         className={cn("rounded-md px-3 py-1.5 text-sm coarse:min-h-[44px]", activeTab === tab ? "bg-muted font-semibold" : "text-muted-foreground hover:text-foreground")}>
-        {label}
+        {label}{tabCount(count)}
       </button>)}
     </div>}
-    {toolbar}
+    {/* In the library the version switch sits in the header; the bar stays only for Share. */}
+    {(!library || canShare) && toolbar}
     {(!library || activeTab === "preview") && subToolbar}
-    <div className="min-h-0 flex-1 overflow-auto">
-      <div className="grid content-start gap-3 p-3">
-        {banners}
-        <p role="status" aria-live="polite" className="text-xs text-muted-foreground empty:hidden">{notice.text}</p>
-        <div hidden={library && activeTab !== "versions"} {...(library ? { role: "tabpanel", id: "artifact-detail-panel-versions", "aria-labelledby": "artifact-detail-tab-versions" } : {})}>{history}</div>
-        <div hidden={library && activeTab !== "preview"} {...(library ? { role: "tabpanel", id: "artifact-detail-panel-preview", "aria-labelledby": "artifact-detail-tab-preview" } : {})}>
-        {canWrite && selectMode && !anchor && !viewingOld && (anchorable
-          ? <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><MousePointerClick className="size-3.5" aria-hidden />Click a part of the screen. The comment stays anchored to that element and version.</p>
-          : <p role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground"><Info className="size-3.5" aria-hidden />Nothing on this screen can take a comment yet: comments anchor to parts with an id, and this screen has none. Ask the agent in chat to add them.</p>)}
-        {canvas}
+    <div className="flex min-h-0 flex-1">
+      <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+        <div className="grid content-start gap-3 p-3">
+          {banners}
+          <p role="status" aria-live="polite" className="text-xs text-muted-foreground empty:hidden">{notice.text}</p>
+          <div hidden={library && activeTab !== "versions"} {...(library ? { role: "tabpanel", id: "artifact-detail-panel-versions", "aria-labelledby": "artifact-detail-tab-versions" } : {})}>{history}</div>
+          <div hidden={library && activeTab !== "preview"} {...(library ? { role: "tabpanel", id: "artifact-detail-panel-preview", "aria-labelledby": "artifact-detail-tab-preview" } : {})}>
+          {canWrite && selectMode && !anchor && !viewingOld && (anchorable
+            ? <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><MousePointerClick className="size-3.5" aria-hidden />Click a part of the screen. The comment stays anchored to that element and version.</p>
+            : <p role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground"><Info className="size-3.5" aria-hidden />Nothing on this screen can take a comment yet: comments anchor to parts with an id, and this screen has none. Ask the agent in chat to add them.</p>)}
+          {canvas}
+          </div>
+          <div hidden={library && activeTab !== "comments"} {...(library ? { role: "tabpanel", id: "artifact-detail-panel-comments", "aria-labelledby": "artifact-detail-tab-comments" } : {})}>{queue}</div>
+          {canWrite && !library && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Info className="size-3.5 shrink-0" aria-hidden />A comment starts the agent only when you choose Send to agent.</p>}
         </div>
-        <div hidden={library && activeTab !== "comments"} {...(library ? { role: "tabpanel", id: "artifact-detail-panel-comments", "aria-labelledby": "artifact-detail-tab-comments" } : {})}>{queue}</div>
-        {canWrite && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Info className="size-3.5 shrink-0" aria-hidden />A comment starts the agent only when you choose Send to agent.</p>}
       </div>
+      {rail}
     </div>
   </>)
 }

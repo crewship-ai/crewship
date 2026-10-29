@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { useLayoutEffect } from "react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
 const apiFetch = vi.hoisted(() => vi.fn())
@@ -80,4 +81,20 @@ it("says the draft is kept off another holder's work", async () => {
 it("renders nothing without a draft", () => {
   const { container } = render(<LocalDraftBanner userId="u1" workspaceId="w1" slug="doc" onCompare={() => {}} />)
   expect(container.textContent).toBe("")
+})
+
+it("never renders the previous person's draft after the identity changes, not even for one commit", () => {
+  saveLocalDraft("u1", "w1", "doc", { ...draft, content: "ALICE_PRIVATE_SECRET" })
+  const commits: string[] = []
+  // Layout effects run right after the DOM commit and before passive effects:
+  // a reset done only in useEffect would still be on screen here.
+  function Probe() { useLayoutEffect(() => { commits.push(document.body.textContent ?? "") }); return null }
+  const banner = (userId: string) => <><LocalDraftBanner userId={userId} workspaceId="w1" slug="doc" holderName={null} onCompare={vi.fn()} /><Probe /></>
+  const { rerender } = render(banner("u1"))
+  expect(screen.getByText("Recovered local draft")).toBeTruthy()
+  commits.length = 0
+  rerender(banner("u2"))
+  expect(commits.length).toBeGreaterThan(0)
+  expect(commits.filter(text => text.includes("Recovered local draft"))).toEqual([])
+  expect(screen.queryByRole("button", { name: "Compare" })).toBeNull()
 })
