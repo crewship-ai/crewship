@@ -25,11 +25,12 @@ crewship workflows list                              # alias
 
 Output columns: `ID`, `NAME`, `BUILTIN`, `STAGES`, `ICON`, `COLOR`. The `STAGES` column counts entries inside the stored `template_json` blob — a value of `0` indicates a corrupt row that should be inspected via `workflow get`.
 
-## `crewship workflow get <slug>`
+## `crewship workflow get <id|slug>`
 
-`GET /api/v1/workflow-templates/{id}` after resolving `<slug>` via the list endpoint. Prints every column including the full `template_json` so you can pipe it through `jq` to inspect the stage list.
+`GET /api/v1/workflow-templates/{id}`. The argument is tried as a template id first (one request); only when the server answers 404 is it matched against template names and slugs from the list endpoint. Prints every column including the full `template_json` so you can pipe it through `jq` to inspect the stage list.
 
 ```bash
+crewship workflow get wft_abc123                   # by id
 crewship workflow get engineering-standard
 crewship workflow get "Engineering Standard"        # exact name also works
 ```

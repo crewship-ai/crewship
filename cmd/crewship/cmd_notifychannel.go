@@ -249,6 +249,69 @@ categories. Omit for "every category".
 	},
 }
 
+var notifyChannelUpdateCmd = &cobra.Command{
+	Use:   "update <id>",
+	Short: "Change a channel's enabled state, category allowlist, priority floor or events",
+	Long: `Update a notification channel in place. Only the flags you pass are sent;
+everything else on the channel is left untouched.
+
+  crewship notifychannel update nch_abc123 --enabled=false
+  crewship notifychannel update nch_abc123 --min-priority high
+  crewship notifychannel update nch_abc123 --categories chat.replies,security.alerts
+  crewship notifychannel update nch_abc123 --categories ""     # back to every category
+  crewship notifychannel update nch_abc123 --events failed,completed
+
+Workspace channels need ADMIN/OWNER; a personal channel can be updated by its
+owner (enforced server-side).`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		fl := cmd.Flags()
+		body := map[string]any{}
+		if fl.Changed("enabled") {
+			v, _ := fl.GetBool("enabled")
+			body["enabled"] = v
+		}
+		if fl.Changed("categories") {
+			v, _ := fl.GetStringSlice("categories")
+			if v == nil {
+				v = []string{}
+			}
+			body["categories"] = v
+		}
+		if fl.Changed("min-priority") {
+			v, _ := fl.GetString("min-priority")
+			body["min_priority"] = v
+		}
+		if fl.Changed("events") {
+			v, _ := fl.GetStringSlice("events")
+			if v == nil {
+				v = []string{}
+			}
+			body["events"] = v
+		}
+		if len(body) == 0 {
+			return fmt.Errorf("nothing to update: pass at least one of --enabled, --categories, --min-priority, --events")
+		}
+		id := args[0]
+		resp, err := newAPIClient().Patch("/api/v1/notification-channels/"+url.PathEscape(id), body)
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		resp.Body.Close()
+		cli.PrintSuccess(fmt.Sprintf("Notification channel updated: %s", id))
+		return nil
+	},
+}
+
 var notifyChannelTestCmd = &cobra.Command{
 	Use:   "test <id>",
 	Short: "Send a synthetic test notification to one channel",
@@ -673,6 +736,11 @@ func init() {
 
 	notifyChannelCmd.AddCommand(notifyChannelListCmd)
 	notifyChannelCmd.AddCommand(notifyChannelAddCmd)
+	notifyChannelUpdateCmd.Flags().Bool("enabled", false, "Enable (--enabled) or disable (--enabled=false) the channel")
+	notifyChannelUpdateCmd.Flags().StringSlice("categories", nil, "Replace the admin category allowlist (empty string = every category)")
+	notifyChannelUpdateCmd.Flags().String("min-priority", "", "Priority floor: low | medium | high | urgent")
+	notifyChannelUpdateCmd.Flags().StringSlice("events", nil, "Replace subscribed run outcomes: failed, completed, or all — legacy #850 path")
+	notifyChannelCmd.AddCommand(notifyChannelUpdateCmd)
 	notifyChannelCmd.AddCommand(notifyChannelTestCmd)
 	notifyChannelCmd.AddCommand(notifyChannelRmCmd)
 	notifyChannelCmd.AddCommand(notifyChannelProvidersCmd)

@@ -25,6 +25,7 @@ label so you can return to it later.
 
 Examples:
   crewship checkpoint list --mission MIS-42
+  crewship checkpoint get chk_abc
   crewship checkpoint create --mission MIS-42 --label "green build"
   crewship checkpoint restore chk_abc            # advisory: shows diverged entries
   crewship checkpoint fork chk_abc --label "experiment-1"
@@ -96,6 +97,46 @@ var checkpointListCmd = &cobra.Command{
 			})
 		}
 		return f.Auto(body.Checkpoints, headers, rows)
+	},
+}
+
+var checkpointGetCmd = &cobra.Command{
+	Use:   "get <id>",
+	Short: "Show one checkpoint",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		client := newAPIClient()
+		resp, err := client.Get("/api/v1/checkpoints/" + url.PathEscape(args[0]))
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		var cp checkpointRow
+		if err := cli.ReadJSON(resp, &cp); err != nil {
+			return err
+		}
+		forkOf := cp.ForkOf
+		if forkOf == "" {
+			forkOf = "-"
+		}
+		pairs := [][]string{
+			{"ID", cp.ID},
+			{"Mission", cp.MissionID},
+			{"Label", cp.Label},
+			{"Cursor", cp.JournalCursor},
+			{"Created by", cp.CreatedBy},
+			{"Created", cp.CreatedAt},
+			{"Fork of", forkOf},
+		}
+		return newFormatter().AutoDetail(cp, pairs)
 	},
 }
 
@@ -264,6 +305,7 @@ func init() {
 	checkpointDeleteCmd.Flags().Bool("yes", false, "Skip confirmation prompt")
 
 	checkpointCmd.AddCommand(checkpointListCmd)
+	checkpointCmd.AddCommand(checkpointGetCmd)
 	checkpointCmd.AddCommand(checkpointCreateCmd)
 	checkpointCmd.AddCommand(checkpointRestoreCmd)
 	checkpointCmd.AddCommand(checkpointForkCmd)

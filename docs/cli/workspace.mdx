@@ -313,10 +313,21 @@ Valid capability strings: `chat`, `routine.create`, `routine.run`, `skill.create
 
 | Command | Args | Purpose |
 | --- | --- | --- |
-| `capabilities list <user-id>` | exactly 1 | Show capabilities granted to one member. |
+| `capabilities list [user-id]` | 0 or 1 | Show capabilities granted to one member, or to every member when no id is given. |
 | `capabilities grant <user-id> <cap> [<cap>...]` | 2+ | Grant one or more capabilities incrementally (existing grants preserved). |
 | `capabilities revoke <user-id> <cap> [<cap>...]` | 2+ | Revoke one or more capabilities incrementally (other grants preserved). |
 | `capabilities preset <user-id> <chat\|power\|admin>` | exactly 2 | Replace the member's capability set with a named bundle (overwrites existing grants). |
+
+## `crewship workspace member capabilities list [user-id]`
+
+With a `<user-id>`, shows that member's role and capabilities (`GET /api/v1/workspaces/{id}/members/{user}/capabilities`). Without one, lists every member of the active workspace in a single request (`GET /api/v1/workspaces/{id}/members/capabilities`). `ADMIN+` required.
+
+```bash
+crewship workspace member capabilities list
+crewship workspace member capabilities list ludmila
+```
+
+The command has no command-specific flags.
 
 ## `crewship workspace member capabilities grant <user-id> <capability> [<capability>...]`
 

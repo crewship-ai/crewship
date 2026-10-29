@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -188,6 +189,12 @@ const workflowTemplateColumns = `id, name, description, template_json, icon, col
 // GET /api/v1/workflow-templates
 func (h *WorkflowTemplateHandler) List(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
+
+	// Lazy, idempotent seed of the built-in templates, same as the legacy
+	// GET /api/v1/templates List, so a fresh workspace is not empty.
+	if err := database.SeedBuiltinTemplates(r.Context(), h.db, wsID, h.logger); err != nil {
+		h.logger.Warn("seed builtin workflow templates", "error", err)
+	}
 
 	rows, err := h.db.QueryContext(r.Context(),
 		`SELECT `+workflowTemplateColumns+`

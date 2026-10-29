@@ -552,25 +552,43 @@ func nukeInbox(ctx context.Context, client *cli.Client, kind string) error {
 // them. 115 rows survived a nuke on dev2 that way, each holding an agent-authored
 // intent and the conversation history the judge was shown.
 func nukeKeeperRequests(ctx context.Context, client *cli.Client) error {
+	_, err := purgeKeeperRequests(ctx, client)
+	return err
+}
+
+// keeperPurgeResult is the DELETE /api/v1/admin/keeper/requests answer.
+// Supported is false when the server predates the endpoint (404/405), so the
+// explicit `nuke keeper-requests` can say nothing was purged instead of
+// claiming success; nuke all keeps tolerating that.
+type keeperPurgeResult struct {
+	Supported       bool  `json:"-" yaml:"-"`
+	DeletedRequests int64 `json:"deleted_requests" yaml:"deleted_requests"`
+	DeletedEvents   int64 `json:"deleted_events" yaml:"deleted_events"`
+}
+
+func purgeKeeperRequests(ctx context.Context, client *cli.Client) (keeperPurgeResult, error) {
+	var res keeperPurgeResult
 	if err := ctx.Err(); err != nil {
-		return err
+		return res, err
 	}
 	const path = "/api/v1/admin/keeper/requests"
 	r, err := client.Delete(path)
 	if err != nil {
-		return err
+		return res, err
 	}
 	defer r.Body.Close()
 	// A server older than this endpoint answers 404/405. Tolerated the way
 	// nukeRuntimes tolerates a docker-less 503: the CLI must keep working against
 	// a server that predates it, and the alternative is failing every nuke.
 	if r.StatusCode == http.StatusNotFound || r.StatusCode == http.StatusMethodNotAllowed {
-		return nil
+		return res, nil
 	}
 	if r.StatusCode >= 300 {
-		return fmt.Errorf("DELETE %s: HTTP %d", path, r.StatusCode)
+		return res, fmt.Errorf("DELETE %s: HTTP %d", path, r.StatusCode)
 	}
-	return nil
+	res.Supported = true
+	_ = json.NewDecoder(r.Body).Decode(&res)
+	return res, nil
 }
 
 // nukeEscalations hard-deletes crew escalations. crewFilter == "" enumerates

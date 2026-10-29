@@ -178,17 +178,34 @@ func TestWorkflowTemplate_Create_RBAC(t *testing.T) {
 
 // ── List / Get ─────────────────────────────────────────────────────────────
 
-func TestWorkflowTemplate_List_EmptyReturnsEmptyArray(t *testing.T) {
+// A fresh workspace has no workflow_templates rows. The legacy
+// /api/v1/templates List lazily seeds the built-ins; this route must do the
+// same so `crewship workflow list` is not empty on a new workspace.
+func TestWorkflowTemplate_List_SeedsBuiltinsIdempotently(t *testing.T) {
 	h, userID, wsID := newWorkflowTemplateHandler(t)
-	req := httptest.NewRequest("GET", "/", nil)
-	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "VIEWER"))
-	rr := httptest.NewRecorder()
-	h.List(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("list: %d body=%s", rr.Code, rr.Body.String())
+	list := func() []workflowTemplateResponse {
+		req := httptest.NewRequest("GET", "/", nil)
+		req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "VIEWER"))
+		rr := httptest.NewRecorder()
+		h.List(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("list: %d body=%s", rr.Code, rr.Body.String())
+		}
+		var out []workflowTemplateResponse
+		mustUnmarshal(t, rr, &out)
+		return out
 	}
-	if got := bytes.TrimSpace(rr.Body.Bytes()); string(got) != "[]" {
-		t.Errorf("empty list body = %q, want []", string(got))
+	first := list()
+	if len(first) == 0 {
+		t.Fatal("fresh workspace list is empty; built-in templates were not seeded")
+	}
+	for _, tpl := range first {
+		if !tpl.IsBuiltin {
+			t.Errorf("template %q is not marked built-in", tpl.Name)
+		}
+	}
+	if second := list(); len(second) != len(first) {
+		t.Errorf("second list has %d templates, want %d (seeding must be idempotent)", len(second), len(first))
 	}
 }
 
@@ -207,8 +224,14 @@ func TestWorkflowTemplate_List_VIEWER_CanRead(t *testing.T) {
 	}
 	var list []workflowTemplateResponse
 	mustUnmarshal(t, rr, &list)
-	if len(list) != 1 || list[0].ID != created.ID {
-		t.Fatalf("list mismatch: %+v", list)
+	found := false
+	for _, tpl := range list {
+		if tpl.ID == created.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("created template %s missing from list: %+v", created.ID, list)
 	}
 }
 
