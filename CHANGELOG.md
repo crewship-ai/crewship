@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **A Word or Sheet save whose reply was lost in a long outage is still confirmed.** Reconciling the exact attempted version no longer needs a live editing lease, so an outage longer than the lease no longer leaves an already saved draft offered for recovery; the expired lease still cannot save.
+
 - ⚠️ **Behaviour change: notification channel URLs are checked more strictly.** The delivery library (shoutrrr 0.22.1) rejects a channel URL that could never send when a channel is created from the provider form or tested, and at send time for raw URLs: Gotify needs a real application token (15 characters starting with `A`, or a Gotify 3 `gtfya.` token), Google Chat needs both `key` and `token`, Mattermost needs a host, and ntfy topics follow ntfy's naming rule. Saved channels are never checked at startup or when listed; a Google Chat channel saved without `key` or `token` now reports a delivery error. SQLite driver updated to modernc.org/sqlite 1.61.0.
 
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.

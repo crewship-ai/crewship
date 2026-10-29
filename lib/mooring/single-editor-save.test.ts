@@ -478,3 +478,30 @@ it("flush waits for pending transport and commits its own snapshot without inven
   expect(r.state).toHaveBeenLastCalledWith({ phase: "saved", dirty: false })
   await r.controller.close()
 })
+
+it("proves a lost acknowledgement when write ends after the lease expired, without saving again", async () => {
+  const r = rig()
+  r.transport.save.mockRejectedValueOnce(new Error("lost ACK"))
+  await r.controller.save()
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "uncertain" }))
+  const lost = r.transport.save.mock.calls[0][0]
+  await expect(r.controller.revokeWrite()).resolves.toBe(true)
+  expect(r.transport.save).toHaveBeenCalledOnce()
+  expect(r.transport.reconcile).toHaveBeenCalledOnce()
+  expect(r.transport.reconcile.mock.calls[0][0]).toMatchObject({ contentHash: lost.contentHash, baseVersion: "1", generation: "1" })
+  // Both the lost attempt and the identical fresh capture are confirmed, so no recovery is offered.
+  expect(r.journal.confirm.mock.calls.map(c => c[0].contentHash)).toEqual([lost.contentHash, lost.contentHash])
+  await r.controller.close()
+})
+
+it("keeps the captured draft for comparison when the lost acknowledgement cannot be proven", async () => {
+  const r = rig()
+  r.transport.save.mockRejectedValueOnce(new Error("lost ACK"))
+  r.transport.reconcile.mockRejectedValueOnce(new NativeSaveError("conflict"))
+  await r.controller.save()
+  await expect(r.controller.revokeWrite()).resolves.toBe(true)
+  expect(r.transport.reconcile).toHaveBeenCalledOnce()
+  expect(r.journal.confirm).not.toHaveBeenCalled()
+  expect(r.transport.save).toHaveBeenCalledOnce()
+  await r.controller.close()
+})

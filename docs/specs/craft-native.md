@@ -44,7 +44,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | GET | `/api/v1/pages/{slug}/craft/document` | Craft admission header. | Complete base64 native bytes, version and pinned editor/engine metadata, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/save` | Bound whole snapshot described below. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Same whole snapshot contract; existing explicit native Page only. | Exact committed snapshot receipt, 200. |
-| POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Exact original snapshot binding and hash; no blind retry. | Original pinned commit receipt,200; never an arbitrary latest head. |
+| POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Exact original snapshot binding and hash; no blind retry. Current write rights and the original admission; the original lease may have expired or moved. | Original pinned commit receipt,200; never an arbitrary latest head. |
 | POST | `/api/v1/pages/{slug}/craft/document/restore` | Current binding and targetVersion. | New committed version and node durability, 200. |
 
 Except availability, agent task controls, initialization and initial session creation, send `X-Craft-Session` as well
@@ -53,6 +53,13 @@ public `session_id`, `application_id`, and `page_id`. Keep the token only in the
 mounted host closure, never in editor messages, local drafts, URLs or public DTOs.
 The editor host and its lease controls share one admission; separate admissions
 represent separate connections even for the same human.
+
+A reply lost during an outage longer than the lease stays provable: reconcile
+checks Page write rights and that the caller is the original admission, not
+that its lease is still live. When the editor loses write, it reconciles the
+unconfirmed attempt once before retiring; a proven commit and an identical
+fresh capture leave no recovery draft, anything else stays offered for
+comparison. The expired generation still cannot save.
 
 Renew/release require `{generation: "1"}`. Handoff requires
 `{generation: "1", request_id: "public-request-id"}`. Other lease mutations use
