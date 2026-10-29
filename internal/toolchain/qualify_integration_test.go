@@ -58,7 +58,13 @@ func testQualificationThroughDockerRuntime(t *testing.T, homeInstalled bool) {
 	if homeInstalled {
 		binaryPath = "/home/agent/.local/bin/codex"
 	}
-	content := []byte("#!/bin/sh\ntest -w \"$HOME\" || exit 41\ntest ! -w /home/agent || exit 42\necho 'codex-cli 0.152.0'\n")
+	content := []byte(`#!/bin/sh
+test -w "$HOME" || exit 41
+test ! -w /home/agent || exit 42
+case "$MISE_STATE_DIR:$MISE_CACHE_DIR" in "$HOME"/*:"$HOME"/*) ;; *) exit 43;; esac
+mkdir -p "$MISE_STATE_DIR" "$MISE_CACHE_DIR" || exit 44
+echo 'codex-cli 0.152.0'
+`)
 	headers := []tar.Header{{Name: "usr/local/bin/codex", Mode: 0755, Size: int64(len(content))}}
 	if homeInstalled {
 		headers = []tar.Header{

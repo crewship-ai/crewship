@@ -50,7 +50,16 @@ func Qualify(ctx context.Context, runtime provider.SandboxRuntime, inventory *de
 	result.Status = "passed"
 	env := []string{"HOME=" + provider.SandboxHome, "DISABLE_AUTOUPDATER=1"}
 	for _, kv := range devcontainer.MiseRuntimeEnv {
-		env = append(env, kv[0]+"="+kv[1])
+		value := kv[1]
+		// Keep installed tools/config in the immutable image, but give shims
+		// the same writable state/cache contract as ordinary crew launches.
+		switch kv[0] {
+		case "MISE_STATE_DIR":
+			value = provider.SandboxHome + "/.local/state/mise"
+		case "MISE_CACHE_DIR":
+			value = provider.SandboxHome + "/.cache/mise"
+		}
+		env = append(env, kv[0]+"="+value)
 	}
 	if loginPath != "" {
 		env = append(env, "PATH="+loginPath)
