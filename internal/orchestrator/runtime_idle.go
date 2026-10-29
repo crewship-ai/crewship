@@ -51,6 +51,11 @@ func (o *Orchestrator) VerifyRuntimeIdle(ctx context.Context, crewID, containerI
 		case "completed", "error", "failed", "cancelled", "stopped":
 			continue
 		}
+		// A run recorded for another crew never executes in this crew's
+		// runtime; an unknown crew still fails closed.
+		if run.ContainerID == "" && run.CrewID != "" && run.CrewID != crewID {
+			continue
+		}
 		if run.ContainerID == "" || run.ContainerID == containerID {
 			return errors.New("runtime has a recovered or unresolved invocation")
 		}
