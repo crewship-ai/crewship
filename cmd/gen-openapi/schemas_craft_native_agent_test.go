@@ -17,6 +17,9 @@ func TestCraftNativeAgentContractKeepsExplicitConsentSeparateFromHumanAdmission(
 		t.Fatal("explicit whole-document consent missing")
 	}
 	available := schemas["NativeCraftAvailability"].(map[string]any)["properties"].(map[string]any)
+	if available["can_edit"] == nil {
+		t.Fatal("explicit native edit availability missing")
+	}
 	if available["agents_enabled"] == nil {
 		t.Fatal("default-off agent availability missing")
 	}
