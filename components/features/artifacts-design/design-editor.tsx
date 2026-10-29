@@ -103,7 +103,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
    if (data?.origin && data?.can_edit) {
     setDelivery(previous => ({ ...previous, [posted.id]: "Sending to agent…" }))
     const accepted = await agent.dispatch(posted)
-    setDelivery(previous => ({ ...previous, [posted.id]: accepted ? "Sent to agent" : "Comment saved. Retry when the source chat is connected." }))
+    setDelivery(previous => ({ ...previous, [posted.id]: accepted ? "Sent to agent" : agent.refusal?.(posted.id) === "busy" ? "Comment saved. The agent is busy; retry when it finishes." : "Comment saved. Retry when the source chat is connected." }))
    }
   } catch (error) { setCommentError(error instanceof Error ? error.message : "Comment could not be saved.") }
  }
@@ -189,7 +189,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
      {(design.comments.data?.comments ?? []).map(comment => <article key={comment.id} className="mb-3 rounded border p-3 text-xs">
       <button className="text-left text-muted-foreground" onClick={() => setSelectedId(comment.selector)}>v{comment.version} · {comment.quote || comment.selector}</button><p className="mt-2 whitespace-pre-wrap">{comment.text}</p>
       {comment.task_id && <p className="mt-2 text-muted-foreground">{comment.replies?.length ? `Done · v${comment.replies.at(-1)?.version}` : delivery[comment.id] ?? "Waiting for agent"}</p>}
-      {comment.task_id && !comment.replies?.length && data.origin && data.can_edit && <Button size="sm" variant="ghost" disabled={!agent.ready} onClick={async () => { const accepted = await agent.dispatch(comment); setDelivery(previous => ({ ...previous, [comment.id]: accepted ? "Sent to agent" : "Comment saved. Agent delivery could not be confirmed." })) }}>Retry delivery</Button>}
+      {comment.task_id && !comment.replies?.length && data.origin && data.can_edit && <Button size="sm" variant="ghost" disabled={!agent.ready} onClick={async () => { const accepted = await agent.dispatch(comment); setDelivery(previous => ({ ...previous, [comment.id]: accepted ? "Sent to agent" : agent.refusal?.(comment.id) === "busy" ? "Comment saved. The agent is busy; retry when it finishes." : "Comment saved. Agent delivery could not be confirmed." })) }}>Retry delivery</Button>}
       {comment.replies?.map((reply, index) => <p key={index} className="mt-2 border-t pt-2">v{reply.version}: {reply.text}</p>)}
      </article>)}
     </div>
