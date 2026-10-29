@@ -39,6 +39,7 @@ function Running({ activity, startedAt }: { activity: ArtifactToolActivity; star
     <div role="progressbar" aria-label={label.replace(/…$/, "")} className="relative h-1 overflow-hidden rounded-full bg-muted">
       <span className="absolute inset-y-0 left-0 w-1/3 rounded-full bg-primary motion-safe:animate-pulse" />
     </div>
+    {activity.baseVersion !== undefined && <p className="text-xs text-muted-foreground">You can keep working; v{activity.baseVersion} stays as it is.</p>}
   </div>
 }
 
@@ -84,7 +85,8 @@ export function ArtifactStepCard({ activity, startedAt, source }: {
   if (activity.state === "failed") {
     // No retry here: the agent owns the retry and will publish again.
     return <div className={CARD}><p className="flex items-center gap-2 text-sm text-destructive"><AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
-      <span className="min-w-0 break-words">Couldn’t save version{activity.error ? ` · ${activity.error}` : ""}</span></p></div>
+      <span className="min-w-0 break-words">Couldn’t save version{activity.error ? ` · ${activity.error}` : ""}</span></p>
+      <p className="text-xs text-muted-foreground">{activity.baseVersion !== undefined ? `Nothing was saved; v${activity.baseVersion} is unchanged.` : "Nothing was saved."}</p></div>
   }
   const { version, slug } = activity
   return <div className={CARD}>

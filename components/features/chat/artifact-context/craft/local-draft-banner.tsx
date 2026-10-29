@@ -27,21 +27,27 @@ function clock(iso: string): string {
  * until a create-copy endpoint exists.
  */
 export function LocalDraftBanner({ userId, workspaceId, slug, holderName, onCompare }: LocalDraftBannerProps) {
-  const [draft, setDraft] = useState<LocalDraft | null>(null)
-  const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle")
+  const identity = JSON.stringify([userId, workspaceId, slug])
+  // What was read is remembered with whose it is; after a change of person or
+  // document it is not shown, not even for the render before the re-read.
+  const [read, setRead] = useState<{ identity: string; draft: LocalDraft | null }>({ identity: "", draft: null })
+  const [copy, setCopy] = useState<{ identity: string; state: "idle" | "copied" | "failed" }>({ identity: "", state: "idle" })
   // Read after mount: storage does not exist during prerender.
-  useEffect(() => { setDraft(readLocalDraft(userId, workspaceId, slug)); setCopy("idle") }, [userId, workspaceId, slug])
+  useEffect(() => { setRead({ identity, draft: readLocalDraft(userId, workspaceId, slug) }) }, [identity, userId, workspaceId, slug])
+  const draft = read.identity === identity ? read.draft : null
+  const copied = copy.identity === identity ? copy.state : "idle"
+  const setCopied = (state: "copied" | "failed") => setCopy({ identity, state })
   if (!draft) return null
 
   const copyDraft = async () => {
     try {
       await navigator.clipboard.writeText(draft.content)
-      setCopy("copied")
+      setCopied("copied")
     } catch {
-      setCopy("failed")
+      setCopied("failed")
     }
   }
-  const discard = () => { discardLocalDraft(userId, workspaceId, slug); setDraft(null) }
+  const discard = () => { discardLocalDraft(userId, workspaceId, slug); setRead({ identity, draft: null }) }
   const tail = holderName ? `${holderName} edits now, so it is not saved over their work.` : "Not saved yet."
 
   return <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-warn/10 px-3 py-2 text-sm">
@@ -50,7 +56,7 @@ export function LocalDraftBanner({ userId, workspaceId, slug, holderName, onComp
       <b className="font-semibold">Recovered local draft</b>
       <span className="text-xs text-muted-foreground">From {clock(draft.savedAt)}, before your browser closed. {tail}</span>
     </div>
-    <span role="status" className="text-xs text-muted-foreground">{copy === "copied" ? "Copied" : copy === "failed" ? "Could not copy" : ""}</span>
+    <span role="status" className="text-xs text-muted-foreground">{copied === "copied" ? "Copied" : copied === "failed" ? "Could not copy" : ""}</span>
     <Button type="button" size="sm" variant="ghost" className={BTN} onClick={() => onCompare(draft)}><Layers aria-hidden />Compare</Button>
     <Button type="button" size="sm" variant="secondary" className={BTN} onClick={() => void copyDraft()}>Copy text</Button>
     <Button type="button" size="icon" variant="ghost" aria-label="Discard draft" className="size-8 coarse:size-[44px]" onClick={discard}><X aria-hidden /></Button>

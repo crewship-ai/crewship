@@ -115,3 +115,23 @@ it.each([false,undefined])("does not offer Restore to an editor without explicit
  renderStep({tool:"publish",state:"done",slug:"onboarding",version:2})
  expect(screen.queryByRole("button",{name:"Restore v1"})).toBeNull()
 })
+
+it("a running new version says the current one stays as it is", () => {
+  renderStep({ tool: "publish", state: "running", slug: "onboarding", baseVersion: 3 })
+  expect(screen.getByText("You can keep working; v3 stays as it is.")).toBeTruthy()
+})
+
+it("a running create has no earlier version to mention", () => {
+  renderStep({ tool: "create", state: "running" })
+  expect(screen.queryByText(/stays as it is/)).toBeNull()
+})
+
+it("a failed new version says in plain words that nothing changed", () => {
+  renderStep({ tool: "publish", state: "failed", slug: "onboarding", baseVersion: 2, error: "quota exceeded" })
+  expect(screen.getByText("Nothing was saved; v2 is unchanged.")).toBeTruthy()
+})
+
+it("a failed create says nothing was saved", () => {
+  renderStep({ tool: "create", state: "failed", error: "boom" })
+  expect(screen.getByText("Nothing was saved.")).toBeTruthy()
+})
