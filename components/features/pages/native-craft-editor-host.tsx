@@ -44,6 +44,17 @@ export function nativeCraftFrameURL(snapshot:NativeDocumentSnapshot,hostOrigin:s
 interface Comparison {version:string;server:string;draft:string;serverHash:string;draftHash:string;equal:boolean;draftLabel?:string}
 interface Props {workspaceId:string;pageId:string;humanId:string;enabled?:boolean}
 type Coordinator=ReturnType<typeof createSingleEditorSave>
+// A recovered draft whose bytes the server already holds is a save whose reply
+// was lost; nothing in it can be lost, so retire it instead of offering it.
+async function retireCommitted(journal:NativeDraftJournal,rows:NativeRecovery[],server:Uint8Array):Promise<NativeRecovery[]>{
+ const digest=async(bytes:Uint8Array)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new Uint8Array(bytes))),v=>v.toString(16).padStart(2,'0')).join('')
+ const serverHash=await digest(server),kept:NativeRecovery[]=[]
+ for(const row of rows){
+  if(await digest(row.draft.bytes)===serverHash){try{await journal.confirm(row.draft);continue}catch{/* Kept for comparison. */}}
+  kept.push(row)
+ }
+ return kept
+}
 interface Runtime {enginePin:string;port:NativeEditorPort;frame:HTMLIFrameElement;abort:AbortController;version:string;generation:string;ready:boolean;writable:boolean;nativeReadOnly:boolean;coordinator?:Coordinator;journal?:NativeDraftJournal;phase?:NativeSaveState;ackedVersion?:string;receiptAck?:Promise<boolean>;receiptVersion?:string;edit:number;blocked:boolean;capture?:NativeDraft;retiring?:Promise<boolean>;retirementFinished?:boolean}
 
 /** One authenticated client/session owns both lease controls and the isolated full Craft editor. */
@@ -244,11 +255,14 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   }
   async function retireConnection(message:string){
    if(dead||networkRetired)return
-   networkRetired=true;setConnectionRetired(true);setError(message);client.close();clearInterval(reauthorize);clearInterval(leaseWatch)
+   networkRetired=true;setConnectionRetired(true);setError(message);clearInterval(reauthorize);clearInterval(leaseWatch)
    const r=current
+   // Retire writing before closing the client so a save whose reply was lost
+   // can still be reconciled while the network allows it.
    if(r&&(r.writable||r.retiring&&!r.retirementFinished)){
-    if(!await retireWrite(r))return
+    if(!await retireWrite(r)){client.close();return}
    }
+   client.close()
    if(!dead)stop(message)
   }
   async function refreshReader(){
@@ -281,7 +295,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    const snapshot=await client.read(lifetime.signal),r=await mountEditor(snapshot,proof.generation!)
    const journal=await openNativeDraftJournal({human:humanId,workspace:workspaceId,page:pageId,applicationId:snapshot.applicationId})
    if(!live(r)){await journal.close();return}
-   r.journal=journal;privacyJournal=journal;const recovery=await journal.recovery();if(!live(r)){await journal.close();return}setRecoveries(recovery)
+   r.journal=journal;privacyJournal=journal;const recovery=await retireCommitted(journal,await journal.recovery(),snapshot.bytes);if(!live(r)){await journal.close();return}setRecoveries(recovery)
    const finalProof=leaseView(await client.lease(lifetime.signal))
    if(!live(r)){await journal.close();return}
    if(!owns(finalProof,r.generation)){await journal.close();r.journal=undefined;throw Error('lease_not_current')}

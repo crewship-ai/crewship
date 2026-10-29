@@ -122,7 +122,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   async function transmit(attempt: Prepared, reconcile: boolean) {
     if (!active || !writable || pending) return
     let complete!: () => void
-    const operation = { abort: new AbortController(), done: new Promise<void>(resolve => { complete = resolve }) }; pending = operation
+    const operation = { attempt, abort: new AbortController(), done: new Promise<void>(resolve => { complete = resolve }) }; pending = operation
     emit("saving")
     try {
       const result = await bounded(signal => reconcile ? options.transport.reconcile!(attempt.draft, signal) : options.transport.save(attempt.draft, signal), operation.abort)
@@ -264,6 +264,9 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     // Revoke sending synchronously. The host must first suspend input, then
     // await this fresh durable capture before closing the editor or journal.
     // A failed capture retains the native frame; it never grants a handoff.
+    // A save already sent may have committed; its reply is abandoned here, so
+    // keep it as the unconfirmed attempt for proveLost to reconcile.
+    if (pending && !unconfirmed) unconfirmed = pending.attempt
     writable = false; blocked = "write_revoked"; clearTimeout(timer); pending?.abort.abort()
     const sequence = nextPreparation + 1
     writeRetirement = new Promise<boolean>(resolve => {
