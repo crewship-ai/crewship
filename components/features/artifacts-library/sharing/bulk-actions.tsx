@@ -87,9 +87,9 @@ export function BulkPreviewDialog({ workspaceId, action, items, folders, open, o
   const [preview, setPreview] = useState<BulkResult | null>(null)
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [applied, setApplied] = useState<BulkResult | null>(null)
-  const apply = useSharingMutation(workspaceId, (sharing, request: BulkRequest) => sharing.bulk(request))
-  const tooMany = items.length > BULK_LIMIT
   const identity = items.map(i => i.slug).join("\u0000")
+  const apply = useSharingMutation(workspaceId, (sharing, request: BulkRequest) => sharing.bulk(request), identity)
+  const tooMany = items.length > BULK_LIMIT
 
   useEffect(() => {
     if (!open) return
@@ -109,13 +109,14 @@ export function BulkPreviewDialog({ workspaceId, action, items, folders, open, o
     if (!open || !base || tooMany) return
     let live = true
     const started = generation.current
+    const operation = new AbortController()
     setPreview(null); setPreviewError(null)
     // A dry run is one request per item: none of them is sent once this preview is retired.
-    const guarded = api.mock ? api : guardedSharingApi(workspaceId, () => { if (!live || generation.current !== started) throw new SharingError(SESSION_CHANGED, 401) })
+    const guarded = api.mock ? api : guardedSharingApi(workspaceId, () => { if (!live || generation.current !== started) throw new SharingError(SESSION_CHANGED, 401) }, operation.signal)
     guarded.bulk({ ...base, items, dryRun: true })
       .then(result => { if (live) setPreview(result) })
       .catch((error: unknown) => { if (live) setPreviewError(error instanceof Error ? error.message : "The preview failed.") })
-    return () => { live = false }
+    return () => { live = false; operation.abort() }
     // `items` is tracked by identity: a new array with the same slugs is the same selection. A new human
     // re-runs the preview and drops the old one's late answer.
     // eslint-disable-next-line react-hooks/exhaustive-deps

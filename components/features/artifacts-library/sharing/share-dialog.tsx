@@ -46,10 +46,10 @@ function ShareBody({ workspaceId, item }: { workspaceId: string; item: LibraryIt
   const access = useAccess(workspaceId, item)
   const [subject, setSubject] = useState("")
   const [level, setLevel] = useState<ShareLevel>("read")
-  const add = useSharingMutation<ShareInput, void>(workspaceId, (api, input) => api.share(item, input))
+  const add = useSharingMutation<ShareInput, void>(workspaceId, (api, input) => api.share(item, input), item.slug)
   const change = useSharingMutation<RowChange, void>(workspaceId, (api, { entry, level }) => level
     ? api.share(item, { subjectType: entry.subjectType, subjectId: entry.subjectId, label: entry.label, level })
-    : api.revoke(item, entry.subjectType, entry.subjectId))
+    : api.revoke(item, entry.subjectType, entry.subjectId), item.slug)
 
   const entries = [...(access.data ?? [])].sort(byAccess)
   const busyKey = change.isPending && change.variables ? entryKey(change.variables.entry) : null

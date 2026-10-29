@@ -65,7 +65,7 @@ function SettingsForm({ workspaceId, folder, initial, capabilities, onClose }: {
   const [subject, setSubject] = useState<Subject | null>(null)
   const [level, setLevel] = useState<ShareLevel>("read")
   const { subjects, error: peopleError } = useSubjects(workspaceId, true)
-  const save = useSharingMutation(workspaceId, (api, input: Pick<FolderSettings, "defaultAudience" | "entries">) => api.saveFolderSettings(folder.slug, input))
+  const save = useSharingMutation(workspaceId, (api, input: Pick<FolderSettings, "defaultAudience" | "entries">) => api.saveFolderSettings(folder.slug, input), folder.slug)
 
   const add = () => {
     if (!subject) return
