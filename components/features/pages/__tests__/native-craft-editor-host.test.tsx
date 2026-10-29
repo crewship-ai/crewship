@@ -356,3 +356,19 @@ describe('agent proposals while a person holds the editor (#4480)',()=>{
   expect(client.leaseAction).not.toHaveBeenCalled()
  })
 })
+
+describe('full native history',()=>{
+ it('stops saving, keeps every version and the draft, and offers the draft as a file',async()=>{
+  mount();await ready();await acquire()
+  client.save.mockRejectedValueOnce(new NativeSaveError('quota'))
+  act(()=>portOptions.at(-1)!.onChanged('edit-at-full-quota','doc'))
+  act(()=>portOptions.at(-1)!.onSaveRequest({documentId:'doc',editorRevision:'edit-at-full-quota'}))
+  expect(await screen.findByText(/Historie dokumentu je plná/)).toBeInTheDocument()
+  const click=vi.fn();const create=vi.spyOn(document,'createElement')
+  vi.stubGlobal('URL',Object.assign(URL,{createObjectURL:vi.fn(()=>'blob:x'),revokeObjectURL:vi.fn()}))
+  create.mockImplementationOnce(()=>Object.assign(document.createElementNS('http://www.w3.org/1999/xhtml','a') as HTMLAnchorElement,{click}))
+  fireEvent.click(screen.getByRole('button',{name:'Stáhnout koncept'}))
+  await waitFor(()=>expect(click).toHaveBeenCalledOnce())
+  expect(journal.revokeRead).not.toHaveBeenCalled();expect(document.querySelector('iframe')).not.toBeNull()
+ })
+})

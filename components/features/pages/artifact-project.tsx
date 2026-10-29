@@ -97,7 +97,7 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
    },
    onError:(error)=>{
     if(sourceCurrent.current.scope!==submitted.scope)return
-    setSourceError({scope:submitted.scope,message:error.message,hidePreview:(error as Error&{status?:number}).status!==409})
+    setSourceError({scope:submitted.scope,message:error.message,hidePreview:![409,413].includes((error as Error&{status?:number}).status??0)})
    },
   })
  }

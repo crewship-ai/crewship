@@ -19,6 +19,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **An unsent artifact comment survives a crash.** The chat and library artifact viewer keeps the comment text in this browser for the same person and Page, and offers it again after reopening; the place has to be selected again.
 
+- **Full document history now says what happens and what you can do.** Word and Sheet editors stop saving, state that every version is kept and the unsaved work stays in the browser, and offer the draft as a download. Projects keep their preview and source draft at full quota. Neither promises more storage.
+
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.
 
 - **Shared artifact commenters can post feedback in the preview.** Comments stay anchored to the shared version without granting editing or agent execution rights; changing accounts, workspace or permissions retires an unfinished selection.
