@@ -46,10 +46,10 @@ function avatarUrlBuilds(source: string): string[] {
   const patterns = [
     /\bgetAgentAvatarUrl\s*\(/, // the shared builder, called outside the component
     /\bcreateAvatar\s*\(/, // DiceBear core, called directly
-    /api\.dicebear\.com/, // the hosted DiceBear HTTP API
   ]
   for (const line of stripComments(source).split("\n")) {
-    if (patterns.some((p) => p.test(line))) hits.push(line.trim())
+    // The hosted DiceBear HTTP API, matched as plain text rather than as a URL check.
+    if (patterns.some((p) => p.test(line)) || line.includes("api.dicebear.com")) hits.push(line.trim())
   }
   return hits
 }
