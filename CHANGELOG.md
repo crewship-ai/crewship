@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **`crewship chat stream` shows which assignment, escalation or exposed port an event is about.** Session broadcasts that are not chat events (`assignment_*`, `escalation_*`, `peer_query_*`, `port_expose_created`) reached the NDJSON run stream as a bare type name; the WebSocket delivered the same frame with its payload. The stream now carries the payload as `metadata`, cost-redacted like every other frame (#4504).
+
 - **`crewship chat <id>` shows message times again, and `--since` filters.** The transcript read each message's `created_at`, which the messages endpoint never sends — it sends `ts` — so every header printed without a time and `--since` kept every message. It now reads `ts` (#4504).
 
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
