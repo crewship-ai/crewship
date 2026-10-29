@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Home-installed agent CLIs remain visible during startup checks.** Offline qualification uses a separate temporary home while preserving read-only executable paths from the immutable image.
+
 - Add human Comment grants for shared artifact feedback without edit or agent execution rights, explicit QA item markers and catalog filters, and confirmed archive and folder-move previews with live access checks. Access reports include effective capabilities and their sources; existing content, history and grants remain intact.
 
 - **Native Craft editing can continue past access-token expiry.** The browser refreshes its cookie before admitting or renewing the same editing connection and replaces only its authenticated metadata stream. Unsaved work, the lease generation and in-flight saves remain in place; document mutations are never replayed.

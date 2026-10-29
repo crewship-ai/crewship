@@ -48,7 +48,7 @@ func Qualify(ctx context.Context, runtime provider.SandboxRuntime, inventory *de
 		return
 	}
 	result.Status = "passed"
-	env := []string{"HOME=/home/agent", "DISABLE_AUTOUPDATER=1"}
+	env := []string{"HOME=" + provider.SandboxHome, "DISABLE_AUTOUPDATER=1"}
 	for _, kv := range devcontainer.MiseRuntimeEnv {
 		env = append(env, kv[0]+"="+kv[1])
 	}

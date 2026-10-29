@@ -682,7 +682,10 @@ observed CLI inventory and build time. Records are scoped to the crew's
 workspace; raw configuration and environment variable values are not copied
 into history. Reusing the same image for the same definition reuses its record.
 Offline qualification is included in that immutable build evidence; it is not
-a current provider-authentication claim.
+a current provider-authentication claim. The version probe receives a fresh
+writable `HOME` separate from the image's read-only `/home/agent`, so
+home-installed CLI binaries and symlink targets remain available. Runtime
+credentials are not mounted or forwarded to qualification.
 
 By default, offline AI CLI checks record evidence without preventing publication.
 To require them for a crew, set `spec.mise.ai_cli_check: required` in its Crew
