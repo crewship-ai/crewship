@@ -9,8 +9,8 @@ Page, initializes its native Word model and releases the initial lease before
 opening the full editor. An ambiguous initialization is never blindly replayed. Native format metadata on
 Page reads reopens an existing native Page through that same fresh admission.
 A lost creation-release response cannot erase or reinitialize its confirmed data.
-This does not convert existing documents, enable agent proposals, or qualify the
-complete editor acceptance.
+This does not convert existing documents or qualify the complete editor
+acceptance. Agent proposals are described under "Agent proposals" below.
 
 Availability requires a readable Page with an explicit `craft_native_documents`
 profile. Other profiles, inaccessible Pages and absent Pages report disabled.
@@ -46,6 +46,10 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Same whole snapshot contract; existing explicit native Page only. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Exact original snapshot binding and hash; no blind retry. | Original pinned commit receipt,200; never an arbitrary latest head. |
 | POST | `/api/v1/pages/{slug}/craft/document/restore` | Current binding and targetVersion. | New committed version and node durability, 200. |
+| GET | `/api/v1/pages/{slug}/craft/proposals` | Craft admission header; Page read. | `{proposals: [...]}` open and decided agent proposals, 200. |
+| GET | `/api/v1/pages/{slug}/craft/proposals/{proposalID}` | Craft admission header; `ncp_` id. | `{proposal, bytes, content_hash, engine_pin}` candidate, 200; 404 when absent. |
+| POST | `/api/v1/pages/{slug}/craft/proposals/{proposalID}/accept` | `{generation: "1"}` of this admission's lease; Page write. | `{proposal, receipt}` with the new committed version, 200; 409 `stale` when base is no longer latest. |
+| POST | `/api/v1/pages/{slug}/craft/proposals/{proposalID}/reject` | `{}`; Page write, no lease. | Rejected proposal, 200; 409 when already decided. |
 
 Except availability, agent task controls, initialization and initial session creation, send `X-Craft-Session` as well
 as ordinary authentication. Session creation returns `session_token`, the distinct
@@ -351,5 +355,23 @@ builds exclude them. Default CI is not evidence that either engine executed.
 The human and agent transport boundaries have targeted API, original-engine,
 private-process, retirement, cancellation and receipt regressions. Live editor
 and genuine dispatched-agent acceptance must still qualify the exact release;
-unit provider/model fixtures are not live agent evidence. Proposals and complete
-visible-editor feature acceptance remain separate work.
+unit provider/model fixtures are not live agent evidence. Complete
+visible-editor feature acceptance remains separate work.
+
+## Agent proposals
+
+When a person holds the lease, an agent never waits for, steals or retries it.
+`craft_propose` runs the same allowlisted original-engine commands over the
+exact `base_version` the agent read and stores the complete candidate in
+`craft_native_proposals`; the document, its versions and the lease are
+unchanged. At most 16 proposals per document may be open. The same agent
+`request_id` returns the original proposal.
+
+A person with an admitted session reviews them (`GET .../craft/proposals`,
+candidate bytes at `GET .../craft/proposals/{id}`) and decides once. Accept is
+the person's own fenced save: Page write rights, the immutable profile, this
+admission's lease generation, base == latest and the open state are checked and
+the version and decision commit in one transaction. If the document moved on,
+the proposal becomes `stale` and nothing is applied; it is never rebased.
+Reject needs write rights but no lease. The agent cannot decide its own
+proposal.

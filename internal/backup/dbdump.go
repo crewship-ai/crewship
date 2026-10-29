@@ -321,6 +321,7 @@ var BackupTables = []string{
 	"page_folder_acl", // FK folder_id → page_folders; nullable set_by_user_id → users
 	"pages",
 	"craft_native_documents", // immutable native profile, Page/workspace FKs remap on fork
+	"craft_native_proposals", // agent candidates awaiting a human decision; FK craft_native_documents
 	"artifact_version_heads",
 	"artifact_design_documents",
 	"artifact_version_blobs",

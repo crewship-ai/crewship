@@ -18,7 +18,7 @@ const ownedLease={...emptyLease,holder:{actor_id:"user:human",display_name:"Pave
 const receipt=(r:NativeSaveRequest)=>({...r,bytes:undefined,version:(BigInt(r.baseVersion)+1n).toString(),candidateHash:r.contentHash,durability:"node",issuedBy:"crewship",phase:"committed"})
 let privacyRetire:(()=>Promise<void>)|undefined
 let client:ReturnType<typeof clientRig>,journal:ReturnType<typeof journalRig>,ports:ReturnType<typeof portRig>[],portOptions:NativeEditorPortOptions[],stream:((event:"lease"|"session_retired",value:Record<string,unknown>)=>void)|undefined
-function clientRig(){return {share:vi.fn(async(r:{targetVersion:string})=>({version:r.targetVersion,durability:'node',issuedBy:'crewship',phase:'shared'})),open:vi.fn().mockResolvedValue({sessionId:"private-session",applicationId:"wordcraft"}),read:vi.fn().mockResolvedValue({version:"1",bytes:new TextEncoder().encode('{"body":[]}'),applicationId:"wordcraft",enginePin:"a".repeat(64),editorBundle:"b".repeat(64),editorURL:`https://native.example/b/${"b".repeat(64)}/index.html`,quota:{usedBytes:"12",limitBytes:"99999",warning:false,retention:"keep-all"}}),lease:vi.fn().mockResolvedValue(emptyLease),leaseAction:vi.fn(async(action:string):Promise<unknown>=>{if(action==='acquire')client.lease.mockResolvedValue(ownedLease);return ownedLease}),events:vi.fn((_signal:AbortSignal,callback:typeof stream)=>{stream=callback;return new Promise<void>(()=>{})}),reauthorize:vi.fn().mockResolvedValue(true),save:vi.fn(async(r:NativeSaveRequest)=>receipt(r)),reconcile:vi.fn(),close:vi.fn()}}
+function clientRig(){return {share:vi.fn(async(r:{targetVersion:string})=>({version:r.targetVersion,durability:'node',issuedBy:'crewship',phase:'shared'})),open:vi.fn().mockResolvedValue({sessionId:"private-session",applicationId:"wordcraft"}),read:vi.fn().mockResolvedValue({version:"1",bytes:new TextEncoder().encode('{"body":[]}'),applicationId:"wordcraft",enginePin:"a".repeat(64),editorBundle:"b".repeat(64),editorURL:`https://native.example/b/${"b".repeat(64)}/index.html`,quota:{usedBytes:"12",limitBytes:"99999",warning:false,retention:"keep-all"}}),lease:vi.fn().mockResolvedValue(emptyLease),leaseAction:vi.fn(async(action:string):Promise<unknown>=>{if(action==='acquire')client.lease.mockResolvedValue(ownedLease);return ownedLease}),events:vi.fn((_signal:AbortSignal,callback:typeof stream)=>{stream=callback;return new Promise<void>(()=>{})}),reauthorize:vi.fn().mockResolvedValue(true),save:vi.fn(async(r:NativeSaveRequest)=>receipt(r)),reconcile:vi.fn(),close:vi.fn(),proposals:vi.fn().mockResolvedValue([]),proposalBytes:vi.fn(),decideProposal:vi.fn()}}
 function journalRig(){return {persist:vi.fn().mockResolvedValue(undefined),confirm:vi.fn().mockResolvedValue(undefined),recovery:vi.fn().mockResolvedValue([]),onRetire:vi.fn(()=>()=>{}),close:vi.fn().mockResolvedValue(undefined),revokeRead:vi.fn().mockResolvedValue(undefined)}}
 function portRig(){return {loaded:vi.fn(),handleWindowMessage:vi.fn(),bootstrap:vi.fn().mockResolvedValue({bytes:new TextEncoder().encode('{"body":[]}'),editorRevision:"initial",documentId:"doc"}),snapshot:vi.fn().mockResolvedValue({bytes:new TextEncoder().encode('{"body":[1]}'),editorRevision:"snapshot-1",documentId:"doc"}),validate:vi.fn().mockResolvedValue(undefined),ack:vi.fn().mockResolvedValue(true),saveFailed:vi.fn(),setReadOnly:vi.fn(async(v:boolean)=>v),close:vi.fn()}}
 beforeEach(()=>{vi.stubGlobal('crypto',webcrypto);client=clientRig();journal=journalRig();ports=[];portOptions=[];stream=undefined;privacyRetire=undefined;m.purge.mockResolvedValue(undefined);m.registerPrivacy.mockImplementation((_human:string,retire:()=>Promise<void>)=>{privacyRetire=retire;return vi.fn()});m.createClient.mockReturnValue(client);m.openJournal.mockResolvedValue(journal);m.createPort.mockImplementation((o:NativeEditorPortOptions)=>{const p=portRig();ports.push(p);portOptions.push(o);queueMicrotask(()=>o.onReady?.('qualified'));return p})})
@@ -319,4 +319,40 @@ it('preserves the exact writer, private journal and pending save during successf
   await act(async()=>pendingSave.resolve(receipt(captured)));await screen.findByText('Uloženo')
   expect(client.save).toHaveBeenCalledOnce();expect(ownedJournal.revokeRead).not.toHaveBeenCalled()
  }finally{vi.useRealTimers()}
+})
+
+describe('agent proposals while a person holds the editor (#4480)',()=>{
+ const proposal={id:'ncp_0123456789abcdef01234567',authorName:'Jamie',baseVersion:'1',summary:'Nadpis',createdAt:'2026-10-29T17:00:00Z',state:'open' as const}
+ it('accepts only as the current holder after saving its own edits, then reopens from the server',async()=>{
+  client.proposals.mockResolvedValue([proposal])
+  mount();await ready()
+  await screen.findByText('Jamie připravil návrh nad verzí 1')
+  expect(screen.queryByRole('button',{name:'Přijmout'})).not.toBeInTheDocument()
+  await acquire()
+  client.decideProposal.mockResolvedValue({...proposal,state:'accepted',resultVersion:'2'})
+  act(()=>portOptions.at(-1)!.onChanged('human-edit','doc'))
+  fireEvent.click(await screen.findByRole('button',{name:'Přijmout'}))
+  await waitFor(()=>expect(client.decideProposal).toHaveBeenCalledWith(proposal.id,'accept','9007199254740995',expect.any(AbortSignal)))
+  expect(client.save.mock.invocationCallOrder[0]).toBeLessThan(client.decideProposal.mock.invocationCallOrder[0])
+  await waitFor(()=>expect(client.read.mock.calls.length).toBeGreaterThanOrEqual(3))
+ })
+ it('reports a stale proposal without changing the document',async()=>{
+  client.proposals.mockResolvedValue([proposal])
+  mount();await ready();await acquire()
+  client.decideProposal.mockResolvedValue({...proposal,state:'stale'})
+  fireEvent.click(await screen.findByRole('button',{name:'Přijmout'}))
+  await screen.findByText(/Návrh nebyl použit/)
+  expect(document.querySelector('iframe')).not.toBeNull()
+ })
+ it('rejects without a lease and compares the candidate read-only',async()=>{
+  client.proposals.mockResolvedValue([proposal])
+  client.proposalBytes.mockResolvedValue(new TextEncoder().encode('{"body":["agent"]}'))
+  client.decideProposal.mockResolvedValue({...proposal,state:'rejected'})
+  mount();await ready()
+  fireEvent.click(await screen.findByRole('button',{name:'Porovnat'}))
+  expect(await screen.findByLabelText('Návrh Jamie nad verzí 1')).toHaveValue('{"body":["agent"]}')
+  fireEvent.click(screen.getByRole('button',{name:'Odmítnout'}))
+  await waitFor(()=>expect(client.decideProposal).toHaveBeenCalledWith(proposal.id,'reject',undefined,expect.any(AbortSignal)))
+  expect(client.leaseAction).not.toHaveBeenCalled()
+ })
 })

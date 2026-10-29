@@ -16,6 +16,15 @@ export interface NativeShareRequest {
  workspaceId:string;pageId:string;applicationId:string;enginePin:string;sessionId:string;generation:string;baseVersion:string;targetVersion:string
 }
 export interface NativeShareReceipt {version:string;durability:'node';issuedBy:'crewship';phase:'shared'}
+/** An agent's candidate prepared while a person holds the lease (#4480). */
+export interface NativeProposal {id:string;authorName:string;baseVersion:string;summary:string;createdAt:string;state:'open'|'accepted'|'rejected'|'stale';resultVersion?:string}
+const PROPOSAL_ID=/^ncp_[a-f0-9]{24}$/
+function nativeProposal(raw:unknown):NativeProposal|null{
+ if(!raw||typeof raw!=='object'||Array.isArray(raw))return null
+ const v=raw as Record<string,unknown>,author=v.author as Record<string,unknown>|undefined
+ if(typeof v.id!=='string'||!PROPOSAL_ID.test(v.id)||!Number.isSafeInteger(v.base_version)||(v.base_version as number)<1||typeof v.summary!=='string'||typeof v.created_at!=='string'||!['open','accepted','rejected','stale'].includes(v.state as string)||!author||author.kind!=='agent'||typeof author.display_name!=='string')return null
+ return {id:v.id,authorName:author.display_name,baseVersion:String(v.base_version),summary:v.summary,createdAt:v.created_at,state:v.state as NativeProposal['state'],...(Number.isSafeInteger(v.result_version)?{resultVersion:String(v.result_version)}:{})}
+}
 export interface NativeDocumentClient {
  open(signal: AbortSignal): Promise<{sessionId: string; applicationId: string}>
  read(signal:AbortSignal):Promise<NativeDocumentSnapshot>
@@ -24,6 +33,10 @@ export interface NativeDocumentClient {
  lease(signal:AbortSignal):Promise<unknown>
  leaseAction(action:"acquire"|"release"|"request-handoff"|"handoff",body:{generation?:string;request_id?:string},signal:AbortSignal):Promise<unknown>
  share(request:NativeShareRequest,signal:AbortSignal):Promise<NativeShareReceipt>
+ proposals(signal:AbortSignal):Promise<NativeProposal[]>
+ proposalBytes(id:string,signal:AbortSignal):Promise<Uint8Array>
+ /** Accept is this admission's own fenced save; a "stale" result changed nothing. */
+ decideProposal(id:string,decision:'accept'|'reject',generation:string|undefined,signal:AbortSignal):Promise<NativeProposal>
  save(request: NativeSaveRequest,signal: AbortSignal): Promise<unknown>
  reconcile(request: NativeSaveRequest,signal: AbortSignal): Promise<unknown>
  close(): void
@@ -217,6 +230,35 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    let bytes:Uint8Array
    try {const binary=atob(v.bytes);if(!binary.length||binary.length>32*1024*1024)throw new Error();bytes=Uint8Array.from(binary,c=>c.charCodeAt(0))}catch{throw new Error("invalid_native_document")}
    return {version:v.version,bytes,applicationId:applicationId as "wordcraft"|"gridcraft",enginePin:v.enginePin,editorBundle:v.editorBundle,editorURL:v.editorURL,quota:{usedBytes:q.usedBytes,limitBytes:q.limitBytes,warning:q.warning,retention:q.retention}}
+  },
+  async proposals(signal){
+   ready();const response=await send(`${base}proposals?${query}`,{method:'GET',cache:'no-store',signal,headers:{'X-Craft-Session':token!}})
+   ready();if(!response.ok)throw new Error('native_proposals_unavailable')
+   const value=await response.json() as {proposals?:unknown};ready()
+   if(!value||!Array.isArray(value.proposals))throw new Error('native_proposals_unavailable')
+   return value.proposals.map(nativeProposal).filter((p):p is NativeProposal=>p!==null)
+  },
+  async proposalBytes(id,signal){
+   ready();if(!PROPOSAL_ID.test(id))throw new Error('invalid_native_proposal')
+   const response=await send(`${base}proposals/${id}?${query}`,{method:'GET',cache:'no-store',signal,headers:{'X-Craft-Session':token!}})
+   ready();if(!response.ok)throw new Error('native_proposal_unavailable')
+   const value=await response.json() as {bytes?:unknown};ready()
+   if(typeof value?.bytes!=='string'||!value.bytes.length||value.bytes.length>44739244)throw new Error('invalid_native_proposal')
+   const binary=atob(value.bytes);return Uint8Array.from(binary,c=>c.charCodeAt(0))
+  },
+  async decideProposal(id,decision,generation,signal){
+   ready()
+   if(!PROPOSAL_ID.test(id)||decision==='accept'&&(!validNativeVersion(generation)||generation==='0'))throw new Error('invalid_native_proposal')
+   const body=decision==='accept'?{sessionId,generation}:{}
+   const response=await send(`${base}proposals/${id}/${decision}?${query}`,{method:'POST',cache:'no-store',signal,headers:{'Content-Type':'application/json','X-Craft-Session':token!},body:JSON.stringify(body)})
+   ready()
+   const value=await response.json().catch(()=>null) as Record<string,unknown>|null;ready()
+   const proposal=nativeProposal(value&&'proposal' in value?value.proposal:value)
+   if(response.status===409&&proposal?.state==='stale')return proposal
+   if(response.status===409)throw new NativeSaveError('conflict')
+   if(response.status===401||response.status===403)throw new NativeSaveError('write_revoked')
+   if(!response.ok||!proposal)throw new Error('native_proposal_unconfirmed')
+   return proposal
   },
   save:(request,signal)=>mutate("save",request,signal),
   reconcile:(request,signal)=>mutate("reconcile",request,signal),
