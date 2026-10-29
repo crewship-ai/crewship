@@ -79,7 +79,7 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 
-const open = () => render(withQuery(<ArtifactsLibrary workspaceId="workspace-1" item="launch" onSelect={vi.fn()} />))
+const open = () => render(withQuery(<ArtifactsLibrary workspaceId="workspace-1" item="page-1" onSelect={vi.fn()} />))
 
 function compose() {
   fireEvent.click(screen.getByRole("button", { name: "Select" }))

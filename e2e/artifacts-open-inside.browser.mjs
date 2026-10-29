@@ -28,7 +28,8 @@ const useAddress = () => useSyncExternalStore(subscribe, () => location.href)
 export const useRouter = () => ({ push(u) { history.pushState(null, "", u); notify() }, replace(u) { history.replaceState(null, "", u); notify() }, back() { history.back() }, prefetch() {}, refresh() {} })
 export const useSearchParams = () => { useAddress(); return new URLSearchParams(location.search) }
 export const usePathname = () => { useAddress(); return location.pathname }
-export const useParams = () => { useAddress(); const m = /^\\/artifacts\\/([^/]+)/.exec(location.pathname); return m ? { id: m[1] } : {} }`,
+// Like the static export, which serves artifacts/_.html for every ID: the params only ever hold the placeholder.
+export const useParams = () => { useAddress(); return location.pathname.startsWith("/artifacts/") ? { id: "_" } : {} }`,
 }
 // The Design editor needs its Yjs socket; its own browser test covers it. Here it only has to show which design opened.
 STUBS["design-editor"] = `import { jsx } from "react/jsx-runtime"
@@ -140,13 +141,15 @@ try {
   assert.equal(await page.locator('a[href^="/pages"]').count(), 0, "no link into /pages from a Design")
   step("design opened", { url: page.url() })
 
-  // 6. A link from before IDs moves to the artifact's address and opens it.
+  // 7. A link from before IDs opens by slug and moves to the artifact's ID address; a slug is never an ID address.
   await page.goto(`${origin}/artifacts?item=pricing-site`)
   await projectContent()
-  assert.equal(path(), "/artifacts/pricing-site")
+  await page.waitForURL(url => url.pathname === "/artifacts/page-site")
+  await page.goto(`${origin}/artifacts/pricing-site`)
+  await page.getByText("This artifact is not available.").waitFor()
   step("legacy ?item= link")
 
-  // 7. Leaving the detail returns to the library at /artifacts.
+  // 8. Leaving the detail returns to the library at /artifacts.
   await page.getByRole("button", { name: "All artifacts" }).first().click()
   await list.waitFor()
   assert.equal(path(), "/artifacts")

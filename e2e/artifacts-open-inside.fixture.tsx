@@ -62,10 +62,11 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false 
 
 /** The app router's choice between the route files, by the address bar; the static /artifacts/edit wins over [id]. */
 function Routes() {
-  const id = useParams<{ id?: string }>()?.id
+  // Subscribes to navigation; the params themselves only hold the exported "_" placeholder.
+  const detail = useParams<{ id?: string }>()?.id !== undefined
   // The editor itself (the unchanged Craft editor page) is not part of this fixture; only its address is.
-  if (id === "edit") return <p>Editor route</p>
-  return <div className="min-h-dvh bg-background text-foreground">{id ? <ArtifactDetailRoute /> : <ArtifactsPage />}</div>
+  if (/^\/artifacts\/edit\/?$/.test(location.pathname)) return <p>Editor route</p>
+  return <div className="min-h-dvh bg-background text-foreground">{detail ? <ArtifactDetailRoute /> : <ArtifactsPage />}</div>
 }
 
 createRoot(document.getElementById("root")!).render(<QueryClientProvider client={queryClient}><Routes /></QueryClientProvider>)

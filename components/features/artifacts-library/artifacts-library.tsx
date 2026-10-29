@@ -497,9 +497,14 @@ function useLibraryKeys(root: React.RefObject<HTMLElement | null>, keys: Library
 
 interface ArtifactsLibraryProps {
   workspaceId: string
-  /** The open artifact's immutable page ID (or, for an item without one, its slug), or null for the library. Kept in the URL by the route. */
+  /** The open artifact's immutable page ID, or null for the library. Kept in the URL by the route. */
   item: string | null
-  onSelect: (id: string | null) => void
+  /** `item` is a slug from a link made before IDs (or an item that has no ID). It never matches an ID. */
+  bySlug?: boolean
+  /** Opens an artifact by its ID; one without an ID opens by `slug`. Null returns to the list. */
+  onSelect: (id: string | null, slug?: string) => void
+  /** A slug link found its artifact: the route moves to the ID address. */
+  onCanonical?: (id: string) => void
   /** Controlled filters, when the route keeps them in the URL; otherwise the library holds them. */
   filters?: LibraryFilters
   onFiltersChange?: (next: LibraryFilters) => void
@@ -511,7 +516,7 @@ interface ArtifactsLibraryProps {
  * searches, filters and switches views; Home offers what can be made. Empty
  * items and repeated runs have their own views and are never deleted here.
  */
-export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: controlled, onFiltersChange }: ArtifactsLibraryProps) {
+export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanonical, filters: controlled, onFiltersChange }: ArtifactsLibraryProps) {
   const { pages, loading, error, refresh } = usePages(workspaceId, undefined, CATALOG)
   const { folders } = usePageFolders(workspaceId)
   const caps = useArtifactCapabilities(workspaceId)
@@ -541,8 +546,10 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
     opened: new Map(Array.isArray(recent) ? recent.filter(entry => typeof entry?.slug === "string" && Number.isFinite(entry?.at)).map(entry => [entry.slug, entry.at]) : []),
     favorites: new Set(Array.isArray(favorites) ? favorites.filter(slug => typeof slug === "string") : []),
   }), [recent, favorites])
-  // The ID survives a renamed or reassigned slug; a slug still opens links made before IDs.
-  const selected = item !== null ? items.find(entry => entry.pageId === item) ?? items.find(entry => entry.slug === item) ?? null : null
+  // An ID address fails closed: it never falls back to a slug, which another artifact may hold now.
+  const selected = item === null ? null : items.find(entry => bySlug ? entry.slug === item : entry.pageId === item) ?? null
+  const canonical = bySlug ? selected?.pageId : undefined
+  useEffect(() => { if (canonical) onCanonical?.(canonical) }, [canonical]) // eslint-disable-line react-hooks/exhaustive-deps
   const contentRef = useRef<HTMLDivElement>(null)
   const openedSlug = selected?.slug
   useEffect(() => {
@@ -559,7 +566,11 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
   const mobile = useIsMobile()
   const [peek, setPeek] = useState<string | null>(null)
   const peeked = !mobile && item === null ? items.find(entry => entry.slug === peek) ?? null : null
-  const open = (slug: string) => { setPeek(null); onSelect(items.find(entry => entry.slug === slug)?.pageId ?? slug) }
+  const open = (slug: string) => {
+    setPeek(null)
+    const id = items.find(entry => entry.slug === slug)?.pageId
+    if (id) onSelect(id); else onSelect(null, slug)
+  }
   const pick = (slug: string) => { if (mobile || peek === slug) open(slug); else setPeek(slug) }
   useLibraryKeys(contentRef, { detailOpen: item !== null, onBack: () => onSelect(null), peek: peeked?.slug ?? null, onPeek: mobile ? null : setPeek, onOpen: open })
   // A selection and a peek belong to the list they were made in.
