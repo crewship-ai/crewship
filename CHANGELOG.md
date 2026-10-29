@@ -9,6 +9,16 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **`crewship page artifact comment --send-to-agent` no longer leaves the task stuck at "pending".** The task only starts when the artifact's source chat receives a message carrying its purpose, which the viewer sends and the CLI never did. `--wait` on `page artifact comment` and `page design comment` now sends it, confirms the host saved it and waits for the agent's answer or clarification; `crewship run --chat <chat> --artifact-target <file>` sends the same purpose by hand, including a "Describe it" creation (#4505).
+
+- ⚠️ **Behaviour change: a busy agent exits `9`, a full artifact history exits `2`.** A message bounced because the agent already has a live run now exits `9` (was `1`) for `crewship run` and the new `--wait` commands; nothing was sent or stored. A full artifact version history (HTTP 413 `artifact_history_quota`) now exits `2` (was `1`) and says nothing was saved, your `--file` is unchanged and every version is retained (#4505).
+
+- **`crewship craft` shows why the server refused.** Refusals printed only `native HTTP 409` and exited `1`. They now carry the server's text with the session token removed, exit with the usual codes (`5` conflict, `2` validation, `7` server, `8` network) and fill the `--format json` error envelope; a lease conflict names who holds the lease, and a proposal refusal says whether it was stale. Agent `task` commands still print status only (#4505).
+
+- **`crewship page artifact publish` confirms a save whose reply was lost.** After a transport error, a 5xx or a 409, it reads version base+1 once and reports the save as done when that version holds exactly your manifest; otherwise the original error stands. `crewship page artifact reconcile` does the same check by hand (#4505).
+
+- **More Design and Mooring operations from the CLI.** `page design create --test-item`, `page design watch --authority-revision`, `mooring command-session` and `mooring session --reauthorize` (#4505).
+
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
 
 - ⚠️ **Behaviour change: notification channel URLs are checked more strictly.** The delivery library (shoutrrr 0.22.1) rejects a channel URL that could never send when a channel is created from the provider form or tested, and at send time for raw URLs: Gotify needs a real application token (15 characters starting with `A`, or a Gotify 3 `gtfya.` token), Google Chat needs both `key` and `token`, Mattermost needs a host, and ntfy topics follow ntfy's naming rule. Saved channels are never checked at startup or when listed; a Google Chat channel saved without `key` or `token` now reports a delivery error. SQLite driver updated to modernc.org/sqlite 1.61.0.

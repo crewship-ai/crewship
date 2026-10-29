@@ -2025,7 +2025,10 @@ Comment grants reach only the current shared pin. Readers cannot publish,
 comment, restore or share; Comment permits feedback without content writes.
 Storage usage and the keep-all policy are returned with the owner snapshot.
 Quota rejection retains every prior version; keep the candidate manifest file
-until publication is acknowledged.
+until publication is acknowledged. The CLI reports the `artifact_history_quota`
+refusal (HTTP 413) as "nothing was saved; your `--file` is unchanged; versions
+retained" and exits `2`; the `--format json` error envelope keeps the server's
+`code` under `error.extensions`.
 
 For an agent, enable **Create artifact project** in the original private chat.
 The host binds that explicit request to the actual human credential and one
@@ -2064,6 +2067,29 @@ A conflict leaves the candidate available for deliberate reconciliation.
 crewship page artifact publish demo --base-version 1 --file manifest.json
 ```
 
+When the reply is lost — a transport error, a `5xx`, or a `409` that may be the
+echo of the first attempt — the CLI reads version `base+1` once and compares it
+with your manifest (same entrypoint; same path, content and media type for every
+file). If it matches, the save is confirmed: the command prints
+`{"reconciled": true, "version": N}` and exits `0`. Otherwise the original error
+is returned unchanged. The CLI never publishes twice.
+
+### `crewship page artifact reconcile <slug>`
+
+Confirm by hand whether an uncertain publish was saved. Read-only. Required
+`--base-version` is the base the publish used and `--file` the same manifest
+(`-` reads stdin).
+
+```bash
+crewship page artifact reconcile demo --base-version 1 --file manifest.json
+```
+
+| Exit | Meaning |
+|------|---------|
+| `0` | Version `base+1` holds exactly your manifest: `{"reconciled": true, "version": N}`. |
+| `3` | Version `base+1` does not exist: nothing was saved, so publishing again with the same `--base-version` is safe. |
+| `5` | Version `base+1` exists with other content: another save took it. Read the latest version and merge. |
+
 ### `crewship page artifact comment <slug>`
 
 Create an anchored comment as the human owner, using the exact selected version
@@ -2076,6 +2102,28 @@ crewship page artifact comment demo --version 1 --path index.html --selector '#a
 Omit `--send-to-agent` to store only the comment. Queuing a task does not confirm
 agent delivery. A protected agent invocation cannot fall back to a saved human
 profile to create the comment. `page artifact comments` remains the read command.
+
+`--send-to-agent` alone leaves the task `pending`: like the viewer, the task
+starts only when the artifact's source chat receives a message carrying the
+matching `artifact_project_intent`. Add `--wait` to do what the viewer's **Send
+to agent** does — create the comment, send that message to the source chat
+(`origin.chat_id`), confirm the host saved it, then poll the comment until its
+status is `answered` or `needs_clarification` and print it with its replies:
+
+```bash
+crewship page artifact comment demo --version 1 --path index.html --selector '#artifact-heading' --quote 'Current title' --text 'Make this title shorter' --send-to-agent --wait
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--wait` | `false` | With `--send-to-agent`: deliver the task and wait for the agent's reply. Human credential only. |
+| `--wait-timeout` | `15m` | Stop waiting after this long; the task stays queued. |
+
+If the agent already has a live run, nothing is sent or stored, the command exits
+`9` (busy) and prints the exact `--artifact-target` packet so you can retry with
+[`crewship run --artifact-target`](/cli/run) once the run ends. The CLI token
+needs `pages:write` when it is scoped; the source chat must be your private,
+trusted chat.
 
 ### Dashboard data (disabled by default)
 
@@ -2161,7 +2209,8 @@ agent token to a saved human profile.
 ### `crewship page design create <slug>`
 
 Create an empty Design Page. `--name` is the required title. Creation requires
-human authentication and Page creation permission.
+human authentication and Page creation permission. `--test-item` marks the new
+Design as created by a test (creation-only, like `page artifact create --test-item`).
 
 ```bash
 crewship page design create checkout --name "Checkout"
@@ -2236,6 +2285,11 @@ agent delivery. A changed version or element returns a conflict without retry.
 crewship page design comment checkout --version 2 --node cart-title --quote "Cart" --text "Use brand colors" --send-to-agent
 ```
 
+`--wait` (with `--send-to-agent`) sends the task to the chat connected with
+`page design agent` and waits for the reply, exactly as
+[`page artifact comment --wait`](#crewship-page-artifact-comment-slug) does,
+including `--wait-timeout` and the busy exit code `9`.
+
 ### `crewship page design agent <slug>`
 
 Required `--chat-id` connects an existing private chat owned by the same human.
@@ -2252,7 +2306,11 @@ Watch standard binary Yjs frames encoded as base64 rows. Optional `--count`
 stops after that many binary frames; zero watches until interrupted. JSON and
 NDJSON output use one row per frame; YAML uses one document per frame. This
 stream requires human authentication and the normal server-host credential guard.
+Optional `--authority-revision` (the `authority_revision` from `page design get`)
+admits the socket only if the workspace's grants have not changed since that
+read; a changed revision is refused (exit `4`) instead of replaying the canvas.
 
 ```bash
 crewship page design watch checkout --count 1
+crewship page design watch checkout --authority-revision 42
 ```
