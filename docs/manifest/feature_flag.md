@@ -3,14 +3,16 @@
 ## What it is
 
 `kind: FeatureFlag` declares a runtime toggle that Crewship code
-checks at request time. A flag has two layers and the manifest can
-write to both in a single document:
+checks at request time. A flag has two layers and the manifest is
+designed to write to both in a single document:
 
 1. The **instance-global definition** — name (`key`), description,
    the default `enabled` state, and an optional `default_percentage`
    for gradual-rollout flags. This row lives in the `feature_flags`
-   table and is shared by every workspace on the instance. Only
-   ADMIN may create, update, or delete it.
+   table and is shared by every workspace on the instance. Only an
+   instance administrator who is also OWNER or ADMIN of the target
+   workspace may create, update, or delete it
+   ([details](/api-reference/feature-flags#who-may-change-a-definition)).
 
 2. The **workspace override** — an optional per-workspace
    force-enable / force-disable that takes precedence over the
@@ -41,8 +43,33 @@ The `workspace_override` field is **pointer-typed** in the Go
 struct (`*bool`). That is deliberate: an *absent* field means
 "inherit", which is structurally different from "force OFF
 (`false`)". Re-applying a manifest that omits the field will
-DELETE any stale override the workspace happened to have — that's
-how operators clear an override and return to the instance default.
+is meant to DELETE any stale override the workspace happened to have.
+On `main` it does not (see the limitations above): clear an override
+with `crewship feature-flag inherit <key>`.
+
+> **Current limitations on `main`.** The `FeatureFlag` kind parses and
+> validates, but `crewship apply` only partly reconciles it today:
+>
+> - Apply always sends a **create** (`POST`) for the definition. It does
+>   not read existing flags first, so applying a manifest for a flag that
+>   already exists fails that item with `unexpected status 409`. Use
+>   [`crewship feature-flag update`](/cli/feature-flag#crewship-feature-flag-update)
+>   to change an existing definition.
+> - The create body names the fields `default_enabled` and
+>   `default_percentage`, but the server reads `enabled` and `percentage`.
+>   A flag created by apply therefore starts with `enabled: false` and
+>   `percentage: 0` whatever the manifest says; only `key` and
+>   `description` are taken from it. Set the default afterwards with
+>   `crewship feature-flag update <key> --enabled`.
+> - `workspace_override` set to `true` or `false` is applied (`PUT`
+>   override). Leaving it out does **not** remove an existing override; use
+>   `crewship feature-flag inherit <key>`.
+> - `crewship export` does not emit `FeatureFlag` documents.
+> - `percentage` is stored but not evaluated by the server; see
+>   [Effective value](/api-reference/feature-flags#effective-value).
+>
+> The sections below describe the intended behaviour and note where `main`
+> differs.
 
 ## YAML schema
 
@@ -68,8 +95,8 @@ spec:
 |---|---|---|---|
 | `metadata.slug` | string | yes | Becomes the `feature_flags.key` column. Used as the path parameter on every per-flag endpoint. |
 | `spec.description` | string | no | Free-form, shown in admin UI / `feature-flag list`. |
-| `spec.default_enabled` | bool | yes | Instance-wide default. Only honored on create; runtime toggles via the admin UI win on re-apply (see "Apply behavior"). |
-| `spec.default_percentage` | int 0..100 | yes | Gradual rollout knob. Validation rejects out-of-range values. **Not** diffed on update — see "Apply behavior". |
+| `spec.default_enabled` | bool | yes | Intended instance-wide default. On `main` it is not applied: the server ignores the field name and creates the flag with `enabled: false`. |
+| `spec.default_percentage` | int 0..100 | yes | Validation rejects out-of-range values. On `main` it is not applied (created as `0`) and the server does not evaluate percentages anyway. |
 | `spec.workspace_override` | *bool | no | Force-enable (`true`) or force-disable (`false`) for the current workspace. Omit to inherit the instance default. |
 
 ## Examples
@@ -94,9 +121,9 @@ spec:
 ### Realistic — definition + workspace opt-in
 
 Same flag, but the workspace this manifest applies to wants the
-feature ON regardless of the instance default. Two PlanItems will
-be emitted on first apply: POST the definition, then PUT the
-override.
+feature ON regardless of the instance default. Two PlanItems are
+emitted: POST the definition, then PUT the override. On a re-apply
+the POST fails with `409` because the flag exists.
 
 ```yaml
 apiVersion: crewship/v1
@@ -113,8 +140,10 @@ spec:
 
 ### Force-disable for a specific workspace
 
-The instance default is `true`, but this workspace explicitly opts
-out — useful for a customer who isn't ready for the change.
+This workspace explicitly opts out — useful for a customer who isn't
+ready for the change. The override is applied; `default_enabled: true`
+is not (see the limitations above), so turn the instance default on
+with `crewship feature-flag update new-issue-search --enabled`.
 
 ```yaml
 apiVersion: crewship/v1
@@ -131,10 +160,10 @@ spec:
 
 ### Clear an existing override
 
-Drop the `workspace_override:` line entirely and re-apply. The plan
-emits one `ActionDelete` against
-`DELETE /api/v1/feature-flags/{key}/override`. The flag definition
-itself is untouched.
+Intended: drop the `workspace_override:` line and re-apply, and the
+plan removes the override. On `main` this emits nothing for the
+override (and the definition POST fails with `409`), so run
+`crewship feature-flag inherit experimental-llm-cache` instead.
 
 ```yaml
 apiVersion: crewship/v1
@@ -146,43 +175,38 @@ spec:
   description: "Experimental cross-request LLM response cache."
   default_enabled: false
   default_percentage: 0
-  # workspace_override removed → existing override row will be deleted
+  # workspace_override removed — on main this does NOT delete the override
 ```
 
 ## CLI reference
 
 ```
-crewship feature-flag list
-    List every flag + this workspace's effective override state. Alias: `flag list`.
-
-crewship feature-flag enable <key>
-    Shortcut: PUT override with enabled: true for the current workspace.
-
-crewship feature-flag disable <key>
-    Shortcut: PUT override with enabled: false.
-
-crewship feature-flag inherit <key>
-    Drop this workspace's override row and revert to the instance default.
+crewship feature-flag list                List every flag, its default, this workspace's override and the effective value.
+crewship feature-flag create --key <key>  Create a definition (instance administrator).
+crewship feature-flag update <key>        Change description / --enabled / --percentage of a definition.
+crewship feature-flag delete <key>        Delete a definition and every workspace's override.
+crewship feature-flag enable <key>        PUT override enabled: true for the current workspace.
+crewship feature-flag disable <key>       PUT override enabled: false.
+crewship feature-flag inherit <key>       Drop this workspace's override and revert to the instance default.
 ```
 
-The override subcommands all operate on the **current** workspace (resolved via `crewship workspace use` / `CREWSHIP_WORKSPACE`); there is no `--workspace` flag for targeting an arbitrary other workspace from the CLI. To cross-target, switch workspace context first.
-
-For full CRUD (creating new flag definitions, deleting flags) use
-`crewship apply --file flag.yaml`. The admin CLI intentionally
-does NOT expose `feature-flag create` / `delete` — flag definitions
-are a versioned codebase concern and should land via a reviewed
-manifest, not an ad-hoc shell command.
+The alias `crewship flag` works for every subcommand. The override
+subcommands act on the selected workspace: pass the global
+`--workspace` / `-w` flag, set `CREWSHIP_WORKSPACE`, or run
+`crewship workspace use`. Full reference: [`crewship feature-flag`](/cli/feature-flag).
 
 ## REST endpoint mapping
 
-| Concern | Endpoint | Manifest field → body field |
+| Concern | Endpoint | What apply sends on `main` |
 |---|---|---|
-| List | `GET /api/v1/feature-flags` | (response) `key`, `description`, `default_enabled`, `default_percentage`, `workspace_override` |
-| Create definition | `POST /api/v1/feature-flags` | `metadata.slug` → `key`; `spec.description` → `description`; `spec.default_enabled` → `default_enabled`; `spec.default_percentage` → `default_percentage` |
-| Update definition | `PATCH /api/v1/feature-flags/{key}` | `spec.description` → `description`; `spec.default_enabled` → `default_enabled` (NOT `default_percentage`) |
-| Delete definition | `DELETE /api/v1/feature-flags/{key}` | — (only used by `ApplyReplace`) |
-| Upsert override | `PUT /api/v1/feature-flags/{key}/override` | `spec.workspace_override` → `enabled` |
-| Remove override | `DELETE /api/v1/feature-flags/{key}/override` | — (emitted when `workspace_override` is absent but an override row exists) |
+| Create definition | `POST /api/v1/feature-flags` | `key` ← `metadata.slug`, `description` ← `spec.description`, plus `default_enabled` / `default_percentage`, which the server ignores (it reads `enabled` / `percentage`) |
+| Upsert override | `PUT /api/v1/feature-flags/{key}/override` | `enabled` ← `spec.workspace_override`, only when the field is set |
+
+The kind also contains update (`PATCH`) and remove-override (`DELETE
+…/override`) steps, but they only run when apply knows the remote
+state, which it does not fetch on `main`. The server's response fields
+are `enabled`, `percentage` and `override_enabled`; see the
+[API reference](/api-reference/feature-flags).
 
 DB columns: `feature_flags(key, description, enabled, percentage)` +
 `feature_flag_overrides(flag_id, workspace_id, enabled)`. See
@@ -190,77 +214,44 @@ DB columns: `feature_flags(key, description, enabled, percentage)` +
 
 ## Validation rules
 
-- `metadata.slug` is required (used as the server-side `key`).
+- `metadata.slug` is required (used as the server-side `key`). It may be
+  1-256 characters and must not contain whitespace, control characters,
+  `/`, `?` or `#`.
 - `spec.default_percentage` MUST be in the closed range `[0, 100]`.
   Out-of-range values fail validation at parse time, before any
   REST call.
 - `spec.workspace_override`, when present, must be a YAML boolean
   (`true` / `false`). Pointer typing means "field omitted" is a
   third valid state and not a validation failure.
+- Two `FeatureFlag` documents with the same slug in one bundle are
+  rejected.
 - No cross-kind FK references — FeatureFlag is a leaf kind in the
-  dependency graph. The `WorkspaceContext` argument to `Validate`
-  is accepted for signature uniformity but ignored.
+  dependency graph.
 
 ## Apply behavior
 
-### Default mode (Upsert)
+On `main`, every apply mode plans the same items for a `FeatureFlag`
+document:
 
-Plan() emits one PlanItem per drifted concern, with a maximum of
-two items per flag:
+- one `POST /api/v1/feature-flags` (create) for the definition, and
+- one `PUT …/override` when `workspace_override` is set.
 
-- Flag definition missing remotely → `ActionCreate` (POST).
-- Flag definition present but `description` or `default_enabled`
-  differ → `ActionUpdate` (PATCH).
-- Flag definition present and identical → no item.
-- `workspace_override` set in YAML and differs from remote (or
-  remote has no override) → `ActionUpdate` (PUT override).
-- `workspace_override` absent in YAML and remote has an override
-  row → `ActionDelete` (DELETE override).
-- `workspace_override` absent both sides → no item.
+The create runs before the override, so a first apply of a new flag
+with an override succeeds. When the flag already exists, the create
+item fails with `unexpected status 409`. `--strict` and `--replace`
+do not change this: replace mode does not delete and recreate flag
+definitions.
 
-When the flag is being created AND the manifest sets an override,
-the POST runs first and the PUT second (declaration order); the
-override endpoint requires the flag to already exist.
-
-**`default_percentage` is deliberately excluded from the update
-diff.** Percentage rollouts are typically tuned at runtime by ops
-("bump to 25%"); re-applying a manifest that hard-codes the
-original `0` would fight the live system on every CI run. The
-field is still honored on POST (for first-time bootstrap) and
-round-trips via export, but `crewship apply` won't reset it once
-the row exists.
-
-### ApplyStrict
-
-Fails with a clear error if the flag definition already exists. Use
-this in fresh-instance bootstrap pipelines where any pre-existing
-flag is a sign of a previous half-baked apply.
-
-### ApplyReplace
-
-Emits `ActionDelete` for the flag definition first, then
-`ActionCreate` to recreate it from the manifest. Workspace
-override rows are cascaded-deleted by the foreign key on the
-`feature_flags` table, then recreated by the same Plan logic if
-the manifest declares an override. This mode is destructive — use
-`--yes` to bypass the interactive confirmation only after the dry
-run looks right.
+`default_percentage` is deliberately left out of the definition diff
+the kind computes when it knows the remote state, so that runtime
+tuning is not reset by a re-apply. Because apply does not fetch the
+remote state on `main`, that diff does not run today.
 
 ## Round-trip via export
 
-`crewship export workspace` includes one `kind: FeatureFlag`
-document per flag definition the user can read. The
-`workspace_override` field is emitted ONLY when the server reports
-an override row for the current workspace (the JSON pointer
-`workspace_override` field is non-nil on the response). Pointer
-semantics carry through to the YAML: an absent field means
-"inherit the default."
-
-Round-trip is lossless for `description`, `default_enabled`,
-`default_percentage`, and `workspace_override`. The
-`feature_flags.id` column (CUID) is regenerated on a fresh apply
-and is not preserved — references between kinds are always by
-slug, never by id.
+`crewship export` does not include `FeatureFlag` documents on `main`.
+The kind has an export helper, but no export command calls it. To
+capture flags, use `crewship feature-flag list --format yaml`.
 
 ## See also
 
