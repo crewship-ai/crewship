@@ -143,6 +143,15 @@ export function artifactsLibrary(): boolean {
 }
 
 /**
+ * Sends the /pages overview to the Artifacts library. Only with the library
+ * itself on; reference links, restricted members and single pages stay on
+ * Pages. Default OFF.
+ */
+export function pagesOpenArtifacts(): boolean {
+  return artifactsLibrary() && process.env.NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS === "true"
+}
+
+/**
  * Runs Share, Access, folder settings, archive and bulk actions in the
  * Artifacts library against an in-browser mock of the agreed interface,
  * until the server serves `/pages/{slug}/access`, `/pages/bulk`, the

@@ -65,13 +65,13 @@ func (p *Provider) CreateSandbox(ctx context.Context, spec provider.SandboxSpec)
 			env = append(env, key+"=")
 		}
 	}
-	env = append(env, "HOME=/home/agent", "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "DISABLE_AUTOUPDATER=1")
+	env = append(env, "HOME="+provider.SandboxHome, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "DISABLE_AUTOUPDATER=1")
 	init := true
 	pids := spec.PIDs
 	created, err := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name:       fmt.Sprintf("crewship-sandbox-%x-%s", sha256.Sum256([]byte(p.cfg.InstanceID)), spec.ID),
 		Config:     &container.Config{Image: spec.ImageID, User: "1002:1002", Entrypoint: []string{"/bin/sleep"}, Cmd: []string{strconv.FormatInt(int64((spec.Lifetime+time.Second-1)/time.Second), 10)}, Env: env, WorkingDir: "/tmp", Healthcheck: &container.HealthConfig{Test: []string{"NONE"}}, Labels: map[string]string{resourcelifecycle.InstanceLabel: p.cfg.InstanceID, sandboxInstanceLabel: spec.ID, sandboxKindLabel: "offline-v1"}},
-		HostConfig: &container.HostConfig{NetworkMode: "none", IpcMode: "private", CgroupnsMode: "private", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Init: &init, Resources: container.Resources{Memory: spec.MemoryBytes, MemorySwap: spec.MemoryBytes, NanoCPUs: spec.NanoCPUs, PidsLimit: &pids}, Tmpfs: map[string]string{"/home/agent": "rw,nosuid,nodev,size=67108864,uid=1001,gid=1001,mode=0700", "/tmp": "rw,nosuid,nodev,noexec,size=16777216,mode=1777"}},
+		HostConfig: &container.HostConfig{NetworkMode: "none", IpcMode: "private", CgroupnsMode: "private", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Init: &init, Resources: container.Resources{Memory: spec.MemoryBytes, MemorySwap: spec.MemoryBytes, NanoCPUs: spec.NanoCPUs, PidsLimit: &pids}, Tmpfs: map[string]string{provider.SandboxHome: "rw,nosuid,nodev,size=67108864,uid=1001,gid=1001,mode=0700", "/tmp": "rw,nosuid,nodev,noexec,size=16777216,mode=1777"}},
 	})
 	if err != nil {
 		return provider.SandboxRef{}, fmt.Errorf("sandbox create: %w", err)
@@ -155,7 +155,7 @@ func (p *Provider) ExecSandbox(ctx context.Context, ref provider.SandboxRef, spe
 
 	ctx, cancel := context.WithTimeout(ctx, spec.Timeout)
 	defer cancel()
-	created, err := p.client.ExecCreate(ctx, ref.RuntimeID, client.ExecCreateOptions{Cmd: spec.Command, Env: spec.Env, User: "1001:1001", WorkingDir: "/home/agent", AttachStdout: true, AttachStderr: true})
+	created, err := p.client.ExecCreate(ctx, ref.RuntimeID, client.ExecCreateOptions{Cmd: spec.Command, Env: spec.Env, User: "1001:1001", WorkingDir: provider.SandboxHome, AttachStdout: true, AttachStderr: true})
 	if err != nil {
 		return provider.SandboxExecResult{}, err
 	}
@@ -197,7 +197,7 @@ func auditOfflineSandbox(c container.InspectResponse) error {
 	if h.Memory < 32<<20 || h.Memory > 4<<30 || h.MemorySwap != h.Memory || h.NanoCPUs < 100_000_000 || h.NanoCPUs > 4_000_000_000 || h.PidsLimit == nil || *h.PidsLimit < 8 || *h.PidsLimit > 512 {
 		return provider.ErrSandboxDenied
 	}
-	if len(h.Tmpfs) != 2 || h.Tmpfs["/home/agent"] != "rw,nosuid,nodev,size=67108864,uid=1001,gid=1001,mode=0700" || h.Tmpfs["/tmp"] != "rw,nosuid,nodev,noexec,size=16777216,mode=1777" {
+	if len(h.Tmpfs) != 2 || h.Tmpfs[provider.SandboxHome] != "rw,nosuid,nodev,size=67108864,uid=1001,gid=1001,mode=0700" || h.Tmpfs["/tmp"] != "rw,nosuid,nodev,noexec,size=16777216,mode=1777" {
 		return provider.ErrSandboxDenied
 	}
 	return nil

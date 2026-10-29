@@ -103,3 +103,24 @@ case "$0" in */codex) echo codex-cli 0.160.0;; *) echo mise 2026.10.0;; esac
 		t.Fatalf("fixture did not detect readlink regression: %+v", got)
 	}
 }
+
+func TestQualificationMiseShimUsesFreshHomeForWritableState(t *testing.T) {
+	dir := t.TempDir()
+	shim := filepath.Join(dir, "codex")
+	// A version probe must not emit mise's read-only state/cache warnings:
+	// merged stdout/stderr would then fail exact single-line version parsing.
+	source := `#!/bin/sh
+case "$MISE_STATE_DIR" in "$HOME"/*) ;; *) echo 'mise WARN read-only state' >&2; exit 1;; esac
+case "$MISE_CACHE_DIR" in "$HOME"/*) ;; *) echo 'mise WARN read-only cache' >&2; exit 1;; esac
+test "$MISE_DATA_DIR" = /opt/mise/data || exit 1
+test "$MISE_CONFIG_DIR" = /opt/mise/config || exit 1
+echo 'codex-cli 0.160.0'
+`
+	if err := os.WriteFile(shim, []byte(source), 0700); err != nil {
+		t.Fatal(err)
+	}
+	inventory := &devcontainer.ToolchainInventory{ImageID: "fixture-image", Tools: []devcontainer.ToolchainTool{{Binary: "codex", Path: shim, Version: "0.160.0", Status: "observed"}}}
+	if got := Qualify(t.Context(), &shimQualificationRuntime{}, inventory, ""); got.Status != "passed" {
+		t.Fatalf("mise shim cannot use a read-only image home for state/cache: %+v", got)
+	}
+}

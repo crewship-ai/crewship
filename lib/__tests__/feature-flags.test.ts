@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { readFileSync } from "node:fs"
 import { parseEnv } from "node:util"
-import { artifactSlides, artifactsLibrary, chatArtifactProjects, chatCraftLease, crewsUnifiedUI, legacyMcpIntegrations } from "@/lib/feature-flags"
+import { artifactSlides, artifactsLibrary, chatArtifactProjects, chatCraftLease, crewsUnifiedUI, legacyMcpIntegrations, pagesOpenArtifacts } from "@/lib/feature-flags"
 
 describe.each([
   ["NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", chatArtifactProjects],
@@ -19,6 +19,25 @@ describe.each([
   it("allows an explicit build-time opt-in", () => {
     vi.stubEnv(name, "true")
     expect(enabled()).toBe(true)
+  })
+})
+
+describe("pagesOpenArtifacts", () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it("stays off with the checked-in production build configuration", () => {
+    const defaults = parseEnv(readFileSync(".env.production", "utf8"))
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", defaults.NEXT_PUBLIC_ARTIFACTS_LIBRARY)
+    vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", defaults.NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS)
+    expect(pagesOpenArtifacts()).toBe(false)
+  })
+
+  it("needs the library itself as well as its own opt-in", () => {
+    vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", "true")
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "false")
+    expect(pagesOpenArtifacts()).toBe(false)
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
+    expect(pagesOpenArtifacts()).toBe(true)
   })
 })
 
