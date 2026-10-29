@@ -45,7 +45,6 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -53,6 +52,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil/migratedtemplate"
 )
 
 var (
@@ -123,50 +123,13 @@ func buildMigratedTemplate() {
 }
 
 func migrateTemplateAt(path string) error {
-	db, err := database.Open("file:"+path, testSynchronous)
-	if err != nil {
-		return err
-	}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		db.Close()
-		return err
-	}
-	// Fold the WAL back into the main file so a plain file copy carries the
-	// complete schema — no -wal/-shm sidecars to copy alongside it.
-	//
-	// QueryRow, not Exec. `PRAGMA wal_checkpoint` reports failure as a RESULT
-	// ROW — (busy, log, checkpointed) — not as an error, and Exec discards
-	// rows. A busy checkpoint through Exec therefore returns nil while leaving
-	// pages in the -wal that the copy does not carry, and every fixture in the
-	// process would silently get a truncated schema. This build is
-	// single-threaded so busy is not realistically reachable, and
-	// TestMigratedDB_SchemaMatchesMigrateRunner would catch it if it were, but
-	// a check that costs one line should not be left to a downstream assertion.
-	var busy, walPages, checkpointed int
-	if err := db.DB.QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").
-		Scan(&busy, &walPages, &checkpointed); err != nil {
-		db.Close()
-		return fmt.Errorf("checkpoint template wal: %w", err)
-	}
-	if busy != 0 {
-		db.Close()
-		return fmt.Errorf(
-			"checkpoint template wal: busy (log=%d pages, checkpointed=%d) — "+
-				"template would be missing schema still held in the -wal",
-			walPages, checkpointed)
-	}
-	if err := db.Close(); err != nil {
-		return err
-	}
-	// Close leaves empty -wal/-shm sidecars behind; the template is the main
-	// file alone, so drop them rather than let a copy-by-directory pick them up.
-	for _, suffix := range []string{"-wal", "-shm"} {
-		if err := os.Remove(path + suffix); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove template %s: %w", suffix, err)
+	if migratedTemplateUseNormalHelper {
+		used, err := buildNormalMigratedTemplate(path)
+		if used {
+			return err
 		}
 	}
-	return nil
+	return migratedtemplate.Build(context.Background(), path)
 }
 
 // MigratedTemplatePath returns the path of the shared migrated template
