@@ -11,7 +11,7 @@ import {
 import type { LibraryItem } from "../library-items"
 import { LevelSelect, SELECT, SubjectSelect, useSubjects, type Subject } from "./share-controls"
 import {
-  BULK_LIMIT, SHARE_LEVEL_LABEL, useSharingApi, useSharingHuman, useSharingMutation,
+  BULK_LIMIT, guardedSharingApi, SESSION_CHANGED, SHARE_LEVEL_LABEL, SharingError, useSharingApi, useSharingHuman, useSharingMutation,
   type AccessEntry, type BulkAction, type BulkRequest, type BulkResult, type ShareLevel,
 } from "./sharing-api"
 
@@ -79,7 +79,7 @@ const listEntries = (entries: AccessEntry[]) => entries.map(e => `${e.label} (${
 /** Changes 26–27: pick the action, read its dry run per item, confirm only what can happen. */
 export function BulkPreviewDialog({ workspaceId, action, items, folders, open, onOpenChange, onDone }: BulkPreviewDialogProps) {
   const api = useSharingApi(workspaceId)
-  const { humanId } = useSharingHuman()
+  const { humanId, generation } = useSharingHuman()
   const { subjects } = useSubjects(workspaceId, open && action === "share")
   const [target, setTarget] = useState("")
   const [subject, setSubject] = useState<Subject | null>(null)
@@ -108,8 +108,11 @@ export function BulkPreviewDialog({ workspaceId, action, items, folders, open, o
   useEffect(() => {
     if (!open || !base || tooMany) return
     let live = true
+    const started = generation.current
     setPreview(null); setPreviewError(null)
-    api.bulk({ ...base, items, dryRun: true })
+    // A dry run is one request per item: none of them is sent once this preview is retired.
+    const guarded = api.mock ? api : guardedSharingApi(workspaceId, () => { if (!live || generation.current !== started) throw new SharingError(SESSION_CHANGED, 401) })
+    guarded.bulk({ ...base, items, dryRun: true })
       .then(result => { if (live) setPreview(result) })
       .catch((error: unknown) => { if (live) setPreviewError(error instanceof Error ? error.message : "The preview failed.") })
     return () => { live = false }

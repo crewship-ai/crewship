@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useRef } from "react"
+import { useEffect, useMemo, useRef } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
 import { apiErrorMessage } from "@/lib/api-error"
@@ -139,7 +139,7 @@ export class SharingError extends Error {
   constructor(message: string, readonly status: number) { super(message) }
 }
 
-async function call(path: string, init?: RequestInit): Promise<unknown> {
+async function send(path: string, init?: RequestInit): Promise<unknown> {
   const res = await apiFetch(path, init)
   const text = await res.text()
   let body: unknown = null
@@ -237,7 +237,15 @@ const refuse = (slug: string, reason: string): BulkItemResult => ({ slug, ok: fa
 
 export const HTTP_CAPABILITIES: SharingCapabilities = { folderDefaultAudience: false, folderLevels: ["read", "write"], atomicFolderSave: false }
 
-export function httpSharingApi(workspaceId: string): SharingApi {
+/**
+ * Checked before every request of one operation. It throws once the
+ * operation is retired (another session, scope or an unmounted caller), so
+ * an ACL change started by one person never sends its next request as anyone else.
+ */
+export type RequestGuard = () => void
+
+export function httpSharingApi(workspaceId: string, guard?: RequestGuard): SharingApi {
+  const call = (path: string, init?: RequestInit) => { guard?.(); return send(path, init) }
   const ws = `workspace_id=${encodeURIComponent(workspaceId)}`
   const page = (slug: string) => `/api/v1/pages/${encodeURIComponent(slug)}`
   const folder = (slug: string) => `/api/v1/page-folders/${encodeURIComponent(slug)}`
@@ -629,12 +637,20 @@ export const sharingKeys = {
 }
 
 /** The signed-in human, and a ref that always holds the current one. */
-export function useSharingHuman(): { humanId: string | null; current: { readonly current: string | null } } {
+export function useSharingHuman(): { humanId: string | null; current: { readonly current: string | null }; generation: { readonly current: number } } {
   const session = useSessionSafe()
   const humanId = session.status === "authenticated" ? session.data?.user.id ?? null : null
   const current = useRef(humanId)
   current.current = humanId
-  return { humanId, current }
+  // Bumped in render on every change of human, so A → B → A is a new generation too.
+  const generation = useRef({ humanId, value: 0 })
+  if (generation.current.humanId !== humanId) generation.current = { humanId, value: generation.current.value + 1 }
+  return { humanId, current, generation: { get current() { return generation.current.value } } }
+}
+
+/** The API for one operation: its requests stop at the first one the guard refuses. */
+export function guardedSharingApi(workspaceId: string, guard: RequestGuard): SharingApi {
+  return artifactsSharingMock() ? mockSharingApi(workspaceId) : httpSharingApi(workspaceId, guard)
 }
 
 export function useSharingApi(workspaceId: string): SharingApi {
@@ -671,15 +687,19 @@ export const SESSION_CHANGED = "Your session changed before this finished. Open 
 /** Every write settles by re-reading sharing state and the page list. */
 export function useSharingMutation<T, R>(workspaceId: string, run: (api: SharingApi, input: T) => Promise<R>) {
   const api = useSharingApi(workspaceId)
-  const { current } = useSharingHuman()
+  const { generation } = useSharingHuman()
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const qc = useQueryClient()
   return useMutation<R, Error, T>({
     retry: false,
     mutationFn: async input => {
-      const started = current.current
-      const result = await run(api, input)
-      // The write is done; its result belongs to the session that asked for it, not to whoever is here now.
-      if (current.current !== started) throw new SharingError(SESSION_CHANGED, 401)
+      // The operation belongs to the session that started it: every further
+      // request, and its result, is refused once that session or caller is gone.
+      const started = generation.current
+      const guard = () => { if (!mounted.current || generation.current !== started) throw new SharingError(SESSION_CHANGED, 401) }
+      const result = await run(api.mock ? api : guardedSharingApi(workspaceId, guard), input)
+      guard()
       return result
     },
     onSettled: () => {
