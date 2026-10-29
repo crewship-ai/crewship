@@ -1,7 +1,7 @@
 "use client"
 
 import { useIssuePeople } from "@/hooks/use-issue-people"
-import { SHARE_LEVEL_LABEL, SHARE_LEVELS, type ShareLevel, type ShareSubjectType } from "./sharing-api"
+import { SHARE_LEVEL_LABEL, SHARE_LEVELS, useSharingHuman, type AccessEntry, type ShareLevel, type ShareSubjectType } from "./sharing-api"
 
 /** The library's select idiom (artifacts-library Display row). */
 export const SELECT = "h-[var(--control-sm)] rounded-md border border-border bg-card px-2 text-xs text-foreground coarse:min-h-[44px]"
@@ -15,8 +15,10 @@ const subjectValue = (s: Pick<Subject, "subjectType" | "subjectId">) => `${s.sub
 /** Workspace only: a person or everyone. No guests, no links. */
 export function useSubjects(workspaceId: string, enabled: boolean): { subjects: Subject[]; error: boolean } {
   const { people, error } = useIssuePeople(workspaceId, enabled)
+  const { humanId } = useSharingHuman()
   return {
-    subjects: [{ subjectType: "workspace", subjectId: "", label: EVERYONE_LABEL }, ...people.map(p => ({ subjectType: "user" as const, subjectId: p.id, label: p.name }))],
+    // You already have your own access; offering yourself only confuses the list.
+    subjects: [{ subjectType: "workspace", subjectId: "", label: EVERYONE_LABEL }, ...people.filter(p => p.id !== humanId).map(p => ({ subjectType: "user" as const, subjectId: p.id, label: p.name }))],
     error,
   }
 }
@@ -35,4 +37,9 @@ export function LevelSelect({ value, onChange, label = "Level", levels = SHARE_L
   return <select aria-label={label} className={SELECT} value={value} onChange={event => onChange(event.target.value as ShareLevel)}>
     {levels.map(level => <option key={level} value={level}>{SHARE_LEVEL_LABEL[level]}</option>)}
   </select>
+}
+
+/** A row about the signed-in person reads "You", not their address. */
+export function shownLabel(entry: Pick<AccessEntry, "subjectType" | "subjectId" | "label">, humanId: string | null): string {
+  return entry.subjectType === "user" && humanId && entry.subjectId === humanId ? "You" : entry.label
 }
