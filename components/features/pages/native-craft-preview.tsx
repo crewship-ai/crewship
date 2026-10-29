@@ -78,5 +78,5 @@ function PreviewSession({humanId,workspaceId,pageId,retry}:Props&{retry:()=>void
   void read()
   return()=>{dead=true;abort.abort();clearTimeout(readDeadline);clearInterval(poll);unregister();clearFrame();window.removeEventListener('message',message);window.removeEventListener('focus',focus);window.removeEventListener('online',focus)}
  },[humanId,workspaceId,pageId])
- return <section className="flex h-full min-h-96 flex-col"><p className="p-3" role={error?'alert':'status'}>{error??(version?`Sdílený náhled · verze ${version}`:'Načítám sdílený náhled…')}</p>{error&&<button type="button" className="self-start rounded border px-3 py-2 coarse:min-h-12" onClick={retry}>Znovu načíst náhled</button>}<div ref={mount} className="relative min-h-80 flex-1"/></section>
+ return <section className="flex h-full min-h-96 flex-col"><p className="p-3" role={error?'alert':'status'}>{error??(version?`Sdílený náhled · verze ${version}`:'Načítám sdílený náhled…')}</p>{error&&<button type="button" className="self-start rounded border px-3 py-2 coarse:min-h-[44px]" onClick={retry}>Znovu načíst náhled</button>}<div ref={mount} className="relative min-h-80 flex-1"/></section>
 }
