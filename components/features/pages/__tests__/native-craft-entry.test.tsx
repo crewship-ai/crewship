@@ -10,7 +10,7 @@ vi.mock('@/lib/api-fetch',()=>({apiFetch:m.fetch}))
 vi.mock('../native-craft-editor-host',()=>({NativeCraftEditorHost:(props:unknown)=>{m.host(props);return <div>Full native Word</div>}}))
 vi.mock('../native-craft-preview',()=>({NativeCraftPreview:(props:unknown)=>{m.preview(props);return <div>Shared native preview</div>}}))
 const deferred=<T,>()=>{let resolve!:(v:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve}}
-const availability=(enabled:boolean)=>new Response(JSON.stringify({enabled}),{status:200,headers:{'content-type':'application/json'}})
+const availability=(enabled:boolean)=>new Response(JSON.stringify({enabled,can_edit:enabled}),{status:200,headers:{'content-type':'application/json'}})
 beforeEach(()=>{vi.stubEnv('NEXT_PUBLIC_CRAFT_NATIVE_ENABLED','false');m.host.mockClear();m.preview.mockClear();m.fetch.mockReset();m.fetch.mockResolvedValue(availability(true));m.params=new URLSearchParams('workspace_id=w&page_id=p');m.workspace={workspaceId:'w',loading:false,linkUnavailable:false};m.session={status:'authenticated',data:{user:{id:'human'}}}})
 afterEach(()=>vi.unstubAllEnvs())
 it('mounts one full host only after authenticated page-scoped server availability even with no build flag',async()=>{render(<CraftPage/>);expect(m.host).not.toHaveBeenCalled();await screen.findByText('Full native Word');expect(m.fetch).toHaveBeenCalledWith('/api/v1/pages/%40p/craft/availability?workspace_id=w',expect.objectContaining({signal:expect.any(AbortSignal),cache:'no-store'}));expect(m.host).toHaveBeenCalledWith(expect.objectContaining({workspaceId:'w',pageId:'p',humanId:'human',enabled:true}))})
@@ -29,6 +29,17 @@ it('routes Comment to shared preview only when the server explicitly permits it'
 })
 it('does not infer preview permission from a truthy nonboolean field',async()=>{
  m.fetch.mockResolvedValue(new Response(JSON.stringify({enabled:false,preview_enabled:'true'})))
+ render(<CraftPage/>);await screen.findByText('Nativní editor není zapnutý.')
+ expect(m.host).not.toHaveBeenCalled();expect(m.preview).not.toHaveBeenCalled()
+})
+
+it.each([false,undefined,'true'])('routes a legacy enabled observer with can_edit=%s only to shared preview',async(canEdit)=>{
+ m.fetch.mockResolvedValue(new Response(JSON.stringify({enabled:true,can_edit:canEdit,preview_enabled:true})))
+ render(<CraftPage/>);await screen.findByText('Shared native preview')
+ expect(m.host).not.toHaveBeenCalled();expect(m.preview).toHaveBeenCalled()
+})
+it('does not open either surface when legacy enabled lacks explicit edit and preview permission',async()=>{
+ m.fetch.mockResolvedValue(new Response(JSON.stringify({enabled:true})))
  render(<CraftPage/>);await screen.findByText('Nativní editor není zapnutý.')
  expect(m.host).not.toHaveBeenCalled();expect(m.preview).not.toHaveBeenCalled()
 })

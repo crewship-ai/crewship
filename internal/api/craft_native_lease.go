@@ -14,6 +14,7 @@ import (
 
 type craftNativeAvailabilityResponse struct {
 	Enabled        bool `json:"enabled"`
+	CanEdit        bool `json:"can_edit"`
 	PreviewEnabled bool `json:"preview_enabled"`
 	AgentsEnabled  bool `json:"agents_enabled"`
 }
@@ -61,6 +62,7 @@ func craftNativeGeneration(raw string) (int64, error) {
 }
 func (m *craftNativeHTTP) availability(w http.ResponseWriter, r *http.Request) {
 	enabled := false
+	canEdit := false
 	previewEnabled := false
 	agentsEnabled := false
 	if m.enabled && m.pages != nil {
@@ -77,16 +79,15 @@ func (m *craftNativeHTTP) availability(w http.ResponseWriter, r *http.Request) {
 					enabled = e == nil
 					_, previewErr := m.pageAuthorityForView(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, false, true)
 					previewEnabled = previewErr == nil
-					if enabled && m.agents != nil && m.agents.runtimeReady() {
-						_, writeErr := m.pageAuthority(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, true)
-						agentsEnabled = writeErr == nil
-					}
+					_, writeErr := m.pageAuthority(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, true)
+					canEdit = writeErr == nil
+					agentsEnabled = enabled && canEdit && m.agents != nil && m.agents.runtimeReady()
 				}
 			}
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, craftNativeAvailabilityResponse{Enabled: enabled, PreviewEnabled: previewEnabled, AgentsEnabled: agentsEnabled})
+	writeJSON(w, 200, craftNativeAvailabilityResponse{Enabled: enabled, CanEdit: canEdit, PreviewEnabled: previewEnabled, AgentsEnabled: agentsEnabled})
 }
 func craftNativeHTTPError(w http.ResponseWriter, err error) {
 	if errors.Is(err, mooring.ErrEditLeaseBusy) || errors.Is(err, mooring.ErrEditLeaseStale) {

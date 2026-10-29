@@ -29,7 +29,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 
 | Method | Path | Request | Response / success status |
 |---|---|---|---|
-| GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean, preview_enabled: boolean, agents_enabled: boolean}`, 200. |
+| GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean, can_edit: boolean, preview_enabled: boolean, agents_enabled: boolean}`, 200. |
 | POST | `/api/v1/pages/{slug}/craft/sessions` | `{}`. | `session_token`, public `session_id`, `application_id`, `page_id`, 201. |
 | POST | `/api/v1/pages/{slug}/craft/sessions/reauthorize` | Separately refreshed original authentication; no body consumed. | `{renewed: boolean}`, 200. |
 | GET | `/api/v1/pages/{slug}/craft/lease` | Craft admission header. | Lease status described below, 200. |
@@ -88,8 +88,14 @@ latest version, history, quota, admission or custody metadata is returned. A
 missing shared pin returns 404, denied access 403 and disabled/unqualified
 profiles 503; there is no fallback to the latest bytes. `preview_enabled` in
 availability advertises this separately from the existing native observer path.
-The existing explicit Read observer path remains compatible; Comment alone never
-opens an editor admission or receives private latest native bytes.
+The default editor entry requires both `enabled === true` and `can_edit === true`
+before mounting the editor host. `can_edit` checks current original-credential
+and Page write authority in the same transaction as the other availability
+fields. Read and Comment instead mount the shared preview only when
+`preview_enabled === true`, without opening a Craft session; missing or truthy
+nonboolean edit capabilities grant no host access. The legacy explicit Read
+observer API remains compatible, while Comment alone never opens an editor
+admission or receives private latest native bytes.
 
 `POST /api/v1/pages/{slug}/craft/document/share` requires ordinary human auth and
 `X-Craft-Session`. Its strict JSON request contains `workspaceId`, `pageId`,

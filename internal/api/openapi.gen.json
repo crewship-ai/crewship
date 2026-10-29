@@ -13529,6 +13529,9 @@
           "agents_enabled": {
             "type": "boolean"
           },
+          "can_edit": {
+            "type": "boolean"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -13538,6 +13541,7 @@
         },
         "required": [
           "enabled",
+          "can_edit",
           "preview_enabled",
           "agents_enabled"
         ],

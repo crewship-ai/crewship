@@ -26,7 +26,7 @@ function NativeWordEntry(){
   void apiFetch(request,{signal:abort.signal,cache:'no-store',redirect:'error'}).then(async response=>{
    if(!response.ok)throw Error('native_availability_unconfirmed')
    const value:unknown=await response.json()
-   const enabled=Boolean(value)&&typeof value==='object'&&!Array.isArray(value)&&(value as {enabled?:unknown}).enabled===true
+   const enabled=Boolean(value)&&typeof value==='object'&&!Array.isArray(value)&&(value as {enabled?:unknown}).enabled===true&&(value as {can_edit?:unknown}).can_edit===true
    const preview=Boolean(value)&&typeof value==='object'&&!Array.isArray(value)&&(value as {preview_enabled?:unknown}).preview_enabled===true
    if(!abort.signal.aborted)setAvailability({scope,state:enabled?'enabled':preview?'preview':'disabled'})
   }).catch(()=>{if(!abort.signal.aborted)setAvailability({scope,state:'error'})})
