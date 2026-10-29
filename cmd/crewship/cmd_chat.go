@@ -67,8 +67,7 @@ Examples:
 			}
 			filtered := body.Messages[:0]
 			for _, m := range body.Messages {
-				ts, _ := m["created_at"].(string)
-				if mt, err := time.Parse(time.RFC3339, ts); err != nil || mt.After(t) {
+				if mt, ok := chatMessageTime(m); !ok || mt.After(t) {
 					filtered = append(filtered, m)
 				}
 			}
@@ -95,6 +94,21 @@ Examples:
 	},
 }
 
+// chatMessageTime reads a transcript message's timestamp. The wire field is
+// `ts` (conversation.Message.Timestamp, RFC 3339 with nanoseconds); this
+// command used to read `created_at`, which the messages endpoint never sends,
+// so --since filtered nothing and every header printed without a time.
+// `created_at` stays as a fallback only for hand-built fixtures and exports.
+func chatMessageTime(m map[string]any) (time.Time, bool) {
+	for _, key := range []string{"ts", "created_at"} {
+		if raw, ok := m[key].(string); ok && raw != "" {
+			t, err := time.Parse(time.RFC3339Nano, raw)
+			return t, err == nil
+		}
+	}
+	return time.Time{}, false
+}
+
 // printChatTranscript renders messages with role-aware styling. Assistant
 // messages go through the markdown renderer; user/system stay plain.
 func printChatTranscript(messages []map[string]any, md *cli.MarkdownRenderer) {
@@ -105,8 +119,8 @@ func printChatTranscript(messages []map[string]any, md *cli.MarkdownRenderer) {
 	for i, m := range messages {
 		role, _ := m["role"].(string)
 		content, _ := m["content"].(string)
-		ts, _ := m["created_at"].(string)
-		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+		ts := ""
+		if t, ok := chatMessageTime(m); ok {
 			ts = t.Format("2006-01-02 15:04:05")
 		}
 		if i > 0 {
