@@ -171,6 +171,21 @@ describe("PagesLayout", () => {
     expect(screen.queryByTestId("artifact-reader")).toBeNull()
   })
 
+  it.each(["dashboard", "slides", "project", "word", "sheet"] as const)("never says a typed %s with no panels declares none", async kind => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "false")
+    renderLayout([{...FLEET, panels: [], artifact_kind: kind}], FLEET.slug!)
+    // Its own reader where one is mounted, otherwise the explicit state; never the panels empty state.
+    await waitFor(() => expect(screen.queryByTestId("artifact-reader") ?? screen.queryByText("Can't show this artifact here")).toBeTruthy())
+    expect(screen.queryByText(/declares no panels/i)).toBeNull()
+  })
+
+  it("treats a version head without a kind as an artifact, never as empty panels", async () => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "false")
+    renderLayout([{...FLEET, panels: [], has_artifact_project: true}], FLEET.slug!)
+    expect(await screen.findByText("Can't show this artifact here")).toBeTruthy()
+    expect(screen.queryByText(/declares no panels/i)).toBeNull()
+  })
+
   it("does not mount either content reader before initial selected metadata is authorized", () => {
     vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true")
     const qc = newQueryClient()

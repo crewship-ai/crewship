@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { toPageView, type WirePage } from "@/hooks/use-pages"
-import { kindCounts, libraryItems } from "../library-items"
+import { kindCounts, libraryItems, repeatedSeries, seriesStem, visibleItems } from "../library-items"
 
 const page = (over: Partial<WirePage>): WirePage => ({ id: over.slug ?? "p", slug: "p", name: "P", owner: "user/u1", updated_at: "2026-10-27T10:00:00Z", reach: ["owner"], ...over } as WirePage)
 
@@ -14,7 +14,7 @@ describe("library items", () => {
       ["slides", true, false, 2], ["slides", false, false, null],
     ])
   })
-  it("lists only kinds that have a backend, newest first, with the shared version", () => {
+  it("lists every kind newest first, a panel Page as Page, and hides only empty items", () => {
     const items = libraryItems([
       page({ slug: "site", name: "Pricing site", artifact_kind: "project", artifact_shared_version: 2, updated_at: "2026-10-27T12:00:00Z" }),
       page({ slug: "brief", name: "Partner brief", artifact_kind: "word", has_document: true }),
@@ -25,9 +25,14 @@ describe("library items", () => {
       page({ slug: "app", name: "Calculator", has_application: true } as Partial<WirePage>),
       page({ slug: "empty", name: "Nothing yet" }),
     ].map(toPageView))
-    expect(items.map(i => [i.slug, i.kind])).toEqual([
-      ["site", "project"], ["brief", "word"], ["model", "sheet"], ["deck", "slides"], ["weekly", "dashboard"], ["notes", "word"],
+    expect(items.map(i => [i.slug, i.kind, i.empty])).toEqual([
+      ["site", "project", false], ["brief", "word", false], ["model", "sheet", false], ["deck", "slides", false],
+      ["weekly", "page", false], ["notes", "word", false], ["app", "page", true], ["empty", "page", true],
     ])
+    expect(visibleItems(items).map(i => i.slug)).toEqual(["site", "brief", "model", "deck", "weekly", "notes"])
+    expect(visibleItems(items, "empty").map(i => i.slug)).toEqual(["app", "empty"])
+    expect(items.find(i => i.slug === "weekly")?.family).toBe("web")
+    expect(items.find(i => i.slug === "model")?.family).toBe("document")
     expect(items[0].sharedVersion).toBe(2)
     expect(items[1].sharedVersion).toBeNull()
     expect(items[1].native).toBe(true)
@@ -62,4 +67,50 @@ it.each(["project", "dashboard", "slides"])("preserves the explicit backend %s a
 it("does not classify legacy panel dashboards or native Slides as VersionStore projects", () => {
   const items = libraryItems([toPageView(page({ panel_count: 1 })), toPageView(page({ has_slides: true }))])
   expect(items.every(item => item.projectBacked === false)).toBe(true)
+})
+
+describe("legacy panels", () => {
+  it("never calls a panel Page a Dashboard; only the server's kind does", () => {
+    const [legacy, typed] = libraryItems([
+      page({ slug: "weekly", panel_count: 3, updated_at: "2026-10-27T12:00:00Z" } as Partial<WirePage>),
+      page({ slug: "ops", artifact_kind: "dashboard" }),
+    ].map(toPageView))
+    expect(legacy.kind).toBe("page")
+    expect(legacy.projectBacked).toBe(false)
+    expect(typed.kind).toBe("dashboard")
+  })
+})
+
+describe("repeated series", () => {
+  it("takes run markers off the name", () => {
+    expect(["Smoke test 12", "Smoke test #3", "Smoke test run 4", "Smoke test (2)", "Smoke test 2026-10-27", "Smoke test-2026-10-27T10:00Z", "Board deck v3", "Board deck"].map(seriesStem))
+      .toEqual(["Smoke test", "Smoke test", "Smoke test", "Smoke test", "Smoke test", "Smoke test", "Board deck", "Board deck"])
+  })
+
+  it("takes a trailing id off: a UUID or a long hex run", () => {
+    expect(["TAG05 d72fa378-102d-4805-a1ee-d119ba0341fa", "Document smoke 293d4eed-0aee-4e11-be36-b517a13499c6", "Build a1b2c3d4e5f6", "Plan Q3"].map(seriesStem))
+      .toEqual(["TAG05", "Document smoke", "Build", "Plan Q3"])
+  })
+
+  it("counts the same name made three times as a series, two as a coincidence", () => {
+    const items = libraryItems([
+      ...["a", "b", "c"].map(n => page({ slug: `t-${n}`, name: `TAG05 ${n}0000000-0000-4000-8000-000000000000`, artifact_kind: "word" })),
+      ...["a", "b", "c"].map(n => page({ slug: `g-${n}`, name: "Garden guide", artifact_kind: "word" })),
+      ...["a", "b"].map(n => page({ slug: `o-${n}`, name: "Ověření", artifact_kind: "word" })),
+    ].map(toPageView))
+    expect(repeatedSeries(items).map(s => [s.stem, s.items.length])).toEqual([["TAG05", 3], ["Garden guide", 3]])
+  })
+
+  it("suggests three or more runs of one kind and never touches the rest", () => {
+    const items = libraryItems([
+      ...[1, 2, 3, 4].map(n => page({ slug: `s${n}`, name: `Smoke test ${n}`, artifact_kind: "project" })),
+      page({ slug: "w1", name: "Smoke test 5", artifact_kind: "word" }),
+      page({ slug: "d1", name: "Board deck v1", artifact_kind: "slides" }),
+      page({ slug: "d2", name: "Board deck v2", artifact_kind: "slides" }),
+      page({ slug: "plain", name: "Pricing", artifact_kind: "project" }),
+    ].map(toPageView))
+    const series = repeatedSeries(items)
+    expect(series.map(s => [s.stem, s.kind, s.items.length])).toEqual([["Smoke test", "project", 4]])
+    expect(items).toHaveLength(8)
+  })
 })

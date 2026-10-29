@@ -290,6 +290,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "artifact.mooring_mandate_admitted",
       "artifact.mooring_mandate_revoked",
       "artifact.project_shared",
+      "craft.native_preview_shared",
       "artifact.orphaned_workbook_deleted",
       "artifact.private_output_published",
       "page.published",

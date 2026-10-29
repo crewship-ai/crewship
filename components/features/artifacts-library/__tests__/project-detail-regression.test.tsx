@@ -14,6 +14,17 @@ const state = vi.hoisted(() => ({
   version: undefined as number | undefined,
 }))
 
+// The library's own data around the detail; the detail itself stays real.
+// Per-user preferences as plain state; the hook's server sync is its own test.
+vi.mock("@/hooks/use-user-preference", async () => {
+  const { useState } = await import("react")
+  return { useUserPreference: <T,>(_key: string, initial: T) => { const [value, set] = useState<T>(initial); return [value, set, { ready: true }] as const } }
+})
+vi.mock("@/hooks/use-page-folders", () => ({ usePageFolders: () => ({ folders: [], loading: false, error: null, supported: true, refresh: () => {}, reread: async () => {} }) }))
+vi.mock("@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities", () => ({
+  useArtifactCapabilities: () => ({ projects: true, dashboards: false, slides: false, documents: false, sheets: false, pages: false }),
+}))
+vi.mock("@/components/layout/secondary-panel", async importOriginal => ({ ...(await importOriginal<typeof import("@/components/layout/secondary-panel")>()), SecondaryPanel: ({ label, children }: { label: string; children: React.ReactNode }) => <aside aria-label={label}>{children}</aside> }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "owner" } } }) }))
 vi.mock("@/components/features/chat/artifact-context/viewer/artifact-slides-preview", () => ({ ArtifactSlidesPreview: ({ selectMode }: { selectMode: boolean }) => <div data-testid="library-slides" data-select-mode={String(selectMode)}>Library typed Slides</div> }))
 vi.mock("@/hooks/use-pages", async importOriginal => ({
@@ -40,7 +51,9 @@ vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-proje
 }))
 
 import { toPageView } from "@/hooks/use-pages"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ArtifactsLibrary } from "../artifacts-library"
+const withQuery = (ui: React.ReactElement) => <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>
 
 const saved: ArtifactComment = {
   id: "comment-1", task_id: "task-1", version: 3, path: "index.html",
@@ -66,7 +79,7 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 
-const open = () => render(<ArtifactsLibrary workspaceId="workspace-1" item="launch" onSelect={vi.fn()} />)
+const open = () => render(withQuery(<ArtifactsLibrary workspaceId="workspace-1" item="launch" onSelect={vi.fn()} />))
 
 function compose() {
   fireEvent.click(screen.getByRole("button", { name: "Select" }))

@@ -13,6 +13,7 @@ export interface ArtifactProjectSnapshot {
  artifact_kind?: "slides"
  origin?: ArtifactOrigin
  can_write: boolean
+ can_comment?: boolean
  latest_version: number
  shared_version: number
  manifest: { version: number; entrypoint: string; files: ArtifactFile[] }

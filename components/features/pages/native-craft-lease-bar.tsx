@@ -5,6 +5,7 @@ import { validNativeVersion } from "@/lib/mooring/native-draft"
 
 export interface NativeCraftLeaseView {
   holder: { actor_id: string; display_name: string; kind: "human" | "agent" } | null
+  can_edit?: boolean
   can_stop_agent?: boolean
   mine: boolean
   generation: string | null
