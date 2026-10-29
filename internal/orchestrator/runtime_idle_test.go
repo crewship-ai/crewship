@@ -41,6 +41,10 @@ func TestVerifyRuntimeIdlePreservesUnresolvedWork(t *testing.T) {
 		{name: "recovered", record: `{"status":"running","container_id":"runtime"}`, wantErr: true},
 		{name: "unknown", record: `{"status":"unknown","container_id":"runtime"}`, wantErr: true},
 		{name: "unknown_location", record: `{"status":"running"}`, wantErr: true},
+		{name: "unknown_location_same_crew", record: `{"status":"running","crew_id":"crew"}`, wantErr: true},
+		// Another crew's run never executes in this crew's runtime, even when
+		// its own container was never recorded.
+		{name: "unknown_location_other_crew", record: `{"status":"running","crew_id":"other"}`},
 		{name: "corrupt", record: `{`, wantErr: true},
 		{name: "held", held: true, wantErr: true},
 		{name: "local", local: true, wantErr: true},
