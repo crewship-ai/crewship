@@ -20,7 +20,7 @@ afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 it("moves a saved /pages/<slug> link to the artifact inside Artifacts, without a Back step to Pages", () => {
   on()
   render(<PageDetailClient />)
-  expect(state.replace).toHaveBeenCalledWith("/artifacts/weekly-report?workspace_id=ws1")
+  expect(state.replace).toHaveBeenCalledWith("/artifacts?workspace_id=ws1&item=weekly-report")
   expect(screen.queryByTestId("pages")).toBeNull()
 })
 

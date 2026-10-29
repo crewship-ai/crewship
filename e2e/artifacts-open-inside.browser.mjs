@@ -28,7 +28,8 @@ const useAddress = () => useSyncExternalStore(subscribe, () => location.href)
 export const useRouter = () => ({ push(u) { history.pushState(null, "", u); notify() }, replace(u) { history.replaceState(null, "", u); notify() }, back() { history.back() }, prefetch() {}, refresh() {} })
 export const useSearchParams = () => { useAddress(); return new URLSearchParams(location.search) }
 export const usePathname = () => { useAddress(); return location.pathname }
-export const useParams = () => { useAddress(); const m = /^\\/artifacts\\/([^/]+)/.exec(location.pathname); return m ? { id: m[1] } : {} }`,
+// Like the static export, which serves artifacts/_.html for every ID: the params only ever hold the placeholder.
+export const useParams = () => { useAddress(); return location.pathname.startsWith("/artifacts/") ? { id: "_" } : {} }`,
 }
 const stubOf = path => path.includes("use-page-workspace") ? "use-page-workspace" : path.includes("use-auth") ? "use-auth" : path.includes("use-workspace") ? "use-workspace" : path === "next/navigation" ? "next-navigation" : null
 
@@ -93,10 +94,12 @@ try {
   assert.equal(path(), "/artifacts/page-brief")
   step("reload and direct address")
 
-  // 4. A link from before IDs moves to the artifact's address and opens it.
+  // 4. A link from before IDs opens by slug and moves to the artifact's ID address; a slug is never an ID address.
   await page.goto(`${origin}/artifacts?item=pricing-site`)
   await projectContent()
-  assert.equal(path(), "/artifacts/pricing-site")
+  await page.waitForURL(url => url.pathname === "/artifacts/page-site")
+  await page.goto(`${origin}/artifacts/pricing-site`)
+  await page.getByText("This artifact is not available.").waitFor()
   step("legacy ?item= link")
 
   // 5. Bookmarks and shared links to /pages/<slug> open the artifact inside Artifacts; Back skips Pages.
@@ -106,7 +109,7 @@ try {
   assert.equal(path(), "/artifacts/page-site")
   await page.goto(`${origin}/pages/partner-brief`)
   await page.getByText("Three partners, one launch date.").waitFor()
-  assert.equal(path(), "/artifacts/partner-brief")
+  await page.waitForURL(url => url.pathname === "/artifacts/page-brief")
   await page.goBack()
   await projectContent()
   assert.equal(path(), "/artifacts/page-site", "Back does not return to /pages")

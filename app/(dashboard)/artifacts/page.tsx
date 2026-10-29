@@ -1,26 +1,20 @@
 "use client"
 
-import { Suspense, useEffect } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { Suspense } from "react"
+import { useSearchParams } from "next/navigation"
 import { Skeleton } from "@/components/ui/skeleton"
-import { ArtifactsRoute, artifactHref } from "@/components/features/artifacts-library/artifacts-route"
+import { ArtifactsRoute } from "@/components/features/artifacts-library/artifacts-route"
 
 // /artifacts — the Artifacts library. One open artifact has its own address,
-// /artifacts/<id>; a link from before that, /artifacts?item=<slug>, moves there.
+// /artifacts/<id>; a link from before that, /artifacts?item=<slug>, opens by slug
+// and moves to the ID address once the slug resolves.
 export default function ArtifactsPage() {
   return <Suspense fallback={<Skeleton className="m-6 h-12" />}><ArtifactsEntry /></Suspense>
 }
 
 function ArtifactsEntry() {
   const params = useSearchParams()
-  const router = useRouter()
-  const legacy = params?.get("item") || null
-  useEffect(() => {
-    if (!legacy) return
-    const rest = new URLSearchParams(params?.toString())
-    rest.delete("item")
-    router.replace(artifactHref(legacy, rest))
-  }, [legacy]) // eslint-disable-line react-hooks/exhaustive-deps
-  if (legacy) return <Skeleton className="m-6 h-12" />
-  return <ArtifactsRoute item={null} />
+  // A shared Design version opens full screen at /artifacts?design=1&item=<slug>; only other ?item= links are from before.
+  const legacy = params?.get("design") === "1" ? null : params?.get("item") || null
+  return <ArtifactsRoute item={legacy} bySlug={legacy !== null} />
 }

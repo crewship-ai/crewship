@@ -2,8 +2,8 @@ import type { LucideIcon } from "lucide-react"
 import { ACCENT, type Accent } from "@/lib/concept-accents"
 import { ARTIFACT_KINDS, NO_CAPABILITIES, type ArtifactCapabilities } from "./artifact-kinds"
 
-/** The kinds the chat composer can start: it carries an intent for exactly these two. */
-export type ArtifactKindId = "project" | "word"
+/** The kinds the chat composer can start: it carries an explicit intent for these kinds. */
+export type ArtifactKindId = "project" | "word" | "design"
 
 export interface ArtifactKind {
   id: ArtifactKindId
@@ -15,7 +15,7 @@ export interface ArtifactKind {
   starterPrompts: string[]
 }
 
-const CHAT_KINDS: readonly ArtifactKindId[] = ["project", "word"]
+const CHAT_KINDS: readonly ArtifactKindId[] = ["project", "word", "design"]
 
 /**
  * Kinds the composer may offer, given what the backend serves right now, read
@@ -23,7 +23,7 @@ const CHAT_KINDS: readonly ArtifactKindId[] = ["project", "word"]
  * (dashboards, sheets, pages, slides) are left out entirely rather than shown
  * as planned or disabled tiles.
  */
-export function availableArtifactKinds(caps: { projects: boolean; documents: boolean }): ArtifactKind[] {
+export function availableArtifactKinds(caps: { projects: boolean; documents: boolean; designs?: boolean }): ArtifactKind[] {
   // The composer already checked that a signed-in person may create.
   const full: ArtifactCapabilities = { ...NO_CAPABILITIES, ...caps, pages: true }
   return ARTIFACT_KINDS

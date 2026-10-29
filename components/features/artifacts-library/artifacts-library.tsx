@@ -1,4 +1,5 @@
 "use client"
+import dynamic from "next/dynamic"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { ArrowLeft, ExternalLink, FolderInput, LayoutGrid, Library, List, Lock, Maximize2, Plus, Settings2, Share2, Star, Table2, X } from "lucide-react"
@@ -16,7 +17,7 @@ import { useUserPreference } from "@/hooks/use-user-preference"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { DocumentReadonly } from "@/components/features/pages/document-readonly/document-readonly"
 import { formatRelativeShort } from "@/lib/time"
-import { artifactDashboards, artifactSlides } from "@/lib/feature-flags"
+import { artifactDashboards, artifactSlides, artifactsDesign } from "@/lib/feature-flags"
 import { cn } from "@/lib/utils"
 import { ArtifactViewerProvider } from "@/components/features/chat/artifact-context/projects/artifact-viewer-context"
 import { useArtifactProjectsAvailable } from "@/components/features/chat/artifact-context/projects/use-artifact-project-data"
@@ -40,6 +41,8 @@ import {
 } from "./library-filter"
 import { LibraryPanel } from "./library-panel"
 import { KindThumb } from "./kind-thumb"
+
+const DesignEditor = dynamic(() => import("@/components/features/artifacts-design/design-editor").then(module => module.DesignEditor), { ssr: false })
 
 /** Each kind wears its registry colour, so Word reads blue and Sheet green before the label is read. */
 function KindTile({ kind, large }: { kind: LibraryKind; large?: boolean }) {
@@ -331,13 +334,13 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
         <h1 className="truncate text-xl font-semibold">{item.name}</h1>
         <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><KindBadge kind={item.kind} /><StateChips item={item} /><span>{meta(item)}</span></p>
       </div>
-      <OpenInPages workspaceId={workspaceId} item={item} />
+      {item.kind !== "design" && <OpenInPages workspaceId={workspaceId} item={item} />}
     </header>}
     {dialog === "share" && <ShareDialog workspaceId={workspaceId} item={item} open onOpenChange={open => { if (!open) setDialog(null) }} />}
     {dialog === "move" && <MoveToFolderDialog workspaceId={workspaceId} item={item} folders={folders} open
       onOpenChange={open => { if (!open) setDialog(null) }} onDone={() => setDialog(null)} />}
     {tab === "access" ? <AccessTab workspaceId={workspaceId} item={item} onShare={() => setDialog("share")} /> : <>
-    {projectPreview
+    {item.kind === "design" && artifactsDesign() ? <DesignEditor workspaceId={workspaceId} slug={item.pageId ? "@" + item.pageId : item.slug} /> : projectPreview
       ? <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
         <div className="flex min-h-[520px] flex-1 overflow-hidden rounded-card border"><ArtifactViewerPanel variant="library" /></div>
       </ArtifactViewerProvider>
@@ -350,7 +353,7 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
     {!projectPreview && item.native && item.kind === "word" && item.pageId && <LockLostDraft workspaceId={workspaceId} slug={"@" + item.pageId} />}
     {item.kind === "word" && !item.empty && item.pageId && <WordPreview workspaceId={workspaceId} item={item} />}
     {/* An old-editor Word has nowhere to edit it; its notice says so on its own. */}
-    {!projectPreview && item.kind !== "project" && !(item.kind === "word" && !item.native) && <p className="text-sm text-muted-foreground">
+    {!projectPreview && item.kind !== "project" && item.kind !== "design" && !(item.kind === "word" && !item.native) && <p className="text-sm text-muted-foreground">
       {DETAIL_HINT[item.kind] ?? "Open in Pages shows it with everything it contains."}
     </p>}
     </>}
@@ -485,9 +488,14 @@ function useLibraryKeys(root: React.RefObject<HTMLElement | null>, keys: Library
 
 interface ArtifactsLibraryProps {
   workspaceId: string
-  /** The open artifact's immutable page ID (or, for an item without one, its slug), or null for the library. Kept in the URL by the route. */
+  /** The open artifact's immutable page ID, or null for the library. Kept in the URL by the route. */
   item: string | null
-  onSelect: (id: string | null) => void
+  /** `item` is a slug from a link made before IDs (or an item that has no ID). It never matches an ID. */
+  bySlug?: boolean
+  /** Opens an artifact by its ID; one without an ID opens by `slug`. Null returns to the list. */
+  onSelect: (id: string | null, slug?: string) => void
+  /** A slug link found its artifact: the route moves to the ID address. */
+  onCanonical?: (id: string) => void
   /** Controlled filters, when the route keeps them in the URL; otherwise the library holds them. */
   filters?: LibraryFilters
   onFiltersChange?: (next: LibraryFilters) => void
@@ -499,7 +507,7 @@ interface ArtifactsLibraryProps {
  * searches, filters and switches views; Home offers what can be made. Empty
  * items and repeated runs have their own views and are never deleted here.
  */
-export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: controlled, onFiltersChange }: ArtifactsLibraryProps) {
+export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanonical, filters: controlled, onFiltersChange }: ArtifactsLibraryProps) {
   const { pages, loading, error, refresh } = usePages(workspaceId, undefined, CATALOG)
   const { folders } = usePageFolders(workspaceId)
   const caps = useArtifactCapabilities(workspaceId)
@@ -507,7 +515,7 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
   // Archive, test origin and mock moves; re-read whenever a sharing write settles.
   const stateTick = useQuery({ queryKey: sharingKeys.state(workspaceId), queryFn: () => Date.now(), staleTime: Infinity }).data
   const items = useMemo(() => {
-    const base = libraryItems(pages)
+    const base = libraryItems(pages).filter(entry => entry.kind !== "design" || artifactsDesign())
     return withLibraryState(base, sharing.libraryState(base))
   }, [pages, sharing, stateTick]) // eslint-disable-line react-hooks/exhaustive-deps -- stateTick is the re-read signal
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
@@ -529,8 +537,10 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
     opened: new Map(Array.isArray(recent) ? recent.filter(entry => typeof entry?.slug === "string" && Number.isFinite(entry?.at)).map(entry => [entry.slug, entry.at]) : []),
     favorites: new Set(Array.isArray(favorites) ? favorites.filter(slug => typeof slug === "string") : []),
   }), [recent, favorites])
-  // The ID survives a renamed or reassigned slug; a slug still opens links made before IDs.
-  const selected = item !== null ? items.find(entry => entry.pageId === item) ?? items.find(entry => entry.slug === item) ?? null : null
+  // An ID address fails closed: it never falls back to a slug, which another artifact may hold now.
+  const selected = item === null ? null : items.find(entry => bySlug ? entry.slug === item : entry.pageId === item) ?? null
+  const canonical = bySlug ? selected?.pageId : undefined
+  useEffect(() => { if (canonical) onCanonical?.(canonical) }, [canonical]) // eslint-disable-line react-hooks/exhaustive-deps
   const contentRef = useRef<HTMLDivElement>(null)
   const openedSlug = selected?.slug
   useEffect(() => {
@@ -547,7 +557,11 @@ export function ArtifactsLibrary({ workspaceId, item, onSelect, filters: control
   const mobile = useIsMobile()
   const [peek, setPeek] = useState<string | null>(null)
   const peeked = !mobile && item === null ? items.find(entry => entry.slug === peek) ?? null : null
-  const open = (slug: string) => { setPeek(null); onSelect(items.find(entry => entry.slug === slug)?.pageId ?? slug) }
+  const open = (slug: string) => {
+    setPeek(null)
+    const id = items.find(entry => entry.slug === slug)?.pageId
+    if (id) onSelect(id); else onSelect(null, slug)
+  }
   const pick = (slug: string) => { if (mobile || peek === slug) open(slug); else setPeek(slug) }
   useLibraryKeys(contentRef, { detailOpen: item !== null, onBack: () => onSelect(null), peek: peeked?.slug ?? null, onPeek: mobile ? null : setPeek, onOpen: open })
   // A selection and a peek belong to the list they were made in.

@@ -9,9 +9,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Old `/pages/<slug>` links open the artifact inside Artifacts.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` on, a bookmark or shared link to a single page, an `@<id>` reference or a project link opens `/artifacts/<id>` instead, and Back does not return to Pages. Reference links (`?ref=`), the panel editor and restricted members stay on Pages. Off by default.
+- **Old `/pages/<slug>` links open the artifact inside Artifacts.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` on, a bookmark or shared link to a single page opens it in Artifacts (a slug resolves there, an `@<id>` reference or project link goes straight to `/artifacts/<id>`), and Back does not return to Pages. Reference links (`?ref=`), the panel editor and restricted members stay on Pages. Off by default.
 
-- **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, move to the new address.
+- **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
 
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.
 
@@ -20,6 +20,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add human Comment grants for shared artifact feedback without edit or agent execution rights, explicit QA item markers and catalog filters, and confirmed archive and folder-move previews with live access checks. Access reports include effective capabilities and their sources; existing content, history and grants remain intact.
 
 - **Home-installed agent CLIs remain visible during startup checks.** Offline qualification uses a separate temporary home while preserving read-only executable paths from the immutable image.
+
+- **Design artifacts gain an opt-in collaborative canvas.** People and agents can edit frames, shapes, text and images through Yjs, with live presence and normal artifact version history. Agents can address their selected canvas by its immutable ID. Disabled by default. Long-running cookie sessions renew only their collaborative transport after fresh authority checks, retaining unsaved work. Restoring saved canvases preserves prototype-named node IDs and their original contents.
 
 - **Native Craft editing can continue past access-token expiry.** The browser refreshes its cookie before admitting or renewing the same editing connection and replaces only its authenticated metadata stream. Unsaved work, the lease generation and in-flight saves remain in place; document mutations are never replayed.
 - **Read-only Craft viewers saw editing controls.** Native Craft previews now show edit actions only when the server confirms current edit access. Comment viewers can open an explicitly published native preview without acquiring an editor lock or reading private drafts. The CLI exposes the same shared preview and publication paths. ⚠️ **Behaviour change:** admitted native CLI actions and shared preview reads reject HTTP redirects.

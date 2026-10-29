@@ -45,10 +45,12 @@ export function PageDetailClient() {
     if (!toArtifacts || !slug) return
     const query = new URLSearchParams()
     if (linkedWorkspace) query.set("workspace_id", linkedWorkspace)
-    // An immutable reference is the artifact's ID; a slug resolves in the library.
-    const id = slug.startsWith("@") ? slug.slice(1) : slug
     // The static export has no server redirect; replace, so Back does not return here.
-    router.replace(`/artifacts/${encodeURIComponent(id)}${query.size ? `?${query}` : ""}`)
+    // An immutable reference is the artifact's ID address. A slug is never one: it
+    // opens by slug in the library, which then moves to the ID address.
+    if (slug.startsWith("@")) return router.replace(`/artifacts/${encodeURIComponent(slug.slice(1))}${query.size ? `?${query}` : ""}`)
+    query.set("item", slug)
+    router.replace(`/artifacts?${query}`)
   }, [toArtifacts, slug, linkedWorkspace]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (linkUnavailable) return <p className="p-6" role="alert">Document unavailable.</p>

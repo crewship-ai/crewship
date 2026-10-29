@@ -2,7 +2,7 @@
 
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 import { usePageCreationAccess } from "@/hooks/use-page-creation-access"
-import { artifactDashboards, artifactSlides } from "@/lib/feature-flags"
+import { artifactDashboards, artifactSlides, artifactsDesign } from "@/lib/feature-flags"
 import { useArtifactProjectsAvailable } from "../projects/use-artifact-project-data"
 import type { ArtifactCapabilities } from "./artifact-kinds"
 
@@ -15,6 +15,7 @@ export function useArtifactCapabilities(workspaceId: string): ArtifactCapabiliti
     pages,
     projects,
     dashboards: artifactDashboards(),
+    designs: artifactsDesign(),
     slides: artifactSlides(),
     documents: documents.data === true || Boolean(documents.wordcraftSDKPrefix) || documents.wordcraftCommands,
     // A blank workbook cannot be typed into until something imports into it,

@@ -165,3 +165,8 @@ export function artifactsSharingMock(): boolean {
 export function artifactDashboards(): boolean {
   return process.env.NEXT_PUBLIC_ARTIFACT_DASHBOARDS === "true"
 }
+
+/** Collaborative Design canvas. Default off. */
+export function artifactsDesign(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN === "true"
+}

@@ -44,6 +44,7 @@ const SEARCH_FROM = 9
  * template or import route in the browser yet, so those say "Coming".
  */
 function startOptions(kind: ArtifactKindEntry): SegmentedOption<Start>[] {
+  if (kind.make === "canvas") return [{ value: "blank", label: "Blank canvas" }]
   if (kind.make === "agent") return [{ value: "describe", label: "Describe it" }, { value: "tmpl", label: "From template" }]
   const tmpl: SegmentedOption<Start> = { value: "tmpl", label: "From template", disabled: true, title: "Coming" }
   if (kind.make === "panels") return [{ value: "blank", label: "Empty page" }, tmpl]
@@ -140,11 +141,11 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
       // A new workbook Page has never moved; 0 is the column default.
       return { slug: made.slug, pagesVersion: 0 }
     }
-    const intent = pageIntent.current ??= { slug: freeSlug(trimmed, "page", pages) }
+    const intent = pageIntent.current ??= { slug: freeSlug(trimmed, k.key === "design" ? "design" : "page", pages) }
     if (intent.created) return intent.created
     if (intent.uncertain) throw new Error("Page creation could not be confirmed. Check the library before starting again.")
     intent.uncertain = true
-    const response = await apiFetch(`/api/v1/pages?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: trimmed, slug: intent.slug, panels: [], allow_empty: true }) })
+    const response = await apiFetch(`/api/v1/pages${k.key === "design" ? "/design" : ""}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(k.key === "design" ? { name: trimmed, slug: intent.slug } : { name: trimmed, slug: intent.slug, panels: [], allow_empty: true }) })
     const value = await response.json().catch(() => null)
     if (!response.ok) {
       // A clear refusal created nothing, so the person may change the name and try again.
@@ -247,12 +248,13 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
         </div>}
         {start === "blank" && <p className="text-micro text-muted-foreground-soft">{kind.make === "panels"
           ? "An empty Page. Crews add panels on their next run."
+          : kind.make === "canvas" ? "A shared canvas with live presence and retained versions."
           : `Opens with you holding the lock. Nobody else sees it until you share a version.`}</p>}
       </>}
     </CreateSurfaceBody>
     <CreateSurfaceRefusal message={refusal} />
     <CreateSurfaceFooter
-      hint={kind?.make === "edit" ? "One editor at a time · versions" : kind?.make === "panels" ? "Panels · no versions" : "Versions · comments for the agent"}
+      hint={kind?.make === "canvas" ? "Collaborative canvas · versions" : kind?.make === "edit" ? "One editor at a time · versions" : kind?.make === "panels" ? "Panels · no versions" : "Versions · comments for the agent"}
       onCancel={busy ? undefined : close} guardCancel={false}
       primaryLabel={primaryLabel} primaryDisabled={!canSubmit} busy={busy} onPrimary={() => void submit()} />
   </CreateSurface>

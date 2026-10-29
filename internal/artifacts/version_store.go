@@ -112,7 +112,7 @@ func (s *VersionStore) transaction(ctx context.Context, k VersionKey, a VersionA
 		return ErrDisabled
 	}
 	switch s.opts.ContentType {
-	case "artifact_project", "wordcraft", "gridcraft":
+	case "artifact_project", "wordcraft", "gridcraft", "design":
 	default:
 		return fmt.Errorf("%w: unsupported content family", ErrVersionInvalid)
 	}
