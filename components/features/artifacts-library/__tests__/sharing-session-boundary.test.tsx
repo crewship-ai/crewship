@@ -79,6 +79,15 @@ describe("sharing writes stay with the session that started them", () => {
     expect(sent).toEqual([])
   })
 
+  // #4460: mutate and unmount in the same tick, before the mutation has even started.
+  it.each(operations)("%s queued and unmounted in the same tick sends nothing", async (_name, run) => {
+    const { hook, sent } = harness(run)
+    act(() => { hook.result.current.mutate(null); hook.unmount() })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(state.fetch).not.toHaveBeenCalled()
+    expect(sent).toEqual([])
+  })
+
   it("a share in one session completes all its requests", async () => {
     const { hook, sent, release } = harness(operations[0][1])
     act(() => hook.result.current.mutate(null))

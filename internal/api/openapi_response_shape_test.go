@@ -80,6 +80,8 @@ var responseShapeContracts = []struct {
 	{name: "NativeCraftRequest", pointer: "/components/schemas/NativeCraftRequest", value: craftNativeRequestResponse{}},
 	{name: "NativeCraftInitializeReceipt", pointer: "/components/schemas/NativeCraftInitializeReceipt", value: craftNativeInitializeResponse{}},
 	{name: "NativeCraftDocument", pointer: "/components/schemas/NativeCraftDocument", value: craftNativeDocumentResponse{}},
+	{name: "NativeCraftPreview", pointer: "/components/schemas/NativeCraftPreview", value: craftNativePreviewResponse{}},
+	{name: "NativeCraftShareReceipt", pointer: "/components/schemas/NativeCraftShareReceipt", value: craftNativeRestoreResponse{}},
 	{name: "NativeCraftDocumentQuota", pointer: "/components/schemas/NativeCraftDocumentQuota", value: craftNativeDocumentQuotaResponse{}},
 	{name: "NativeCraftSnapshotReceipt", pointer: "/components/schemas/NativeCraftSnapshotReceipt", value: mooring.NativeSaveReceipt{}},
 	{name: "NativeCraftRestoreReceipt", pointer: "/components/schemas/NativeCraftRestoreReceipt", value: craftNativeRestoreResponse{}},

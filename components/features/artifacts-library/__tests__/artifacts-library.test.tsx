@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { toPageView, type PageView, type WirePage } from "@/hooks/use-pages"
 
-const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error: null as string | null, refresh: vi.fn(), projectsOn: true, item: null as string | null, select: vi.fn(), folders: [] as { id: string; slug: string; name: string; pageCount: number }[], reads: [] as { target: { pageId: string } | null; enabled: boolean; chatId: string }[], readStatus: "ready" as string, pagesArgs: [] as unknown[] }))
+const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error: null as string | null, refresh: vi.fn(), projectsOn: true, item: null as string | null, select: vi.fn(), folders: [] as { id: string; slug: string; name: string; pageCount: number }[], reads: [] as { target: { pageId: string } | null; enabled: boolean; chatId: string }[], readStatus: "ready" as string, pagesArgs: [] as unknown[], mobile: false }))
 vi.mock("@/hooks/use-pages", async importOriginal => ({
   ...(await importOriginal<typeof import("@/hooks/use-pages")>()),
   usePages: (...args: unknown[]) => { state.pagesArgs = args; return { pages: state.pages, loading: state.loading, error: state.error, refresh: state.refresh } },
@@ -13,6 +13,7 @@ vi.mock("@/components/features/chat/artifact-context/projects/artifact-viewer-co
     <div data-testid="viewer-provider" data-slug={target?.slug} data-tab={target?.tab}>{children}</div>,
 }))
 vi.mock("@/components/features/chat/artifact-context/viewer/artifact-viewer-panel", () => ({ ArtifactViewerPanel: () => <div data-testid="viewer-panel" /> }))
+vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => state.mobile }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "u1" } } }) }))
 vi.mock("@/hooks/use-document-viewer-read", () => ({
   useDocumentViewerRead: (input: { target: { pageId: string } | null; enabled: boolean; chatId: string }) => {
@@ -66,7 +67,7 @@ beforeEach(() => {
     wire({ slug: "weekly", id: "page-weekly", name: "Weekly report", panel_count: 2 } as Partial<WirePage>),
     wire({ slug: "calc", id: "page-calc", name: "Calculator", has_application: true } as Partial<WirePage>),
   ]
-  state.folders = []; state.reads = []; state.pagesArgs = []; state.readStatus = "ready"; state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.select.mockReset(); state.refresh.mockReset()
+  state.folders = []; state.reads = []; state.pagesArgs = []; state.mobile = false; state.readStatus = "ready"; state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.select.mockReset(); state.refresh.mockReset()
 })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
@@ -133,11 +134,84 @@ it("searches with operators, filters by kind with counts and switches to a table
   expect(within(rows[1]).getByText("v2")).toBeTruthy()
 })
 
-it("opening a row selects it by slug", () => {
+const peek = () => screen.getByRole("complementary", { name: "Preview" })
+const peekOpen = () => fireEvent.click(within(peek()).getByRole("button", { name: /^Open$/ }))
+
+it("a click on desktop peeks at the item on the right and the list stays with its filter", () => {
+  render(withQuery(<ArtifactsLibrary workspaceId="ws1" item={null} onSelect={state.select} filters={{ view: "all", q: "", kinds: ["word", "sheet"], access: [], version: [], owners: [], folder: null }} />))
+  fireEvent.click(screen.getByRole("button", { name: "Open Partner brief" }))
+  expect(state.select).not.toHaveBeenCalled()
+  expect(within(peek()).getByRole("heading", { name: "Partner brief" })).toBeTruthy()
+  // The facts the prototype lists: kind, owner, folder, version, edited, who can open.
+  const facts = within(peek()).getAllByRole("term").map(term => term.textContent)
+  expect(facts).toEqual(["Kind", "Version", "Folder", "Who can open", "Owner", "Edited"])
+  expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(row => row.textContent)).toEqual([
+    expect.stringContaining("Partner brief"), expect.stringContaining("Price model"),
+  ])
+  expect(screen.getByRole("button", { name: "Open Partner brief" }).getAttribute("aria-current")).toBe("true")
+  peekOpen()
+  expect(state.select).toHaveBeenCalledWith("brief")
+})
+
+it("the peek shares and stars the item it shows, and closes", () => {
   renderLibrary()
   openAll()
-  fireEvent.click(screen.getByRole("button", { name: /Open Partner brief/ }))
+  fireEvent.click(screen.getByRole("button", { name: "Open Price model" }))
+  fireEvent.click(within(peek()).getByRole("button", { name: "Share" }))
+  expect(screen.getByRole("dialog", { name: "Share Price model" })).toBeTruthy()
+  fireEvent.click(within(peek()).getByRole("button", { name: "Add to favorites" }))
+  expect(within(peek()).getByRole("button", { name: "Remove from favorites" })).toBeTruthy()
+  fireEvent.click(within(peek()).getByRole("button", { name: "Close preview" }))
+  expect(screen.queryByRole("complementary", { name: "Preview" })).toBeNull()
+})
+
+it("J and K move the peek, Enter opens the peeked item, Escape closes the peek", () => {
+  renderLibrary()
+  openAll()
+  fireEvent.keyDown(window, { key: "j" })
+  expect(within(peek()).getByRole("heading", { name: "Pricing site" })).toBeTruthy()
+  fireEvent.keyDown(window, { key: "j" })
+  expect(within(peek()).getByRole("heading", { name: "Partner brief" })).toBeTruthy()
+  expect(document.activeElement?.getAttribute("aria-label")).toBe("Open Partner brief")
+  fireEvent.keyDown(window, { key: "k" })
+  expect(within(peek()).getByRole("heading", { name: "Pricing site" })).toBeTruthy()
+  fireEvent.keyDown(document.body, { key: "Escape" })
+  expect(screen.queryByRole("complementary", { name: "Preview" })).toBeNull()
+  expect(state.select).not.toHaveBeenCalled()
+  expect(screen.getByRole("list", { name: "Artifacts" })).toBeTruthy()
+  fireEvent.keyDown(window, { key: "j" })
+  expect(within(peek()).getByRole("heading", { name: "Partner brief" })).toBeTruthy()
+  fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Enter" })
+  expect(state.select).toHaveBeenLastCalledWith("brief")
+})
+
+it("on a phone a click opens the detail directly, with no peek", () => {
+  state.mobile = true
+  renderLibrary()
+  openAll()
+  fireEvent.click(screen.getByRole("button", { name: "Open Partner brief" }))
   expect(state.select).toHaveBeenCalledWith("brief")
+  expect(screen.queryByRole("complementary", { name: "Preview" })).toBeNull()
+})
+
+it("phone rows show checkboxes only after Select", () => {
+  state.mobile = true
+  renderLibrary()
+  openAll()
+  expect(screen.queryByRole("checkbox", { name: "Select Partner brief" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: /^Select$/ }))
+  fireEvent.click(screen.getByRole("checkbox", { name: "Select Partner brief" }))
+  expect(screen.getByRole("toolbar", { name: "Bulk actions" })).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Done" }))
+  expect(screen.queryByRole("checkbox", { name: "Select Partner brief" })).toBeNull()
+  expect(screen.queryByRole("toolbar", { name: "Bulk actions" })).toBeNull()
+})
+
+it("desktop rows keep their checkboxes without a Select toggle", () => {
+  renderLibrary()
+  openAll()
+  expect(screen.getByRole("checkbox", { name: "Select Partner brief" })).toBeTruthy()
+  expect(screen.queryByRole("button", { name: /^Select$/ })).toBeNull()
 })
 
 it("a project detail opens the project preview", () => {
@@ -180,6 +254,8 @@ it.each(["unavailable", "error"])("an old-editor Word that answers %s says so pl
   renderLibrary()
   expect(screen.getByRole("status")).toHaveTextContent("This document is from an older version of the editor and does not open here.")
   expect(screen.getByRole("status").textContent).not.toMatch(/engine|503|service/i)
+  // Nothing next to it sends the reader to an editor that cannot open it.
+  expect(screen.queryByText(/Edit it in its editor/)).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: /All artifacts/ }))
   expect(state.select).toHaveBeenCalledWith(null)
 })
@@ -244,9 +320,13 @@ it.each(["project", "dashboard", "slides"] as const)("keeps %s routed through it
   const view = renderLibrary()
   openAll()
   fireEvent.click(screen.getByRole("button", { name: "Open Owner artifact" }))
+  peekOpen()
   expect(state.select).toHaveBeenLastCalledWith("ordinary-owner-page")
+  state.select.mockReset()
   fireEvent.click(screen.getByRole("radio", { name: "Table" }))
+  fireEvent.keyDown(document.body, { key: "Escape" })
   fireEvent.click(screen.getByRole("button", { name: "Owner artifact" }))
+  peekOpen()
   expect(state.select).toHaveBeenLastCalledWith("ordinary-owner-page")
   state.item = "ordinary-owner-page"
   view.rerender(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
@@ -277,6 +357,7 @@ it("J and K move between items, Enter opens, Escape leaves the detail, never fro
   fireEvent.keyDown(window, { key: "j" })
   fireEvent.keyDown(window, { key: "k" })
   expect(document.activeElement?.getAttribute("aria-label")).toBe("Open Partner brief")
+  // The peeked row's second click opens it, as Enter does.
   fireEvent.click(document.activeElement as HTMLElement)
   expect(state.select).toHaveBeenLastCalledWith("brief")
   const search = screen.getByRole("textbox", { name: "Search artifacts" })

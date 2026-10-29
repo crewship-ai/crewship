@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react"
 import { KIND_ACCENT } from "@/components/features/chat/artifact-context/new-artifact/artifact-kinds"
+import { cn } from "@/lib/utils"
 import type { LibraryKind } from "./library-items"
 
 /*
@@ -54,10 +55,10 @@ function Drawing({ kind }: { kind: LibraryKind }) {
   }
 }
 
-export function KindThumb({ kind, empty }: { kind: LibraryKind; empty?: boolean }) {
+export function KindThumb({ kind, empty, className }: { kind: LibraryKind; empty?: boolean; className?: string }) {
   const style = { "--kind": KIND_ACCENT[kind].tint } as CSSProperties
   return <div aria-hidden="true" data-thumb={kind} style={style}
-    className="relative h-[104px] overflow-hidden border-b border-border bg-[color-mix(in_srgb,var(--kind)_8%,var(--muted))]">
+    className={cn("relative h-[104px] overflow-hidden border-b border-border bg-[color-mix(in_srgb,var(--kind)_8%,var(--muted))]", className)}>
     {empty ? <span className="absolute inset-0 grid place-items-center text-xs text-muted-foreground">Nothing here yet</span> : <Drawing kind={kind} />}
   </div>
 }

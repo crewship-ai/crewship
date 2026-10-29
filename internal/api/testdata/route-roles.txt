@@ -356,6 +356,7 @@ POST /api/v1/pages/{slug}/craft/document/import roleSelf
 POST /api/v1/pages/{slug}/craft/document/reconcile roleSelf
 POST /api/v1/pages/{slug}/craft/document/restore roleSelf
 POST /api/v1/pages/{slug}/craft/document/save roleSelf
+POST /api/v1/pages/{slug}/craft/document/share roleSelf
 POST /api/v1/pages/{slug}/craft/initialize roleSelf
 POST /api/v1/pages/{slug}/craft/lease roleSelf
 POST /api/v1/pages/{slug}/craft/lease/acquire roleSelf

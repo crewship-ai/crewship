@@ -7,7 +7,7 @@ const flags = vi.hoisted(() => ({ mock: true, fetch: vi.fn() }))
 vi.mock("@/lib/feature-flags", async importOriginal => ({ ...(await importOriginal<typeof import("@/lib/feature-flags")>()), artifactsSharingMock: () => flags.mock }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: flags.fetch }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "me" } }, status: "authenticated" }) }))
-vi.mock("@/hooks/use-issue-people", () => ({ useIssuePeople: () => ({ people: [{ id: "u2", name: "Ada Lovelace" }, { id: "u3", name: "Alan Turing" }], error: false }) }))
+vi.mock("@/hooks/use-issue-people", () => ({ useIssuePeople: () => ({ people: [{ id: "me", name: "Me Myself" }, { id: "u2", name: "Ada Lovelace" }, { id: "u3", name: "Alan Turing" }], error: false }) }))
 
 import { mockSharingApi, resetSharingMock } from "../sharing/sharing-api"
 import { ShareDialog } from "../sharing/share-dialog"
@@ -130,4 +130,12 @@ it("on the server, a downgrade from Edit to Read removes Edit, by query", async 
     ["PUT", { subject_type: "user", subject: "u2", level: "read" }],
     ["DELETE", "workspace_id=ws1&subject_type=user&subject=u2&level=write"],
   ])
+})
+
+it("never offers the signed-in person as someone to share with, and names their own row You", async () => {
+  renderDialog()
+  await within(list()).findByText("Everyone in this workspace")
+  const options = Array.from((screen.getByLabelText("Share with", { exact: true }) as HTMLSelectElement).options).map(o => o.textContent)
+  expect(options).toContain("Ada Lovelace")
+  expect(options).not.toContain("Me Myself")
 })
