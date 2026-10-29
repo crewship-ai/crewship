@@ -88,11 +88,31 @@ func TestDesignTypedRunCanEditOfflineOnlyItsSelectedCanvas(t *testing.T) {
 		return w
 	}
 	op := `{"operations":[{"op":"upsert","node":{"id":"cart","type":"frame","name":"Košík","x":0,"y":0,"width":390,"height":844,"fill":"#fff"}},{"op":"upsert","node":{"id":"cart-title","parentId":"cart","type":"text","name":"Title","text":"Košík","x":20,"y":20,"width":300,"height":40,"fill":"#333"}}]}`
-	if w := tool("design_apply", "review-design-a", op); w.Code != 200 {
+	if w := tool("design_apply", page, op); w.Code != 200 {
 		t.Fatalf("offline original-run apply %d %s", w.Code, w.Body)
+	}
+	// The model receives the selected immutable Page ID. A different Page may
+	// legally use that text as its slug; the exact run mandate disambiguates it.
+	if w := human(page, fmt.Sprintf(`{"slug":%q,"name":"ID collision"}`, page), f.pages.CreateDesign); w.Code != 201 {
+		t.Fatalf("collision fixture %d %s", w.Code, w.Body)
+	}
+	for _, reference := range []string{page, "@" + page} {
+		for _, payload := range []string{`{}`, `{"version":2}`} {
+			w := tool("design_get", reference, payload)
+			var selected struct {
+				PageID string `json:"page_id"`
+			}
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &selected) != nil || selected.PageID != page {
+				t.Fatalf("selected immutable reference %q resolved incorrectly: %d %s", reference, w.Code, w.Body)
+			}
+		}
 	}
 	if w := tool("design_get", "review-design-a", `{}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"parentId":"cart"`) || !strings.Contains(w.Body.String(), `"version":2`) {
 		t.Fatalf("offline retained Yjs canvas %d %s", w.Code, w.Body)
+	}
+	var otherPage string
+	if err := f.rig.db.QueryRow(`SELECT id FROM pages WHERE slug='review-design-b'`).Scan(&otherPage); err != nil {
+		t.Fatal(err)
 	}
 	for _, operation := range []string{"design_get", "design_apply", "design_snapshot", "design_versions", "design_restore"} {
 		payload := `{}`
@@ -106,6 +126,11 @@ func TestDesignTypedRunCanEditOfflineOnlyItsSelectedCanvas(t *testing.T) {
 		other := tool(operation, "review-design-b", payload)
 		if absent.Code != 404 || other.Code != 404 || absent.Body.String() != other.Body.String() {
 			t.Errorf("run probed another owned Design via %s: absent %d %s other %d %s", operation, absent.Code, absent.Body, other.Code, other.Body)
+		}
+		for _, reference := range []string{otherPage, "@" + otherPage} {
+			if denied := tool(operation, reference, payload); denied.Code != 404 || denied.Body.String() != absent.Body.String() {
+				t.Errorf("run probed another immutable Design via %s: %d %s", operation, denied.Code, denied.Body)
+			}
 		}
 	}
 	mustExec(t, f.rig.db, `UPDATE artifact_project_message_intents SET revoked_at='2026-10-28T00:00:00Z' WHERE run_id=?`, f.a.RunID)

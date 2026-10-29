@@ -26,6 +26,8 @@ func designMCPCatalog() []memoryMCPToolDescriptor {
 		for _, field := range tool.fields {
 			property := map[string]any{"type": "string"}
 			switch field {
+			case "slug":
+				property["description"] = "Page slug, or the immutable Page ID selected by this run's original human mandate, with or without @."
 			case "version":
 				property = map[string]any{"type": "integer", "minimum": 1, "maximum": 9007199254740991}
 			case "operations":

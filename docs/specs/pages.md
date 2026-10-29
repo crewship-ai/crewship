@@ -1458,6 +1458,9 @@ cannot choose a human identity, workspace, alternate profile or server. A
 visible tool never grants access. Creating a Design requires human authentication;
 agents edit an explicitly selected existing Design. The host rejects calls when Design is
 not enabled. A failed response is never automatically retried.
+The agent tool's `slug` accepts a Page slug or the exact immutable Page ID
+selected by that run's original human mandate, with or without `@`. This does
+not permit selecting another Page.
 
 Additional human CLI commands list or create anchored comments, pin a shared
 version, and connect the owner's private chat:
