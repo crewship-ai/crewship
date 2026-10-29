@@ -11,6 +11,7 @@ import { artifactDashboards } from "@/lib/feature-flags"
 import { ArtifactDashboardPreview } from "@/components/features/chat/artifact-context/viewer/artifact-dashboard-preview"
 import { artifactSlidesMode } from "@/lib/pages/artifact-slides"
 import { ArtifactSlidesPreview } from "@/components/features/chat/artifact-context/viewer/artifact-slides-preview"
+import { artifactDraftKey, readArtifactDraft, writeArtifactDraft } from "@/lib/artifact-drafts"
 
 export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspaceId: string; slug: string; initialVersion?: number }) {
  const session = useSessionSafe()
@@ -18,7 +19,7 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  const { query, restore, share, comment, save } = useArtifactProject(workspaceId, slug, version)
  const [screenPath, setScreenPath] = useState("")
  const [selection, setSelection] = useState<{scope:string; selecting:boolean; anchor?:ArtifactAnchor}>()
- const draftKey = session?.data?.user?.id ? `artifact-comment:${session.data.user.id}:${workspaceId}:${slug}` : null
+ const draftKey = artifactDraftKey("artifact-comment", session?.data?.user?.id, workspaceId, slug)
  const [draftState, setDraftState] = useState<{key:string;text:string} | null>(null)
  const draft = draftKey && draftState?.key === draftKey ? draftState.text : ""
  const setDraft = (text: string) => setDraftState(draftKey ? {key:draftKey,text} : null)
@@ -28,19 +29,25 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  const [sourceDraft,setSourceDraft]=useState<{scope:object;body:ArtifactProjectSave;path:string}>()
  const [sourceError,setSourceError]=useState<{scope:object;message:string;hidePreview:boolean}>()
  const activeSource=sourceDraft?.scope===sourceScope?sourceDraft:undefined
- // An unsaved source draft survives a crash or closed tab in this browser; it
- // is only offered back, never saved over newer work automatically.
- const sourceKey=sourceScope.human?`artifact-source:${sourceScope.human}:${workspaceId}:${slug}`:null
+ // An unsaved source draft survives a crash or closed tab in this browser
+ // (IndexedDB, strict durability: lib/artifact-drafts); it is only offered
+ // back, never saved over newer work automatically.
+ const sourceKey=artifactDraftKey("artifact-source",sourceScope.human,workspaceId,slug)
  const [storedSource,setStoredSource]=useState<{key:string;draft:{body:ArtifactProjectSave;path:string}}>()
  useEffect(()=>{
   if(!sourceKey)return
-  try{const raw=localStorage.getItem(sourceKey);const parsed=raw?JSON.parse(raw):null;setStoredSource(parsed&&Array.isArray(parsed.body?.files)&&typeof parsed.path==="string"?{key:sourceKey,draft:parsed}:undefined)}catch{setStoredSource(undefined)}
+  let live=true
+  void readArtifactDraft(sourceKey).then(raw=>{
+   if(!live)return
+   try{const parsed=raw?JSON.parse(raw):null;setStoredSource(parsed&&Array.isArray(parsed.body?.files)&&typeof parsed.path==="string"?{key:sourceKey,draft:parsed}:undefined)}catch{setStoredSource(undefined)}
+  })
+  return()=>{live=false}
  },[sourceKey])
  useEffect(()=>{
   if(!sourceKey||!activeSource)return
-  try{localStorage.setItem(sourceKey,JSON.stringify({body:activeSource.body,path:activeSource.path}));setStorageError(false)}catch{setStorageError(true)}
+  writeArtifactDraft(sourceKey,JSON.stringify({body:activeSource.body,path:activeSource.path})).then(()=>setStorageError(false),()=>setStorageError(true))
  },[sourceKey,activeSource])
- const forgetSource=useCallback((key:string|null)=>{if(!key)return;try{localStorage.removeItem(key)}catch{};setStoredSource(undefined)},[])
+ const forgetSource=useCallback((key:string|null)=>{if(!key)return;void writeArtifactDraft(key,"").catch(()=>{});setStoredSource(undefined)},[])
  const sourceCurrent=useRef({scope:sourceScope,draft:activeSource,canWrite:false})
  const data = query.data
  sourceCurrent.current={scope:sourceScope,draft:activeSource,canWrite:data?.can_write===true&&!query.isError}
@@ -63,11 +70,14 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  const source = useMemo(() => manifest && !slidesMode ? artifactProjectDocument(manifest.files, path, token, selecting) : "", [manifest, path, token, selecting, slidesMode])
  useEffect(() => {
   if (!draftKey) { setDraftState(null); return }
-  try { setDraftState({key:draftKey,text:localStorage.getItem(draftKey) ?? ""}); setStorageError(false) } catch { setDraftState({key:draftKey,text:""}); setStorageError(true) }
+  let live = true
+  // Text typed while the stored draft loads wins over the stored copy.
+  void readArtifactDraft(draftKey).then(text => { if (live) setDraftState(previous => previous?.key === draftKey ? previous : {key:draftKey,text}) })
+  return () => { live = false }
  }, [draftKey])
  useEffect(() => {
   if (!draftKey || draftState?.key !== draftKey) return
-  try { if (draftState.text) localStorage.setItem(draftKey, draftState.text); else localStorage.removeItem(draftKey) } catch { setStorageError(true) }
+  writeArtifactDraft(draftKey, draftState.text).then(() => setStorageError(false), () => setStorageError(true))
  }, [draftState, draftKey])
  useEffect(() => {
   const receive = (event: MessageEvent) => {

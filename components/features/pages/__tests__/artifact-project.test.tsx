@@ -1,6 +1,7 @@
 import React from "react"
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { afterEach, expect, it, vi } from "vitest"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, beforeEach, expect, it, vi } from "vitest"
+import { setArtifactDraftStore } from "@/lib/artifact-drafts"
 const state = vi.hoisted(() => ({ user: "owner", token: "", save: vi.fn(), comment: vi.fn(), dispatch: vi.fn(), data: { can_write: true, can_comment: false, can_share: true, can_restore: true, can_send_to_agent: true, latest_version: 2, shared_version: 1, manifest: { version: 2, entrypoint: "index.html", files: [{ path: "index.html", content: "<h1>Hello</h1>", media_type: "text/html" }, { path: "details.html", content: "<h1>Details</h1>", media_type: "text/html" }] }, versions: [{ version: 2 }, { version: 1 }], quota: { used_bytes: 10, limit_bytes: 100, warning: false }, comments: [] }, restore: vi.fn(), share: vi.fn() }))
 vi.mock("@/hooks/use-artifact-agent-dispatch", () => ({ useArtifactAgentDispatch: () => ({ dispatch: state.dispatch, ready: false }) }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: state.user } } }) }))
@@ -10,7 +11,22 @@ vi.mock("@/components/features/chat/artifact-context/viewer/artifact-slides-prev
 vi.mock("@/components/features/chat/artifact-context/viewer/artifact-dashboard-preview", () => ({ ArtifactDashboardPreview: ({selectMode,onSelect}:{selectMode:boolean;onSelect:(value:{selector:string;quote:string})=>void}) => <button disabled={!selectMode} onClick={() => onSelect({selector:"#typed",quote:"Typed heading"})}>Pick typed element</button> }))
 import { artifactProjectDocument } from "@/lib/pages/artifact-project-preview"
 import { ArtifactProject } from "../artifact-project"
-afterEach(() => { cleanup(); vi.clearAllMocks(); state.data.can_write = true; state.user = "owner"; localStorage.clear() })
+// Durable draft storage: a put lands on "disk" only when released (strict IndexedDB commit).
+const disk = new Map<string,string>()
+const held: (() => void)[] = []
+let hold = false
+const release = () => { for (const done of held.splice(0)) done() }
+const row = (human:string, kind:string) => JSON.stringify([human, kind, "w", "demo"])
+beforeEach(() => {
+ disk.clear(); held.length = 0; hold = false
+ setArtifactDraftStore({
+  get: async key => disk.get(JSON.stringify(key)),
+  put: (key, text) => new Promise<void>(resolve => { const done = () => { disk.set(JSON.stringify(key), text); resolve() }; if (hold) held.push(done); else done() }),
+  delete: async key => { disk.delete(JSON.stringify(key)) },
+  purge: async () => { disk.clear() },
+ })
+})
+afterEach(() => { cleanup(); vi.clearAllMocks(); state.data.can_write = true; state.user = "owner"; localStorage.clear(); setArtifactDraftStore(undefined) })
 it("switches screens, restores with the latest base and shares only the selected version", () => {
  render(<ArtifactProject workspaceId="w" slug="demo" />)
  fireEvent.click(screen.getByRole("button", { name: "details.html" }))
@@ -32,18 +48,20 @@ it("keeps all write controls unavailable to a reader", () => {
  expect(screen.queryByRole("textbox")).toBeNull()
 })
 
-it("never moves an unsent draft into another user browser scope", () => {
- const storage = new Map<string,string>()
- vi.mocked(localStorage.getItem).mockImplementation(key => storage.get(key) ?? null)
- vi.mocked(localStorage.setItem).mockImplementation((key,value) => { storage.set(key,value) })
- vi.mocked(localStorage.removeItem).mockImplementation(key => { storage.delete(key) })
+it("never moves an unsent draft into another user browser scope", async () => {
  const view=render(<ArtifactProject workspaceId="w" slug="demo" />)
  fireEvent.change(screen.getByLabelText("Comment for agent"),{target:{value:"Owner private draft"}})
- expect(localStorage.getItem("artifact-comment:owner:w:demo")).toBe("Owner private draft")
+ await waitFor(() => expect(disk.get(row("owner","artifact-comment"))).toBe("Owner private draft"))
  state.user="reader"
  view.rerender(<ArtifactProject workspaceId="w" slug="demo" />)
  expect(screen.getByLabelText("Comment for agent")).toHaveValue("")
- expect(localStorage.getItem("artifact-comment:reader:w:demo")).toBeNull()
+ await act(async () => {})
+ expect(screen.getByLabelText("Comment for agent")).toHaveValue("")
+ expect(disk.has(row("reader","artifact-comment"))).toBe(false)
+ view.unmount()
+ state.user="owner"
+ render(<ArtifactProject workspaceId="w" slug="demo" />)
+ await waitFor(() => expect(screen.getByLabelText("Comment for agent")).toHaveValue("Owner private draft"))
 })
 
 it("retains 500 Unicode codepoints in a normalized selected quote sent to the agent", () => {
@@ -253,20 +271,33 @@ it("removes the private iframe after a refused source save",async()=>{
  expect(screen.getByLabelText("Source file")).toHaveValue("Private draft")
 })
 
-it("offers an unsaved source draft back after the tab was lost, and forgets it after save",async()=>{
- const storage = new Map<string,string>()
- vi.mocked(localStorage.getItem).mockImplementation(key => storage.get(key) ?? null)
- vi.mocked(localStorage.setItem).mockImplementation((key,value) => { storage.set(key,value) })
- vi.mocked(localStorage.removeItem).mockImplementation(key => { storage.delete(key) })
+it("offers an unsaved source draft back after the browser was killed, once its strict write committed, and forgets it after save",async()=>{
+ hold=true
  const first=render(<ArtifactProject workspaceId="w" slug="demo" />)
  fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
  fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"Typed before the crash"}})
- expect(storage.get("artifact-source:owner:w:demo")).toContain("Typed before the crash")
+ await waitFor(() => expect(held.length).toBeGreaterThan(0))
+ // Nothing is on disk until the durable commit completes; localStorage is not used.
+ expect(disk.has(row("owner","artifact-source"))).toBe(false)
+ await waitFor(() => { release(); expect(disk.get(row("owner","artifact-source"))).toContain("Typed before the crash") })
+ expect(localStorage.setItem).not.toHaveBeenCalled()
+ hold=false
  first.unmount()
  render(<ArtifactProject workspaceId="w" slug="demo" />)
  fireEvent.click(await screen.findByRole("button",{name:"Restore source draft"}))
  expect(screen.getByLabelText("Source file")).toHaveValue("Typed before the crash")
  fireEvent.click(screen.getByRole("button",{name:"Save project"}))
  await act(async()=>state.save.mock.calls[0][1].onSuccess({version:3}))
- expect(storage.has("artifact-source:owner:w:demo")).toBe(false)
+ await waitFor(() => expect(disk.has(row("owner","artifact-source"))).toBe(false))
+})
+
+it("offers a source draft kept in localStorage by an older build and moves it into durable storage",async()=>{
+ const legacy=JSON.stringify({path:"index.html",body:{base_version:2,entrypoint:"index.html",files:[{path:"index.html",media_type:"text/html",content:"Legacy draft"}]}})
+ vi.mocked(localStorage.getItem).mockImplementation(key => key==="artifact-source:owner:w:demo" ? legacy : null)
+ render(<ArtifactProject workspaceId="w" slug="demo" />)
+ fireEvent.click(await screen.findByRole("button",{name:"Restore source draft"}))
+ expect(screen.getByLabelText("Source file")).toHaveValue("Legacy draft")
+ await waitFor(() => expect(localStorage.removeItem).toHaveBeenCalledWith("artifact-source:owner:w:demo"))
+ expect(JSON.parse(disk.get(row("owner","artifact-source"))!).body.files[0].content).toBe("Legacy draft")
+ vi.mocked(localStorage.getItem).mockReset().mockReturnValue(null)
 })
