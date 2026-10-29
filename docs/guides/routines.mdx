@@ -323,7 +323,7 @@ The main win is a real multiline `prompt` via YAML's literal block scalar (`|`) 
 | `resources` | object | Agent-declared capability manifest — `datastores[]` and `tools[]` the routine touches that **can't** be inferred from the step graph. **Declared AND enforced at run time** against the crew's container resources — see [Required resources](#required-resources) below. See [Capability manifest](#capability-manifest) below for the shape. |
 | `max_cost_usd` | number | Runtime cost cap; run aborts if exceeded between steps. |
 | `concurrency_key` | string | Template that gates how many runs can be in flight at once for the same workspace + rendered key. Typical pattern `"{{ inputs.account_id }}"` to serialise per-tenant runs. Empty (default) = no gate. See [Concurrency + idempotency](/guides/routines-cookbook#recipe-5-—-idempotent-routine-with-concurrency-key) recipe and the fail-fast note in [Troubleshooting](#run-returns-500-pipeline-concurrency_key-rendered-to-empty-value). |
-| `max_concurrent` | integer | Cap on simultaneous runs sharing the resolved `concurrency_key`. Defaults to `1` when `concurrency_key` is set (strict per-key serialisation); ignored otherwise. |
+| `max_concurrent` | integer | Cap on simultaneous runs sharing the resolved `concurrency_key`. Defaults to `1` when `concurrency_key` is set (strict per-key serialisation); ignored otherwise. With the default queue policy, new work at full capacity waits instead of failing: a webhook start waits up to 24 h, and a cron schedule keeps at most one waiting occurrence (later ones are recorded as `SKIPPED`). The wait reason is visible in the routine detail and in `crewship routine pending list`. |
 | `concurrency_policy` | string | `queue` (default) or `skip`. With `skip`, a scheduled fire or a webhook delivery that finds the slot taken is dropped on purpose: the schedule records `SKIPPED` (no failure, alert or circuit-breaker tick) and the webhook answers `200 {"status":"SKIPPED"}`. Needs a `concurrency_key`. In the New routine dialog it is **Skip the new start**. |
 | `guardrails` | object | Per-routine [Lookout](/guides/lookout) policy. `guardrails.input.prompt_injection.action`: `block` (default) \| `sanitize` \| `log`. |
 | `eval` | object | Continuous online grading. See [Online eval](#online-eval-sampler) below. |
@@ -960,6 +960,32 @@ Both forms are workspace-fenced: a topic delivery never reaches a run in another
 
 A `code` step has a `runtime`. Two runtimes are wired today — **`expr`** and **`cel`** — both in-process, pure-Go, token-zero (no container, no LLM, no filesystem, no network). Use `expr` for a single boolean comparison (wake-gate probes); reach for `cel` as soon as you need real logic (booleans, arithmetic, string/list ops) — its own code comments call it out as the general-purpose deterministic primitive.
 
+#### Typed data in code steps
+
+CEL and expr receive runtime values as data, never as source text. Prefer
+`inputs.amount` and `steps.parse.output`; identifiers containing hyphens use
+brackets, for example `steps["parse-invoice"].output`. Legacy simple references
+such as `{{ inputs.amount }}` (including a whole ordinary quoted reference)
+translate to typed selectors during validation/execution. Stored definitions
+are not rewritten. Embedded text and expressions inside templates are rejected
+with guidance when saving; existing definitions fail closed at execution.
+Use CEL operations such as `"prefix " + inputs.name` instead.
+
+Step outputs that contain one complete JSON value retain that value's type:
+`7`, `"7"`, `true`, arrays and `null` differ. Invalid or trailing JSON remains
+raw text. `steps.parse.output` is the complete value; object fields also have
+shortcuts such as `steps.parse.total`. An object's own `output` property stays
+at `steps.parse.output.output`. Missing selectors fail rather than rendering
+empty. Legacy dotted paths now traverse segments; use explicit brackets for
+a key containing dots (`inputs.a["b.c"]`). Templates inside raw, bytes or
+triple quoted literals are rejected; literals without templates are unchanged.
+
+Credential resolution keeps its existing explicit `{{ secrets.TYPE }}`
+declarations and workspace/crew scope. A direct `secrets.TYPE` selector alone
+does not request a credential or enumerate the vault. Output/error scrubbing
+is retained. Lazy step decoding avoids unused outputs for ordinary selectors;
+whole-map operations can still decode all outputs and are not a memory budget.
+
 #### `runtime: expr` (wired, token-zero)
 
 ```yaml
@@ -967,13 +993,13 @@ A `code` step has a `runtime`. Two runtimes are wired today — **`expr`** and *
   type: code
   code:
     runtime: expr
-    code: "{{ inputs.spend_usd }} > {{ inputs.threshold_usd }}"
+    code: "inputs.spend_usd > inputs.threshold_usd"
 ```
 
 `expr` evaluates a **single comparison** and emits `true` or `false`:
 
 - Operators: `>`  `>=`  `<`  `<=`  `==`  `!=`.
-- The body is `Render()`-ed first, so `{{ inputs.x }}` / `{{ steps.y.output }}` placeholders substitute before evaluation.
+- Runtime inputs and step outputs are typed operands, separate from expression source. Simple legacy placeholders translate to selectors.
 - Anything that isn't a single comparison (multiple operators, function calls, arbitrary code) **fails closed** with a clear error — `expr` is deliberately not a scripting language.
 
 This is the canonical primitive for **agentless** probes and **schedule wake-gates** (emit `true` only when work is needed). See [Wake gates](#wake-gates).
@@ -1458,7 +1484,7 @@ crewship routine step-run notify-webhook post-it --input @payload.json     # htt
 ```
 
 - **`--input`** is the step's inputs fixture — a JSON object, inline or `@file.json`. The step's `{{ inputs.X }}` refs resolve against it.
-- **`--outputs`** seeds upstream `{{ steps.X.output }}` refs — a JSON object mapping `step_id` → that step's output (a string, or any JSON value, which is stringified). **Most non-first steps read an upstream output**, so without `--outputs` those refs render **empty** and you'd be iterating against different input than a real run — so the command **warns loudly** (`⚠ step references {{ steps.parse.output }} but no --outputs fixture was provided…`) when a referenced upstream output isn't seeded, across whichever fields the step type actually templates (prompt for `agent_run`; url/body/headers for `http`; input/expression for `transform`; args/env for `script`). Still no DAG traversal — the fixture stands in for upstream steps; nothing upstream executes.
+- **`--outputs`** seeds upstream `{{ steps.X.output }}` refs — a JSON object mapping `step_id` → that step's output (a string, or any JSON value, which is stringified). **Most non-first steps read an upstream output**, so without `--outputs` template refs render **empty** (CEL/expr selectors instead fail for a missing value) and you'd be iterating against different input than a real run — so the command **warns loudly** (`⚠ step references {{ steps.parse.output }} but no --outputs fixture was provided…`) when a referenced upstream output isn't seeded, across whichever fields the step type actually templates (prompt for `agent_run`; url/body/headers for `http`; input/expression for `transform`; args/env for `script`). Still no DAG traversal — the fixture stands in for upstream steps; nothing upstream executes.
 - **`--tier-override`** (`trivial|fast|moderate|smart`) swaps the step's tier for cheap structural iteration on an `agent_run` step; a step-level `model_override` still wins. Ignored for `http`/`script`/`transform` — there's no tier to override.
 - The response is marked `simulated: true` — it does **not** create a run record, so it never shows up in `routine records`/metrics or pollutes the run trace. A `script` step-run still executes for real in the crew's container (real side effects — only the run-record bookkeeping is skipped), and an `http` step-run still goes through the same egress/SSRF guard a real run enforces, not a relaxed check.
 - **Not supported:** `wait` (blocks on external state), `notify`/`call_pipeline` (side effects that don't make sense without a real run), and `code` (needs the same sandboxed-container wiring `script` has, not yet extended here).
@@ -1481,7 +1507,7 @@ Declare `"agentless": true` to get a **token-zero guarantee**: the routine can n
     { "id": "amount", "type": "transform",
       "transform": { "input": "{{ steps.fetch.output }}", "expression": ".spend_usd" } },
     { "id": "judge", "type": "code",
-      "code": { "runtime": "expr", "code": "{{ steps.amount.output }} > 100" } }
+      "code": { "runtime": "expr", "code": "steps.amount.output > 100" } }
   ]
 }
 ```

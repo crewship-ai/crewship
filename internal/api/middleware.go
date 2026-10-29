@@ -108,6 +108,7 @@ type AuthUser struct {
 	SessionID           string
 	TokenID             string
 	CredentialExpiresAt time.Time
+	OriginalCredential  *auth.OriginalCredential `json:"-"`
 }
 
 // UserFromContext returns the authenticated user stored in the request context, or nil if not set.
@@ -251,6 +252,12 @@ type AuthMiddleware struct {
 	db        *sql.DB
 	logger    *slog.Logger
 	streams   *auth.StreamCredentials
+	// observeSession, when set, sees every request a sign-in session
+	// authenticated (never a CLI token), after authentication and before
+	// the handler, with the user's ID and a lookup (a database query, so
+	// call it only when needed) of whether the user administers the
+	// instance. It must not block or change the request.
+	observeSession func(r *http.Request, userID string, isInstanceAdmin func() bool)
 }
 
 // NewAuthMiddleware creates an AuthMiddleware. sessionsStore must back
@@ -397,17 +404,48 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 			}
 		}
 
-		tracked, release := m.streams.Track(r.Context(), epoch, user.ID, user.SessionID, user.TokenID, user.CredentialExpiresAt)
+		tracked, release := m.streams.Track(r.Context(), epoch, user.ID, user.SessionID, user.TokenID, user.CredentialExpiresAt, m.persistedSessionValidator(user.ID, user.SessionID))
 		defer release()
+		if m.db != nil {
+			// Preserve the audience-aware retry outcome when this exact credential
+			// changed after its authoritative read. The additional original-source
+			// snapshot must never turn that race into a forced-login response.
+			if !auth.StreamCredentialCurrent(tracked) {
+				replyError(w, http.StatusServiceUnavailable, "credential state changed; retry the request")
+				return
+			}
+			original, err := captureOriginalHumanCredential(r.Context(), m.db, user, authKind, token)
+			if err != nil {
+				if !auth.StreamCredentialCurrent(tracked) {
+					replyError(w, http.StatusServiceUnavailable, "credential state changed; retry the request")
+					return
+				}
+				if originalCredentialAdmissionError(err) {
+					writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)
+				} else {
+					replyInternalError(w, m.logger, "original credential snapshot unavailable", err)
+				}
+				return
+			}
+			user.OriginalCredential = original
+		}
+		// Revocation may also race the snapshot itself; never deliver its result
+		// through a lease that became invalid while the SQL read was in flight.
 		if !auth.StreamCredentialCurrent(tracked) {
 			replyError(w, http.StatusServiceUnavailable, "credential state changed; retry the request")
 			return
 		}
 		ctx := context.WithValue(tracked, ctxUser, user)
+		if user.OriginalCredential != nil {
+			ctx = auth.WithOriginalCredential(ctx, *user.OriginalCredential)
+		}
 		ctx = context.WithValue(ctx, ctxAuthKind, authKind)
 		r = r.WithContext(ctx)
 		if !m.restrictedRequest(w, r, user.ID) {
 			return
+		}
+		if authKind == AuthKindSession && m.observeSession != nil {
+			m.observeSession(r, user.ID, func() bool { return m.db != nil && isInstanceAdmin(r, m.db) })
 		}
 		next.ServeHTTP(w, r)
 	})

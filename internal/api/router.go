@@ -34,6 +34,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
+	"github.com/crewship-ai/crewship/internal/skills"
 	"github.com/crewship-ai/crewship/internal/ws"
 	dockerclient "github.com/moby/moby/client"
 )
@@ -62,6 +63,16 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
+	craftNativeHTTPConfig  CraftNativeHTTPConfig
+	craftNativeStartupErr  error
+	craftNativeHTTP        *craftNativeHTTP
+	craftNativeDocuments   *craftNativeDocumentsHTTP
+	mooringStartupErr      error
+	mooringHTTPConfig      MooringHTTPConfig
+	mooringHTTP            *collaborationHTTPManager
+	skillGitImportPolicy   skills.GitImportPolicy
+	diffLimits             config.DiffConfig
+	diffs                  *diffComputeBudget
 	documentsServiceSocket string
 	documentsClient        *http.Client
 	documentsSocket        string
@@ -73,6 +84,7 @@ type Router struct {
 
 	issueMutationHandler   *IssueHandler
 	issueMutationWorker    *issueMutationWorker
+	gridcraftOutbox        *gridcraftOutboxWorker
 	transcriptLock         func(context.Context) (func(), error)
 	transcriptSnapshotLock func(context.Context) (func(), error)
 	restrictedWorkflow     *restrictedworkflow.Service
@@ -163,19 +175,21 @@ type Router struct {
 	// govModelJudge is the same resolver as govModelStatus, concretely typed so
 	// the admin judge routes can build a candidate hosted judge. nil → those
 	// routes 503.
-	govModelJudge    *GovModelResolver
-	composioConfig   *config.ComposioConfig
-	keeperConvReader ConversationReader
-	convSearcher     ConversationSearcher
-	missionCallback  MissionCallback
-	scheduleUpdater  ScheduleUpdater
-	logWriter        *logcollector.Writer
-	allowSignup      bool
-	googleClientID   string
-	googleSecret     string
-	authBaseURL      string
-	license          *license.License
-	agentHandler     *AgentHandler
+	govModelJudge       *GovModelResolver
+	composioConfig      *config.ComposioConfig
+	keeperConvReader    ConversationReader
+	convSearcher        ConversationSearcher
+	missionCallback     MissionCallback
+	scheduleUpdater     ScheduleUpdater
+	logWriter           *logcollector.Writer
+	publicPagePasswords config.PublicPagePasswordsConfig
+	pagePublicHandler   *PagePublicHandler
+	allowSignup         bool
+	googleClientID      string
+	googleSecret        string
+	authBaseURL         string
+	license             *license.License
+	agentHandler        *AgentHandler
 	// credentialHandler and skillGenHandler are stashed at
 	// registerCrewsRoutes time so the registerInternalRoutes step
 	// can wire the matching /api/v1/internal/credentials and
@@ -199,11 +213,17 @@ type Router struct {
 	pageBuildImageLookup             func(context.Context) ([]string, error)
 	pageRuntimeOrigin                string
 	pageRuntimeDevelopmentSameOrigin bool
-	pageStudioOrigin                 string
-	storagePath                      string // base path for crew file storage
-	catalogFetcher                   *devcontainer.CatalogFetcher
-	runtimeFetcher                   *devcontainer.RuntimeFetcher
-	dockerClient                     *dockerclient.Client
+	// workbookEditorDetail answers GET /api/v1/admin/instance/workbook-editor;
+	// nil while the embedded workbook editor is off.
+	workbookEditorDetail func() any
+	// workbookEditorBundle names the editor bundle new workbook editor
+	// sessions frame; nil while the embedded workbook editor is off.
+	workbookEditorBundle func(*http.Request) (digest, url string)
+	pageStudioOrigin     string
+	storagePath          string // base path for crew file storage
+	catalogFetcher       *devcontainer.CatalogFetcher
+	runtimeFetcher       *devcontainer.RuntimeFetcher
+	dockerClient         *dockerclient.Client
 	// instanceBackups is Admin › Backups across the instance, kept so tests
 	// can point its instance backup at a temp directory.
 	instanceBackups    *InstanceBackupsHandler
@@ -239,6 +259,7 @@ type Router struct {
 	ratelimitStore *ratelimitcfg.Store // runtime-tunable limiter values; nil → shipped defaults
 	cappedMux      http.Handler        // body-capped mux, NOT rate-limited — the #1333 authenticated-CLI exemption routes here directly
 	cliExemptNeg   *cliExemptNegCache  // bounded negative cache of failed exemption lookups — stops spoofed CLI-prefix bearers from forcing an unthrottled DB lookup per request
+	auditAlerts    *auditChainAlerter  // audit chain break/reseal alerts (audit_chain_alerts.go)
 	journal        journal.Emitter     // Crew Journal emitter; nil → emits become no-ops so dev builds without the server-level wiring still work
 	consolidator   *consolidate.Consolidator
 	// outputBasePath is the host-side root that the container
@@ -872,6 +893,19 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	for _, opt := range opts {
 		opt(r)
 	}
+	var passwordLimitsErr error
+	r.publicPagePasswords, passwordLimitsErr = r.publicPagePasswords.Resolve()
+	if passwordLimitsErr != nil {
+		return nil, fmt.Errorf("new router: %w", passwordLimitsErr)
+	}
+	r.auditAlerts = &auditChainAlerter{db: r.db, logger: r.logger}
+	if writer, ok := r.journal.(interface {
+		SetChainBreakObserver(func(context.Context, string, error))
+	}); ok {
+		writer.SetChainBreakObserver(func(ctx context.Context, workspaceID string, err error) {
+			r.auditAlerts.raise(ctx, auditChainIncident{Kind: "chain_break", Scope: "workspace", WorkspaceID: workspaceID, Reason: err.Error()})
+		})
+	}
 
 	// Now that options have attached the hub and any extra revocation
 	// notifiers, wrap the sessions store so every successful Revoke /
@@ -898,7 +932,20 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	notifiers = append(notifiers, r.revokeNotifiers...)
 	r.sessionsStore = newNotifyingSessionStore(r.sessionsStore, notifiers...)
 
+	limits, err := r.diffLimits.Resolve()
+	if err != nil {
+		return nil, err
+	}
+	r.diffs = newDiffComputeBudget(limits)
 	r.registerRoutes()
+	if r.craftNativeStartupErr != nil {
+		r.Shutdown()
+		return nil, fmt.Errorf("new router: native Craft initialization failed: %w", r.craftNativeStartupErr)
+	}
+	if r.mooringStartupErr != nil {
+		r.Shutdown()
+		return nil, fmt.Errorf("new router: Mooring initialization failed: %w", r.mooringStartupErr)
+	}
 
 	// Close the method-routing hole every Go 1.22 ServeMux has: a request
 	// whose method is not registered for a literal path falls through to a
@@ -1003,6 +1050,19 @@ func (r *Router) SetSteerer(s Steerer) {
 // RouterOption is a functional option for configuring a Router.
 
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	// The configured writer owns the boot snapshot. Do not reread environment
+	// or key files between the instance/journal writes of one request.
+	if provider, ok := r.journal.(interface {
+		SigningKeySnapshot() (*journal.SigningKeys, error)
+	}); ok {
+		keys, err := provider.SigningKeySnapshot()
+		if err != nil {
+			keys = nil
+		}
+		// The alerter rides the same copy: production always configures the
+		// writer, and one request copy keeps the mux's req.Pattern visible.
+		req = req.WithContext(withAuditChainAlerter(journal.WithSigningKeys(req.Context(), keys), r.auditAlerts))
+	}
 	// Order matters: SecurityHeaders runs outermost so headers go on every
 	// response (incl. 403s from the origin check); VersionHeader rides the
 	// same everything-gets-it slot so even error responses let a skewed CLI
@@ -1022,6 +1082,12 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // reference to the DB handle or the Docker client.
 
 func (r *Router) Shutdown() {
+	if r.craftNativeHTTP != nil && r.craftNativeHTTP.agents != nil {
+		r.craftNativeHTTP.agents.Close()
+	}
+	if r.mooringHTTP != nil {
+		r.mooringHTTP.Close()
+	}
 	if r.documentsClient != nil {
 		r.documentsClient.CloseIdleConnections()
 	}
@@ -1034,6 +1100,7 @@ func (r *Router) Shutdown() {
 	})
 
 	r.issueMutationWorker.stop()
+	r.gridcraftOutbox.stop()
 	if r.provisioning != nil {
 		r.provisioning.Stop()
 	}

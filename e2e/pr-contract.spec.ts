@@ -407,7 +407,7 @@ test.describe("PR browser contract subset: saved Document preview fixture", () =
       await expect(page.getByRole("region", { name: "Saved document body" })).toHaveText("Current fixture saved body")
       await expect(page.getByText("Current saved document", { exact: true })).toBeVisible()
       const editor = page.getByRole("link", { name: "Open full editor", exact: true })
-      await expect(editor).toHaveAttribute("href", `/pages?ref=%40${pageId}&workspace_id=${encodeURIComponent(workspaceId)}`)
+      await expect(editor).toHaveAttribute("href", `/pages?ref=${encodeURIComponent(pageId)}&workspace_id=${encodeURIComponent(workspaceId)}`)
       await expect(editor).toHaveAttribute("target", "_blank")
       await page.getByRole("button", { name: phone ? "Back to chat" : "Close document preview", exact: true }).click()
       await expect(page.getByRole("region", { name: "Document preview" })).toHaveCount(0)

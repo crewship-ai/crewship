@@ -26,7 +26,7 @@ func memberCreateActorIn(ctx context.Context, tx *sql.Tx, actor, workspace, role
 
 // Both writers own the transaction and run the returned notification only after
 // COMMIT. Read normalized stored rights after ReplaceIn, never request JSON.
-func (h *WorkspaceHandler) appendMemberCreatedIn(ctx context.Context, tx *sql.Tx, actor, workspace, user, role, stamp string, expected access.Membership) (func(), error) {
+func (h *WorkspaceHandler) appendMemberCreatedIn(ctx context.Context, tx *sql.Tx, actor, workspace, user, role, stamp string, expected access.Membership, provenance ...memberCreationProvenance) (func(), error) {
 	type row struct {
 		Role, Mode, Created, Updated string
 		Revision                     int64
@@ -48,9 +48,14 @@ func (h *WorkspaceHandler) appendMemberCreatedIn(ctx context.Context, tx *sql.Tx
 	if err != nil {
 		return nil, err
 	}
+	payload := map[string]any{"member_id": expected.ID, "subject_user_id": user, "action": "added", "role": role, "access_mode": policy.Mode, "rights": policy.Rights}
+	if len(provenance) > 0 {
+		payload["created_user"] = provenance[0].CreatedUser
+		payload["setup_link_issued"] = provenance[0].SetupLinkIssued
+	}
 	notify, err := appendAuthorizationAudit(ctx, tx, h.policyJournal, journal.Entry{
 		WorkspaceID: workspace, Type: journal.EntryMemberAdded, ActorType: journal.ActorUser, ActorID: actor, Summary: "Workspace member added",
-		Payload: map[string]any{"member_id": expected.ID, "subject_user_id": user, "action": "added", "role": role, "access_mode": policy.Mode, "rights": policy.Rights},
+		Payload: payload,
 	})
 	if err != nil {
 		return nil, err
@@ -64,3 +69,6 @@ func (h *WorkspaceHandler) appendMemberCreatedIn(ctx context.Context, tx *sql.Tx
 	}
 	return notify, nil
 }
+
+// Only non-secret provisioning facts belong in this canonical event.
+type memberCreationProvenance struct{ CreatedUser, SetupLinkIssued bool }

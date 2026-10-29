@@ -1,0 +1,311 @@
+{
+  "profile": "mooring-e3-bounded-json-v1",
+  "status": "proposed negotiated implementation profile; not generic PRD maxima or full wire conformance",
+  "limits": {
+    "raw_bytes": 262144,
+    "canonical_bytes": 262144,
+    "container_depth": 64,
+    "structural_tokens": 32768,
+    "identifier_scalars": 200
+  },
+  "rules": {
+    "framing": "UTF-8 body bytes exclude transport length prefix or NDJSON delimiter; count all body whitespace. Every incoming and outgoing body is bounded, including base64 and envelope.",
+    "depth": "Outer object/array has depth 1; only containers count.",
+    "structural_tokens": "Count each opening object/array delimiter and each comma/colon outside JSON strings, including object keys; closing delimiters do not count.",
+    "strict_json": "Reject duplicate keys, malformed UTF-8, unpaired surrogate escapes, nonfinite binary64. JCS binary64 normalization precedes application semantics.",
+    "identifiers": "1..200 Unicode scalar values excluding U+0000; no Unicode normalization. Only schema Identifier fields, never arbitrary payload fields inferred by key name.",
+    "versions": "Frozen schema Versions grammar unchanged; syntax acceptance does not imply negotiated support.",
+    "expansion": "segments concatenate strings or repeat text count times; utf8_hex supplies exact bytes; expected counts MUST be verified before acceptance assertions."
+  },
+  "resource_cases": [
+    {
+      "id": "raw-exact",
+      "segments": [
+        "\"",
+        {
+          "text": "x",
+          "repeat": 262142
+        },
+        "\""
+      ],
+      "valid": true,
+      "raw_bytes": 262144
+    },
+    {
+      "id": "raw-one-over",
+      "segments": [
+        "\"",
+        {
+          "text": "x",
+          "repeat": 262143
+        },
+        "\""
+      ],
+      "valid": false,
+      "raw_bytes": 262145
+    },
+    {
+      "id": "multibyte-exact",
+      "segments": [
+        "\"",
+        {
+          "text": "é",
+          "repeat": 131071
+        },
+        "\""
+      ],
+      "valid": true,
+      "raw_bytes": 262144
+    },
+    {
+      "id": "multibyte-over",
+      "segments": [
+        "\"",
+        {
+          "text": "é",
+          "repeat": 131072
+        },
+        "\""
+      ],
+      "valid": false,
+      "raw_bytes": 262146
+    },
+    {
+      "id": "depth64",
+      "segments": [
+        {
+          "text": "[",
+          "repeat": 64
+        },
+        "0",
+        {
+          "text": "]",
+          "repeat": 64
+        }
+      ],
+      "valid": true,
+      "depth": 64,
+      "structural_tokens": 64
+    },
+    {
+      "id": "depth65",
+      "segments": [
+        {
+          "text": "[",
+          "repeat": 65
+        },
+        "0",
+        {
+          "text": "]",
+          "repeat": 65
+        }
+      ],
+      "valid": false,
+      "depth": 65,
+      "structural_tokens": 65
+    },
+    {
+      "id": "tokens-exact",
+      "segments": [
+        "[",
+        {
+          "text": "0,",
+          "repeat": 32767
+        },
+        "0]"
+      ],
+      "valid": true,
+      "depth": 1,
+      "structural_tokens": 32768
+    },
+    {
+      "id": "tokens-over",
+      "segments": [
+        "[",
+        {
+          "text": "0,",
+          "repeat": 32768
+        },
+        "0]"
+      ],
+      "valid": false,
+      "depth": 1,
+      "structural_tokens": 32769
+    },
+    {
+      "id": "quoted-structure",
+      "segments": [
+        "{\"text\":\"[{:,\\\"end\"}"
+      ],
+      "valid": true,
+      "depth": 1,
+      "structural_tokens": 2
+    },
+    {
+      "id": "duplicate-key",
+      "segments": [
+        "{\"a\":0,\"a\":1}"
+      ],
+      "valid": false
+    },
+    {
+      "id": "lone-surrogate",
+      "segments": [
+        "\"\\ud800\""
+      ],
+      "valid": false
+    },
+    {
+      "id": "overflow-number",
+      "segments": [
+        "1e400"
+      ],
+      "valid": false
+    },
+    {
+      "id": "canonical-expands-over",
+      "segments": [
+        "[1e20,\"",
+        {
+          "text": "x",
+          "repeat": 262123
+        },
+        "\"]"
+      ],
+      "valid": false,
+      "raw_bytes": 262132,
+      "canonical_bytes": 262149
+    },
+    {
+      "id": "invalid-utf8",
+      "utf8_hex": "22c32822",
+      "valid": false
+    }
+  ],
+  "identifier_cases": [
+    {
+      "id": "empty",
+      "segments": [
+        {
+          "text": "",
+          "repeat": 1
+        }
+      ],
+      "valid": false
+    },
+    {
+      "id": "ascii200",
+      "segments": [
+        {
+          "text": "a",
+          "repeat": 200
+        }
+      ],
+      "valid": true
+    },
+    {
+      "id": "ascii201",
+      "segments": [
+        {
+          "text": "a",
+          "repeat": 201
+        }
+      ],
+      "valid": false
+    },
+    {
+      "id": "bmp200",
+      "segments": [
+        {
+          "text": "é",
+          "repeat": 200
+        }
+      ],
+      "valid": true
+    },
+    {
+      "id": "astral200",
+      "segments": [
+        {
+          "text": "😀",
+          "repeat": 200
+        }
+      ],
+      "valid": true
+    },
+    {
+      "id": "astral201",
+      "segments": [
+        {
+          "text": "😀",
+          "repeat": 201
+        }
+      ],
+      "valid": false
+    },
+    {
+      "id": "nul",
+      "segments": [
+        {
+          "text": "a\u0000b",
+          "repeat": 1
+        }
+      ],
+      "valid": false
+    },
+    {
+      "id": "composed",
+      "segments": [
+        {
+          "text": "é",
+          "repeat": 1
+        }
+      ],
+      "valid": true
+    },
+    {
+      "id": "decomposed",
+      "segments": [
+        {
+          "text": "é",
+          "repeat": 1
+        }
+      ],
+      "valid": true
+    }
+  ],
+  "version_cases": [
+    {
+      "value": "0.0.0",
+      "valid": true
+    },
+    {
+      "value": "999999999.999999999.999999999",
+      "valid": true
+    },
+    {
+      "value": "1000000000.0.0",
+      "valid": false
+    },
+    {
+      "value": "01.0.0",
+      "valid": false
+    },
+    {
+      "value": "1.0.0\n",
+      "valid": false
+    },
+    {
+      "value": "1.0.0-rc1",
+      "valid": false
+    },
+    {
+      "value": "1.0",
+      "valid": false
+    },
+    {
+      "value": "١.0.0",
+      "valid": false
+    }
+  ]
+}

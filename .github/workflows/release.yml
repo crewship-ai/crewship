@@ -114,6 +114,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y rpm rpm2cpio cpio
           bash scripts/check-release-artifacts.sh --strict --dist dist
+      - name: Reject binaries built with the test barrier tag
+        run: bash scripts/check-no-test-barrier.sh dist
       - name: Scan final release artifacts
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
         with:
@@ -220,7 +222,7 @@ jobs:
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
       - name: Login to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -289,7 +291,7 @@ jobs:
       packages: write
     steps:
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

@@ -29,7 +29,8 @@ This is step 3 of a master-key rotation:
   1. Generate a new key:            openssl rand -hex 32
   2. On the server, set ENCRYPTION_KEY_V2=<new key> and
      CREWSHIP_ENCRYPTION_KEY_VERSION=v2 (keep ENCRYPTION_KEY = old key),
-     then restart crewship.
+     then restart crewship. The restart also re-wraps the sealed audit
+     keyring under the new version (same signing keys).
   3. Run:                           crewship admin reencrypt
   4. Keep the exact original ENCRYPTION_KEY value: journal and instance-audit
      MACs still require this v1 root even when failed: 0 and no v1 envelopes

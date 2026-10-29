@@ -1,11 +1,11 @@
 {
   "version": 1,
   "protected_files": {
-    ".github/workflows/ci.yml": "bb3aae551846218b21633f1c065ee726353d393174240a3a5f994c8108819fc4",
-    ".github/workflows/security.yml": "f6ba09c25e1d72ba972e3aa91b36d6687f073ede6aa015accce0542320e7b258",
+    ".github/workflows/ci.yml": "785cf9aff9d1eb10b03761ab50114564a86cee1d9f4d99a7ff8afeb1acca74be",
+    ".github/workflows/security.yml": "c33ba55a4650e15787eca0ea994de968fcf74fa0a0b61eb68211ff133b8fd505",
     ".github/workflows/codeql.yml": "08ba82c71afd5cf02aa224e9f26c543469bfe8bf3417c1e51d7eb76ae095c8bf",
     "scripts/ci/plan.py": "4383e14ede409fff4077013342dd7acb6146d8808ea376c53e4a0202ba1514aa",
-    "scripts/ci/verdict.py": "8b8be020996272e54c39b06822e3d669f7e7b0f435137ed6446d8a4990b9f025"
+    "scripts/ci/verdict.py": "2bf759eef9aeb9f8dfebc46151f723eee6203fe28d87013eacb17cb18bdc4b1a"
   },
   "workflows": {
     ".github/workflows/ci.yml": {
@@ -28,6 +28,7 @@
         "go-race",
         "go-race-api",
         "go-race-api-shards",
+        "go-race-api-template",
         "go-race-cli",
         "go-race-cli-shards",
         "go-shuffle",
@@ -36,6 +37,8 @@
         "image",
         "managed-environments",
         "merge-conflict-markers",
+        "mooring",
+        "mooring-actual",
         "onboarding-default-boots",
         "onboarding-journey",
         "pages-apps",

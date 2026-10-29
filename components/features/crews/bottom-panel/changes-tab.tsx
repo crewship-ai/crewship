@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext } from "./types"
-import { EmptyState } from "./shared"
+import { PanelEmptyText } from "./shared"
 
 // Mirror of internal/api diffResponse (changes endpoint).
 interface ChangedFile {
@@ -74,16 +74,16 @@ export function ChangesTab({ workspaceId, context }: { workspaceId: string; cont
     return () => { cancelled = true }
   }, [url])
 
-  if (!context) return <EmptyState>Select an issue or run to see its changes.</EmptyState>
+  if (!context) return <PanelEmptyText>Select an issue or run to see its changes.</PanelEmptyText>
   if (context.kind !== "mission" && context.kind !== "run") {
-    return <EmptyState>Changes are shown per issue or run.</EmptyState>
+    return <PanelEmptyText>Changes are shown per issue or run.</PanelEmptyText>
   }
-  if (unavailable) return <EmptyState>Change diffs aren&apos;t wired up for this workspace yet.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
-  if (data === null) return <EmptyState>Computing diff…</EmptyState>
-  if (!data.is_repo) return <EmptyState>This workspace isn&apos;t a git repository — no tracked changes.</EmptyState>
+  if (unavailable) return <PanelEmptyText>Change diffs aren&apos;t wired up for this workspace yet.</PanelEmptyText>
+  if (error) return <PanelEmptyText><span className="text-destructive">Failed to load: {error}</span></PanelEmptyText>
+  if (data === null) return <PanelEmptyText>Computing diff…</PanelEmptyText>
+  if (!data.is_repo) return <PanelEmptyText>This workspace isn&apos;t a git repository — no tracked changes.</PanelEmptyText>
   const files = data.files ?? []
-  if (files.length === 0 && !data.diff) return <EmptyState>No changes in the working tree.</EmptyState>
+  if (files.length === 0 && !data.diff) return <PanelEmptyText>No changes in the working tree.</PanelEmptyText>
 
   const totals = files.reduce(
     (acc, f) => ({ add: acc.add + (f.additions ?? 0), del: acc.del + (f.deletions ?? 0) }),

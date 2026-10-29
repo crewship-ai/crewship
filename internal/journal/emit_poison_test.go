@@ -50,6 +50,7 @@ func openPoisonDB(t *testing.T) *sql.DB {
 	`); err != nil {
 		t.Fatalf("schema: %v", err)
 	}
+	addAuditSigningFixture(t, db)
 	t.Cleanup(func() { db.Close() })
 	return db
 }

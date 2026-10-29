@@ -130,10 +130,26 @@ Rotate a user's password.
 
 <Warning>
   The hashed value is written into `users.hashed_password`, the brute-force
-  lockout state is cleared (`failed_login_count=0`, `locked_until=NULL`), and
-  every active session row for that user is revoked as a side effect (the audit
-  trail records `revoked_reason='password_change'`).
+  lockout state is cleared (`failed_login_count=0`, `locked_until=NULL`),
+  every active session row for that user is revoked (the audit trail records
+  `revoked_reason='password_change'`), and every live CLI token of the account
+  is revoked, each with its own `auth.cli_token_revoked` audit entry. All of it
+  commits together with the `auth.password_reset` entry, or none of it does.
+  A running server is not notified, so stop it first.
 </Warning>
+
+The audit entries are signed with the keyring of the instance whose database
+the command writes: `CREWSHIP_AUDIT_KEYRING_PATH` when set, otherwise
+`audit-keyring.json` beside the database file, or in the data directory named
+by `CREWSHIP_HOME` / `CREWSHIP_DATA_DIR` (or the default one, when the database
+is its own). The command never creates a keyring. When it finds none — or two
+different ones — it stops and asks for `CREWSHIP_AUDIT_KEYRING_PATH`; a
+`DATABASE_URL` alone never borrows the unrelated default `~/.crewship` keyring.
+
+The audit keyring it signs with is sealed at rest under the instance's master
+key. The command uses `ENCRYPTION_KEY` (and `ENCRYPTION_KEY_V<N>`,
+`CREWSHIP_ENCRYPTION_KEY_VERSION`) from its environment when set, otherwise
+the values in the data directory's `secrets.env`, as `crewship start` does.
 
 ```bash
 # Interactive: stdin prompt with hidden input (no shell-history leak)
@@ -702,6 +718,14 @@ the server's environment.
 | `--limit` | no | Rows to return, 100 by default, 500 at most. |
 | `--for` | no | One person (email) or workspace (slug). |
 
+### audit verify
+
+`GET /api/v1/admin/instance/audit/verify`. Verifies the whole instance audit
+chain on demand (audited writes check only its tail) and prints the verdict:
+OK, not clean with the `historical_status` of defects behind an authentic tail,
+or broken at the tail, plus the number of unchained fallback records. Exits
+non-zero unless every row verifies. `--format json` prints the raw result.
+
 ### keeper governance
 
 `GET /api/v1/admin/instance/keeper/governance`. What each workspace has
@@ -794,6 +818,26 @@ row with its workspace. The last line totals what the filter matches.
 window: how many decisions it holds, how many let work go on, how often the
 judge failed, the p95 latency and any standing alarm. Below the sample minimum
 there is too little to judge, which is not the same as healthy.
+
+### workbook-editor
+
+`GET /api/v1/admin/instance/workbook-editor`. The embedded workbook editor's
+mode and, in same-host mode, the server's proxy self-check of every public
+Studio origin it knows: the configured one, or those signed-in browsers used.
+For each origin: the check result, whether the editor is disabled there, the
+cause and the problems found. A learned origin shows the ID of the user whose
+signed-in request taught it and `(admin)` once an instance administrator's
+session used it; only the configured origin and those count towards
+`/healthz`. Any signed-in user can make the server learn an origin, so check
+that the others are yours. A learned origin unused for 24 hours is
+forgotten. A disabled origin comes back by itself after
+three consecutive passing checks, five minutes apart. `crewship doctor` reads
+the same detail and repeats the check from your machine.
+
+```
+crewship admin instance workbook-editor
+crewship admin instance workbook-editor -f json
+```
 
 ### retention get
 

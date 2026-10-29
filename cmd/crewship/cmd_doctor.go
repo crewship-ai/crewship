@@ -167,6 +167,11 @@ counters or filter the per-check array.`,
 		// block agent container start); INFO when unknown/older server.
 		runProbe(runCheckLegacyResources)
 
+		// Same-host workbook editor: reads `workbook_editor` off /healthz and
+		// checks from this machine that nothing in front of Crewship
+		// redirects or rewrites /_editor/. INFO when the editor is off.
+		runProbe(runCheckWorkbookEditorProxy)
+
 		// New checks (CRE-XXX): telemetry visibility, DSN reachability,
 		// data-dir perm drift, and CLI staleness. Each one is implemented
 		// as a thin wrapper around a testable helper that accepts state via

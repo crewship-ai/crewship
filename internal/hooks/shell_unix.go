@@ -11,7 +11,7 @@ import (
 // shellCommand builds the host-shell invocation for a hook command line.
 // POSIX hosts run it under `sh -c` — the contract hook authors have always
 // had. nosemgrep: dangerous-exec-command — intentional; trust model
-// documented in shell.go (hook config = owner-only, env sanitized, timeout
+// documented in shell.go (hook config = instance-admin-only, env sanitized, timeout
 // bounded).
 func shellCommand(ctx context.Context, command string) *exec.Cmd {
 	return exec.CommandContext(ctx, "sh", "-c", command) // nosemgrep: dangerous-exec-command

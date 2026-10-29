@@ -1,0 +1,142 @@
+{
+  "format": "mooring.actual-tests.v1",
+  "files": [
+    {
+      "path": "internal/api/mooring_collab_agent_tool_actual_linux_test.go",
+      "tests": [
+        "TestMooringAgentToolActualHandlerOwnsAdmissionAndPhysicalFlush",
+        "TestMooringAgentToolActualHandlerSealsOriginalBeforeNativeDispatch"
+      ]
+    },
+    {
+      "path": "internal/api/mooring_collab_actor_commit_actual_linux_test.go",
+      "tests": [
+        "TestCollaborationActualActorBPrecedesAAckAndCommitsOriginalSQL",
+        "TestCollaborationProductionActorRefusesIncompatibleSessionOffer"
+      ]
+    },
+    {
+      "path": "internal/api/mooring_collab_actor_join_actual_linux_test.go",
+      "tests": [
+        "TestCollaborationActualActorJoinRequiresOriginalCommittedSQLGate"
+      ]
+    },
+    {
+      "path": "internal/api/mooring_collab_actor_owner_review_actual_linux_test.go",
+      "tests": [
+        "TestReviewActualActorLateOwnerCannotSaveOrRunLaterSubmit"
+      ]
+    },
+    {
+      "path": "internal/api/mooring_collab_agent_session_read_actual_linux_test.go",
+      "tests": [
+        "TestCollaborationAgentActualSessionReadKeepsOriginalMandate"
+      ]
+    },
+    {
+      "path": "internal/api/mooring_collab_author_session_actual_linux_test.go",
+      "tests": [
+        "TestCollaborationAuthorActualSessionKeepsIndependentOriginalRights"
+      ]
+    },
+    {
+      "path": "internal/api/mooring_collab_http_actual_linux_test.go",
+      "tests": [
+        "TestMooringHTTPActualTwoHumansJoinReadAndOriginalRevocation"
+      ]
+    },
+    {
+      "path": "internal/api/mooring_collab_http_original_actual_linux_test.go",
+      "tests": [
+        "TestMooringOriginalPublicationPrecedesEarlyOutcomesAndKnownRetry"
+      ]
+    },
+    {
+      "path": "internal/api/mooring_collab_http_page_grant_actual_linux_test.go",
+      "tests": [
+        "TestMooringHTTPActualPageGrantRevocation"
+      ]
+    },
+    {
+      "path": "internal/api/mooring_collab_http_saved_actual_linux_test.go",
+      "tests": [
+        "TestMooringHTTPActualSDKWholeGroupSavedAndPeer",
+        "TestMooringHTTPActualSDKUnobservedPeerDeletePreservesOriginal"
+      ]
+    },
+    {
+      "path": "internal/api/mooring_collab_human_actual_linux_test.go",
+      "tests": [
+        "TestCollaborationHumanActualHTTPRustStoreAndRevocation"
+      ]
+    },
+    {
+      "path": "internal/api/mooring_collab_human_rebind_actual_linux_test.go",
+      "tests": [
+        "TestCollaborationHumanActualRuntimeReplacementPreservesAdmission"
+      ]
+    },
+    {
+      "path": "internal/api/mooring_collab_origin_authority_actual_linux_test.go",
+      "tests": [
+        "TestCollaborationOriginInventoryKeepsActualOriginalAuthor",
+        "TestCollaborationReadonlyOriginInventoryRejectsUnsupportedDocument"
+      ]
+    },
+    {
+      "path": "internal/api/mooring_collab_session_actual_linux_test.go",
+      "tests": [
+        "TestCollaborationSessionActualActivationOwnsOriginalHumanStore",
+        "TestCollaborationSessionActualInitializeSourceABARollsBack"
+      ]
+    },
+    {
+      "path": "internal/api/mooring_collab_session_delivery_actual_linux_test.go",
+      "tests": [
+        "TestCollaborationActualDeliveryRenewRejectsForeignAndRevokedSources"
+      ]
+    },
+    {
+      "path": "internal/mooring/rpc_prepare_rust_linux_test.go",
+      "tests": [
+        "TestRPCPrepareActualRustSQLCommitAndRecovery"
+      ]
+    },
+    {
+      "path": "internal/mooring/runtime_rust_linux_test.go",
+      "tests": [
+        "TestRuntimeActualRustChild"
+      ]
+    },
+    {
+      "path": "internal/mooring/runtime_session_actual_linux_test.go",
+      "tests": [
+        "TestSessionActivationActualRustOwnedDocumentAndBootOwner"
+      ]
+    },
+    {
+      "path": "internal/mooring/runtime_session_origins_actual_linux_test.go",
+      "tests": [
+        "TestSessionOriginInventoryActualRustOwnedDocumentAndSQLFence"
+      ]
+    },
+    {
+      "path": "internal/api/mooring_collab_agent_task_registration_actual_linux_test.go",
+      "tests": [
+        "TestMooringAgentToolActualOriginalTaskRegistration"
+      ]
+    },
+    {
+      "path": "internal/testutil/migrateddb_evidence_test.go",
+      "tests": [
+        "TestActualFailureDBEvidenceSurvivesCleanup"
+      ]
+    },
+    {
+      "path": "internal/mooring/runtime_evidence_test.go",
+      "tests": [
+        "TestActualRuntimeStderrSurvivesFailure"
+      ]
+    }
+  ]
+}

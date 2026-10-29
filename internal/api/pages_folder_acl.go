@@ -73,6 +73,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pages"
 )
@@ -473,6 +474,16 @@ func (h *PageHandler) PutFolderACL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
+	f, before, err := h.folderACLMutationIn(r.Context(), tx, wsID, user.ID, f.ID)
+	if errors.Is(err, access.ErrDenied) {
+		replyError(w, http.StatusForbidden, "current folder administrator required")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "authorize folder permission mutation", err)
+		return
+	}
+
 	if _, err := tx.ExecContext(r.Context(), `
 		INSERT INTO page_folder_acl (folder_id, subject_type, subject_id, can_read, can_write, set_by_user_id, set_at)
 		VALUES (?, ?, ?, 1, ?, ?, ?)
@@ -488,12 +499,25 @@ func (h *PageHandler) PutFolderACL(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "bump folder acl_version", err)
 		return
 	}
+	entry := pageFolderACLRecord{FolderID: f.ID, SubjectType: req.SubjectType, SubjectID: subjectID, CanWrite: req.CanWrite, SetBy: user.ID, SetAt: now}
+	notify, err := h.journalFolderACLTx(r.Context(), tx, wsID, user, f, "set", entry, subjectRef, folderACLAuditChange{before, folderACLAfter(before, entry, false), f.ACLVersion - 1})
+	if err != nil {
+		replyInternalError(w, h.logger, "audit folder permission change", err)
+		return
+	}
+	if err := h.acknowledgeFolderACLIn(r.Context(), tx, f, folderACLAfter(before, entry, false)); err != nil {
+		replyInternalError(w, h.logger, "acknowledge folder permission mutation", err)
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit folder permission change", err)
 		return
 	}
-	entry := pageFolderACLRecord{FolderID: f.ID, SubjectType: req.SubjectType, SubjectID: subjectID, CanWrite: req.CanWrite, SetBy: user.ID, SetAt: now}
-	h.journalFolderACL(r.Context(), wsID, user, f, "set", entry, subjectRef)
+	if notify != nil {
+		notify()
+	}
+
 	broadcastWorkspaceEvent(h.hub, wsID, pageFolderEvent, map[string]any{"slug": f.Slug, "folder_id": f.ID})
 
 	acl, err := h.loadFolderACL(r.Context(), f.ID)
@@ -555,6 +579,7 @@ func (h *PageHandler) DeleteFolderACL(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusNotFound, fmt.Sprintf("folder %q has no permission entry for %s/%s", f.Slug, subjectType, ref))
 		return
 	}
+	subjectRef := h.folderACLSubjectLabel(r.Context(), wsID, found.SubjectType, found.SubjectID)
 	now := h.evaluator().Now().UTC().Format(time.RFC3339)
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
@@ -562,6 +587,28 @@ func (h *PageHandler) DeleteFolderACL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback() }()
+	f, before, err := h.folderACLMutationIn(r.Context(), tx, wsID, user.ID, f.ID)
+	if errors.Is(err, access.ErrDenied) {
+		replyError(w, http.StatusForbidden, "current folder administrator required")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "authorize folder permission mutation", err)
+		return
+	}
+	var live *pageFolderACLRecord
+	for i := range before {
+		if before[i].SubjectType == found.SubjectType && before[i].SubjectID == found.SubjectID {
+			live = &before[i]
+			break
+		}
+	}
+	if live == nil {
+		replyError(w, http.StatusNotFound, "folder permission no longer exists")
+		return
+	}
+	found = live
+
 	res, err := tx.ExecContext(r.Context(),
 		`DELETE FROM page_folder_acl WHERE folder_id = ? AND subject_type = ? AND subject_id = ?`,
 		f.ID, found.SubjectType, found.SubjectID)
@@ -582,11 +629,24 @@ func (h *PageHandler) DeleteFolderACL(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "bump folder acl_version", err)
 		return
 	}
+	notify, err := h.journalFolderACLTx(r.Context(), tx, wsID, user, f, "removed", *found, subjectRef, folderACLAuditChange{before, folderACLAfter(before, *found, true), f.ACLVersion - 1})
+	if err != nil {
+		replyInternalError(w, h.logger, "audit folder permission removal", err)
+		return
+	}
+	if err := h.acknowledgeFolderACLIn(r.Context(), tx, f, folderACLAfter(before, *found, true)); err != nil {
+		replyInternalError(w, h.logger, "acknowledge folder permission mutation", err)
+		return
+	}
+
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit folder permission removal", err)
 		return
 	}
-	h.journalFolderACL(r.Context(), wsID, user, f, "removed", *found, h.folderACLSubjectLabel(r.Context(), wsID, found.SubjectType, found.SubjectID))
+	if notify != nil {
+		notify()
+	}
+
 	broadcastWorkspaceEvent(h.hub, wsID, pageFolderEvent, map[string]any{"slug": f.Slug, "folder_id": f.ID})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -635,6 +695,10 @@ func (h *PageHandler) BatchMoveFolderPages(w http.ResponseWriter, r *http.Reques
 	}
 	body, ok := readCapped(w, r, pages.MaxSpecBytes, "folder batch move request")
 	if !ok {
+		return
+	}
+	if hasPageReviewFields(body) {
+		replyError(w, 400, "batch preview is not supported; no Page was changed")
 		return
 	}
 	var req pageFolderBatchMoveRequest
@@ -692,6 +756,10 @@ func (h *PageHandler) BatchMoveFolderPages(w http.ResponseWriter, r *http.Reques
 			})
 			return
 		}
+		if !workbookPageOwnerOnly(rec, user.ID) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": workbookFolderRefusal + "; nothing was moved", "page": rec.Slug})
+			return
+		}
 		if rec.PagesVersion != *item.PagesVersion {
 			h.writeFolderFenceConflict(w, r, wsID, viewer, rec, f, acl, "pages_version")
 			return
@@ -715,7 +783,7 @@ func (h *PageHandler) BatchMoveFolderPages(w http.ResponseWriter, r *http.Reques
 		if m.rec.FolderID == f.ID {
 			continue // already here: nothing changes, nothing bumps
 		}
-		res, err := tx.ExecContext(r.Context(), folderMoveStatement, f.ID, m.rec.ID, m.rec.PagesVersion, f.ID, f.ACLVersion)
+		res, err := tx.ExecContext(r.Context(), folderMoveStatement, f.ID, m.rec.ID, m.rec.PagesVersion, f.ID, f.ACLVersion, user.ID)
 		if err != nil {
 			replyInternalError(w, h.logger, "move page into folder", err)
 			return
@@ -754,12 +822,15 @@ func (h *PageHandler) BatchMoveFolderPages(w http.ResponseWriter, r *http.Reques
 // folderMoveStatement is the fenced UPDATE both the single move and the batch
 // run: the page's pages_version AND the folder's acl_version, in one
 // statement, so a move and an ACL change that interleave cannot both succeed
-// (§3/12). Arguments: folder id, page id, pages_version, folder id,
-// acl_version.
+// (§3/12). A Page holding a workbook moves only for its owner, which the
+// statement repeats so a workbook imported after the check is not filed by
+// anybody else. Arguments: folder id, page id, pages_version, folder id,
+// acl_version, acting user id.
 const folderMoveStatement = `
 	UPDATE pages SET folder_id = ?, pages_version = pages_version + 1
 	WHERE id = ? AND pages_version = ?
-	  AND EXISTS (SELECT 1 FROM page_folders WHERE id = ? AND acl_version = ?)`
+	  AND EXISTS (SELECT 1 FROM page_folders WHERE id = ? AND acl_version = ?)
+	  AND (owner_user_id = ? OR NOT EXISTS (SELECT 1 FROM gridcraft_heads WHERE page_id = pages.id))`
 
 // ── 5. My access — GET /api/v1/pages/{slug}/access/me ──────────────────────
 
@@ -830,9 +901,10 @@ func (h *PageHandler) MyPageAccess(w http.ResponseWriter, r *http.Request) {
 
 // ── Journal ────────────────────────────────────────────────────────────────
 
-func (h *PageHandler) journalFolderACL(ctx context.Context, wsID string, actor *AuthUser, f *pageFolderRecord, op string, e pageFolderACLRecord, subjectRef string) {
-	if h.journal == nil {
-		return
+func (h *PageHandler) journalFolderACLTx(ctx context.Context, tx *sql.Tx, wsID string, actor *AuthUser, f *pageFolderRecord, op string, e pageFolderACLRecord, subjectRef string, change folderACLAuditChange, auditID ...string) (func(), error) {
+	id := ""
+	if len(auditID) > 0 {
+		id = auditID[0]
 	}
 	right := "can view"
 	if e.CanWrite {
@@ -846,7 +918,8 @@ func (h *PageHandler) journalFolderACL(ctx context.Context, wsID string, actor *
 	if op == "removed" {
 		summary = fmt.Sprintf("%s removed %s from page folder %s", actor.Email, subject, f.Slug)
 	}
-	if _, err := h.journal.Emit(ctx, journal.Entry{
+	return appendAuthorizationAudit(ctx, tx, h.journal, journal.Entry{
+		ID:          id,
 		WorkspaceID: wsID,
 		Type:        entryPageFolderACLChanged,
 		Severity:    journal.SeverityInfo,
@@ -857,8 +930,9 @@ func (h *PageHandler) journalFolderACL(ctx context.Context, wsID string, actor *
 			"folder": f.Slug, "folder_id": f.ID, "op": op,
 			"subject_type": e.SubjectType, "subject_id": e.SubjectID, "subject": subjectRef,
 			"can_write": e.CanWrite, "acl_version": f.ACLVersion, "actor_user_id": actor.ID,
+			"previous_acl_version": change.Version,
+			"previous_acl":         folderACLAuditSnapshot(change.Before),
+			"acl":                  folderACLAuditSnapshot(change.After),
 		},
-	}); err != nil && h.logger != nil {
-		h.logger.Warn("pages: folder permission change was not journalled", "folder", f.Slug, "op", op, "error", err)
-	}
+	})
 }

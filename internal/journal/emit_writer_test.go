@@ -203,6 +203,7 @@ func TestWriter_PersistBatch_RollbackOnPartialFailure(t *testing.T) {
 		t.Fatalf("schema: %v", err)
 	}
 
+	addAuditSigningFixture(t, db)
 	w := NewWriter(db, quietLogger(), WriterOptions{
 		QueueSize:     16,
 		FlushSize:     3,

@@ -61,17 +61,21 @@ import (
 // an agent slug — and is OMITTED, together with a real SubjectID, on the
 // anonymous row that stands for the crews the caller cannot see.
 type pageAccessSubjectWire struct {
-	SubjectType string   `json:"subject_type"`
-	SubjectID   string   `json:"subject_id"`
-	Label       string   `json:"label,omitempty"`
-	Paths       []string `json:"paths"`
+	SubjectType          string                `json:"subject_type"`
+	SubjectID            string                `json:"subject_id"`
+	Label                string                `json:"label,omitempty"`
+	Paths                []string              `json:"paths"`
+	EffectivePermissions pageAccessPermissions `json:"effective_permissions"`
+	Sources              []pageAccessSource    `json:"sources"`
 }
 
 // pageAccessWire is the page endpoint's envelope.
 type pageAccessWire struct {
-	Page       string                  `json:"page"`
-	Subjects   []pageAccessSubjectWire `json:"subjects"`
-	NextCursor string                  `json:"next_cursor,omitempty"`
+	Page         string                  `json:"page"`
+	PageID       string                  `json:"page_id"`
+	PagesVersion int64                   `json:"pages_version"`
+	Subjects     []pageAccessSubjectWire `json:"subjects"`
+	NextCursor   string                  `json:"next_cursor,omitempty"`
 }
 
 // pageAccessRefWire names the subject the subject endpoint was asked about.
@@ -133,7 +137,15 @@ func (h *PageHandler) PageAccess(w http.ResponseWriter, r *http.Request) {
 	defer read.tx.Rollback()
 
 	wsID := WorkspaceIDFromContext(r.Context())
-	role := RoleFromContext(r.Context())
+	role, err := h.liveContentHumanRole(r.Context(), wsID, user.ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, 404, "page not found")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "load current access administrator", err)
+		return
+	}
 	rec, ok := h.grantPage(w, r, wsID)
 	if !ok {
 		return
@@ -151,6 +163,7 @@ func (h *PageHandler) PageAccess(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "load page viewer", err)
 		return
 	}
+	viewer.Role = role
 	ws, err := h.loadAccessWorkspace(r.Context(), wsID)
 	if err != nil {
 		replyInternalError(w, h.logger, "load workspace for page access", err)
@@ -180,6 +193,7 @@ func (h *PageHandler) PageAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	subjects := h.pageAccessSubjects(rec, ws, panels, grants, folders, folderACL, viewer)
+	decoratePageAccess(subjects, rec, ws, folderACL)
 
 	// Keyset over the fixed order: the cursor names the last row sent, and
 	// the next call resumes after it. Recomputing the whole set on each page
@@ -195,7 +209,7 @@ func (h *PageHandler) PageAccess(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	out := pageAccessWire{Page: rec.Slug, Subjects: []pageAccessSubjectWire{}}
+	out := pageAccessWire{Page: rec.Slug, PageID: rec.ID, PagesVersion: rec.PagesVersion, Subjects: []pageAccessSubjectWire{}}
 	end := start + limit
 	if end > len(subjects) {
 		end = len(subjects)
@@ -482,7 +496,7 @@ func pageAccessGrantPaths(grants []pageGrantRecord, match func(pageGrantRecord) 
 		levels[g.Level] = true
 	}
 	var out []string
-	for _, level := range []string{pageGrantRead, pageGrantProduce, pageGrantWrite} {
+	for _, level := range []string{pageGrantRead, pageGrantComment, pageGrantProduce, pageGrantWrite} {
 		if levels[level] {
 			out = append(out, pageReachGrantPage+level)
 		}

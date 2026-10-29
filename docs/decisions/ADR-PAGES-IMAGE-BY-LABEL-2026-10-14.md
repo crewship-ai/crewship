@@ -1,6 +1,6 @@
 # ADR: Pages compiler image is discovered by profile label instead of a configured digest
 
-Date: 2026-10-14 · Status: **proposed** — awaiting maintainer acceptance · Issue: [#3108](https://github.com/crewship-ai/crewship/issues/3108)
+Date: 2026-10-14 · Status: **accepted** — 2026-10-29, accepted by delegated maintainer decision · Issue: [#3108](https://github.com/crewship-ai/crewship/issues/3108)
 
 Motivated by [pages-build-worker-install-2026-10-14.md](../prd/pages-build-worker-install-2026-10-14.md)
 §4.1 (step 0 of its plan). It changes one rule of the current Pages Apps
@@ -79,3 +79,15 @@ stay an explicit operator act.
   host with the same version.
 - Reversing this decision means a new ADR; the explicit override remains the
   fallback in the meantime.
+
+## Acceptance
+
+Accepted on 2026-10-29 by delegated maintainer decision, on the reasoning
+above: the explicit `CREWSHIP_PAGE_BUILD_IMAGE` digest override is retained;
+creating a labelled image requires Docker daemon access, the same trust as
+pointing the configured digest at an image; builds keep `--pull=never` and
+`--network=none`; the post-build fingerprint check is retained; and the
+Pages-off invariant holds. The decision covers every caller of the Page build
+worker, including Artifacts of the Project kind, which build through the same
+`POST /api/v1/pages/{slug}/project/build` path. Switching the repository's own
+CI and `dev.sh` to `crewship page enable` is a separate CI-control change.

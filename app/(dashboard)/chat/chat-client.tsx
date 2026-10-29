@@ -539,8 +539,13 @@ function ChatClientBody() {
     [agent, workspaceId, tree, attachmentPrefix],
   )
 
+  // Drafts whose first send has gone out: their row exists from then on, even
+  // before the fan-out lists it, so returning to one must load it like any chat.
+  const sentDraftsRef = useRef<Set<string>>(new Set())
+
   const handleSend = useCallback(
     (sid: string, text: string) => {
+      sentDraftsRef.current.add(sid)
       autoTitleSession(sid, text)
       // A successful send consumes the URL handoff. Workspace switching
       // remounts ChatPanel, so leaving this value set could auto-send the
@@ -828,6 +833,9 @@ function ChatClientBody() {
           agentMeta={agent}
           sessionKind={activeThread ? classifyThread(activeThread) : "direct"}
           sessionId={sessionId}
+          // Minted here and not sent yet: the server has no row to read, so the
+          // panel waits for its first send instead of probing the id (#4369).
+          draft={draftConversation?.id === sessionId && !sentDraftsRef.current.has(sessionId) && !threadsByAgent[agent.id]?.some((t) => t.id === sessionId)}
           initialInput={handoffForThisSession ? handoff?.prompt : undefined}
           autoSendInitial={handoffForThisSession && !handoff?.draft}
           pageContextSlug={pageHandoffForThisSession ? pageHandoff : undefined}

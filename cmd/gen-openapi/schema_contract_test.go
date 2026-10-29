@@ -13,7 +13,7 @@ var auditedResponseContracts = []struct {
 	{path: "/api/v1/workspaces", componentName: "WorkspaceList"},
 	{path: "/api/v1/workspaces/{workspaceId}", componentName: "Workspace"},
 	{path: "/api/v1/crews", componentName: "CrewList"},
-	{path: "/api/v1/crews/{crewId}", componentName: "Crew"},
+	{path: "/api/v1/crews/{crewId}", componentName: "CrewRead"},
 	{path: "/api/v1/agents", componentName: "AgentList"},
 	{path: "/api/v1/agents/{agentId}", componentName: "Agent"},
 	{path: "/api/v1/projects", componentName: "ProjectList"},

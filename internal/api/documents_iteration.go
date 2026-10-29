@@ -237,3 +237,12 @@ func (h *PageHandler) documentIterationRun(ctx context.Context, a *artifactRunAu
 	err = h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM document_iteration_intents WHERE run_id=?)`, a.RunID).Scan(&selected)
 	return selected, err
 }
+
+// RecordDocumentIteration is wired only to the in-process trusted human bridge.
+// Message metadata and model tools cannot invoke this issuer through a route.
+func (h *PageHandler) RecordDocumentIteration(ctx context.Context, receipt *chataudience.Receipt, message string, intent documents.IterationIntent) error {
+	if h.documentCall == nil {
+		return errors.New("Document iteration is unavailable")
+	}
+	return h.persistDocumentIterationIntent((&http.Request{}).WithContext(ctx), receipt, message, intent)
+}

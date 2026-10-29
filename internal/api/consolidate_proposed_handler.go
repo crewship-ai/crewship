@@ -25,6 +25,7 @@ import (
 // cross-workspace probe gets the same 404 as a non-existent id, no
 // existence leak).
 type ProposedHandler struct {
+	diffs   *diffComputeBudget
 	db      *sql.DB
 	logger  *slog.Logger
 	journal journal.Emitter
@@ -41,6 +42,7 @@ func NewProposedHandler(db *sql.DB, logger *slog.Logger) *ProposedHandler {
 		db:      db,
 		logger:  logger,
 		journal: noopEmitter{},
+		diffs:   defaultDiffComputeBudget(),
 	}
 }
 

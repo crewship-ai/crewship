@@ -77,7 +77,7 @@ Start with [Pages](../specs/pages.md) and [Pages Apps](../specs/pages-apps.md).
 | [pages-folder-permissions-linux-model-2026-09-13.md](pages-folder-permissions-linux-model-2026-09-13.md) | Inherited folder permissions and explicitly bounded acceptance evidence. |
 | [pages-project-authoring-access.md](pages-project-authoring-access.md) | Authoring authority separated from panel visibility and whole-document reads. |
 | [pages-settings-editor-review-proposal-2026-09-10.md](pages-settings-editor-review-proposal-2026-09-10.md) | Editor interactions and acceptance criteria; distinguishes implemented P0 from pending user acceptance. |
-| [pages-build-worker-install-2026-10-14.md](pages-build-worker-install-2026-10-14.md) | Proposal for #3108: enabling Pages Apps with one `crewship page enable` command; implementation in progress, decision proposed in [ADR-PAGES-IMAGE-BY-LABEL-2026-10-14](../decisions/ADR-PAGES-IMAGE-BY-LABEL-2026-10-14.md). |
+| [pages-build-worker-install-2026-10-14.md](pages-build-worker-install-2026-10-14.md) | Proposal for #3108: enabling Pages Apps with one `crewship page enable` command; implemented except §4.3 and the dev/CI step; decision accepted 2026-10-29 in [ADR-PAGES-IMAGE-BY-LABEL-2026-10-14](../decisions/ADR-PAGES-IMAGE-BY-LABEL-2026-10-14.md). |
 
 ## Chat and collaboration
 

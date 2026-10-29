@@ -530,7 +530,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	}
 
 	if err := scanner.Err(); err != nil && ctx.Err() == nil {
-		o.logger.Debug("scanner error", "error", err, "agent_id", req.AgentID)
+		o.loggerForRun(req).Debug("scanner error", "error", err, "agent_id", req.AgentID)
 	}
 
 	// Terminal-envelope resilience: the CLI produced output but exited
@@ -543,7 +543,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	// record and must never infer success from transport EOF.
 	if req.DurableOutputDir == "" && req.HostOutputDir == "" && useStreamJSON && handler != nil && !sawResult && !sawError &&
 		ctx.Err() == nil && totalBytes > 0 {
-		o.logger.Warn("stream ended without terminal result — synthesizing",
+		o.loggerForRun(req).Warn("stream ended without terminal result — synthesizing",
 			"agent_id", req.AgentID,
 			"adapter", req.CLIAdapter,
 		)
@@ -569,7 +569,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	// emit below carries the full stdout+stderr capture (which will be
 	// empty in this case too) so a post-mortem has both signals.
 	if totalBytes == 0 && ctx.Err() == nil {
-		o.logger.Warn("agent run produced no stdout (#545)",
+		o.loggerForRun(req).Warn("agent run produced no stdout (#545)",
 			"agent_id", req.AgentID,
 			"agent_slug", req.AgentSlug,
 			"agent_role", req.AgentRole,
@@ -588,7 +588,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	// store is slow or stuck. ExecID lives on the provider ExecResult so we
 	// record it in the payload for correlation with the exec.command end
 	// event.
-	if req.HostOutputDir != "" {
+	if req.HostOutputDir != "" || req.strictContentPrivacy {
 		return string(captureBuf)
 	}
 	emitCtx := ctx
@@ -618,7 +618,7 @@ func (o *Orchestrator) streamOutput(ctx context.Context, result *provider.ExecRe
 	if result != nil && result.ExecID != "" {
 		payload["exec_id"] = result.ExecID
 	}
-	_, _ = o.getJournal().Emit(emitCtx, JournalEntry{
+	_, _ = o.journalForRun(req).Emit(emitCtx, JournalEntry{
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.CrewID,
 		AgentID:     req.AgentID,

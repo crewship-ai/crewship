@@ -2,12 +2,12 @@
 
 Stav: veřejný návrh z 2026-10-14, revize `main` @ `612908edc`. Řeší
 [#3108](https://github.com/crewship-ai/crewship/issues/3108). Implementováno
-kromě §4.3 (výchozí úložiště projektů) a §8 (odloženo); kontrakt je
+kromě §4.3 (výchozí úložiště projektů), kroku 8 z §5 (dev a CI, viz §4.6) a §8 (odloženo); kontrakt je
 [docs/specs/pages-apps.md](../specs/pages-apps.md), provozní postup
 [docs/guides/pages-apps-operations.mdx](../guides/pages-apps-operations.mdx).
-Změna pravidla „digest image v konfiguraci“ (§4.1) je zapsaná jako navržené
-rozhodnutí [ADR-PAGES-IMAGE-BY-LABEL-2026-10-14](../decisions/ADR-PAGES-IMAGE-BY-LABEL-2026-10-14.md)
-a čeká na souhlas maintainera.
+Změna pravidla „digest image v konfiguraci“ (§4.1) je zapsaná jako
+rozhodnutí [ADR-PAGES-IMAGE-BY-LABEL-2026-10-14](../decisions/ADR-PAGES-IMAGE-BY-LABEL-2026-10-14.md),
+přijaté 2026-10-29 delegovaným rozhodnutím maintainera.
 
 ## 1. Shrnutí
 
@@ -170,6 +170,11 @@ Odpovídající aktualizace OpenAPI proběhne přes `cmd/gen-openapi`.
   odvodí podle §4.2, protože `CREWSHIP_NEXTJS_URL` je `http://localhost:<next port>`.
 - `scripts/test-pages-apps.sh` a CI (`ci.yml:479-489`) použijí `crewship page enable`
   místo vlastního `docker build`, takže testují cestu zákazníka.
+- **Odloženo (2026-10-29):** změny `dev.sh`, `scripts/test-pages-apps.sh` a
+  `.github/workflows/ci.yml` jsou řídicí soubory CI (`scripts/ci/inventory-guard.py`)
+  a vyžadují samostatný administrátorský dispatch. Do té doby CI i
+  `scripts/test-pages-apps.sh` staví image `docker build` z `tools/pages-build`
+  a připínají ho přes `CREWSHIP_PAGE_BUILD_IMAGE` (explicitní override dál platí).
 
 ## 5. Postup implementace
 
@@ -207,7 +212,7 @@ Kroky 1–3 mají hodnotu samy o sobě a lze je mergnout dřív než zbytek.
 7. Bez `enable` server nespouští žádný Pages kontejner a nevytváří projects adresář.
 8. Bez internetu: `docker save` image z online stroje se stejnou verzí, `docker load`
    na cílovém stroji → Pages Apps zapnuté bez dalšího kroku.
-9. `./dev.sh start` + `crewship seed` na čistém dev stroji s Dockerem → demo
+9. (Odloženo s krokem 8.) `./dev.sh start` + `crewship seed` na čistém dev stroji s Dockerem → demo
    aplikace publikované; s `CREWSHIP_DEV_PAGES=0` seed vypíše jednu zprávu.
 10. Build stránky dál běží s `--pull=never`, `--network=none` a neměnným ID
     (stávající `internal/pagebuild/docker_test.go` beze změny).

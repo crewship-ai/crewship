@@ -1,0 +1,750 @@
+{
+  "profile": "mooring.batch-resolution.v0.4",
+  "status": "shared-planner-regression-vectors-not-transport-conformance",
+  "rules": [
+    "Known immutable outcomes are not revalidated. Definite admission failures and their transitive dependents are excluded from outgoing SCC edges.",
+    "Detect complete operation and atomic-change SCCs among remaining eligible changes; cycles precede acyclic internal forward-order errors.",
+    "Preserve operation order. Whole-change application follows stable topological order.",
+    "Adapter failure names an actual immutable member. It alone receives the direct reason; atomic siblings and descendants retain its original root.",
+    "Group admission failure roots deterministically at the first member unless the validator identifies an actual failing member.",
+    "This shared intersection does not cover identity-conflict persistence, transport/schema validation, authorization or engine correctness."
+  ],
+  "cases": [
+    {
+      "id": "complete-scc-and-descendant",
+      "changes": [
+        {
+          "change_id": "A",
+          "operations": [
+            {
+              "op_id": "A",
+              "dependencies": [
+                "B",
+                "C"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "B",
+          "operations": [
+            {
+              "op_id": "B",
+              "dependencies": [
+                "A"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "C",
+          "operations": [
+            {
+              "op_id": "C",
+              "dependencies": [
+                "B"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "D",
+          "operations": [
+            {
+              "op_id": "D",
+              "dependencies": [
+                "C"
+              ]
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "op_id": "A",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "A",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "B",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "B",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "C",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "C",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "D",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "C",
+          "root_code": "dependency_cycle"
+        }
+      ]
+    },
+    {
+      "id": "cancelled-before-scc",
+      "changes": [
+        {
+          "change_id": "A",
+          "operations": [
+            {
+              "op_id": "A",
+              "dependencies": [
+                "B"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "B",
+          "operations": [
+            {
+              "op_id": "B",
+              "dependencies": [
+                "A"
+              ]
+            }
+          ]
+        }
+      ],
+      "direct_failures": [
+        {
+          "op_id": "A",
+          "code": "task_cancelled"
+        }
+      ],
+      "expected": [
+        {
+          "op_id": "A",
+          "status": "rejected",
+          "code": "task_cancelled",
+          "root_op_id": "A",
+          "root_code": "task_cancelled"
+        },
+        {
+          "op_id": "B",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "A",
+          "root_code": "task_cancelled"
+        }
+      ]
+    },
+    {
+      "id": "unknown-external-before-scc",
+      "changes": [
+        {
+          "change_id": "A",
+          "operations": [
+            {
+              "op_id": "A",
+              "dependencies": [
+                "B",
+                "missing"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "B",
+          "operations": [
+            {
+              "op_id": "B",
+              "dependencies": [
+                "A"
+              ]
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "op_id": "A",
+          "status": "rejected",
+          "code": "unknown_dependency",
+          "root_op_id": "A",
+          "root_code": "unknown_dependency"
+        },
+        {
+          "op_id": "B",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "A",
+          "root_code": "unknown_dependency"
+        }
+      ]
+    },
+    {
+      "id": "prior-rejected-before-scc",
+      "changes": [
+        {
+          "change_id": "A",
+          "operations": [
+            {
+              "op_id": "A",
+              "dependencies": [
+                "B",
+                "old"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "B",
+          "operations": [
+            {
+              "op_id": "B",
+              "dependencies": [
+                "A"
+              ]
+            }
+          ]
+        }
+      ],
+      "prior_outcomes": [
+        {
+          "op_id": "old",
+          "status": "rejected",
+          "code": "target_deleted"
+        }
+      ],
+      "expected": [
+        {
+          "op_id": "A",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "old",
+          "root_code": "target_deleted"
+        },
+        {
+          "op_id": "B",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "old",
+          "root_code": "target_deleted"
+        }
+      ]
+    },
+    {
+      "id": "fixed-point-before-scc",
+      "changes": [
+        {
+          "change_id": "A",
+          "operations": [
+            {
+              "op_id": "A",
+              "dependencies": [
+                "missing"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "B",
+          "operations": [
+            {
+              "op_id": "B",
+              "dependencies": [
+                "C",
+                "A"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "C",
+          "operations": [
+            {
+              "op_id": "C",
+              "dependencies": [
+                "B"
+              ]
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "op_id": "A",
+          "status": "rejected",
+          "code": "unknown_dependency",
+          "root_op_id": "A",
+          "root_code": "unknown_dependency"
+        },
+        {
+          "op_id": "B",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "A",
+          "root_code": "unknown_dependency"
+        },
+        {
+          "op_id": "C",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "A",
+          "root_code": "unknown_dependency"
+        }
+      ]
+    },
+    {
+      "id": "actual-adapter-root-through-atomic-sibling",
+      "changes": [
+        {
+          "change_id": "A",
+          "operations": [
+            {
+              "op_id": "A1",
+              "dependencies": []
+            },
+            {
+              "op_id": "A2",
+              "dependencies": [
+                "A1"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "C",
+          "operations": [
+            {
+              "op_id": "C",
+              "dependencies": [
+                "A2"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "I",
+          "operations": [
+            {
+              "op_id": "I",
+              "dependencies": []
+            }
+          ]
+        }
+      ],
+      "adapter_failures": [
+        {
+          "op_id": "A1",
+          "code": "target_deleted"
+        }
+      ],
+      "expected": [
+        {
+          "op_id": "A1",
+          "status": "rejected",
+          "code": "target_deleted",
+          "root_op_id": "A1",
+          "root_code": "target_deleted"
+        },
+        {
+          "op_id": "A2",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "A1",
+          "root_code": "target_deleted"
+        },
+        {
+          "op_id": "C",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "A1",
+          "root_code": "target_deleted"
+        },
+        {
+          "op_id": "I",
+          "status": "saved"
+        }
+      ]
+    },
+    {
+      "id": "atomic-change-cycle-with-acyclic-op-graph",
+      "changes": [
+        {
+          "change_id": "A",
+          "operations": [
+            {
+              "op_id": "A1",
+              "dependencies": [
+                "B1"
+              ]
+            },
+            {
+              "op_id": "A2",
+              "dependencies": []
+            }
+          ]
+        },
+        {
+          "change_id": "B",
+          "operations": [
+            {
+              "op_id": "B1",
+              "dependencies": [
+                "A2"
+              ]
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "op_id": "A1",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "A1",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "A2",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "A1",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "B1",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "B1",
+          "root_code": "dependency_cycle"
+        }
+      ]
+    },
+    {
+      "id": "acyclic-forward-order-invalid",
+      "changes": [
+        {
+          "change_id": "A",
+          "operations": [
+            {
+              "op_id": "A1",
+              "dependencies": [
+                "A2"
+              ]
+            },
+            {
+              "op_id": "A2",
+              "dependencies": []
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "op_id": "A1",
+          "status": "rejected",
+          "code": "invalid_request",
+          "root_op_id": "A1",
+          "root_code": "invalid_request"
+        },
+        {
+          "op_id": "A2",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "A1",
+          "root_code": "invalid_request"
+        }
+      ]
+    },
+    {
+      "id": "self-cycle-precedes-forward",
+      "changes": [
+        {
+          "change_id": "A",
+          "operations": [
+            {
+              "op_id": "A",
+              "dependencies": [
+                "A"
+              ]
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "op_id": "A",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "A",
+          "root_code": "dependency_cycle"
+        }
+      ]
+    },
+    {
+      "id": "immutable-rejected-replay-not-new-cycle",
+      "changes": [
+        {
+          "change_id": "A",
+          "operations": [
+            {
+              "op_id": "A",
+              "dependencies": [
+                "B"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "B",
+          "operations": [
+            {
+              "op_id": "B",
+              "dependencies": [
+                "A"
+              ]
+            }
+          ]
+        }
+      ],
+      "known_change_ids": [
+        "A"
+      ],
+      "expected": [
+        {
+          "op_id": "A",
+          "status": "rejected",
+          "code": "unknown_dependency",
+          "root_op_id": "A",
+          "root_code": "unknown_dependency"
+        },
+        {
+          "op_id": "B",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "A",
+          "root_code": "unknown_dependency"
+        }
+      ]
+    },
+    {
+      "id": "whole-change-cycle-precedes-internal-forward",
+      "changes": [
+        {
+          "change_id": "A",
+          "operations": [
+            {
+              "op_id": "A1",
+              "dependencies": [
+                "A2",
+                "B"
+              ]
+            },
+            {
+              "op_id": "A2",
+              "dependencies": []
+            }
+          ]
+        },
+        {
+          "change_id": "B",
+          "operations": [
+            {
+              "op_id": "B",
+              "dependencies": [
+                "A2"
+              ]
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "op_id": "A1",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "A1",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "A2",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "A1",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "B",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "B",
+          "root_code": "dependency_cycle"
+        }
+      ]
+    },
+    {
+      "id": "distinct-scc-root-edge-membership",
+      "changes": [
+        {
+          "change_id": "A",
+          "operations": [
+            {
+              "op_id": "a1",
+              "dependencies": [
+                "c"
+              ]
+            },
+            {
+              "op_id": "a2",
+              "dependencies": [
+                "b"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "B",
+          "operations": [
+            {
+              "op_id": "b",
+              "dependencies": [
+                "a2"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "C",
+          "operations": [
+            {
+              "op_id": "c",
+              "dependencies": [
+                "d"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "D",
+          "operations": [
+            {
+              "op_id": "d",
+              "dependencies": [
+                "c"
+              ]
+            }
+          ]
+        },
+        {
+          "change_id": "E",
+          "operations": [
+            {
+              "op_id": "e",
+              "dependencies": [
+                "a1"
+              ]
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "op_id": "a1",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "a2",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "a2",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "a2",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "b",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "b",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "c",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "c",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "d",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "d",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "e",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "a2",
+          "root_code": "dependency_cycle"
+        }
+      ]
+    },
+    {
+      "id": "internal-cycle-first-submitted-actual-member",
+      "changes": [
+        {
+          "change_id": "A",
+          "operations": [
+            {
+              "op_id": "p",
+              "dependencies": [
+                "z"
+              ]
+            },
+            {
+              "op_id": "y",
+              "dependencies": [
+                "z"
+              ]
+            },
+            {
+              "op_id": "z",
+              "dependencies": [
+                "y"
+              ]
+            }
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "op_id": "p",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "y",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "y",
+          "status": "rejected",
+          "code": "dependency_cycle",
+          "root_op_id": "y",
+          "root_code": "dependency_cycle"
+        },
+        {
+          "op_id": "z",
+          "status": "rejected",
+          "code": "dependency_rejected",
+          "root_op_id": "y",
+          "root_code": "dependency_cycle"
+        }
+      ]
+    }
+  ]
+}

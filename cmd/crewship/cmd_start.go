@@ -34,6 +34,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/inbox"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/leader"
 	"github.com/crewship-ai/crewship/internal/license"
 	"github.com/crewship-ai/crewship/internal/logging"
@@ -207,6 +208,16 @@ var startCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
 		}
+		auditKeys, auditPath, err := journal.EnsureSigningKeys(dataDir.Root, cfg.Audit.KeyringPath)
+		if err != nil {
+			return fmt.Errorf("initialize audit keyring: %w", err)
+		}
+		cfg.Audit.Keys, cfg.Audit.KeyringPath = auditKeys, auditPath
+		// Bootstrap exports the app-owned location once, like secrets.env. Normal
+		// request/background writers still share the immutable boot snapshot.
+		if err := os.Setenv(journal.SigningKeysPathEnv, auditPath); err != nil {
+			return err
+		}
 		debugBuffer := logging.NewRingBuffer(500)
 		innerLogger := logging.New(cfg.Logging.Level, "json", os.Stdout)
 		ringHandler := logging.NewRingHandler(innerLogger.Handler(), debugBuffer)
@@ -272,6 +283,23 @@ var startCmd = &cobra.Command{
 		}
 		if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
 			return fmt.Errorf("failed to run migrations: %w", err)
+		}
+		// A rotate-key interrupted between its audit commit and the keyring
+		// rename is finished now; anything its audit entry does not vouch
+		// for is set aside without stopping the start.
+		if auditPath == filepath.Join(dataDir.Root, journal.SigningKeysFile) {
+			changed, notes, err := journal.ResolvePendingSigningKeyRotations(dataDir.Root, pendingRotationLookup(context.Background(), db.DB))
+			for _, note := range notes {
+				logger.Warn("pending audit key rotation", "detail", note)
+			}
+			if err != nil {
+				return fmt.Errorf("settle pending audit key rotation: %w", err)
+			}
+			if changed {
+				if cfg.Audit.Keys, err = journal.LoadSigningKeys(auditPath); err != nil {
+					return fmt.Errorf("load rotated audit keyring: %w", err)
+				}
+			}
 		}
 		// Automations an instance restore left held (`crewship recover`):
 		// schedulers, inbound webhooks and queued work read this in-memory
@@ -483,6 +511,7 @@ var startCmd = &cobra.Command{
 			resolver,
 			chatbridge.BridgeConfig{
 				DocumentCreationEnabled: cfg.Documents.Enabled,
+				ArtifactProjectsEnabled: true, // authoritative recorder checks the workspace feature flag for every send
 				DefaultMemoryMB:         cfg.Container.DefaultMemoryMB,
 				DefaultCPUs:             cfg.Container.DefaultCPUs,
 			},
@@ -491,6 +520,8 @@ var startCmd = &cobra.Command{
 		srv.SetChatHandler(bridge)
 		if apiRouter := srv.APIRouter(); apiRouter != nil {
 			bridge.SetPageChatContextResolver(apiRouter.Pages())
+			bridge.SetDocumentIterationRecorder(apiRouter.Pages())
+			bridge.SetArtifactProjectIntentRecorder(apiRouter.Pages())
 		}
 
 		// Wire mid-turn steering: the API's POST /chats/{id}/steer route
@@ -1268,6 +1299,10 @@ var startCmd = &cobra.Command{
 				// operator's to declare and not ours to assume. See
 				// internal/api/audit_retention.go.
 				go api.StartAuditRetentionSweeper(ctx, deps.DB, logger, 24*time.Hour)
+
+				if apiRouter := srv.APIRouter(); apiRouter != nil {
+					go apiRouter.StartAuditVerification(ctx, time.Hour)
+				}
 
 				// approvals_queue retention (#2233) — same daily shape, for
 				// terminal HITL approval rows that were kept forever before

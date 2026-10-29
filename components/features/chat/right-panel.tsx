@@ -23,6 +23,8 @@ const validTab = (tab?: string): PanelTab => tab === "work" || tab === "memory" 
 interface RightPanelProps {
   agentId: string
   workspaceId: string | null
+  chatId?: string | null
+  viewerId?: string | null
   initialTab?: string
   hideTabs?: boolean
   style?: React.CSSProperties
@@ -40,7 +42,7 @@ interface RightPanelProps {
 }
 
 /** Chat exposes deliverables and work; agent configuration lives on the agent card. */
-export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId, initialTab, hideTabs, style, workHeader }: RightPanelProps) {
+export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId, chatId, viewerId, initialTab, hideTabs, style, workHeader }: RightPanelProps) {
   const chatAgent = useChatAgent()
   const [activeTab, setActiveTab] = useState<PanelTab>(() => validTab(initialTab))
   useEffect(() => { setActiveTab(validTab(initialTab)) }, [initialTab])
@@ -60,7 +62,7 @@ export const RightPanel = React.memo(function RightPanel({ agentId, workspaceId,
       </button>)}
     </div>}
     <div className="min-h-0 flex-1 overflow-y-auto">
-      {activeTab === "memory" ? <PreferencesTab agentId={agentId} workspaceId={workspaceId} /> : activeTab === "artifacts" ? <AgentArtifactsTab agentId={agentId} workspaceId={workspaceId} crewId={chatAgent?.crewId} agentSlug={chatAgent?.slug} />
+      {activeTab === "memory" ? <PreferencesTab agentId={agentId} workspaceId={workspaceId} /> : activeTab === "artifacts" ? <AgentArtifactsTab agentId={agentId} workspaceId={workspaceId} chatId={chatId} viewerId={viewerId} crewId={chatAgent?.crewId} agentSlug={chatAgent?.slug} />
         : <>{workHeader && <div className="p-3">{workHeader}</div>}<AgentWorkTab agentId={agentId} workspaceId={workspaceId} /></>}
     </div>
   </div>

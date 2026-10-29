@@ -329,7 +329,7 @@ func loadEnvironmentImage(ctx context.Context, eo EnvironmentOps, env *Environme
 // AssembleImageArchive writes the saved image archive back out from its
 // entries, reading each file from open.
 func AssembleImageArchive(ctx context.Context, env *Environment, w io.Writer, open BlobOpener) error {
-	tw := tar.NewWriter(w)
+	tw := tar.NewWriter(RestoreWriter(ctx, w))
 	epoch := time.Unix(0, 0)
 	for _, e := range env.Image.Entries {
 		if err := ctx.Err(); err != nil {
@@ -360,7 +360,10 @@ func AssembleImageArchive(ctx context.Context, env *Environment, w io.Writer, op
 				_ = rc.Close()
 				return err
 			}
-			_, err = io.CopyN(tw, rc, n)
+			// Stored layers are replayed work, including decrypted external files.
+			// Charge the same operation budget as archive decoding.
+			input := &restoreReadGuard{ctx: ctx, r: rc, b: readBudget(ctx), decoded: true}
+			_, err = io.CopyN(tw, input, n)
 			_ = rc.Close()
 			if err != nil {
 				return fmt.Errorf("backup: environment blob %s: %w", e.Digest, err)
@@ -437,7 +440,7 @@ func recreateContainer(ctx context.Context, eo EnvironmentOps, env *Environment,
 			notes = append(notes, "no content for "+m.Destination+" in the bundle; it starts empty")
 			continue
 		}
-		err = eo.CopyTo(ctx, id, m.Destination, dropRootEntry(rc))
+		err = eo.CopyTo(ctx, id, m.Destination, dropRootEntry(rc, ctx))
 		_ = rc.Close()
 		if err != nil {
 			return fail(fmt.Errorf("backup: restore content of %s: %w", m.Destination, err))
@@ -459,11 +462,16 @@ func isBuiltinNetwork(mode string) bool {
 
 // dropRootEntry filters a section tar's "." entry: extracting it onto a
 // mount point would try to change the mount point itself.
-func dropRootEntry(r io.Reader) io.Reader {
+func dropRootEntry(r io.Reader, contexts ...context.Context) io.Reader {
+	ctx := context.Background()
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
 	pr, pw := io.Pipe()
 	go func() {
-		tr := tar.NewReader(r)
-		tw := tar.NewWriter(pw)
+		tr := newRestoreTarReader(ctx, r)
+		defer tr.Close()
+		tw := tar.NewWriter(RestoreWriter(ctx, pw))
 		for {
 			hdr, err := tr.Next()
 			if err == io.EOF {

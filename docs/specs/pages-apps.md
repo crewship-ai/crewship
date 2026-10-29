@@ -94,7 +94,7 @@ and labels it with that fingerprint; the server uses an explicitly configured
 `CREWSHIP_PAGE_BUILD_IMAGE` when set, otherwise the newest local image carrying
 its own fingerprint label (`internal/pagebuild/resolve.go`). Without either, the
 build worker is off and no Pages container is started
-([ADR](../decisions/ADR-PAGES-IMAGE-BY-LABEL-2026-10-14.md), proposed). Builds
+([ADR](../decisions/ADR-PAGES-IMAGE-BY-LABEL-2026-10-14.md), accepted 2026-10-29). Builds
 always run from the immutable image ID and never pull. A release upgrade runs
 `crewship page enable` again before building; existing immutable publications do
 not rebuild automatically. Preserve old images and source backups for rollback. V1 SDK changes must preserve

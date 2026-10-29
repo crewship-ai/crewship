@@ -45,7 +45,6 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -53,6 +52,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/testutil/migratedtemplate"
 )
 
 var (
@@ -123,50 +123,13 @@ func buildMigratedTemplate() {
 }
 
 func migrateTemplateAt(path string) error {
-	db, err := database.Open("file:"+path, testSynchronous)
-	if err != nil {
-		return err
-	}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := database.Migrate(context.Background(), db.DB, logger); err != nil {
-		db.Close()
-		return err
-	}
-	// Fold the WAL back into the main file so a plain file copy carries the
-	// complete schema — no -wal/-shm sidecars to copy alongside it.
-	//
-	// QueryRow, not Exec. `PRAGMA wal_checkpoint` reports failure as a RESULT
-	// ROW — (busy, log, checkpointed) — not as an error, and Exec discards
-	// rows. A busy checkpoint through Exec therefore returns nil while leaving
-	// pages in the -wal that the copy does not carry, and every fixture in the
-	// process would silently get a truncated schema. This build is
-	// single-threaded so busy is not realistically reachable, and
-	// TestMigratedDB_SchemaMatchesMigrateRunner would catch it if it were, but
-	// a check that costs one line should not be left to a downstream assertion.
-	var busy, walPages, checkpointed int
-	if err := db.DB.QueryRow("PRAGMA wal_checkpoint(TRUNCATE)").
-		Scan(&busy, &walPages, &checkpointed); err != nil {
-		db.Close()
-		return fmt.Errorf("checkpoint template wal: %w", err)
-	}
-	if busy != 0 {
-		db.Close()
-		return fmt.Errorf(
-			"checkpoint template wal: busy (log=%d pages, checkpointed=%d) — "+
-				"template would be missing schema still held in the -wal",
-			walPages, checkpointed)
-	}
-	if err := db.Close(); err != nil {
-		return err
-	}
-	// Close leaves empty -wal/-shm sidecars behind; the template is the main
-	// file alone, so drop them rather than let a copy-by-directory pick them up.
-	for _, suffix := range []string{"-wal", "-shm"} {
-		if err := os.Remove(path + suffix); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove template %s: %w", suffix, err)
+	if migratedTemplateUseNormalHelper {
+		used, err := buildNormalMigratedTemplate(path)
+		if used {
+			return err
 		}
 	}
-	return nil
+	return migratedtemplate.Build(context.Background(), path)
 }
 
 // MigratedTemplatePath returns the path of the shared migrated template
@@ -203,11 +166,19 @@ func MigratedTemplate() (string, error) {
 // type; reach for .DB when a plain *sql.DB is wanted, or call MigratedSQLDB.
 func MigratedDB(t testing.TB) *database.DB {
 	t.Helper()
+	if actualEvidenceEnabled() {
+		dir, err := newActualEvidenceDBDir()
+		if err != nil {
+			t.Fatal(err)
+		}
+		registerTestDirCleanup(t, dir)
+		return MigratedDBAt(t, filepath.Join(dir, "test.db"))
+	}
 	if p, ok := takePrefetched(); ok {
 		// Same two cleanups, in the same LIFO order, as the synchronous path
 		// below: quiesce the handle first, then remove its directory.
 		registerTestDirCleanup(t, p.dir)
-		t.Cleanup(func() { quiesce(p.db, p.path) })
+		t.Cleanup(func() { closeMigratedTestDB(t, p.db, p.path) })
 		return p.db
 	}
 	return MigratedDBAt(t, filepath.Join(migratedTestDir(t), "test.db"))
@@ -236,7 +207,7 @@ func MigratedDBAt(t testing.TB, path string) *database.DB {
 	if err != nil {
 		t.Fatalf("testutil: %v", err)
 	}
-	t.Cleanup(func() { quiesce(db, path) })
+	t.Cleanup(func() { closeMigratedTestDB(t, db, path) })
 	return db
 }
 
@@ -277,6 +248,9 @@ func openMigratedCopy(path string) (*database.DB, error) {
 	if err := copyFileForTest(template, path); err != nil {
 		return nil, fmt.Errorf("copy migrated template: %w", err)
 	}
+	if err := secureActualDB(path); err != nil {
+		return nil, err
+	}
 	db, err := database.Open("file:"+path, testSynchronous)
 	if err != nil {
 		return nil, fmt.Errorf("open migrated db: %w", err)
@@ -286,6 +260,10 @@ func openMigratedCopy(path string) (*database.DB, error) {
 
 func templatePath() (string, error) {
 	migratedTemplateOnce.Do(func() {
+		if dir, configured := os.LookupEnv(importBundleEnv); configured {
+			migratedTemplatePath, migratedTemplateErr = importMigratedBundle(dir)
+			return
+		}
 		if path, ok := inheritedTemplate(); ok {
 			migratedTemplatePath = path
 			return
@@ -334,6 +312,9 @@ func migratedTestDir(t testing.TB) string {
 func registerTestDirCleanup(t testing.TB, dir string) {
 	t.Helper()
 	t.Cleanup(func() {
+		if retainActualFailure(t, dir) {
+			return
+		}
 		if err := os.RemoveAll(dir); err != nil {
 			leftovers, _ := os.ReadDir(dir)
 			names := make([]string, 0, len(leftovers))
@@ -343,6 +324,16 @@ func registerTestDirCleanup(t testing.TB, dir string) {
 			t.Logf("testutil: test DB temp dir not fully removed (non-fatal): %v; survivors: %v", err, names)
 		}
 	})
+}
+
+// Keep failed actual evidence intact: no forced WAL checkpoint or sidecar unlink.
+func closeMigratedTestDB(t testing.TB, db *database.DB, path string) {
+	if retainActualFailure(t, filepath.Dir(path)) {
+		snapshotActualFailure(t, path)
+		_ = db.Close()
+		return
+	}
+	quiesce(db, path)
 }
 
 // quiesce shuts a test DB down deterministically.

@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+// SandboxHome is a fresh writable home distinct from image-installed tools.
+// The immutable image's /home/agent stays visible and read-only so absolute
+// CLI paths and their symlink targets keep their original identity.
+const SandboxHome = "/crewship-sandbox-home"
+
 var ErrSandboxUnsupported = errors.New("sandbox capability unavailable")
 var ErrSandboxDenied = errors.New("sandbox request denied")
 var ErrSandboxOutputLimit = errors.New("sandbox output limit exceeded")

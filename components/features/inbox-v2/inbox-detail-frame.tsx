@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useEffect, useRef, useState } from "react"
+import { createContext, useContext, useEffect, useRef } from "react"
 import { createPortal } from "react-dom"
 import Link from "next/link"
 import { CheckCircle2, Clock3, Lock, type LucideIcon } from "lucide-react"
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
 import { entityHref } from "@/lib/entity-links"
 import { cn } from "@/lib/utils"
+import { useLayoutBand } from "@/hooks/use-layout-breakpoint"
 
 import { EntryAvatar, entryIdentity } from "./inbox-entry-identity"
 import { ageLabel, entryAttention, entryKindPill, entryTitle, INBOX_ATTENTION } from "./inbox-v2-derive"
@@ -106,23 +107,13 @@ export function DetailHead({ entry, lookup, attention: override }: { entry: Inbo
  * rail's slot while the rail is shown; a RailPart renders into it then and
  * in place otherwise, so each part exists once and never twice.
  */
-export const WIDE_DETAIL_QUERY = "(min-width: 1536px)"
 const RailSlot = createContext<HTMLElement | null>(null)
 const InRail = createContext(false)
 export const RailSlotProvider = RailSlot.Provider
 
 /** True at the width where the Inbox shows its rail. */
 export function useWideDetail(): boolean {
-  const [wide, setWide] = useState(false)
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return
-    const mql = window.matchMedia(WIDE_DETAIL_QUERY)
-    const update = () => setWide(mql.matches)
-    update()
-    mql.addEventListener?.("change", update)
-    return () => mql.removeEventListener?.("change", update)
-  }, [])
-  return wide
+  return useLayoutBand("wide")
 }
 
 /** A part of the detail that moves into the rail on a wide desktop. */

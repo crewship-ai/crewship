@@ -116,6 +116,20 @@ func legacyHeadNativeRow(t *testing.T, db *sql.DB, id any) []any {
 	if err := rows.Scan(pointers...); err != nil {
 		t.Fatal(err)
 	}
+	// Later additive withdrawal columns default to NULL on every legacy row.
+	for len(columns) > 0 && (columns[len(columns)-1] == "publication_withdrawn_at" || columns[len(columns)-1] == "publication_last_withdrawn_at") {
+		if values[len(values)-1] != nil {
+			t.Fatalf("legacy %s default changed: %v", columns[len(columns)-1], values[len(values)-1])
+		}
+		columns, values = columns[:len(columns)-1], values[:len(values)-1]
+	}
+	// Compare every original column; the additive publication field has its own default assertion.
+	if columns[len(columns)-1] == "publication_authority_fingerprint" {
+		if values[len(values)-1] != "legacy-trusted:v1" {
+			t.Fatalf("legacy publication authority default changed: %v", values[len(values)-1])
+		}
+		values = values[:len(values)-1]
+	}
 	for i, value := range values {
 		if b, ok := value.([]byte); ok {
 			copyBytes := make([]byte, len(b))

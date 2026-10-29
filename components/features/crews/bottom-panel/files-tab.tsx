@@ -12,7 +12,7 @@ import { useUserPreference } from "@/hooks/use-user-preference"
 import { apiFetch } from "@/lib/api-fetch"
 
 import type { BottomPanelContext, FileEntry } from "./types"
-import { EmptyState, formatBytes } from "./shared"
+import { PanelEmptyText, formatBytes } from "./shared"
 
 // Files only operate on a container-backed entity — an agent's home dir or
 // a crew's shared tree. The dock router guarantees this narrower context;
@@ -251,16 +251,16 @@ export function FilesTab({ workspaceId, context }: { workspaceId: string; contex
     }
   }, [context, previewPath, workspaceId])
 
-  if (!context) return <EmptyState>Select an agent or crew to browse files.</EmptyState>
-  if (error) return <EmptyState><span className="text-destructive">Failed to load: {error}</span></EmptyState>
-  if (tree === null) return <EmptyState>Loading…</EmptyState>
+  if (!context) return <PanelEmptyText>Select an agent or crew to browse files.</PanelEmptyText>
+  if (error) return <PanelEmptyText><span className="text-destructive">Failed to load: {error}</span></PanelEmptyText>
+  if (tree === null) return <PanelEmptyText>Loading…</PanelEmptyText>
   if (tree.length === 0) {
     return (
-      <EmptyState>
+      <PanelEmptyText>
         {context.kind === "agent"
           ? `No files in ${context.agentName}'s home dir.`
           : "No shared files in this crew yet."}
-      </EmptyState>
+      </PanelEmptyText>
     )
   }
 

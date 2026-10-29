@@ -1,0 +1,10 @@
+{
+  "engineSha": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+  "sourceCatalog": "schemas/wordcraft/capabilities.json",
+  "sourceProfiles": "tools/wordcraft-capabilities/parameter-profiles.json",
+  "catalogSha256": "9f1cb61f8ffb8e4890001aab1a9a222e327a8e98f4531ef50a7b66e28cc0f0cb",
+  "profilesSha256": "7276f698b0a55ae474ee461bec6a1076187d9b77088fe6dda1e62a87fa82a1ae",
+  "sourceCommit": "8f6e907cdd826d3942e8310131b9cd0a219f6f5f",
+  "scope": "isolated C1 candidate qualification only; grants no product permission",
+  "vectorsSha256": "a1eaf0de6aefa06e80bae5d8e0ce56cb0a7f491cbbb386c914d1c048b0e199fb"
+}

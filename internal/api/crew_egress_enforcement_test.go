@@ -263,7 +263,7 @@ func TestCrewUpdate_SwitchingToRestrictedWarnsOnTheResponseThatDidIt(t *testing.
 	req := httptest.NewRequest("PATCH", "/api/v1/crews/crew-1",
 		strings.NewReader(`{"network_mode":"restricted"}`))
 	req.SetPathValue("crewId", "crew-1")
-	req = req.WithContext(withWorkspace(req.Context(), wsID, "OWNER"))
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()
 	h.Update(rr, req)
 	if rr.Code != http.StatusOK {

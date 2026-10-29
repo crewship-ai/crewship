@@ -338,6 +338,18 @@ func buildDocument(routes []route) map[string]any {
 	for name, schema := range documentSchemaComponents() {
 		schemas[name] = schema
 	}
+	_, nativeCraftComponents := craftNativeSchemaCatalog()
+	for name, schema := range nativeCraftComponents {
+		schemas[name] = schema
+	}
+	_, mooringComponents := mooringSchemaCatalog()
+	for name, schema := range mooringComponents {
+		schemas[name] = schema
+	}
+	_, workbookComponents := gridcraftSchemaCatalog()
+	for name, schema := range workbookComponents {
+		schemas[name] = schema
+	}
 	_, slidesComponents := slidesHumanSchemaCatalog()
 	for name, schema := range slidesComponents {
 		schemas[name] = schema
@@ -349,6 +361,26 @@ func buildDocument(routes []route) map[string]any {
 	_, policyComponents := artifactCreationPolicySchemaCatalog()
 	for name, schema := range policyComponents {
 		schemas[name] = schema
+	}
+	_, designComponents := designSchemaCatalog()
+	for name, schema := range designComponents {
+		schemas[name] = schema
+	}
+	artifactCore := artifactProjectCoreComponents()
+	for _, name := range []string{"ArtifactProjectCreateRequest", "ArtifactProjectFileInput", "ArtifactProjectCreateResponse", "ArtifactProjectAvailability", "ArtifactProjectError", "ArtifactProjectFile", "ArtifactProjectManifest", "ArtifactProjectVersion", "ArtifactProjectQuota", "ArtifactProjectPublishRequest", "ArtifactProjectMutationResponse", "ArtifactProjectVersionRequest", "ArtifactProjectShareResponse"} {
+		schemas[name] = artifactCore[name]
+	}
+	_, artifactSlidesComponents := artifactSlidesSchemaCatalog()
+	for name, schema := range artifactSlidesComponents {
+		schemas[name] = schema
+	}
+	_, dashboardDataComponents := artifactDashboardDataSchemaCatalog()
+	for name, schema := range dashboardDataComponents {
+		schemas[name] = schema
+	}
+	artifactFeedback := artifactProjectFeedbackComponents()
+	for _, name := range []string{"ArtifactProjectOrigin", "ArtifactProjectReply", "ArtifactProjectComment", "ArtifactProjectSnapshot", "ArtifactProjectCommentRequest", "ArtifactProjectReplyRequest"} {
+		schemas[name] = artifactFeedback[name]
 	}
 	_, providerLoginComponents := providerLoginSchemaCatalog()
 	for name, schema := range providerLoginComponents {
@@ -404,6 +436,9 @@ func buildDocument(routes []route) map[string]any {
 				"schema":   map[string]any{"type": "string"},
 			})
 		}
+		if rt.method == "GET" && (rt.path == "/api/v1/pages/{slug}/artifact/data" || rt.path == "/api/v1/pages/{slug}/artifact/data/{collection}") {
+			info.query["version"] = queryParam{typ: "integer", required: true}
+		}
 		for name, param := range info.query {
 			schema := map[string]any{"type": param.typ}
 			// requiredQueryParams proves something stronger than OpenAPI's
@@ -443,6 +478,14 @@ func buildDocument(routes []route) map[string]any {
 		// handler reached for. Success responses retain the generic schema
 		// until endpoint-specific schemas are added.
 		for status, response := range responses {
+			// Informational responses (including WebSocket's 101 upgrade) have
+			// headers but no HTTP message body. Do not invent a JSON error body.
+			if status[0] == '1' {
+				if headers := routeSchemaCatalog()[rt.method+" "+rt.path].SuccessHeaders; headers != nil {
+					response.(map[string]any)["headers"] = headers
+				}
+				continue
+			}
 			if status[0] != '2' && status != "304" {
 				response.(map[string]any)["content"] = errorContentForRoute(rt, info)
 			}
@@ -533,6 +576,14 @@ func buildDocument(routes []route) map[string]any {
 
 func routeSchemaCatalog() map[string]DomainSchema {
 	result := map[string]DomainSchema{}
+	artifactSlidesRoutes, _ := artifactSlidesSchemaCatalog()
+	for key, schema := range artifactSlidesRoutes {
+		result[key] = schema
+	}
+	dashboardDataRoutes, _ := artifactDashboardDataSchemaCatalog()
+	for key, schema := range dashboardDataRoutes {
+		result[key] = schema
+	}
 	outboxRoutes, _ := issueOutboxFailedSchemaCatalog()
 	for key, schema := range outboxRoutes {
 		result[key] = schema
@@ -662,6 +713,18 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	for key, schema := range documentSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
+	nativeCraftRoutes, _ := craftNativeSchemaCatalog()
+	for key, schema := range nativeCraftRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	mooringRoutes, _ := mooringSchemaCatalog()
+	for key, schema := range mooringRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	workbookRoutes, _ := gridcraftSchemaCatalog()
+	for key, schema := range workbookRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
 	slidesRoutes, _ := slidesHumanSchemaCatalog()
 	for key, schema := range slidesRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
@@ -672,6 +735,19 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	policyRoutes, _ := artifactCreationPolicySchemaCatalog()
 	for key, schema := range policyRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	designRoutes, _ := designSchemaCatalog()
+	for key, schema := range designRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range artifactProjectCreateSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range artifactProjectVersionSchemaCatalog() {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	for key, schema := range artifactProjectFeedbackSchemaCatalog() {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	providerLoginRoutes, _ := providerLoginSchemaCatalog()
@@ -883,7 +959,7 @@ func auditedResponseName(path string) string {
 		"/api/v1/workspaces":               "WorkspaceList",
 		"/api/v1/workspaces/{workspaceId}": "Workspace",
 		"/api/v1/crews":                    "CrewList",
-		"/api/v1/crews/{crewId}":           "Crew",
+		"/api/v1/crews/{crewId}":           "CrewRead",
 		"/api/v1/agents":                   "AgentList",
 		"/api/v1/agents/{agentId}":         "Agent",
 		"/api/v1/projects":                 "ProjectList",

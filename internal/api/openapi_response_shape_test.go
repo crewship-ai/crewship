@@ -11,13 +11,17 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/appengine"
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/costvis"
 	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
+	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 	"github.com/crewship-ai/crewship/internal/slides"
 	"github.com/crewship-ai/crewship/internal/webhook"
+	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
 )
 
 // The spec's `required` list must be DERIVED from the response struct, not
@@ -47,7 +51,56 @@ var responseShapeContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+
+	{name: "DesignCreateResponse", pointer: "/components/schemas/DesignCreateResponse", value: designCreateResponse{}},
+	{name: "DesignSnapshot", pointer: "/components/schemas/DesignSnapshot", value: designSnapshotResponse{}},
+	{name: "DesignActor", pointer: "/components/schemas/DesignActor", value: designActorResponse{}},
+	{name: "DesignOrigin", pointer: "/components/schemas/ArtifactProjectOrigin", value: designOriginResponse{}},
+	{name: "DesignOperationsResponse", pointer: "/components/schemas/DesignOperationsResponse", value: designOperationsResponse{}},
+	{name: "DesignVersionList", pointer: "/components/schemas/DesignVersionList", value: designVersionListResponse{}},
+	{name: "DesignVersion", pointer: "/components/schemas/DesignVersion", value: artifacts.VersionInfo{}},
+	{name: "DesignVersionReceipt", pointer: "/components/schemas/DesignVersionReceipt", value: artifacts.VersionReceipt{}},
+	{name: "DesignCommentsResponse", pointer: "/components/schemas/DesignCommentsResponse", value: designCommentsResponse{}},
+	{name: "DesignShareResponse", pointer: "/components/schemas/DesignShareResponse", value: designShareResponse{}},
+	{name: "DesignAgentResponse", pointer: "/components/schemas/DesignAgentResponse", value: designAgentResponse{}},
+
+	{name: "ArtifactSlidesProjection", pointer: "/components/schemas/ArtifactSlidesProjection", value: artifacts.ArtifactSlidesProjection{}},
+	{name: "ArtifactSlideAnchor", pointer: "/components/schemas/ArtifactSlideAnchor", value: artifacts.ArtifactSlideAnchor{}},
+	{name: "ArtifactDataCollections", pointer: "/components/schemas/ArtifactDataCollections", value: artifactDataCollectionsResponse{}},
+	{name: "ArtifactDataResponse", pointer: "/components/schemas/ArtifactDataResponse", value: artifactDataResponse{}},
+	{name: "ArtifactDataDocument", pointer: "/components/schemas/ArtifactDataDocument", value: artifactDataDocumentResponse{}},
+	{name: "NativeCraftAgentTaskReceipt", pointer: "/components/schemas/NativeCraftAgentTaskReceipt", value: craftNativeAgentTaskReceipt{}},
+	{name: "NativeCraftAgentStopReceipt", pointer: "/components/schemas/NativeCraftAgentStopReceipt", value: craftNativeAgentStopReceipt{}},
+	{name: "NativeCraftAgentTaskStatus", pointer: "/components/schemas/NativeCraftAgentTaskStatus", value: craftNativeAgentTaskStatus{}},
+	{name: "NativeCraftAgentToolEvent", pointer: "/components/schemas/NativeCraftAgentToolEvent", value: craftNativeAgentToolEvent{}},
+	{name: "NativeCraftAvailability", pointer: "/components/schemas/NativeCraftAvailability", value: craftNativeAvailabilityResponse{}},
+	{name: "NativeCraftRenewal", pointer: "/components/schemas/NativeCraftRenewal", value: craftNativeRenewalResponse{}},
+	{name: "NativeCraftLease", pointer: "/components/schemas/NativeCraftLease", value: craftNativeLeaseResponse{}},
+	{name: "NativeCraftHolder", pointer: "/components/schemas/NativeCraftHolder", value: craftNativeHolderResponse{}},
+	{name: "NativeCraftRequest", pointer: "/components/schemas/NativeCraftRequest", value: craftNativeRequestResponse{}},
+	{name: "NativeCraftInitializeReceipt", pointer: "/components/schemas/NativeCraftInitializeReceipt", value: craftNativeInitializeResponse{}},
+	{name: "NativeCraftDocument", pointer: "/components/schemas/NativeCraftDocument", value: craftNativeDocumentResponse{}},
+	{name: "NativeCraftPreview", pointer: "/components/schemas/NativeCraftPreview", value: craftNativePreviewResponse{}},
+	{name: "NativeCraftShareReceipt", pointer: "/components/schemas/NativeCraftShareReceipt", value: craftNativeRestoreResponse{}},
+	{name: "NativeCraftDocumentQuota", pointer: "/components/schemas/NativeCraftDocumentQuota", value: craftNativeDocumentQuotaResponse{}},
+	{name: "NativeCraftSnapshotReceipt", pointer: "/components/schemas/NativeCraftSnapshotReceipt", value: mooring.NativeSaveReceipt{}},
+	{name: "NativeCraftRestoreReceipt", pointer: "/components/schemas/NativeCraftRestoreReceipt", value: craftNativeRestoreResponse{}},
+	{name: "MooringCommandSession", pointer: "/components/schemas/MooringCommandSession", value: commandProductHTTPResponse{}},
+	{name: "MooringSession", pointer: "/components/schemas/MooringSession", value: collaborationHTTPSessionResponse{}},
+	{name: "NativeArtifactEdit", pointer: "/components/schemas/NativeArtifactEdit", value: nativeArtifactEdit{}},
+	{name: "NativeDocumentProvenance", pointer: "/components/schemas/NativeDocumentProvenance", value: nativeProvenanceResponse{}},
+	{name: "ChatDocumentAccessList", pointer: "/components/schemas/ChatDocumentAccessList", value: chatDocumentAccessResponse{}},
+	{name: "ChatDocumentAccess", pointer: "/components/schemas/ChatDocumentAccess", value: chatDocumentAccess{}},
+	{name: "ChatDocumentTaskView", pointer: "/components/schemas/ChatDocumentTaskView", value: collaborationAgentTaskView{}},
+	{name: "MooringSessionEditor", pointer: "/components/schemas/MooringSession/properties/editor", value: collaborationHTTPSessionEditor{}},
+	{name: "MooringSessionVersions", pointer: "/components/schemas/MooringSession/properties/versions", value: protocol.Versions{}},
+	{name: "SharedCrew", pointer: "/components/schemas/SharedCrew", value: sharedCrewResponse{}},
+	{name: "SharedCrewAgent", pointer: "/components/schemas/SharedCrewAgent", value: sharedCrewAgent{}},
+	{name: "CrewAccessMe", pointer: "/components/schemas/CrewAccessMe", value: crewAccessMeResponse{}},
 	{name: "CredentialFolder", pointer: "/components/schemas/CredentialFolder", value: credentialFolderResponse{}},
+	{name: "RestrictedRoutinePublicationValidation", pointer: "/components/schemas/RestrictedRoutinePublicationValidation", value: routinePublicationValidationResponse{}},
+	{name: "RestrictedRoutinePublication", pointer: "/components/schemas/RestrictedRoutinePublication", value: routinePublicationResponse{}},
+	{name: "RestrictedRoutineUnpublication", pointer: "/components/schemas/RestrictedRoutineUnpublication", value: routineUnpublicationResponse{}},
 	{name: "WorkspaceArtifactCreationPolicyResponse", pointer: "/components/schemas/WorkspaceArtifactCreationPolicyResponse", value: WorkspaceArtifactCreationPolicyResponse{}},
 	{name: "RoutineFolder", pointer: "/components/schemas/RoutineFolder", value: routineFolderResponse{}},
 	{name: "RoutineFolderMoveResult", pointer: "/components/schemas/RoutineFolderMoveResult", value: routineFolderMoveResult{}},
@@ -64,6 +117,12 @@ var responseShapeContracts = []struct {
 	{name: "AgentReleasedV1", pointer: "/components/schemas/AgentReleasedV1", value: agentReleasedResponse{}},
 	{name: "CrewPolicyResponseV1", pointer: "/components/schemas/CrewPolicyResponseV1", value: crewPolicyResponse{}},
 	{name: "DocumentAvailability", pointer: "/components/schemas/DocumentAvailability", value: DocumentAvailability{}},
+	{name: "ArtifactProjectAvailability", pointer: "/components/schemas/ArtifactProjectAvailability", value: artifactProjectAvailabilityResponse{}},
+	{name: "ArtifactProjectSnapshot", pointer: "/components/schemas/ArtifactProjectSnapshot", value: artifactProjectSnapshotResponse{}},
+	{name: "ArtifactProjectMutationResponse", pointer: "/components/schemas/ArtifactProjectMutationResponse", value: artifactProjectMutationResponse{}},
+	{name: "ArtifactProjectShareResponse", pointer: "/components/schemas/ArtifactProjectShareResponse", value: artifactProjectShareResponse{}},
+	{name: "ArtifactProjectReply", pointer: "/components/schemas/ArtifactProjectReply", value: artifactProjectReply{}},
+	{name: "ArtifactProjectComment", pointer: "/components/schemas/ArtifactProjectComment", value: artifactProjectComment{}},
 	{name: "DocumentChatResultsResponse", pointer: "/components/schemas/DocumentChatResults", value: DocumentChatResultsResponse{}},
 	{name: "DocumentChatResult", pointer: "/components/schemas/DocumentChatResults/properties/results/items", value: DocumentChatResult{}},
 	{name: "DocumentStateResponse", pointer: "/components/schemas/DocumentState", value: DocumentStateResponse{}},
@@ -71,6 +130,19 @@ var responseShapeContracts = []struct {
 	{name: "DocumentCheckpointSummary", pointer: "/components/schemas/DocumentCheckpointList/properties/checkpoints/items", value: documentCheckpointSummary{}},
 	{name: "DocumentCheckpoint", pointer: "/components/schemas/DocumentCheckpoint", value: documentCheckpointResponse{}},
 	{name: "DocumentRestoreReceipt", pointer: "/components/schemas/DocumentRestoreReceipt", value: documentRestoreResponse{}},
+	{name: "MooringManifest", pointer: "/components/schemas/MooringManifest", value: mooring.Manifest{}},
+	{name: "MooringCreated", pointer: "/components/schemas/MooringCreated", value: mooringCreatedResponse{}},
+	{name: "MooringRead", pointer: "/components/schemas/MooringRead", value: mooringRead{}},
+	{name: "MooringReceipt", pointer: "/components/schemas/MooringReceipt", value: mooring.Receipt{}},
+	{name: "MooringMandate", pointer: "/components/schemas/MooringMandate", value: mooringMandate{}},
+	{name: "MooringRevoked", pointer: "/components/schemas/MooringRevoked", value: mooringRevoked{}},
+	{name: "WorkbookState", pointer: "/components/schemas/WorkbookState", value: appengine.State{}},
+	{name: "WorkbookReceipt", pointer: "/components/schemas/WorkbookReceipt", value: appengine.Receipt{}},
+	{name: "WorkbookStatus", pointer: "/components/schemas/WorkbookStatus", value: appengine.Status{}},
+	{name: "WorkbookEditorSession", pointer: "/components/schemas/WorkbookEditorSession", value: gridcraftEditorSession{}},
+	{name: "WorkbookCommits", pointer: "/components/schemas/WorkbookCommits", value: gridcraftFeed{}},
+	{name: "WorkbookCommit", pointer: "/components/schemas/WorkbookCommit", value: gridcraftFeedCommit{}},
+	{name: "WorkbookMandate", pointer: "/components/schemas/WorkbookMandate", value: gridcraftMandate{}},
 	{name: "NativeSlidesState", pointer: "/components/schemas/NativeSlidesState", value: slides.State{}},
 	{name: "NativeSlidesReceipt", pointer: "/components/schemas/NativeSlidesReceipt", value: slides.Receipt{}},
 	{name: "DocumentNode", pointer: "/components/schemas/DocumentNode", value: DocumentNode{}},

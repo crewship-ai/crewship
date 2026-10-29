@@ -43,7 +43,6 @@ func openPinningTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db := openFactoryTestDB(t)
 	if _, err := db.ExecContext(context.Background(), `
-ALTER TABLE pipelines ADD COLUMN head_version INTEGER NOT NULL DEFAULT 0;
 CREATE TABLE IF NOT EXISTS pipeline_versions (
 chat_origin_id TEXT,
     id              TEXT PRIMARY KEY,

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/hmac"
 	"database/sql"
 	"errors"
 	"github.com/crewship-ai/crewship/internal/keeper/governance"
@@ -340,13 +341,20 @@ func (h *InstanceAdminHandler) Suspend(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "suspend", err)
 		return
 	}
-	ids, err := revokeCLITokensAuditedTx(ctx, tx, actor.ID, id, now)
+	// Durable: a suspension lifted before a run's next step still stops it.
+	if err := MarkAccessRevokedTx(ctx, tx, id); err != nil {
+		replyInternalError(w, h.logger, "suspend: access revocation marker", err)
+		return
+	}
+	// Suspension only removes access, so it proceeds with a broken chain tail.
+	auditCtx := withSecurityAuditFallback(ctx)
+	ids, err := revokeCLITokensAuditedTx(auditCtx, tx, actor.ID, id, now)
 	if err != nil {
 		replyInternalError(w, h.logger, "suspend: revoke CLI tokens and audit", err)
 		return
 	}
 	tokens := int64(len(ids))
-	if err := auditInstance(ctx, r, tx, "instance.user_suspended", "user", id, "", map[string]any{
+	if err := auditInstance(auditCtx, r, tx, "instance.user_suspended", "user", id, "", map[string]any{
 		"reason": req.Reason, "sessions_revoked": revoked, "cli_tokens_revoked": tokens,
 	}); err != nil {
 		replyInternalError(w, h.logger, "suspend: audit", err)
@@ -657,42 +665,68 @@ func (h *InstanceAdminHandler) RemoveMembership(w http.ResponseWriter, r *http.R
 	wsID := strings.TrimSpace(r.PathValue("workspaceId"))
 	userID := strings.TrimSpace(r.PathValue("userId"))
 	ctx := r.Context()
-	var role string
-	err := h.db.QueryRowContext(ctx,
-		`SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, wsID, userID).Scan(&role)
-	if errors.Is(err, sql.ErrNoRows) {
-		replyError(w, http.StatusNotFound, "not a member of this workspace")
-		return
-	}
-	if err != nil {
-		replyInternalError(w, h.logger, "remove membership: lookup", err)
-		return
-	}
-	if role == "OWNER" {
-		tx, err := h.db.BeginTx(ctx, nil)
-		if err != nil {
-			replyInternalError(w, h.logger, "remove membership: begin", err)
-			return
-		}
-		last, err := lastOwnerTx(ctx, tx, wsID, userID)
-		_ = tx.Rollback()
-		if err != nil {
-			replyInternalError(w, h.logger, "remove membership: owner count", err)
-			return
-		}
-		if last {
-			replyError(w, http.StatusConflict, "this is the workspace's only owner; transfer ownership first")
-			return
-		}
-	}
 	actorID := ""
 	if a := UserFromContext(ctx); a != nil {
 		actorID = a.ID
 	}
+	var role string
+	errDenied := errors.New("active instance administrator required")
+	errMissingMember := errors.New("not a member of this workspace")
+	errLastOwner := errors.New("this is the workspace's only owner; transfer ownership first")
+	authorize := func(tx *sql.Tx) error {
+		// Middleware has already performed any one-time bootstrap. Re-read
+		// authority under the departure's writer lock instead of bootstrapping
+		// again or trusting the request's earlier instance-admin admission.
+		if actorID == "" || !canScope(ctx, scopeInstanceAdmin) {
+			return errDenied
+		}
+		var email string
+		var instanceRole sql.NullString
+		err := tx.QueryRowContext(ctx, `SELECT email, instance_role FROM users
+			WHERE id=? AND suspended_at IS NULL
+			AND NOT EXISTS (SELECT 1 FROM workspace_members WHERE user_id=users.id AND access_mode='restricted')`, actorID).Scan(&email, &instanceRole)
+		if errors.Is(err, sql.ErrNoRows) {
+			return errDenied
+		}
+		if err != nil {
+			return err
+		}
+		if !backup.IsInstanceOwner(email) && instanceRole.String != "ADMIN" {
+			return errDenied
+		}
+		if err := tx.QueryRowContext(ctx,
+			`SELECT role FROM workspace_members WHERE workspace_id=? AND user_id=?`, wsID, userID).Scan(&role); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return errMissingMember
+			}
+			return err
+		}
+		if role == "OWNER" {
+			last, err := lastOwnerTx(ctx, tx, wsID, userID)
+			if err != nil {
+				return err
+			}
+			if last {
+				return errLastOwner
+			}
+		}
+		return nil
+	}
 	audit := func(tx *sql.Tx) error {
 		return auditInstance(ctx, r, tx, "instance.member_removed", "workspace_member", userID, wsID, map[string]any{"role": role})
 	}
-	if err := departWorkspace(ctx, h.db, h.journal, actorID, wsID, userID, audit); err != nil {
+	if err := departWorkspaceAuthorized(ctx, h.db, h.journal, actorID, wsID, userID, authorize, audit); err != nil {
+		switch {
+		case errors.Is(err, errDenied):
+			replyError(w, http.StatusForbidden, errDenied.Error())
+			return
+		case errors.Is(err, errMissingMember):
+			replyError(w, http.StatusNotFound, errMissingMember.Error())
+			return
+		case errors.Is(err, errLastOwner):
+			replyError(w, http.StatusConflict, errLastOwner.Error())
+			return
+		}
 		var needsManual *ErrPagesNeedManualTransfer
 		if errors.As(err, &needsManual) {
 			if !isInstanceAdmin(r, h.db) {
@@ -1067,6 +1101,21 @@ type instanceAuditRow struct {
 // max 500) and ?entity_id= narrow it to one person or workspace.
 // GET /api/v1/admin/instance/audit
 func (h *InstanceAdminHandler) AuditLog(w http.ResponseWriter, r *http.Request) {
+	keys, keyErr := journal.SigningKeysForContext(r.Context())
+	if keyErr != nil {
+		replyInternalError(w, h.logger, "load audit verification keys", keyErr)
+		return
+	}
+	anchor, err := latestInstanceAuditCheckpoint(r.Context(), h.db, keys)
+	if err != nil {
+		replyInternalError(w, h.logger, "read audit checkpoint", err)
+		return
+	}
+	checkpointSeq := int64(0)
+	if anchor != nil {
+		checkpointSeq = anchor.OldTailSeq + 1
+	}
+	provenFailure, failedSeq := false, int64(0)
 	limit := 100
 	if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && v > 0 {
 		limit = min(v, 500)
@@ -1112,14 +1161,56 @@ func (h *InstanceAdminHandler) AuditLog(w http.ResponseWriter, r *http.Request) 
 		if fields.Metadata.Valid {
 			a.Metadata = fields.Metadata.String
 		}
-		a.Integrity = proof.integrity(fields)
+		a.Integrity = proof.integrityWithKeys(keys, fields)
+		if anchor != nil && anchor.HistoricalStatus != "verified" && proof.seq.Valid && proof.seq.Int64 < checkpointSeq && a.Integrity != "entry_verified" {
+			a.Integrity = anchor.HistoricalStatus
+		}
+		if (anchor == nil || proof.seq.Int64 >= checkpointSeq) && a.Integrity == "invalid" {
+			expected, macErr := journal.InstanceAuditMACForKeys(keys, proof.keyID, proof.macVersion, proof.seq.Int64, proof.prev.String, fields)
+			if macErr == nil && !hmac.Equal([]byte(expected), []byte(proof.hash.String)) {
+				provenFailure = true
+				if failedSeq == 0 || proof.seq.Int64 < failedSeq {
+					failedSeq = proof.seq.Int64
+				}
+			}
+		}
 		out = append(out, a)
 	}
 	if err := rows.Err(); err != nil {
 		replyInternalError(w, h.logger, "instance audit: rows", err)
 		return
 	}
+	if err := rows.Close(); err != nil {
+		replyInternalError(w, h.logger, "close audit verification", err)
+		return
+	}
+	if provenFailure {
+		h.logger.Error("instance audit chain integrity failure; inspect audit history before explicit OWNER reseal")
+		raiseAuditChainIncident(r.Context(), auditChainIncident{Kind: "chain_break", Scope: "instance", Seq: failedSeq, Reason: "instance audit row failed its MAC check while listing"})
+	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// AuditVerify walks the whole instance audit chain on demand: read-only, on
+// the pool, never inside a writer transaction. Appends check only the tail,
+// so this (with the backup drill) is where history is verified. The result
+// carries historical_status, unchained_fallback and the first failure.
+// GET /api/v1/admin/instance/audit/verify
+func (h *InstanceAdminHandler) AuditVerify(w http.ResponseWriter, r *http.Request) {
+	keys, err := journal.SigningKeysForContext(r.Context())
+	if err != nil {
+		replyInternalError(w, h.logger, "load audit verification keys", err)
+		return
+	}
+	result, err := journal.VerifyInstanceAuditWithKeys(r.Context(), h.db, keys)
+	if err != nil {
+		replyInternalError(w, h.logger, "verify instance audit", err)
+		return
+	}
+	if result.BrokenSeq > 0 {
+		raiseAuditChainIncident(r.Context(), auditChainIncident{Kind: "chain_break", Scope: "instance", Seq: result.BrokenSeq, Reason: auditIncidentReason(result)})
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────

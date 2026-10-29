@@ -219,6 +219,8 @@ func TestPumpAndDispatch_DoesNotCollideWithHeldLock(t *testing.T) {
 func TestRunAssignment_ReleasesLockBeforeOwnPump_SoOwnQueuedRowDrainsImmediately(t *testing.T) {
 	t.Parallel()
 	h, db, crewID, agentIDs, chatID := dispatchPumpRig(t)
+	// Registered after the rig so LIFO cleanup drains dispatches before its DB closes.
+	t.Cleanup(h.WaitDispatches)
 	setCrewBudget(t, db, crewID, 1)
 	lock := chatbridge.NewAgentRunLock()
 	h.SetAgentRunLock(lock)
@@ -247,10 +249,20 @@ func TestRunAssignment_ReleasesLockBeforeOwnPump_SoOwnQueuedRowDrainsImmediately
 	// a2 must not be stuck QUEUED: A1's own completion pump should have
 	// claimed and run it immediately, because the lock was released BEFORE
 	// finishAssignment (and its pump) ran — not after.
-	final := pollFinalStatus(t, db, a2, map[string]bool{"QUEUED": true, "RUNNING": true}, 1*time.Second)
+	// The pump registers each goroutine before runAssignment returns. Wait for
+	// that actual work, rather than racing its completion against a local timer.
+	h.WaitDispatches()
+	final := statusOf(t, db, a2)
 	if final != "FAILED" {
 		t.Fatalf("a2 final status = %q, want FAILED — it should have been drained by a1's own completion "+
 			"pump (proves the lock was released before, not after, finishAssignment's pump call)", final)
+	}
+	var errMsg string
+	if err := db.QueryRow(`SELECT COALESCE(error_message,'') FROM assignments WHERE id = ?`, a2).Scan(&errMsg); err != nil {
+		t.Fatalf("a2 error message: %v", err)
+	}
+	if errMsg != "orchestrator not available" {
+		t.Errorf("a2 error_message = %q, want %q", errMsg, "orchestrator not available")
 	}
 	if lock.InFlight(agentIDs[0]) {
 		t.Error("lock still reports the agent in-flight after both runs finished")

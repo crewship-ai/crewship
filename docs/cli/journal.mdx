@@ -209,6 +209,18 @@ fi
 [Audit Log](/security/audit#tamper-evidence-the-journal-hash-chain) page for
 the guarantee and what it does (and does not) cover.
 
+Current servers also return `continuation_verified` and `historical_status`. A valid new segment does not authenticate old history whose key
+is missing or whose integrity failed. Whole-history verification still exits
+non-zero in that case. A defect followed by authentic rows is reported with
+`continuation_verified` true and does not block new entries: as
+`historical_invalid` or `historical_unverified` when the row predates the
+keyring upgrade or the last reseal, and as `post_upgrade_invalid` when it is a
+keyring-signed row (damage since the upgrade). Audit appends check only the chain tail
+and refuse when the tail itself does not authenticate; missing keys, database contention and cancellation are
+not reported as proven tampering. After investigation, the current OWNER can
+use [`crewship audit reseal`](/cli/audit#crewship-audit-reseal) to record an
+explicit new segment without rewriting the old rows.
+
 Verification also reconciles the one committed field that is *meant* to change
 after write — entry **priority**. Setting a pin or `permanent` marker is an
 authorised action, so the chain commits to the immutable emit-time value while the

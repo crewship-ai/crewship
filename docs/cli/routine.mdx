@@ -1351,7 +1351,13 @@ to_version, from_hash, to_hash, identical, unified_diff}`.
 `crewship routine rollback <slug> --to N` calls this same endpoint after a
 successful rollback to print a **"What changed"** view against the
 version it just rolled back from — best-effort, so a diff-fetch failure
-never fails the rollback itself.
+never fails the rollback itself, including `413` or `429` preview refusals.
+
+An explicit `routine diff` refusal is an error: `413` exits 1 and says the
+comparison is too large; `429` exits 6 and asks the caller to try again shortly.
+View versions separately or ask an administrator to adjust the shared
+[diff limits](/configuration/environment#diff-preview-computation). The CLI does
+not automatically retry a refused preview.
 
 ## `crewship routine iterate <slug>`
 
@@ -2395,12 +2401,69 @@ crewship routine shared-draft save ROUTINE_ID --file - < draft.json
 
 `shared-draft <routine-id-or-slug>` supports table, JSON and YAML output. Save
 requires `--file` containing one complete JSON snapshot; `-` reads stdin.
-`can_edit` is a read-only server hint and is removed before saving. Unknown
+`can_edit` and `can_publish` are read-only server hints and are removed before saving. Unknown
 fields and incomplete snapshots fail locally. PUT requires the existing
 `workspace:admin` token scope and rechecks current rights, issuers and account.
 A 409 preserves the conflict for review; the CLI performs no hidden GET or retry.
-Saving changes only the collaborative draft. Trusted testing and exact-revision
-review/publication remain required; this command cannot publish or run it.
+Saving changes only the collaborative draft. Publication requires separate
+Publish authority and exact-revision review; this save command cannot publish or run it.
+
+
+### Validate and publish a reviewed shared draft
+
+```bash
+crewship routine draft validate ROUTINE_ID --draft-id ID --revision N --base-revision N
+crewship routine draft publish ROUTINE_ID --draft-id ID --revision N --base-revision N
+```
+
+Both commands send the exact reviewed reference without refreshing or retrying.
+The web editor provides the same flow through **Save shared draft → Check
+saved draft structure → Publish reviewed draft**. A further edit clears the
+check; conflicts require explicit reload. Publication displays its version
+without starting a run. A 422 refusal shows the server's reason and changes
+nothing, so the editor can fix the cause and check again.
+Validate checks structure only (`"scope": "structure_only"`); it is not a test
+run. Publish additionally requires current View, Edit, Publish and the
+referenced agent execution grants. A stale reference or busy writer returns 409.
+Existing triggers, and other saved routines whose `call_pipeline` steps target
+this routine, return 422 and must be removed explicitly before publishing.
+A null description is rejected with 400. Publication stores an immutable authority
+manifest and consumes the draft atomically with its audit event. It does not run
+agents: the generic runner, nested calls and automatic trigger writers refuse the
+published version. Existing `routine draft publish FILE` keeps its legacy
+validation flow.
+
+### Run a Guest-published routine
+
+```bash
+crewship routine run ROUTINE_SLUG --inputs '{"task":"..."}' --wait
+```
+
+A Guest with Run on the routine and on its recorded agents starts a bounded
+manual run of the published version; the publisher's frozen grants and the
+recorded provider credentials must still be current. Logging out does not stop
+an accepted run. Revoked grants, membership removal, suspension, an
+administrator revoking the user's sessions (even after the user logged out), a
+grant issuer losing authority, a rotated agent credential, or the routine being
+withdrawn stop it before its next step, and so does the workspace run limit
+(30 minutes unless an OWNER/ADMIN sets
+`crewship workspace update --guest-routine-max-run-minutes N`, 1-240).
+`--delay` is refused (422) for published routines. A stopped run's `--wait` exits
+nonzero without printing a result. Schedules, webhooks, nested calls and Page
+actions cannot start a published routine.
+
+### Withdraw a Guest publication
+
+```bash
+crewship routine unpublish ROUTINE_ID
+```
+
+Requires Publish on the routine, or workspace OWNER/ADMIN. The published version
+stays in history; new runs are refused and running ones stop before their next
+step. A routine without a current Guest publication, or one already withdrawn,
+returns 409. A shared draft saved before the withdrawal must be reloaded
+(`routine shared-draft`) before publishing; publishing again makes the routine
+runnable for new runs, while runs stopped by the withdrawal stay stopped.
 
 
 ## `crewship routine shared-runs`

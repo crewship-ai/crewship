@@ -322,18 +322,28 @@ func (s *Store) SyncSession(ctx context.Context, sessionID string) error {
 // acquiring a database connection: restore publishes under its DB transaction
 // and must be able to fence JSONL writers without a Store-to-DB lock cycle.
 func (s *Store) appendJSONL(sessionID string, data []byte) error {
+	if err := validateID(sessionID); err != nil {
+		return fmt.Errorf("invalid session ID: %w", err)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	f, ok := s.files[sessionID]
 	if !ok {
-		dir := filepath.Join(s.basePath, "conversations")
-		if err := os.MkdirAll(dir, 0750); err != nil {
+		// The configured store base is trusted. Keep every transcript path below
+		// its opened root, including when an existing directory/file is a symlink.
+		if err := os.MkdirAll(s.basePath, 0750); err != nil {
+			return fmt.Errorf("create conversation storage: %w", err)
+		}
+		root, err := os.OpenRoot(s.basePath)
+		if err != nil {
+			return fmt.Errorf("open conversation storage: %w", err)
+		}
+		defer root.Close()
+		if err := root.MkdirAll("conversations", 0750); err != nil {
 			return fmt.Errorf("create conversation dir: %w", err)
 		}
-		path := filepath.Join(dir, sessionID+".jsonl")
-		var err error
-		f, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
+		f, err = root.OpenFile("conversations/"+sessionID+".jsonl", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0640)
 		if err != nil {
 			return fmt.Errorf("open conversation file: %w", err)
 		}

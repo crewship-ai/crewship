@@ -73,7 +73,8 @@ func TestDocumentCreationTrustedAppendAndPersistence(t *testing.T) {
 	}
 	duplicate := msg
 	duplicate.ID = "duplicate-message"
-	if err := s.AppendDocumentCreation(t.Context(), r.ChatID, duplicate, intent, r); !errors.Is(err, ErrDocumentCreationConsentUnconfirmed) {
+	var accepted *DocumentCreationAlreadyAccepted
+	if err := s.AppendDocumentCreation(t.Context(), r.ChatID, duplicate, intent, r); !errors.As(err, &accepted) || accepted.MessageID != msg.ID {
 		t.Fatalf("duplicate submission: %v", err)
 	}
 	if n := creationCount(t, s.db, `SELECT COUNT(*) FROM conversation_messages WHERE id=?`, duplicate.ID); n != 0 {
@@ -83,7 +84,7 @@ func TestDocumentCreationTrustedAppendAndPersistence(t *testing.T) {
 	reopened := NewStore(s.basePath, logging.New("error", "json", nil), WithDB(s.db))
 	t.Cleanup(reopened.Close)
 	messages, err = reopened.Read(t.Context(), r.ChatID, 0, 0)
-	if err != nil || len(messages) != 3 || messages[2].ID != duplicate.ID {
+	if err != nil || len(messages) != 2 || messages[1].ID != msg.ID {
 		t.Fatalf("saved transcripts after reopen: %+v %v", messages, err)
 	}
 	if n := creationCount(t, s.db, `SELECT COUNT(*) FROM document_creation_consents WHERE message_id=? AND run_id IS NULL`, msg.ID); n != 1 {
@@ -159,6 +160,29 @@ func TestDocumentCreationAppendFailuresDoNotMintConsent(t *testing.T) {
 	if _, err := s.db.Exec(`DROP TRIGGER reject_creation_consent`); err != nil {
 		t.Fatal(err)
 	}
+	// Actual restart/read path: NewStore and Read do not rebuild the mirror
+	// or turn the retained, unconfirmed turn into fresh authority.
+	s.Close()
+	s = NewStore(s.basePath, logging.New("error", "json", nil), WithDB(s.db))
+	t.Cleanup(s.Close)
+	if _, err := s.Read(t.Context(), r.ChatID, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SyncSession(t.Context(), r.ChatID); err != nil {
+		t.Fatal(err)
+	}
+	if n := creationCount(t, s.db, `SELECT COUNT(*) FROM conversation_messages`); n != 0 {
+		t.Fatal("restart/read unexpectedly repaired mirror")
+	}
+	retry := msg
+	retry.ID = "retry-after-partial-failure"
+	if err := s.AppendDocumentCreation(t.Context(), r.ChatID, retry, intent, r); !errors.Is(err, ErrDocumentCreationConsentUnconfirmed) {
+		t.Fatalf("partial retry: %v", err)
+	}
+	if messages, err := s.Read(t.Context(), r.ChatID, 0, 0); err != nil || len(messages) != 1 {
+		t.Fatalf("partial retry appended: %+v %v", messages, err)
+	}
+
 	if err := s.Append(t.Context(), r.ChatID, msg); err != nil {
 		t.Fatal(err)
 	}

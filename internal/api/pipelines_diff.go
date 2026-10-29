@@ -1,13 +1,9 @@
 package api
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
-
-	"github.com/pmezard/go-difflib/difflib"
 
 	"github.com/crewship-ai/crewship/internal/pipeline"
 )
@@ -96,16 +92,26 @@ func (h *PipelineHandler) DiffVersions(w http.ResponseWriter, r *http.Request) {
 		Identical:   fromV.DefinitionHash == toV.DefinitionHash,
 	}
 	if !resp.Identical {
-		fromPretty := prettyJSONOrRaw(fromV.DefinitionJSON)
-		toPretty := prettyJSONOrRaw(toV.DefinitionJSON)
-		diff := difflib.UnifiedDiff{
-			A:        difflib.SplitLines(fromPretty),
-			B:        difflib.SplitLines(toPretty),
-			FromFile: "v" + strconv.Itoa(fromN),
-			ToFile:   "v" + strconv.Itoa(toN),
-			Context:  3,
+		release, admitted := h.diffs.acquire()
+		if !admitted {
+			replyDiffBusy(w)
+			return
 		}
-		out, derr := difflib.GetUnifiedDiffString(diff)
+		defer release()
+		fromPretty, toPretty, derr := h.diffs.prettyPair(fromV.DefinitionJSON, toV.DefinitionJSON)
+		if errors.Is(derr, errDiffTooLarge) {
+			replyDiffTooLarge(w)
+			return
+		}
+		if derr != nil {
+			replyError(w, http.StatusInternalServerError, "failed to compute diff")
+			return
+		}
+		out, derr := h.diffs.render(fromPretty, toPretty, "v"+strconv.Itoa(fromN), "v"+strconv.Itoa(toN))
+		if errors.Is(derr, errDiffTooLarge) {
+			replyDiffTooLarge(w)
+			return
+		}
 		if derr != nil {
 			h.logger.Error("pipeline diff versions: compute diff", "pipeline_id", p.ID, "error", derr)
 			replyError(w, http.StatusInternalServerError, "failed to compute diff")
@@ -114,23 +120,4 @@ func (h *PipelineHandler) DiffVersions(w http.ResponseWriter, r *http.Request) {
 		resp.UnifiedDiff = out
 	}
 	writeJSON(w, http.StatusOK, resp)
-}
-
-// prettyJSONOrRaw re-indents a definition_json blob for a readable diff;
-// falls back to the raw string (still correct, just less pretty) if it
-// somehow isn't valid JSON — a stored definition should always parse, but
-// the diff endpoint is read-only tooling and must never 500 on a
-// malformed historical row.
-func prettyJSONOrRaw(raw string) string {
-	var v any
-	if err := json.Unmarshal([]byte(raw), &v); err != nil {
-		return raw
-	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(v); err != nil {
-		return raw
-	}
-	return buf.String()
 }

@@ -45,7 +45,7 @@ var sampleFields = map[string]map[string]string{
 	},
 	ProviderGotify: {
 		"server":    "gotify.example.com",
-		"app_token": "EXAMPLE-not-a-real-token",
+		"app_token": "AExampleToken01", // Gotify's token shape: 15 characters starting with A
 	},
 	ProviderPushover: {
 		"user_key":  "EXAMPLE-not-a-real-user-key",

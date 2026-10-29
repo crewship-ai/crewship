@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 )
@@ -249,34 +251,41 @@ func TestCovARReset_HappyPath_RevokesSessions(t *testing.T) {
 	}
 }
 
-// RevokeAllForUser failure after the password commit must surface as a
-// hard 500 — a stolen cookie can't be allowed to outlive the reset.
-func TestCovARReset_RevokeFailure_Returns500(t *testing.T) {
+// A store without a transactional revoker cannot split password and session writes.
+func TestCovARReset_NonTransactionalStoreRefusesWithoutChangingPassword(t *testing.T) {
 	db := setupTestDB(t)
 	realStore := sessions.NewDBStore(db)
 	userID := seedTestUserWithPassword(t, db, "stuckrevoke@example.com", "originalpw")
 	if _, err := realStore.Create(context.Background(), userID, "ua", "1.2.3.4", auth.RefreshTokenTTL); err != nil {
-		t.Fatalf("seed session: %v", err)
+		t.Fatal(err)
 	}
 	h := newRecoveryHandler(t, db, &stubMailer{configured: true}, covARFailRevokeStore{realStore})
 	covARMintToken(t, h, "stuckrevoke@example.com", "stuck-raw-token-456def")
-
 	req, rr := covARPost("POST", "/api/v1/auth/reset", `{"token":"stuck-raw-token-456def","new_password":"brandnewpw12"}`)
 	h.Reset(rr, req)
 	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500 when session revoke fails post-commit", rr.Code)
+		t.Fatalf("status=%d want500", rr.Code)
 	}
-	if !strings.Contains(rr.Body.String(), "sign out existing sessions") {
-		t.Errorf("body = %q, want the partial-success revoke-failure message", rr.Body.String())
-	}
-
-	// Password must still have committed (the message tells the user so).
 	var hashed string
 	if err := db.QueryRow(`SELECT hashed_password FROM users WHERE id=?`, userID).Scan(&hashed); err != nil {
-		t.Fatalf("read user: %v", err)
+		t.Fatal(err)
 	}
-	if hashed == "" {
-		t.Error("password should have committed before the revoke step failed")
+	if bcrypt.CompareHashAndPassword([]byte(hashed), []byte("originalpw")) != nil {
+		t.Error("failed reset changed password")
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM verification_tokens WHERE token=?`, hashResetToken("stuck-raw-token-456def")).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Error("failed reset consumed proof")
+	}
+	active, err := realStore.ListActiveForUser(t.Context(), userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 1 {
+		t.Error("failed reset changed sessions")
 	}
 }
 

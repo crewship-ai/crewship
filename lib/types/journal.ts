@@ -129,6 +129,7 @@ export const JOURNAL_ENTRY_TYPES = [
   "chat.agent_response",
   // Provisioning
   "sidecar.stale",
+  "sidecar.recreated",
   "image.stale",
   "provisioning.queued",
   "provisioning.building",
@@ -167,6 +168,7 @@ export const JOURNAL_ENTRY_TYPES = [
     "crew.member_changed",
     "member.role_changed",
     "member.removed",
+    "workspace.deleted",
   // Memory (extended)
   "memory.write_rejected",
   "memory.consolidation_proposed",
@@ -224,6 +226,14 @@ export const JOURNAL_ENTRY_TYPES = [
   // only types.go, could not see any of them.
   // lib/__tests__/journal-groups.test.ts now scans the whole Go tree.
   // §7.3.2 public links, §8b webhooks, and the owner handoff.
+  "artifact.mooring_created",
+  "artifact.mooring_committed",
+  "artifact.mooring_mandate_admitted",
+  "artifact.mooring_mandate_revoked",
+  "artifact.project_shared",
+  "craft.native_preview_shared",
+  "artifact.orphaned_workbook_deleted",
+  "artifact.private_output_published",
   "page.published",
   "page.link_revoked",
   "page.public_view",

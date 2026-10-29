@@ -15,7 +15,11 @@ import (
 // Real B2 admission and journal plus B3 policy, without exposing a new route.
 func documentCreationAdmissionFixture(t *testing.T, drafting ...bool) (*artifactPrincipalFixture, documents.CreationIntent) {
 	t.Helper()
-	f := newArtifactPrincipalFixture(t)
+	return documentCreationAdmissionWithPrincipal(t, newArtifactPrincipalFixture(t), drafting...)
+}
+
+func documentCreationAdmissionWithPrincipal(t *testing.T, f *artifactPrincipalFixture, drafting ...bool) (*artifactPrincipalFixture, documents.CreationIntent) {
+	t.Helper()
 	// Creation comes from the private human chat entrypoint; the generic
 	// principal fixture also serves unrelated group-chat tests.
 	mustExec(t, f.rig.db, `UPDATE chats SET visibility='private' WHERE id=?`, f.a.ChatID)

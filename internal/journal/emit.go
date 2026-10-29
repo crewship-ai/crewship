@@ -59,11 +59,11 @@ type Writer struct {
 	// chain append well-defined without relying on SQLite lock timing.
 	writeMu sync.Mutex
 
-	// chainKey is the HMAC key for the tamper-evident hash-chain. It is
-	// derived once from the persisted ENCRYPTION_KEY (never stored in the DB)
-	// so a DB-write attacker cannot forge entry_hash values. Verify + the
-	// migration backfill derive the same key from the same seed.
-	chainKey []byte
+	// chainKey retains raw-key fixture compatibility. Production writers use
+	// the immutable signingKeys snapshot, never signing keys stored in the DB.
+	chainKey        []byte
+	signingKeys     *SigningKeys
+	signingKeyError error
 
 	// notifyMu guards notifyCh, the flush-broadcast channel for Notify (see
 	// below). Separate from writeMu: readers must never block on a DB write.
@@ -79,6 +79,13 @@ type Writer struct {
 	commitMu  sync.RWMutex
 	commitObs []func([]Entry)
 	readObs   []func([]Entry)
+
+	// chainBreakMu guards the chain-break observer and its per-workspace
+	// rate limit (emit_held.go).
+	chainBreakMu  sync.Mutex
+	chainBreakObs func(context.Context, string, error)
+	chainBreakAt  map[string]time.Time
+	heldRetry     time.Duration
 }
 
 // AddCommitObserver registers fn to be called after each durable commit with
@@ -233,10 +240,13 @@ type WriterOptions struct {
 	FlushSize     int           // write when this many pending (default 64)
 	FlushInterval time.Duration // write at least this often (default 100ms)
 	// ChainKey overrides the HMAC key for the hash-chain. Nil (the
-	// production default) derives it from the process ENCRYPTION_KEY via
-	// ChainKeyFromEnv, matching the verify path and the migration backfill.
-	// Set explicitly only in tests that need a known key.
-	ChainKey []byte
+	// production default) uses SigningKeys or the configured keyring.
+	// Set explicitly only in legacy-format tests that need a known key.
+	ChainKey    []byte
+	SigningKeys *SigningKeys
+	// HeldRetryInterval is how often entries held by a broken chain tail are
+	// retried (default 30s; see emit_held.go).
+	HeldRetryInterval time.Duration
 }
 
 // NewWriter builds a Writer bound to db. Callers MUST call Close before
@@ -254,24 +264,42 @@ func NewWriter(db *sql.DB, logger *slog.Logger, opts WriterOptions) *Writer {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	chainKey := opts.ChainKey
-	if chainKey == nil {
-		chainKey = ChainKeyFromEnv()
+	if opts.HeldRetryInterval <= 0 {
+		opts.HeldRetryInterval = defaultHeldRetryInterval
+	}
+	keys := opts.SigningKeys
+	var keyErr error
+	if keys == nil {
+		if opts.ChainKey != nil {
+			keys = LegacySigningKeys(opts.ChainKey)
+		} else {
+			keys, keyErr = LoadSigningKeysFromEnv()
+		}
+	}
+	var chainKey []byte
+	if keyErr == nil {
+		_, _, chainKey, keyErr = keys.active()
 	}
 	w := &Writer{
-		db:       db,
-		logger:   logger,
-		queue:    make(chan Entry, opts.QueueSize),
-		flushN:   opts.FlushSize,
-		flushDur: opts.FlushInterval,
-		closed:   make(chan struct{}),
-		chainKey: chainKey,
-		notifyCh: make(chan struct{}),
+		db:              db,
+		logger:          logger,
+		queue:           make(chan Entry, opts.QueueSize),
+		flushN:          opts.FlushSize,
+		flushDur:        opts.FlushInterval,
+		closed:          make(chan struct{}),
+		chainKey:        chainKey,
+		signingKeys:     keys,
+		signingKeyError: keyErr,
+		notifyCh:        make(chan struct{}),
+		heldRetry:       opts.HeldRetryInterval,
 	}
 	w.wg.Add(1)
 	go w.run()
 	return w
 }
+
+// SigningKeySnapshot supplies the same immutable boot keys to request audits.
+func (w *Writer) SigningKeySnapshot() (*SigningKeys, error) { return w.signingKeys, w.signingKeyError }
 
 // Emit queues the entry for asynchronous write and returns the generated
 // ID. Validation errors come back synchronously. If the queue is saturated
@@ -437,9 +465,52 @@ func (w *Writer) run() {
 	// (at that point we start logging and dropping oldest).
 	const maxBatchRetryBytes = 64 * 1024 * 1024 // ~64 MB of buffered entries
 	var persistFailures int
+	// held: entries a broken chain tail refused (emit_held.go). Retried on
+	// the ticker, never dropped as poison; lost only at shutdown or past cap.
+	var held []Entry
+	lastHeldRetry := time.Now()
+	defer func() {
+		if len(held) > 0 {
+			w.logger.Error("journal entries held by a broken audit chain were not written before shutdown", "n", len(held))
+		}
+	}()
+	retry := func() {
+		if len(held) == 0 || time.Since(lastHeldRetry) < w.heldRetry {
+			return
+		}
+		lastHeldRetry = time.Now()
+		var committed []Entry
+		held, committed = w.retryHeld(held)
+		if len(committed) > 0 {
+			w.afterCommit(committed)
+		}
+	}
 	drain := func() {
 		if len(batch) == 0 {
 			return
+		}
+		// A repaired tail can accept appends before the held retry tick.
+		// Queue fresh background entries behind that workspace's older held
+		// entries instead of letting them overtake the backlog.
+		if len(held) > 0 {
+			blocked := make(map[string]bool)
+			for _, e := range held {
+				blocked[e.WorkspaceID] = true
+			}
+			var waiting []Entry
+			ready := batch[:0]
+			for _, e := range batch {
+				if blocked[e.WorkspaceID] {
+					waiting = append(waiting, e)
+				} else {
+					ready = append(ready, e)
+				}
+			}
+			held = w.hold(held, waiting)
+			batch = ready
+			if len(batch) == 0 {
+				return
+			}
 		}
 		err := w.persistBatch(context.Background(), batch)
 		if err == nil {
@@ -463,17 +534,30 @@ func (w *Writer) run() {
 		// path below unchanged, so the durability contract still holds for
 		// recoverable outages.
 		if isPermanentDBError(err) {
-			kept := batch[:0]
+			var kept, committed, suspects []Entry
 			dropped := 0
-			// committed is a SEPARATE slice (its own backing array) — kept
-			// reuses batch's array, so appending committed rows there would be
-			// clobbered by the in-place filter.
-			var committed []Entry
-			for _, e := range batch {
+			// One workspace at a time first: a broken chain tail refuses its
+			// whole workspace (held, not dropped) without blocking the others.
+			for _, group := range groupByWorkspace(batch) {
+				gerr := w.persistBatch(context.Background(), group)
+				switch {
+				case gerr == nil:
+					committed = append(committed, group...)
+				case isChainAdmissionError(gerr):
+					held = w.hold(held, group)
+				case isPermanentDBError(gerr):
+					suspects = append(suspects, group...)
+				default:
+					kept = append(kept, group...)
+				}
+			}
+			for _, e := range suspects {
 				perr := w.persistOne(context.Background(), e)
 				switch {
 				case perr == nil:
 					committed = append(committed, e)
+				case isChainAdmissionError(perr):
+					held = w.hold(held, []Entry{e})
 				case isPermanentDBError(perr):
 					w.logger.Error("journal entry permanently rejected — dropping to unblock the stream",
 						"err", perr, "entry_id", e.ID, "entry_type", e.Type,
@@ -538,6 +622,7 @@ func (w *Writer) run() {
 			}
 		case <-ticker.C:
 			drain()
+			retry()
 		case <-w.closed:
 			// Shutdown signal from Close(). Drain anything already
 			// buffered in the channel so Close->Wait doesn't race
@@ -583,13 +668,15 @@ func (w *Writer) persistOne(ctx context.Context, e Entry) error {
 // else — "database is locked"/"busy", context deadline, a dropped connection
 // — is treated as transient and retained for retry, so a recoverable outage
 // never drops an audit entry. Classify conservatively: only errors we are
-// confident are deterministic count as permanent.
+// confident are deterministic count as permanent. Chain-admission refusals
+// are permanent for the batch (they route it to per-workspace isolation) but
+// their entries are held and retried, never dropped (emit_held.go).
 func isPermanentDBError(err error) bool {
 	if err == nil {
 		return false
 	}
 	s := err.Error()
-	return errors.Is(err, ErrRecoveredStopConflict) || strings.Contains(s, "constraint failed") ||
+	return errors.Is(err, ErrRecoveredStopConflict) || errors.Is(err, ErrChainIntegrity) || errors.Is(err, ErrSigningKeyUnavailable) || strings.Contains(s, "constraint failed") ||
 		strings.Contains(s, "journal: marshal")
 }
 
@@ -651,7 +738,30 @@ func (w *Writer) persistBatch(ctx context.Context, batch []Entry) error {
 
 // persistBatchTx extends the chain inside the caller's write transaction.
 func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, checked bool) error {
-	stmt, err := tx.PrepareContext(ctx, insertSQL)
+	if w.signingKeyError != nil {
+		return w.signingKeyError
+	}
+	keys := w.signingKeys
+	if keys == nil {
+		keys = LegacySigningKeys(w.chainKey)
+	}
+	keyID, macVersion, _, err := keys.active()
+	if err != nil {
+		return err
+	}
+	versioned, err := keyColumns(ctx, tx, "journal_entries")
+	if err != nil {
+		return err
+	}
+	query := insertSQL
+	if macVersion == 2 {
+		if !versioned {
+			return errors.New("journal: versioned audit migration required")
+		}
+		query = strings.Replace(insertSQL, "priority_at_emit)", "priority_at_emit,chain_key_id,chain_mac_version)", 1)
+		query = strings.Replace(query, "?, ?, ?, ?, ?)", "?, ?, ?, ?, ?, ?, ?)", 1)
+	}
+	stmt, err := tx.PrepareContext(ctx, query)
 	if err != nil {
 		return fmt.Errorf("journal: prepare: %w", err)
 	}
@@ -660,6 +770,7 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 	// Per-workspace chain heads, lazily loaded from the DB the first
 	// time a workspace appears in this batch.
 	heads := make(map[string]*chainHead, 4)
+	starts := make(map[string]appendStart, 4)
 
 	for _, e := range batch {
 		if err := checkRecoveredStopWrite(ctx, tx, e); err != nil {
@@ -682,7 +793,12 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 		}
 
 		if e.replay {
-			fingerprint, err := w.replayFingerprint(e, payload, refs, expiresStr)
+			receiptID, receiptVersion := ActiveSigningIdentity(keys)
+			_, _, receiptKey, err := keys.active()
+			if err != nil {
+				return err
+			}
+			fingerprint, err := replayFingerprintForKey(receiptKey, receiptID, receiptVersion, e, payload, refs, expiresStr)
 			if err != nil {
 				return err
 			}
@@ -690,23 +806,37 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 			if err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO journal_replay_receipts(id,fingerprint,workspace_id,agent_id,trace_id,entry_type,terminal_exit_code) VALUES(?,?,?,?,?,?,?)`, e.ID, fingerprint, e.WorkspaceID, e.AgentID, e.TraceID, string(e.Type), exitCode); err != nil {
+			receiptQuery := `INSERT INTO journal_replay_receipts(id,fingerprint,workspace_id,agent_id,trace_id,entry_type,terminal_exit_code) VALUES(?,?,?,?,?,?,?)`
+			receiptArgs := []any{e.ID, fingerprint, e.WorkspaceID, e.AgentID, e.TraceID, string(e.Type), exitCode}
+			if receiptID.Valid {
+				receiptQuery = `INSERT INTO journal_replay_receipts(id,fingerprint,workspace_id,agent_id,trace_id,entry_type,terminal_exit_code,chain_key_id,chain_mac_version) VALUES(?,?,?,?,?,?,?,?,?)`
+				receiptArgs = append(receiptArgs, receiptID, receiptVersion)
+			}
+			if _, err := tx.ExecContext(ctx, receiptQuery, receiptArgs...); err != nil {
 				return fmt.Errorf("journal: insert replay receipt: %w", err)
 			}
 		}
 
 		head, ok := heads[e.WorkspaceID]
 		if !ok {
-			head, err = loadChainHead(ctx, tx, e.WorkspaceID)
+			if e.reseal {
+				head, err = loadChainHead(ctx, tx, e.WorkspaceID)
+			} else {
+				head, err = loadChainHeadWithKeys(ctx, tx, e.WorkspaceID, keys)
+			}
 			if err != nil {
+				if isChainAdmissionError(err) {
+					w.reportChainBreak(e.WorkspaceID, err)
+				}
 				return err
 			}
 			heads[e.WorkspaceID] = head
+			starts[e.WorkspaceID] = appendStart{seq: head.seq, hash: head.prevHash, trusted: e.reseal}
 		}
 
 		seq := head.seq + 1
 		prevHash := head.prevHash
-		entryHash := ChainHashKeyed(w.chainKey, prevHash, ChainFields{
+		fields := ChainFields{
 			Seq:       seq,
 			ID:        e.ID,
 			Workspace: e.WorkspaceID,
@@ -725,7 +855,15 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 			TraceID:   e.TraceID,
 			SpanID:    e.SpanID,
 			ExpiresAt: expiresStr,
-		})
+		}
+		if macVersion == 2 {
+			fields.KeyID = sql.NullString{String: keyID, Valid: true}
+			fields.MACVersion = sql.NullInt64{Int64: 2, Valid: true}
+		}
+		entryHash, err := chainHashForKeys(keys, prevHash, fields)
+		if err != nil {
+			return err
+		}
 
 		insertArgs := []any{
 			e.ID,
@@ -751,6 +889,9 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 			// priority_at_emit — the same value the hash above committed to.
 			priorityOrNormal(e.Priority),
 		}
+		if macVersion == 2 {
+			insertArgs = append(insertArgs, keyID, int64(2))
+		}
 		insertResult, err := stmt.ExecContext(ctx, insertArgs...)
 		if err != nil {
 			return fmt.Errorf("journal: insert %s: %w", e.Type, err)
@@ -771,6 +912,18 @@ func (w *Writer) persistBatchTx(ctx context.Context, tx *sql.Tx, batch []Entry, 
 
 		head.seq = seq
 		head.prevHash = entryHash
+	}
+	// Re-read the tail in this same writer snapshot, after native insert
+	// triggers: the previous tail, its link, and every row this batch wrote.
+	// Never the whole chain — that is the on-demand verifier's job, and a walk
+	// here would make every audited write cost O(history) under the lock.
+	for workspace, head := range heads {
+		if err := verifyAppendTail(ctx, tx, workspace, keys, starts[workspace], head.seq); err != nil {
+			if isChainAdmissionError(err) {
+				w.reportChainBreak(workspace, err)
+			}
+			return err
+		}
 	}
 	return nil
 }

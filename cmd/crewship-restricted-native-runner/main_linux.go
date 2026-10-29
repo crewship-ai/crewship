@@ -108,7 +108,7 @@ func nativeArgs(model string) []string {
 func native(ctx context.Context, model string, output io.Writer) error {
 	for path, want := range map[string]string{
 		"/opt/codex":     "d2752c52353401f7f6efbfcea68796f4f7a3d3e4769f5d1da53fa49d4856b72f",
-		"/usr/bin/bwrap": "85580dd52ed366ece8844e90fa75ac7c4de8802963071344e123221fb9f6f11e",
+		"/usr/bin/bwrap": "c3cd4aa9990c6aee9f084ea6790f4c77056b42262d2a2364073e2295bf6d855f",
 	} {
 		file, err := os.Open(path)
 		if err != nil {

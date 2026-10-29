@@ -142,5 +142,146 @@
     "export_formats": [],
     "execution_profile": "none",
     "authoring_skill": ""
+  },
+  {
+    "type_id": "gridcraft-workbook",
+    "schema_version": 1,
+    "viewer": "unavailable",
+    "editor": "unavailable",
+    "storage_adapter": "gridcraft-revisions-v1",
+    "projection_adapter": "none",
+    "anchor_kinds": [
+      "cell"
+    ],
+    "export_formats": [],
+    "execution_profile": "headless-worker/v1",
+    "authoring_skill": ""
+  },
+  {
+    "type_id": "mooring-app",
+    "schema_version": 1,
+    "viewer": "mooring",
+    "editor": "mooring",
+    "storage_adapter": "mooring",
+    "projection_adapter": "mooring",
+    "anchor_kinds": [],
+    "export_formats": [],
+    "execution_profile": "host-json",
+    "authoring_skill": ""
+  },
+  {
+    "type_id": "artifact-project",
+    "schema_version": 1,
+    "viewer": "artifact-preview-frame",
+    "editor": "artifact-comment-queue",
+    "storage_adapter": "artifact-version-store-v1",
+    "projection_adapter": "artifact-project-html-v1",
+    "anchor_kinds": [
+      "element"
+    ],
+    "export_formats": [],
+    "execution_profile": "artifact-project-html-v1",
+    "authoring_skill": "crewship-artifacts",
+    "release": "1.1.0",
+    "contract_version": 1,
+    "content_locations": [
+      "version-store"
+    ],
+    "required_features": [
+      "artifact_projects"
+    ],
+    "mcp_tools": [
+      "artifact_create",
+      "artifact_versions",
+      "artifact_publish",
+      "artifact_restore",
+      "artifact_comments",
+      "artifact_reply"
+    ]
+  },
+  {
+    "type_id": "artifact-dashboard",
+    "schema_version": 1,
+    "viewer": "artifact-dashboard-preview",
+    "editor": "artifact-comment-queue",
+    "storage_adapter": "artifact-version-store-v1",
+    "projection_adapter": "inert-dashboard-v1",
+    "anchor_kinds": [
+      "element"
+    ],
+    "export_formats": [],
+    "execution_profile": "inert-dashboard-v1",
+    "authoring_skill": "crewship-artifacts",
+    "release": "1.1.0",
+    "contract_version": 1,
+    "content_locations": [
+      "version-store",
+      "data-store"
+    ],
+    "required_features": [
+      "artifact_projects",
+      "artifact_dashboard_data"
+    ],
+    "mcp_tools": [
+      "artifact_create",
+      "artifact_versions",
+      "artifact_publish",
+      "artifact_restore",
+      "artifact_comments",
+      "artifact_reply",
+      "artifact_data_batch",
+      "artifact_data_read",
+      "artifact_data_collections"
+    ]
+  },
+  {
+    "type_id": "artifact-slides",
+    "schema_version": 1,
+    "viewer": "artifact-slides-preview",
+    "editor": "artifact-comment-queue",
+    "storage_adapter": "artifact-version-store-v1",
+    "projection_adapter": "closed-slides-html-v1",
+    "anchor_kinds": [
+      "element"
+    ],
+    "export_formats": [
+      "pdf"
+    ],
+    "execution_profile": "closed-slides-html-v1",
+    "authoring_skill": "crewship-artifacts",
+    "release": "1.1.0",
+    "contract_version": 1,
+    "content_locations": [
+      "version-store"
+    ],
+    "required_features": [
+      "artifact_projects",
+      "artifact_slides"
+    ],
+    "mcp_tools": [
+      "artifact_create",
+      "artifact_versions",
+      "artifact_publish",
+      "artifact_restore",
+      "artifact_comments",
+      "artifact_reply",
+      "artifact_slides_read",
+      "artifact_export_pdf"
+    ]
+  },
+  {
+    "type_id": "design",
+    "schema_version": 1,
+    "viewer": "page-design",
+    "editor": "page-design",
+    "storage_adapter": "design-yjs-v1",
+    "projection_adapter": "design-scene-v1",
+    "anchor_kinds": [
+      "frame",
+      "element"
+    ],
+    "export_formats": [],
+    "execution_profile": "none",
+    "authoring_skill": "crewship-artifacts"
   }
 ]

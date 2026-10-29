@@ -98,8 +98,21 @@ var leaseSweepInterval = 15 * time.Second
 
 // stats collector, and all background goroutines. It blocks until ctx is done.
 func (s *Server) Start(ctx context.Context) error {
+	if s.cfg != nil && s.cfg.Audit.Keys != nil {
+		ctx = journal.WithSigningKeys(ctx, s.cfg.Audit.Keys)
+	}
+	if s.mooringStartupErr != nil {
+		return fmt.Errorf("Mooring runtime startup: %w", s.mooringStartupErr)
+	}
 	if s.documentsStartupErr != nil {
 		return fmt.Errorf("Docs authority startup: %w", s.documentsStartupErr)
+	}
+	port := 0
+	if s.cfg != nil {
+		port = s.cfg.Server.Port
+	}
+	if err := startGridCraftTestBarrier(s.logger, port); err != nil {
+		return err
 	}
 	s.startedAt = time.Now()
 
@@ -193,6 +206,9 @@ func (s *Server) Start(ctx context.Context) error {
 		// Recover assignments first, then resume committed outbox work using
 		// the same server lifetime as the dispatchers it calls.
 		s.apiRouter.StartIssueMutationOutbox(ctx)
+		// Workbook revisions whose live push was lost to a crash are pushed
+		// by this sweeper; a no-op when the workbook API is not installed.
+		s.apiRouter.StartGridCraftOutbox(ctx)
 		// Escalation expiry sweeper: the net for questions whose agent is no
 		// longer waiting. The long poll expires its own escalation at the
 		// deadline (internal/api/escalation_lifecycle.go), so this only ever
@@ -714,6 +730,9 @@ func (s *Server) Shutdown() error {
 	if s.apiRouter != nil {
 		s.apiRouter.Shutdown()
 	}
+	// The router has stopped and joined all private Rust/WS workers.
+	// Only then may the exact extracted executable be removed.
+	s.closeMooringAssets()
 
 	if s.state != nil {
 		if err := s.state.Close(); err != nil {

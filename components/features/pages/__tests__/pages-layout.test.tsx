@@ -13,7 +13,8 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 
-vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "pages-test-human" } }, status: "authenticated" }) }))
+const identity = vi.hoisted(() => ({ id: "pages-test-human" }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: identity.id } }, status: "authenticated" }) }))
 
 const access = vi.hoisted(() => ({role: "MANAGER" as string | null, capabilities: [] as string[], loading: false, error: false}))
 vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
@@ -21,8 +22,9 @@ vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
   useWorkspace: () => ({...access, workspaceId: "ws-1", workspaces: [{id:"ws-1",currentUserRole:access.role}], workspace:{id:"ws-1"}}),
 }))
 const push = vi.fn()
+const replace = vi.fn()
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push, replace: vi.fn(), prefetch: vi.fn(), back: vi.fn() }),
+  useRouter: () => ({ push, replace, prefetch: vi.fn(), back: vi.fn() }),
   usePathname: () => "/pages",
   useSearchParams: () => new URLSearchParams(),
   useParams: () => ({}),
@@ -70,11 +72,23 @@ vi.mock("@/components/features/pages/page-application", () => ({
 }))
 
 vi.mock("@/components/features/pages/page-document",()=>({PageDocument:({pageId,workspaceId}:{pageId:string;workspaceId:string})=><div data-testid="native-document">Native document {workspaceId}:{pageId}</div>}))
+const nativeHost = vi.hoisted(() => ({ unavailable: undefined as undefined | (() => void) }))
+vi.mock("@/components/features/pages/wordcraft-editor-host", () => ({ WordCraftEditorHost: ({ onDirtyChange, onUnavailable, unavailable }: { unavailable?: boolean; onDirtyChange: (dirty: boolean) => void; onUnavailable?: () => void }) => {
+  nativeHost.unavailable = onUnavailable
+  return <div data-testid="native-wordcraft" data-blocked={String(Boolean(unavailable))}><button onClick={() => onDirtyChange(true)}>Make draft</button></div>
+} }))
+vi.mock("@/components/features/pages/wordcraft-command-editor-host", () => ({ WordCraftCommandEditorHost: ({ onDirtyChange, unavailable }: { unavailable?: boolean; onDirtyChange: (dirty: boolean) => void }) => <div data-testid="native-commands" data-blocked={String(Boolean(unavailable))}><button onClick={() => onDirtyChange(true)}>Make command pending</button></div> }))
+vi.mock("@/components/features/pages/native-document-access-dialog", () => ({ NativeDocumentAccessDialog: ({ slug, onClose }: { slug: string; onClose: () => void }) => <div role="dialog">Access {slug}<button onClick={onClose}>Close access</button></div> }))
+// The leaf's independent ACL/query behavior has its own tests. Here observe
+// whether the layout mounts CURRENT metadata beside a retained draft producer.
+vi.mock("@/components/features/chat/right-panel-tabs/chat-document-access", () => ({ NativeDocumentProvenance: ({ pageId, viewerId }: { pageId: string; viewerId: string }) => <div data-testid="native-provenance" data-page={pageId} data-viewer={viewerId} /> }))
+
+vi.mock("@/components/features/pages/artifact-project", () => ({ ArtifactProject: ({workspaceId, slug, initialVersion}: {workspaceId: string; slug: string; initialVersion?: number}) => <div data-testid="artifact-reader" data-workspace={workspaceId} data-page={slug} data-pin={initialVersion}>Versioned artifact reader</div> }))
 
 import { PagesLayout } from "@/components/features/pages/pages-layout"
 import { PAGE_STATE_ORDER } from "@/components/features/pages/page-state"
 import { PANEL_STATES } from "@/components/features/pages/panels/types"
-import type { WirePage } from "@/hooks/use-pages"
+import { pagesKeys, type WirePage } from "@/hooks/use-pages"
 
 const NOW = new Date("2026-08-12T12:00:00Z")
 
@@ -103,10 +117,11 @@ function newQueryClient(): QueryClient {
   return new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
 }
 
-function renderLayout(list: WirePage[], slug?: string) {
+function renderLayout(list: WirePage[], slug?: string, documentStatus: object = {enabled:false}) {
   const qc = newQueryClient()
   const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
+    if (url.includes("/api/v1/documents/status")) return okJSON(documentStatus)
     // The folders route has its own prefix (`/page-folders`, because
     // `/pages/folders/{slug}` collides with `/pages/{slug}/grants` in the Go
     // mux); this layout has no folders, so the rail groups by owner.
@@ -118,17 +133,18 @@ function renderLayout(list: WirePage[], slug?: string) {
     return okJSON(list)
   })
   vi.stubGlobal("fetch", mockFetch)
-  render(
+  const view = render(
     <QueryClientProvider client={qc}>
       <PagesLayout workspaceId="ws-1" slug={slug} now={NOW} />
     </QueryClientProvider>,
   )
-  return { qc, mockFetch }
+  return { ...view, qc, mockFetch }
 }
 
 describe("PagesLayout", () => {
   beforeEach(() => {
     cleanup()
+    identity.id = "pages-test-human"
     Object.assign(access, {role:"MANAGER",capabilities:[],loading:false,error:false})
     push.mockReset()
     // The editor's mode and section live in the address now, so a test that
@@ -136,7 +152,168 @@ describe("PagesLayout", () => {
     // address between tests.)
     window.history.replaceState(null, "", "/pages")
   })
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs() })
+
+  it.each(["project", "dashboard", "slides"] as const)("uses current selected %s metadata inside the guarded shell", async kind => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true")
+    renderLayout([{...FLEET, artifact_kind: kind, has_application: true}], FLEET.slug!)
+    expect(await screen.findByTestId("artifact-reader")).toHaveAttribute("data-page", FLEET.slug)
+    expect(screen.queryByTestId("application")).toBeNull()
+    expect(screen.queryByRole("button", {name: "Edit"})).toBeNull()
+    expect(screen.queryByRole("button", {name: "Share"})).toBeNull()
+    expect(screen.queryByText("Jede to?")).toBeNull()
+  })
+
+  it("preserves legacy application routing with the artifact flag off", async () => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "false")
+    renderLayout([{...FLEET, artifact_kind: "dashboard", has_application: true}], FLEET.slug!)
+    await screen.findByTestId("application")
+    expect(screen.queryByTestId("artifact-reader")).toBeNull()
+  })
+
+  it.each(["dashboard", "slides", "project", "word", "sheet"] as const)("never says a typed %s with no panels declares none", async kind => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "false")
+    renderLayout([{...FLEET, panels: [], artifact_kind: kind}], FLEET.slug!)
+    // Its own reader where one is mounted, otherwise the explicit state; never the panels empty state.
+    await waitFor(() => expect(screen.queryByTestId("artifact-reader") ?? screen.queryByText("Can't show this artifact here")).toBeTruthy())
+    expect(screen.queryByText(/declares no panels/i)).toBeNull()
+  })
+
+  it("treats a version head without a kind as an artifact, never as empty panels", async () => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "false")
+    renderLayout([{...FLEET, panels: [], has_artifact_project: true}], FLEET.slug!)
+    expect(await screen.findByText("Can't show this artifact here")).toBeTruthy()
+    expect(screen.queryByText(/declares no panels/i)).toBeNull()
+  })
+
+  it("does not mount either content reader before initial selected metadata is authorized", () => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true")
+    const qc = newQueryClient()
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})))
+    render(<QueryClientProvider client={qc}><PagesLayout workspaceId="ws-1" slug={FLEET.slug!} now={NOW} /></QueryClientProvider>)
+    expect(screen.queryByTestId("artifact-reader")).toBeNull()
+    expect(screen.queryByTestId("application")).toBeNull()
+    expect(screen.queryByText("Jede to?")).toBeNull()
+  })
+
+  it.each([undefined, 2, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])("applies only valid selected code pin %s", async pin => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true")
+    const qc = newQueryClient()
+    qc.setQueryData(pagesKeys.detail("ws-1", FLEET.slug!, identity.id), {...FLEET, artifact_kind: "dashboard"})
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})))
+    render(<QueryClientProvider client={qc}><PagesLayout workspaceId="ws-1" slug={FLEET.slug!} initialArtifactVersion={pin} now={NOW} /></QueryClientProvider>)
+    expect((await screen.findByTestId("artifact-reader")).getAttribute("data-pin")).toBe(pin === 2 ? "2" : null)
+  })
+
+  it.each(["keep", "discard"] as const)("keeps the real dirty producer until %s answers navigation to an artifact", async choice => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true")
+    window.history.replaceState(null, "", `/pages/${FLEET.slug}`)
+    const view = renderLayout([{...FLEET, has_collaboration: true}, {...CLOSE, artifact_kind: "dashboard"}], FLEET.slug!)
+    const original = await screen.findByTestId("native-wordcraft")
+    fireEvent.click(screen.getByRole("button", {name: "Make draft"}))
+    window.history.replaceState(null, "", `/pages/${CLOSE.slug}`)
+    view.rerender(<QueryClientProvider client={view.qc}><PagesLayout workspaceId="ws-1" slug={CLOSE.slug!} initialArtifactVersion={7} now={NOW} /></QueryClientProvider>)
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("Leave with unsent edits?")
+    expect(screen.getByTestId("native-wordcraft")).toBe(original)
+    expect(screen.queryByTestId("artifact-reader")).toBeNull()
+    fireEvent.click(screen.getByRole("button", {name: choice === "keep" ? "Keep editing" : "Leave anyway"}))
+    if (choice === "keep") {
+      expect(screen.getByTestId("native-wordcraft")).toBe(original)
+      expect(screen.queryByTestId("artifact-reader")).toBeNull()
+      expect(window.location.pathname).toBe(`/pages/${FLEET.slug}`)
+    } else {
+      expect(await screen.findByTestId("artifact-reader")).toHaveAttribute("data-page", CLOSE.slug)
+      expect(screen.getByTestId("artifact-reader")).toHaveAttribute("data-pin", "7")
+      expect(original.isConnected).toBe(false)
+    }
+  })
+
+  it.each([403, 404, 500])("does not render stale artifact data or panels after metadata refresh %s", async status => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true")
+    const view = renderLayout([{...FLEET, artifact_kind: "dashboard", has_application: true}], FLEET.slug!)
+    await screen.findByTestId("artifact-reader")
+    view.mockFetch.mockImplementation(async () => new Response(JSON.stringify({error:"unavailable"}), {status}))
+    await act(async () => { await view.qc.refetchQueries({queryKey: pagesKeys.detail("ws-1", FLEET.slug!, identity.id)}) })
+    await waitFor(() => expect(screen.queryByTestId("artifact-reader")).toBeNull())
+    expect(screen.queryByTestId("application")).toBeNull()
+    expect(screen.queryByText("Jede to?")).toBeNull()
+  })
+
+  it("opens native sharing without replacing a dirty WordCraft editor and closes it when the host stops", async () => {
+    renderLayout([{ ...FLEET, has_collaboration: true }], FLEET.slug!)
+    const editor = await screen.findByTestId("native-wordcraft")
+    fireEvent.click(screen.getByRole("button", { name: "Make draft" }))
+    fireEvent.click(screen.getByRole("button", { name: "Share" }))
+    expect(screen.getByRole("dialog")).toHaveTextContent(`Access ${FLEET.slug}`)
+    expect(screen.getByTestId("native-wordcraft")).toBe(editor)
+    expect(screen.queryByTestId("section-content")).not.toBeInTheDocument()
+    act(() => nativeHost.unavailable?.())
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(screen.getByTestId("native-wordcraft")).toBe(editor)
+  })
+
+  it("selects C1 by immutable format and keeps that original host blocked when availability is withdrawn", async () => {
+    const view = renderLayout([{ ...FLEET, has_collaboration: true, collaboration_format: "wordcraft-c1-v2" }], FLEET.slug!, {enabled:false,wordcraft_commands:true})
+    const editor = await screen.findByTestId("native-commands")
+    expect(screen.queryByTestId("native-wordcraft")).toBeNull()
+    fireEvent.click(screen.getByRole("button",{name:"Make command pending"}))
+    act(() => { view.qc.setQueryData(["documents-status","ws-1"],{enabled:false,wordcraftCommands:false}) })
+    await waitFor(() => expect(editor).toHaveAttribute("data-blocked","true"))
+    expect(screen.getByTestId("native-commands")).toBe(editor)
+    expect(screen.queryByTestId("native-wordcraft")).toBeNull()
+  })
+
+  it.each(["unknown","wordcraft-c1-v2"])("does not open an alternate engine for unavailable format %s",async format=>{
+    renderLayout([{ ...FLEET, has_collaboration:true,collaboration_format:format }], FLEET.slug!, {enabled:false,wordcraft_commands:false})
+    await screen.findByText("This document format is unavailable. No alternate editor has been opened.")
+    expect(screen.queryByTestId("native-wordcraft")).toBeNull()
+    expect(screen.queryByTestId("native-commands")).toBeNull()
+  })
+
+  it("does not fall back to a pilot when declared format contradicts storage classification",async()=>{
+    renderLayout([{...FLEET,has_collaboration:false,has_mooring:true,collaboration_format:"unknown"}],FLEET.slug!)
+    await screen.findByText("This document format is unavailable. No alternate editor has been opened.")
+    expect(screen.queryByTestId("native-wordcraft")).toBeNull()
+  })
+
+  it("does not replace a retained C1 producer when a metadata refresh changes its format",async()=>{
+    const page = {...FLEET,has_collaboration:true,collaboration_format:"wordcraft-c1-v2"}
+    const view=renderLayout([page],FLEET.slug!,{enabled:false,wordcraft_commands:true})
+    const editor=await screen.findByTestId("native-commands")
+    act(()=>view.qc.setQueryData(pagesKeys.detail("ws-1",FLEET.slug!,identity.id),{...page,collaboration_format:"mooring-causal-v1"}))
+    await waitFor(()=>expect(editor).toHaveAttribute("data-blocked","true"))
+    expect(screen.getByTestId("native-commands")).toBe(editor)
+    expect(screen.queryByTestId("native-wordcraft")).toBeNull()
+  })
+
+  it("replaces the old native host even when the new human Page cache is already warm", async () => {
+    const page = { ...FLEET, has_collaboration: true }
+    const view = renderLayout([page], FLEET.slug!)
+    const original = await screen.findByTestId("native-wordcraft")
+    view.qc.setQueryData(pagesKeys.detail("ws-1", FLEET.slug!, "second-human"), page)
+    identity.id = "second-human"
+    view.rerender(<QueryClientProvider client={view.qc}><PagesLayout workspaceId="ws-1" slug={FLEET.slug!} now={NOW} /></QueryClientProvider>)
+    await waitFor(() => expect(screen.getByTestId("native-wordcraft")).not.toBe(original))
+    expect(original.isConnected).toBe(false)
+    expect(screen.getByTestId("native-provenance")).toHaveAttribute("data-viewer", "second-human")
+  })
+
+  it.each([403, 404])("retains and blocks the dirty original native host when its actual Page refetch returns %s", async status => {
+    const view = renderLayout([{ ...FLEET, has_collaboration: true }], FLEET.slug!)
+    const original = await screen.findByTestId("native-wordcraft")
+    expect(screen.getByTestId("native-provenance")).toHaveAttribute("data-page", FLEET.id)
+    fireEvent.click(screen.getByRole("button", { name: "Make draft" }))
+    view.mockFetch.mockImplementation(async input => String(input).includes(`/api/v1/pages/${FLEET.slug}`)
+      ? new Response(JSON.stringify({ error: "Current Page denied." }), { status, headers: { "Content-Type": "application/json" } })
+      : okJSON([]))
+    await act(async () => { await view.qc.refetchQueries({ queryKey: pagesKeys.detail("ws-1", FLEET.slug!, identity.id) }) })
+    await waitFor(() => {
+      expect(screen.getByTestId("native-wordcraft")).toBe(original)
+      expect(original).toHaveAttribute("data-blocked", "true")
+      expect(screen.queryByTestId("native-provenance")).toBeNull()
+    })
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
 
   it("keeps readable Pages while hiding creation and import for VIEWER without page.create", async () => {
     access.role = "VIEWER"
@@ -380,4 +557,31 @@ it("explains an empty filtered Docs-only list and restores the card when cleared
  fireEvent.change(screen.getByLabelText("Search pages"),{target:{value:""}})
  expect(await screen.findByRole("button",{name:"Notes Doc"})).toBeInTheDocument()
  expect(screen.queryByText("No documents match these filters.")).toBeNull()
+})
+
+it("offers New Doc and WordCraft when native collaboration is available without legacy Docs",async()=>{
+ cleanup();window.history.replaceState(null,"","/pages")
+ Object.assign(access,{role:"OWNER",capabilities:[],loading:false,error:false})
+ const view=renderLayout([],undefined,{enabled:false,wordcraft_sdk_prefix:"/mooring-sdk/generated/"+"a".repeat(64)})
+ fireEvent.click(await screen.findByRole("button",{name:"New Doc"}))
+ expect(await screen.findByLabelText("Format")).toHaveValue("wordcraft")
+ expect(screen.queryByText("Document creation is unavailable.")).not.toBeInTheDocument()
+ view.qc.clear()
+})
+
+it.each(["wordcraft","gridcraft"])("reopens an explicit native %s Page in the full editor instead of an empty legacy view",async(application)=>{
+ cleanup();window.history.replaceState(null,"","/pages/native-word")
+ const {qc}=renderLayout([{id:"native-id",slug:"native-word",name:"Native Word",panels:[],native_craft_application:application} as WirePage],"native-word")
+ await waitFor(()=>expect(replace).toHaveBeenCalledWith("/pages/craft/editor?workspace_id=ws-1&page_id=native-id"))
+ qc.clear()
+})
+
+it('offers New Doc when only the independently qualified native Sheet is available',async()=>{
+ cleanup();window.history.replaceState(null,'','/pages')
+ Object.assign(access,{role:'OWNER',capabilities:[],loading:false,error:false})
+ const view=renderLayout([],undefined,{enabled:false,wordcraft_native:false,gridcraft_native:true})
+ fireEvent.click(await screen.findByRole('button',{name:'New Doc'}))
+ expect(await screen.findByLabelText('Format')).toHaveValue('sheet')
+ expect(screen.getByRole('option',{name:'Sheet'})).toBeInTheDocument()
+ view.qc.clear()
 })

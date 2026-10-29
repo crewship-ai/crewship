@@ -504,6 +504,14 @@ const (
 	// channel class nobody watched when #1008 first happened. Remediation:
 	// `crewship crew restart-agents`.
 	EntrySidecarStale EntryType = "sidecar.stale"
+	// EntrySidecarRecreated (#3964): the docker provider replaced an idle
+	// crew container because it was created with a different crewship-sidecar
+	// binary than the one this server stages (typically: the first start
+	// after an upgrade). The resolution of sidecar.stale that needs no
+	// operator. Severity info; payload carries previous_sidecar_hash
+	// ("" for containers from before the stamp), sidecar_hash and both
+	// container ids.
+	EntrySidecarRecreated EntryType = "sidecar.recreated"
 
 	// EntryImageStale (#1845): a crew's RUNNING container was created from a
 	// manifest that its image tag no longer resolves to. Deliberately a
@@ -885,6 +893,7 @@ type Entry struct {
 	// replay marks an idempotent projection. Its receipt commits atomically
 	// with the journal row and survives retention of that visible row.
 	replay bool
+	reseal bool
 
 	// flushBarrierAck is an internal sentinel used by Writer.Flush.
 	// When non-nil, the worker treats this Entry as a barrier rather

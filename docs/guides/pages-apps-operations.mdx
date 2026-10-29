@@ -154,8 +154,8 @@ and confirm the draft/publication/receipt identities survive. Repeat with a fres
 restore target using the existing Crewship workspace backup/restore workflow;
 source SQL without the Page project archive is intentionally rejected as incomplete.
 
-For repository verification, `bash scripts/test-pages-apps.sh` installs the tools
-image with `crewship page enable` built from the checkout, runs real Docker/API/MCP/seed checks and exercises the Go bootstrap in
+For repository verification, `bash scripts/test-pages-apps.sh` rebuilds the tools
+image from `tools/pages-build` and pins it with `CREWSHIP_PAGE_BUILD_IMAGE`, runs real Docker/API/MCP/seed checks and exercises the Go bootstrap in
 Chromium. It fails when required tests are skipped. It does not replace a real
 chat-agent authoring test or your deployment's DNS/TLS verification.
 

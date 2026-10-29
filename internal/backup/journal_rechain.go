@@ -85,6 +85,7 @@ type resignProvenance struct {
 	// The stored MAC commits to that id, so it is the only value the
 	// checkpoint's signature can be checked against.
 	CheckpointSourceWorkspaces []string
+	CheckpointSourceIDs        []string
 }
 
 // journalRechainStats reports what the re-sign touched, so the caller can put
@@ -95,11 +96,11 @@ type journalRechainStats struct {
 	Checkpoints int
 	// CheckpointsUnverified counts compaction checkpoints carried over
 	// WITHOUT being re-signed, because their stored MAC did not validate
-	// under the workspace they came from. See resignCheckpoints.
+	// under the workspace they came from. See resignCheckpointsWithKeys.
 	CheckpointsUnverified int
 }
 
-// rechainForkedJournal re-signs the journal rows of a remapped dump.
+// rechainForkedJournalWithKeys re-signs the journal rows of a remapped dump.
 //
 // Call it AFTER RemapIDs and BEFORE the dump is inserted: it works on the
 // in-memory rows, so the re-signed hashes land in the same transaction as the
@@ -108,7 +109,7 @@ type journalRechainStats struct {
 //
 // db is used only to probe the TARGET schema (see hashedPriorityForRow) — the
 // re-chain reads and writes the dump, never the database.
-func rechainForkedJournal(ctx context.Context, db *sql.DB, dump *DBDump, key []byte, prov resignProvenance) (journalRechainStats, error) {
+func rechainForkedJournalWithKeys(ctx context.Context, db *sql.DB, dump *DBDump, keys *journal.SigningKeys, prov resignProvenance) (journalRechainStats, error) {
 	var stats journalRechainStats
 	if dump == nil {
 		return stats, nil
@@ -118,16 +119,8 @@ func rechainForkedJournal(ctx context.Context, db *sql.DB, dump *DBDump, key []b
 	if len(entries) == 0 && len(checkpoints) == 0 {
 		return stats, nil
 	}
-	// The chain key is the whole point of the exercise: a chain re-signed
-	// under no key at all is a chain anybody can forge. ChainKeyFromEnv
-	// cannot return empty (an unset ENCRYPTION_KEY still derives the
-	// documented plaintext-dev-mode key, which is the same key VerifyChain
-	// will use in this process), so this guard exists for the caller that
-	// passes a key explicitly — and it FAILS the restore rather than
-	// falling back to an unkeyed hash or skipping the re-sign.
-	if len(key) == 0 {
-		return stats, fmt.Errorf("backup: cannot re-sign the forked journal chain: no chain key available; " +
-			"refusing to restore a fork whose journal would report as tampered on the next integrity check")
+	if keys == nil {
+		return stats, journal.ErrSigningKeyUnavailable
 	}
 
 	hasEmitColumn, err := targetHasPriorityAtEmit(ctx, db)
@@ -140,7 +133,7 @@ func rechainForkedJournal(ctx context.Context, db *sql.DB, dump *DBDump, key []b
 	//    virtualForeignKeys), but the column is FRAMED INTO the MAC by
 	//    journal.CheckpointMAC, so moving the row without re-signing it
 	//    yields a checkpoint that validates for nobody and covers nothing.
-	removedByWorkspace, checkpointsByWorkspace, unverified, err := resignCheckpoints(checkpoints, key, prov.CheckpointSourceWorkspaces)
+	removedByWorkspace, checkpointsByWorkspace, unverified, err := resignCheckpointsWithKeys(checkpoints, keys, prov.CheckpointSourceWorkspaces, prov.CheckpointSourceIDs)
 	if err != nil {
 		return stats, err
 	}
@@ -148,7 +141,7 @@ func rechainForkedJournal(ctx context.Context, db *sql.DB, dump *DBDump, key []b
 	stats.CheckpointsUnverified = unverified
 
 	// 2. Re-chain the entries, workspace by workspace, in seq order.
-	touched, err := resignEntries(entries, key, removedByWorkspace, checkpointsByWorkspace, hasEmitColumn)
+	touched, err := resignEntries(entries, nil, removedByWorkspace, checkpointsByWorkspace, hasEmitColumn, keys)
 	if err != nil {
 		return stats, err
 	}
@@ -165,7 +158,7 @@ func rechainForkedJournal(ctx context.Context, db *sql.DB, dump *DBDump, key []b
 		tail := touched[ws]
 		stats.Workspaces++
 		stats.Entries += tail.entries
-		row, err := resignNoticeRow(ws, tail, key, hasEmitColumn, now, prov)
+		row, err := resignNoticeRow(ws, tail, nil, hasEmitColumn, now, prov, keys)
 		if err != nil {
 			return stats, err
 		}
@@ -185,7 +178,7 @@ type chainTail struct {
 	checkpoints int
 }
 
-// resignCheckpoints re-signs every compaction checkpoint in the dump under the
+// resignCheckpointsWithKeys re-signs every compaction checkpoint in the dump under the
 // workspace id it now carries, and returns the (workspace -> seq -> removed
 // entry_hash) index the entry walk needs to bridge compacted gaps.
 //
@@ -196,7 +189,7 @@ type chainTail struct {
 // prev_hash — so carrying the source's value through verbatim, and re-signing
 // only the MAC that binds the set to a workspace, is both sufficient and the
 // only thing that can be done.
-func resignCheckpoints(rows []map[string]any, key []byte, sourceWorkspaces []string) (map[string]map[int64]string, map[string]int, int, error) {
+func resignCheckpointsWithKeys(rows []map[string]any, keys *journal.SigningKeys, sourceWorkspaces, sourceIDs []string) (map[string]map[int64]string, map[string]int, int, error) {
 	out := map[string]map[int64]string{}
 	counts := map[string]int{}
 	unverified := 0
@@ -229,14 +222,24 @@ func resignCheckpoints(rows []map[string]any, key []byte, sourceWorkspaces []str
 		if i < len(sourceWorkspaces) {
 			sourceWS = sourceWorkspaces[i]
 		}
-		if sourceWS == "" || !hmac.Equal(
-			[]byte(journal.CheckpointMAC(key, sourceWS, removed)),
-			[]byte(rowString(row, "mac")),
-		) {
+		sourceID := rowString(row, "id")
+		if i < len(sourceIDs) {
+			sourceID = sourceIDs[i]
+		}
+		oldID, oldVersion := rowKeyIdentity(row)
+		expected, verifyErr := journal.CheckpointMACForKeys(keys, sourceID, sourceWS, rowString(row, "created_at"), removed, oldID, oldVersion)
+		if sourceWS == "" || verifyErr != nil || !hmac.Equal([]byte(expected), []byte(rowString(row, "mac"))) {
 			unverified++
 			continue
 		}
-		row["mac"] = journal.CheckpointMAC(key, ws, removed)
+		id, version := journal.ActiveSigningIdentity(keys)
+		mac, err := journal.CheckpointMACForKeys(keys, rowString(row, "id"), ws, rowString(row, "created_at"), removed, id, version)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		row["mac"] = mac
+		setRowKeyIdentity(row, id, version)
+
 		counts[ws]++
 		if out[ws] == nil {
 			out[ws] = map[int64]string{}
@@ -257,7 +260,7 @@ func resignCheckpoints(rows []map[string]any, key []byte, sourceWorkspaces []str
 // attestation this instance never made, and VerifyChain already reports them
 // for what they are. A source workspace that carried such rows forks into one
 // that carries them too — no better, and no worse.
-func resignEntries(rows []map[string]any, key []byte, removed map[string]map[int64]string, checkpointCounts map[string]int, hasEmitColumn bool) (map[string]*chainTail, error) {
+func resignEntries(rows []map[string]any, key []byte, removed map[string]map[int64]string, checkpointCounts map[string]int, hasEmitColumn bool, snapshots ...*journal.SigningKeys) (map[string]*chainTail, error) {
 	byWorkspace := map[string][]map[string]any{}
 	for _, row := range rows {
 		ws := rowString(row, "workspace_id")
@@ -320,6 +323,15 @@ func resignEntries(rows []map[string]any, key []byte, removed map[string]map[int
 
 			f := chainFieldsFromRow(row, ws, seq, hasEmitColumn)
 			hash := journal.ChainHashKeyed(key, tail.prevHash, f)
+			if len(snapshots) == 1 {
+				f.KeyID, f.MACVersion = journal.ActiveSigningIdentity(snapshots[0])
+				var err error
+				hash, err = journal.ChainHashForKeys(snapshots[0], tail.prevHash, f)
+				if err != nil {
+					return nil, err
+				}
+				setRowKeyIdentity(row, f.KeyID, f.MACVersion)
+			}
 			row["prev_hash"] = tail.prevHash
 			row["entry_hash"] = hash
 			tail.prevHash = hash
@@ -417,7 +429,7 @@ func targetHasPriorityAtEmit(ctx context.Context, db *sql.DB) (bool, error) {
 // when its rows never landed — and an emit after commit would be a second
 // write that a crash could lose, leaving a silently re-signed fork, which is
 // the exact outcome this entry exists to prevent.
-func resignNoticeRow(workspaceID string, tail *chainTail, key []byte, hasEmitColumn bool, now time.Time, prov resignProvenance) (map[string]any, error) {
+func resignNoticeRow(workspaceID string, tail *chainTail, key []byte, hasEmitColumn bool, now time.Time, prov resignProvenance, snapshots ...*journal.SigningKeys) (map[string]any, error) {
 	payload := map[string]any{
 		"reason":                "forked restore (--as-workspace/--as-crew) rewrote the ids the journal hash chain commits to",
 		"entries_resigned":      tail.entries,
@@ -480,6 +492,15 @@ func resignNoticeRow(workspaceID string, tail *chainTail, key []byte, hasEmitCol
 		"prev_hash":    tail.prevHash,
 		"entry_hash":   journal.ChainHashKeyed(key, tail.prevHash, f),
 	}
+	if len(snapshots) == 1 {
+		f.KeyID, f.MACVersion = journal.ActiveSigningIdentity(snapshots[0])
+		hash, err := journal.ChainHashForKeys(snapshots[0], tail.prevHash, f)
+		if err != nil {
+			return nil, err
+		}
+		row["entry_hash"] = hash
+		setRowKeyIdentity(row, f.KeyID, f.MACVersion)
+	}
 	if actorID != "" {
 		row["actor_id"] = actorID
 	}
@@ -529,5 +550,31 @@ func rowInt64(row map[string]any, key string) (int64, error) {
 		return strconv.ParseInt(n, 10, 64)
 	default:
 		return 0, fmt.Errorf("unsupported value type %T", n)
+	}
+}
+
+func rowKeyIdentity(row map[string]any) (sql.NullString, sql.NullInt64) {
+	var id sql.NullString
+	var version sql.NullInt64
+	if raw, ok := row["chain_key_id"]; ok && raw != nil {
+		id = sql.NullString{String: rowString(row, "chain_key_id"), Valid: true}
+	}
+	if raw, ok := row["chain_mac_version"]; ok && raw != nil {
+		n, err := rowInt64(row, "chain_mac_version")
+		if err == nil {
+			version = sql.NullInt64{Int64: n, Valid: true}
+		} else {
+			version = sql.NullInt64{Int64: -1, Valid: true}
+		}
+	}
+	return id, version
+}
+func setRowKeyIdentity(row map[string]any, id sql.NullString, version sql.NullInt64) {
+	if id.Valid {
+		row["chain_key_id"] = id.String
+		row["chain_mac_version"] = version.Int64
+	} else {
+		row["chain_key_id"] = nil
+		row["chain_mac_version"] = nil
 	}
 }

@@ -113,9 +113,8 @@ func TestExecutor_AgentlessCodeProbe_RunsTokenZero(t *testing.T) {
 	}
 }
 
-// The render fix: the code body must be rendered (inputs substituted) before
-// dispatch, so {{ inputs.x }} works exactly like agent_run prompts.
-func TestExecutor_CodeProbe_RendersInputs(t *testing.T) {
+// Legacy references translate to typed selectors without rendering values.
+func TestExecutor_CodeProbe_LegacyTypedInputs(t *testing.T) {
 	store, resolver, cleanup := openExecutorTestDB(t)
 	defer cleanup()
 	runner := newMockRunner()
@@ -144,6 +143,6 @@ func TestExecutor_CodeProbe_RendersInputs(t *testing.T) {
 		t.Fatalf("status: got %q (error: %s)", res.Status, res.ErrorMessage)
 	}
 	if res.Output != "true" {
-		t.Errorf("rendered probe output: got %q, want %q (render fix not applied?)", res.Output, "true")
+		t.Errorf("legacy typed probe output: got %q, want %q", res.Output, "true")
 	}
 }

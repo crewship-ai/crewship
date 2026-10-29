@@ -21,7 +21,8 @@ import { emitChatEvent } from "@/lib/telemetry"
 import { cn } from "@/lib/utils"
 
 import { currencyPlaceholder } from "@/lib/ask-template"
-import { classifyAskFieldType, validateAskAnswers } from "@/lib/ask-validate"
+import { AskSubmissionError } from "@/lib/ask-submission-error"
+import { classifyAskFieldType, validateAskAnswers, type AskAnswerError } from "@/lib/ask-validate"
 
 import {
   buildAskEnvelope,
@@ -157,6 +158,7 @@ function Sheet({
   })
   const [previewOpen, setPreviewOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [serverErrors, setServerErrors] = useState<AskAnswerError[]>([])
   const rootRef = useRef<HTMLDivElement>(null)
 
   const { key: attachmentKey } = useAttachmentScope(sessionId)
@@ -300,6 +302,7 @@ function Sheet({
 
   const setField = useCallback(
     (name: string) => (e: { target: { value: string } }) => {
+      setServerErrors((errors) => errors.filter((error) => error.field !== name))
       lastFieldRef.current = name
       setValues((prev) => ({ ...prev, [name]: e.target.value }))
     },
@@ -367,10 +370,12 @@ function Sheet({
       submissionId: newAskSubmissionId(),
       values: renderValues,
       attachmentsByField: pathsByField,
+      messageAttachmentIds: messageAttachments.filter(isSendableAttachment).map((attachment) => attachment.path!),
       renderedText: rendered,
     })
     recordAskSubmission(sessionId, envelope)
 
+    setServerErrors([])
     setSubmitting(true)
     try {
       const sent = await onSubmit(form, rendered, envelope)
@@ -389,6 +394,9 @@ function Sheet({
         })
         onClose()
       }
+    } catch (error) {
+      if (error instanceof AskSubmissionError) setServerErrors(error.errors)
+      toast.error(error instanceof Error ? error.message : "The form could not be sent. Try again.")
     } finally {
       setSubmitting(false)
     }
@@ -399,6 +407,7 @@ function Sheet({
     form,
     byField,
     pathsByField,
+    messageAttachments,
     renderValues,
     attachments,
     rendered,
@@ -477,24 +486,30 @@ function Sheet({
           classifyAskFieldType(fieldType(f)).verdict === "unsafe" ? (
             <BlockedField key={f.name} field={f} />
           ) : (
-            <FormField
-              key={f.name}
-              field={f}
-              value={values[f.name] ?? ""}
-              onChange={setField(f.name)}
-              idPrefix={`ask-${form.id}-`}
-              testIdPrefix="ask-field"
-              attachmentSlot={
-                isAttachmentField(f) ? (
-                  <AskFieldAttachments
-                    agentId={agentId}
-                    sessionId={sessionId}
-                    formId={form.id}
-                    field={f}
-                  />
-                ) : undefined
-              }
-            />
+            <div key={f.name}>
+              <FormField
+                field={f}
+                invalid={serverErrors.some((error) => error.field === f.name)}
+                describedBy={serverErrors.some((error) => error.field === f.name) ? `ask-error-${form.id}-${f.name}` : undefined}
+                value={values[f.name] ?? ""}
+                onChange={setField(f.name)}
+                idPrefix={`ask-${form.id}-`}
+                testIdPrefix="ask-field"
+                attachmentSlot={
+                  isAttachmentField(f) ? (
+                    <AskFieldAttachments
+                      agentId={agentId}
+                      sessionId={sessionId}
+                      formId={form.id}
+                      field={f}
+                    />
+                  ) : undefined
+                }
+              />
+              {serverErrors.filter((error) => error.field === f.name).map((error) => (
+                <p key={error.code} id={`ask-error-${form.id}-${f.name}`} role="alert" className="mt-1 text-xs text-destructive">{error.message}</p>
+              ))}
+            </div>
           ),
         )}
 

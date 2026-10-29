@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react"
 import { CheckCircle2, KeyRound, Workflow } from "lucide-react"
 
 import {
-  DetailCard, EmptyState, EntityChip, FieldLabel, Pill, StatStrip, StepRow, TickRow,
+  DetailCard, EntityChip, FieldLabel, Pill, StatStrip, StepRow, TickRow,
 } from "@/components/ui/detail"
 
 // The kit's job is to stop every screen inventing its own sizes, so the tests
@@ -156,14 +156,5 @@ describe("shared roles", () => {
     const chip = screen.getByText("@casey").parentElement!
     expect(chip).toHaveClass("text-purple-hover")
     expect(chip.className).not.toMatch(/(^|\s)text-purple(\s|$)/)
-  })
-
-  it("EmptyState renders title, description and action", () => {
-    render(
-      <EmptyState icon={Workflow} title="Nothing yet" description="Description" action={<button>Add</button>} />,
-    )
-    expect(screen.getByText("Nothing yet")).toBeInTheDocument()
-    expect(screen.getByText("Description")).toHaveClass("type-row")
-    expect(screen.getByRole("button", { name: "Add" })).toBeInTheDocument()
   })
 })

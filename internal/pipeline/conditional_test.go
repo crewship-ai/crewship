@@ -43,6 +43,11 @@ CREATE TABLE IF NOT EXISTS pipeline_webhooks (
 func openWebhookTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	db := openStoreTestDB(t)
+	seedPipeline(t, db, "pln_1", "webhook-one")
+	seedPipeline(t, db, "pln_2", "webhook-two")
+	if _, err := db.Exec(`INSERT INTO pipeline_versions(id,pipeline_id,version,definition_json,definition_hash,author_type,author_id,created_at) SELECT 'webhook-pin',id,3,definition_json,definition_hash,'user','user_test',datetime('now') FROM pipelines WHERE id='pln_1'`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.ExecContext(context.Background(), webhookSchemaSQL); err != nil {
 		t.Fatalf("webhook schema: %v", err)
 	}

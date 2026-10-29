@@ -154,4 +154,26 @@ func TestAcceptance_AdminInstanceVerbs(t *testing.T) {
 	if out := must("admin", "instance", "audit"); !strings.Contains(out, "instance.admin_bootstrapped") || !strings.Contains(out, "instance.admin_granted") {
 		t.Fatalf("boss after naming carol:\n%s", out)
 	}
+
+	// Writes check only the chain tail; history is verified on demand.
+	if out := must("admin", "instance", "audit", "verify"); !strings.Contains(out, "Instance audit chain OK") {
+		t.Fatalf("audit verify on an authentic chain:\n%s", out)
+	}
+	if _, err := db.Exec(`UPDATE instance_audit_logs SET metadata='{"tampered":true}' WHERE chain_seq=2`); err != nil {
+		t.Fatal(err)
+	}
+	must("admin", "instance", "add-admin", "lucie@lab.invalid") // a middle defect does not block writes
+	if out, err := run("admin", "instance", "audit", "verify"); err == nil || !strings.Contains(out, "NOT CLEAN") || !strings.Contains(out, "post_upgrade_invalid") {
+		t.Fatalf("audit verify after a middle defect: %v\n%s", err, out)
+	}
+	out, _ = run("admin", "instance", "audit", "verify", "--format", "json")
+	var verdict struct {
+		OK                   bool   `json:"ok"`
+		ContinuationVerified bool   `json:"continuation_verified"`
+		HistoricalStatus     string `json:"historical_status"`
+	}
+	// The verdict is the first JSON value; the non-zero exit adds its own error after it.
+	if err := json.NewDecoder(strings.NewReader(out[strings.Index(out, "{"):])).Decode(&verdict); err != nil || verdict.OK || !verdict.ContinuationVerified || verdict.HistoricalStatus != "post_upgrade_invalid" {
+		t.Fatalf("audit verify json: %+v %v\n%s", verdict, err, out)
+	}
 }

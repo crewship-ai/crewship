@@ -233,3 +233,12 @@ describe("ask submission envelope", () => {
     expect(JSON.stringify(window.sessionStorage)).not.toContain("api")
   })
 })
+
+
+describe("message attachments in submission metadata", () => {
+  it("preserves message attachment handles when reading durable metadata", () => {
+    const env: AskSubmissionEnvelope = { submission_id: "sub-att", form_id: "receipt", form_label: "Receipt", form_version: 1, values: {}, rendered_text: "Receipt", message_attachment_ids: ["attachments/chat-1/invoice.pdf"] }
+    const parsed = askEnvelopeFromMetadata(JSON.parse(JSON.stringify({ [ASK_SUBMISSION_METADATA_KEY]: env })))
+    expect(parsed?.message_attachment_ids).toEqual(env.message_attachment_ids)
+  })
+})

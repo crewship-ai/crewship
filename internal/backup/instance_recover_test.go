@@ -419,7 +419,7 @@ func TestInstanceDrillAndContentsCheck(t *testing.T) {
 	if c := byName[backup.DrillCheckAttachments]; c.Checked != 1 || c.Failed != 0 {
 		t.Fatalf("attachments check = %+v", c)
 	}
-	if c := byName[backup.DrillCheckJournal]; c.Status != backup.DrillStatusOK || c.Checked != 2 || !strings.Contains(c.Detail, "3 entries") {
+	if c := byName[backup.DrillCheckJournal]; c.Status != backup.DrillStatusOK || c.Checked != 3 || !strings.Contains(c.Detail, "3 entries") {
 		t.Fatalf("journal check = %+v", c)
 	}
 

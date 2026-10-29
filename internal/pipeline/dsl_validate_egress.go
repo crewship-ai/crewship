@@ -66,6 +66,9 @@ func validateStepEgress(st Step) error {
 				"use runtime: expr or cel for agentless logic, or convert to type: agent_run "+
 				"with a shell-tool-enabled agent (see docs/manifest/routine.md `Code steps`)", st.ID, st.Code.Runtime)
 		}
+		if _, err := normalizeCodeSource(st.Code.Code); err != nil {
+			return fmt.Errorf("pipeline: step %q (code): %w", st.ID, err)
+		}
 	case StepWait:
 		if st.Wait == nil {
 			return fmt.Errorf("pipeline: step %q (wait) missing wait body", st.ID)

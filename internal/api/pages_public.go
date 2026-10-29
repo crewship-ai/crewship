@@ -49,6 +49,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/time/rate"
 
+	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pages"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
@@ -74,16 +75,23 @@ type PagePublicHandler struct {
 	// a legitimate reader does repeatedly; a password attempt is not, and
 	// sharing one bucket between them would mean either a useless view limit or
 	// a brute-force allowance of 600 guesses an hour.
-	passwords *pagePublicLimiter
+	passwords    *pagePublicLimiter
+	passwordWork *pagePasswordAdmission
+	// comparePassword is handler-owned so tests can hold the real work boundary
+	// without changing shared authentication globals or relying on CPU timing.
+	comparePassword func([]byte, []byte) error
 }
 
 // NewPagePublicHandler builds the public view handler over an existing page
 // handler.
 func NewPagePublicHandler(base *PageHandler) *PagePublicHandler {
+	limits, _ := (config.PublicPagePasswordsConfig{}).Resolve()
 	return &PagePublicHandler{
-		PageHandler: base,
-		views:       newPagePublicLimiter(configuredPublicViewsPerHour, 0),
-		passwords:   newPagePublicLimiter(func() int { return pagePublicPasswordAttemptsPerHour }, pagePublicPasswordBurst),
+		passwordWork:    newPagePasswordAdmission(limits),
+		comparePassword: bcrypt.CompareHashAndPassword,
+		PageHandler:     base,
+		views:           newPagePublicLimiter(configuredPublicViewsPerHour, 0),
+		passwords:       newPagePublicLimiter(func() int { return pagePublicPasswordAttemptsPerHour }, pagePublicPasswordBurst),
 	}
 }
 
@@ -302,29 +310,35 @@ func (h *PagePublicHandler) Unlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// §7.3.3: "the failure must not distinguish 'wrong password' from 'unknown
-	// token'". That is two properties, not one — the same ANSWER and the same
-	// COST. An unknown token still burns a bcrypt comparison against the
-	// package's dummy hash, exactly as the sign-in path does for an unknown
-	// email (lockout.go), so the two cases cannot be told apart by a clock
-	// either.
-	switch {
-	case resolveErr != nil && !errors.Is(resolveErr, sql.ErrNoRows):
+	// Storage failures are not password comparisons and do not spend admission.
+	if resolveErr != nil && !errors.Is(resolveErr, sql.ErrNoRows) {
 		replyInternalError(w, h.logger, "resolve public page token", resolveErr)
 		return
-	case tok == nil:
-		_ = bcrypt.CompareHashAndPassword([]byte(dummyBcryptHash()), []byte(req.Password))
-		h.replyPublicPasswordRefused(w)
+	}
+	// Canonical token hashes identify both real and unknown targets. The map
+	// never retains idle targets, and no plaintext token is kept in admission.
+	release, admitted := h.passwordWork.acquire(hashPagePublicToken(strings.TrimSpace(token)))
+	if !admitted {
+		w.Header().Set("Retry-After", "1")
+		replyError(w, http.StatusTooManyRequests, "public page password checks are busy; retry shortly")
 		return
-	case tok.PasswordHash == "":
-		// No password on this link. Serving the page here would make "POST
-		// unlock" a way to skip the GET's rate limit; refusing tells the caller
-		// nothing it did not already know, since an unprotected link answers
-		// the GET anyway.
-		_ = bcrypt.CompareHashAndPassword([]byte(dummyBcryptHash()), []byte(req.Password))
-		h.replyPublicPasswordRefused(w)
-		return
-	case bcrypt.CompareHashAndPassword([]byte(tok.PasswordHash), []byte(req.Password)) != nil:
+	}
+	matched := func() bool {
+		// Cancellation cannot free the slot while a synchronous bcrypt operation
+		// is still running. Release before serving a potentially slow page.
+		defer release()
+		hash := ""
+		if tok != nil {
+			hash = tok.PasswordHash
+		}
+		protected := hash != ""
+		if !protected {
+			hash = dummyBcryptHash()
+		}
+		err := h.comparePassword([]byte(hash), []byte(req.Password))
+		return tok != nil && protected && err == nil
+	}()
+	if !matched {
 		h.replyPublicPasswordRefused(w)
 		return
 	}

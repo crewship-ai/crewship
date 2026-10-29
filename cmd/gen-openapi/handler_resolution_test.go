@@ -289,6 +289,14 @@ func TestGeneratedSpecDoesNotBleedAnnotationsOntoNeighbouringRoutes(t *testing.T
 // the same two trimmed parameters as the DELETE fifty lines above it, joined by
 // && instead of ||, so either alone satisfies it and neither is required.
 var requiredQueryParametersInSpec = []string{
+	// Both Dashboard data reads reject an omitted code version before loading data.
+	// Pinned by TestDashboardDataReadsRequireSelectedCodeVersion.
+	"GET /api/v1/pages/{slug}/artifact/data ?version",
+	"GET /api/v1/pages/{slug}/artifact/data/{collection} ?version",
+	// Both Slides reads delegate their exact pin guard to serveArtifactSlides.
+	// Pinned by TestArtifactSlidesSelectedProjectionAndPDF.
+	"GET /api/v1/pages/{slug}/artifact/slides ?version",
+	"GET /api/v1/pages/{slug}/artifact/export.pdf ?version",
 	"DELETE /api/v1/admin/backups ?path",
 	"DELETE /api/v1/crews/{crewId}/files/delete ?path",
 	"DELETE /api/v1/feedback ?message_id",
@@ -321,6 +329,12 @@ var requiredQueryParametersInSpec = []string{
 	"GET /api/v1/models ?provider",
 	"GET /api/v1/oauth/callback ?code",
 	"GET /api/v1/oauth/callback ?state",
+	// Verified against gridcraftHTTP.commits (internal/api/gridcraft_live.go):
+	// a feed request without since is 400. Pinned by
+	// TestGridCraftCommitsFeedUnderReadAccess.
+	"GET /api/v1/pages/{slug}/workbook/commits ?since",
+	// Mooring's authenticated upgrade refuses a missing original connection_ref.
+	"GET /api/v1/pages/{slug}/mooring/ws ?connection_ref",
 	"GET /api/v1/skills/proposed ?crew_id",
 	// pipeline-schedules/preview used to list ?cron_expr here (B9, #2362). It takes
 	// cron_expr OR phrase since ODCH-RT-15, so neither is required on its own.

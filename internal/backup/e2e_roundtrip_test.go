@@ -293,6 +293,13 @@ func snapshotWorkspaceScopedTables(t *testing.T, db *sql.DB, workspaceID string)
 				if q.table == "chats" && c == "authority_generation" {
 					continue
 				}
+				// Canonical ACL rows recreated during restore advance this
+				// admission generation. Compare durable content, not a lease
+				// generation which must not be reset just to match a dump.
+				// Its change is asserted explicitly in the round-trip below.
+				if q.table == "workspaces" && c == "authority_revision" {
+					continue
+				}
 				// modernc.org/sqlite returns []byte for TEXT in some
 				// paths; normalize to string so the JSON encoding is
 				// stable across source-vs-target reads.
@@ -447,6 +454,20 @@ func TestE2E_BackupRestoreRoundTrip(t *testing.T) {
 	}
 	if err := receiptRows.Err(); err != nil {
 		t.Fatal(err)
+	}
+
+	// The fixture restores crews and other canonical authority edges. Their
+	// same-writer triggers must remain active: restoring a content-equivalent
+	// workspace is not permission to restore the source's admission generation.
+	var sourceAuthority, targetAuthority int64
+	if err := source.QueryRowContext(ctx, `SELECT authority_revision FROM workspaces WHERE id=?`, workspaceID).Scan(&sourceAuthority); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.QueryRowContext(ctx, `SELECT authority_revision FROM workspaces WHERE id=?`, workspaceID).Scan(&targetAuthority); err != nil {
+		t.Fatal(err)
+	}
+	if targetAuthority <= sourceAuthority {
+		t.Fatalf("restored canonical edges did not invalidate source admission generation: source=%d target=%d", sourceAuthority, targetAuthority)
 	}
 
 	// Per-table diff.

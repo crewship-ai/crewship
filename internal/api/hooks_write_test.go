@@ -108,10 +108,11 @@ func TestHooksCreate_PreToolCallIsRejected(t *testing.T) {
 	}
 }
 
-func TestHooksCreate_ShellHandlerRequiresOwner(t *testing.T) {
+func TestHooksCreate_ShellHandlerRequiresInstanceAdmin(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
+	mustExec(t, db, `INSERT INTO users(id,email,instance_role) VALUES('named-admin','named-admin@example.test','ADMIN')`)
 	h := NewHooksHandler(db, newTestLogger())
 
 	shell := map[string]any{
@@ -126,7 +127,7 @@ func TestHooksCreate_ShellHandlerRequiresOwner(t *testing.T) {
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("ADMIN shell create status = %d, want 403; body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "OWNER") {
+	if !strings.Contains(rr.Body.String(), "instance administrator") {
 		t.Errorf("403 should say which role is required: %s", rr.Body.String())
 	}
 	var n int
@@ -137,7 +138,13 @@ func TestHooksCreate_ShellHandlerRequiresOwner(t *testing.T) {
 		t.Fatalf("shell hook persisted for a non-OWNER (%d rows)", n)
 	}
 
-	// Same body, OWNER: accepted.
+	// Workspace ownership alone still does not authorize the command.
+	rr = postHook(t, h, userID, wsID, "OWNER", shell)
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("workspace OWNER status=%d", rr.Code)
+	}
+	mustExec(t, db, `UPDATE users SET instance_role='ADMIN' WHERE id=?`, userID)
+	// Same body, named instance administrator: accepted.
 	rr = postHook(t, h, userID, wsID, "OWNER", shell)
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("OWNER shell create status = %d, want 201; body=%s", rr.Code, rr.Body.String())
@@ -486,10 +493,11 @@ func TestHooksUpdate_LegacyPreToolCallRowSurvivesUnrelatedPatch(t *testing.T) {
 	}
 }
 
-func TestHooksUpdate_NonOwnerCannotConvertAHookToShell(t *testing.T) {
+func TestHooksUpdate_NonInstanceAdminCannotConvertAHookToShell(t *testing.T) {
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
+	mustExec(t, db, `INSERT INTO users(id,email,instance_role) VALUES('named-admin','named-admin@example.test','ADMIN')`)
 	h := NewHooksHandler(db, newTestLogger())
 
 	rr := postHook(t, h, userID, wsID, "ADMIN", map[string]any{

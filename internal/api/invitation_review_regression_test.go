@@ -1,11 +1,14 @@
 package api
 
 import (
-	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"database/sql"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/database"
 )
 
 func TestInvitationReviewExpiredSameDateCanBeReissued(t *testing.T) {
@@ -51,10 +54,45 @@ func TestInvitationReviewRevokedInviterCannotGrantAtSignup(t *testing.T) {
 	}
 }
 
+// Build the genuine pre-invariant schema inside this test's measured time.
+// Only schema is shared: each case receives a private in-memory snapshot before
+// it seeds legacy authority, runs the real upgrade and exercises Signup.
 func TestInvitationReviewInviterSessionCeiling(t *testing.T) {
+	template, _ := setupGuestAdministratorUpgradeDB(t)
+	newUpgradeDB := func(t *testing.T) (*sql.DB, func()) {
+		t.Helper()
+		resetCapabilityCache()
+		drainBackgroundWork(t)
+		snapshot, err := database.SnapshotToMemory(t.Context(), template)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = snapshot.Close() })
+		db := snapshot.DB
+		// Backup copies database pages, not connection pragmas. Retain the
+		// original fixture's foreign-key and single-connection invariants.
+		execOrFatal(t, db, "PRAGMA foreign_keys=ON")
+		var foreignKeys int
+		if err := db.QueryRow("PRAGMA foreign_keys").Scan(&foreignKeys); err != nil || foreignKeys != 1 || db.Stats().MaxOpenConnections != 1 {
+			t.Fatalf("private upgrade fixture invariants: foreign_keys=%d max_connections=%d err=%v", foreignKeys, db.Stats().MaxOpenConnections, err)
+		}
+		var installed int
+		if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='guest_administrator_insert'").Scan(&installed); err != nil || installed != 0 {
+			t.Fatalf("fixture is not pre-invariant: installed=%d err=%v", installed, err)
+		}
+		return db, func() {
+			t.Helper()
+			if err := database.Migrate(t.Context(), db, newTestLogger()); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='guest_administrator_insert'").Scan(&installed); err != nil || installed != 1 {
+				t.Fatalf("genuine upgrade did not install invariant: installed=%d err=%v", installed, err)
+			}
+		}
+	}
 	for _, mode := range []string{"trusted", "restricted-here", "restricted-other"} {
 		t.Run(mode, func(t *testing.T) {
-			db, completeUpgrade := setupGuestAdministratorUpgradeDB(t)
+			db, completeUpgrade := newUpgradeDB(t)
 			inviter, ws := seedInviter(t, db)
 			seedInvitation(t, db, "review-ceiling", ws, inviter, "ceiling-review@example.test", "MEMBER", time.Now().Add(time.Hour), nil)
 			if mode == "restricted-here" {

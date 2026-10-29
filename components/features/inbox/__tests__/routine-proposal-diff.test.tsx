@@ -84,3 +84,14 @@ describe("<RoutineProposalDiff>", () => {
     expect(await screen.findByText(/could not load the diff \(404\)/i)).toBeTruthy()
   })
 })
+
+it.each([
+  [413, /diff is too large/i],
+  [429, /comparisons are busy/i],
+] as const)("shows an explicit diff refusal for HTTP %i without retry", async (status, message) => {
+  apiFetch.mockReset()
+  apiFetch.mockResolvedValue({ ok: false, status, json: async () => ({}) })
+  render(<RoutineProposalDiff workspaceId="ws" slug="owned" fromVersion={1} toVersion={2} />)
+  expect(await screen.findByText(message)).toBeTruthy()
+  expect(apiFetch).toHaveBeenCalledTimes(1)
+})

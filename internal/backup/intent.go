@@ -36,6 +36,53 @@ import "sort"
 // table. Drift detection catches the omission in tests so an oversight
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
+	"artifact_data_collections":        IntentInclude,
+	"artifact_data_documents":          IntentInclude,
+	"artifact_design_documents":        IntentInclude, // durable live Yjs content, including unsnapshotted edits; never awareness or authority
+	"artifact_project_comments":        IntentInclude,
+	"artifact_project_comment_tasks":   IntentInclude,
+	"artifact_project_comment_replies": IntentInclude,
+	"artifact_project_origins":         IntentInclude,
+	"artifact_project_run_consents":    IntentExcludeRuntime,
+	"artifact_project_message_intents": IntentExcludeRuntime,
+
+	"artifact_version_heads": IntentInclude, // immutable storage family and separate latest/shared pins
+	"artifact_version_blobs": IntentInclude, // binary project assets, encoded losslessly
+	"artifact_versions":      IntentInclude, // all retained whole-project manifests
+
+	"mooring_authority_generations":  IntentExcludeRuntime, // target-local non-ABA tombstones never travel or reset in portable restore
+	"mooring_delivery_gates":         IntentExcludeRuntime,
+	"mooring_delivery_barriers":      IntentExcludeRuntime,
+	"mooring_collab_documents":       IntentInclude, // durable collaboration state; no runtime capabilities
+	"mooring_collab_tasks":           IntentInclude, // durable collaboration state; no runtime capabilities
+	"mooring_collab_changes":         IntentInclude, // durable collaboration state; no runtime capabilities
+	"mooring_collab_target_versions": IntentInclude,
+	"mooring_collab_target_effects":  IntentInclude,
+	"mooring_collab_operations":      IntentInclude,        // durable collaboration state; no runtime capabilities
+	"mooring_collab_checkpoints":     IntentInclude,        // durable collaboration state; no runtime capabilities
+	"mooring_collab_audit":           IntentInclude,        // durable collaboration state; no runtime capabilities
+	"mooring_collab_artifact_edits":  IntentInclude,        // historical attribution DATA, never live authority
+	"mooring_session_owners":         IntentExcludeRuntime, // process-bound owner capability requires fresh admission after restore
+	"mooring_documents":              IntentInclude,        // durable generic application state
+	"mooring_receipts":               IntentInclude,        // immutable history and idempotence evidence
+	"mooring_intents":                IntentExcludeRuntime, // live human/run mandates never survive restore
+
+	"mooring_edit_leases":           IntentExcludeRuntime, // target-local editor generation tombstones; no portable capabilities
+	"mooring_edit_lease_workspaces": IntentExcludeRuntime, // issued target fences outlive Page deletion
+	"mooring_edit_lease_requests":   IntentExcludeRuntime,
+
+	"craft_native_documents": IntentInclude, // immutable native compatibility pins, never runtime authority
+
+	// Workbook content and immutable receipts travel; live authority does not.
+	"gridcraft_heads":        IntentInclude,
+	"gridcraft_operations":   IntentInclude,
+	"gridcraft_revisions":    IntentInclude,
+	"gridcraft_audit":        IntentInclude,
+	"gridcraft_outbox":       IntentInclude,
+	"gridcraft_intents":      IntentExcludeRuntime,
+	"gridcraft_sessions":     IntentExcludeRuntime,
+	"gridcraft_writer_fence": IntentExcludeRuntime,
+
 	"document_iteration_intents": IntentExcludeRuntime, // original live targeted-message grants never survive restore
 	"document_creation_consents": IntentExcludeRuntime, // live creation permission must be freshly admitted after restore
 	"slides_heads":               IntentInclude,
@@ -66,6 +113,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"restricted_workflow_jobs":              IntentExcludeRuntime, // copying private queue capsules must not replay paid work
 	"restricted_workflow_attempt_roots":     IntentExcludeRuntime, // dispatch fences and stop identities belong to excluded work attempts; never transplant runtime authority
 	"access_files":                          IntentExcludeRuntime, // classified outputs depend on excluded attempt authority
+	"crew_access_preset_selections":         IntentInclude,        // informational crew choice, never execution authority
 	"access_preset_selections":              IntentInclude,        // saved explicit intent, never execution authority
 	"access_grants":                         IntentInclude,        // exact member/resource rights survive restore
 	"access_context_dependencies":           IntentExcludeRuntime, // dependency authority requires fresh admission
@@ -678,6 +726,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 // Pure-mechanical tables (sqlite_*, the _migrations ledger, FTS5 shadow tables)
 // are skipped by pattern in the guard and deliberately NOT listed here.
 var NonBackedUpTables = map[string]struct{}{
+	"mooring_session_writer_fence": {}, // installation-local serialization singleton, recreated by migration
 	// ── Global / cross-workspace identities. No workspace_id; keyed by global
 	//    unique columns. users/workspaces/skills are dumped (if at all) via the
 	//    special-cased head of BackupTables, not the workspace-scoped intent map.
@@ -700,11 +749,12 @@ var NonBackedUpTables = map[string]struct{}{
 
 	// ── Instance-global configuration & operational state. Local to THIS
 	//    instance; carrying it across a restore would clobber the target's own.
-	"app_settings":            {},
-	"instance_config":         {},
-	"rate_limit_overrides":    {}, // instance-global limiter tuning (v168); must not clobber the target's own on restore
-	"keeper_runtime_settings": {}, // instance-global judge wiring; a restored workspace must not repoint the target's gatekeeper at the source's model server
-	"instance_audit_logs":     {}, // instance-level admin actions (Admin › People & workspaces); the target instance keeps its own trail
+	"app_settings":                     {},
+	"instance_config":                  {},
+	"rate_limit_overrides":             {}, // instance-global limiter tuning (v168); must not clobber the target's own on restore
+	"keeper_runtime_settings":          {}, // instance-global judge wiring; a restored workspace must not repoint the target's gatekeeper at the source's model server
+	"instance_audit_logs":              {}, // instance-level admin actions (Admin › People & workspaces); the target instance keeps its own trail
+	"instance_audit_notice_deliveries": {}, // instance-level audit notification bookkeeping; retained by whole-database instance bundles
 	// restore_reports records every restore / dry run / drill THIS instance
 	// ran. Instance bookkeeping, like backup_catalog: a bundle carrying it
 	// would hand the target a restore history it never had.

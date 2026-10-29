@@ -7,6 +7,7 @@ package api
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	dockerclient "github.com/moby/moby/client"
@@ -26,6 +27,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
+	"github.com/crewship-ai/crewship/internal/skills"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -228,6 +230,12 @@ func WithComposioConfig(cfg *config.ComposioConfig) RouterOption {
 
 // WithKeeperConversations attaches a conversation reader so Keeper can inspect
 // the agent's actual chat history before making access decisions.
+// WithPublicPagePasswords configures nonblocking password-work admission.
+// NewRouter validates and resolves automatic values before serving requests.
+func WithPublicPagePasswords(limits config.PublicPagePasswordsConfig) RouterOption {
+	return func(r *Router) { r.publicPagePasswords = limits }
+}
+
 func WithAllowSignup(allow bool) RouterOption {
 	return func(r *Router) {
 		r.allowSignup = allow
@@ -472,6 +480,26 @@ func WithPageRuntime(runtime, studio string, developmentSameOrigin ...bool) Rout
 	}
 }
 
+// WithWorkbookEditor wires the embedded workbook editor's server-side state:
+// observe sees every request a sign-in session authenticated, with the
+// user's ID and a lookup of whether the user administers the instance (the
+// same-host editor learns from it which public origin browsers use), and
+// detail answers GET /api/v1/admin/instance/workbook-editor. Either may be
+// nil.
+func WithWorkbookEditor(observe func(r *http.Request, userID string, isInstanceAdmin func() bool), detail func() any) RouterOption {
+	return func(r *Router) {
+		r.authMw.observeSession = observe
+		r.workbookEditorDetail = detail
+	}
+}
+
+// WithWorkbookEditorBundle names the editor bundle (digest and frame URL)
+// that a new workbook editor session may frame for the request; "" while
+// nothing may be framed.
+func WithWorkbookEditorBundle(bundle func(*http.Request) (digest, url string)) RouterOption {
+	return func(r *Router) { r.workbookEditorBundle = bundle }
+}
+
 // WithMemoryInventoryRoot enables read-only workspace knowledge discovery.
 func WithMemoryInventoryRoot(path string) RouterOption {
 	return func(r *Router) { r.memoryInventoryRoot = path }
@@ -511,4 +539,11 @@ func WithDocumentLimits(c config.DocumentsConfig) RouterOption {
 // WithDocumentService connects the public Pages bridge to a private engine.
 func WithDocumentService(socket string) RouterOption {
 	return func(r *Router) { r.documentsServiceSocket = socket }
+}
+
+// WithSkillGitImportPolicy snapshots boot-owned policy; this is not an API
+// setting and workspace roles cannot change it.
+func WithSkillGitImportPolicy(policy skills.GitImportPolicy) RouterOption {
+	copyPolicy := skills.GitImportPolicy{PrivateHosts: append([]string(nil), policy.PrivateHosts...)}
+	return func(r *Router) { r.skillGitImportPolicy = copyPolicy }
 }

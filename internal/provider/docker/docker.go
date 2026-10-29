@@ -146,6 +146,13 @@ type Provider struct {
 	runtimeIdleMu       sync.RWMutex
 	runtimeIdleVerifier func(context.Context, string, string) error
 
+	// Outdated-sidecar recreation (#3964, sidecar_refresh.go): the observer
+	// told about each replacement, and the replacement noted under the crew
+	// lock while its successor is being created.
+	sidecarHookMu        sync.RWMutex
+	sidecarRecreatedHook func(context.Context, provider.SidecarRecreatedEvent)
+	sidecarRecreates     sync.Map // crew id -> provider.SidecarRecreatedEvent
+
 	// migrationLocks serializes the pre-C1 legacy-resource migration by
 	// *legacy slug*, not crew id. The legacy resources reconciled in
 	// migrateLegacyCrewResources ("<prefix>-{team,home,tools}-<slug>") are

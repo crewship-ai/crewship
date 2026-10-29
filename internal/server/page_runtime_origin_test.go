@@ -1,11 +1,14 @@
 package server
 
 import (
+	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/editororigin"
 	"github.com/crewship-ai/crewship/internal/logging"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
@@ -60,5 +63,36 @@ func TestPageRuntimeOriginReachesTheHandler(t *testing.T) {
 				t.Fatalf("CSP frames a runtime nobody configured: %s", csp)
 			}
 		})
+	}
+}
+
+// TestSameHostEditorRefusesTheDerivedRuntimeOrigin — the derived 127.0.0.1
+// runtime origin hosts untrusted Page apps, so the same-host editor must
+// treat it exactly like a configured runtime origin: refused there, served
+// on the localhost Studio origin (#3108).
+func TestSameHostEditorRefusesTheDerivedRuntimeOrigin(t *testing.T) {
+	cfg := config.Default()
+	if got := cfg.PageRuntimeOrigin(); got != "http://127.0.0.1:8080" {
+		t.Fatalf("default config derives runtime %q, want http://127.0.0.1:8080", got)
+	}
+	dir := t.TempDir()
+	digest := writeEditorBundle(t, dir)
+	cfg.GridCraft = config.GridCraftConfig{Enabled: true, EditorEnabled: true, EditorBundleDir: dir, EditorBundles: []string{digest}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("config with derived runtime and same-host editor invalid: %v", err)
+	}
+	editor := newEditorOrigin(cfg, slog.Default())
+	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) })
+	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, editor)))
+
+	for host, want := range map[string]bool{"localhost:8080": true, "127.0.0.1:8080": false} {
+		r := httptest.NewRequest("GET", "http://"+host+"/_editor/b/"+digest+"/index.html", nil)
+		r.Header.Set("Sec-Fetch-Site", "same-origin")
+		r.Header.Set("Sec-Fetch-Dest", "iframe")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if (w.Code == 200) != want {
+			t.Errorf("editor on %s = %d, served want %v", host, w.Code, want)
+		}
 	}
 }

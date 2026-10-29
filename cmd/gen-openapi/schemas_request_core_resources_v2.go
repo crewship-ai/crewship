@@ -46,6 +46,8 @@ func coreResourceRequestSchemaCatalogV2() (map[string]DomainSchema, map[string]a
 		// references, rather than the former unreferenced
 		// WorkspaceUpdateRequest component.
 		"approvals_retention_days": nullable(integer()),
+		// Hard limit for future Guest-published routine runs, 1-240 minutes.
+		"guest_routine_max_run_minutes": nullable(integer()),
 	}))
 
 	request("CoreCrewCreateRequestV2", object(map[string]any{

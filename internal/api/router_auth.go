@@ -19,6 +19,9 @@ func (r *Router) registerAuthRoutes() {
 
 	// Onboarding (require auth, no workspace context needed)
 	onboardingSvc := services.NewOnboardingService(r.db, r.logger, generateCUID)
+	if _, noop := r.journal.(noopEmitter); !noop {
+		onboardingSvc.SetJournal(r.journal)
+	}
 	onboarding := NewOnboardingHandler(r.db, onboardingSvc, r.logger)
 	r.mux.Handle("GET /api/v1/onboarding/status", authed(http.HandlerFunc(onboarding.Status)))
 	r.authedSelfMut("POST", "/api/v1/onboarding/complete", onboarding.Complete)
@@ -55,6 +58,7 @@ func (r *Router) registerAuthRoutes() {
 	// returns 200 either way (no enumeration); /reset is the
 	// token-redemption endpoint.
 	recoveryH := NewRecoveryHandler(r.db, r.logger, mail, r.sessionsStore)
+	recoveryH.streams = r.authMw.streams
 	r.mux.HandleFunc("POST /api/v1/auth/forgot", recoveryH.Forgot)
 	r.mux.HandleFunc("POST /api/v1/auth/reset", recoveryH.Reset)
 

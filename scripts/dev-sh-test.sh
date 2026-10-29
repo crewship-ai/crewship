@@ -363,14 +363,14 @@ if [[ "$out" == *"web/out/ was built from ${HEAD1:0:8}"* ]]; then pass "names th
 # running the old inode; /proc/<pid>/exe then reads "<path> (deleted)" and a
 # `-f` test on that string finds nothing. The check has to look at the link.
 printf '%s\n' "$(git -C "$STALE_DIR" rev-parse HEAD)" > "$STALE_DIR/.web-build-marker"
-# rm first: the earlier steps left a non-executable stand-in at this path,
-# and cp onto it would keep that mode and the exec would fail silently.
-rm -f "$STALE_DIR/bin"
-cp "$(command -v sleep)" "$STALE_DIR/bin"
-"$STALE_DIR/bin" 30 &
+# Preserve the sleep applet name: CI may resolve sleep to a multicall
+# coreutils executable, which selects its command from argv[0]. Calling a copy
+# named "bin" exits before there is a running inode to replace.
+cp "$(command -v sleep)" "$STALE_DIR/sleep"
+"$STALE_DIR/sleep" 30 &
 RUNNER=$!
 sleep 0.2
-cp "$(command -v sleep)" "$STALE_DIR/bin.new" && mv -f "$STALE_DIR/bin.new" "$STALE_DIR/bin"
+cp "$(command -v sleep)" "$STALE_DIR/sleep.new" && mv -f "$STALE_DIR/sleep.new" "$STALE_DIR/sleep"
 out=$(printf '%s\n%s\n%s\n' 'set -euo pipefail' "$STALE_FN" "deploy_staleness '$STALE_DIR' '/proc/$RUNNER/exe'" | bash 2>/dev/null)
 if [[ "$out" == *"replaced on disk"* ]]; then pass "names a running binary whose file was replaced (proc exe reads deleted)"; else fail "replaced binary not reported: '$out'"; fi
 kill "$RUNNER" 2>/dev/null || true
@@ -378,44 +378,6 @@ wait "$RUNNER" 2>/dev/null || true
 rm -rf "$STALE_DIR"
 
 # Guard the whole class of bug, not just the one instance of it.
-# enable_dev_pages opts a slot into Pages Apps (#3108). It must skip without
-# Docker or with CREWSHIP_DEV_PAGES=0, and a failing enable must never stop
-# the slot from starting: Pages are optional.
-echo "dev.sh: enable_dev_pages"
-PAGES_DIR="$(mktemp -d)"
-cat > "$PAGES_DIR/crewship" <<STUB
-#!/usr/bin/env bash
-printf '%s\n' "\$*" >> '$PAGES_DIR/calls'
-echo sha256:0000000000000000000000000000000000000000000000000000000000000000
-exit "\${STUB_EXIT:-0}"
-STUB
-chmod +x "$PAGES_DIR/crewship"
-pages_case() {
-  # $1 = docker info status, $2 = CREWSHIP_DEV_PAGES, $3 = stub exit
-  rm -f "$PAGES_DIR/calls"
-  run_with_fn enable_dev_pages "
-TIMEOUT_CMD=''
-log() { :; }; ok() { :; }; warn() { :; }
-docker() { return $1; }
-export STUB_EXIT=$3 CREWSHIP_DEV_PAGES='$2'
-out=\$(enable_dev_pages '$PAGES_DIR/crewship')
-[[ -z \"\$out\" ]]
-"
-}
-status=$(pages_case 0 '' 0)
-if [[ "$status" == 0 && "$(cat "$PAGES_DIR/calls" 2>/dev/null)" == "page enable" ]]; then
-  pass "runs 'page enable' with Docker available and keeps the image ID off stdout"
-else
-  fail "enable_dev_pages with Docker exited $status, calls: $(cat "$PAGES_DIR/calls" 2>/dev/null)"
-fi
-status=$(pages_case 0 0 0)
-if [[ "$status" == 0 && ! -e "$PAGES_DIR/calls" ]]; then pass "CREWSHIP_DEV_PAGES=0 skips enable"; else fail "CREWSHIP_DEV_PAGES=0 exited $status or ran enable"; fi
-status=$(pages_case 1 '' 0)
-if [[ "$status" == 0 && ! -e "$PAGES_DIR/calls" ]]; then pass "no Docker daemon skips enable"; else fail "no-Docker case exited $status or ran enable"; fi
-status=$(pages_case 0 '' 1)
-if [[ "$status" == 0 && -e "$PAGES_DIR/calls" ]]; then pass "failing enable warns and returns 0"; else fail "failing enable exited $status"; fi
-rm -rf "$PAGES_DIR"
-
 echo "dev.sh: no function ends in a bare && list"
 offenders="$(awk '
   /^[a-zA-Z_][a-zA-Z0-9_]*\(\) \{/ { fn = $1; last = ""; next }

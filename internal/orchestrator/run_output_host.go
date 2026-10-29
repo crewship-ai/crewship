@@ -241,6 +241,13 @@ func (o *Orchestrator) SetHostOutputCapacity(bytes int64, runs int) {
 }
 
 func (o *Orchestrator) configureHostOutput(req *AgentRunRequest) error {
+	// Private document runs use the existing direct transport. Selecting the
+	// global retained-output default would both violate that policy and make
+	// the subsequent private-exec guard refuse every run on configured hosts.
+	// Explicit unsupported capture requests remain intact for that guard.
+	if req.strictContentPrivacy {
+		return nil
+	}
 	o.mu.RLock()
 	root := o.hostOutputRoot
 	o.mu.RUnlock()

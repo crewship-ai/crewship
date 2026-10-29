@@ -47,7 +47,10 @@ exception in the other direction: it prints YAML unless you ask for
 | `set <slug>/<panel> --data -` | Push a panel's data — the single write path |
 | `actions <slug>/<panel>` | List the actions a panel declares, and the routine each one runs |
 | `action <slug>/<panel> <action-id>` | Dispatch a declared action |
-| `grant <slug> --user\|--crew\|--agent <subject>\|--workspace --level <level>` | Grant read, produce, or write on a page |
+| `grant <slug> --user\|--crew\|--agent <subject>\|--workspace --level <level>` | Grant read, comment, produce, or write on a page |
+| `share <slug> --user\|--crew <subject>\|--workspace --level read\|comment\|write` | Share inside the workspace; Comment never grants edit or execution authority |
+| `archive <page> --dry-run --pages-version <n>` | Preview removal from default lists without deleting content |
+| `unarchive <page> --dry-run --pages-version <n>` | Preview restoration to default lists |
 | `revoke <slug> --agent <agent-slug>` | Remove a grant |
 | `access <slug> --me` | How you reach a page: your own paths |
 | `grants <slug>` | List a page's grants |
@@ -126,6 +129,141 @@ workspace. A page whose only path is `grant` is one somebody shared with you. `-
 the form the next command in a pipe wants.
 
 ---
+
+## Catalog review and QA items
+
+`crewship page list --test-items exclude|only|include --archived exclude|only|include`
+filters after access checks and before pagination; both default to `exclude`.
+`created_by_test` is stored explicitly, independent of names. New QA belongs in
+a dedicated workspace. Use `crewship page create --allow-empty --test-item` for
+a staged native document or `crewship page artifact create --test-item` for a
+human-created typed artifact. The marker is creation-only and survives content
+changes; exporting a marked Page preserves it on import without copying archive
+state. No legacy rows are automatically retagged.
+
+`crewship page archive <page> --dry-run --pages-version N` calls
+`POST /api/v1/pages/{slug}/archive`; `crewship page unarchive <page> --dry-run
+--pages-version N` calls `POST /api/v1/pages/{slug}/unarchive`. Review the returned
+impact, then confirm with `--yes --pages-version N --review-token TOKEN`.
+A changed version or authority requires another preview. Archiving changes
+catalog discovery only; content, history, grants and direct authorized reads
+remain available. Neither operation deletes data.
+
+`crewship page folder add <folder> <page> --dry-run` previews the full effective
+access before and after filing, using the current Page and folder ACL versions.
+Confirmation requires `--yes --pages-version N --acl-version M --review-token
+TOKEN`; it does not silently retry a stale review. Hidden folder ACL identities
+stay withheld. The existing fenced legacy filing command remains supported;
+review mode is currently single-item only.
+
+`crewship page share <page> --user <member> --level comment` uses the same
+`PUT /api/v1/pages/{slug}/grants` authorization as `page grant`. Read cannot submit
+artifact feedback; Comment can submit feedback on the current shared version,
+with the commenter's actual identity, without editing, restoring, sharing or
+starting an owner run. Produce remains separate. Sharing offers workspace
+members only, with no guest or expiry options. Access output retains its
+existing `subjects` shape and adds effective read/comment/edit/produce rights
+and their sources.
+
+---
+
+## `crewship page archive <page>`
+
+Authenticated workspace request `POST /api/v1/pages/{slug}/archive` requires a
+fresh human Page owner or authorized administrator; private/native custody
+restrictions remain effective. Request body uses `pages_version` and either
+`dry_run: true` or `confirm: true` with the returned `review_token`.
+Response 200 contains `dry_run`, `page_id`, `page`, `pages_version`, `before`,
+`after`, `impact`, `changed` and a preview-only `review_token`. Impact records
+removal from default lists; access and content are retained.
+Statuses: 400 invalid review request, 401 unauthenticated, 403 forbidden,
+404 hidden/missing Page, 409 stale version or changed authority, 500 storage
+failure. Preview never mutates; confirmation never silently retries a stale
+review. The artifact spelling is an alias of the same Page API.
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Preview without mutation. |
+| `--pages-version <n>` | Exact Page version read before the preview; required. |
+| `--review-token <token>` | Exact server token returned by the matching preview. |
+| `--yes` | Confirm the reviewed change, with version and token. |
+
+## `crewship page unarchive <page>`
+
+Authenticated workspace request `POST /api/v1/pages/{slug}/unarchive` requires a
+fresh human Page owner or authorized administrator; private/native custody
+restrictions remain effective. Request body uses `pages_version` and either
+`dry_run: true` or `confirm: true` with the returned `review_token`.
+Response 200 contains `dry_run`, `page_id`, `page`, `pages_version`, `before`,
+`after`, `impact`, `changed` and a preview-only `review_token`. Impact records
+removal from default lists; access and content are retained.
+Statuses: 400 invalid review request, 401 unauthenticated, 403 forbidden,
+404 hidden/missing Page, 409 stale version or changed authority, 500 storage
+failure. Preview never mutates; confirmation never silently retries a stale
+review. The artifact spelling is an alias of the same Page API.
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Preview without mutation. |
+| `--pages-version <n>` | Exact Page version read before the preview; required. |
+| `--review-token <token>` | Exact server token returned by the matching preview. |
+| `--yes` | Confirm the reviewed change, with version and token. |
+
+## `crewship page artifact archive <page>`
+
+Authenticated workspace request `POST /api/v1/pages/{slug}/archive` requires a
+fresh human Page owner or authorized administrator; private/native custody
+restrictions remain effective. Request body uses `pages_version` and either
+`dry_run: true` or `confirm: true` with the returned `review_token`.
+Response 200 contains `dry_run`, `page_id`, `page`, `pages_version`, `before`,
+`after`, `impact`, `changed` and a preview-only `review_token`. Impact records
+removal from default lists; access and content are retained.
+Statuses: 400 invalid review request, 401 unauthenticated, 403 forbidden,
+404 hidden/missing Page, 409 stale version or changed authority, 500 storage
+failure. Preview never mutates; confirmation never silently retries a stale
+review. The artifact spelling is an alias of the same Page API.
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Preview without mutation. |
+| `--pages-version <n>` | Exact Page version read before the preview; required. |
+| `--review-token <token>` | Exact server token returned by the matching preview. |
+| `--yes` | Confirm the reviewed change, with version and token. |
+
+## `crewship page artifact unarchive <page>`
+
+Authenticated workspace request `POST /api/v1/pages/{slug}/unarchive` requires a
+fresh human Page owner or authorized administrator; private/native custody
+restrictions remain effective. Request body uses `pages_version` and either
+`dry_run: true` or `confirm: true` with the returned `review_token`.
+Response 200 contains `dry_run`, `page_id`, `page`, `pages_version`, `before`,
+`after`, `impact`, `changed` and a preview-only `review_token`. Impact records
+removal from default lists; access and content are retained.
+Statuses: 400 invalid review request, 401 unauthenticated, 403 forbidden,
+404 hidden/missing Page, 409 stale version or changed authority, 500 storage
+failure. Preview never mutates; confirmation never silently retries a stale
+review. The artifact spelling is an alias of the same Page API.
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Preview without mutation. |
+| `--pages-version <n>` | Exact Page version read before the preview; required. |
+| `--review-token <token>` | Exact server token returned by the matching preview. |
+| `--yes` | Confirm the reviewed change, with version and token. |
+
+## `crewship page share <slug>`
+
+Share with an existing workspace member, crew or the entire workspace using
+`PUT /api/v1/pages/{slug}/grants`. This human command uses the existing live
+issuer authorization. A grant is immediately inert after its issuer loses
+standing. It offers no guest or expiry options and cannot grant agent Produce.
+
+| Flag | Description |
+|---|---|
+| `--user <member>` | Existing member email or ID. |
+| `--crew <crew>` | Existing crew slug or ID. |
+| `--workspace` | All current human workspace members. |
+| `--level <read\|comment\|write>` | Human sharing capability; Comment grants feedback only. |
 
 ## `crewship page get <slug>`
 
@@ -740,7 +878,7 @@ crewship page grant fleet-201 --user  ops@example.com --level write
 | `--crew <slug>` | Grant to a crew |
 | `--agent <slug>` | Grant to an agent |
 | `--workspace` | Grant to everyone in the workspace — every current human member, never an agent. `read` or `write` only; `produce` names a producer, and everyone is not one. |
-| `--level <read\|produce\|write>` | The verb being granted — see [the permission model](/guides/pages#the-three-verbs) |
+| `--level <read\|comment\|produce\|write>` | The verb being granted — see [the permission model](/guides/pages#the-three-verbs) |
 | `--panels <id,id,...>` | Restricts a `produce` grant to these panel ids. Omitted = every panel the subject is otherwise eligible to write. Only meaningful for `--level produce`. |
 
 <Note>
@@ -916,6 +1054,14 @@ crewship page folder add ops-board fleet-201
 The same as `crewship page move fleet-201 --folder ops-board`. See
 [`page move`](#crewship-page-move-page) for the two authorities it needs and
 the fences it carries.
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Preview effective access before and after the move without mutation. |
+| `--pages-version <n>` | Exact Page version for the reviewed move. |
+| `--acl-version <n>` | Exact target folder ACL version. |
+| `--review-token <token>` | Token from that matching preview. |
+| `--yes` | Confirm the same reviewed move with its versions and token. |
 
 ### `crewship page folder remove <folder> <page>`
 
@@ -1923,3 +2069,278 @@ for a retained version) or `crewship page project publish`.
 After a transport timeout the outcome can be unknown; inspect the current
 revision and build status before retrying. Data producers keep pushing through
 the existing panel API/`page.write` path independently of source edits.
+
+
+Private Page custodians retain version, export and project read access when restricted elsewhere. Other workspace OWNER reads remain audited; grants do not widen private audiences.
+
+
+## Artifact projects (disabled by default)
+
+The `artifact_projects` feature flag enables a private multi-screen HTML pilot.
+An artifact project has its own atomic file history; it does not convert an
+existing Page, document or application. Every publish supplies all files and
+checks the latest manifest version. Conflicts preserve the existing versions;
+the CLI does not retry with a newer base automatically.
+
+```bash
+crewship page artifact create demo --name "Demo" --file manifest.json
+crewship page artifact get demo
+crewship page artifact get demo --version 1
+crewship page artifact versions demo
+crewship page artifact publish demo --base-version 1 --file manifest.json
+crewship page artifact restore demo --base-version 2 --version 1
+crewship page artifact share demo --base-version 3 --version 1
+crewship page artifact comments demo
+crewship page artifact comments demo --version 1
+crewship page artifact reply demo COMMENT_ID --version 2 --text "Updated the selected heading"
+```
+
+A manifest is JSON with `entrypoint`, `files` and optional `message`. Each file
+contains `path`, UTF-8 `content` and `media_type`; for example:
+
+```json
+{"entrypoint":"index.html","files":[{"path":"index.html","media_type":"text/html","content":"<h1 id=hero>Home</h1><a href=details.html>Details</a>"},{"path":"details.html","media_type":"text/html","content":"<h1 id=details>Details</h1><a href=settings.html>Settings</a>"},{"path":"settings.html","media_type":"text/html","content":"<h1 id=settings>Settings</h1><a href=index.html>Home</a>"}]}
+```
+
+An explicit human Edit grant can use `get` to read the latest manifest and
+`publish --base-version` to save it under the editor's own identity. A 409
+preserves the candidate file and never causes an automatic retry. Edit alone
+does not expose owner history or allow owner agent execution.
+
+Restore appends a new version. Share selects an existing immutable version and
+leaves the latest version unchanged; both require owner authority. Read and
+Comment grants reach only the current shared pin. Readers cannot publish,
+comment, restore or share; Comment permits feedback without content writes.
+Storage usage and the keep-all policy are returned with the owner snapshot.
+Quota rejection retains every prior version; keep the candidate manifest file
+until publication is acknowledged.
+
+For an agent, enable **Create artifact project** in the original private chat.
+The host binds that explicit request to the actual human credential and one
+live run. Comment dispatch binds a selected Page, version and comment to the
+follow-up run. Agent MCP tools are `artifact_create`, `artifact_publish`,
+`artifact_versions`, `artifact_restore`, `artifact_comments` and `artifact_reply`.
+They cannot choose an owner or publish a shared version. Under an admitted
+agent run the CLI uses the same scoped sidecar transport and server authority.
+
+
+For a clarification reply against the original comment version:
+
+```bash
+crewship page artifact reply demo COMMENT_ID --version 1 --text "Please select the current heading again" --needs-clarification
+```
+
+### `crewship page artifact availability`
+
+Read whether the current workspace enables artifact projects. An unavailable or
+disabled service does not authorize project creation.
+
+```bash
+crewship page artifact availability
+```
+
+Returns `{ "enabled": false }` when the workspace feature is disabled. The
+command uses the same authenticated workspace client as other Page commands.
+
+### `crewship page artifact publish <slug>`
+
+Supply `--base-version` with the exact positive latest project version and
+`--file` with the complete manifest. Use `artifact create` for a new project.
+A conflict leaves the candidate available for deliberate reconciliation.
+
+```bash
+crewship page artifact publish demo --base-version 1 --file manifest.json
+```
+
+### `crewship page artifact comment <slug>`
+
+Create an anchored comment as the human owner, using the exact selected version
+and element text. This request preserves `409` without retrying a newer version:
+
+```bash
+crewship page artifact comment demo --version 1 --path index.html --selector '#artifact-heading' --quote 'Current title' --text 'Make this title shorter' --send-to-agent
+```
+
+Omit `--send-to-agent` to store only the comment. Queuing a task does not confirm
+agent delivery. A protected agent invocation cannot fall back to a saved human
+profile to create the comment. `page artifact comments` remains the read command.
+
+### Dashboard data (disabled by default)
+
+Both `artifact_projects` and `artifact_dashboard_data` must be enabled. A code
+manifest declares its collections in a `dashboard.json` file:
+
+```json
+{"schema_version":1,"collections":["sales"]}
+```
+
+```bash
+crewship page artifact data collections demo --version 1
+crewship page artifact data get demo sales --version 1
+crewship page artifact data batch demo sales --file batch.json
+```
+
+`batch.json` carries the current code version and exact document versions:
+
+```json
+{"base_version":1,"documents":[{"id":"north","ifVersion":0,"value":{"revenue":1250}}]}
+```
+
+`ifVersion:0` creates a document. Updates supply its last returned positive
+version. A batch is atomic: one conflict returns an error and retains every
+existing document. Reconcile explicitly; the CLI never retries a stale batch.
+Data updates increment document versions without publishing a code version.
+Collection and document identifiers contain 1–128 ASCII letters, digits,
+underscores or hyphens, starting with a letter or digit. Values are JSON objects;
+duplicate object keys and noncanonical transport fields are rejected.
+
+Limits are 256 KiB per document, 50 writes and 1 MiB per batch, 4096 documents
+and 8 MiB of stored JSON per collection, and 32 collections per Page. Code-version
+reads are required; shared readers can read only collections declared by the
+current shared pin, and cannot write. Responses include host update time and a
+reader-safe source label, without private run or account identifiers.
+
+Agent tools `artifact_data_batch`, `artifact_data_read` and
+`artifact_data_collections` use these same fields (`slug`, `collection`,
+`base_version`/`version`, `documents`) under the original signed run and exact
+Page mandate. Protected CLI runs use that sidecar transport and cannot fall back
+to human credentials. Code restore/share/comments retain the existing artifact
+version and comment operations; restoring code does not rewind mutable data.
+
+### `crewship page artifact slides <slug-or-id>`
+
+Read the authorized Slides projection and authored comment anchors. Both
+`artifact_projects` and `artifact_slides` must be enabled for the workspace.
+The required `--version` selects an exact positive immutable code version
+(at most 9007199254740991); it never follows the latest version implicitly.
+Owners can read retained versions; shared readers can read only the current
+shared pin.
+
+```bash
+crewship page artifact slides @PAGE_ID --version 2 --format json
+```
+
+### `crewship page artifact export-pdf <slug-or-id>`
+
+Export an authorized Slides snapshot with the same feature and version access
+rules. The required `--version` is an exact positive immutable code pin. The
+required `--out` names a local file and is never sent to the server or used as a
+host output path. Standard output contains a receipt, rather than PDF bytes.
+
+```bash
+crewship page artifact export-pdf @PAGE_ID --version 2 --out slides.pdf --format json
+```
+
+The receipt contains `path`, `media_type`, `code_version`, `byte_length` and
+`sha256`. The CLI validates the PDF media type, magic bytes and 8 MiB limit
+before atomically replacing the local output. Protected agent runs retain their
+original run identity and also verify the selected pin, base64, byte length and
+SHA-256 of the host response before writing; they never use human credentials
+as a fallback. The MCP tools `artifact_slides_read` and `artifact_export_pdf`
+accept only `slug` and the required positive `version`, without an output path.
+
+## Design canvases (disabled by default)
+
+Design requires the server `artifacts_design` feature. Commands use current Page
+permissions. Agent runs use the original scoped MCP capability for read, apply,
+snapshot, versions and restore; human-only operations never fall back from an
+agent token to a saved human profile.
+
+### `crewship page design create <slug>`
+
+Create an empty Design Page. `--name` is the required title. Creation requires
+human authentication and Page creation permission.
+
+```bash
+crewship page design create checkout --name "Checkout"
+```
+
+### `crewship page design get <slug>`
+
+Read the live nodes and order. Optional `--version` selects a positive retained
+snapshot; zero reads the live canvas. A reader can select only its shared pin.
+
+```bash
+crewship page design get checkout --version 1
+```
+
+### `crewship page design versions <slug>`
+
+List authorized retained snapshots. Editors see history; readers see their
+shared version. This command has no additional flags.
+
+### `crewship page design apply <slug>`
+
+Apply node changes to the live Yjs document, including with no browser open.
+Required `--file` names a JSON object containing `operations` and optional
+`message`; `--file -` reads stdin. Operations are `upsert`, `delete` and `reorder`.
+Keep stable node IDs when changing existing content. The returned receipt
+acknowledges the committed retained version.
+
+```bash
+crewship page design apply checkout --file changes.json
+```
+
+### `crewship page design snapshot <slug>`
+
+Save the live document as a retained version. Optional `--message` describes the
+version. The `save` alias performs the same operation.
+
+```bash
+crewship page design snapshot checkout --message "Cart layout"
+```
+
+### `crewship page design restore <slug>`
+
+Required `--version` selects a positive retained snapshot. Restore creates a new
+version without deleting history or changing the shared pin.
+
+```bash
+crewship page design restore checkout --version 1
+```
+
+### `crewship page design share <slug>`
+
+The Page owner pins the positive retained `--version` for readers. Page grants
+remain necessary; sharing a version grants no edit permission.
+
+```bash
+crewship page design share checkout --version 2
+```
+
+### `crewship page design comments <slug>`
+
+Read authorized node-anchored comments and replies. Readers receive feedback
+for the shared pin. This command has no additional flags.
+
+### `crewship page design comment <slug>`
+
+Required `--version`, `--node` and `--text` select an exact retained version,
+stable node ID and feedback text. Optional `--quote` matches the node name or
+text. `--send-to-agent` queues a version-bound task; it does not by itself prove
+agent delivery. A changed version or element returns a conflict without retry.
+
+```bash
+crewship page design comment checkout --version 2 --node cart-title --quote "Cart" --text "Use brand colors" --send-to-agent
+```
+
+### `crewship page design agent <slug>`
+
+Required `--chat-id` connects an existing private chat owned by the same human.
+A fresh explicit message intent and original live-run mandate are still required
+before that agent can edit this Page.
+
+```bash
+crewship page design agent checkout --chat-id private-chat-id
+```
+
+### `crewship page design watch <slug>`
+
+Watch standard binary Yjs frames encoded as base64 rows. Optional `--count`
+stops after that many binary frames; zero watches until interrupted. JSON and
+NDJSON output use one row per frame; YAML uses one document per frame. This
+stream requires human authentication and the normal server-host credential guard.
+
+```bash
+crewship page design watch checkout --count 1
+```

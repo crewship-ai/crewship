@@ -301,6 +301,9 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 	if dump == nil {
 		return nil
 	}
+	if err := rejectMooringCollaborationRemap(dump); err != nil {
+		return err
+	}
 	// table → edges. Build once so the two-pass walk stays fast.
 	fks := map[string][]foreignKeyEdge{}
 	for _, table := range BackupTables {
@@ -368,10 +371,10 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 				}
 				row[rc.column] = rc.regenerate(oldVal)
 			}
-			// These IDs identify immutable operations/history within the remapped
-			// workspace/Page composite key. Reminting them breaks receipt digests
-			// and checkpoint references; the anchor FKs still remap in pass 2.
-			if table == "document_receipts" || table == "document_checkpoints" {
+			// These IDs identify history or authored dataset keys within the
+			// remapped workspace/Page. Reminting them breaks receipt digests,
+			// checkpoints or HTML data-row bindings; anchor FKs still remap.
+			if table == "document_receipts" || table == "document_checkpoints" || table == "artifact_data_documents" {
 				continue
 			}
 			oldID, ok := row["id"].(string)
@@ -415,6 +418,21 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 	// Composite document FKs point at documents(workspace_id,page_id), not
 	// a remapped documents.id. Follow the anchor identities explicitly.
 	for _, table := range []string{"document_updates", "document_receipts", "document_checkpoints", "document_creations"} {
+		for _, row := range dump.Tables[table] {
+			for column, anchor := range map[string]string{"workspace_id": "workspaces", "page_id": "pages"} {
+				if old, ok := row[column].(string); ok {
+					if mapped := idMap[anchor][old]; mapped != "" {
+						row[column] = mapped
+					}
+				}
+			}
+		}
+	}
+	remapGridCraft(dump, idMap)
+	// Dataset keys and live Design state belong to a Page. Rewrite their
+	// composite anchors, which reference heads rather than pages; authored node
+	// IDs and opaque Yjs bytes remain unchanged.
+	for _, table := range []string{"artifact_data_collections", "artifact_data_documents", "artifact_design_documents"} {
 		for _, row := range dump.Tables[table] {
 			for column, anchor := range map[string]string{"workspace_id": "workspaces", "page_id": "pages"} {
 				if old, ok := row[column].(string); ok {

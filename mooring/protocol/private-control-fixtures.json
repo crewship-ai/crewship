@@ -1,0 +1,94 @@
+{
+  "status": "draft-control-profile-not-runtime-proof",
+  "profile": "mooring.prepare.v1",
+  "channel": "authenticated_inherited_private_rpc",
+  "message_types": [
+    "validate_checkpoint",
+    "checkpoint_validated",
+    "prepare_atomic",
+    "atomic_prepared"
+  ],
+  "limits": {
+    "raw_bytes": 2097152,
+    "canonical_bytes": 2097152,
+    "decoded_checkpoint_bytes": 1572864,
+    "containers": 64,
+    "structural_tokens": 32768
+  },
+  "public_profile_unchanged_bytes": 262144,
+  "actual_d3": {
+    "validate_checkpoint": {
+      "bytes": 975315,
+      "sha256": "094ebebdb9e732e37a66775a03160a126b9c45aa37a5187adea2d3637c1cc31d",
+      "fits_2097152": true
+    },
+    "prepare_atomic_size_only": {
+      "bytes": 980605,
+      "sha256": "cc68549f6bebe3eb4b574c3a7f3532f976225f0fce094e8df066fbfa3321e944",
+      "fits_2097152": true
+    },
+    "source_checkpoint_bytes": 731163,
+    "source_checkpoint_sha256": "c361f873dd99cd7b07768a6318cee9398d9ada19bbe914e47656a1f898abd151",
+    "target_count": 45,
+    "limitation": "D3 is READ ONLY. prepare_atomic_size_only is shape/envelope sizing, NOT an admissible WordCraft write or execution proof."
+  },
+  "cases": [
+    {
+      "id": "private-raw-exact",
+      "kind": "raw_bytes",
+      "count": 2097152,
+      "accept": true
+    },
+    {
+      "id": "private-raw-over",
+      "kind": "raw_bytes",
+      "count": 2097153,
+      "accept": false
+    },
+    {
+      "id": "private-canonical-over",
+      "kind": "canonical_bytes",
+      "count": 2097153,
+      "accept": false
+    },
+    {
+      "id": "private-decoded-exact",
+      "kind": "decoded_checkpoint_bytes",
+      "count": 1572864,
+      "accept": true,
+      "note": "Component bound only; enclosing full frame must independently fit."
+    },
+    {
+      "id": "private-decoded-over",
+      "kind": "decoded_checkpoint_bytes",
+      "count": 1572865,
+      "accept": false
+    },
+    {
+      "id": "base64-canonical",
+      "kind": "base64",
+      "value": "e30=",
+      "accept": true
+    },
+    {
+      "id": "base64-nonzero-padding",
+      "kind": "base64",
+      "value": "e31=",
+      "accept": false
+    },
+    {
+      "id": "public-cannot-select-private",
+      "kind": "channel",
+      "channel": "participant_socket",
+      "message_type": "validate_checkpoint",
+      "accept": false
+    },
+    {
+      "id": "private-cannot-carry-public-commit",
+      "kind": "message_type",
+      "channel": "authenticated_inherited_private_rpc",
+      "message_type": "commit_batch",
+      "accept": false
+    }
+  ]
+}

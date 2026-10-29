@@ -22,6 +22,8 @@ type frozenGraph struct {
 	Agent   string         `json:"agent"`
 	Profile string         `json:"profile"`
 	Rights  []access.Right `json:"rights"`
+	// Publication is absent for legacy graphs, preserving their frozen hash.
+	Publication *publishedRef `json:"publication,omitempty"`
 }
 type graphRecipe struct {
 	ID, Hash, Raw string
@@ -39,6 +41,26 @@ func decodeGraph(j job) (frozenGraph, error) {
 		return g, ErrDenied
 	}
 	return g, nil
+}
+
+// loadLegacyGraphRecipe reads body and authority together, retaining legacy pending
+// bodies while denying bounded archives. Storage failures cannot prove legacy status.
+func loadLegacyGraphRecipe(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, workspace, id string) (*graphRecipe, error) {
+	r := &graphRecipe{ID: id}
+	err := q.QueryRowContext(ctx, `SELECT p.definition_json,p.author_crew_id
+ FROM main.pipelines p LEFT JOIN main.pipeline_versions v
+ ON v.pipeline_id=p.id AND v.version=p.head_version
+ WHERE p.id=? AND p.workspace_id=? AND p.deleted_at IS NULL AND p.status='active'
+ AND typeof(p.publication_authority_fingerprint)='text' AND p.publication_authority_fingerprint='legacy-trusted:v1'
+ AND (v.id IS NULL OR (typeof(v.authority_fingerprint)='text' AND v.authority_fingerprint='legacy-trusted:v1'
+ AND v.publication_authority_json IS NULL))`, id, workspace).Scan(&r.Raw, &r.Crew)
+	if err != nil {
+		return nil, graphLookupError(err)
+	}
+	r.Hash = hash(r.Raw)
+	return r, nil
 }
 
 func (s *Service) checkGraph(ctx context.Context, q interface {
@@ -67,10 +89,18 @@ func (s *Service) checkGraph(ctx context.Context, q interface {
 			}
 		} else {
 			seenRecipes[r.ID] = r.Hash
-			var one int
-			if q.QueryRowContext(ctx, `SELECT 1 FROM pipelines WHERE id=? AND workspace_id=? AND definition_json=? AND author_crew_id IS ? AND deleted_at IS NULL AND status='active'`, r.ID, j.Workspace, r.Raw, r.Crew).Scan(&one) != nil {
+			// Published graphs are checked by checkPublishedJob only.
+			if g.Publication != nil {
 				return ErrDenied
 			}
+			current, err := loadLegacyGraphRecipe(ctx, q, j.Workspace, r.ID)
+			if err != nil {
+				return err
+			}
+			if current.Raw != r.Raw || current.Crew != r.Crew {
+				return ErrDenied
+			}
+			var one int
 			if stored && q.QueryRowContext(ctx, `SELECT 1 FROM restricted_workflow_recipe_bindings WHERE job_id=? AND pipeline_id=? AND recipe_hash=? AND recipe_json=? AND author_crew_id IS ?`, j.ID, r.ID, r.Hash, r.Raw, r.Crew).Scan(&one) != nil {
 				return ErrDenied
 			}
@@ -169,6 +199,20 @@ func (s *Service) compileGraph(ctx context.Context, user, workspace, pipelineID 
 	if authority == nil {
 		return graph, ErrDenied
 	}
+	root, ref, manifest, published, err := loadPublishedRoot(ctx, s.db, workspace, pipelineID)
+	if err != nil {
+		if errors.Is(err, ErrDenied) {
+			return graph, ErrDenied
+		}
+		return graph, graphLookupError(err)
+	}
+	if published {
+		graph, err = s.compilePublishedGraph(ctx, user, workspace, root, ref, manifest)
+		if errors.Is(err, access.ErrDenied) {
+			return frozenGraph{}, ErrDenied
+		}
+		return graph, err
+	}
 	leaves, nodes, bytes := 0, 0, 0
 	seenBytes := map[string]bool{}
 	path := map[string]bool{}
@@ -180,11 +224,10 @@ func (s *Service) compileGraph(ctx context.Context, user, workspace, pipelineID 
 		}
 		path[recipeID] = true
 		defer delete(path, recipeID)
-		r := &graphRecipe{ID: recipeID}
-		if err := s.db.QueryRowContext(ctx, `SELECT definition_json,author_crew_id FROM pipelines WHERE id=? AND workspace_id=? AND deleted_at IS NULL AND status='active'`, recipeID, workspace).Scan(&r.Raw, &r.Crew); err != nil {
-			return nil, graphLookupError(err)
+		r, err := loadLegacyGraphRecipe(ctx, s.db, workspace, recipeID)
+		if err != nil {
+			return nil, err
 		}
-		r.Hash = hash(r.Raw)
 		if !seenBytes[recipeID] {
 			bytes += len(r.Raw)
 			seenBytes[recipeID] = true
@@ -271,7 +314,6 @@ func (s *Service) compileGraph(ctx context.Context, user, workspace, pipelineID 
 		}
 		return r, nil
 	}
-	var err error
 	graph.Root, err = visit(pipelineID, 1)
 	if err != nil {
 		if errors.Is(err, ErrDenied) || errors.Is(err, access.ErrDenied) {
@@ -296,13 +338,7 @@ func (s *Service) compileGraph(ctx context.Context, user, workspace, pipelineID 
 	// agent dependency. Nested recipes remain pinned by the frozen graph.
 	graph.Rights = append(graph.Rights, access.Right{Kind: "routine", ID: pipelineID, Operation: "run"})
 	// Sort via canonical JSON-independent rights ordering before hashing/pinning.
-	for i := 0; i < len(graph.Rights); i++ {
-		for j := i + 1; j < len(graph.Rights); j++ {
-			if graph.Rights[j].Kind+graph.Rights[j].ID+graph.Rights[j].Operation < graph.Rights[i].Kind+graph.Rights[i].ID+graph.Rights[i].Operation {
-				graph.Rights[i], graph.Rights[j] = graph.Rights[j], graph.Rights[i]
-			}
-		}
-	}
+	sortRights(graph.Rights)
 	encoded, err := json.Marshal(graph)
 	if err != nil || len(encoded) > 1<<20 {
 		return frozenGraph{}, ErrUnsupported
