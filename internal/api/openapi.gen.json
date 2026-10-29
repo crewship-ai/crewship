@@ -137513,6 +137513,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Expected opaque policy revision from fresh authorized Design metadata. A mismatch is rejected before upgrade; browser renewal always supplies it.",
+            "in": "query",
+            "name": "authority_revision",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {

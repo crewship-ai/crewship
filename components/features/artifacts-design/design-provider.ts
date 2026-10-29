@@ -5,6 +5,7 @@ import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
 
 export type DesignConnection = "connecting" | "connected" | "offline" | "denied"
+export type DesignAdmission = "ready" | "denied" | "retry"
 export interface DesignPeer { clientId: number; name: string; color: string; cursor?: { x: number; y: number } }
 const REMOTE = "design-server"
 
@@ -15,6 +16,9 @@ export class DesignProvider {
  private retry: ReturnType<typeof setTimeout> | undefined
  private stopped = false
  private canEdit: boolean
+ private admittedEdit: boolean
+ private generation = 0
+ private renewal: ReturnType<typeof setTimeout> | undefined
  private connected = false
  private acknowledged = false
  private updateTimer: ReturnType<typeof setTimeout> | undefined
@@ -26,8 +30,9 @@ export class DesignProvider {
  private changeListener: (update: Uint8Array, origin: unknown) => void
  private awarenessListener: (changes: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) => void
 
- constructor(readonly doc: Y.Doc, private url: string, editable: boolean, user: { name: string; color: string }, private status: (status: DesignConnection) => void, private dirty: () => void) {
+ constructor(readonly doc: Y.Doc, private url: string, editable: boolean, user: { name: string; color: string }, private status: (status: DesignConnection) => void, private dirty: () => void, private prepare?: () => Promise<DesignAdmission>) {
   this.canEdit = editable
+  this.admittedEdit = editable
   this.awareness = new Awareness(doc)
   this.awareness.setLocalStateField("user", user)
   this.changeListener = (update, origin) => {
@@ -83,15 +88,28 @@ export class DesignProvider {
  private send(message: Uint8Array) {
   if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(Uint8Array.from(message).buffer)
  }
- private connect() {
+ private connect(recovering = false) {
   if (this.stopped) return
-  this.status("connecting")
+  const generation = ++this.generation
+  if (!recovering) this.status("connecting")
+  if (!this.prepare) { this.open(generation); return }
+  void this.prepare().catch(() => "retry" as const).then(admission => {
+   if (this.stopped || generation !== this.generation) return
+   if (admission === "ready") { this.canEdit = this.admittedEdit; this.status("connecting"); this.open(generation) }
+   else if (admission === "denied") { this.canEdit = false; this.status("denied") }
+   else { this.status("offline"); this.retry = setTimeout(() => this.connect(recovering), 2000) }
+  })
+ }
+ private open(generation: number) {
+  if (this.stopped || generation !== this.generation) return
   const socket = new WebSocket(this.url)
   this.socket = socket
   socket.binaryType = "arraybuffer"
   socket.onopen = () => {
+   if (this.stopped || this.socket !== socket) return
    this.connected = true
    this.status("connected")
+   if (this.prepare) this.renewal = setTimeout(() => this.rotate(), 5 * 60 * 1000)
    const encoder = encoding.createEncoder()
    encoding.writeVarUint(encoder, 0)
    sync.writeSyncStep1(encoder, this.doc)
@@ -102,6 +120,7 @@ export class DesignProvider {
    this.send(encoding.toUint8Array(awareness))
   }
   socket.onmessage = event => {
+   if (this.stopped || this.socket !== socket) return
    if (!(event.data instanceof ArrayBuffer)) return
    try {
     const decoder = decoding.createDecoder(new Uint8Array(event.data))
@@ -131,8 +150,12 @@ export class DesignProvider {
     socket.close(1002, "Invalid collaboration frame")
    }
   }
-  socket.onerror = () => this.status("offline")
+  socket.onerror = () => { if (!this.stopped && this.socket === socket) this.status("offline") }
   socket.onclose = event => {
+   if (this.stopped || this.socket !== socket) return
+   this.socket = null
+   clearTimeout(this.renewal)
+   this.rejectWaiters("Canvas reconnected before the version was saved. Save again after reconnecting.")
    this.connected = false
    this.acknowledged = false
    removeAwarenessStates(this.awareness, [...this.awareness.getStates().keys()].filter(id => id !== this.doc.clientID), REMOTE)
@@ -140,15 +163,33 @@ export class DesignProvider {
    if (event.code === 1008 || event.code === 4003 || event.code === 4403) {
     this.canEdit = false
     this.status("denied")
+    if (this.prepare) this.connect(true)
    } else {
     this.status("offline")
     this.retry = setTimeout(() => this.connect(), 2000)
    }
   }
  }
+ private rejectWaiters(message: string) {
+  for (const waiter of this.waiters) { clearTimeout(waiter.timer); waiter.reject(new Error(message)) }
+  this.waiters.clear()
+ }
+ private rotate() {
+  if (this.stopped || !this.socket || !this.connected) return
+  // Never replay or acknowledge an in-flight HTTP snapshot during renewal.
+  if (this.waiters.size || this.queuedUpdates.length) { this.renewal = setTimeout(() => this.rotate(), 1000); return }
+  const previous = this.socket
+  this.socket = null
+  this.connected = false
+  this.acknowledged = false
+  previous.close()
+  this.connect()
+ }
  destroy() {
   this.flushUpdates()
   this.stopped = true
+  ++this.generation
+  clearTimeout(this.renewal)
   clearTimeout(this.cursorTimer)
   for (const waiter of this.waiters) { clearTimeout(waiter.timer); waiter.reject(new Error("Canvas closed before the version was saved.")) }
   this.waiters.clear()

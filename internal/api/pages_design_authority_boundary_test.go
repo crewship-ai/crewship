@@ -399,3 +399,47 @@ func TestDesignCanonicalCommentGrantIsFailClosedOrFeedbackOnly(t *testing.T) {
 		t.Fatalf("feedback lost actual Comment author: %q", actor)
 	}
 }
+
+func TestDesignRenewalAdmissionRejectsStaleBrowserAuthority(t *testing.T) {
+	f := newDesignAuthorityFixture(t)
+	f.addUser(t, "editor")
+	if w := f.grant(t, "editor", "write"); w.Code != 200 {
+		t.Fatalf("grant: %d %s", w.Code, w.Body)
+	}
+	token := f.token(t, "editor")
+	authority := func() string {
+		var revision string
+		if err := f.h.db.QueryRow(`SELECT CAST(authority_revision AS TEXT) FROM workspaces WHERE id=?`, f.workspace).Scan(&revision); err != nil {
+			t.Fatal(err)
+		}
+		return revision
+	}
+	previous := authority()
+	f.regrantSameTransaction(t, "editor", "write")
+	current := authority()
+	if previous == current {
+		t.Fatal("regrant did not advance authority")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := withWorkspace(withUser(r.Context(), &AuthUser{ID: "editor"}), f.workspace, "MEMBER")
+		ctx = context.WithValue(ctx, ctxAuthKind, AuthKindCLIToken)
+		r = r.WithContext(ctx)
+		r.SetPathValue("slug", "board")
+		f.h.DesignWebsocket(w, r)
+	}))
+	defer server.Close()
+	endpoint := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/v1/pages/board/design/ws?authority_revision="
+	headers := http.Header{"Authorization": []string{"Bearer " + token}}
+	stale, response, err := websocket.DefaultDialer.Dial(endpoint+fmt.Sprint(previous), headers)
+	if stale != nil {
+		_ = stale.Close()
+	}
+	if err == nil || response == nil || response.StatusCode != 403 {
+		t.Fatalf("stale admission: response=%v error=%v", response, err)
+	}
+	conn, response, err := websocket.DefaultDialer.Dial(endpoint+fmt.Sprint(current), headers)
+	if err != nil {
+		t.Fatalf("fresh admission: response=%v error=%v", response, err)
+	}
+	_ = conn.Close()
+}
