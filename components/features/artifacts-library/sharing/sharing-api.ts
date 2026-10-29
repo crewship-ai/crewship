@@ -244,8 +244,10 @@ export const HTTP_CAPABILITIES: SharingCapabilities = { folderDefaultAudience: f
  */
 export type RequestGuard = () => void
 
-export function httpSharingApi(workspaceId: string, guard?: RequestGuard): SharingApi {
-  const call = (path: string, init?: RequestInit) => { guard?.(); return send(path, init) }
+export function httpSharingApi(workspaceId: string, guard?: RequestGuard, operation?: AbortSignal): SharingApi {
+  // The operation's signal rides every request, so apiFetch's own retry after
+  // a token refresh is cancelled too once the operation is retired.
+  const call = (path: string, init?: RequestInit) => { guard?.(); return send(path, { ...init, signal: init?.signal ?? operation }) }
   const ws = `workspace_id=${encodeURIComponent(workspaceId)}`
   const page = (slug: string) => `/api/v1/pages/${encodeURIComponent(slug)}`
   const folder = (slug: string) => `/api/v1/page-folders/${encodeURIComponent(slug)}`
@@ -649,8 +651,8 @@ export function useSharingHuman(): { humanId: string | null; current: { readonly
 }
 
 /** The API for one operation: its requests stop at the first one the guard refuses. */
-export function guardedSharingApi(workspaceId: string, guard: RequestGuard): SharingApi {
-  return artifactsSharingMock() ? mockSharingApi(workspaceId) : httpSharingApi(workspaceId, guard)
+export function guardedSharingApi(workspaceId: string, guard: RequestGuard, operation?: AbortSignal): SharingApi {
+  return artifactsSharingMock() ? mockSharingApi(workspaceId) : httpSharingApi(workspaceId, guard, operation)
 }
 
 export function useSharingApi(workspaceId: string): SharingApi {
@@ -685,22 +687,33 @@ export function useFolderSettings(workspaceId: string, slug: string | null) {
 export const SESSION_CHANGED = "Your session changed before this finished. Open it again to see where things stand."
 
 /** Every write settles by re-reading sharing state and the page list. */
-export function useSharingMutation<T, R>(workspaceId: string, run: (api: SharingApi, input: T) => Promise<R>) {
+export function useSharingMutation<T, R>(workspaceId: string, run: (api: SharingApi, input: T) => Promise<R>, scope = "") {
   const api = useSharingApi(workspaceId)
-  const { generation } = useSharingHuman()
-  const mounted = useRef(true)
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  const { humanId, generation } = useSharingHuman()
+  // Operations in flight. A new human, workspace or scope, or an unmounted
+  // caller, aborts them: the guard refuses their next request and the abort
+  // cancels the one in flight, including apiFetch's retry after a refresh.
+  const running = useRef(new Set<AbortController>())
+  useEffect(() => {
+    const operations = running.current
+    return () => { for (const operation of operations) operation.abort(); operations.clear() }
+  }, [humanId, workspaceId, scope])
   const qc = useQueryClient()
   return useMutation<R, Error, T>({
     retry: false,
     mutationFn: async input => {
-      // The operation belongs to the session that started it: every further
-      // request, and its result, is refused once that session or caller is gone.
       const started = generation.current
-      const guard = () => { if (!mounted.current || generation.current !== started) throw new SharingError(SESSION_CHANGED, 401) }
-      const result = await run(api.mock ? api : guardedSharingApi(workspaceId, guard), input)
-      guard()
-      return result
+      const operation = new AbortController()
+      running.current.add(operation)
+      const guard = () => { if (operation.signal.aborted || generation.current !== started) throw new SharingError(SESSION_CHANGED, 401) }
+      try {
+        const result = await run(api.mock ? api : guardedSharingApi(workspaceId, guard, operation.signal), input)
+        guard()
+        return result
+      } catch (error) {
+        guard()
+        throw error
+      } finally { running.current.delete(operation) }
     },
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: sharingKeys.all(workspaceId) })
