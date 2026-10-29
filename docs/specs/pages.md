@@ -1424,6 +1424,13 @@ accepts the workspace-scoped `artifacts_design` feature flag. The embedded Yjs
 engine uses an existing Node runtime; no additional service is started.
 The browser uses standard Yjs sync and awareness; frame, rectangle, text and
 image nodes have stable IDs. Live operations also work without an open browser.
+Cookie-authenticated collaboration refreshes credentials before each connection
+and replaces only its websocket every five minutes, preserving the Yjs document
+and unsaved draft. Fresh metadata must confirm the same actor, immutable Page,
+Edit capability and opaque authority revision. Browser websocket admission sends
+that `authority_revision`; the host rejects a mismatch before upgrading, including
+a revoke-and-regrant gap. Revocation never restores an earlier writer draft.
+Credential renewal does not replay an HTTP snapshot or mutation.
 
 The authenticated CLI surface is:
 

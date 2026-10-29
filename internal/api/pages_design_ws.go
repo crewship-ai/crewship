@@ -200,6 +200,7 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	expectedRevision := r.URL.Query().Get("authority_revision")
 	room := h.designRoom(k)
 	room.mu.Lock()
 	var actor, displayName, admittedRevision string
@@ -211,6 +212,11 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 		admittedRevision, epochErr = designAuthorityRevision(ctx, tx, k.WorkspaceID)
 		if epochErr != nil {
 			return epochErr
+		}
+		// Browser transport renewal must not replay an old document after a
+		// grant changes between its metadata read and websocket admission.
+		if expectedRevision != "" && expectedRevision != admittedRevision {
+			return errDesignAccess
 		}
 		if e := tx.QueryRowContext(ctx, `SELECT coalesce(nullif(full_name,''),email,id) FROM users WHERE id=?`, UserFromContext(ctx).ID).Scan(&displayName); e != nil {
 			return e

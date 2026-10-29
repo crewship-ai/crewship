@@ -1,23 +1,24 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { tryRefresh } from "@/lib/api-fetch"
 import { useDesign } from "../use-design"
 import { designNodes, upsertDesignNode } from "../design-document"
-const server = vi.hoisted(() => ({ pageId: "old-private-page", authorityRevision: "1", canEdit: true, providers: [] as { admittedEdit: boolean; editable: boolean; destroyed: boolean; deny: () => void; connect: () => void }[], urls: [] as string[], calls: [] as { url: string; method: string }[] }))
+const server = vi.hoisted(() => ({ actorId: "same-user", bearer: false, pageId: "old-private-page", authorityRevision: "1", canEdit: true, providers: [] as { admittedEdit: boolean; editable: boolean; destroyed: boolean; deny: () => void; connect: () => void; prepare?: () => Promise<string> }[], urls: [] as string[], calls: [] as { url: string; method: string }[] }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "same-user", name: "Owner" } } }) }))
-vi.mock("@/lib/server-base", () => ({ resolveWsBase: () => "ws://localhost" }))
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: async (url: string, init?: RequestInit) => {
+vi.mock("@/lib/server-base", () => ({ resolveWsBase: () => "ws://localhost", getAuthMode: () => server.bearer ? "bearer" : "cookie" }))
+vi.mock("@/lib/api-fetch", () => ({ tryRefresh: vi.fn(async () => "ok"), apiFetch: async (url: string, init?: RequestInit) => {
  server.calls.push({ url, method: init?.method ?? "GET" })
  if (init?.method === "POST" && url.includes("/@old-private-page/") && server.pageId !== "old-private-page") return new Response(JSON.stringify({ error: "not found" }), { status: 404 })
  const common = { latest_version: 1, shared_version: 0 }
- const data = url.includes("/comments?") ? { comments: [] } : url.includes("/versions?") ? { ...common, versions: [] } : { ...common, page_id: server.pageId, authority_revision: server.authorityRevision, can_edit: server.canEdit, version: 1, nodes: [], order: [], actor: { id: "same-user", name: "Owner" } }
+ const data = url.includes("/comments?") ? { comments: [] } : url.includes("/versions?") ? { ...common, versions: [] } : { ...common, page_id: server.pageId, authority_revision: server.authorityRevision, can_edit: server.canEdit, version: 1, nodes: [], order: [], actor: { id: server.actorId, name: "Owner" } }
  return new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } })
 } }))
 vi.mock("../design-provider", () => ({ DesignProvider: class {
  admittedEdit: boolean
  editable: boolean
  destroyed = false
- constructor(_doc: unknown, url: string, editable: boolean, _user: unknown, private status: (status: "connected" | "denied") => void) {
+ constructor(_doc: unknown, url: string, editable: boolean, _user: unknown, private status: (status: "connected" | "denied") => void, _dirty: () => void, readonly prepare?: () => Promise<string>) {
   this.admittedEdit = editable
   this.editable = editable
   server.urls.push(url)
@@ -38,6 +39,9 @@ beforeEach(() => {
  server.urls = []
  server.calls = []
  server.providers = []
+ server.actorId = "same-user"
+ server.bearer = false
+ vi.mocked(tryRefresh).mockClear().mockResolvedValue("ok")
  server.authorityRevision = "1"
  server.canEdit = true
  vi.mocked(localStorage.getItem).mockImplementation(key => drafts.get(key) ?? null)
@@ -92,6 +96,41 @@ describe("Design local draft identity", () => {
   expect(designNodes(view.result.current.doc!)).toEqual([])
   expect(drafts.size).toBe(1)
  })
+ it.each(["actor", "page", "authority", "edit"])("denies renewed transport after %s changes", async changed => {
+  server.pageId = "old-private-page"
+  const view = mount()
+  await waitFor(() => expect(server.providers).toHaveLength(1))
+  const original = server.providers[0]
+  let admission: string | undefined
+  await act(async () => { admission = await original.prepare!() })
+  expect(admission).toBe("ready")
+  expect(server.calls.at(-1)?.url).toContain("/pages/@old-private-page/design?")
+  if (changed === "actor") server.actorId = "different-user"
+  if (changed === "page") server.pageId = "different-page"
+  if (changed === "authority") server.authorityRevision = "2"
+  if (changed === "edit") { server.authorityRevision = "2"; server.canEdit = false }
+  await act(async () => { admission = await original.prepare!() })
+  expect(admission).toBe("denied")
+  await waitFor(() => expect(original.destroyed).toBe(true))
+  if (changed === "actor") {
+   expect(view.result.current.query.isError).toBe(true)
+   expect(view.result.current.doc).toBeNull()
+   expect(server.providers).toHaveLength(1)
+  }
+ })
+ it("does not admit a failed cookie refresh and skips cookie rotation for bearer mode", async () => {
+  server.pageId = "old-private-page"
+  mount()
+  await waitFor(() => expect(server.providers).toHaveLength(1))
+  const original = server.providers[0]
+  vi.mocked(tryRefresh).mockResolvedValue("auth_failed")
+  expect(await original.prepare!()).toBe("denied")
+  expect(server.calls.some(call => call.url.includes("/@old-private-page/design?"))).toBe(false)
+  vi.mocked(tryRefresh).mockClear()
+  server.bearer = true
+  expect(await original.prepare!()).toBe("ready")
+  expect(tryRefresh).not.toHaveBeenCalled()
+ })
  it("pins private mutation requests to the loaded Page during the slug reuse refetch gap", async () => {
   server.pageId = "old-private-page"
   const view = mount()
@@ -115,13 +154,13 @@ describe("Design local draft identity", () => {
   const view = mount()
   await waitFor(() => expect(view.result.current.doc).not.toBeNull())
   const previous = view.result.current.doc!
-  expect(server.urls.at(-1)).toBe("ws://localhost/api/v1/pages/@old-private-page/design/ws?workspace_id=same-workspace")
+  expect(server.urls.at(-1)).toBe("ws://localhost/api/v1/pages/@old-private-page/design/ws?workspace_id=same-workspace&authority_revision=1")
   act(() => upsertDesignNode(previous, { id: "confidential", type: "text", text: "Old private canvas", x: 0, y: 0, width: 200, height: 40, fill: "#111111" }))
   server.pageId = "new-shared-page"
   await act(async () => { await clients[0].invalidateQueries({ queryKey: ["artifact-design"] }) })
   await waitFor(() => { expect(view.result.current.doc).not.toBeNull(); expect(view.result.current.doc).not.toBe(previous) })
   expect(designNodes(view.result.current.doc!)).toEqual([])
-  expect(server.urls.at(-1)).toBe("ws://localhost/api/v1/pages/@new-shared-page/design/ws?workspace_id=same-workspace")
+  expect(server.urls.at(-1)).toBe("ws://localhost/api/v1/pages/@new-shared-page/design/ws?workspace_id=same-workspace&authority_revision=1")
  })
  it("never uploads a previous Page draft when another Page reuses its slug", async () => {
   server.pageId = "old-private-page"

@@ -52,6 +52,16 @@ func TestDesignHTTPContractsUseConcreteSchemas(t *testing.T) {
 func TestDesignWebsocketContractIsBinaryUpgradeWithoutJSONBody(t *testing.T) {
 	const path = "/api/v1/pages/{slug}/design/ws"
 	op := buildDocument([]route{{method: "GET", path: path}})["paths"].(map[string]any)[path].(map[string]any)["get"].(map[string]any)
+	parameters, _ := op["parameters"].([]map[string]any)
+	foundRevision := false
+	for _, parameter := range parameters {
+		if parameter["name"] == "authority_revision" {
+			foundRevision = parameter["in"] == "query" && parameter["required"] == false
+		}
+	}
+	if !foundRevision {
+		t.Fatal("missing optional browser authority revision fence")
+	}
 	responses := op["responses"].(map[string]any)
 	upgrade, ok := responses["101"].(map[string]any)
 	if !ok {

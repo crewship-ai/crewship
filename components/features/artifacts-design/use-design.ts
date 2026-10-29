@@ -6,8 +6,8 @@ import * as Y from "yjs"
 import type { ArtifactOrigin } from "@/hooks/use-artifact-agent-dispatch"
 import type { ArtifactComment } from "@/hooks/use-artifact-project"
 import { useSessionSafe } from "@/hooks/use-auth"
-import { apiFetch } from "@/lib/api-fetch"
-import { resolveWsBase } from "@/lib/server-base"
+import { apiFetch, tryRefresh } from "@/lib/api-fetch"
+import { getAuthMode, resolveWsBase } from "@/lib/server-base"
 import { DesignProvider, type DesignConnection, type DesignPeer } from "./design-provider"
 import { designNodes, type DesignNode } from "./design-document"
 
@@ -43,7 +43,11 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
   if (!response.ok) throw Object.assign(new Error(data?.error ?? "Design could not be loaded."), { status: response.status })
   return data
  }, [endpoint, workspaceId])
- const query = useQuery({ queryKey: [...key, selectedVersion ?? "live"], queryFn: () => request<DesignState>(selectedVersion ? `?version=${selectedVersion}` : ""), retry: false, gcTime: 0, refetchInterval: 10_000 })
+ const query = useQuery({ queryKey: [...key, selectedVersion ?? "live"], enabled: userId !== "anonymous", queryFn: async () => {
+  const current = await request<DesignState>(selectedVersion ? `?version=${selectedVersion}` : "")
+  if (current.actor?.id !== userId) throw new Error("Design session changed. Reopen the canvas.")
+  return current
+ }, retry: false, gcTime: 0, refetchInterval: 10_000 })
  const pageId = query.data?.page_id
  // Opaque server policy generation: only successful metadata can admit a
  // replacement socket after the previous connection was retired.
@@ -67,8 +71,10 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const canConnect = Boolean(pageId && authorityRevision !== null && !query.isError && !selectedVersion)
  const actorName = query.data?.actor?.name ?? session?.data?.user?.name ?? "Collaborator"
  const initialCanEdit = query.data?.can_edit === true
+ const admittedActor = query.data?.actor?.id
  useEffect(() => {
   if (!canConnect || !pageId) return
+  let active = true
   const document = new Y.Doc()
   // A reused slug must never replay another Page’s private draft. Legacy
   // slug-scoped records stay in browser storage and are never loaded here.
@@ -97,10 +103,30 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
   }
   document.on("update", update)
   const color = COLORS[Array.from(userId).reduce((sum, char) => sum + char.charCodeAt(0), 0) % COLORS.length]
-  const live = new DesignProvider(document, `${resolveWsBase()}/api/v1/pages/@${encodeURIComponent(pageId)}/design/ws?workspace_id=${encodeURIComponent(workspaceId)}`, initialCanEdit, { name: actorName, color }, status => {
+  const live = new DesignProvider(document, `${resolveWsBase()}/api/v1/pages/@${encodeURIComponent(pageId)}/design/ws?workspace_id=${encodeURIComponent(workspaceId)}&authority_revision=${encodeURIComponent(authorityRevision!)}`, initialCanEdit, { name: actorName, color }, status => {
    setConnection(status)
    if (status === "denied") void client.invalidateQueries({ queryKey: ["artifact-design", workspaceId, slug, userId] })
-  }, () => setDirty(true))
+  }, () => setDirty(true), async () => {
+   if (getAuthMode() !== "bearer") {
+    const refreshed = await tryRefresh()
+    if (!active) return "denied"
+    if (refreshed !== "ok") return refreshed === "auth_failed" ? "denied" : "retry"
+   }
+   try {
+    const current = await request<DesignState>("", undefined, pageId)
+    if (!active) return "denied"
+    // A new cookie may belong to another person, or permissions may have
+    // changed while refreshing. Never carry this document across either gap.
+    if (!admittedActor || current.actor?.id !== admittedActor || current.page_id !== pageId || current.authority_revision !== authorityRevision || current.can_edit !== initialCanEdit) {
+     void client.invalidateQueries({ queryKey: ["artifact-design", workspaceId, slug, userId] })
+     return "denied"
+    }
+    return "ready"
+   } catch (error) {
+    const status = (error as { status?: number }).status
+    return status === 401 || status === 403 || status === 404 ? "denied" : "retry"
+   }
+  })
   provider.current = live
   const awareness = () => setPeers([...live.awareness.getStates()].flatMap(([clientId, state]) => {
    if (clientId === document.clientID || !state.user) return []
@@ -108,6 +134,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
   }))
   live.awareness.on("change", awareness)
   return () => {
+   active = false
    provider.current = null
    live.awareness.off("change", awareness)
    live.destroy()
@@ -117,7 +144,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
    setNodes([])
    setPeers([])
   }
- }, [canConnect, endpoint, workspaceId, slug, userId, pageId, authorityRevision, actorName, initialCanEdit, client])
+ }, [canConnect, endpoint, workspaceId, slug, userId, pageId, authorityRevision, actorName, admittedActor, initialCanEdit, client, request])
  const invalidate = () => { void client.invalidateQueries({ queryKey: key }) }
  const save = useMutation({ mutationFn: async (message: string) => {
   if (!editableRef.current || !provider.current?.ready) throw new Error("Reconnect before saving a version. Your changes remain in this browser.")
