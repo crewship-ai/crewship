@@ -1,5 +1,5 @@
 // Isolated browser test of opening artifacts inside Artifacts: a click in the library opens the
-// artifact at /artifacts/<id> with its content on screen (a project, a Word, a panel Page), Back returns to the list, a reload of
+// artifact at /artifacts/<id> with its content on screen (a project, a Word, a panel Page, a Sheet), a Word's Edit stays inside Artifacts, Back returns to the list, a reload of
 // that address opens it again, and a link from before IDs (/artifacts?item=<slug>) moves there.
 // The real route code runs over in-memory mocks; anything unmocked fails the run.
 // Run: crewship-heavy node e2e/artifacts-open-inside.browser.mjs
@@ -104,13 +104,30 @@ try {
   assert.equal(await page.locator('a[href^="/pages"]').count(), 0, "no link into /pages")
   step("panel page opened", { url: page.url() })
 
-  // 5. A link from before IDs moves to the artifact's address and opens it.
+  // 5. A Sheet shows its saved workbook inside Artifacts; a Word's Edit opens its editor at /artifacts/edit.
+  await page.goto(`${origin}/artifacts?view=all`)
+  await list.getByRole("button", { name: "Open Price model" }).click()
+  await page.getByRole("complementary", { name: "Preview" }).getByRole("button", { name: "Open", exact: true }).click()
+  await page.getByText("Team", { exact: true }).waitFor()
+  assert.equal(path(), "/artifacts/page-model")
+  assert.equal(await page.locator('a[href^="/pages"]').count(), 0, "no link into /pages from a Sheet")
+  await page.goto(`${origin}/artifacts/page-brief`)
+  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  await page.getByText("Editor route").waitFor()
+  assert.equal(path(), "/artifacts/edit")
+  assert.deepEqual(Object.fromEntries(new URL(page.url()).searchParams), { page_id: "page-brief", workspace_id: "ws-fixture" })
+  await page.goBack()
+  await page.getByRole("button", { name: "Edit", exact: true }).waitFor()
+  assert.equal(path(), "/artifacts/page-brief", "Back from the editor returns to the Word")
+  step("sheet and word edit", { url: page.url() })
+
+  // 6. A link from before IDs moves to the artifact's address and opens it.
   await page.goto(`${origin}/artifacts?item=pricing-site`)
   await projectContent()
   assert.equal(path(), "/artifacts/pricing-site")
   step("legacy ?item= link")
 
-  // 6. Leaving the detail returns to the library at /artifacts.
+  // 7. Leaving the detail returns to the library at /artifacts.
   await page.getByRole("button", { name: "All artifacts" }).first().click()
   await list.waitFor()
   assert.equal(path(), "/artifacts")

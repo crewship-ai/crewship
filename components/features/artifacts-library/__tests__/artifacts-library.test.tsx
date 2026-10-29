@@ -40,8 +40,9 @@ vi.mock("../new-artifact-dialog", () => ({
 vi.mock("@/components/layout/secondary-panel", async importOriginal => ({ ...(await importOriginal<typeof import("@/components/layout/secondary-panel")>()), SecondaryPanel: ({ label, children }: { label: string; children: React.ReactNode }) => <aside aria-label={label}>{children}</aside> }))
 vi.mock("@/components/features/chat/artifact-context/craft/craft-lock-bar", () => ({
   CraftLockBar: ({ slug }: { slug: string }) => <div data-testid="lock-bar" data-slug={slug} />,
-  craftEditorHref: (ws: string, slug: string) => `/editor?${ws}&${slug}`,
 }))
+vi.mock("@/components/features/pages/workbook-editor-host", () => ({ PageWorkbookSurface: ({ pageId }: { pageId: string }) => <div data-testid="workbook" data-page={pageId} /> }))
+vi.mock("@/components/features/pages/page-slides", () => ({ PageSlides: ({ pageId }: { pageId: string }) => <div data-testid="page-slides" data-page={pageId} /> }))
 
 vi.mock("../page-content", () => ({ ArtifactPageContent: ({ pageId }: { pageId: string }) => <div data-testid="page-content" data-page={pageId} /> }))
 vi.mock("../sharing/share-dialog", () => ({ ShareDialog: ({ item }: { item: { name: string } }) => <div role="dialog" aria-label={`Share ${item.name}`} /> }))
@@ -54,7 +55,7 @@ vi.mock("../sharing/bulk-actions", () => ({
 }))
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { ArtifactsLibrary } from "../artifacts-library"
+import { ArtifactsLibrary, artifactEditorHref } from "../artifacts-library"
 let client = new QueryClient()
 beforeEach(() => { client = new QueryClient({ defaultOptions: { queries: { retry: false } } }) })
 const withQuery = (ui: React.ReactElement) => <QueryClientProvider client={client}>{ui}</QueryClientProvider>
@@ -227,12 +228,16 @@ it("a project detail opens the project preview", () => {
   expect(state.select).toHaveBeenCalledWith(null)
 })
 
-it("without the project surface the detail links to the Page instead of a dead viewer", () => {
+it("without the project surface the detail says the viewer is off, never a way out to Pages", () => {
   state.projectsOn = false
   state.item = "site"
   renderLibrary()
   expect(screen.queryByTestId("viewer-panel")).toBeNull()
-  expect(screen.getByRole("link", { name: "Open in Pages" }).getAttribute("href")).toBe("/pages/%40page-site?workspace_id=ws1&artifact=1")
+  expect(screen.queryByRole("link", { name: /Open in Pages|Open page/ })).toBeNull()
+})
+
+it("a native Word's editor opens inside Artifacts", () => {
+  expect(artifactEditorHref("ws1", "page-brief")).toBe("/artifacts/edit?page_id=page-brief&workspace_id=ws1")
 })
 
 it("a native Word detail shows its edit lock by Page reference", () => {
@@ -332,22 +337,28 @@ it.each(["project", "dashboard", "slides"] as const)("keeps %s routed through it
   expect(state.select).toHaveBeenLastCalledWith("owner-page")
   state.item = "owner-page"
   view.rerender(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
-  expect(screen.getByRole("link", { name: "Open in Pages" })).toHaveAttribute("href", "/pages/%40owner-page?workspace_id=ws1&artifact=1")
+  expect(screen.queryByRole("link", { name: /Open in Pages/ })).toBeNull()
+  expect(screen.getByText("Its viewer is not switched on in this workspace.")).toBeTruthy()
   expect(screen.queryByTestId("viewer-panel")).toBeNull()
 })
 
-it.each(["word", "sheet"] as const)("preserves the existing reader link for native %s", artifact_kind => {
-  state.pages = [wire({ id: "native-page", slug: "saved-native", name: "Native document", artifact_kind })]
-  state.projectsOn = false; state.item = "saved-native"
-  renderLibrary()
-  expect(screen.getByRole("link", { name: "Open in Pages" })).toHaveAttribute("href", "/pages/saved-native?workspace_id=ws1")
+it("a native Word opens behind its lock and a native Sheet in its workbook, both inside Artifacts", () => {
+  state.pages = [wire({ id: "native-word", slug: "saved-word", name: "Native document", artifact_kind: "word" }), wire({ id: "native-sheet", slug: "saved-sheet", name: "Native sheet", artifact_kind: "sheet" })]
+  state.projectsOn = false; state.item = "native-word"
+  const view = renderLibrary()
+  expect(screen.getByTestId("lock-bar").dataset.slug).toBe("@native-word")
+  state.item = "native-sheet"
+  view.rerender(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
+  expect(screen.getByTestId("workbook").dataset.page).toBe("native-sheet")
+  expect(screen.queryByRole("link", { name: /Open in Pages/ })).toBeNull()
 })
 
-it("keeps legacy Slides in their existing Page reader", () => {
+it("shows legacy Slides in the deck Pages uses, inside Artifacts", () => {
   state.pages = [wire({ id: "legacy-page", slug: "legacy-slides", name: "Legacy deck", has_slides: true })]
   state.item = "legacy-slides"
   renderLibrary()
-  expect(screen.getByRole("link", { name: "Open in Pages" })).toHaveAttribute("href", "/pages/legacy-slides?workspace_id=ws1")
+  expect(screen.getByTestId("page-slides").dataset.page).toBe("legacy-page")
+  expect(screen.queryByRole("link", { name: /Open in Pages/ })).toBeNull()
 })
 
 it("J and K move between items, Enter opens, Escape leaves the detail, never from a field", () => {

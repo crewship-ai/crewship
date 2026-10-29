@@ -1,7 +1,7 @@
 "use client"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowLeft, ExternalLink, FolderInput, LayoutGrid, Library, List, Lock, Maximize2, Plus, Settings2, Share2, Star, Table2, X } from "lucide-react"
+import { ArrowLeft, FolderInput, LayoutGrid, Library, List, Lock, Maximize2, Plus, Settings2, Share2, Star, Table2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Segmented } from "@/components/ui/segmented"
 import { StatusPill } from "@/components/ui/status-pill"
@@ -21,7 +21,9 @@ import { cn } from "@/lib/utils"
 import { ArtifactViewerProvider } from "@/components/features/chat/artifact-context/projects/artifact-viewer-context"
 import { useArtifactProjectsAvailable } from "@/components/features/chat/artifact-context/projects/use-artifact-project-data"
 import { ArtifactViewerPanel } from "@/components/features/chat/artifact-context/viewer/artifact-viewer-panel"
-import { CraftLockBar, craftEditorHref } from "@/components/features/chat/artifact-context/craft/craft-lock-bar"
+import { CraftLockBar } from "@/components/features/chat/artifact-context/craft/craft-lock-bar"
+import { PageWorkbookSurface } from "@/components/features/pages/workbook-editor-host"
+import { PageSlides } from "@/components/features/pages/page-slides"
 import { useCraftLeaseState } from "@/components/features/chat/artifact-context/craft/use-craft-lease"
 import { readLocalDraft, type LocalDraft } from "@/components/features/chat/artifact-context/craft/local-draft"
 import { LocalDraftBanner } from "@/components/features/chat/artifact-context/craft/local-draft-banner"
@@ -225,14 +227,9 @@ function LibraryHome({ items, creatable, personal, onNew, onOpen, onShow, peeked
   </div>
 }
 
-function OpenInPages({ workspaceId, item }: { workspaceId: string; item: LibraryItem }) {
-  const query = new URLSearchParams({ workspace_id: workspaceId })
-  if (item.projectBacked) query.set("artifact", "1")
-  const reference = item.projectBacked && item.pageId ? "@" + item.pageId : item.slug
-  const href = `/pages/${encodeURIComponent(reference)}?${query}`
-  return <Button asChild size="sm" variant="outline" className="coarse:min-h-[44px]">
-    <a href={href}>{item.kind === "page" ? "Open page" : "Open in Pages"}<ExternalLink aria-hidden /></a>
-  </Button>
+/** A native Word's editor inside Artifacts; the lock bar decides when it may open. */
+export function artifactEditorHref(workspaceId: string, pageId: string) {
+  return `/artifacts/edit?${new URLSearchParams({ page_id: pageId, workspace_id: workspaceId })}`
 }
 
 /**
@@ -251,7 +248,7 @@ function WordPreview({ workspaceId, item }: { workspaceId: string; item: Library
       // A Word without a version head is from the old editor, which this environment no longer runs.
       : !item.native ? "This document is from an older version of the editor and does not open here. Nothing was changed."
         : read.status === "unavailable" ? "The document service is not answering right now, so there is no preview. Nothing was changed."
-          : "The document preview could not be loaded. Open in Pages shows it."}
+          : "The document preview could not be loaded. Try again in a moment; nothing was changed."}
   </p>
   return <div className="bg-card">
     <DocumentReadonly schema={read.content.schema} content={read.content.content} accessibleLabel={`${item.name}, saved version`} />
@@ -295,8 +292,7 @@ function RecoveredDraft({ userId, workspaceId, slug }: { userId: string; workspa
 }
 
 const DETAIL_HINT: Partial<Record<LibraryKind, string>> = {
-  word: "This is the saved version. Edit it in its editor from Open in Pages.",
-  sheet: "Read and edit it in its editor; Open in Pages shows the saved document.",
+  word: "This is the saved version. Edit opens its editor while you hold the lock.",
 }
 
 /** One artifact: a project shows its history in the project viewer, a native Word or Sheet its edit lock. */
@@ -309,6 +305,7 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
   const projectPreview = item.projectBacked && (item.kind === "project" || item.kind === "dashboard" && artifactDashboards() || item.kind === "slides" && artifactSlides()) && projects
   // A Page shows its own content here, with the views Pages draws; it names itself in its breadcrumb.
   const pageContent = item.kind === "page" && item.pageId
+  const legacySlides = item.kind === "slides" && !item.projectBacked && Boolean(item.pageId)
   const inline = projectPreview || pageContent
   const target = useMemo(() => ({ slug: item.slug, tab: "preview" as const }), [item.slug])
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
@@ -334,7 +331,6 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
         <h1 className="truncate text-xl font-semibold">{item.name}</h1>
         <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><KindBadge kind={item.kind} /><StateChips item={item} /><span>{meta(item)}</span></p>
       </div>
-      <OpenInPages workspaceId={workspaceId} item={item} />
     </header>}
     {dialog === "share" && <ShareDialog workspaceId={workspaceId} item={item} open onOpenChange={open => { if (!open) setDialog(null) }} />}
     {dialog === "move" && <MoveToFolderDialog workspaceId={workspaceId} item={item} folders={folders} open
@@ -344,18 +340,27 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
       ? <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
         <div className="flex min-h-[520px] flex-1 overflow-hidden rounded-card border"><ArtifactViewerPanel variant="library" /></div>
       </ArtifactViewerProvider>
+      // A Sheet and a deck made before projects open in the same surfaces Pages uses.
+      : item.kind === "sheet" && item.pageId
+        ? <div className="relative flex min-h-[520px] flex-1 flex-col overflow-hidden rounded-card border">
+          <PageWorkbookSurface key={`${workspaceId}:${item.pageId}`} workspaceId={workspaceId} pageId={item.pageId} name={item.name} />
+        </div>
+      : legacySlides
+        ? <div className="relative flex min-h-[520px] flex-1 flex-col overflow-hidden rounded-card border">
+          <PageSlides key={`${workspaceId}:${item.pageId}`} workspaceId={workspaceId} pageId={item.pageId!} name={item.name} />
+        </div>
       : pageContent ? <ArtifactPageContent workspaceId={workspaceId} pageId={item.pageId!} onBack={onBack} />
       : item.native && item.kind === "word" && item.pageId
         ? <div className="overflow-hidden rounded-card border">
           <CraftLockBar workspaceId={workspaceId} slug={"@" + item.pageId}
-            onEdit={() => window.open(craftEditorHref(workspaceId, "@" + item.pageId), "_blank", "noopener,noreferrer")} />
+            onEdit={() => window.location.assign(artifactEditorHref(workspaceId, item.pageId!))} />
         </div>
         : null}
     {!projectPreview && item.native && item.kind === "word" && item.pageId && <LockLostDraft workspaceId={workspaceId} slug={"@" + item.pageId} />}
     {item.kind === "word" && !item.empty && item.pageId && <WordPreview workspaceId={workspaceId} item={item} />}
     {/* An old-editor Word has nowhere to edit it; its notice says so on its own. */}
-    {!inline && item.kind !== "project" && !(item.kind === "word" && !item.native) && <p className="text-sm text-muted-foreground">
-      {DETAIL_HINT[item.kind] ?? "Open in Pages shows it with everything it contains."}
+    {!inline && !(item.kind === "sheet" && item.pageId) && !legacySlides && !(item.kind === "word" && !item.native) && <p className="text-sm text-muted-foreground">
+      {DETAIL_HINT[item.kind] ?? "Its viewer is not switched on in this workspace."}
     </p>}
     </>}
   </div>

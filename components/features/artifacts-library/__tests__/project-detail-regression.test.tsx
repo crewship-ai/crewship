@@ -185,7 +185,8 @@ it.each(["true", "false"])("routes explicit server-typed Slides with flag %s whi
       expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull()
     } else {
       expect(screen.queryByTestId("library-slides")).toBeNull()
-      expect(screen.getByRole("link", { name: "Open in Pages" })).toBeInTheDocument()
+      expect(screen.getByText("Its viewer is not switched on in this workspace.")).toBeInTheDocument()
+      expect(screen.queryByRole("link", { name: "Open in Pages" })).toBeNull()
     }
   } finally { vi.unstubAllEnvs() }
 })
