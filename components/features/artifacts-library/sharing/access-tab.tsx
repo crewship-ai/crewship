@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
 import type { LibraryItem } from "../library-items"
 import { accessVia, byAccess, LEVEL_TONE, LEVELS_DESC, lockedReason } from "./access-reason"
-import { entryKey, SHARE_LEVEL_LABEL, SHARE_LEVEL_MEANING, SharingError, useAccess } from "./sharing-api"
+import { entryKey, SHARE_LEVEL_LABEL, SHARE_LEVEL_MEANING, SharingError, useAccess, useSharingHuman } from "./sharing-api"
+import { shownLabel } from "./share-controls"
 
 export interface AccessTabProps {
   workspaceId: string
@@ -15,6 +16,7 @@ export interface AccessTabProps {
 
 export function AccessTab({ workspaceId, item, onShare }: AccessTabProps) {
   const access = useAccess(workspaceId, item)
+  const { humanId } = useSharingHuman()
   const entries = [...(access.data ?? [])].sort(byAccess)
   const groups = LEVELS_DESC.map(level => ({ level, entries: entries.filter(e => e.level === level) })).filter(g => g.entries.length > 0)
 
@@ -45,7 +47,7 @@ export function AccessTab({ workspaceId, item, onShare }: AccessTabProps) {
           {entries.map(entry => {
             const locked = lockedReason(entry)
             return <li key={`${entryKey(entry)}:${entry.via}:${entry.folderSlug ?? ""}`} className="flex items-baseline gap-2 py-1.5">
-              <span className="min-w-0 flex-1 truncate text-xs">{entry.label}</span>
+              <span className="min-w-0 flex-1 truncate text-xs">{shownLabel(entry, humanId)}</span>
               <span className="shrink-0 text-micro text-muted-foreground">{accessVia(entry)}{entry.via === "folder" && locked ? ` · ${locked}` : ""}</span>
             </li>
           })}

@@ -28,6 +28,7 @@ const FLOOR_ALLOW: Record<string, string> = {
   "components/features/activity-stream/feed-row.tsx min-w-12": "timestamp column width in a feed row, not a control",
   "components/features/calendar/calendar-views.tsx min-h-11": "month-grid day cell; the events inside it are the targets",
   "components/features/crews/cr-card.tsx min-h-12": "card header band, not a control (its own buttons size themselves)",
+  "components/features/chat/artifact-context/viewer/artifact-viewer-panel.tsx min-h-11": "library viewer header band that wraps; its buttons size themselves",
   "components/features/pages/folder-sharing-dialog.tsx min-h-10": "ACL table rows; the selects and buttons inside are the targets",
   "components/features/skills/skill-page.tsx min-h-12": "read-only list items; inline actions size themselves",
   "components/features/skills/skills-views.tsx min-h-12": "read-only list items; inline actions size themselves",

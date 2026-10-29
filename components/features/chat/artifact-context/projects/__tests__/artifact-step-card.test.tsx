@@ -109,3 +109,23 @@ it("failed shows the error without a retry", () => {
   expect(screen.getByText("Couldn’t save version · quota exceeded")).toBeTruthy()
   expect(screen.queryByRole("button")).toBeNull()
 })
+
+it("a running new version says the current one stays as it is", () => {
+  renderStep({ tool: "publish", state: "running", slug: "onboarding", baseVersion: 3 })
+  expect(screen.getByText("You can keep working; v3 stays as it is.")).toBeTruthy()
+})
+
+it("a running create has no earlier version to mention", () => {
+  renderStep({ tool: "create", state: "running" })
+  expect(screen.queryByText(/stays as it is/)).toBeNull()
+})
+
+it("a failed new version says in plain words that nothing changed", () => {
+  renderStep({ tool: "publish", state: "failed", slug: "onboarding", baseVersion: 2, error: "quota exceeded" })
+  expect(screen.getByText("Nothing was saved; v2 is unchanged.")).toBeTruthy()
+})
+
+it("a failed create says nothing was saved", () => {
+  renderStep({ tool: "create", state: "failed", error: "boom" })
+  expect(screen.getByText("Nothing was saved.")).toBeTruthy()
+})
