@@ -15,6 +15,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Agents prepare a proposal when a person is editing a Word or Sheet document.** Instead of a bare refusal, the agent's `craft_propose` records a complete candidate over the version it read; the document stays unchanged. The person holding the editor can compare it, accept it as their own save (rights, lease and current version are re-checked in one transaction; a proposal over an older version becomes stale) or reject it. Also available as `crewship craft connect` actions.
 
+- **Project source edits survive a lost save reply and a closed tab.** If the save reply is lost, the editor confirms the exact next version instead of reporting a false conflict, and an unsaved source draft is kept in the browser and offered back until it is saved or discarded.
+
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.
 
 - **Shared artifact commenters can post feedback in the preview.** Comments stay anchored to the shared version without granting editing or agent execution rights; changing accounts, workspace or permissions retires an unfinished selection.
