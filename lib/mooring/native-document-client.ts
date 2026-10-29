@@ -9,9 +9,13 @@ export interface NativeDocumentClientOptions {
  refresh?:()=>Promise<RefreshResult>;bearer?:()=>boolean
 }
 export interface NativeDocumentSnapshot {
- version:string;bytes:Uint8Array;applicationId:"wordcraft"|"gridcraft";enginePin:string;editorBundle:string;editorURL:string
+ version:string;bytes:Uint8Array;applicationId:"wordcraft"|"gridcraft"|"deckcraft";enginePin:string;editorBundle:string;editorURL:string
  quota:{usedBytes:string;limitBytes:string;warning:boolean;retention:string}
 }
+export interface NativeShareRequest {
+ workspaceId:string;pageId:string;applicationId:string;enginePin:string;sessionId:string;generation:string;baseVersion:string;targetVersion:string
+}
+export interface NativeShareReceipt {version:string;durability:'node';issuedBy:'crewship';phase:'shared'}
 export interface NativeDocumentClient {
  open(signal: AbortSignal): Promise<{sessionId: string; applicationId: string}>
  read(signal:AbortSignal):Promise<NativeDocumentSnapshot>
@@ -19,6 +23,7 @@ export interface NativeDocumentClient {
  reauthorize(signal:AbortSignal):Promise<boolean>
  lease(signal:AbortSignal):Promise<unknown>
  leaseAction(action:"acquire"|"release"|"request-handoff"|"handoff",body:{generation?:string;request_id?:string},signal:AbortSignal):Promise<unknown>
+ share(request:NativeShareRequest,signal:AbortSignal):Promise<NativeShareReceipt>
  save(request: NativeSaveRequest,signal: AbortSignal): Promise<unknown>
  reconcile(request: NativeSaveRequest,signal: AbortSignal): Promise<unknown>
  close(): void
@@ -86,11 +91,25 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
     const value:unknown=await response.json()
     if(!active||!value||typeof value!=="object")throw new Error("invalid_native_session")
     const v=value as Record<string,unknown>
-    if(typeof v.session_token!=="string"||!/^[a-f0-9]{64}$/.test(v.session_token)||!identifier(v.session_id)||v.page_id!==options.pageId||(v.application_id!=="wordcraft"&&v.application_id!=="gridcraft"))throw new Error("invalid_native_session")
+    if(typeof v.session_token!=="string"||!/^[a-f0-9]{64}$/.test(v.session_token)||!identifier(v.session_id)||v.page_id!==options.pageId||(v.application_id!=="wordcraft"&&v.application_id!=="gridcraft"&&v.application_id!=="deckcraft"))throw new Error("invalid_native_session")
     token=v.session_token;sessionId=v.session_id;applicationId=v.application_id
     return {sessionId,applicationId}
    })()
    return opening
+  },
+  async share(request,signal){
+   ready()
+   if(!request||Object.keys(request).length!==8||request.workspaceId!==options.workspaceId||request.pageId!==options.pageId||request.applicationId!==applicationId||request.sessionId!==sessionId||!/^[a-f0-9]{64}$/.test(request.enginePin)||![request.generation,request.baseVersion,request.targetVersion].every(v=>validNativeVersion(v)&&v!=='0'))throw new Error('invalid_native_share_binding')
+   const response=await send(`${base}document/share?${query}`,{method:'POST',cache:'no-store',signal,headers:{'Content-Type':'application/json','X-Craft-Session':token!},body:JSON.stringify({...request})})
+   ready()
+   if(response.status===409)throw new NativeSaveError('conflict')
+   if(response.status===401||response.status===403)throw new NativeSaveError('write_revoked')
+   if(!response.ok)throw new Error('native_share_unconfirmed')
+   const value:unknown=await response.json();ready()
+   if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('native_share_unconfirmed')
+   const v=value as Record<string,unknown>
+   if(Object.keys(v).length!==4||v.version!==request.targetVersion||v.durability!=='node'||v.issuedBy!=='crewship'||v.phase!=='shared')throw new Error('native_share_unconfirmed')
+   return v as unknown as NativeShareReceipt
   },
   async lease(signal){
    ready();const response=await send(`${base}lease?${query}`,{method:"GET",cache:"no-store",signal,headers:{"X-Craft-Session":token!}})
@@ -197,7 +216,7 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    if(!validNativeVersion(v.version)||v.version==="0"||v.applicationId!==applicationId||typeof v.enginePin!=="string"||!/^[a-f0-9]{64}$/.test(v.enginePin)||typeof v.editorBundle!=="string"||!/^[a-f0-9]{64}$/.test(v.editorBundle)||typeof v.editorURL!=="string"||!v.editorURL.endsWith(`/b/${v.editorBundle}/index.html`)||typeof v.bytes!=="string"||!v.bytes.length||v.bytes.length>44739244||!q||!validNativeVersion(q.usedBytes)||!validNativeVersion(q.limitBytes)||q.limitBytes==="0"||typeof q.warning!=="boolean"||typeof q.retention!=="string")throw new Error("invalid_native_document")
    let bytes:Uint8Array
    try {const binary=atob(v.bytes);if(!binary.length||binary.length>32*1024*1024)throw new Error();bytes=Uint8Array.from(binary,c=>c.charCodeAt(0))}catch{throw new Error("invalid_native_document")}
-   return {version:v.version,bytes,applicationId:applicationId as "wordcraft"|"gridcraft",enginePin:v.enginePin,editorBundle:v.editorBundle,editorURL:v.editorURL,quota:{usedBytes:q.usedBytes,limitBytes:q.limitBytes,warning:q.warning,retention:q.retention}}
+   return {version:v.version,bytes,applicationId:applicationId as "wordcraft"|"gridcraft"|"deckcraft",enginePin:v.enginePin,editorBundle:v.editorBundle,editorURL:v.editorURL,quota:{usedBytes:q.usedBytes,limitBytes:q.limitBytes,warning:q.warning,retention:q.retention}}
   },
   save:(request,signal)=>mutate("save",request,signal),
   reconcile:(request,signal)=>mutate("reconcile",request,signal),

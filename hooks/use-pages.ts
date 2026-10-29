@@ -493,7 +493,7 @@ export interface PageView {
   createdByTest?: boolean
   archived?: boolean
   archivedAt?: string
-  nativeCraftApplication?: "wordcraft" | "gridcraft"
+  nativeCraftApplication?: "wordcraft" | "gridcraft" | "deckcraft"
   /** Actual validated wire ID only; never the legacy slug-derived row key. */
   immutablePageId?: string
   /** Unknown on legacy servers; never infer from ownership or folder. */
@@ -664,7 +664,7 @@ export function toPageView(raw: WirePage): PageView {
     privateAudience: typeof raw.private_audience === "boolean" ? raw.private_audience : undefined,
     hasSlides: raw.has_slides === true,
     hasWorkbook: raw.has_workbook === true,
-    ...(raw.native_craft_application === "wordcraft" || raw.native_craft_application === "gridcraft" ? { nativeCraftApplication: raw.native_craft_application } : {}),
+    ...(raw.native_craft_application === "wordcraft" || raw.native_craft_application === "gridcraft" || raw.native_craft_application === "deckcraft" ? { nativeCraftApplication: raw.native_craft_application } : {}),
     ...(raw.artifact_kind === "project" || raw.artifact_kind === "word" || raw.artifact_kind === "sheet" || raw.artifact_kind === "dashboard" || raw.artifact_kind === "slides" ? { artifactKind: raw.artifact_kind } : {}),
     ...(Number.isSafeInteger(raw.artifact_shared_version) && raw.artifact_shared_version! > 0 ? { artifactSharedVersion: raw.artifact_shared_version } : {}),
     hasMooring: raw.has_mooring === true,

@@ -137,3 +137,37 @@ it('does not refresh and automatically replay a native mutation through the defa
  const client=createNativeDocumentClient({workspaceId:'ws',pageId:'page'})
  try{await client.open(signal());const initialRefreshes=refreshes;expect(initialRefreshes).toBe(1);await expect(client.save(request,signal())).rejects.toBeInstanceOf(NativeSaveError);expect(mutations).toBe(1);expect(refreshes).toBe(initialRefreshes)}finally{client.close();vi.unstubAllGlobals();await stopped(server)}
 })
+
+
+it('preserves a native Deck ZIP and its original session binding without a text conversion',async()=>{
+ const zip=new Uint8Array([80,75,3,4,0,255,128])
+ const snapshot={version:'1',bytes:Buffer.from(zip).toString('base64'),applicationId:'deckcraft',enginePin:'e'.repeat(64),editorBundle:'a'.repeat(64),editorURL:'https://editor.example/b/'+'a'.repeat(64)+'/index.html',quota:{usedBytes:'7',limitBytes:'99999',warning:false,retention:'keep-all'}}
+ const send=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({session_token:'b'.repeat(64),session_id:'public-session',application_id:'deckcraft',page_id:'page'}))).mockResolvedValueOnce(new Response(JSON.stringify(snapshot))).mockResolvedValueOnce(new Response('{}'))
+ const client=createNativeDocumentClient({workspaceId:'ws',pageId:'page',fetch:send})
+ await expect(client.open(signal())).resolves.toEqual({sessionId:'public-session',applicationId:'deckcraft'})
+ expect((await client.read(signal())).bytes).toEqual(zip)
+ await client.save({...request,applicationId:'deckcraft',bytes:zip},signal())
+ expect(JSON.parse(send.mock.calls[2][1].body).bytes).toBe(snapshot.bytes)
+ expect(send.mock.calls[2][1].redirect).toBe('error');client.close()
+})
+
+describe('native shared preview publication',()=>{
+ const share={workspaceId:'ws',pageId:'page',applicationId:'wordcraft',enginePin:'e'.repeat(64),sessionId:'public-session',generation:'9007199254740995',baseVersion:'9007199254740993',targetVersion:'9007199254740993'}
+ const admission=()=>new Response(JSON.stringify({session_token:'b'.repeat(64),session_id:'public-session',application_id:'wordcraft',page_id:'page'}))
+ it('publishes one explicit committed version without putting the bearer in the body',async()=>{
+  const send=vi.fn().mockResolvedValueOnce(admission()).mockResolvedValueOnce(new Response(JSON.stringify({version:share.targetVersion,durability:'node',issuedBy:'crewship',phase:'shared'})))
+  const client=createNativeDocumentClient({workspaceId:'ws',pageId:'page',fetch:send});await client.open(signal())
+  await expect(client.share(share,signal())).resolves.toMatchObject({version:share.targetVersion,phase:'shared'})
+  expect(String(send.mock.calls[1][0])).toBe('/api/v1/pages/%40page/craft/document/share?workspace_id=ws')
+  expect(send.mock.calls[1][1]).toMatchObject({method:'POST',redirect:'error',cache:'no-store',body:JSON.stringify(share)})
+  expect(new Headers(send.mock.calls[1][1].headers).get('X-Craft-Session')).toBe('b'.repeat(64))
+  expect(send.mock.calls[1][1].body).not.toContain('b'.repeat(64))
+ })
+ it.each(['network','403','409','wrong-version'])('does not retry or accept unconfirmed preview publication %s',async(reason)=>{
+  const send=vi.fn().mockResolvedValueOnce(admission())
+  if(reason==='network')send.mockRejectedValueOnce(Error('lost publication'))
+  else send.mockResolvedValueOnce(new Response(reason==='wrong-version'?JSON.stringify({version:'1',durability:'node',issuedBy:'crewship',phase:'shared'}):'{}',{status:reason==='wrong-version'?200:Number(reason)}))
+  const client=createNativeDocumentClient({workspaceId:'ws',pageId:'page',fetch:send});await client.open(signal())
+  await expect(client.share(share,signal())).rejects.toThrow();expect(send).toHaveBeenCalledTimes(2)
+ })
+})

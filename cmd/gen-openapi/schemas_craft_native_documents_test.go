@@ -51,7 +51,7 @@ func TestCraftNativeInitializeHasOwnerNativeTypedAdmission(t *testing.T) {
 	if len(props) != 2 || request["additionalProperties"] != false {
 		t.Fatal("initializer accepts client scope or qualification fields")
 	}
-	if !reflect.DeepEqual(props["application_id"].(map[string]any)["enum"], []string{"wordcraft", "gridcraft"}) {
+	if !reflect.DeepEqual(props["application_id"].(map[string]any)["enum"], []string{"wordcraft", "gridcraft", "deckcraft"}) {
 		t.Fatal("initializer does not list its supported native applications")
 	}
 }

@@ -86,6 +86,10 @@ func (r *Router) registerCraftNativeRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/lease/handoff", roleSelf, m.handoff)
 	// openapi: responses 201,400,401,403,409,413,422,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/initialize", roleSelf, d.initialize)
+	// openapi: responses 200,401,403,404,422,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/craft/preview", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(d.preview)))))
+	// openapi: responses 200,400,401,403,409,422,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/craft/document/share", roleSelf, d.shareSnapshot)
 	// openapi: responses 200,401,403,409,422,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/craft/document", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(d.readSnapshot)))))
 	// openapi: responses 200,400,401,403,409,413,422,503

@@ -27,9 +27,11 @@ func newCraftCommand() *cobra.Command {
 		r, e := c.WithContext(cmd.Context()).Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/craft/availability")
 		return craftResponse(cmd, r, e, "")
 	}})
+	craft.AddCommand(&cobra.Command{Use: "preview <page>", Args: cobra.ExactArgs(1), Short: "Read only the published native preview without opening an editor session", RunE: craftPreview})
 	craft.AddCommand(&cobra.Command{Use: "connect <page>", Args: cobra.ExactArgs(1), Short: "Read bounded NDJSON actions; watch keeps the lease stream alive", RunE: craftConnect})
-	initialize := &cobra.Command{Use: "initialize <page>", Args: cobra.ExactArgs(1), Short: "Initialize an existing empty owned Page as Word native; keep its admission in this process", RunE: craftInitialize}
-	initialize.Flags().String("file", "", "Native Word document file (or - for stdin, without subsequent actions)")
+	initialize := &cobra.Command{Use: "initialize <page>", Args: cobra.ExactArgs(1), Short: "Initialize an existing empty owned Page with a qualified native application; keep its admission in this process", RunE: craftInitialize}
+	initialize.Flags().String("application", "wordcraft", "Native application: wordcraft, gridcraft, or deckcraft")
+	initialize.Flags().String("file", "", "Native document file: Word/Grid JSON or Deck ZIP (or - for stdin, without subsequent actions)")
 	_ = initialize.MarkFlagRequired("file")
 	craft.AddCommand(initialize)
 	craft.AddCommand(newCraftAgentTaskCommand())
@@ -57,10 +59,10 @@ func craftConnect(cmd *cobra.Command, args []string) error {
 	if r.StatusCode != 201 {
 		return fmt.Errorf("native session HTTP %d", r.StatusCode)
 	}
-	return craftUseAdmission(cmd, args, c, r, false)
+	return craftUseAdmission(cmd, args, c, r, "")
 }
 
-func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http.Response, initialized bool) error {
+func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http.Response, initialApplication string) error {
 	raw, e := craftReadJSON(r.Body)
 	if e != nil {
 		return e
@@ -82,9 +84,14 @@ func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http
 	}
 	token := admission.Token
 	c = c.WithHeader("X-Craft-Session", token)
+	// The scoped connection is a one-attempt transport. A same-origin307/308
+	// must not replay a native mutation with its private admission header.
+	httpClient := *c.HTTPClient
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	c.HTTPClient = &httpClient
 	fields := map[string]string{"session_id": admission.ID}
-	if initialized {
-		if !craftPositiveVersion(admission.Generation) || admission.Version != "1" || admission.Application != "wordcraft" || admission.Page == "" {
+	if initialApplication != "" {
+		if !craftPositiveVersion(admission.Generation) || admission.Version != "1" || admission.Application != initialApplication || admission.Page == "" {
 			return fmt.Errorf("invalid native initialization response")
 		}
 		fields["application_id"] = admission.Application
@@ -142,6 +149,8 @@ func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http
 			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/document/save", a.Snapshot)
 		case "import":
 			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/document/import", a.Snapshot)
+		case "share":
+			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/document/share", craftShareSelection{a.Snapshot.WorkspaceID, a.Snapshot.PageID, a.Snapshot.ApplicationID, a.Snapshot.EnginePin, a.Snapshot.SessionID, a.Snapshot.Generation, a.Snapshot.BaseVersion, a.Snapshot.TargetVersion})
 		case "restore":
 			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/document/restore", a.Snapshot)
 		case "reconcile":

@@ -63,7 +63,8 @@ func (s *NativeStore) ready() error {
 		return ErrNativeDisabled
 	}
 	c := s.config
-	if s.db == nil || c.Leases == nil || c.Authorize == nil || c.Validate == nil || c.Application != "wordcraft" && c.Application != "gridcraft" || !nativeHex(c.EngineRevision, 40) || !nativeHex(c.EngineSHA256, 64) || !nativeHex(c.EditorBundle, 64) {
+	_, _, known := NativeDocumentFormat(c.Application)
+	if s.db == nil || c.Leases == nil || c.Authorize == nil || c.Validate == nil || !known || !nativeHex(c.EngineRevision, 40) || !nativeHex(c.EngineSHA256, 64) || !nativeHex(c.EditorBundle, 64) {
 		return ErrInvalid
 	}
 	return nil
@@ -107,7 +108,7 @@ func (s *NativeStore) candidate(ctx context.Context, raw []byte) ([]byte, error)
 	}
 	b := append([]byte(nil), raw...)
 	trimmed := bytes.TrimSpace(b)
-	if len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(b) {
+	if s.config.Application != "deckcraft" && (len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(b)) {
 		return nil, ErrInvalid
 	}
 	if err := s.config.Validate(ctx, append([]byte(nil), b...)); err != nil {
@@ -115,8 +116,9 @@ func (s *NativeStore) candidate(ctx context.Context, raw []byte) ([]byte, error)
 	}
 	return b, nil
 }
-func nativeManifest(base int64, b []byte) artifacts.VersionRequest {
-	return artifacts.VersionRequest{BaseVersion: base, EntryPoint: "document.json", Files: map[string]artifacts.VersionFile{"document.json": {Content: b, MediaType: "application/json"}}}
+func (s *NativeStore) nativeManifest(base int64, b []byte) artifacts.VersionRequest {
+	name, media, _ := NativeDocumentFormat(s.config.Application)
+	return artifacts.VersionRequest{BaseVersion: base, EntryPoint: name, Files: map[string]artifacts.VersionFile{name: {Content: b, MediaType: media}}}
 }
 
 // Initialize only attaches a NEW explicitly selected profile to an authorized
@@ -164,7 +166,7 @@ func (s *NativeStore) Initialize(ctx context.Context, k EditLeaseScope, p EditLe
 		initialized = true
 		return actor, nil
 	}
-	r, err := s.versions.Apply(ctx, nativeVersionKey(k), nativeManifest(0, b), a)
+	r, err := s.versions.Apply(ctx, nativeVersionKey(k), s.nativeManifest(0, b), a)
 	if err != nil {
 		return EditLease{}, artifacts.VersionReceipt{}, err
 	}
@@ -182,7 +184,7 @@ func (s *NativeStore) Save(ctx context.Context, l EditLease, base int64, raw []b
 	if err != nil {
 		return artifacts.VersionReceipt{}, err
 	}
-	return s.versions.Apply(ctx, nativeVersionKey(l.Scope), nativeManifest(base, b), a)
+	return s.versions.Apply(ctx, nativeVersionKey(l.Scope), s.nativeManifest(base, b), a)
 }
 func (s *NativeStore) Read(ctx context.Context, k EditLeaseScope) (artifacts.VersionState, error) {
 	if err := s.ready(); err != nil {
@@ -199,15 +201,57 @@ func (s *NativeStore) Restore(ctx context.Context, l EditLease, base, target int
 	if err != nil {
 		return artifacts.VersionReceipt{}, err
 	}
-	if m.EntryPoint != "document.json" || len(m.Files) != 1 {
+	name, media, _ := NativeDocumentFormat(s.config.Application)
+	if m.EntryPoint != name || len(m.Files) != 1 {
 		return artifacts.VersionReceipt{}, ErrNativeProfile
 	}
-	file, ok := m.Files["document.json"]
-	if !ok || file.MediaType != "application/json" {
+	file, ok := m.Files[name]
+	if !ok || file.MediaType != media {
 		return artifacts.VersionReceipt{}, ErrNativeProfile
 	}
 	if _, err = s.candidate(ctx, file.Content); err != nil {
 		return artifacts.VersionReceipt{}, err
 	}
 	return s.versions.Restore(ctx, nativeVersionKey(l.Scope), base, target, a)
+}
+
+// ReadShared returns only the current shared pin. The host's preview authority
+// and the immutable native profile are checked in that same fenced transaction.
+// It never acquires a lease, exposes private history or falls back to latest.
+func (s *NativeStore) ReadShared(ctx context.Context, k EditLeaseScope) (artifacts.VersionState, error) {
+	if err := s.ready(); err != nil {
+		return artifacts.VersionState{}, err
+	}
+	authorize := s.authority(k, nil, "preview")
+	view, err := s.versions.View(ctx, nativeVersionKey(k), func(ctx context.Context, tx *sql.Tx) (string, artifacts.VersionSelection, error) {
+		actor, err := authorize(ctx, tx)
+		return actor, artifacts.VersionSelection{SharedOnly: true}, err
+	})
+	return view.State, err
+}
+
+// Share publishes an existing validated native version under the same current
+// write authority, generation fence and base-version CAS as native writes.
+func (s *NativeStore) Share(ctx context.Context, l EditLease, base, target int64, publish func(context.Context, *sql.Tx, string) error) error {
+	if err := s.ready(); err != nil {
+		return err
+	}
+	if base < 1 || target < 1 || publish == nil {
+		return ErrInvalid
+	}
+	authorize := s.authority(l.Scope, &l, "write")
+	published := false
+	return s.versions.Share(ctx, nativeVersionKey(l.Scope), base, target, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		actor, err := authorize(ctx, tx)
+		if err != nil {
+			return "", err
+		}
+		if !published {
+			if err = publish(ctx, tx, actor); err != nil {
+				return "", err
+			}
+			published = true
+		}
+		return actor, nil
+	})
 }

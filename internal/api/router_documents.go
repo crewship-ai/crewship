@@ -48,6 +48,7 @@ func (r *Router) documentAvailability(req *http.Request) DocumentAvailability {
 	if d := r.craftNativeDocuments; d != nil && d.human != nil && d.human.enabled {
 		_, status.WordCraftNative = d.applications["wordcraft"]
 		_, status.GridCraftNative = d.applications["gridcraft"]
+		_, status.DeckCraftNative = d.applications["deckcraft"]
 	}
 	if m := r.mooringHTTP; m != nil && m.commandFactory != nil && m.commandFactory.editorBundle != nil {
 		f := m.commandFactory

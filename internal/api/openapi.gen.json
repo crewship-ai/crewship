@@ -7153,6 +7153,9 @@
       },
       "DocumentAvailability": {
         "properties": {
+          "deckcraft_native": {
+            "type": "boolean"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -7170,7 +7173,8 @@
         "required": [
           "enabled",
           "wordcraft_native",
-          "gridcraft_native"
+          "gridcraft_native",
+          "deckcraft_native"
         ],
         "type": "object"
       },
@@ -13529,12 +13533,20 @@
           "agents_enabled": {
             "type": "boolean"
           },
+          "can_edit": {
+            "type": "boolean"
+          },
           "enabled": {
+            "type": "boolean"
+          },
+          "preview_enabled": {
             "type": "boolean"
           }
         },
         "required": [
           "enabled",
+          "can_edit",
+          "preview_enabled",
           "agents_enabled"
         ],
         "type": "object"
@@ -13545,7 +13557,8 @@
           "applicationId": {
             "enum": [
               "wordcraft",
-              "gridcraft"
+              "gridcraft",
+              "deckcraft"
             ],
             "type": "string"
           },
@@ -13712,7 +13725,8 @@
           "application_id": {
             "enum": [
               "wordcraft",
-              "gridcraft"
+              "gridcraft",
+              "deckcraft"
             ],
             "type": "string"
           },
@@ -13756,7 +13770,8 @@
           "application_id": {
             "enum": [
               "wordcraft",
-              "gridcraft"
+              "gridcraft",
+              "deckcraft"
             ],
             "type": "string"
           },
@@ -13779,6 +13794,9 @@
             "description": "Currently always null: acquisition wall time is not persisted.",
             "nullable": true,
             "type": "string"
+          },
+          "can_edit": {
+            "type": "boolean"
           },
           "can_stop_agent": {
             "type": "boolean"
@@ -13831,9 +13849,50 @@
           "expires_at",
           "can_stop_agent",
           "can_write",
+          "can_edit",
           "acquired_at",
           "handoff_requested_kind",
           "handoff_requested_by"
+        ],
+        "type": "object"
+      },
+      "NativeCraftPreview": {
+        "properties": {
+          "applicationId": {
+            "enum": [
+              "wordcraft",
+              "gridcraft"
+            ],
+            "type": "string"
+          },
+          "bytes": {
+            "format": "byte",
+            "type": "string"
+          },
+          "editorBundle": {
+            "type": "string"
+          },
+          "editorURL": {
+            "type": "string"
+          },
+          "enginePin": {
+            "type": "string"
+          },
+          "version": {
+            "description": "Canonical decimal int64 in1..9223372036854775807. Never convert to a JavaScript number.",
+            "maxLength": 19,
+            "nullable": false,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "bytes",
+          "applicationId",
+          "enginePin",
+          "editorBundle",
+          "editorURL"
         ],
         "type": "object"
       },
@@ -13843,7 +13902,8 @@
           "applicationId": {
             "enum": [
               "wordcraft",
-              "gridcraft"
+              "gridcraft",
+              "deckcraft"
             ],
             "type": "string"
           },
@@ -13987,7 +14047,8 @@
           "applicationId": {
             "enum": [
               "wordcraft",
-              "gridcraft"
+              "gridcraft",
+              "deckcraft"
             ],
             "type": "string"
           },
@@ -14056,7 +14117,8 @@
           "application_id": {
             "enum": [
               "wordcraft",
-              "gridcraft"
+              "gridcraft",
+              "deckcraft"
             ],
             "type": "string"
           },
@@ -14080,13 +14142,102 @@
         ],
         "type": "object"
       },
+      "NativeCraftShareReceipt": {
+        "properties": {
+          "durability": {
+            "enum": [
+              "node"
+            ],
+            "type": "string"
+          },
+          "issuedBy": {
+            "enum": [
+              "crewship"
+            ],
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "shared"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "description": "Canonical decimal int64 in1..9223372036854775807. Never convert to a JavaScript number.",
+            "maxLength": 19,
+            "nullable": false,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "durability",
+          "issuedBy",
+          "phase"
+        ],
+        "type": "object"
+      },
+      "NativeCraftShareRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "applicationId": {
+            "type": "string"
+          },
+          "baseVersion": {
+            "description": "Canonical decimal int64 in1..9223372036854775807. Never convert to a JavaScript number.",
+            "maxLength": 19,
+            "nullable": false,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "enginePin": {
+            "type": "string"
+          },
+          "generation": {
+            "description": "Canonical decimal int64 in1..9223372036854775807. Never convert to a JavaScript number.",
+            "maxLength": 19,
+            "nullable": false,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "pageId": {
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          },
+          "targetVersion": {
+            "description": "Canonical decimal int64 in1..9223372036854775807. Never convert to a JavaScript number.",
+            "maxLength": 19,
+            "nullable": false,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspaceId",
+          "pageId",
+          "applicationId",
+          "enginePin",
+          "sessionId",
+          "generation",
+          "baseVersion",
+          "targetVersion"
+        ],
+        "type": "object"
+      },
       "NativeCraftSnapshotReceipt": {
         "additionalProperties": false,
         "properties": {
           "applicationId": {
             "enum": [
               "wordcraft",
-              "gridcraft"
+              "gridcraft",
+              "deckcraft"
             ],
             "type": "string"
           },
@@ -14178,7 +14329,8 @@
           "applicationId": {
             "enum": [
               "wordcraft",
-              "gridcraft"
+              "gridcraft",
+              "deckcraft"
             ],
             "type": "string"
           },
@@ -122256,7 +122408,8 @@
                             "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                             "enum": [
                               "wordcraft",
-                              "gridcraft"
+                              "gridcraft",
+                              "deckcraft"
                             ],
                             "type": "string"
                           },
@@ -123619,7 +123772,8 @@
                               "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                               "enum": [
                                 "wordcraft",
-                                "gridcraft"
+                                "gridcraft",
+                                "deckcraft"
                               ],
                               "type": "string"
                             },
@@ -124388,7 +124542,8 @@
                           "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                           "enum": [
                             "wordcraft",
-                            "gridcraft"
+                            "gridcraft",
+                            "deckcraft"
                           ],
                           "type": "string"
                         },
@@ -124780,7 +124935,8 @@
                             "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                             "enum": [
                               "wordcraft",
-                              "gridcraft"
+                              "gridcraft",
+                              "deckcraft"
                             ],
                             "type": "string"
                           },
@@ -125256,7 +125412,8 @@
                         "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                         "enum": [
                           "wordcraft",
-                          "gridcraft"
+                          "gridcraft",
+                          "deckcraft"
                         ],
                         "type": "string"
                       },
@@ -125693,7 +125850,8 @@
                       "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                       "enum": [
                         "wordcraft",
-                        "gridcraft"
+                        "gridcraft",
+                        "deckcraft"
                       ],
                       "type": "string"
                     },
@@ -125954,7 +126112,8 @@
                       "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                       "enum": [
                         "wordcraft",
-                        "gridcraft"
+                        "gridcraft",
+                        "deckcraft"
                       ],
                       "type": "string"
                     },
@@ -127057,7 +127216,8 @@
                       "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                       "enum": [
                         "wordcraft",
-                        "gridcraft"
+                        "gridcraft",
+                        "deckcraft"
                       ],
                       "type": "string"
                     },
@@ -127318,7 +127478,8 @@
                       "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                       "enum": [
                         "wordcraft",
-                        "gridcraft"
+                        "gridcraft",
+                        "deckcraft"
                       ],
                       "type": "string"
                     },
@@ -128062,7 +128223,8 @@
                       "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                       "enum": [
                         "wordcraft",
-                        "gridcraft"
+                        "gridcraft",
+                        "deckcraft"
                       ],
                       "type": "string"
                     },
@@ -128585,7 +128747,8 @@
                       "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                       "enum": [
                         "wordcraft",
-                        "gridcraft"
+                        "gridcraft",
+                        "deckcraft"
                       ],
                       "type": "string"
                     },
@@ -133388,6 +133551,196 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/pages/{slug}/craft/document/share": {
+      "post": {
+        "description": "Submit page craft document share (POST /api/v1/pages/{slug}/craft/document/share).",
+        "operationId": "post_api_v1_pages_slug_craft_document_share",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Private admission issued for this mounted original human credential and Page.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeCraftShareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftShareReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page craft document share",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/pages/{slug}/craft/events": {
       "get": {
         "description": "List page craft events (GET /api/v1/pages/{slug}/craft/events).",
@@ -134759,6 +135112,167 @@
           "pages"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/craft/preview": {
+      "get": {
+        "description": "Get page craft preview (GET /api/v1/pages/{slug}/craft/preview).",
+        "operationId": "get_api_v1_pages_slug_craft_preview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftPreview"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page craft preview",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/pages/{slug}/craft/sessions": {
@@ -146399,7 +146913,8 @@
                           "description": "Existing whole-native Craft profile; open through the native editor and its independent admission.",
                           "enum": [
                             "wordcraft",
-                            "gridcraft"
+                            "gridcraft",
+                            "deckcraft"
                           ],
                           "type": "string"
                         },

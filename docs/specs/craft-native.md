@@ -1,6 +1,6 @@
 # Native Craft sessions, leases, agent tasks and whole-document API
 
-The separate whole-native WordCraft/GridCraft profile is experimental and off by
+The separate whole-native WordCraft/GridCraft/DeckCraft profile is experimental and off by
 default. `craft_native.enabled: true` or `CREWSHIP_CRAFT_NATIVE_ENABLED=true`
 enables its human session and EditLease HTTP API. It requires a Linux boot-aware
 clock. A qualified Word profile is advertised as `wordcraft_native` by the authenticated
@@ -29,7 +29,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 
 | Method | Path | Request | Response / success status |
 |---|---|---|---|
-| GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean, agents_enabled: boolean}`, 200. |
+| GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean, can_edit: boolean, preview_enabled: boolean, agents_enabled: boolean}`, 200. |
 | POST | `/api/v1/pages/{slug}/craft/sessions` | `{}`. | `session_token`, public `session_id`, `application_id`, `page_id`, 201. |
 | POST | `/api/v1/pages/{slug}/craft/sessions/reauthorize` | Separately refreshed original authentication; no body consumed. | `{renewed: boolean}`, 200. |
 | GET | `/api/v1/pages/{slug}/craft/lease` | Craft admission header. | Lease status described below, 200. |
@@ -40,7 +40,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | POST | `/api/v1/pages/{slug}/craft/lease/request-handoff` | `{}`. | `{request_id, generation}`, 201. |
 | POST | `/api/v1/pages/{slug}/craft/lease/handoff` | `{generation: "1", request_id: "public-request-id"}`. | New holder's lease status, 200. |
 | GET | `/api/v1/pages/{slug}/craft/events` | Craft admission header; keep the connection open. | `text/event-stream`: `lease` status or `session_retired` metadata; 200. |
-| POST | `/api/v1/pages/{slug}/craft/initialize` | Existing empty personal Page owner, original human `pages:write`; Qualified Word or Grid native bytes. | Atomic native profile, lease and version1, with private admission, 201. |
+| POST | `/api/v1/pages/{slug}/craft/initialize` | Existing empty personal Page owner, original human `pages:write`; Qualified Word, Grid or Deck native bytes. | Atomic native profile, lease and version1, with private admission, 201. |
 | GET | `/api/v1/pages/{slug}/craft/document` | Craft admission header. | Complete base64 native bytes, version and pinned editor/engine metadata, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/save` | Bound whole snapshot described below. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Same whole snapshot contract; existing explicit native Page only. | Exact committed snapshot receipt, 200. |
@@ -60,7 +60,7 @@ Renew/release require `{generation: "1"}`. Handoff requires
 numbers. Before the first acquisition, the status generation is `null`.
 
 A lease status has `holder: {actor_id, display_name, kind} | null`, `mine`,
-`generation`, `expires_at`, `can_write`, `acquired_at`,
+`generation`, `expires_at`, `can_write`, `can_edit`, `acquired_at`,
 `handoff_requested_kind`, `handoff_requested_by`, and `can_stop_agent`. An agent holder also has public `agent_id` and `run_id`; its `kind` is `agent`. Requests are an **array**
 of `{request_id, actor_id, display_name, kind}`, visible to the holder. Current
 editor admissions are human-only; an agent uses the separate confirmed task binding below. `acquired_at` is presently `null`: the lease does not
@@ -69,6 +69,47 @@ persist acquisition wall time, and renewal time must not impersonate it.
 Competing acquisition and stale generations return 409. A handoff advances the
 server generation; a late renew or write from the old connection is rejected.
 Neither a display name nor a public request ID establishes write authority.
+
+## Shared previews and edit capability
+
+`can_edit` is current original-credential and Page edit authority, independent of
+whether someone else holds the lease. `can_write` additionally requires this
+connection to hold custody. Observers receive no takeover, handoff, publish or
+agent controls. An older response without `can_edit: true` grants no UI edit
+capability. Server mutations continue to recheck the live authority and lease.
+
+`GET /api/v1/pages/{slug}/craft/preview` uses ordinary human authentication and
+`workspace_id`, without a Craft admission. It accepts canonical Read or Comment
+visibility and returns only the current shared native version: `version`, base64
+`bytes`, `applicationId`, `enginePin`, `editorBundle` and `editorURL`. The live
+credential, Page rights, captured authority epochs and immutable native profile
+are checked in the same protected transaction as the shared pin. No private
+latest version, history, quota, admission or custody metadata is returned. A
+missing shared pin returns 404, denied access 403 and disabled/unqualified
+profiles 503; there is no fallback to the latest bytes. `preview_enabled` in
+availability advertises this separately from the existing native observer path.
+The default editor entry requires both `enabled === true` and `can_edit === true`
+before mounting the editor host. `can_edit` checks current original-credential
+and Page write authority in the same transaction as the other availability
+fields. Read and Comment instead mount the shared preview only when
+`preview_enabled === true`, without opening a Craft session; missing or truthy
+nonboolean edit capabilities grant no host access. The legacy explicit Read
+observer API remains compatible, while Comment alone never opens an editor
+admission or receives private latest native bytes.
+
+`POST /api/v1/pages/{slug}/craft/document/share` requires ordinary human auth and
+`X-Craft-Session`. Its strict JSON request contains `workspaceId`, `pageId`,
+`applicationId`, `enginePin`, `sessionId`, `generation`, `baseVersion` and
+`targetVersion` (canonical positive decimal strings for generations/versions).
+It publishes an existing committed version with current write authority, the
+current lease generation and latest-version CAS inside the same transaction.
+The same transaction records the original human actor, selected version and
+Page in the authorization audit and journal. Unsupported or failed audit writes
+roll back publication. It cannot create content or grant access. Rejected publication preserves both
+content and the prior shared pin. Success returns `{version, durability:"node",
+issuedBy:"crewship", phase:"shared"}`; it is a preview publication receipt,
+not acknowledgement of an unsaved native buffer. Clients must first confirm the
+exact current native snapshot and must not retry an ambiguous publication.
 
 ## Authorization and lifetime
 
@@ -123,7 +164,7 @@ descriptor again, and rejects repair warnings or lossy roundtrips. Requests neve
 choose an executable, validator callback or profile. A missing application
 profile returns 503. Availability never converts an old Page into this profile.
 
-Initialization accepts `application_id: "wordcraft"` or `"gridcraft"` and base64
+Initialization accepts `application_id: "wordcraft"`, `"gridcraft"` or `"deckcraft"` and base64
 `bytes`; the selected application must have an operator-qualified profile.
 It requires an existing empty personal Page owned by the authenticated human,
 current folder policy and live membership. Crew-owned Pages, existing content,
@@ -145,7 +186,12 @@ The native-only operator environment overrides are
 `CREWSHIP_CRAFT_NATIVE_GRID_CLI_PATH`,
 `CREWSHIP_CRAFT_NATIVE_GRID_CLI_SHA256`,
 `CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_BUNDLE` and
-`CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_URL`.
+`CREWSHIP_CRAFT_NATIVE_GRID_EDITOR_URL`. The corresponding presentation overrides are
+`CREWSHIP_CRAFT_NATIVE_DECK_ENGINE_REVISION`,
+`CREWSHIP_CRAFT_NATIVE_DECK_CLI_PATH`,
+`CREWSHIP_CRAFT_NATIVE_DECK_CLI_SHA256`,
+`CREWSHIP_CRAFT_NATIVE_DECK_EDITOR_BUNDLE` and
+`CREWSHIP_CRAFT_NATIVE_DECK_EDITOR_URL`.
 These override corresponding YAML
 fields without enabling the product flag or any legacy profile. Explicit empty
 values remain empty and fail qualification; every startup/manifest/hash check
@@ -159,6 +205,12 @@ Native bytes are bounded to 32 MiB; the encoded JSON body is bounded to 45 MiB.
 The lease and current original credential/Page rights are checked in publication
 transactions, and pins must match the Page's immutable native profile. No HTML
 or partial patch stands in for the native model.
+
+Word and Grid store `document.json` with media type `application/json`. Deck
+stores the original `document.deckcraft` ZIP with media type
+`application/vnd.storyteller.deckcraft+zip`. The qualified original Deck CLI
+validates a roundtrip before publication; authored presentation fields and media
+bytes must survive without repair. ZIP bytes are stored without conversion.
 
 A snapshot receipt repeats the exact scope/session/generation/revision/hash and
 base binding, gives the exact successor `version`, matching `candidateHash`,
@@ -236,6 +288,10 @@ attempt. An exact repeated request only reconciles its original snapshot; it
 never reruns the engine. A changed packet with the same ID conflicts, and a
 historical receipt cannot clear another attempt's uncertainty or downgrade the
 last confirmed version.
+
+Deck has no qualified agent command adapter yet: its `agents_enabled` remains
+false even when human editing and the Word/Grid agent runtime are ready. Direct
+Deck task admission is refused before capturing consent or creating work.
 
 The initial command surface is deliberately narrow: Word supports
 `caret.docStart`, `caret.docEnd` and plaintext `text.insert`; Sheet supports

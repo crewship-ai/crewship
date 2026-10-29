@@ -9,6 +9,10 @@ import (
 )
 
 func craftInitialize(cmd *cobra.Command, args []string) error {
+	application, err := cmd.Flags().GetString("application")
+	if err != nil || !craftKnownNativeApplication(application) {
+		return fmt.Errorf("native initialization requires application wordcraft, gridcraft, or deckcraft")
+	}
 	name, err := cmd.Flags().GetString("file")
 	if err != nil || name == "" {
 		return fmt.Errorf("native initialization requires --file")
@@ -34,7 +38,7 @@ func craftInitialize(cmd *cobra.Command, args []string) error {
 	body := struct {
 		Application string `json:"application_id" yaml:"application_id"`
 		Bytes       []byte `json:"bytes" yaml:"bytes"`
-	}{"wordcraft", native}
+	}{application, native}
 	response, err := c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/initialize", body)
 	if err != nil {
 		return fmt.Errorf("native initialization request failed")
@@ -43,5 +47,5 @@ func craftInitialize(cmd *cobra.Command, args []string) error {
 	if response.StatusCode != 201 {
 		return fmt.Errorf("native initialization HTTP %d", response.StatusCode)
 	}
-	return craftUseAdmission(cmd, args, c, response, true)
+	return craftUseAdmission(cmd, args, c, response, application)
 }

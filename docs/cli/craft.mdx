@@ -15,8 +15,13 @@ existing explicit native Page and its qualified startup profile.
 
 ```bash
 crewship craft availability <page>
+crewship craft preview <page>
 crewship craft connect <page>
 ```
+
+`preview` reads only `GET /api/v1/pages/{slug}/craft/preview` under ordinary
+human authentication, without opening a native admission or acquiring a lease.
+A missing shared version or redirect is an error; it never falls back to private latest bytes.
 
 `availability` reads `GET /api/v1/pages/{slug}/craft/availability`. `connect`
 creates one session with `POST /api/v1/pages/{slug}/craft/sessions`, prints only
@@ -43,6 +48,7 @@ normal CLI context. Server error bodies are not printed.
 | `import` | `POST /api/v1/pages/{slug}/craft/document/import` |
 | `restore` | `POST /api/v1/pages/{slug}/craft/document/restore` |
 | `reconcile` | `POST /api/v1/pages/{slug}/craft/document/reconcile` |
+| `share` | `POST /api/v1/pages/{slug}/craft/document/share` |
 
 ```json
 {"action":"status"}
@@ -75,11 +81,13 @@ reacquisition. EOF does not save content or release/reacquire a lease; send an
 explicit `release` when wanted. Reauthorization uses the current CLI credential
 and cannot revive an expired admission or replace its original authority.
 
-## Initialize one owned Word Page
+## Initialize one owned native Page
 
-`crewship craft initialize <page> --file <native.json>` calls
-`POST /api/v1/pages/{slug}/craft/initialize` with Word native bytes (at most
-32 MiB). The Page must already exist, be empty, and be personally owned by the
+`crewship craft initialize <page> --application wordcraft|gridcraft|deckcraft --file <native-file>`
+calls `POST /api/v1/pages/{slug}/craft/initialize` with raw native bytes (at most
+32 MiB): Word/Grid JSON or a Deck ZIP. Omitting `--application` keeps the existing
+Word default. The response must match the selected application; unavailable or
+unqualified profiles fail closed. The Page must already exist, be empty, and be personally owned by the
 current human with `pages:write`. The server chooses all qualified pins and
 atomically creates its initial native version and lease. This does not convert
 legacy content or create a Page.
@@ -129,3 +137,24 @@ Stop withdraws your current agent mandate for that Page and requests process
 termination. The response distinguishes revoked custody from a process whose
 stop is still pending. It cannot force a human holder and does not replay a
 failed mutation. Existing document content and versions remain available.
+
+
+## Publish a native preview from the current connection
+
+Use the `share` NDJSON action inside `crewship craft connect <page>` after
+acquiring the current lease and confirming the saved native version. Its
+`snapshot` contains only `workspaceId`, `pageId`, `applicationId`, `enginePin`,
+public `sessionId`, `generation`, `baseVersion` and `targetVersion`. Versions and
+generations are canonical positive decimal strings. Do not include native bytes,
+`editorRevision` or `contentHash`: publishing selects an existing committed
+version and cannot save a pending buffer. The server checks current edit rights,
+lease generation, latest-version CAS and an atomic publication audit.
+
+```json
+{"action":"share","snapshot":{"workspaceId":"WORKSPACE","pageId":"PAGE","applicationId":"wordcraft","enginePin":"ENGINE_PIN","sessionId":"PUBLIC_SESSION_ID","generation":"1","baseVersion":"2","targetVersion":"2"}}
+```
+
+The opaque admission bearer stays in the existing connect process and its HTTP
+header. It is never an argument or printed response field. Publication is sent
+once; a refusal, redirect or lost response never triggers a replay. The `phase: "shared"`
+receipt confirms only publication of that version, not an unsaved native buffer.

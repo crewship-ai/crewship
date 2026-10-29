@@ -41,6 +41,9 @@ func (b *nativeEngineOutput) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 func (v NativeCLIValidator) Validate(ctx context.Context, raw []byte) error {
+	if v.Application == "deckcraft" {
+		return v.validateDeck(ctx, raw)
+	}
 	trimmed := bytes.TrimSpace(raw)
 	if len(raw) == 0 || len(raw) > 32<<20 || len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(raw) {
 		return ErrNativeValidation
