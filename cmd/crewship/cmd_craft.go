@@ -204,6 +204,7 @@ func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http
 	}
 	return scanner.Err()
 }
+
 // craftProposalID accepts only the server's opaque ncp_ identifier, so an
 // action line cannot steer the request to another route.
 func craftProposalID(id string) bool {

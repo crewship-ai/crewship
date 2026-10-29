@@ -22,6 +22,22 @@ type craftNativeProposalResponse struct {
 	ResultVersion int64                     `json:"result_version,omitempty"`
 }
 
+type craftNativeProposalListResponse struct {
+	Proposals []craftNativeProposalResponse `json:"proposals"`
+}
+
+type craftNativeProposalDocumentResponse struct {
+	Proposal    craftNativeProposalResponse `json:"proposal"`
+	Bytes       []byte                      `json:"bytes"`
+	ContentHash string                      `json:"content_hash"`
+	EnginePin   string                      `json:"engine_pin"`
+}
+
+type craftNativeProposalAcceptResponse struct {
+	Proposal craftNativeProposalResponse `json:"proposal"`
+	Receipt  mooring.NativeSaveReceipt   `json:"receipt"`
+}
+
 func (d *craftNativeDocumentsHTTP) proposalView(r *http.Request, workspaceID string, p mooring.NativeProposal) craftNativeProposalResponse {
 	agent := strings.TrimPrefix(p.AuthorActorID, "agent:")
 	name := "Agent"
@@ -56,7 +72,7 @@ func (d *craftNativeDocumentsHTTP) listProposals(w http.ResponseWriter, r *http.
 		out = append(out, d.proposalView(r, entry.scope.WorkspaceID, p))
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, map[string]any{"proposals": out})
+	writeJSON(w, 200, craftNativeProposalListResponse{Proposals: out})
 }
 
 // proposalDocument returns the candidate next to its base so a human can
@@ -73,7 +89,7 @@ func (d *craftNativeDocumentsHTTP) proposalDocument(w http.ResponseWriter, r *ht
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, map[string]any{"proposal": d.proposalView(r, entry.scope.WorkspaceID, p), "bytes": p.Content, "content_hash": p.ContentHash, "engine_pin": s.EnginePin()})
+	writeJSON(w, 200, craftNativeProposalDocumentResponse{Proposal: d.proposalView(r, entry.scope.WorkspaceID, p), Bytes: p.Content, ContentHash: p.ContentHash, EnginePin: s.EnginePin()})
 }
 
 type craftNativeProposalDecisionBody struct {
@@ -121,7 +137,7 @@ func (d *craftNativeDocumentsHTTP) decideProposal(w http.ResponseWriter, r *http
 		craftNativeProposalError(w, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"proposal": d.proposalView(r, entry.scope.WorkspaceID, p), "receipt": receipt})
+	writeJSON(w, 200, craftNativeProposalAcceptResponse{Proposal: d.proposalView(r, entry.scope.WorkspaceID, p), Receipt: receipt})
 }
 func (d *craftNativeDocumentsHTTP) acceptProposal(w http.ResponseWriter, r *http.Request) {
 	d.decideProposal(w, r, true)
