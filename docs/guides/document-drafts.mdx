@@ -24,3 +24,11 @@ The browser copy holds private text, so it is deleted rather than kept for later
 
 - **Access lost.** When the server answers 401, 403 or 404 for the document, the copy of that document (for you, in that workspace) is deleted from the browser together with what is on screen. Download an unsent draft before closing the tab if you still need it; after this point it cannot be recovered.
 - **Sign-out, session expiry or a different user signing in.** Copies of other users are deleted, and every copy is deleted on sign-out or when the session ends. Unsent edits that were only stored in this browser are lost, so confirm that the status line says **Confirmed by server** before you sign out on a shared computer.
+
+## Artifact source and comment drafts
+
+An artifact project keeps two kinds of unsent work in this browser: the Project source you are editing (offered back as **Restore source draft**) and the text of an unsent comment in the project page or the artifact viewer. They are kept per person, workspace and project, and another person signed in on the same browser never sees them.
+
+Each change is written to the browser's IndexedDB storage and counts as kept only after the browser has flushed it to disk, so the draft survives a closed tab and a browser that is killed right after typing. Drafts stored by an older version of Crewship in the browser's local storage are moved over the first time they are read.
+
+These drafts follow the same deletion rules as the Document copy above: signing out deletes every artifact draft in the browser, and a different user signing in deletes the drafts of everyone else. Save or copy your source before you sign out on a shared computer.

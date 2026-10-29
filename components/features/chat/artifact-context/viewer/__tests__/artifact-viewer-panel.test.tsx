@@ -1,4 +1,5 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { purgeOtherArtifactDrafts, setArtifactDraftStore } from "@/lib/artifact-drafts"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import type { ArtifactComment, ArtifactProjectSnapshot } from "../../projects/types"
 import type { ArtifactViewerTarget } from "../../projects/artifact-viewer-context"
@@ -704,21 +705,33 @@ it("offers only editors an escaped unpinned source editor link",()=>{
  expect(screen.queryByRole("link",{name:"Edit source"})).toBeNull()
 })
 
-it("offers an unsent comment back after the tab was lost, only to the same person", () => {
-  const storage = new Map<string,string>()
-  vi.mocked(localStorage.getItem).mockImplementation(key => storage.get(key) ?? null)
-  vi.mocked(localStorage.setItem).mockImplementation((key,value) => { storage.set(key,value) })
-  vi.mocked(localStorage.removeItem).mockImplementation(key => { storage.delete(key) })
-  const first = render(<ArtifactViewerPanel />)
-  selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Typed before the crash" } })
-  first.unmount()
-  render(<ArtifactViewerPanel />)
-  selectHero()
-  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Typed before the crash")
-  cleanup()
-  state.userId = "someone-else"
-  render(<ArtifactViewerPanel />)
-  selectHero()
-  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("")
+it("offers an unsent comment back after the browser was killed, only to the same person", async () => {
+  const disk = new Map<string,string>()
+  setArtifactDraftStore({
+    get: async key => disk.get(JSON.stringify(key)),
+    put: async (key, text) => { disk.set(JSON.stringify(key), text) },
+    delete: async key => { disk.delete(JSON.stringify(key)) },
+    purge: async keep => { for (const key of [...disk.keys()]) if (keep === null || JSON.parse(key)[0] !== keep) disk.delete(key) },
+  })
+  vi.mocked(localStorage.setItem).mockClear()
+  try {
+    const first = render(<ArtifactViewerPanel />)
+    selectHero()
+    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Typed before the crash" } })
+    await waitFor(() => expect(disk.get(JSON.stringify(["user-me", "artifact-viewer-comment", "ws1", "p1"]))).toBe("Typed before the crash"))
+    expect(localStorage.setItem).not.toHaveBeenCalled()
+    first.unmount()
+    render(<ArtifactViewerPanel />)
+    selectHero()
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Typed before the crash"))
+    cleanup()
+    state.userId = "someone-else"
+    render(<ArtifactViewerPanel />)
+    selectHero()
+    await act(async () => {})
+    expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("")
+    // Sign-out deletes the draft for the next person on this browser.
+    await purgeOtherArtifactDrafts(null)
+    expect(disk.size).toBe(0)
+  } finally { setArtifactDraftStore(undefined) }
 })

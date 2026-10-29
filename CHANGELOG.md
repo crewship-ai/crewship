@@ -31,6 +31,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Project source edits survive a lost save reply and a closed tab.** If the save reply is lost, the editor confirms the exact next version instead of reporting a false conflict, and an unsaved source draft is kept in the browser and offered back until it is saved or discarded.
 
+- **Artifact drafts survive a killed browser and are deleted on sign-out.** The unsaved Project source and unsent artifact comments are now kept in IndexedDB with strict durability instead of localStorage, so a draft typed moments before the whole browser was killed is still offered back; older localStorage drafts are moved over once. Signing out deletes every artifact draft in the browser and a different user signing in deletes everyone else's, so the next person on a shared browser cannot read them (#4499).
+
 - **Test Design canvases can be identified in the library.** Human canvas creation now retains the explicit test-item marker for catalog filtering.
 
 - Add human Comment grants for shared artifact feedback without edit or agent execution rights, explicit QA item markers and catalog filters, and confirmed archive and folder-move previews with live access checks. Access reports include effective capabilities and their sources; existing content, history and grants remain intact.

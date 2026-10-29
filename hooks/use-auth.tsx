@@ -16,6 +16,7 @@ import { purgeOtherE2Recovery } from "@/lib/chat-e2-recovery"
 import { isKnownAppPath } from "@/lib/app-routes"
 import { SIGNED_OUT_URL, rememberSignedOut, signedOutKind } from "@/lib/signed-out"
 import { purgeOtherDocumentDrafts } from "@/lib/document-queue"
+import { purgeOtherArtifactDrafts } from "@/lib/artifact-drafts"
 
 const sessionSchema = z.object({
   user: z.object({
@@ -171,6 +172,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     unreachableTimer.current = undefined
     purgeOtherE2Recovery(next?.user.id ?? null)
     await purgeOtherDocumentDrafts(next?.user.id ?? null)
+    await purgeOtherArtifactDrafts(next?.user.id ?? null)
     if (gen !== refreshGen.current) return
     setUnreachable(null)
     setSession(next)
@@ -389,6 +391,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     purgeOtherE2Recovery(null)
     // Awaited: callers navigate to /login right after, which could cut a fire-and-forget delete short.
     await purgeOtherDocumentDrafts(null)
+    await purgeOtherArtifactDrafts(null)
     setSession(null)
     setStatus("unauthenticated")
     // Tell other tabs in this browser to drop their session UI too.

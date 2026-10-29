@@ -1,0 +1,185 @@
+import { afterEach, beforeEach, expect, it, vi } from "vitest"
+
+type Drafts = typeof import("./artifact-drafts")
+type Row = [string, string, string, string]
+
+/** Durable map that only changes when a write is explicitly flushed, like a disk. */
+function durableStore() {
+  const disk = new Map<string, string>()
+  const pending: (() => void)[] = []
+  const store = {
+    disk,
+    auto: true,
+    puts: [] as string[],
+    flush() { for (const done of pending.splice(0)) done() },
+    get: vi.fn(async (row: Row) => disk.get(JSON.stringify(row))),
+    put: vi.fn((row: Row, text: string) => {
+      store.puts.push(text)
+      return new Promise<void>(resolve => {
+        const done = () => { disk.set(JSON.stringify(row), text); resolve() }
+        if (store.auto) done(); else pending.push(done)
+      })
+    }),
+    delete: vi.fn(async (row: Row) => { disk.delete(JSON.stringify(row)) }),
+    purge: vi.fn(async (keep: string | null) => { for (const key of [...disk.keys()]) if (keep === null || JSON.parse(key)[0] !== keep) disk.delete(key) }),
+  }
+  return store
+}
+
+const local = new Map<string, string>()
+async function load(): Promise<Drafts> { vi.resetModules(); return import("./artifact-drafts") }
+beforeEach(() => {
+  local.clear()
+  vi.mocked(localStorage.getItem).mockImplementation(key => local.get(key) ?? null)
+  vi.mocked(localStorage.setItem).mockImplementation((key, value) => { local.set(key, value) })
+  vi.mocked(localStorage.removeItem).mockImplementation(key => { local.delete(key) })
+})
+afterEach(() => { vi.unstubAllGlobals(); vi.mocked(localStorage.getItem).mockReset().mockReturnValue(null) })
+
+it("resolves a write only once the durable store has it, so a crash after the await keeps the draft", async () => {
+  const store = durableStore(); store.auto = false
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("artifact-source", "alice", "w", "demo")!
+  let done = false
+  const written = drafts.writeArtifactDraft(key, "typed").then(() => { done = true })
+  await vi.waitFor(() => expect(store.put).toHaveBeenCalled())
+  expect(done).toBe(false)
+  expect(store.disk.size).toBe(0)
+  store.flush(); await written
+  // Crash: a fresh module instance has only what reached the durable store.
+  const reloaded = await load(); reloaded.setArtifactDraftStore(store)
+  await expect(reloaded.readArtifactDraft(key)).resolves.toBe("typed")
+  expect(local.size).toBe(0)
+})
+
+it("coalesces typing behind the running write and keeps the latest text", async () => {
+  const store = durableStore(); store.auto = false
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("artifact-comment", "alice", "w", "demo")!
+  const first = drafts.writeArtifactDraft(key, "a")
+  await vi.waitFor(() => expect(store.put).toHaveBeenCalledTimes(1))
+  const later = [drafts.writeArtifactDraft(key, "ab"), drafts.writeArtifactDraft(key, "abc")]
+  store.flush(); await first
+  await vi.waitFor(() => expect(store.put).toHaveBeenCalledTimes(2))
+  store.flush(); await Promise.all(later)
+  expect(store.puts).toEqual(["a", "abc"])
+  await expect(drafts.readArtifactDraft(key)).resolves.toBe("abc")
+  await drafts.writeArtifactDraft(key, "")
+  expect(store.disk.size).toBe(0)
+})
+
+it("moves a draft written by an older build out of localStorage once", async () => {
+  const store = durableStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  local.set("artifact-source:alice:w:demo", "{\"legacy\":true}")
+  const key = drafts.artifactDraftKey("artifact-source", "alice", "w", "demo")!
+  await expect(drafts.readArtifactDraft(key)).resolves.toBe("{\"legacy\":true}")
+  await vi.waitFor(() => expect(local.has("artifact-source:alice:w:demo")).toBe(false))
+  expect(store.disk.get(JSON.stringify(["alice", "artifact-source", "w", "demo"]))).toBe("{\"legacy\":true}")
+  await expect(drafts.readArtifactDraft(key)).resolves.toBe("{\"legacy\":true}")
+})
+
+it("never offers one person's draft to another", async () => {
+  const store = durableStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  await drafts.writeArtifactDraft(drafts.artifactDraftKey("artifact-viewer-comment", "alice", "w", "p1")!, "Alice private")
+  local.set("artifact-viewer-comment:alice:w:p1", "Alice legacy")
+  await expect(drafts.readArtifactDraft(drafts.artifactDraftKey("artifact-viewer-comment", "bob", "w", "p1")!)).resolves.toBe("")
+  expect(drafts.artifactDraftKey("artifact-source", undefined, "w", "demo")).toBeNull()
+})
+
+it("deletes every draft on sign-out and other people's drafts on an identity change, including localStorage", async () => {
+  const store = durableStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const alice = drafts.artifactDraftKey("artifact-source", "alice", "w", "demo")!
+  const bob = drafts.artifactDraftKey("artifact-comment", "bob", "w", "demo")!
+  await drafts.writeArtifactDraft(alice, "Alice source")
+  await drafts.writeArtifactDraft(bob, "Bob comment")
+  local.set("artifact-comment:bob:w:x", "Bob legacy"); local.set("artifact-source:alice:w:x", "Alice legacy"); local.set("unrelated", "kept")
+  const localKeys = vi.spyOn(Object, "keys").mockImplementation(((target: object) => target === localStorage ? [...local.keys()] : Reflect.ownKeys(target).filter((k): k is string => typeof k === "string")) as typeof Object.keys)
+  try {
+    await drafts.purgeOtherArtifactDrafts("alice")
+    await expect(drafts.readArtifactDraft(bob)).resolves.toBe("")
+    await expect(drafts.readArtifactDraft(alice)).resolves.toBe("Alice source")
+    expect([...local.keys()].sort()).toEqual(["artifact-source:alice:w:x", "unrelated"])
+    await drafts.purgeOtherArtifactDrafts(null)
+    await expect(drafts.readArtifactDraft(alice)).resolves.toBe("")
+    expect([...local.keys()]).toEqual(["unrelated"])
+  } finally { localKeys.mockRestore() }
+})
+
+it("waits for a pending write before purging so it cannot recreate the draft", async () => {
+  const store = durableStore(); store.auto = false
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("artifact-source", "alice", "w", "demo")!
+  const written = drafts.writeArtifactDraft(key, "late")
+  const purged = drafts.purgeOtherArtifactDrafts(null)
+  await vi.waitFor(() => expect(store.put).toHaveBeenCalled())
+  expect(store.purge).not.toHaveBeenCalled()
+  store.flush(); await written; await purged
+  expect(store.disk.size).toBe(0)
+})
+
+it("falls back to localStorage when IndexedDB is unavailable, and reports a refused write", async () => {
+  const drafts = await load()
+  const key = drafts.artifactDraftKey("artifact-comment", "alice", "w", "demo")!
+  await drafts.writeArtifactDraft(key, "fallback")
+  expect(local.get("artifact-comment:alice:w:demo")).toBe("fallback")
+  await expect(drafts.readArtifactDraft(key)).resolves.toBe("fallback")
+  vi.mocked(localStorage.setItem).mockImplementation(() => { throw new Error("QuotaExceededError") })
+  await expect(drafts.writeArtifactDraft(key, "too much")).rejects.toThrow()
+})
+
+/** Minimal IndexedDB: transactions complete only when flushed, and record their options. */
+function fakeIndexedDB() {
+  const rows = new Map<string, { key: Row; text: string }>()
+  const transactions: { mode: string; options: unknown; complete: () => void }[] = []
+  const request = <T>(result?: T) => ({ result } as { result: T | undefined; onsuccess?: () => void })
+  const db = {
+    createObjectStore: vi.fn(),
+    close: vi.fn(),
+    transaction(_name: string, mode: string, options?: unknown) {
+      const staged: (() => void)[] = []
+      const tx = {
+        oncomplete: null as null | (() => void), onabort: null as null | (() => void), onerror: null as null | (() => void),
+        abort: vi.fn(),
+        objectStore: () => ({
+          get: (key: Row) => request(rows.get(JSON.stringify(key))),
+          put: (row: { key: Row; text: string }) => { staged.push(() => rows.set(JSON.stringify(row.key), row)); return request() },
+          delete: (key: Row) => { staged.push(() => rows.delete(JSON.stringify(key))); return request() },
+          clear: () => { staged.push(() => rows.clear()); return request() },
+          openCursor: () => request(),
+        }),
+      }
+      const entry = { mode, options, complete: () => { for (const apply of staged) apply(); tx.oncomplete?.() } }
+      transactions.push(entry)
+      if (mode === "readonly") queueMicrotask(entry.complete)
+      return tx
+    },
+  }
+  const factory = {
+    open: vi.fn(() => {
+      const opening = { result: db, onupgradeneeded: null as null | (() => void), onsuccess: null as null | (() => void), onerror: null, onblocked: null }
+      queueMicrotask(() => { opening.onupgradeneeded?.(); opening.onsuccess?.() })
+      return opening
+    }),
+  }
+  return { factory, rows, transactions }
+}
+
+it("uses strict-durability IndexedDB transactions and resolves only on their completion", async () => {
+  const idb = fakeIndexedDB()
+  vi.stubGlobal("indexedDB", idb.factory)
+  const drafts = await load()
+  const key = drafts.artifactDraftKey("artifact-source", "alice", "w", "demo")!
+  let done = false
+  const written = drafts.writeArtifactDraft(key, "strict").then(() => { done = true })
+  await vi.waitFor(() => expect(idb.transactions.some(t => t.mode === "readwrite")).toBe(true))
+  const write = idb.transactions.find(t => t.mode === "readwrite")!
+  expect(write.options).toEqual({ durability: "strict" })
+  await Promise.resolve()
+  expect(done).toBe(false)
+  write.complete(); await written
+  expect(idb.rows.get(JSON.stringify(["alice", "artifact-source", "w", "demo"]))?.text).toBe("strict")
+  expect(idb.factory.open).toHaveBeenCalledWith("crewship-artifact-drafts", 1)
+})
