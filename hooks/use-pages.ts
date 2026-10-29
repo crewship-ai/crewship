@@ -1049,13 +1049,28 @@ export function groupPagesByFolder(
 
 // ── Query keys ─────────────────────────────────────────────────────────────
 
+/**
+ * The server's catalog filters (#4444): archived and test-made Pages are left
+ * out of the list unless asked for. Omitted means the server default, exclude.
+ */
+export interface PageCatalogFilter {
+  archived?: "include" | "only"
+  testItems?: "include" | "only"
+}
+function catalogParams(catalog?: PageCatalogFilter): [string, string][] {
+  return [
+    ...(catalog?.archived ? [["archived", catalog.archived] as [string, string]] : []),
+    ...(catalog?.testItems ? [["test_items", catalog.testItems] as [string, string]] : []),
+  ]
+}
+
 /** `[resource, workspaceId, params?]` — CONTRIBUTING.md. */
 export const pagesKeys = {
   /** Everything for one workspace; the invalidation scope. */
   all: (workspaceId: string) => ["pages", workspaceId] as const,
   // Omitting the human retains the existing invalidation prefix; reads always
   // append their authenticated human so private metadata cannot cross sessions.
-  list: (workspaceId: string, humanId?: string, audience?: "personal") => ["pages", workspaceId, { view: "list" }, ...(humanId === undefined ? [] : [humanId]), ...(audience ? [{ audience }] : [])] as const,
+  list: (workspaceId: string, humanId?: string, audience?: "personal", catalog?: PageCatalogFilter) => ["pages", workspaceId, { view: "list" }, ...(humanId === undefined ? [] : [humanId]), ...(audience ? [{ audience }] : []), ...(catalogParams(catalog).length ? [Object.fromEntries(catalogParams(catalog))] : [])] as const,
   detail: (workspaceId: string, slug: string, humanId?: string) => ["pages", workspaceId, { slug }, ...(humanId === undefined ? [] : [humanId])] as const,
 }
 
@@ -1141,16 +1156,17 @@ export interface UsePagesResult {
  * query string, the same way the CLI appends it and the same way `/api/v1/inbox`
  * is called from this app.
  */
-export function usePages(workspaceId: string | null | undefined, audience?: "personal"): UsePagesResult {
+export function usePages(workspaceId: string | null | undefined, audience?: "personal", catalog?: PageCatalogFilter): UsePagesResult {
   const qc = useQueryClient()
   const { humanId, current } = usePagesHumanIdentity()
-  const queryKey = pagesKeys.list(workspaceId ?? "", humanId ?? "", audience)
+  const queryKey = pagesKeys.list(workspaceId ?? "", humanId ?? "", audience, catalog)
   const query = useQuery({
     queryKey,
     queryFn: async ({ signal }) => {
       if (!humanId || current.current !== humanId) throw new PagesRequestError(401, "Current human required.")
       const params = new URLSearchParams({ workspace_id: workspaceId! })
       if (audience) params.set("audience", audience)
+      for (const [key, value] of catalogParams(catalog)) params.set(key, value)
       const body = await fetchJSON(`/api/v1/pages?${params.toString()}`, signal, "pages", () => qc.setQueryData(queryKey, []))
       return normalizePageList(body)
     },
