@@ -40,6 +40,17 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1")
 }
 
+/** True when a URL on the line points at the hosted DiceBear HTTP API. */
+function namesDiceBearApi(line: string): boolean {
+  return (line.match(/https?:\/\/[^\s"'`)]+/g) ?? []).some((url) => {
+    try {
+      return new URL(url).hostname === "api.dicebear.com"
+    } catch {
+      return false
+    }
+  })
+}
+
 /** Lines that build an agent avatar URL rather than rendering <AgentAvatar>. */
 function avatarUrlBuilds(source: string): string[] {
   const hits: string[] = []
@@ -48,8 +59,7 @@ function avatarUrlBuilds(source: string): string[] {
     /\bcreateAvatar\s*\(/, // DiceBear core, called directly
   ]
   for (const line of stripComments(source).split("\n")) {
-    // The hosted DiceBear HTTP API, matched as plain text rather than as a URL check.
-    if (patterns.some((p) => p.test(line)) || line.includes("api.dicebear.com")) hits.push(line.trim())
+    if (patterns.some((p) => p.test(line)) || namesDiceBearApi(line)) hits.push(line.trim())
   }
   return hits
 }
