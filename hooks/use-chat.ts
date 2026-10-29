@@ -249,6 +249,8 @@ interface UseChatOptions {
   onReplyCompleted?: (reply: { sessionId: string; repliedAt: string }) => void
   /** The server echoed our persisted user message; a rejected send has no echo. */
   onOwnMessageSaved?: (content: string, metadata?: Record<string, unknown>) => void
+  /** The server refused this chat's in-flight send (busy agent or denied send). */
+  onSendRefused?: (reason: string) => void
 }
 
 /** Map a structured history part to a renderable TurnPart, coercing unknown
@@ -376,11 +378,13 @@ export function messagesToTurns(messages: ChatMessage[]): ChatTurn[] {
  * Handles streaming text/thinking/tool events, turn grouping, history loading,
  * message editing, regeneration, and stop/cancel.
  */
-export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToken, sessionId, currentUserId, onStreamReset, onReplyCompleted, onOwnMessageSaved, executionProfile, getExecutionProfile, workspaceId }: UseChatOptions) {
+export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToken, sessionId, currentUserId, onStreamReset, onReplyCompleted, onOwnMessageSaved, onSendRefused, executionProfile, getExecutionProfile, workspaceId }: UseChatOptions) {
   const completedReplyRef = useRef(onReplyCompleted)
   completedReplyRef.current = onReplyCompleted
   const ownMessageSavedRef = useRef(onOwnMessageSaved)
   ownMessageSavedRef.current = onOwnMessageSaved
+  const sendRefusedRef = useRef(onSendRefused)
+  sendRefusedRef.current = onSendRefused
   const replySoundSinceRef = useRef(Date.now())
   const replyHasTextRef = useRef(false)
   const restrictedAbortRef = useRef<AbortController | null>(null)
@@ -1261,7 +1265,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         // Cross-user run exclusivity (backend: chatbridge.HandleChatMessage):
         // another sender's message is already being processed for this chat.
         // Reuses the error rendering shape — additive case only, no new UI.
-        case "agent_busy": handleErrorEvent(content); break
+        case "agent_busy": handleErrorEvent(content); sendRefusedRef.current?.("busy"); break
       }
       if (activeRunIdRef.current) {
         const runId = activeRunIdRef.current
@@ -1508,6 +1512,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         }
         flushPendingText()
         handleErrorEvent(reason)
+        sendRefusedRef.current?.(/already being processed/i.test(reason) ? "busy" : "refused")
         return
       }
 

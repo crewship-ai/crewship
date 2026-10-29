@@ -21,6 +21,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Full document history now says what happens and what you can do.** Word and Sheet editors stop saving, state that every version is kept and the unsaved work stays in the browser, and offer the draft as a download. Projects keep their preview and source draft at full quota. Neither promises more storage.
 
+- **"Send to agent" on Design and Project comments reports delivery correctly.** A delivered comment no longer turns into "Retry when the source chat is connected" after 15 seconds, and a busy agent is reported at once instead of after a timeout.
+
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.
 
 - **Shared artifact commenters can post feedback in the preview.** Comments stay anchored to the shared version without granting editing or agent execution rights; changing accounts, workspace or permissions retires an unfinished selection.
