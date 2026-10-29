@@ -135,7 +135,7 @@ it("searches with operators, filters by kind with counts and switches to a table
 })
 
 const peek = () => screen.getByRole("complementary", { name: "Preview" })
-const peekOpen = () => fireEvent.click(within(peek()).getByRole("button", { name: "Open", exact: true }))
+const peekOpen = () => fireEvent.click(within(peek()).getByRole("button", { name: /^Open$/ }))
 
 it("a click on desktop peeks at the item on the right and the list stays with its filter", () => {
   render(withQuery(<ArtifactsLibrary workspaceId="ws1" item={null} onSelect={state.select} filters={{ view: "all", q: "", kinds: ["word", "sheet"], access: [], version: [], owners: [], folder: null }} />))
