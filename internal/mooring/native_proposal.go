@@ -1,6 +1,7 @@
 package mooring
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -184,7 +185,7 @@ func nativeProposalRevision(id string) string { return "native-proposal:" + id }
 // AcceptProposal saves an open proposal as the human lease holder's own fenced
 // write. Page rights, the immutable profile, the lease generation, the recorded
 // base version and the decision are all checked and committed in one
-// transaction. If the document moved on, the proposal becomes stale and the
+// transaction. If the document content moved on, the proposal becomes stale and the
 // document is untouched.
 func (s *NativeStore) AcceptProposal(ctx context.Context, l EditLease, id string) (NativeProposal, NativeSaveReceipt, error) {
 	if err := s.ready(); err != nil {
@@ -220,12 +221,16 @@ func (s *NativeStore) AcceptProposal(ctx context.Context, l EditLease, id string
 	if "sha256:"+hex.EncodeToString(sum[:]) != p.ContentHash {
 		return NativeProposal{}, NativeSaveReceipt{}, ErrNativeValidation
 	}
-	revision := nativeProposalRevision(id)
-	message, err := s.snapshotMessage(l, p.BaseVersion, revision, p.ContentHash)
+	base, err := s.proposalBase(ctx, l, p.BaseVersion, write)
 	if err != nil {
 		return NativeProposal{}, NativeSaveReceipt{}, err
 	}
-	request := nativeManifest(p.BaseVersion, b)
+	revision := nativeProposalRevision(id)
+	message, err := s.snapshotMessage(l, base, revision, p.ContentHash)
+	if err != nil {
+		return NativeProposal{}, NativeSaveReceipt{}, err
+	}
+	request := nativeManifest(base, b)
 	request.Message = message
 	decided := false
 	receipt, err := s.versions.Apply(ctx, nativeVersionKey(l.Scope), request, func(ctx context.Context, tx *sql.Tx) (string, error) {
@@ -234,7 +239,7 @@ func (s *NativeStore) AcceptProposal(ctx context.Context, l EditLease, id string
 			return actor, err
 		}
 		decided = true
-		res, err := tx.ExecContext(ctx, `UPDATE craft_native_proposals SET state='accepted',decided_by=?,decided_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),result_version=? WHERE id=? AND page_id=? AND state='open'`, actor, p.BaseVersion+1, id, l.Scope.ArtifactID)
+		res, err := tx.ExecContext(ctx, `UPDATE craft_native_proposals SET state='accepted',decided_by=?,decided_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),result_version=? WHERE id=? AND page_id=? AND state='open'`, actor, base+1, id, l.Scope.ArtifactID)
 		if err != nil {
 			return "", err
 		}
@@ -245,7 +250,7 @@ func (s *NativeStore) AcceptProposal(ctx context.Context, l EditLease, id string
 	})
 	if errors.Is(err, artifacts.ErrVersionConflict) {
 		// The human (or anyone) saved after the agent's base. Record that the
-		// proposal no longer applies; never rebase it silently.
+		// proposal no longer applies; never rebase it over changed content.
 		if staleErr := s.decideProposal(ctx, l.Scope, &l, id, "stale"); staleErr != nil && !errors.Is(staleErr, ErrNativeProposalDecided) {
 			return NativeProposal{}, NativeSaveReceipt{}, staleErr
 		}
@@ -256,7 +261,34 @@ func (s *NativeStore) AcceptProposal(ctx context.Context, l EditLease, id string
 		return NativeProposal{}, NativeSaveReceipt{}, err
 	}
 	p.State, p.ResultVersion = "accepted", receipt.Version
-	return p, s.snapshotReceipt(l, p.BaseVersion, revision, p.ContentHash, receipt.Version), nil
+	return p, s.snapshotReceipt(l, base, revision, p.ContentHash, receipt.Version), nil
+}
+
+// proposalBase returns the version an accepted proposal applies on. The editor
+// saves its holder's state before accepting; when every later save only
+// repeated the base bytes, the document did not change and the proposal still
+// applies on the current head. Any content change keeps the recorded base, so
+// the commit conflicts and the proposal goes stale.
+func (s *NativeStore) proposalBase(ctx context.Context, l EditLease, base int64, write artifacts.VersionAuthorize) (int64, error) {
+	key := nativeVersionKey(l.Scope)
+	head, err := s.versions.Read(ctx, key, write)
+	if err != nil || head.LatestVersion <= base {
+		return base, err
+	}
+	old, err := s.versions.ReadVersion(ctx, key, base, write)
+	if err != nil {
+		return base, err
+	}
+	if old.EntryPoint != head.Manifest.EntryPoint || len(old.Files) != len(head.Manifest.Files) {
+		return base, nil
+	}
+	for name, f := range old.Files {
+		g, ok := head.Manifest.Files[name]
+		if !ok || f.MediaType != g.MediaType || !bytes.Equal(f.Content, g.Content) {
+			return base, nil
+		}
+	}
+	return head.LatestVersion, nil
 }
 
 // RejectProposal closes an open proposal under current write authority. It
