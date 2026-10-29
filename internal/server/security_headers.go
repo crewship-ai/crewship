@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/editororigin"
+	"github.com/crewship-ai/crewship/internal/pagebuild"
 	"github.com/crewship-ai/crewship/internal/pages"
 )
 
@@ -34,6 +35,10 @@ func securityHeadersMiddleware(next http.Handler, pageRuntimeOrigin ...string) h
 // securityHeaderOptions are the operator-configured origins Studio may frame.
 type securityHeaderOptions struct {
 	pageRuntimeOrigin string
+	// pageRuntimeLoopbackOnly: pageRuntimeOrigin was derived for a localhost
+	// Studio (#3108), so only documents served on a loopback host may frame
+	// it; a Studio reached on any other host gets no loopback frame-src.
+	pageRuntimeLoopbackOnly bool
 	// editorFrameSrc returns the embedded workbook editor's frame-src source
 	// for a request; nil while the editor is off. It is a dedicated editor
 	// origin, or the bundle path on the request's Studio origin (zero-config
@@ -66,7 +71,11 @@ func securityHeadersMiddlewareWith(next http.Handler, o securityHeaderOptions) h
 		if o.editorFrameSrc != nil {
 			editorFrameSrc = o.editorFrameSrc(r)
 		}
-		frameSrc := appendFrameSrc(appendFrameSrc(pages.FrameSrcDirective(), o.pageRuntimeOrigin), editorFrameSrc)
+		runtimeFrameSrc := o.pageRuntimeOrigin
+		if o.pageRuntimeLoopbackOnly && !pagebuild.LoopbackHost(r.Host) {
+			runtimeFrameSrc = ""
+		}
+		frameSrc := appendFrameSrc(appendFrameSrc(pages.FrameSrcDirective(), runtimeFrameSrc), editorFrameSrc)
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -174,7 +183,7 @@ func securityHeadersMiddlewareWith(next http.Handler, o securityHeaderOptions) h
 					"frame-ancestors 'none'; "+
 					"base-uri 'self'; "+
 					"form-action 'self'")
-			if o.editorPerRequest && isUIDocumentPath(path) {
+			if (o.editorPerRequest || (o.pageRuntimeLoopbackOnly && o.pageRuntimeOrigin != "")) && isUIDocumentPath(path) {
 				// The same-host editor's frame-src names this request's own
 				// origin. Caches key on host and scheme, but one that maps
 				// several hosts to one entry would replay another host's

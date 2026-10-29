@@ -60,7 +60,10 @@ A sibling subdomain or another port does not meet the production separation rule
 A local installation with Studio on `http://localhost:<port>` gets the runtime
 origin `http://127.0.0.1:<server port>` derived when none is configured
 (`internal/config/page_projects.go`); a literal loopback IP is a different site
-from `localhost`, so this is not the same-origin development exception.
+from `localhost`, so this is not the same-origin development exception. It is
+used only for requests that reached the server on a loopback host
+(`pagebuild.LoopbackHost`); any other host gets `page_runtime_origin_missing`
+and no loopback `frame-src`.
 See [installation and operations](../guides/pages-apps-operations.mdx).
 
 ## Source, build and publication lifecycle

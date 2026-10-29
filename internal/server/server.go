@@ -754,7 +754,7 @@ func (s *Server) mountAPIRouter(
 	if pageRuntimeOrigin != "" && cfg.Storage.PageRuntimeOrigin == "" {
 		logger.Info("pages: runtime origin derived for a localhost Studio; set CREWSHIP_PAGE_RUNTIME_ORIGIN to override", "origin", pageRuntimeOrigin)
 	}
-	opts = append(opts, goapi.WithStoragePath(cfg.Storage.BasePath), goapi.WithPageProjectsPath(cfg.Storage.PageProjectsPath), goapi.WithPageBuildImage(cfg.Storage.PageBuildImage), goapi.WithPageRuntime(pageRuntimeOrigin, cfg.PageStudioOrigin(), cfg.Storage.PageRuntimeDevelopmentSameOrigin))
+	opts = append(opts, goapi.WithStoragePath(cfg.Storage.BasePath), goapi.WithPageProjectsPath(cfg.Storage.PageProjectsPath), goapi.WithPageBuildImage(cfg.Storage.PageBuildImage), goapi.WithPageRuntime(pageRuntimeOrigin, cfg.PageStudioOrigin(), cfg.Storage.PageRuntimeDevelopmentSameOrigin), goapi.WithDerivedPageRuntime(pageRuntimeOrigin != "" && cfg.Storage.PageRuntimeOrigin == ""))
 	if s.editor != nil {
 		editor := s.editor
 		opts = append(opts, goapi.WithWorkbookEditor(editor.LearnOrigin, func() any { return editor.Detail() }))

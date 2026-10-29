@@ -212,6 +212,7 @@ type Router struct {
 	pageBuildImage                   string
 	pageBuildImageLookup             func(context.Context) ([]string, error)
 	pageRuntimeOrigin                string
+	pageRuntimeDerived               bool
 	pageRuntimeDevelopmentSameOrigin bool
 	// workbookEditorDetail answers GET /api/v1/admin/instance/workbook-editor;
 	// nil while the embedded workbook editor is off.

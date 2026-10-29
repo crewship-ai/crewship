@@ -88,7 +88,7 @@ func loopbackBind(host string) bool {
 // editor is enabled: the dedicated origin, or the bundle path on the
 // request's Studio origin, never the bare Studio origin.
 func editorHeaderOptions(cfg *config.Config, editor *editororigin.Handler) securityHeaderOptions {
-	o := securityHeaderOptions{pageRuntimeOrigin: cfg.PageRuntimeOrigin()}
+	o := securityHeaderOptions{pageRuntimeOrigin: cfg.PageRuntimeOrigin(), pageRuntimeLoopbackOnly: cfg.Storage.PageRuntimeOrigin == ""}
 	if ((cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled) || cfg.Mooring.Enabled || nativeCraftEditorEnabled(cfg)) && editor != nil {
 		o.editorFrameSrc = editor.FrameSourceFor
 		o.editorPerRequest = cfg.GridCraft.EditorOrigin == ""

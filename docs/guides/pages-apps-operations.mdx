@@ -92,7 +92,10 @@ listens on loopback or all interfaces needs no origin setting: when
 `CREWSHIP_PAGE_RUNTIME_ORIGIN` is unset, the server derives
 `http://127.0.0.1:<server port>`. A literal loopback IP is a different browser site
 from `localhost`, so this is real site isolation, not the development same-origin
-exception.
+exception. The derived origin applies only to browsers that reach the server on
+a loopback host (`localhost`, `127.0.0.1`, `::1`): Studio reached on any other
+host does not frame it and publication answers as if no runtime origin were
+configured, and the same-host workbook editor is never served on it.
 
 Every other installation (remote viewers, HTTPS, a custom domain) sets the runtime
 origin; without it publication answers `503` with

@@ -196,13 +196,25 @@ const (
 	pageRuntimeOriginMissingText = "Page runtime origin is not configured. Set CREWSHIP_PAGE_RUNTIME_ORIGIN to a separate site."
 )
 
+// runtimeOriginFor is the runtime origin that serves the browser behind r. A
+// derived origin (http://127.0.0.1:<port> for a localhost Studio) applies only
+// to requests that reached the server on a loopback host: for any other
+// browser it would name the visitor's own machine, so it is treated as
+// unconfigured there.
+func (h *PageHandler) runtimeOriginFor(r *http.Request) string {
+	if h.pageRuntimeDerived && !pagebuild.LoopbackHost(r.Host) {
+		return ""
+	}
+	return h.pageRuntimeOrigin
+}
+
 // replyIfPublicationUnconfigured answers 503 when artifacts or the runtime
 // origin are missing and reports whether the caller may proceed.
-func (h *PageHandler) replyIfPublicationUnconfigured(w http.ResponseWriter) bool {
+func (h *PageHandler) replyIfPublicationUnconfigured(w http.ResponseWriter, r *http.Request) bool {
 	switch {
 	case h.pageArtifacts == nil:
 		replyErrorCode(w, 503, pageArtifactsMissingMessage, pagebuild.CodeNotEnabled, "")
-	case h.pageRuntimeOrigin == "":
+	case h.runtimeOriginFor(r) == "":
 		replyErrorCode(w, 503, pageRuntimeOriginMissingText, pagebuild.CodeRuntimeOriginMissing, "")
 	default:
 		return true
@@ -211,7 +223,7 @@ func (h *PageHandler) replyIfPublicationUnconfigured(w http.ResponseWriter) bool
 }
 
 func (h *PageHandler) checkPageCandidate(w http.ResponseWriter, r *http.Request, rec *pageRecord, build string, revision int64) (*checkedPageBuild, bool) {
-	if !h.replyIfPublicationUnconfigured(w) {
+	if !h.replyIfPublicationUnconfigured(w, r) {
 		return nil, false
 	}
 	var row pagePublication
@@ -814,7 +826,7 @@ func (h *PageHandler) PageApplication(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"publication": nil, "publication_version": publication.Version, "can_publish": h.mayAdministerGrants(r.Context(), ws, user.ID, RoleFromContext(r.Context()), rec)})
 		return
 	}
-	if !h.replyIfPublicationUnconfigured(w) {
+	if !h.replyIfPublicationUnconfigured(w, r) {
 		return
 	}
 	scheme := "http://"

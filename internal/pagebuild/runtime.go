@@ -73,6 +73,24 @@ func ValidateRuntimeOriginForDevelopment(runtime, studio string, sameOriginDemo 
 	}
 	return nil
 }
+
+// LoopbackHost reports whether a request Host (with or without a port) names
+// this machine's loopback interface: localhost or a loopback IP. A derived
+// runtime origin (http://127.0.0.1:<port>, #3108) is meaningful only to a
+// browser that reached Studio this way; anywhere else it names the visitor's
+// own machine.
+func LoopbackHost(host string) bool {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.Trim(host, "[]"))
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func RuntimeMatchesHost(runtime, host string) bool {
 	u, err := url.Parse(runtime)
 	return err == nil && strings.EqualFold(u.Host, host)

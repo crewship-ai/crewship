@@ -261,6 +261,9 @@ func TestPagePublicationRefusalCodes(t *testing.T) {
 	}{
 		{name: "no artifact store", strip: func(h *PageHandler) { h.pageArtifacts = nil }, code: pagebuild.CodeNotEnabled, remedy: pagebuild.EnableCommand},
 		{name: "no runtime origin", strip: func(h *PageHandler) { h.pageRuntimeOrigin = "" }, code: pagebuild.CodeRuntimeOriginMissing, remedy: "CREWSHIP_PAGE_RUNTIME_ORIGIN"},
+		// A runtime origin derived for a localhost Studio names the visitor's
+		// own machine for any browser that reached a non-loopback host.
+		{name: "derived runtime origin on a remote host", strip: func(h *PageHandler) { h.pageRuntimeDerived = true }, code: pagebuild.CodeRuntimeOriginMissing, remedy: "CREWSHIP_PAGE_RUNTIME_ORIGIN"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, _, ws, user := reviewFixture(t)
@@ -296,5 +299,31 @@ func TestPagePublicationRefusalCodes(t *testing.T) {
 				t.Fatalf("review blocker does not name %s: %+v", tc.remedy, snapshot.Blockers)
 			}
 		})
+	}
+}
+
+// TestRuntimeOriginForDerived — a derived runtime origin (#3108) serves only
+// browsers that reached the server on a loopback host; a configured one serves
+// every host.
+func TestRuntimeOriginForDerived(t *testing.T) {
+	const origin = "http://127.0.0.1:8080"
+	for _, tc := range []struct {
+		host    string
+		derived bool
+		want    string
+	}{
+		{host: "localhost:8080", derived: true, want: origin},
+		{host: "localhost:3011", derived: true, want: origin},
+		{host: "[::1]:8080", derived: true, want: origin},
+		{host: "crewship.example.com", derived: true, want: ""},
+		{host: "192.168.1.10:8080", derived: true, want: ""},
+		{host: "crewship.example.com", derived: false, want: origin},
+	} {
+		h := &PageHandler{pageRuntimeOrigin: origin, pageRuntimeDerived: tc.derived}
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Host = tc.host
+		if got := h.runtimeOriginFor(r); got != tc.want {
+			t.Errorf("host %s derived %v: %q, want %q", tc.host, tc.derived, got, tc.want)
+		}
 	}
 }

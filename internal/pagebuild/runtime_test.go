@@ -120,3 +120,15 @@ func TestRuntimeSerializesDefaultPortsLikeBrowser(t *testing.T) {
 		}
 	}
 }
+
+func TestLoopbackHost(t *testing.T) {
+	for host, want := range map[string]bool{
+		"localhost": true, "LOCALHOST:8080": true, "127.0.0.1:8080": true, "127.1.2.3": true,
+		"[::1]:8080": true, "::1": true, "crewship.example.com": false, "localhost.example.com:8080": false,
+		"192.168.1.10:8080": false, "0.0.0.0:8080": false, "": false,
+	} {
+		if got := LoopbackHost(host); got != want {
+			t.Errorf("LoopbackHost(%q) = %v, want %v", host, got, want)
+		}
+	}
+}

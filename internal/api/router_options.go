@@ -480,6 +480,14 @@ func WithPageRuntime(runtime, studio string, developmentSameOrigin ...bool) Rout
 	}
 }
 
+// WithDerivedPageRuntime marks the runtime origin given to WithPageRuntime as
+// derived for a localhost Studio rather than configured (#3108). Handlers then
+// use it only for requests that reached the server on a loopback host; a
+// remote browser gets page_runtime_origin_missing, as without derivation.
+func WithDerivedPageRuntime(derived bool) RouterOption {
+	return func(r *Router) { r.pageRuntimeDerived = derived }
+}
+
 // WithWorkbookEditor wires the embedded workbook editor's server-side state:
 // observe sees every request a sign-in session authenticated, with the
 // user's ID and a lookup of whether the user administers the instance (the

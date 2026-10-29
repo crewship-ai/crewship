@@ -97,6 +97,7 @@ func (r *Router) registerPageRoutes() {
 			r.logger.Error("Page runtime configuration", "error", err)
 		} else {
 			p.pageRuntimeOrigin = r.pageRuntimeOrigin
+			p.pageRuntimeDerived = r.pageRuntimeDerived
 			p.pageStudioOrigin = r.pageStudioOrigin
 			p.pageRuntimeDevelopmentSameOrigin = r.pageRuntimeDevelopmentSameOrigin
 			if r.pageRuntimeDevelopmentSameOrigin {

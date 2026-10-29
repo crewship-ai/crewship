@@ -912,7 +912,7 @@ func (h *PageHandler) ReviewProject(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case h.pageArtifacts == nil:
 		blocked(reviewBlockerStorageUnavailable, pageArtifactsMissingMessage)
-	case h.pageRuntimeOrigin == "":
+	case h.runtimeOriginFor(r) == "":
 		blocked(reviewBlockerStorageUnavailable, pageRuntimeOriginMissingText)
 	}
 	if !snapshot.Capabilities.MayPublish {

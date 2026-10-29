@@ -53,14 +53,27 @@ func TestPageRuntimeOriginReachesTheHandler(t *testing.T) {
 					t.Fatalf("bootstrap on %s = %d, served want %v", host, w.Code, want)
 				}
 			}
+			// Studio as the local browser reaches it.
+			studio := httptest.NewRequest("GET", "/", nil)
+			studio.Host = "localhost:8080"
 			w := httptest.NewRecorder()
-			h.ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+			h.ServeHTTP(w, studio)
 			csp := w.Header().Get("Content-Security-Policy")
 			if tc.runtime != "" && !strings.Contains(csp, "http://"+tc.runtime) {
 				t.Fatalf("CSP does not allow framing the runtime %s: %s", tc.runtime, csp)
 			}
 			if tc.runtime == "" && strings.Contains(csp, "127.0.0.1") {
 				t.Fatalf("CSP frames a runtime nobody configured: %s", csp)
+			}
+			// A derived origin is framed only by a Studio reached on a
+			// loopback host; a configured one by every Studio host.
+			r := httptest.NewRequest("GET", "/", nil)
+			r.Host = "crewship.example.com"
+			w = httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			remote := w.Header().Get("Content-Security-Policy")
+			if derived := tc.configured == "" && tc.runtime != ""; derived == strings.Contains(remote, "http://"+tc.runtime) && tc.runtime != "" {
+				t.Fatalf("CSP for a remote Studio host (derived %v): %s", derived, remote)
 			}
 		})
 	}
@@ -78,9 +91,6 @@ func TestSameHostEditorRefusesTheDerivedRuntimeOrigin(t *testing.T) {
 	dir := t.TempDir()
 	digest := writeEditorBundle(t, dir)
 	cfg.GridCraft = config.GridCraftConfig{Enabled: true, EditorEnabled: true, EditorBundleDir: dir, EditorBundles: []string{digest}}
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("config with derived runtime and same-host editor invalid: %v", err)
-	}
 	editor := newEditorOrigin(cfg, slog.Default())
 	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) })
 	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, editor)))

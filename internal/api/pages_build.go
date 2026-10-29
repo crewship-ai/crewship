@@ -246,7 +246,7 @@ func (h *PageHandler) GetProjectPreview(w http.ResponseWriter, r *http.Request) 
 	var job pageBuildRecord
 	err = h.db.QueryRowContext(r.Context(), `SELECT id,source_revision,source_digest,state,COALESCE(artifact_digest,''),error,created_at,COALESCE(completed_at,'') FROM page_project_builds WHERE page_id=? ORDER BY created_at DESC,id DESC LIMIT 1`, rec.ID).Scan(&job.ID, &job.SourceRevision, &job.SourceDigest, &job.State, &job.ArtifactDigest, &job.Error, &job.CreatedAt, &job.CompletedAt)
 	runtimeURL := ""
-	if h.pageRuntimeOrigin != "" {
+	if h.runtimeOriginFor(r) != "" {
 		// Also check the actual API host: a reverse-proxy alias must not silently
 		// put the runtime back on the Studio site validated in configuration.
 		scheme := "http://"
