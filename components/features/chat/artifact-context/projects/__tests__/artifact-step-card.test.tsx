@@ -109,3 +109,9 @@ it("failed shows the error without a retry", () => {
   expect(screen.getByText("Couldn’t save version · quota exceeded")).toBeTruthy()
   expect(screen.queryByRole("button")).toBeNull()
 })
+
+it.each([false,undefined])("does not offer Restore to an editor without explicit owner capability %s",cap=>{
+ h.snap=query({data:snapshot({can_restore:cap})})
+ renderStep({tool:"publish",state:"done",slug:"onboarding",version:2})
+ expect(screen.queryByRole("button",{name:"Restore v1"})).toBeNull()
+})

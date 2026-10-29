@@ -135,3 +135,9 @@ describe("parseArtifactProject", () => {
  const parsed=parseArtifactComment({id:"c1",version:1,path:"index.html",text:"Waiting",delivery_retryable:value})!
  expect(parsed.delivery_retryable).toBe(typeof value==="boolean"?value:undefined)
  })
+
+it("preserves explicit owner capability booleans and drops truthy or missing grants",()=>{
+ expect(parseArtifactProject({...snapshot,can_share:true,can_restore:false,can_send_to_agent:true,can_comment:true})).toMatchObject({can_share:true,can_restore:false,can_send_to_agent:true,can_comment:true})
+ const parsed=parseArtifactProject({...snapshot,can_share:"true",can_restore:1,can_send_to_agent:null})
+ expect(parsed?.can_share).not.toBe(true);expect(parsed?.can_restore).not.toBe(true);expect(parsed?.can_send_to_agent).not.toBe(true)
+})

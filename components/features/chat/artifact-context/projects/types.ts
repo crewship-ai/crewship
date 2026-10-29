@@ -65,6 +65,10 @@ export interface ArtifactProjectSnapshot {
   origin?: { chat_id: string; agent_id: string } | null
   enabled?: boolean
   can_write: boolean
+  can_share?: boolean
+  can_restore?: boolean
+  can_send_to_agent?: boolean
+  can_comment?: boolean
   latest_version: number
   /** 0 when no version is shared. */
   shared_version: number

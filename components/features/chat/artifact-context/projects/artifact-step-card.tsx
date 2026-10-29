@@ -51,7 +51,7 @@ function DoneActions({ workspaceId, slug, version, source }: { workspaceId: stri
   const message = data?.versions.find(v => v.version === version)?.message
     ?? (data?.manifest.version === version ? data.manifest.message : undefined)
   const conflict = restore.error?.status === 409 || restore.error?.code === "artifact_version_conflict"
-  const canRestore = version > 1 && !!data?.can_write && data.latest_version === version
+  const canRestore = version > 1 && !snapshot.error && data?.can_write === true && data.can_restore === true && data.latest_version === version
   return <>
     {message && <span className="min-w-0 truncate text-muted-foreground">{message}</span>}
     <span className="flex-1" />

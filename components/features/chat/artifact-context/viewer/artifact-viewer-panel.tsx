@@ -1,4 +1,5 @@
 "use client"
+import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { AlertTriangle, ChevronLeft, Clock, Eye, Gauge, Info, Link2, MessageSquare, MousePointerClick, OctagonAlert, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -133,7 +134,7 @@ function ViewerBody({ workspaceId, target, onClose, className, variant }: BodyPr
   }
   const props = { data, target, setViewing, refetch: () => void snapshot.refetch(), workspaceId, shell, fullscreen, writeEnabled: !snapshot.error && data.can_write === true, readForRetry: async () => { const fresh = await snapshot.refetch(); return fresh && !fresh.error ? fresh.data : undefined } }
   return variant === "library"
-    ? <LibraryLoadedViewer {...props} dispatchEnabled={props.writeEnabled} />
+    ? <LibraryLoadedViewer {...props} dispatchEnabled={props.writeEnabled && data.can_send_to_agent === true} />
     : <LoadedViewer {...props} />
 }
 
@@ -161,7 +162,10 @@ function LibraryLoadedViewer(props: LoadedProps & { dispatchEnabled: boolean }) 
 function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspaceId, shell, fullscreen, writeEnabled, library = false, sendToOrigin }: LoadedProps) {
   const me = useSessionSafe()?.data?.user?.id
   const canWrite = writeEnabled && data.can_write === true
-  const scope = JSON.stringify([me, workspaceId, data.page_id, data.origin?.chat_id ?? null, data.origin?.agent_id ?? null])
+  const mayShare=canWrite && data.can_share === true
+  const mayRestore=canWrite && data.can_restore === true
+  const maySend=canWrite && data.can_send_to_agent === true
+  const scope = JSON.stringify([me, workspaceId, data.page_id, data.origin?.chat_id ?? null, data.origin?.agent_id ?? null,mayShare,mayRestore,maySend])
   const permission = useRef({ scope, allowed: canWrite, epoch: 0 })
   if (permission.current.scope !== scope || permission.current.allowed !== canWrite) permission.current = { scope, allowed: canWrite, epoch: permission.current.epoch + 1 }
   const epoch = permission.current.epoch
@@ -171,7 +175,7 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
   // while stale callbacks from an old Page or write epoch cannot mutate or dispatch.
   const writeAllowed = () => mounted.current && permission.current.allowed && permission.current.epoch === epoch
   const chatDispatch = useArtifactViewer()?.sendToAgent
-  const sendToAgent = library ? sendToOrigin : chatDispatch
+  const sendToAgent = maySend ? (library ? sendToOrigin : chatDispatch) : undefined
   const { restore, share, comment } = useArtifactProjectMutations(workspaceId, target.slug)
   // A comment saved for the agent whose chat message did not go out; Retry sends it again.
   const [undispatched, setUndispatched] = useState<ArtifactComment | null>(null)
@@ -195,8 +199,10 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
   const [highlight, setHighlight] = useState<{ selector: string; seq: number } | null>(null)
   const [confirmShare, setConfirmShare] = useState(false)
   useEffect(() => {
-    if (!canWrite) { setSelectMode(false); setAnchor(null); setUndispatched(null); setConfirmShare(false) }
-  }, [canWrite])
+    if (!canWrite) { setSelectMode(false); setAnchor(null) }
+    if(!maySend)setUndispatched(null)
+    if(!mayShare)setConfirmShare(false)
+  }, [canWrite,maySend,mayShare])
   const historyRef = useRef<HTMLDivElement>(null)
   const queueRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
@@ -249,7 +255,7 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
   // B's API dispatches to the agent only at creation (send_to_agent) and has no later "send queued" route,
   // so the choice is made per comment here instead of a batch "Send n to agent".
   const submit = (send: boolean) => {
-    if (!writeAllowed() || viewingOld || !anchor || !draft.trim()) return
+    if (!writeAllowed() || send && !maySend || viewingOld || !anchor || !draft.trim()) return
     comment.mutate({ version: anchor.version, path: anchor.path, selector: anchor.selector, quote: anchor.quote, text: draft.trim(), send_to_agent: send }, {
       onSuccess: saved => {
         if (!writeAllowed()) return
@@ -270,7 +276,7 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
   // the old failure before it paints, so Retry cannot launch an answered task.
   if (undispatched && deliveryConfirmed(undispatched)) setUndispatched(null)
   const dispatch = async (saved: ArtifactComment) => {
-    if (!writeAllowed() || deliveryConfirmed(saved)) return
+    if (!writeAllowed() || !maySend || deliveryConfirmed(saved)) return
     setUndispatched(null)
     const started = sendToAgent ? await sendToAgent({ pageId: data.page_id, comment: saved }).catch(() => false) : false
     if (!writeAllowed()) return
@@ -278,7 +284,7 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
     else setUndispatched(saved)
   }
   const recoverable = (snapshot: ArtifactProjectSnapshot, saved: ArtifactComment) =>
-    snapshot.can_write === true && snapshot.origin?.chat_id && snapshot.origin.agent_id &&
+    snapshot.can_write === true && snapshot.can_send_to_agent === true && snapshot.origin?.chat_id && snapshot.origin.agent_id &&
     snapshot.manifest.version === snapshot.latest_version && saved.version === snapshot.latest_version &&
     saved.delivery_retryable === true && saved.status === "pending" && Boolean(saved.task_id) &&
     saved.author === me && !saved.answered_version && !saved.replies?.length
@@ -289,7 +295,7 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
     data.comments.find(saved => saved.id === undispatched.id)?.delivery_retryable !== false ? undispatched : undefined
   const retryComment = localRetry ?? queuedRetry
   const retry = async (saved: ArtifactComment) => {
-    if (!writeAllowed() || retryInFlight.current || deliveryConfirmed(saved)) return
+    if (!writeAllowed() || !maySend || retryInFlight.current || deliveryConfirmed(saved)) return
     retryInFlight.current = true; setCheckingRetry(true)
     try {
       // A cached Waiting task may have been ACKed or claimed while this viewer
@@ -316,14 +322,14 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
     canvasRef.current?.scrollIntoView?.({ block: "nearest" })
   }
   const doRestore = (version: number) => {
-    if (!writeAllowed()) return
+    if (!writeAllowed() || !mayRestore) return
     restore.mutate({ base_version: latest, version }, {
       onSuccess: result => { if (!writeAllowed()) return; setNotice({ text: `Restored v${version} as v${result.version} · nothing deleted` }); setViewing(undefined) },
       onError: fail,
     })
   }
   const doShare = (version: number) => {
-    if (!writeAllowed()) return
+    if (!writeAllowed() || !mayShare) return
     share.mutate({ base_version: latest, version }, {
       onSuccess: result => { if (!writeAllowed()) return; setConfirmShare(false); setNotice({ text: `Shared v${result.shared_version}` }) },
       onError: error => { if (!writeAllowed()) return; setConfirmShare(false); fail(error) },
@@ -345,7 +351,7 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
     ...(viewingOld && shown !== sharedVersion ? [{ value: `v${shown}`, label: `v${shown}` }] : []),
   ]
   const shareTarget = shown
-  const canShare = canWrite && shareTarget !== sharedVersion
+  const canShare = mayShare && shareTarget !== sharedVersion
 
   const toolbar = <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b px-3 py-2">
     <Segmented ariaLabel="Version" size="xs" value={versionValue} options={versionOptions}
@@ -354,6 +360,7 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
       <Clock className="size-3.5" aria-hidden />History
     </Button>}
     <div className="flex-1" />
+    {canWrite && <Link className="inline-flex items-center px-2 text-sm underline coarse:min-h-[44px]" href={`/pages/${encodeURIComponent(target.slug)}?${new URLSearchParams({artifact:"1",workspace_id:workspaceId})}`}>Edit source</Link>}
     {canShare && <Popover open={confirmShare} onOpenChange={setConfirmShare}>
       <PopoverTrigger asChild><Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5"><Link2 className="size-3.5" aria-hidden />Share</Button></PopoverTrigger>
       <PopoverContent align="end" className="w-72 space-y-3 text-sm">
@@ -402,10 +409,10 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
     </ViewerBanner>}
     {banner === "anchor" && <ViewerBanner tone="info">This element changed. Select it again.</ViewerBanner>}
     {banner === "failed" && <ViewerBanner tone="bad">That did not go through. Nothing was changed; try again.</ViewerBanner>}
-    {canWrite && retryComment && <ViewerBanner tone="warn" title="The agent did not start" action={<Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" disabled={checkingRetry} onClick={() => void retry(retryComment)}>Retry</Button>}>
+    {maySend && retryComment && <ViewerBanner tone="warn" title="The agent did not start" action={<Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" disabled={checkingRetry} onClick={() => void retry(retryComment)}>Retry</Button>}>
       The comment is saved. Sending it to the agent in this chat did not go through.</ViewerBanner>}
     {viewingOld && shown === sharedVersion && <ViewerBanner tone="info" icon={Eye}
-      action={canWrite && <Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" disabled={share.isPending} onClick={() => doShare(latest)}>Share v{latest}</Button>}>
+      action={mayShare && <Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" disabled={share.isPending} onClick={() => doShare(latest)}>Share v{latest}</Button>}>
       You see the shared version v{shown}, the one people with the link get. Latest is v{latest}.
     </ViewerBanner>}
     {viewingOld && shown !== sharedVersion && <ViewerBanner tone="info" icon={Eye} action={<Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" onClick={() => setViewing(undefined)}>Back to latest</Button>}>
@@ -423,12 +430,12 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
       {v.version === latest && <StatusPill tone="muted" label="Latest" />}
       {v.version === sharedVersion && <StatusPill tone="success" label="Shared" />}
       {v.version !== shown && <Button type="button" size="sm" variant="ghost" className="h-7" onClick={() => setViewing(v.version === latest ? undefined : v.version)}>View</Button>}
-      {canWrite && v.version !== latest && <Button type="button" size="sm" variant="ghost" className="h-7" disabled={restore.isPending} onClick={() => doRestore(v.version)}>Restore as new version</Button>}
+      {mayRestore && v.version !== latest && <Button type="button" size="sm" variant="ghost" className="h-7" disabled={restore.isPending} onClick={() => doRestore(v.version)}>Restore as new version</Button>}
     </li>)}</ul>
   </div>
 
   const pinNumber = data.comments.length + 1
-  const pinCard = canWrite && (anchor || draft) && !viewingOld && <form aria-label="New comment" onSubmit={event => { event.preventDefault(); submit(true) }}
+  const pinCard = canWrite && (anchor || draft) && !viewingOld && <form aria-label="New comment" onSubmit={event => { event.preventDefault(); submit(maySend) }}
     className="z-[2] mt-2.5 flex flex-wrap items-start gap-2 rounded-card border bg-card px-2.5 py-2 shadow-md @md:absolute @md:right-[18px] @md:top-[18px] @md:mt-0 @md:max-w-[min(320px,calc(100%-36px))]">
     <span aria-hidden className={cn(PIN, "size-6 bg-primary text-xs text-primary-foreground")}>{pinNumber}</span>
     <div className="grid min-w-0 flex-[1_1_160px] gap-1.5">
@@ -438,7 +445,7 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
     <div className="flex w-full flex-wrap justify-end gap-1.5">
       <Button type="button" size="sm" variant="ghost" onClick={resetComposer}>Cancel</Button>
       <Button type="button" size="sm" variant="secondary" disabled={!anchor || !draft.trim() || comment.isPending} onClick={() => submit(false)}>Save comment</Button>
-      <Button type="submit" size="sm" disabled={!anchor || !draft.trim() || comment.isPending}>Send to agent</Button>
+      {maySend && <Button type="submit" size="sm" disabled={!anchor || !draft.trim() || comment.isPending}>Send to agent</Button>}
     </div>
   </form>
 
@@ -508,7 +515,7 @@ function LoadedViewer({ data, target, setViewing, refetch, readForRetry, workspa
         {canvas}
         </div>
         <div hidden={library && activeTab !== "comments"} {...(library ? { role: "tabpanel", id: "artifact-detail-panel-comments", "aria-labelledby": "artifact-detail-tab-comments" } : {})}>{queue}</div>
-        {canWrite && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Info className="size-3.5 shrink-0" aria-hidden />A comment starts the agent only when you choose Send to agent.</p>}
+        {maySend && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Info className="size-3.5 shrink-0" aria-hidden />A comment starts the agent only when you choose Send to agent.</p>}
       </div>
     </div>
   </>)
