@@ -78,6 +78,9 @@ describe("AvatarPickerBody — quick picks keep their full size", () => {
     expect(picks).toHaveLength(8)
     for (const pick of picks) {
       expect(pick.className).toMatch(/\bh-8\b/)
+      // The outline replaces the browser's focus ring, so it must carry one.
+      expect(pick.className).toMatch(/\bfocus-visible:outline-2\b/)
+      expect(pick.className).toMatch(/\bfocus-visible:outline-ring\b/)
       expect(pick.className).not.toMatch(/(^|\s)(border|border-\d|p-\S+)(\s|$)/)
       expect(pick.querySelector("img")?.className).toMatch(/\bh-full\b.*\bw-full\b|\bw-full\b.*\bh-full\b/)
     }

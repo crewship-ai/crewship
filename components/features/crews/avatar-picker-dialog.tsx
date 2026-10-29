@@ -153,7 +153,7 @@ export function AvatarPickerBody({
                   onClick={() => setDraftSeed(qs)}
                   aria-label={`Use avatar seed ${qs}`}
                   className={cn(
-                    "h-8 w-8 shrink-0 overflow-hidden rounded-md outline outline-1 -outline-offset-1 transition-colors",
+                    "h-8 w-8 shrink-0 overflow-hidden rounded-md outline outline-1 -outline-offset-1 transition-colors focus-visible:outline-2 focus-visible:outline-ring",
                     draftSeed === qs ? "outline-primary" : "outline-foreground/10 hover:outline-foreground/25",
                   )}
                 >
