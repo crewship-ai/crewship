@@ -703,3 +703,17 @@ it("offers only editors an escaped unpinned source editor link",()=>{
  cleanup();state.snapshot.data=snap({can_write:false});render(<ArtifactViewerPanel variant="library" />)
  expect(screen.queryByRole("link",{name:"Edit source"})).toBeNull()
 })
+
+it("links the chat viewer to the artifact's own address in Artifacts only with the library on", () => {
+  render(<ArtifactViewerPanel />)
+  expect(screen.queryByRole("link", { name: /Open in Artifacts/ })).toBeNull()
+  cleanup()
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
+  try {
+    render(<ArtifactViewerPanel />)
+    expect(screen.getByRole("link", { name: /Open in Artifacts/ }).getAttribute("href")).toBe("/artifacts/p1?workspace_id=ws1")
+    cleanup()
+    render(<ArtifactViewerPanel variant="library" />)
+    expect(screen.queryByRole("link", { name: /Open in Artifacts/ })).toBeNull()
+  } finally { vi.unstubAllEnvs() }
+})

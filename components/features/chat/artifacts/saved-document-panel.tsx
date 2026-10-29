@@ -3,13 +3,14 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { ExternalLink, Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { chatCraftLease } from "@/lib/feature-flags"
+import { artifactsLibrary, chatCraftLease } from "@/lib/feature-flags"
 import { useDocumentViewerRead, type DocumentViewerReadInput } from "@/hooks/use-document-viewer-read"
 import { DocumentReadonly } from "@/components/features/pages/document-readonly/document-readonly"
 import { PageDocument } from "@/components/features/pages/page-document"
 import { DocumentViewer } from "../artifact-viewer/document-viewer"
 import { CraftLockBarView, craftEditorHref } from "../artifact-context/craft/craft-lock-bar"
 import { useCraftLeaseState } from "../artifact-context/craft/use-craft-lease"
+import { chatItemHref } from "../artifact-context/artifacts-href"
 import type { DocumentViewerProps } from "../artifact-viewer/types"
 
 export type SavedDocumentPanelProps = Omit<DocumentViewerReadInput, "hold"> & Pick<DocumentViewerProps,
@@ -56,9 +57,9 @@ export function SavedDocumentPanel({ headerExtra, onClose, ...props }: SavedDocu
             ? <CraftEditControl workspaceId={document.target.workspaceId} pageId={document.target.pageId}>{editHere}</CraftEditControl>
             : editHere}
         <Button asChild variant="outline" size="sm" className="coarse:min-h-[44px]">
-          <a href={`/pages?${new URLSearchParams({ ref: document.target.pageId, workspace_id: document.target.workspaceId })}`}
+          <a href={chatItemHref(document.target.workspaceId, document.target.pageId, `/pages?${new URLSearchParams({ ref: document.target.pageId, workspace_id: document.target.workspaceId })}`)}
             target="_blank" rel="noopener noreferrer">
-            Open full editor<ExternalLink className="size-4" aria-hidden />
+            {artifactsLibrary() ? "Open in Artifacts" : "Open full editor"}<ExternalLink className="size-4" aria-hidden />
           </a>
         </Button>
       </div>
