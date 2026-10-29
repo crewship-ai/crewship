@@ -66,3 +66,20 @@ describe("create-agent panel", () => {
     expect(initialAgentDraft(null).avatarStyle).toBe("voxel-bot")
   })
 })
+
+describe("AvatarPickerBody — quick picks keep their full size", () => {
+  // A 1 px border inside the 32 px button left the face 30 px wide, under
+  // AVATAR_ANIMATION_MIN_PX, so voxel quick picks stopped moving. The frame
+  // is an inset outline now; happy-dom does no layout, so this pins the
+  // classes that decide the face's box.
+  it("frames each quick pick without shrinking its face", () => {
+    renderBody("voxel-bot")
+    const picks = within(screen.getByTestId("avatar-quick-pick")).getAllByRole("button")
+    expect(picks).toHaveLength(8)
+    for (const pick of picks) {
+      expect(pick.className).toMatch(/\bh-8\b/)
+      expect(pick.className).not.toMatch(/(^|\s)(border|border-\d|p-\S+)(\s|$)/)
+      expect(pick.querySelector("img")?.className).toMatch(/\bh-full\b.*\bw-full\b|\bw-full\b.*\bh-full\b/)
+    }
+  })
+})

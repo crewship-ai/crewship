@@ -37,7 +37,7 @@ export function AvatarPicker({ seed, style, onSeedChange, onStyleChange, lockedS
             seed={seed}
             style={effectiveStyle}
             alt="Current avatar"
-            className="h-20 w-20 rounded-card border shrink-0"
+            className="h-20 w-20 rounded-2xl border shrink-0"
           />
           <div className="space-y-2 flex-1">
             <Label htmlFor="avatar-seed">Avatar Seed</Label>

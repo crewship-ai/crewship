@@ -33,7 +33,6 @@ interface TemplateBrowserProps {
  *  browser) so the prompt + edit affordance is more discoverable on
  *  narrow viewports. */
 export function TemplateBrowser({ selected, onSelect }: TemplateBrowserProps) {
-  // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
   const [source, setSource] = useState<PersonaSource>("builtin")
   const [search, setSearch] = useState("")
   const [category, setCategory] = useState<PersonaCategory | "all">("all")

@@ -67,13 +67,18 @@ function avatarUrlBuilds(source: string): string[] {
 describe("every agent avatar renders through AgentAvatar", () => {
   it("builds no avatar URL outside AgentAvatar", () => {
     const offenders: string[] = []
+    let scanned = 0
     for (const root of ROOTS) {
       for (const file of sourceFilesUnder(root)) {
+        scanned++
         if (ALLOWED.has(file)) continue
         for (const hit of avatarUrlBuilds(readFileSync(file, "utf8"))) offenders.push(`${file}: ${hit}`)
       }
     }
     expect(offenders, offenders.join("\n")).toEqual([])
+    // Run from anywhere but the repo root, the walk finds nothing and passes.
+    expect(ALLOWED.size > 0 && [...ALLOWED].every((f) => statSync(f).isFile())).toBe(true)
+    expect(scanned).toBeGreaterThan(100)
   })
 })
 

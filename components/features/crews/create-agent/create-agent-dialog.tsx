@@ -152,7 +152,6 @@ export function CreateAgentDialog({
   }
   const crews = useMemo(() => agent?.crew && agent.crew_id && !listedCrews.some((crew) => crew.id === agent.crew_id)
     ? [...listedCrews, { ...agent.crew, id: agent.crew_id }] : listedCrews, [agent, listedCrews])
-  // Upgrade lazy-loaded DiceBear styles from placeholder to real avatar.
   const router = useRouter()
   const [section, setSection] = useState("identity")
   // A server refusal that names a field (#2862) is shown under that field

@@ -101,7 +101,6 @@ export function AvatarPickerBody({
 
   const effectiveStyle = draftStyle ?? crewStyle ?? DEFAULT_AVATAR_STYLE
 
-
   return (
     <>
         {/* Four stacked full-width blocks — a 96px preview, a 25-tile grid of
@@ -143,7 +142,9 @@ export function AvatarPickerBody({
 
             {/* Fixed-size thumbnails rather than a grid of eight equal
                 columns: at panel width each column was ~90px, so the quick
-                picks rendered larger than the preview they feed. */}
+                picks rendered larger than the preview they feed. The edge is
+                an inset outline, not a border, so each face keeps the full
+                32 px and a voxel style still moves (#3789). */}
             <div className="flex flex-wrap gap-1.5" data-testid="avatar-quick-pick">
               {quickSeeds.map((qs) => (
                 <button
@@ -152,8 +153,8 @@ export function AvatarPickerBody({
                   onClick={() => setDraftSeed(qs)}
                   aria-label={`Use avatar seed ${qs}`}
                   className={cn(
-                    "h-8 w-8 shrink-0 overflow-hidden rounded-md border transition-colors",
-                    draftSeed === qs ? "border-primary" : "border-foreground/10 hover:border-foreground/25",
+                    "h-8 w-8 shrink-0 overflow-hidden rounded-md outline outline-1 -outline-offset-1 transition-colors",
+                    draftSeed === qs ? "outline-primary" : "outline-foreground/10 hover:outline-foreground/25",
                   )}
                 >
                   <AgentAvatar seed={qs} style={effectiveStyle} className="h-full w-full rounded-none" />
