@@ -266,7 +266,13 @@ func archOf(platform string) string {
 // itself: a Docker socket mount, privileged mode, host path binds. For an
 // instance bundle the per-workspace crew archives are read too.
 func ScanUnsafeSettings(ctx context.Context, bundlePath string, identities []age.Identity, passphrase string) ([]string, error) {
-	_, tr, closeAll, err := openInstancePayload(bundlePath, identities, passphrase)
+	ctx, release, limitErr := BeginRestoreRead(ctx)
+	if limitErr != nil {
+		return nil, limitErr
+	}
+	defer release()
+
+	_, tr, closeAll, err := openInstancePayload(bundlePath, identities, passphrase, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +304,7 @@ func scanDevcontainers(ctx context.Context, tr *TarZstReader, where string, foun
 		name := strings.TrimPrefix(hdr.Name, "./")
 		switch {
 		case strings.HasPrefix(name, "devcontainer/") && strings.HasSuffix(name, "/devcontainer.json"):
-			data, err := io.ReadAll(io.LimitReader(tr, maxBackupDevcontainerEntryBytes))
+			data, err := io.ReadAll(io.LimitReader(RestoreBufferedReader(ctx, tr), maxBackupDevcontainerEntryBytes))
 			if err != nil {
 				return err
 			}
@@ -312,7 +318,7 @@ func scanDevcontainers(ctx context.Context, tr *TarZstReader, where string, foun
 		case strings.HasPrefix(name, environmentsPrefix) && strings.HasSuffix(name, ".json") && !strings.Contains(strings.TrimPrefix(name, environmentsPrefix), "/"):
 			// A complete environment's recorded container settings: what
 			// was captured from `docker inspect` and is restored off.
-			data, err := io.ReadAll(io.LimitReader(tr, maxEnvironmentRecordBytes))
+			data, err := io.ReadAll(io.LimitReader(RestoreBufferedReader(ctx, tr), maxEnvironmentRecordBytes))
 			if err != nil {
 				return err
 			}
@@ -328,7 +334,7 @@ func scanDevcontainers(ctx context.Context, tr *TarZstReader, where string, foun
 				found[s] = true
 			}
 		case (strings.HasPrefix(name, instanceCrewsPrefix) || strings.HasPrefix(name, instanceEnvPrefix)) && strings.HasSuffix(name, instanceCrewsSuffix):
-			inner, err := NewTarZstReader(tr)
+			inner, err := NewTarZstReader(tr, ctx)
 			if err != nil {
 				return err
 			}

@@ -368,54 +368,11 @@ func TestBulkImport_GitRefValidationError(t *testing.T) {
 	}
 }
 
-func TestBulkImport_GitCloneFailure(t *testing.T) {
+func TestBulkImport_GitRejectsUnqualifiedExecutable(t *testing.T) {
 	imp := newCovImporter(t)
-	installFakeGit(t, "echo boom >&2\nexit 1")
-
-	_, err := imp.BulkImport(context.Background(), BulkImportRequest{GitURL: "https://github.com/o/r.git"})
-	if err == nil || !strings.Contains(err.Error(), "git clone failed") {
-		t.Fatalf("got %v, want 'git clone failed'", err)
-	}
-	// The error must reference the (redacted) URL, never raw output.
-	if !strings.Contains(err.Error(), "https://github.com/o/r.git") {
-		t.Errorf("error %q should name the redacted clone URL", err)
-	}
-	if strings.Contains(err.Error(), "boom") {
-		t.Errorf("error %q leaked git output", err)
-	}
-}
-
-func TestBulkImport_GitCloneSuccess(t *testing.T) {
-	imp := newCovImporter(t)
-	installFakeGit(t, `cat > "$dest/SKILL.md" <<'EOF'
----
-name: bulk-git-skill
-license: MIT
-description: Cloned by the fake git stub in tests.
----
-# Git Skill
-Instructions.
-EOF`)
-
-	res, err := imp.BulkImport(context.Background(), BulkImportRequest{
-		GitURL: "https://github.com/o/r.git",
-		GitRef: "main",
-	})
-	if err != nil {
-		t.Fatalf("BulkImport: %v", err)
-	}
-	if res.TotalImported != 1 || len(res.Skills) != 1 {
-		t.Fatalf("imported=%d, want 1 (skipped: %+v)", res.TotalImported, res.Skipped)
-	}
-	if res.Source != "https://github.com/o/r.git" {
-		t.Errorf("Source = %q, want redacted clone URL", res.Source)
-	}
-	// Git imports default the vendor to "community".
-	var vendor string
-	if err := imp.db.QueryRow("SELECT vendor FROM skills WHERE slug = ?", "bulk-git-skill").Scan(&vendor); err != nil {
-		t.Fatalf("query: %v", err)
-	}
-	if vendor != "community" {
-		t.Errorf("vendor = %q, want community", vendor)
+	installFakeGit(t, "echo not-a-qualified-git; exit 0")
+	_, err := imp.BulkImport(context.Background(), BulkImportRequest{GitURL: "https://8.8.8.8/o/r.git"})
+	if err == nil || !strings.Contains(err.Error(), "requires a recognized Git") {
+		t.Fatalf("unqualified executable accepted: %v", err)
 	}
 }

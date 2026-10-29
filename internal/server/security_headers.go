@@ -2,8 +2,10 @@ package server
 
 import (
 	"net/http"
+	"path"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/editororigin"
 	"github.com/crewship-ai/crewship/internal/pages"
 )
 
@@ -22,15 +24,49 @@ import (
 //     also matches this path and skips CSP so the API router doesn't re-stamp
 //     the lockdown after this middleware bowed out.
 func securityHeadersMiddleware(next http.Handler, pageRuntimeOrigin ...string) http.Handler {
+	var o securityHeaderOptions
+	if len(pageRuntimeOrigin) > 0 {
+		o.pageRuntimeOrigin = pageRuntimeOrigin[0]
+	}
+	return securityHeadersMiddlewareWith(next, o)
+}
+
+// securityHeaderOptions are the operator-configured origins Studio may frame.
+type securityHeaderOptions struct {
+	pageRuntimeOrigin string
+	// editorFrameSrc returns the embedded workbook editor's frame-src source
+	// for a request; nil while the editor is off. It is a dedicated editor
+	// origin, or the bundle path on the request's Studio origin (zero-config
+	// default, never the bare Studio origin, so a self-navigated editor frame
+	// cannot reach a Studio document). It is added to frame-src of every UI
+	// document: the policy belongs to the document, and the UI routes on the
+	// client, so a document first loaded on /chat may later show a workbook
+	// Page. The editor document is CSP-sandboxed and holds no credential;
+	// frame-src governs only what Studio frames, not who may frame Studio
+	// (frame-ancestors stays 'none').
+	editorFrameSrc func(*http.Request) string
+	// editorPerRequest: the source depends on the request's Host and
+	// scheme, so UI documents are kept out of shared caches.
+	editorPerRequest bool
+}
+
+func appendFrameSrc(frameSrc, origin string) string {
+	if origin == "" {
+		return frameSrc
+	}
+	if frameSrc == "frame-src 'none'" {
+		return "frame-src " + origin
+	}
+	return frameSrc + " " + origin
+}
+
+func securityHeadersMiddlewareWith(next http.Handler, o securityHeaderOptions) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		frameSrc := pages.FrameSrcDirective()
-		if len(pageRuntimeOrigin) > 0 && pageRuntimeOrigin[0] != "" {
-			if frameSrc == "frame-src 'none'" {
-				frameSrc = "frame-src " + pageRuntimeOrigin[0]
-			} else {
-				frameSrc += " " + pageRuntimeOrigin[0]
-			}
+		editorFrameSrc := ""
+		if o.editorFrameSrc != nil {
+			editorFrameSrc = o.editorFrameSrc(r)
 		}
+		frameSrc := appendFrameSrc(appendFrameSrc(pages.FrameSrcDirective(), o.pageRuntimeOrigin), editorFrameSrc)
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -69,7 +105,8 @@ func securityHeadersMiddleware(next http.Handler, pageRuntimeOrigin ...string) h
 			// omitted on purpose — opting into Chrome's preload list
 			// is a one-way door (removal takes months) and requires
 			// every current and future subdomain to be HTTPS-only.
-			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			// The same-host workbook editor sends this exact value too.
+			w.Header().Set("Strict-Transport-Security", editororigin.StudioHSTS)
 
 			// COEP `credentialless` strips cookies from cross-origin
 			// no-cors requests so the page can opt into cross-origin
@@ -137,6 +174,16 @@ func securityHeadersMiddleware(next http.Handler, pageRuntimeOrigin ...string) h
 					"frame-ancestors 'none'; "+
 					"base-uri 'self'; "+
 					"form-action 'self'")
+			if o.editorPerRequest && isUIDocumentPath(path) {
+				// The same-host editor's frame-src names this request's own
+				// origin. Caches key on host and scheme, but one that maps
+				// several hosts to one entry would replay another host's
+				// policy: documents stay out of shared caches. Hashed static
+				// assets carry no policy that matters and stay cacheable.
+				// The UI handler sets its own Cache-Control, so "private" is
+				// merged in when the response is written, not before.
+				w = &privateCacheWriter{ResponseWriter: w}
+			}
 		default:
 			w.Header().Set("Content-Security-Policy",
 				"default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
@@ -144,4 +191,72 @@ func securityHeadersMiddleware(next http.Handler, pageRuntimeOrigin ...string) h
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isUIDocumentPath reports whether a UI path can serve an HTML document: no
+// file extension (client routes) or .html.
+func isUIDocumentPath(p string) bool {
+	ext := path.Ext(p)
+	return ext == "" || ext == ".html"
+}
+
+// privateCacheWriter makes the response's Cache-Control private when its
+// header is written, whatever the wrapped handler set.
+type privateCacheWriter struct {
+	http.ResponseWriter
+	done bool
+}
+
+func (p *privateCacheWriter) mark() {
+	if p.done {
+		return
+	}
+	p.done = true
+	h := p.ResponseWriter.Header()
+	h.Set("Cache-Control", privateCacheControl(h.Get("Cache-Control")))
+}
+
+func (p *privateCacheWriter) WriteHeader(code int) {
+	p.mark()
+	p.ResponseWriter.WriteHeader(code)
+}
+
+func (p *privateCacheWriter) Write(b []byte) (int, error) {
+	p.mark()
+	return p.ResponseWriter.Write(b)
+}
+
+func (p *privateCacheWriter) Flush() {
+	p.mark()
+	if f, ok := p.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (p *privateCacheWriter) Unwrap() http.ResponseWriter { return p.ResponseWriter }
+
+// privateCacheControl keeps a Cache-Control value's directives but makes
+// it private: "public" is dropped and "private" added unless the response
+// is already private or no-store.
+func privateCacheControl(v string) string {
+	var out []string
+	private := false
+	for _, d := range strings.Split(v, ",") {
+		d = strings.TrimSpace(d)
+		name, _, _ := strings.Cut(strings.ToLower(d), "=")
+		switch name {
+		case "":
+			continue
+		case "public":
+			continue
+		case "private", "no-store":
+			private = true
+		}
+		out = append(out, d)
+	}
+	if !private {
+		out = append([]string{"private"}, out...)
+	}
+	return strings.Join(out, ", ")
 }

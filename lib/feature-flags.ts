@@ -9,6 +9,11 @@ export function crewsUnifiedUI(): boolean {
   return process.env.NEXT_PUBLIC_CREWS_UNIFIED_UI === "true"
 }
 
+/** Typed VersionStore Slides previews; requires the backend artifact_slides capability. */
+export function artifactSlides(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACT_SLIDES === "true"
+}
+
 /**
  * Gates the legacy self-hosted MCP-server Integrations UI.
  *
@@ -106,4 +111,62 @@ export function chatSidebarViews(): boolean {
  */
 export function slidesEditorMount(): boolean {
   return process.env.NEXT_PUBLIC_SLIDES_EDITOR === "true"
+}
+
+/**
+ * Gates artifact project cards and the side viewer in chat (multi-screen
+ * HTML projects with versions and anchored comments).
+ *
+ * Default OFF: the `/pages/{slug}/artifact` routes are still in review. Even
+ * with the flag on, nothing renders until the server reports the feature
+ * available for the workspace.
+ */
+export function chatArtifactProjects(): boolean {
+  return process.env.NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS === "true"
+}
+
+/**
+ * Gates the Craft edit-lease bar, agent proposals and local draft recovery
+ * in chat. Default OFF: the native lease routes (#4374) are opt-in per Page.
+ */
+export function chatCraftLease(): boolean {
+  return process.env.NEXT_PUBLIC_CHAT_CRAFT_LEASE === "true"
+}
+
+/**
+ * Gates the Artifacts library at /artifacts: a gallery of versioned projects,
+ * Word, Sheet, Slides and dashboards with their shared version and a project
+ * history detail. Default OFF; /artifacts sends saved links to /pages.
+ */
+export function artifactsLibrary(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACTS_LIBRARY === "true"
+}
+
+/**
+ * Sends the /pages overview to the Artifacts library. Only with the library
+ * itself on; reference links, restricted members and single pages stay on
+ * Pages. Default OFF.
+ */
+export function pagesOpenArtifacts(): boolean {
+  return artifactsLibrary() && process.env.NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS === "true"
+}
+
+/**
+ * Runs Share, Access, folder settings, archive and bulk actions in the
+ * Artifacts library against an in-browser mock of the agreed interface,
+ * until the server serves `/pages/{slug}/access`, `/pages/bulk`, the
+ * `comment` level and `default_audience`. Default OFF.
+ */
+export function artifactsSharingMock(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACTS_SHARING_MOCK === "true"
+}
+
+/** Inert live-data Dashboard previews. Opt-in at build time; no data requests while off. */
+export function artifactDashboards(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACT_DASHBOARDS === "true"
+}
+
+/** Collaborative Design canvas. Default off. */
+export function artifactsDesign(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN === "true"
 }

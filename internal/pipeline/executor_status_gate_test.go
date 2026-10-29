@@ -24,6 +24,7 @@ func TestExecutor_StatusGate_CallPipeline(t *testing.T) {
 		`{"dsl_version":"1.0","name":"disabled-child","steps":[{"id":"c1","type":"agent_run","agent_slug":"child-agent","prompt":"hi"}]}`,
 		"crew_a", "agent_lead")
 	disabled.Status = "disabled"
+	persistPipelineFixture(t, store, disabled)
 	exec.WithPipelineResolver(pipeResolverFn(func(_ context.Context, _, slug string) (*Pipeline, error) {
 		if slug == "disabled-child" {
 			return disabled, nil

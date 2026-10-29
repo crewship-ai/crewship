@@ -61,7 +61,7 @@ CREATE TABLE journal_entries (
     entry_hash TEXT NOT NULL DEFAULT '',
     -- v166: immutable priority the hash-chain commits to; the writer
     -- INSERTs it unconditionally, so a fixture missing it drops every row.
-    priority_at_emit TEXT
+    priority_at_emit TEXT,chain_key_id TEXT,chain_mac_version INTEGER
 );
 CREATE INDEX idx_journal_ws_ts ON journal_entries(workspace_id, ts DESC);
 CREATE UNIQUE INDEX idx_journal_ws_seq ON journal_entries(workspace_id, seq) WHERE seq > 0;
@@ -71,7 +71,7 @@ CREATE TABLE journal_chain_checkpoints (
     workspace_id TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     removed_json TEXT NOT NULL,
-    mac TEXT NOT NULL
+    mac TEXT NOT NULL,chain_key_id TEXT,chain_mac_version INTEGER
 );
 
 CREATE TABLE cost_ledger (

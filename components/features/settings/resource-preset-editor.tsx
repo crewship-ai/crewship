@@ -4,13 +4,18 @@ import { useState } from "react"
 import { toast } from "@/lib/toast"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { apiFetch } from "@/lib/api-fetch"
+import { readApiError } from "@/lib/api-error"
 import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { resourcePolicySchema, type ResourcePolicy } from "@/lib/resource-sharing"
 import { presetCatalogSchema, presetPreviewSchema, type PresetPreview } from "@/lib/resource-presets"
 import { Button } from "@/components/ui/button"
 import { nativeSelect } from "./shared"
 
-type Resource = {kind:"project"|"routine";id:string}
+const levelLabel = (level: string) => level === "edit_publish" ? "Edit + Publish" : level
+/** A 422 is a definite refusal before any write; its reason is shown as is. */
+class PresetRefused extends Error {}
+
+type Resource = {kind:"project"|"routine"|"crew";id:string}
 export function ResourcePresetEditor({workspaceId,policy,resource,disabled,onBusy,onSaved,onSaveStarted}:{
   workspaceId:string;policy:ResourcePolicy;resource:Resource;disabled:boolean;onBusy:(busy:boolean)=>void;onSaved:(policy:ResourcePolicy)=>void;onSaveStarted:()=>((policy:ResourcePolicy)=>boolean)
 }) {
@@ -33,7 +38,8 @@ export function ResourcePresetEditor({workspaceId,policy,resource,disabled,onBus
   })
   const choices=catalog.data?.presets.filter(entry=>entry.definition.kind===resource.kind).flatMap(entry=>entry.definition.levels.map(level=>({entry,level,key:JSON.stringify([entry.definition.preset_id,entry.definition.version,level.level])})))??[]
   const choice=choices.find(item=>item.key===selected)
-  const saved=policy.preset_selections?.find(item=>item.kind===resource.kind&&item.resource_id===resource.id)
+  // Each preset version keeps its own record for this resource.
+  const saved=policy.preset_selections?.filter(item=>item.kind===resource.kind&&item.resource_id===resource.id)??[]
   const retained=policy.grant_details?.filter(right=>right.kind===resource.kind&&right.id===resource.id&&choice?.level.operations.includes(right.operation))??[]
   const blocked=disabled||busy||stale||policy.mode!=="restricted"
   function clearPreview(){setPreview(null);setConfirmed(false);setError("")}
@@ -46,13 +52,14 @@ export function ResourcePresetEditor({workspaceId,policy,resource,disabled,onBus
     try{
       const response=await apiFetch(`${base}/members/${requireApiPathSegment(policy.membership_id)}/access/presets/preview${scope}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(selection)})
       if(response.status===409){setStale(true);setError("Access changed. Reload saved policy and preview again.");return}
+      if(response.status===422)throw new PresetRefused(await readApiError(response,"This preset cannot be applied to the saved policy."))
       if(!response.ok)throw new Error("Preview unavailable")
       const result=presetPreviewSchema.parse(await response.json())
       const actual=result.selection
       const keys=(rights:typeof actual.reissue)=>rights.map(right=>JSON.stringify([right.kind,right.id,right.operation])).sort().join("|")
       if(actual.membership_id!==policy.membership_id||actual.revision!==policy.revision||actual.resource.kind!==resource.kind||actual.resource.id!==resource.id||actual.preset_id!==selection.preset_id||actual.preset_version!==selection.preset_version||actual.level!==selection.level||result.definition_hash!==choice.entry.definition_hash||keys(actual.reissue)!==keys(selection.reissue))throw new Error("Mismatched preview")
       setPreview(result)
-    }catch{setError("Preview unavailable. Reload saved policy before trying again.")}
+    }catch(failure){setError(failure instanceof PresetRefused?failure.message:"Preview unavailable. Reload saved policy before trying again.")}
     finally{setBusy(false);onBusy(false)}
   }
   async function apply(){
@@ -62,10 +69,11 @@ export function ResourcePresetEditor({workspaceId,policy,resource,disabled,onBus
     try{
       const response=await apiFetch(`${base}/members/${requireApiPathSegment(policy.membership_id)}/access/presets/apply${scope}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({selection:preview.selection,confirmation_digest:preview.confirmation_digest})})
       if(response.status===409){setStale(true);setPreview(null);setConfirmed(false);setError("Access changed. Reload saved policy and preview again.");return}
+      if(response.status===422)throw new PresetRefused(await readApiError(response,"Preset was not applied."))
       if(!response.ok)throw new Error("Preset was not applied")
       const updated=resourcePolicySchema.parse(await response.json())
       if(updated.membership_id!==policy.membership_id||updated.mode!=="restricted"||updated.revision<=policy.revision)throw new Error("Membership changed")
-      const saved=updated.preset_selections?.find(item=>item.kind===resource.kind&&item.resource_id===resource.id)
+      const saved=updated.preset_selections?.find(item=>item.kind===resource.kind&&item.resource_id===resource.id&&item.preset_id===preview.selection.preset_id&&item.version===preview.selection.preset_version)
       if(!saved||saved.preset_id!==preview.selection.preset_id||saved.version!==preview.selection.preset_version||saved.level!==preview.selection.level||saved.definition_hash!==preview.definition_hash||saved.state!=="selected")throw new Error("Selection not confirmed")
       if(!confirm(updated))return
       client.setQueryData(["member-resource-access",workspaceId,policy.membership_id],updated)
@@ -73,13 +81,17 @@ export function ResourcePresetEditor({workspaceId,policy,resource,disabled,onBus
       void client.invalidateQueries({queryKey:["object-resource-sharing",workspaceId],refetchType:"none"})
       toast.success("Preset applied")
       onSaved(updated)
-    }catch{setStale(true);setPreview(null);setConfirmed(false);setError("Apply could not be confirmed. Reload saved policy before creating another preview.")}
+    }catch(failure){
+      // A refusal wrote nothing; only an unconfirmed outcome requires a reload.
+      if(failure instanceof PresetRefused){setPreview(null);setConfirmed(false);setError(failure.message);return}
+      setStale(true);setPreview(null);setConfirmed(false);setError("Apply could not be confirmed. Reload saved policy before creating another preview.")
+    }
     finally{setBusy(false);onBusy(false)}
   }
   return <section className="space-y-2 rounded-md border p-3" aria-label="Ordered resource preset">
-    <p>{saved?`Saved ${saved.level} v${saved.version} · ${saved.state} — intent, not effective authority`:"Custom — no preset was explicitly selected"}</p>
+    {saved.length?saved.map(item=><p key={item.id}>{`Saved ${levelLabel(item.level)} v${item.version} · ${item.state} — intent, not effective authority`}</p>):<p>Custom — no preset was explicitly selected</p>}
     <label>Ordered preset<select aria-label="Ordered preset" className={nativeSelect} value={selected} disabled={blocked||!catalog.data} onChange={event=>{setSelected(event.target.value);setReissue([]);clearPreview()}}>
-      <option value="">Choose an explicit preset</option>{choices.map(item=><option key={item.key} value={item.key}>{item.level.level} v{item.entry.definition.version} · {item.level.operations.join(" + ")}</option>)}
+      <option value="">Choose an explicit preset</option>{choices.map(item=><option key={item.key} value={item.key}>{levelLabel(item.level.level)} v{item.entry.definition.version} · {item.level.operations.length?item.level.operations.join(" + "):`removes ${item.entry.definition.managed_operations.join(" + ")}`}</option>)}
     </select></label>
     {catalog.isPending&&<p role="status">Loading preset definitions…</p>}
     {catalog.isError&&<div role="alert"><p>Preset catalog unavailable.</p><Button size="sm" variant="outline" className="coarse:h-[44px]" disabled={busy||disabled} onClick={()=>{clearPreview();setSelected("");setReissue([]);void catalog.refetch()}}>Retry catalog</Button></div>}

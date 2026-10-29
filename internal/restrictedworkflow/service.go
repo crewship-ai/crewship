@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/dispatch"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/restricteddispatch"
@@ -45,6 +46,11 @@ type Service struct {
 	runtime          *workflowRuntime
 	ledger           *work.Store
 	SourceChecker    func(context.Context, pipeline.PageActionQuery, string) error
+	// Audit is the configured chained journal writer. Bootstrap sets it
+	// before Start; nil uses the standalone default-key transaction append.
+	Audit journal.TransactionEmitter
+	// publishedRunLimit overrides DefaultPublishedRunLimit in tests.
+	publishedRunLimit time.Duration
 }
 type Receipt struct {
 	ID     string `json:"run_id"`
@@ -218,6 +224,10 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 		return Receipt{}, ErrDenied
 	}
 	var receipt Receipt
+	// Acceptance time is taken before any authority is read, so a
+	// revocation or withdrawal during admission is >= it and refuses the run.
+	acceptedTime := time.Now()
+	acceptedAt := tsformat.Format(acceptedTime)
 	store := access.Store{DB: s.db}
 	m, err := store.Membership(ctx, user, workspace)
 	if err != nil || m.Mode != "restricted" {
@@ -235,6 +245,10 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 	graph, err := s.compileGraph(ctx, user, workspace, pipelineID)
 	if err != nil {
 		return receipt, err
+	}
+	// Guest-published v1 routines run only through bounded manual admission.
+	if graph.Publication != nil && (page != nil || prepared != nil) {
+		return receipt, ErrDenied
 	}
 	if _, ok := s.executor.(proofExecutor); !ok {
 		return receipt, ErrUnsupported
@@ -265,6 +279,10 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 		if store.Check(ctx, user, workspace, right) != nil {
 			return receipt, ErrDenied
 		}
+	}
+	// Deferral is treated like scheduling, which v1 publications refuse.
+	if graph.Publication != nil && delay != 0 {
+		return receipt, ErrPublishedDeferral
 	}
 	pageID := sql.NullString{}
 	pageAction, pageHash, source := "", "", "manual"
@@ -344,7 +362,13 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 	if err != nil {
 		return receipt, ErrDenied
 	}
-	j := job{ID: id(), Workspace: workspace, Principal: user, Member: m.ID, Revision: m.Revision, Pipeline: pipelineID, RecipeHash: recipeHash, Recipe: recipe, Agent: agent, Profile: profile, Chat: chatID, Origin: origin.ID, Handle: ciphertext, Idempotency: idempotency, Source: source, Page: pageID, PageAction: pageAction, PageHash: pageHash, Inputs: string(rawInputs), Rights: string(rawRights), SourceFacet: facet, State: "pending", Created: tsformat.Format(time.Now()), FireAt: tsformat.Format(time.Now().Add(delay)), Expires: tsformat.Format(time.Now().Add(delay + time.Hour))}
+	lifetime := time.Hour
+	if graph.Publication != nil {
+		if lifetime, err = s.publishedRunLimitFor(ctx, workspace); err != nil {
+			return receipt, err
+		}
+	}
+	j := job{ID: id(), Workspace: workspace, Principal: user, Member: m.ID, Revision: m.Revision, Pipeline: pipelineID, RecipeHash: recipeHash, Recipe: recipe, Agent: agent, Profile: profile, Chat: chatID, Origin: origin.ID, Handle: ciphertext, Idempotency: idempotency, Source: source, Page: pageID, PageAction: pageAction, PageHash: pageHash, Inputs: string(rawInputs), Rights: string(rawRights), SourceFacet: facet, State: "pending", Created: acceptedAt, FireAt: tsformat.Format(acceptedTime.Add(delay)), Expires: tsformat.Format(acceptedTime.Add(delay + lifetime))}
 	j.Graph, j.GraphHash, j.Proofs = string(rawGraph), graphHash, "{}"
 	if prepared != nil {
 		prepared.job = j
@@ -362,10 +386,19 @@ func (s *Service) admit(ctx context.Context, user, workspace, slug string, suppl
 	if err != nil {
 		return Receipt{}, err
 	}
+	var audited func()
+	if graph.Publication != nil {
+		if audited, err = s.auditPublishedRun(ctx, tx, j, graph, "published_run_started", ""); err != nil {
+			return Receipt{}, err
+		}
+	}
 	if err = tx.Commit(); err != nil {
 		return receipt, err
 	}
 	accepted = true
+	if audited != nil {
+		audited()
+	}
 	s.notify()
 	return Receipt{j.ID, chatID, "SCHEDULED"}, nil
 }

@@ -93,7 +93,7 @@ func TestCov3WMAddMember_InsertBlocked500(t *testing.T) {
 // --- RemoveMember: delete blocked → 500 ---
 
 func TestCov3WMRemoveMember_DeleteBlocked500(t *testing.T) {
-	h, db, _, wsID := cov3WMRig(t)
+	h, db, userID, wsID := cov3WMRig(t)
 	if _, err := db.Exec(`INSERT INTO users (id, email, full_name, hashed_password)
 		VALUES ('u-rm3', 'u-rm3@example.com', 'Rm', 'x')`); err != nil {
 		t.Fatalf("seed user: %v", err)
@@ -107,6 +107,7 @@ func TestCov3WMRemoveMember_DeleteBlocked500(t *testing.T) {
 
 	req := cov3WMReq("DELETE", "/x", "", wsID, "OWNER")
 	req.SetPathValue("memberId", "wm-rm3")
+	req = req.WithContext(withUser(req.Context(), &AuthUser{ID: userID}))
 	rec := httptest.NewRecorder()
 	h.RemoveMember(rec, req)
 	if rec.Code != http.StatusInternalServerError {

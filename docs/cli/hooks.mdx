@@ -20,8 +20,8 @@ crewship hook  <subcommand> [flags]   # singular alias
 ```
 
 <Note>
-  Every write requires `OWNER` or `ADMIN`. Creating or editing a **shell**
-  hook requires `OWNER` -- a shell handler runs its command on the
+  Non-host writes require workspace `OWNER` or `ADMIN`. Creating, editing or enabling a **shell**
+  hook requires an instance administrator -- a shell handler runs its command on the
   crewshipd host, outside container isolation.
 </Note>
 
@@ -33,7 +33,7 @@ crewship hook  <subcommand> [flags]   # singular alias
 | `create` | Register a new hook (OWNER/ADMIN). |
 | `update <id>` | Patch an existing hook (OWNER/ADMIN). |
 | `delete <id>` | Remove a hook permanently (OWNER/ADMIN). |
-| `enable <id>` | Enable a registered hook (OWNER/ADMIN). |
+| `enable <id>` | Enable a host hook as instance administrator; other hooks as workspace OWNER/ADMIN. |
 | `disable <id>` | Disable a registered hook (OWNER/ADMIN). |
 
 `hooks list`, `create`, and `update` honour the global `--format` flag
@@ -79,7 +79,7 @@ New hooks are **enabled** unless you pass `--disabled`.
 | `--event` | `string` | Lifecycle event. Validated locally against the 14 declared events — an unknown value errors before any request is sent, and the message lists the valid names. |
 | `--handler` | `string` | `shell`, `http`, or `subagent`. |
 | `--url` | `string` | http handler: destination URL. |
-| `--command` | `string` | shell handler: command run on the host (`OWNER` only). |
+| `--command` | `string` | shell handler: command run on the host (instance administrators only). |
 | `--subagent` | `string` | subagent handler: agent slug or ID to dispatch. |
 | `--handler-config` | `string` | Raw `handler_config` JSON. Escape hatch for keys the flags above don't cover (`method`, `hmac_secret`, `timeout_secs`, ...). Wins over `--url`/`--command`/`--subagent`. |
 | `--crew` | `string` | Scope to one crew (slug or ID). Omit for workspace-wide. |
@@ -96,7 +96,7 @@ New hooks are **enabled** unless you pass `--disabled`.
 crewship hooks create --event on_approval_requested --handler http \
     --url https://hooks.slack.com/services/XXX
 
-# Blocking shell gate before every agent run, for one crew (OWNER only)
+# Blocking shell gate before every agent run, for one crew (instance administrators only)
 crewship hooks create --event pre_agent_start --handler shell \
     --command /usr/local/bin/gate.sh \
     --crew backend-team --blocking
@@ -129,7 +129,7 @@ crewship hooks update hk_abc123 --disabled
 
 Takes the same flags as `create`, all optional. **Only the flags you pass are sent** — an omitted flag keeps its current server-side value. If a blocking `pre_*` hook is changed to a `post_*` or `on_*` event, explicitly pass `--blocking=false`; the server refuses an observation event that retains the old blocking flag. Passing no flags at all is an error rather than an empty patch.
 
-Converting a hook to `--handler shell`, or editing one that is already shell, requires `OWNER`.
+Converting a hook to `--handler shell`, or editing one that is already shell, requires an instance administrator.
 
 ---
 
@@ -177,7 +177,7 @@ Same auth and audit semantics as enable.
 |---|---|
 | 400 | Unknown event or handler kind, a handler with no target, or `--blocking` on an observation event. Most of these are caught locally before a request is sent. |
 | 401 | Not authenticated. |
-| 403 | Logged in but not `OWNER` / `ADMIN`; or a non-`OWNER` touching a shell hook. |
+| 403 | Logged in but not `OWNER` / `ADMIN`; or a non-instance-administrator creating, editing or enabling a host hook. |
 | 404 | Hook ID not found in your workspace (also returned for cross-tenant IDs). |
 
 ## Currently-dispatched events
@@ -202,3 +202,20 @@ Same auth and audit semantics as enable.
 
 - [Hooks guide](/guides/hooks).
 - [Hooks API](/api-reference/hooks).
+
+
+## Host hook review after upgrade or restore
+
+Host shell hooks require instance administrator authority, not workspace ownership.
+Existing host hook definitions are preserved but disabled on upgrade because prior
+versions did not record historical instance authority. The audit log records
+`hook.host_review_required` without recording command contents. A restored host
+hook also loses imported approval and stays disabled until local review.
+
+An instance administrator must inspect the current command and configuration,
+then use **Enable** in Lifecycle hooks or `crewship hooks enable ID` with the
+appropriate workspace and an instance-admin session/token (`instance:admin`).
+`host_review_required` in list/detail responses identifies pending review.
+Creating or editing a host hook requires the same authority. The default global
+lifecycle pause still prevents execution; it is not an authorization bypass.
+Container startup hooks are a separate feature and are unchanged.

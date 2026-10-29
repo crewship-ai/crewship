@@ -103,8 +103,7 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	role := RoleFromContext(r.Context())
 	crewID := r.PathValue("crewId")
 
-	if !canRole(role, "create") {
-		replyError(w, http.StatusForbidden, "Forbidden")
+	if !h.crewManageRequest(w, r, crewID, "create") {
 		return
 	}
 
@@ -171,6 +170,10 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 	// constraint in place — a clean 400 beats a sql.Exec error.
 	var roleParam sql.NullString
 	if req.Role != "" {
+		if !canRole(role, "create") {
+			replyError(w, http.StatusForbidden, "Crew Manage does not permit assigning roles")
+			return
+		}
 		if _, ok := roleRank[req.Role]; !ok {
 			replyError(w, http.StatusBadRequest,
 				"role must be one of OWNER, ADMIN, MANAGER, MEMBER, VIEWER")
@@ -197,11 +200,15 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	memberID := generateCUID()
-	tx, currentRole := h.beginMemberMutation(w, r, crewID, "create")
+	tx, currentRole := h.beginCrewManageMutation(w, r, crewID, "create")
 	if tx == nil {
 		return
 	}
 	defer tx.Rollback()
+	if roleParam.Valid && !canRole(currentRole, "create") {
+		replyError(w, http.StatusForbidden, "Crew Manage does not permit assigning roles")
+		return
+	}
 	if roleParam.Valid && roleRank[roleParam.String] > roleRank[currentRole] {
 		replyError(w, http.StatusForbidden, "Forbidden")
 		return
@@ -256,12 +263,10 @@ func (h *CrewHandler) AddMember(w http.ResponseWriter, r *http.Request) {
 
 func (h *CrewHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
-	role := RoleFromContext(r.Context())
 	crewID := r.PathValue("crewId")
 	memberID := r.PathValue("memberId")
 
-	if !canRole(role, "manage") {
-		replyError(w, http.StatusForbidden, "Forbidden")
+	if !h.crewManageRequest(w, r, crewID, "manage") {
 		return
 	}
 
@@ -302,7 +307,7 @@ func (h *CrewHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, _ := h.beginMemberMutation(w, r, crewID, "manage")
+	tx, currentRole := h.beginCrewManageMutation(w, r, crewID, "manage")
 	if tx == nil {
 		return
 	}
@@ -316,9 +321,13 @@ func (h *CrewHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "read removed crew membership", err)
 		return
 	}
+	if before.Role.Valid && !canRole(currentRole, "manage") {
+		replyError(w, http.StatusForbidden, "Crew Manage cannot remove an explicit crew role")
+		return
+	}
 	res, err := tx.ExecContext(r.Context(),
-		"DELETE FROM crew_members WHERE id = ? AND crew_id = ?",
-		memberID, crewID)
+		"DELETE FROM crew_members WHERE id = ? AND crew_id = ? AND role IS ?",
+		memberID, crewID, before.Role)
 	if err != nil {
 		replyInternalError(w, h.logger, "delete crew member", err)
 		return

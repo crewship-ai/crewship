@@ -19,6 +19,13 @@ func (h *PageHandler) ResolvePageChatContext(ctx context.Context, workspaceID, u
 	if workspaceID == "" || userID == "" || agentID == "" || slug == "" || len(slug) > 128 {
 		return deniedContext, deniedError
 	}
+	// The resolver also serves internal callers that pass the validated human
+	// identity explicitly. Never replace a different authenticated principal.
+	if user := UserFromContext(ctx); user != nil && user.ID != userID {
+		return deniedContext, deniedError
+	} else if user == nil {
+		ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: userID})
+	}
 	var role string
 	if err := h.db.QueryRowContext(ctx, `SELECT role FROM workspace_members WHERE workspace_id=? AND user_id=?`, workspaceID, userID).Scan(&role); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -33,7 +40,7 @@ func (h *PageHandler) ResolvePageChatContext(ctx context.Context, workspaceID, u
 		}
 		return chatbridge.PageChatContext{}, err
 	}
-	rec, err := h.loadPage(ctx, workspaceID, slug)
+	rec, err := h.loadPageForRead(ctx, workspaceID, slug)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return deniedContext, deniedError
@@ -45,6 +52,16 @@ func (h *PageHandler) ResolvePageChatContext(ctx context.Context, workspaceID, u
 		return chatbridge.PageChatContext{}, err
 	}
 	viewer.Role = role
+	if rec.PrivateAudience {
+		current, err := h.livePrivatePageReader(ctx, workspaceID, userID)
+		if err != nil {
+			return chatbridge.PageChatContext{}, err
+		}
+		if current == nil {
+			return deniedContext, deniedError
+		}
+		viewer.Role = current.Role
+	}
 	panels, err := h.loadPanels(ctx, workspaceID, rec.ID)
 	if err != nil {
 		return chatbridge.PageChatContext{}, err
@@ -62,6 +79,9 @@ func (h *PageHandler) ResolvePageChatContext(ctx context.Context, workspaceID, u
 	}
 	if len(pageAccessAgentPaths(agentID, grants)) == 0 {
 		return deniedContext, deniedError
+	}
+	if err := h.recordPrivateOwnerAccess(ctx, workspaceID, userID, rec); err != nil {
+		return deniedContext, err
 	}
 	return chatbridge.PageChatContext{
 		WorkspaceID: workspaceID, PageID: rec.ID, Slug: rec.Slug,

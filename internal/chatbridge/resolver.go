@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/documents"
@@ -63,6 +65,7 @@ func NewIPCResolver(nextjsURL, internalToken string, logger *slog.Logger) *IPCRe
 }
 
 type chatResolveResponse struct {
+	AskForms              string                   `json:"ask_forms"`
 	HumanAuthority        *chataudience.Receipt    `json:"human_authority"`
 	AgentID               string                   `json:"agent_id"`
 	AgentSlug             string                   `json:"agent_slug"`
@@ -321,7 +324,7 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 		cleanMetadata := make(map[string]interface{}, len(metadata))
 		for k, v := range metadata {
 			switch k {
-			case "artifact_human_receipt", "artifact_human_message_id", "document_request_id", "artifact_request_id", "board_request_id", "slides_request_id", "document_creation_intent", "human_authority", "trigger_message_id", "chat_origin_id":
+			case "artifact_project_intent", "artifact_human_receipt", "artifact_human_message_id", "document_request_id", "artifact_request_id", "board_request_id", "slides_request_id", "document_creation_intent", "document_iteration_intent", "human_authority", "trigger_message_id", "chat_origin_id":
 			default:
 				cleanMetadata[k] = v
 			}
@@ -331,6 +334,15 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 		receipt := chataudience.ReceiptFromContext(ctx)
 		if ok && intent != nil && intent.Validate() == nil && receipt != nil && receipt.UserID != "" && receipt.ChatID == chatID && receipt.AgentID == agentID && receipt.WorkspaceID == workspaceID && runauthority.TriggerMessageFromContext(ctx) != "" && runauthority.OriginIDFromContext(ctx) == "" {
 			payload["document_creation_intent"] = intent
+		}
+		iteration, ok := metadata["document_iteration_intent"].(*documents.IterationIntent)
+		if ok && iteration != nil && iteration.Validate() == nil && receipt != nil && receipt.UserID != "" && receipt.ChatID == chatID && receipt.AgentID == agentID && receipt.WorkspaceID == workspaceID && runauthority.TriggerMessageFromContext(ctx) != "" && runauthority.OriginIDFromContext(ctx) == "" {
+			payload["document_iteration_intent"] = iteration
+		}
+
+		project, ok := metadata[artifacts.ProjectIntentMetadataKey].(*artifacts.ProjectIntent)
+		if ok && project != nil && project.Validate() == nil && receipt != nil && receipt.UserID != "" && receipt.ChatID == chatID && receipt.AgentID == agentID && receipt.WorkspaceID == workspaceID && runauthority.TriggerMessageFromContext(ctx) != "" && runauthority.OriginIDFromContext(ctx) == "" {
+			payload[artifacts.ProjectIntentMetadataKey] = project
 		}
 	}
 	body, err := json.Marshal(payload)
@@ -517,6 +529,15 @@ func (r *IPCResolver) ResolveHumanChat(ctx context.Context, userID, chatID strin
 			return nil, err
 		}
 		resolveURL += "&receipt=" + base64.RawURLEncoding.EncodeToString(raw)
+	} else if original := auth.OriginalCredentialFromContext(ctx); original != nil {
+		if original.UserID != userID {
+			return nil, fmt.Errorf("original credential identity mismatch")
+		}
+		raw, err := json.Marshal(original)
+		if err != nil {
+			return nil, err
+		}
+		resolveURL += "&source_credential=" + base64.RawURLEncoding.EncodeToString(raw)
 	}
 	info, err := r.resolve(ctx, resolveURL)
 	if err != nil {
@@ -737,6 +758,7 @@ func (r *IPCResolver) resolve(ctx context.Context, resolveURL string) (*ChatInfo
 	}
 
 	return &ChatInfo{
+		AskForms:              data.AskForms,
 		AgentID:               data.AgentID,
 		AgentSlug:             data.AgentSlug,
 		AgentRole:             data.AgentRole,

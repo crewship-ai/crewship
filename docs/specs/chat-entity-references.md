@@ -571,3 +571,50 @@ Browser acceptance uses the production static export with handler-verified
 reference fixtures: `pnpm exec playwright test --config=playwright.restricted.config.ts`.
 It requires a preceding frontend build and an installed Chromium, and contacts
 no live application or model provider.
+
+## Document access metadata in chat
+
+`GET /api/v1/chats/{chatId}/document-access?workspace_id=...` is a human-only,
+`no-store` metadata read. It requires the original current session or CLI token
+with current `pages:read`, the current chat audience and independent Page read.
+Chat membership and a document link never grant document access. Private-audience
+Pages are excluded from agent grants; inaccessible titles and IDs are omitted.
+
+CLI: `crewship chat document-access <chat-id>` reads the same authorized metadata
+and uses the selected machine output format. It cannot grant access or start work.
+
+Status codes: `200` returns the authorized list; `401` requires an original human
+credential; `403` rejects a revoked, expired or insufficiently scoped credential;
+`404` conceals an inaccessible chat or workspace; `503` means current metadata
+or a bounded HTTP writer could not be verified. No denied response contains
+document names, IDs or task metadata.
+
+The response is `{documents: [...]}`. Each row contains `page_id`, `title`,
+`document_type`, `application_id`, `document_grant` (`read` or `write`),
+`policy_allows`, `task_status`, `tasks` and `provenance`. The native WordCraft
+application ID is returned only after its existing content-read authorization.
+Opening the immutable Page ID uses the existing document route and its ACL.
+
+A document grant is separate from task authority. `task_status` is `unavailable`
+when its canonical runtime source cannot be verified, `no_active_task` for a
+verified empty attached registry, or `active` for verified original bindings.
+Each task exposes only `work_id`, `run_id`, `scope`, `expires_at`, `can_read` and
+`can_write`. No bearer, mandate handle or original credential is returned. Task
+metadata rechecks the original confirmed attempt, human source and Page policy;
+it never renews authority or reconstructs consent from queued SQL work. Until
+the production dispatcher shares this registry, the route reports task authority
+as unavailable. Generic document grants do not qualify a native writer.
+
+The panel polls only within its current viewer/workspace/chat scope. It retains
+metadata for at most three seconds measured from sending its request; errors,
+visibility changes and viewer changes clear it. Delayed responses cannot extend
+that interval. Content reads and writes still authorize independently. Output
+files and this grant list have no proven creation lineage, so they explicitly
+show unknown origin; this endpoint does not implement durable provenance.
+
+The HTTP response requires a supported write deadline from the original
+three-second handler deadline and flushes while holding the ingress lease.
+An unsupported bounded writer returns unavailable before taking that lease.
+
+Regression coverage: `TestChatDocumentAccess*`,
+`TestCollaborationAgentTaskView*` and `chat-document-access.test.tsx`.

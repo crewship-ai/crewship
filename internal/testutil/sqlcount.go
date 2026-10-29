@@ -11,7 +11,20 @@ import (
 	"testing"
 )
 
-type SQLCounter struct{ n atomic.Int64 }
+type SQLCounter struct {
+	n           atomic.Int64
+	beforeQuery atomic.Pointer[func(string)]
+}
+
+// BeforeQuery observes a real query before SQLite takes its read snapshot.
+// Tests can interleave a separate writer without replacing results or decisions.
+func (c *SQLCounter) BeforeQuery(fn func(string)) {
+	if fn == nil {
+		c.beforeQuery.Store(nil)
+		return
+	}
+	c.beforeQuery.Store(&fn)
+}
 
 func (c *SQLCounter) Reset()       { c.n.Store(0) }
 func (c *SQLCounter) Count() int64 { return c.n.Load() }
@@ -44,6 +57,9 @@ type countingConn struct {
 
 func (c *countingConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	c.counter.add()
+	if observer := c.counter.beforeQuery.Load(); observer != nil {
+		(*observer)(query)
+	}
 	return c.Conn.(driver.QueryerContext).QueryContext(ctx, query, args)
 }
 

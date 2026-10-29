@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/httpsafe"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,22 +46,35 @@ func envBool(name string) (val, ok bool) {
 type Config struct {
 	pathSources map[string]string // effective explicit path origins, populated while loading
 
-	Server    ServerConfig    `yaml:"server"`
-	IPC       IPCConfig       `yaml:"ipc"`
-	Container ContainerConfig `yaml:"container"`
-	Storage   StorageConfig   `yaml:"storage"`
-	State     StateConfig     `yaml:"state"`
-	Logging   LoggingConfig   `yaml:"logging"`
-	Auth      AuthConfig      `yaml:"auth"`
-	LLMProxy  LLMProxyConfig  `yaml:"llm_proxy"`
-	Keeper    KeeperConfig    `yaml:"keeper"`
-	License   LicenseConfig   `yaml:"license"`
-	Composio  ComposioConfig  `yaml:"composio"`
-	Documents DocumentsConfig `yaml:"documents"`
-	Slides    SlidesConfig    `yaml:"slides"`
+	Skills      httpsafe.GitImportPolicy `yaml:"skills"`
+	Server      ServerConfig             `yaml:"server"`
+	IPC         IPCConfig                `yaml:"ipc"`
+	Container   ContainerConfig          `yaml:"container"`
+	Storage     StorageConfig            `yaml:"storage"`
+	State       StateConfig              `yaml:"state"`
+	Logging     LoggingConfig            `yaml:"logging"`
+	Auth        AuthConfig               `yaml:"auth"`
+	LLMProxy    LLMProxyConfig           `yaml:"llm_proxy"`
+	Keeper      KeeperConfig             `yaml:"keeper"`
+	License     LicenseConfig            `yaml:"license"`
+	Composio    ComposioConfig           `yaml:"composio"`
+	Documents   DocumentsConfig          `yaml:"documents"`
+	Diff        DiffConfig               `yaml:"diff"`
+	Slides      SlidesConfig             `yaml:"slides"`
+	GridCraft   GridCraftConfig          `yaml:"gridcraft"`
+	Mooring     MooringConfig            `yaml:"mooring"`
+	CraftNative CraftNativeConfig        `yaml:"craft_native"`
+	Audit       AuditConfig              `yaml:"audit"`
 
 	LocalModels  LocalModelsConfig  `yaml:"local_models"`
 	Orchestrator OrchestratorConfig `yaml:"orchestrator"`
+}
+
+// AuditConfig names an immutable external keyring. Normal boot publishes the
+// app-owned default in DataDir; secret keys are never serialized in config.
+type AuditConfig struct {
+	KeyringPath string               `yaml:"keyring_path"`
+	Keys        *journal.SigningKeys `yaml:"-" json:"-"`
 }
 
 // OrchestratorConfig holds settings for the agent-run orchestrator's
@@ -195,13 +210,14 @@ type LoggingConfig struct {
 // AuthConfig holds authentication settings including JWT secrets, WebSocket
 // token expiry, internal token for IPC auth, and signup policy.
 type AuthConfig struct {
-	JWTSecret      string        `yaml:"jwt_secret"`
-	WSTokenExpiry  time.Duration `yaml:"ws_token_expiry"`
-	NextjsURL      string        `yaml:"nextjs_url"`
-	InternalToken  string        `yaml:"internal_token"`
-	AllowSignup    bool          `yaml:"allow_signup"`
-	GoogleClientID string        `yaml:"google_client_id"`
-	GoogleSecret   string        `yaml:"google_client_secret"`
+	PublicPagePasswords PublicPagePasswordsConfig `yaml:"public_page_passwords"`
+	JWTSecret           string                    `yaml:"jwt_secret"`
+	WSTokenExpiry       time.Duration             `yaml:"ws_token_expiry"`
+	NextjsURL           string                    `yaml:"nextjs_url"`
+	InternalToken       string                    `yaml:"internal_token"`
+	AllowSignup         bool                      `yaml:"allow_signup"`
+	GoogleClientID      string                    `yaml:"google_client_id"`
+	GoogleSecret        string                    `yaml:"google_client_secret"`
 
 	// BootstrapWindow controls the first-run /bootstrap window. Zero (the
 	// default) keeps bootstrap open until the first admin exists — the empty
@@ -325,6 +341,14 @@ func Load(path string) (*Config, error) {
 	}
 
 	applyEnvOverrides(cfg)
+	if path := os.Getenv(journal.SigningKeysPathEnv); path != "" {
+		cfg.Audit.KeyringPath = path
+	}
+	var auditErr error
+	cfg.Audit.Keys, auditErr = journal.LoadSigningKeys(cfg.Audit.KeyringPath)
+	if auditErr != nil {
+		return nil, fmt.Errorf("audit key configuration: %w", auditErr)
+	}
 	capturePathEnvSources(cfg)
 
 	// Autodetect sidecar binary + entrypoint.sh paths when not explicitly set.
@@ -411,7 +435,28 @@ var (
 // Validate checks that all configuration values are within acceptable ranges
 // and required fields are set. Returns an error describing the first invalid value.
 func (c *Config) Validate() error {
+	if _, _, err := c.CraftNative.ResolveEditorBundles(c.GridCraft, (c.GridCraft.Enabled && c.GridCraft.EditorEnabled) || c.Mooring.Enabled); err != nil {
+		return err
+	}
+	if err := c.Mooring.validate(); err != nil {
+		return err
+	}
+	if err := c.GridCraft.validate(); err != nil {
+		return err
+	}
+	if err := validateGridCraftEditor(c, os.Getenv("CREWSHIP_ALLOWED_ORIGINS")); err != nil {
+		return err
+	}
+	if err := httpsafe.ValidateGitImportPolicy(c.Skills); err != nil {
+		return err
+	}
+	if _, err := c.Auth.PublicPagePasswords.Resolve(); err != nil {
+		return err
+	}
 	if err := c.Documents.validate(); err != nil {
+		return err
+	}
+	if _, err := c.Diff.Resolve(); err != nil {
 		return err
 	}
 	if value := c.Storage.RunOutputPath; value != "" && (!filepath.IsAbs(value) || filepath.Clean(value) != value || strings.ContainsRune(value, 0)) {
@@ -522,7 +567,29 @@ func loadFromFile(cfg *Config, path string) error {
 }
 
 func applyEnvOverrides(cfg *Config) {
+	applyCraftNativeEnv(&cfg.CraftNative)
+	if value, ok := os.LookupEnv("CREWSHIP_CRAFT_NATIVE_ENABLED"); ok {
+		cfg.CraftNative.Enabled = value == "true" || value == "1"
+	}
+	if value, ok := os.LookupEnv("CREWSHIP_MOORING_ENABLED"); ok {
+		cfg.Mooring.Enabled = value == "true" || value == "1"
+	}
+	if value, ok := os.LookupEnv("CREWSHIP_MOORING_COMMANDS_ENABLED"); ok {
+		cfg.Mooring.CommandsEnabled = value == "true" || value == "1"
+	}
+	if raw, ok := os.LookupEnv("CREWSHIP_SKILLS_PRIVATE_HOSTS"); ok {
+		cfg.Skills.PrivateHosts = nil
+		if raw != "" {
+			for _, entry := range strings.Split(raw, ",") {
+				cfg.Skills.PrivateHosts = append(cfg.Skills.PrivateHosts, strings.TrimSpace(entry))
+			}
+		}
+	}
 	for name, target := range map[string]*int{
+		"CREWSHIP_MOORING_DELIVERY_LEASE_MS":             &cfg.Mooring.DeliveryLeaseMilliseconds,
+		"CREWSHIP_DIFF_MAX_INPUT_BYTES":                  &cfg.Diff.MaxInputBytes,
+		"CREWSHIP_DIFF_MAX_LINES":                        &cfg.Diff.MaxLines,
+		"CREWSHIP_DIFF_MAX_CONCURRENT":                   &cfg.Diff.MaxConcurrent,
 		"CREWSHIP_DOCUMENTS_MAX_DOCUMENTS_PER_WORKSPACE": &cfg.Documents.MaxDocumentsPerWorkspace,
 		"CREWSHIP_DOCUMENTS_MAX_OPERATIONS_PER_WINDOW":   &cfg.Documents.MaxOperationsPerWindow,
 		"CREWSHIP_DOCUMENTS_OPERATION_WINDOW_SECONDS":    &cfg.Documents.OperationWindowSeconds,
@@ -539,6 +606,16 @@ func applyEnvOverrides(cfg *Config) {
 	if v, ok := os.LookupEnv("CREWSHIP_DOCUMENTS_ENABLED"); ok {
 		cfg.Documents.Enabled = v == "true" || v == "1"
 	}
+	if v, ok := os.LookupEnv("CREWSHIP_GRIDCRAFT_ENABLED"); ok {
+		cfg.GridCraft.Enabled = v == "true" || v == "1"
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_GRIDCRAFT_SERVICE_SOCKET"); ok {
+		cfg.GridCraft.ServiceSocket = v
+	}
+	if v, ok := os.LookupEnv("CREWSHIP_GRIDCRAFT_SERVICE_TOKEN_FILE"); ok {
+		cfg.GridCraft.ServiceTokenFile = v
+	}
+	applyGridCraftEditorEnv(&cfg.GridCraft)
 	if v, ok := os.LookupEnv("CREWSHIP_SLIDES_ENABLED"); ok {
 		cfg.Slides.Enabled = v == "true" || v == "1"
 	}
@@ -697,6 +774,22 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if val, ok := envBool("CREWSHIP_ALLOW_SIGNUP"); ok {
 		cfg.Auth.AllowSignup = val
+	}
+	for _, setting := range []struct {
+		name string
+		dst  *int
+	}{
+		{"CREWSHIP_PUBLIC_PAGE_PASSWORD_MAX_CONCURRENT", &cfg.Auth.PublicPagePasswords.MaxConcurrent},
+		{"CREWSHIP_PUBLIC_PAGE_PASSWORD_MAX_CONCURRENT_PER_TARGET", &cfg.Auth.PublicPagePasswords.MaxConcurrentPerTarget},
+	} {
+		if raw := os.Getenv(setting.name); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil {
+				slog.Warn("ignoring invalid public page password limit", "name", setting.name)
+			} else {
+				*setting.dst = value
+			}
+		}
 	}
 	if v := os.Getenv("CREWSHIP_BOOTSTRAP_WINDOW"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {

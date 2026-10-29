@@ -16,7 +16,7 @@ import (
 // fresh in-memory DB and applies this directly instead of pulling in the
 // whole migrate package — keeps the unit test fast and self-contained.
 const schemaSQL = `
-CREATE TABLE journal_replay_receipts (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, workspace_id TEXT NOT NULL, agent_id TEXT NOT NULL, trace_id TEXT NOT NULL, entry_type TEXT NOT NULL, terminal_exit_code INTEGER);
+CREATE TABLE journal_replay_receipts (id TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, workspace_id TEXT NOT NULL, agent_id TEXT NOT NULL, trace_id TEXT NOT NULL, entry_type TEXT NOT NULL, terminal_exit_code INTEGER,chain_key_id TEXT,chain_mac_version INTEGER);
 CREATE TABLE workspaces (id TEXT PRIMARY KEY);
 INSERT INTO workspaces (id) VALUES ('ws_test');
 
@@ -51,7 +51,9 @@ CREATE TABLE journal_entries (
     -- v166: the IMMUTABLE priority the hash-chain commits to. The priority
     -- column above stays mutable for readers and the operator pin control; this
     -- one is written once at emit so an authorised edit cannot break verification.
-    priority_at_emit TEXT
+    priority_at_emit TEXT,
+ chain_key_id TEXT,
+ chain_mac_version INTEGER
 );
 CREATE INDEX idx_journal_ws_ts ON journal_entries(workspace_id, ts DESC);
 CREATE UNIQUE INDEX idx_journal_ws_seq ON journal_entries(workspace_id, seq) WHERE seq > 0;
@@ -61,7 +63,9 @@ CREATE TABLE journal_chain_checkpoints (
     workspace_id TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     removed_json TEXT NOT NULL,
-    mac TEXT NOT NULL
+    mac TEXT NOT NULL,
+ chain_key_id TEXT,
+ chain_mac_version INTEGER
 );
 
 -- v166: append-only ledger of operator priority edits. Verification reconciles
@@ -81,7 +85,7 @@ CREATE TABLE journal_entry_priorities (
 );
 `
 
-func openTestDB(t *testing.T) *sql.DB {
+func openTestDB(t testing.TB) *sql.DB {
 	t.Helper()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -99,12 +103,16 @@ func quietLogger() *slog.Logger {
 
 func TestEmitAndList(t *testing.T) {
 	db := openTestDB(t)
+	// SQLite :memory: belongs to one connection; the asynchronous writer and
+	// reader must share it rather than opening a second empty database.
+	db.SetMaxOpenConns(1)
 	defer db.Close()
 
 	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 2, FlushInterval: 10 * time.Millisecond})
 	defer w.Close()
 
 	ctx := context.Background()
+	flushed := w.Notify()
 	id, err := w.Emit(ctx, Entry{
 		WorkspaceID: "ws_test",
 		Type:        EntryPeerConversation,
@@ -120,8 +128,13 @@ func TestEmitAndList(t *testing.T) {
 		t.Fatal("expected id")
 	}
 
-	// Give the batcher a moment to flush.
-	time.Sleep(50 * time.Millisecond)
+	// Still exercise the actual background timer. Wait for its post-commit
+	// notification instead of assuming it finishes within an arbitrary sleep.
+	select {
+	case <-flushed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("background journal flush did not complete")
+	}
 
 	entries, _, err := List(ctx, db, Query{WorkspaceID: "ws_test"})
 	if err != nil {
@@ -570,6 +583,7 @@ CREATE UNIQUE INDEX idx_journal_ws_seq ON journal_entries(workspace_id, seq) WHE
 		t.Fatalf("schema: %v", err)
 	}
 
+	addAuditSigningFixture(t, db)
 	w := NewWriter(db, quietLogger(), WriterOptions{FlushSize: 1})
 	defer w.Close()
 

@@ -45,7 +45,7 @@ func TestPresetCatalogAuthenticatedContract(t *testing.T) {
 			var result struct {
 				Presets []access.CatalogEntry `json:"presets"`
 			}
-			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || len(result.Presets) != 2 {
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil || len(result.Presets) != 4 {
 				t.Fatalf("catalog incomplete:%s %v", w.Body.String(), err)
 			}
 			for _, entry := range result.Presets {

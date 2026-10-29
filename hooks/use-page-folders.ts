@@ -686,13 +686,14 @@ export function useFolderAcl(
     if (!workspaceId || !slug) return
     await qc.refetchQueries({ queryKey: pageFoldersKeys.acl(workspaceId, slug) })
   }, [qc, workspaceId, slug])
+  const current = on && err === null
   return {
-    entries: query.data?.entries ?? [],
-    aclVersion: query.data?.aclVersion ?? null,
+    entries: current ? query.data?.entries ?? [] : [],
+    aclVersion: current ? query.data?.aclVersion ?? null : null,
     loading: query.isPending && on,
     refusal: forbidden ? err.message : null,
     error: err && !forbidden ? err.message : null,
-    manages: query.data !== undefined,
+    manages: current && query.data !== undefined,
     reread,
   }
 }

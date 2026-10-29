@@ -11,6 +11,19 @@ from parity import TESTS, missing_tests
 
 
 class GateTests(unittest.TestCase):
+    def test_api_bootstrap_cannot_be_missing_or_skipped_for_go_change(self):
+        self.assertIn('go-race-api-template', GO)
+        plan = {'code': 'true', 'go': 'true', 'release': 'true', **{key: 'false' for key in PARITY.values()}}
+        good = {name: {'result': 'success'} for name in ALWAYS | CODE | GO | {'release-rehearsal'}}
+        good.update({name: {'result': 'skipped'} for name in PARITY})
+        good['changes']['outputs'] = plan
+        self.assertEqual(failures(good), [])
+        for result in ['failure', 'cancelled', 'skipped']:
+            bad = dict(good, **{'go-race-api-template': {'result': result}})
+            self.assertTrue(any('go-race-api-template' in error for error in failures(bad)))
+        del good['go-race-api-template']
+        self.assertTrue(any('go-race-api-template' in error for error in failures(good)))
+
     def test_routing(self):
         for paths, expected in [
             (['docs/guide.mdx'], {'code': False, 'go': False, 'docs_inventory': True}),
@@ -182,6 +195,26 @@ class GateTests(unittest.TestCase):
         self.assertTrue(failures(needs))
         needs['release-rehearsal']['result'] = 'success'
         self.assertEqual(failures(needs), [])
+
+    def test_all_actual_mooring_lane_cannot_be_missing_or_not_executed(self):
+        self.assertIn('mooring-actual', CODE)
+        for result in ['failure', 'cancelled', 'skipped', None]:
+            needs = self.results()
+            needs['mooring-actual']['result'] = result
+            self.assertTrue(failures(needs), result)
+        needs = self.results()
+        del needs['mooring-actual']
+        self.assertTrue(failures(needs))
+
+    def test_mooring_requires_actual_success_for_code_changes(self):
+        self.assertIn('mooring', CODE)
+        for result in ['failure', 'cancelled', 'skipped', None]:
+            needs = self.results()
+            needs['mooring']['result'] = result
+            self.assertTrue(failures(needs), result)
+        needs = self.results()
+        del needs['mooring']
+        self.assertTrue(failures(needs))
 
     def test_valid_plans(self):
         for code, go in [('true', 'true'), ('true', 'false'), ('false', 'false')]:

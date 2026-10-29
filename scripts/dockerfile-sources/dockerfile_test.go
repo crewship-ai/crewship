@@ -10,10 +10,9 @@ import (
 	"testing"
 )
 
-// rootGoPackages lists every top-level directory of the module that the
-// shipped binaries import, transitively — the set the backend stage must
-// COPY. Asked of the Go tool, so an examples/ or tools/ directory nothing
-// links does not count.
+// rootGoPackages lists module package directories imported transitively by
+// shipped binaries. Keep nested paths: a selective COPY mooring/protocol/ is
+// sufficient without copying an unrelated Rust toolchain/vendor source tree.
 func rootGoPackages(t *testing.T, root string) []string {
 	t.Helper()
 	const module = "github.com/crewship-ai/crewship/"
@@ -28,8 +27,7 @@ func rootGoPackages(t *testing.T, root string) []string {
 		if !strings.HasPrefix(line, module) {
 			continue
 		}
-		dir, _, _ := strings.Cut(strings.TrimPrefix(line, module), "/")
-		seen[dir] = true
+		seen[strings.TrimPrefix(line, module)] = true
 	}
 	dirs := make([]string, 0, len(seen))
 	for d := range seen {
@@ -81,9 +79,40 @@ func TestBackendStageCopiesEveryRootGoPackage(t *testing.T) {
 	root := filepath.Join("..", "..")
 	copies := backendStageCopies(t, filepath.Join(root, "Dockerfile"))
 	for _, dir := range rootGoPackages(t, root) {
-		if copies[dir] {
+		if backendPackageCopied(copies, dir) {
 			continue
 		}
 		t.Errorf("Dockerfile backend stage does not COPY %s/ — the in-image go build cannot resolve github.com/crewship-ai/crewship/%s", dir, dir)
+	}
+}
+
+func backendPackageCopied(copies map[string]bool, dir string) bool {
+	for {
+		if copies[dir] {
+			return true
+		}
+		i := strings.LastIndexByte(dir, '/')
+		if i < 0 {
+			return false
+		}
+		dir = dir[:i]
+	}
+}
+
+func TestBackendPackageCopyCoverageUsesDirectoryBoundaries(t *testing.T) {
+	for _, test := range []struct {
+		source, pkg string
+		want        bool
+	}{
+		{"internal", "internal/api", true},
+		{"mooring/protocol", "mooring/protocol", true},
+		{"mooring/protocol", "mooring/protocol/generated/go", true},
+		{"mooring/protocol", "mooring/protocol-other", false},
+		{"mooring/protocol/generated/go", "mooring/protocol", false},
+		{"mooring/protocol/generated/go", "mooring/client", false},
+	} {
+		if got := backendPackageCopied(map[string]bool{test.source: true}, test.pkg); got != test.want {
+			t.Errorf("COPY %s for %s: got %v want %v", test.source, test.pkg, got, test.want)
+		}
 	}
 }

@@ -24,6 +24,8 @@ import (
 	"filippo.io/age"
 
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/safepath"
 	"github.com/crewship-ai/crewship/internal/tsformat"
@@ -79,6 +81,10 @@ type RecoverOptions struct {
 	// Force allows a non-empty data directory: its database is replaced and
 	// files the bundle carries are overwritten.
 	Force bool
+	// DiscardWorkbooks acknowledges that a forced recovery destroys every
+	// workbook in the target database; no bundle contains one. Without it a
+	// forced recovery over workbooks refuses (ErrWorkbookTargetReplacement).
+	DiscardWorkbooks bool
 	// Drill restores for a test only: no key files are written and auth keys
 	// are not rotated (the directory is thrown away); the kit stays in memory
 	// for the drill's checks. The report is recorded as kind drill.
@@ -153,6 +159,17 @@ func (o *RecoverOptions) validate() error {
 // in the restored database) even when the result is partial; an error means
 // the result is failed.
 func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport, retErr error) {
+	ctx, release, limitErr := BeginRestoreRead(ctx)
+	if limitErr != nil {
+		return nil, limitErr
+	}
+	defer release()
+	defer func() {
+		if retErr == nil {
+			retErr = restoreOperationError(ctx)
+		}
+	}()
+
 	if err := opts.validate(); err != nil {
 		return nil, err
 	}
@@ -194,7 +211,12 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 
 	// 2. The target.
 	if opts.Force {
-		if err := rejectPrivateArtifactRecoveryTarget(ctx, dataDir); err != nil {
+		if err := rejectPrivateArtifactRecoveryTarget(ctx, dataDir, opts.DiscardWorkbooks); err != nil {
+			return rep, err
+		}
+		// A booted target holds its own audit keyring. Refuse one recovery
+		// could not back up and replace now, before the database is removed.
+		if err := journal.CheckSigningKeysReplaceable(dataDir); err != nil {
 			return rep, err
 		}
 	}
@@ -272,7 +294,9 @@ func RecoverInstance(ctx context.Context, opts RecoverOptions) (_ *RecoverReport
 		rep.Notes = append(rep.Notes, fmt.Sprintf("%d workspace(s) carry crew container files; they are kept under %s and are not in any container yet — start the crews, then land them from a workspace bundle or copy them in", len(ex.crewArchives), filepath.Join(dataDir, RecoveredCrewsDir)))
 	}
 	if len(m.Contents.Environments) > 0 {
-		stageRecoveredEnvironmentLayers(rep, m, opts, dataDir, ex.envArchives)
+		if err := stageRecoveredEnvironmentLayers(ctx, rep, m, opts, dataDir, ex.envArchives); err != nil {
+			return rep, err
+		}
 	}
 	if rep.PageProjectsPath != "" {
 		rep.Notes = append(rep.Notes, "set CREWSHIP_PAGE_PROJECTS_PATH="+rep.PageProjectsPath+" before starting the server")
@@ -354,12 +378,26 @@ type extractedInstance struct {
 
 // openInstancePayload opens the bundle and returns a plaintext payload
 // reader over the decrypted tar.zst, plus a closer.
-func openInstancePayload(path string, identities []age.Identity, passphrase string) (*Manifest, *TarZstReader, func(), error) {
+func openInstancePayload(path string, identities []age.Identity, passphrase string, contexts ...context.Context) (*Manifest, *TarZstReader, func(), error) {
+	ctx := context.Background()
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
+	ctx, release, limitErr := ensureReadBudget(ctx)
+	if limitErr != nil {
+		return nil, nil, nil, limitErr
+	}
+	success := false
+	defer func() {
+		if !success {
+			release()
+		}
+	}()
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	m, sealed, closeBundle, err := ReadBundleStream(f)
+	m, sealed, closeBundle, err := ReadBundleStream(f, ctx)
 	if err != nil {
 		_ = f.Close()
 		return m, nil, nil, err
@@ -378,17 +416,18 @@ func openInstancePayload(path string, identities []age.Identity, passphrase stri
 		_ = f.Close()
 		return m, nil, nil, err
 	}
-	tr, err := NewTarZstReader(plain)
+	tr, err := NewTarZstReader(plain, ctx)
 	if err != nil {
 		_ = closeBundle()
 		_ = f.Close()
 		return m, nil, nil, err
 	}
-	return m, tr, func() { _ = tr.Close(); _ = closeBundle(); _ = f.Close() }, nil
+	success = true
+	return m, tr, func() { _ = tr.Close(); _ = closeBundle(); _ = f.Close(); release() }, nil
 }
 
 func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifest, dataDir string) (*extractedInstance, error) {
-	_, tr, closeAll, err := openInstancePayload(opts.BundlePath, opts.Identities, opts.Passphrase)
+	_, tr, closeAll, err := openInstancePayload(opts.BundlePath, opts.Identities, opts.Passphrase, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -428,19 +467,19 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 			}
 		case name == instanceDBEntry:
 			dst := filepath.Join(dataDir, "crewship.db")
-			sha, _, err := writeExtracted(dst, tr)
+			sha, _, err := writeExtracted(ctx, dst, tr)
 			if err != nil {
 				return nil, fmt.Errorf("backup: write database: %w", err)
 			}
 			ex.dbSHA = sha
 		case name == instanceIndexEntry:
 			var idx InstanceIndex
-			if err := json.NewDecoder(io.LimitReader(tr, maxBackupDBDumpBytes)).Decode(&idx); err != nil {
+			if err := json.NewDecoder(io.LimitReader(RestoreBufferedReader(ctx, tr), maxBackupDBDumpBytes)).Decode(&idx); err != nil {
 				return nil, fmt.Errorf("backup: read file index: %w", err)
 			}
 			ex.index = &idx
 		case name == RecoveryKitPath:
-			data, err := io.ReadAll(io.LimitReader(tr, 1<<20))
+			data, err := io.ReadAll(io.LimitReader(RestoreBufferedReader(ctx, tr), 1<<20))
 			if err != nil {
 				return nil, err
 			}
@@ -459,7 +498,7 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 			if err != nil || dst == RecoveredStoreDir(dataDir, store) {
 				return nil, fmt.Errorf("backup: refuse unsafe payload path %q", name)
 			}
-			sha, n, err := writeExtracted(dst, tr)
+			sha, n, err := writeExtracted(ctx, dst, tr)
 			if err != nil {
 				return nil, fmt.Errorf("backup: write %s: %w", name, err)
 			}
@@ -478,7 +517,7 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 			if err != nil {
 				return nil, fmt.Errorf("backup: refuse unsafe payload path %q", name)
 			}
-			if _, _, err := writeExtracted(dst, tr); err != nil {
+			if _, _, err := writeExtracted(ctx, dst, tr); err != nil {
 				return nil, err
 			}
 			ex.crewArchives = append(ex.crewArchives, dst)
@@ -488,7 +527,7 @@ func extractInstancePayload(ctx context.Context, opts RecoverOptions, m *Manifes
 			if err != nil {
 				return nil, fmt.Errorf("backup: refuse unsafe payload path %q", name)
 			}
-			if _, _, err := writeExtracted(dst, tr); err != nil {
+			if _, _, err := writeExtracted(ctx, dst, tr); err != nil {
 				return nil, err
 			}
 			ex.envArchives = append(ex.envArchives, dst)
@@ -536,7 +575,7 @@ func knownStore(s string) bool {
 	return false
 }
 
-func writeExtracted(dst string, r io.Reader) (string, int64, error) {
+func writeExtracted(ctx context.Context, dst string, r io.Reader) (string, int64, error) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return "", 0, err
 	}
@@ -548,7 +587,7 @@ func writeExtracted(dst string, r io.Reader) (string, int64, error) {
 		return "", 0, err
 	}
 	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h), r)
+	n, err := io.Copy(RestoreWriter(ctx, io.MultiWriter(f, h)), r)
 	if err == nil {
 		// A recovered data directory is the only copy the operator will
 		// boot from: every landed file reaches the disk before recover
@@ -644,8 +683,13 @@ func kitEnv(kit *RecoveryKit) (map[string]string, error) {
 // must not survive a move: sign-in sessions, pairings, locks, the scheduler
 // lease, OAuth polling. Tables absent from this schema are skipped.
 var runtimeResets = []struct{ table, what string }{
+	{"gridcraft_intents", "workbook run intents"},
+	{"gridcraft_sessions", "workbook editor sessions"},
+	{"mooring_session_owners", "Mooring session owner leases"},
 	{"document_creation_consents", "document creation consents"},
 	{"document_iteration_intents", "document iteration intents"},
+	{"artifact_project_message_intents", "artifact project message permissions"},
+	{"artifact_project_run_consents", "artifact project run permissions"},
 	{"artifact_run_principals", "artifact run principal admissions"},
 	{"sessions", "sign-in sessions"},
 	{"user_sessions", "sign-in sessions"},
@@ -660,6 +704,17 @@ var runtimeResets = []struct{ table, what string }{
 }
 
 func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *RecoveryKit, dataDir string, logger *slog.Logger, serviceArgs ...instanceServiceRecovery) error {
+	if kit != nil {
+		keys, err := kit.AuditSigningKeys()
+		if err != nil {
+			if !errors.Is(err, journal.ErrSigningKeyUnavailable) {
+				return err
+			}
+			rep.Warnings = append(rep.Warnings, "the older recovery kit has no usable audit keyring: historical MACs remain unverified and affected audit writes require an explicit OWNER checkpoint")
+		} else {
+			ctx = journal.WithSigningKeys(ctx, keys)
+		}
+	}
 	env, err := kitEnv(kit)
 	if err != nil {
 		return err
@@ -683,6 +738,16 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 			}
 		}
 		rep.MigrationsApplied = len(AppliedMigrationVersions(ctx, db.DB)) - before
+
+		// A physical snapshot carries source-instance execution approvals too.
+		// Recovery must require local review even when no migration is pending.
+		count, err := resetRecoveredHostHooks(ctx, db.DB)
+		if err != nil {
+			return err
+		}
+		if count > 0 {
+			rep.Warnings = append(rep.Warnings, fmt.Sprintf("%d restored host shell hook(s) require instance administrator review; configurations are preserved and disabled. Review in Settings > Lifecycle hooks, then use crewship hooks enable <id>.", count))
+		}
 
 		if len(serviceArgs) != 0 && serviceArgs[0].count > 0 {
 			services := serviceArgs[0].payload
@@ -715,6 +780,19 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 			if n > 0 {
 				rep.RuntimeReset = append(rep.RuntimeReset, fmt.Sprintf("%s (%d)", r.what, n))
 			}
+		}
+		if err := resetRecoveredGridCraft(ctx, db.DB); err != nil {
+			return err
+		}
+		rep.RuntimeReset = append(rep.RuntimeReset, "workbook writer generations and reservations")
+		// Close source delivery capabilities, but retain issued expiry bounds for
+		// read-revocation barriers if recovery shares the same OS boot. Never
+		// interpret discarded runtime metadata as an acknowledgement.
+		if _, err := db.ExecContext(ctx, `UPDATE mooring_delivery_gates SET closed=1,blocked=0`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "no such table") {
+			return fmt.Errorf("backup: close source Mooring delivery gates: %w", err)
+		}
+		if err := resetRecoveredCraftEditLeases(ctx, db.DB); err != nil {
+			return err
 		}
 		// Physical instance bundles include document bytes and their source leases.
 		// Preserve content/history, fence every source engine before first boot.
@@ -820,6 +898,9 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 	if existing, err := readEnvFile(secretsPath); err == nil {
 		values = existing
 	}
+	// The master keys a booted target sealed its own keyring with, before
+	// the kit's replace them: they let a replaced keyring be re-sealed.
+	previousMaster := previousMasterKeys(values)
 	newSecret, err := RotateAuthKeys(func(s string) error { values[NextAuthSecretEnv] = s; return nil })
 	if err != nil {
 		return err
@@ -842,6 +923,31 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 				values[k] = v
 			}
 		}
+	}
+	if kit != nil && len(kit.AuditKeyring) > 0 {
+		// Sealed at rest under the recovered instance's master key, which is
+		// the kit's, not this host's environment.
+		env, err := kitEnv(kit)
+		if err != nil {
+			return err
+		}
+		if _, ok := env[encryption.KeyVersionEnvVar]; !ok {
+			env[encryption.KeyVersionEnvVar] = ""
+		}
+		var auditPath, replaced, unreadable string
+		if err := withEnv(env, func() (err error) {
+			auditPath, replaced, unreadable, err = journal.ReplaceSigningKeys(dataDir, kit.AuditKeyring, time.Now(), previousMaster)
+			return err
+		}); err != nil {
+			return err
+		}
+		if replaced != "" {
+			rep.Notes = append(rep.Notes, "the data dir's previous audit keyring was replaced by the bundle's and kept as "+replaced)
+		}
+		if unreadable != "" {
+			rep.Warnings = append(rep.Warnings, "the data dir's previous audit keyring could not be read ("+unreadable+"); it was kept unchanged as "+replaced)
+		}
+		kitLines = append(kitLines, journal.SigningKeysPathEnv+"="+auditPath)
 	}
 	if err := writeEnvFile(secretsPath, []string{
 		"# crewship: secrets for a recovered instance, written by `crewship recover`.",
@@ -871,6 +977,38 @@ func writeRecoveredSecrets(rep *RecoverReport, kit *RecoveryKit, dataDir string)
 	}
 	rep.KeysFile = keysPath
 	return nil
+}
+
+// previousMasterKeys resolves master-key versions from the target's previous
+// secrets.env, then this process's environment, with Decrypt's fallback from
+// a missing ENCRYPTION_KEY_V<N> to ENCRYPTION_KEY.
+func previousMasterKeys(persisted map[string]string) journal.MasterKeyFunc {
+	// Snapshot now: the call runs later, under the kit's environment.
+	snapshot := map[string]string{}
+	for _, kv := range os.Environ() {
+		if name, value, ok := strings.Cut(kv, "="); ok && strings.HasPrefix(name, "ENCRYPTION_KEY") {
+			snapshot[name] = value
+		}
+	}
+	for k, v := range persisted {
+		if v != "" {
+			snapshot[k] = v
+		}
+	}
+	return func(version string) ([]byte, error) {
+		for _, name := range []string{encryption.KeyEnvVar(version), "ENCRYPTION_KEY"} {
+			value := snapshot[name]
+			if value == "" {
+				continue
+			}
+			key, err := hex.DecodeString(value)
+			if err != nil || len(key) != 32 {
+				return nil, fmt.Errorf("%s is not a 32-byte hex key", name)
+			}
+			return key, nil
+		}
+		return nil, fmt.Errorf("%s is not set", encryption.KeyEnvVar(version))
+	}
 }
 
 func readEnvFile(p string) (map[string]string, error) {

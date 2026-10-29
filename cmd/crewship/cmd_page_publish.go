@@ -9,12 +9,13 @@ package main
 //	GET    /api/v1/pages/{slug}/public             page links <slug>
 //	DELETE /api/v1/pages/{slug}/public/{tokenId}   page unpublish <slug> --id <id>
 //
-// The feature has two more endpoints and they deliberately have NO command,
+// The feature has two more endpoints and they deliberately have no dedicated page command,
 // for the reason POST /api/v1/page-webhooks/{token} has none (cmd_page_webhook.go):
 //
 //	GET  /api/v1/public/pages/{token}          the anonymous reader's page
 //	POST /api/v1/public/pages/{token}/unlock   the password gate in front of it
 //
+// Anonymous diagnostics use `api request --anonymous`; no account is attached.
 // Both are unauthenticated, and they exist for somebody who does NOT have this
 // binary or an account — the accountant opening a link in a browser. A command
 // here would be the CLI rendering a page at itself while holding credentials

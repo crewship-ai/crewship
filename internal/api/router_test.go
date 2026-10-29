@@ -620,8 +620,7 @@ func TestWorkspaceUpdate_PreferredLanguage(t *testing.T) {
 
 	body := bytes.NewBufferString(`{"preferred_language":"Czech"}`)
 	req := httptest.NewRequest("PATCH", "/api/v1/workspaces/"+wsID, body)
-	ctx := withWorkspace(req.Context(), wsID, "OWNER")
-	req = req.WithContext(ctx)
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()
 
 	handler.Update(rr, req)
@@ -661,8 +660,7 @@ func TestWorkspaceUpdate_ClearPreferredLanguage(t *testing.T) {
 	// Clear with empty string
 	body := bytes.NewBufferString(`{"preferred_language":""}`)
 	req := httptest.NewRequest("PATCH", "/api/v1/workspaces/"+wsID, body)
-	ctx := withWorkspace(req.Context(), wsID, "OWNER")
-	req = req.WithContext(ctx)
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()
 
 	handler.Update(rr, req)

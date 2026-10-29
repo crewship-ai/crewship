@@ -24,6 +24,65 @@ not yet have `WriteAuditLog` calls wired into their handlers:
 Keeper security decisions are tracked separately in the
 `keeper_requests` table (see below), not in `audit_logs`.
 
+### Access changes are chained and atomic
+
+A change to who or what may access something appends a hash-chained journal
+entry in the **same transaction** as the change: if the audit cannot be written,
+the change is rolled back and the request fails. The entry carries the previous
+and current values, never secrets. Where the Settings Audit view reads
+`audit_logs`, the same transaction also writes that row. This covers workspace
+and crew settings (including crew runtime privileges: `privileged`, added
+capabilities, `init` and mounts), member roles and capabilities, invitations,
+Page grants, crew links and their shared-file access
+(`crew_link.create|update|delete|file_access`), the artifact creation policy
+(`workspace.artifact_creation_policy.update`), credential folder policy
+(`credential_folder.update`), routine origin binding clears
+(`routine.origin_binding.clear`) and refused waitpoint decisions
+(`waitpoint.decision_refused`; the journal entry names the run and step, not the
+callback token).
+
+Agent privileges are access changes too. A PATCH of an agent that changes its
+`tool_profile`, `mcp_config_json`, `crew_id` or `agent_role` (including the
+previous lead a promotion demotes, listed as `demoted_leads`) records the
+agent's previous and current privileges in the `update` entry; temporary hires
+are chained as `agent.hired`, `agent.rehired`, `agent.released` and, when a
+hire's required approval could not be staged and it is removed again,
+`agent.hire_reverted`. Every agent update is written this way, not only those
+that touch privileges. Creating an agent (`create`, and `agent.created` when an
+agent creates one through the internal API) records its current privileges,
+and deleting one (`delete`) records the privileges it held. An internal create
+whose required review hold cannot be written is removed again and chained as
+`agent.create_reverted`. These removals finish even if the client disconnects.
+Paths that run on behalf of an agent, such as the internal hire and create,
+have no user: their records name a system actor. `agent.created` also records
+what the caller's credentials prove: the workspace and crew its internal token
+is bound to (`caller_token_workspace_id`, `caller_token_crew_id`) and, when it
+presents a valid run token, `caller_run_id` and `caller_agent_id`. An invalid
+run token is flagged (`caller_run_token_invalid`); no token is stored. Agent
+delete re-decides its authorization inside the delete transaction.
+
+MCP configurations commonly carry API keys. The audit never stores an MCP
+configuration verbatim: it records, per server, the name, transport, the
+executable's base name (leading `NAME=value` assignments are skipped, and
+nothing is recorded unless that token is a plain program name) and the
+**names** of its environment variables and headers.
+Arguments, URLs and every env/header value are left out. Before this change the agent `update` entry copied the request body, so `audit_logs`
+metadata and journal payloads written by earlier versions may contain MCP
+configuration values; chained entries are not rewritten (that would break the
+chain), so treat any credential that was set through an agent's MCP
+configuration on an earlier version as exposed to readers of the audit log and
+rotate it.
+
+A source-scanning test (`internal/api/audit_logs_writer_guard_test.go`) checks
+every audit call site, not every file: each `audit_logs` insert must sit in a
+function that appends the chain, and a best-effort writer fails when its action
+names an access concept or when it records a privilege-bearing field of an
+`AGENT` or `CREDENTIAL_FOLDER` (or passes metadata it cannot read). It also
+fails a function that sends a membership, invitation or Page grant journal entry
+with the buffered `Emit` rather than appending it on the change's transaction.
+The few legacy-only sites it allows are listed there, one per call site, with
+their reasons, along with what the scan cannot see.
+
 ### Keeper Decision Auditing
 
 Keeper security decisions are stored in the `keeper_requests` table with detailed fields:
@@ -288,19 +347,155 @@ to the database**. A bare hash would give them no trouble: they could edit a
 row, recompute its `entry_hash`, and recompute `prev_hash`/`entry_hash` for
 every following row, producing a perfectly self-consistent forged chain.
 
-Crewship defeats this by keying the chain. `entry_hash` is
-`HMAC-SHA256(chain_key, …)`, where `chain_key` is **derived from the persisted
-`ENCRYPTION_KEY`** (domain-separated, one-way) and **never stored in the
-database**:
+New journal and instance audit rows carry `chain_key_id` and
+`chain_mac_version = 2`. Their MAC binds the key ID, version, purpose and row
+content. The active signing key and retained verification keys live in a
+private keyring outside the database. Normal server boot creates a random
+active key once in `<data-dir>/audit-keyring.json` with mode `0600`; it never
+overwrites an existing or invalid file.
+
+That app-owned keyring is sealed at rest: AES-256-GCM under a key derived with
+HKDF-SHA256 (purpose label `crewship audit keyring at rest v1`) from the current
+master key (`ENCRYPTION_KEY`, or `ENCRYPTION_KEY_V<N>` for
+`CREWSHIP_ENCRYPTION_KEY_VERSION=v<N>`). The file records which master-key
+version sealed it. At boot a plaintext keyring written by an older build, or
+one sealed under an older master-key version, is re-wrapped in place with the
+same keys. A keyring that does not open with the configured master key stops
+the boot and is left untouched — restore the master key rather than deleting
+the file.
+
+What sealing does and does not protect: on a default install the master key
+is in `<data-dir>/secrets.env`, right next to the keyring, so anyone who can
+read the whole data directory can still open it. Sealing protects copies that
+leave out `secrets.env` — file-level backups, snapshots or support bundles that
+take the keyring but not the secrets — and installs whose master key is
+injected from outside (systemd `EnvironmentFile`, a secret manager) rather than
+kept in the data directory. Treat the data directory as a whole as secret.
+
+**Rollback across this change.** Builds before sealing cannot read a sealed
+keyring and refuse to start. Before rolling back (including `crew rollback`)
+stop the server and run [`crewship audit export-keyring --plaintext`](/cli/audit#crewship-audit-export-keyring)
+to write the keys unsealed, put that file in place of `audit-keyring.json`,
+then start the older build; a newer build seals it again at its next start.
+Rolling back without that step is unsupported.
+
+Rotate the active signing key with [`crewship audit rotate-key`](/cli/audit#crewship-audit-rotate-key)
+instead of editing the file: it adds a random active key, keeps every earlier
+key for verification only, and records an `audit.signing_key_rotated` entry.
+The running server signs with its boot snapshot until it restarts.
+
+Legacy rows with both key columns NULL retain their original byte layout and
+verification derivation:
 
 ```
 chain_key = HMAC-SHA256(ENCRYPTION_KEY, "crewship journal chain v1\x00")
 ```
 
-An attacker with DB write can still mutate rows, but cannot recompute a valid
-`entry_hash` without the key — so verification fails. The same key derivation is
-used by the write path, the verifier, and the upgrade migration's backfill, so
-they never drift.
+The retained `legacy-v1` key is verification-only. Vault-key rotation does not
+change an existing audit keyring or rewrite historical MACs. An attacker with
+database write access cannot recompute a valid MAC without its signing key.
+
+Operators may configure an external private keyring through
+`CREWSHIP_AUDIT_KEYRING_PATH` or YAML `audit.keyring_path`. Crewship reads it
+(plaintext or sealed) but never rewrites or rotates it. It contains an
+`active_key_id` and a `keys` array of `{id, key_b64}` records, with unique IDs
+and 32-byte keys. Rotate by choosing a new active ID and retaining every key
+needed to verify old rows. The process snapshots the keyring at boot; changes
+require a restart. These HMAC verification keys are secrets, not public keys.
+
+A missing historical key is reported as unverified, rather than proven
+tampering. Audit append admission checks only the chain **tail** inside the
+writer transaction, after native insert triggers: the previous tail's MAC under
+its own key from the keyring, its link to its predecessor, and every row the
+append wrote. Its cost does not grow with history (one bounded index read per
+affected workspace in a journal batch, one per instance audit row). A missing
+verification key for the tail, or a tail that does not authenticate, refuses the
+append: a row chained onto it would make the tampered row look endorsed.
+
+Defects further back — a modified or unverifiable middle row, a priority
+mismatch, unsigned pre-chain rows — are **historical**. They never block new
+appends. Whole-history verification (`crewship journal verify`, the instance
+audit verifier and the backup drill) still reports them: `ok` stays false, the
+breaks are listed, and once an authentic row follows them `historical_status`
+says which kind they are, with `continuation_verified` describing the segment
+after the last defect:
+
+- `historical_invalid` (proven mismatch) or `historical_unverified` (missing key
+  or unresolved priority): the defect is in a row written before the keyring
+  upgrade (a legacy v1 MAC) or before the last OWNER reseal — inherited history.
+- `post_upgrade_invalid`: the defect is in a keyring-signed row, or after the
+  last reseal — damage since the upgrade. It does not block appends either, but
+  it is not history and should be investigated as an incident.
+
+The tail check also refuses when the tail's predecessor row is missing and no
+signed compaction checkpoint accounts for it. Full verification never runs
+inside a writer transaction on a hot path: run it on demand with
+`crewship journal verify` (workspace) and
+[`crewship admin instance audit verify`](/cli/admin#audit-verify) (instance), or
+through the backup drill.
+
+Background journal entries (agent activity, run lifecycle) that a broken
+workspace tail refuses are **held**, not dropped: the writer keeps them in
+order, retries each affected workspace every 30 seconds with one tail-only
+admission, and keeps committing every other workspace meanwhile. At most 10,000
+entries are held; past that the oldest are dropped with an ERROR naming the
+count, and entries still held at shutdown are logged as lost. `Flush()` can
+return while broken-chain entries remain held; it is not proof of their
+durability. Fresh background entries for that workspace wait behind its
+backlog, including after repair but before the retry tick.
+
+#### Alerts on chain breaks and reseals
+
+A detected break — an append refused by a workspace or instance chain tail, an
+instance audit row failing its check while the audit log is listed, or a defect
+reported by `crewship journal verify` or `crewship admin instance audit verify`
+(including `post_upgrade_invalid`, whose verdict class leads the recorded
+reason) — and every OWNER reseal reach the instance admins:
+
+- **Instance audit event.** A break records `audit.chain_break_detected`
+  (entity `audit_chain`, one event per incident: scope, workspace, seq), chained
+  normally or as an unchained fallback when the instance chain tail is itself
+  broken. A reseal records `audit.resealed` (instance chain) or
+  `audit.workspace_resealed` (workspace chain) in the reseal's own transaction.
+- **Inbox notification.** Each instance admin gets one item in their primary
+  workspace inbox, targeted at them alone (the same routing as backup
+  incidents), titled **Audit chain needs attention** or **Audit chain
+  resealed**, with category `security`, so it also reaches their external
+  channels per their notification preferences. Repeats of the same incident do
+  not add items.
+
+The alert is written by a background task after detection, never inside the
+writer transaction that detected it.
+Missing per-admin inbox notices are retried on later detection and by the
+periodic sweep from persisted incident/reseal events, including after restart.
+A delivery receipt (`instance_audit_notice_deliveries`) commits atomically with
+each recipient's inbox projection. Receipts contain only the incident key, user
+ID and delivery time, survive inbox purge/retention, and are removed on physical
+user deletion. A handled notice is never resurrected or externally resent by a
+sweep after its inbox row is removed. Existing inbox projections are adopted
+without another external send. External fan-out follows commit and retains the
+notification subsystem's delivery limits.
+
+The server also verifies the full instance chain and every retained workspace
+journal at startup and hourly, using read snapshots outside writer transactions.
+Each sweep has a five-minute deadline; verification errors are logged and retried
+on the next sweep. `post_upgrade_invalid` raises the same deduplicated incident.
+Any `unchained_fallback > 0` raises a separate, stable seq-zero incident, even
+when the chained segment is healthy; the alert itself cannot generate an endless
+series of fallback incidents. Deleted workspaces with retained journal rows are
+included. No verification request or refused append is needed to detect these
+verifier-reported defects. Whole-database rollback, tail truncation and rows
+indistinguishable from pre-chain legacy history remain outside that guarantee.
+
+There is no new quarantine state; with a broken tail, audit-producing writes
+on that chain fail while reads and unrelated chains retain their own authority
+checks (security-reducing instance actions are the exception below). Database
+contention and cancellation do not establish tampering. Investigate before the
+current OWNER records an explicit
+[`audit reseal`](/cli/audit#crewship-audit-reseal) checkpoint with the reviewed
+old tail and a reason. It starts a separately authenticated segment without
+changing old rows. `continuation_verified` does not change a historical
+`historical_unverified` or `historical_invalid` verdict into a clean history.
 
 ### What the chain detects
 
@@ -443,10 +638,11 @@ claim and are unaffected.
   **Residual gaps (no overclaiming).** Two attacks are *not* fully covered:
   **tail truncation** — deleting the newest N entries leaves a shorter but
   internally-consistent chain (anchoring the tip with a signed high-water
-  checkpoint is the tracked follow-up, issue #1369); and **plaintext dev mode**
-  — when no `ENCRYPTION_KEY` is configured the chain key is derived from an
-  empty seed and is therefore reproducible, so keying degrades to detecting only
-  key-unaware edits. Production installs always have a persisted `ENCRYPTION_KEY`.
+  checkpoint is the tracked follow-up, issue #1369); and **legacy plaintext
+  dev history** — old NULL-key rows written with an empty encryption seed use
+  a reproducible key. While that known key is retained, a database writer can
+  forge legacy-framed rows, including a downgrade to that framing. A random
+  active key protects v2 MACs but cannot strengthen a known retained key.
 </Note>
 
 #### A forked restore starts a new chain
@@ -575,10 +771,31 @@ event. Stream revocation notifications run only after commit.
 Instance audit rows use a separate HMAC domain derived from the installation's
 stable journal key. The reader exposes `integrity`: `entry_verified` checks that
 row's stored bytes and immediate predecessor link; `legacy_unverified` means an
-older unchained row, and `invalid` reports a failed check. This bounded check is
+older unchained row, `unchained_fallback` a security action recorded while the
+chain tail was broken (below), and `invalid` reports a failed check. This bounded check is
 not verification of the whole history or protection against tail truncation or
 whole-database rollback. Existing rows are not backfilled with invented proofs;
 plaintext dev mode retains the journal's documented keying limitation.
+
+### Security actions with a broken instance chain tail
+
+Revoking a CLI token, revoking a person's sessions (one or all, by an instance
+admin) and suspending an account only remove access, so they are never held
+hostage by audit repair. Local `crewship admin reset-password` recovery on the
+server host is the operator's own incident response and is treated the same
+way. When the instance chain tail does not authenticate,
+such an action still commits, and its audit row is written in the same
+transaction as an **unchained fallback**: no `chain_seq`, `prev_hash` or
+`entry_hash`, and `"audit_chain": "unchained_fallback"` added to its metadata.
+The fallback row neither extends nor endorses the broken tail; the server logs
+an error for each one, and instance verification counts them
+(`unchained_fallback`) and never reports such a chain as OK. Every
+access-granting action (token creation, pairing, unlock, admin grants and the
+rest) stays refused until the tail is repaired by an explicit reseal. That
+includes a password change and the web password reset: whoever sets a password
+gains access with it, so both fail closed with `503` and the message that the
+audit trail needs repair, and change nothing. Any other
+audit failure (for example a database error) still rolls the action back.
 
 Password changes and sibling-session revocation still precede the token/audit
 transaction; their already-completed effects do not roll back if token audit

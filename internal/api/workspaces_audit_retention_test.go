@@ -24,10 +24,12 @@ import (
 func patchWorkspaceRetention(t *testing.T, h *WorkspaceHandler, wsID, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/workspaces/"+wsID, strings.NewReader(body))
-	ctx := context.WithValue(req.Context(), ctxWorkspaceID, wsID)
-	ctx = context.WithValue(ctx, ctxRole, "OWNER")
+	var owner string
+	if err := h.db.QueryRow(`SELECT user_id FROM workspace_members WHERE workspace_id=? AND role='OWNER'`, wsID).Scan(&owner); err != nil {
+		t.Fatalf("read retention operator: %v", err)
+	}
 	rr := httptest.NewRecorder()
-	h.Update(rr, req.WithContext(ctx))
+	h.Update(rr, withWorkspaceUser(req, owner, wsID, "OWNER"))
 	return rr
 }
 

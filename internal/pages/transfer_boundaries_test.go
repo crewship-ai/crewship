@@ -11,7 +11,7 @@ import (
 )
 
 func TestProjectTransferPreservesPortableSourceAndBindings(t *testing.T) {
-	bundle := TransferBundle{Format: TransferV2, Page: TransferPage{Name: "Portable", Slug: "portable", Owner: "crew/observer", Panels: []TransferPanel{{ID: "health", Schema: "status", Owner: "crew/observer", Producer: "script/check", SLASeconds: 30}}}, Project: testSourceProject(), Refs: []TransferReference{{Ref: "crew/observer", Kind: "crew", Bindable: true, UsedBy: []string{"health"}}}, Meta: TransferMetadata{PanelCount: 1}}
+	bundle := TransferBundle{Format: TransferV2, Page: TransferPage{Name: "Portable", Slug: "portable", Owner: "crew/observer", Panels: []TransferPanel{{ID: "health", Schema: "status", Owner: "crew/observer", Producer: "script/check", SLASeconds: 30}}}, Project: testSourceProject(), Refs: []TransferReference{{Ref: "crew/observer", Kind: "crew", Bindable: true, UsedBy: []string{"health"}}}, Meta: TransferMetadata{PanelCount: 1, CreatedByTest: true}}
 	encoded, err := MarshalProjectTransfer(bundle)
 	if err != nil {
 		t.Fatal(err)

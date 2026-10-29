@@ -11,12 +11,19 @@ it is safe against a shared development instance.
 | --- | --- | --- |
 | Start development | `./dev.sh start` | Starts the instance's Go/Next.js services; use `status` to inspect first |
 | Build a release-style binary | `make build` | Builds and embeds the UI, then builds Go |
+| Mooring dev release assets | `python3 scripts/build-mooring-runtime.py --release-dev EXACT_SHA` | In a clean committed Linux source tree, build the pinned Rust runtime, WASM SDK and isolated WordCraft editor. Requires the pinned Rust/WASM toolchain and frozen pnpm install. Fetches only pinned public source/font inputs and locked WordCraft dependencies; includes licenses. Writes only ignored generated assets; enables no environment or route. Build output requires separate application and authorization acceptance. |
+| Mooring build isolation checks | `python3 -m unittest discover -s scripts -p test_build_mooring_runtime.py` | Synthetic owned Git repositories, bounded tool archives and execution of a flat editor package with a real WASM snippet import. Requires Node.js; no network, Rust compiler or live environment. |
 | Fast pre-push checks | `bash scripts/verify.sh quick` | CI helper tests, toolchain/build-path checks and workflow lint; not the full test suite |
 | Backend pre-push checks | `bash scripts/verify.sh go` | Quick checks plus the Go test wrapper and `go vet` |
 | Full pre-push entrypoint | `bash scripts/verify.sh full` | Adds frontend lint, types, coverage and static export build |
 | Whole frontend coverage audit | `pnpm test:coverage:full` | Measures handwritten application routes, components, hooks, libraries and stores; writes `coverage/full-frontend/` and fails when any measured file has less than 90% lines or branches. This broader audit is separate from the historical shared-module CI gate and currently reports outstanding coverage debt. |
 | CLI subprocess coverage | Set `TEST_CREWSHIP_CLI_COVERAGE_DIR` to an existing absolute output directory when running `go test ./cmd/crewship` | Instruments the shared acceptance-test binary for `cmd/crewship`. Export its counters with `go tool covdata textfmt -i="$TEST_CREWSHIP_CLI_COVERAGE_DIR" -o=cli-subprocess.out`; combine matching statement blocks with the ordinary test profile. The subprocess report alone does not include in-process unit tests. |
 | Inspect trusted CI control inventory | `python3 -m unittest discover -s scripts/ci -p test_inventory_guard.py` | Tests the main-owned, metadata-only guard; administrator exceptions require a separate exact-head dispatch. See [trust limits and rollout](../docs/runbooks/ci-inventory-guard.md) |
+| Mooring native/WASM fixtures | `bash scripts/ci/mooring.sh` | Requires Rust with the WASM target, Node and wasm-bindgen 0.2.129; runs offline native workspace tests, builds the actual WASM client and executes its shared fixture cases through the generated ABI. CI verifies the pinned binding-tool archive before extraction. |
+| Public actual Mooring fixtures | `python3 scripts/ci/mooring-actual-fixtures.py --output NEW_ABSOLUTE_DIRECTORY` | Builds the native service, WordCraft WASM SDK and public D1/D3 checkpoints from a clean committed checkout; records source and input byte hashes, with no private prebuilt fixtures. |
+| ALL actual Mooring integration cases | `python3 scripts/ci/mooring-actual.py --fixtures FIXTURES_JSON --results NEW_DIRECTORY` | Runs every inventoried Linux `mooring_rust_integration` test individually under the race detector; rejects source/inventory drift, missing tests, skips and failed processes. |
+| Actual Mooring test discovery | `go run scripts/ci/mooring-actual-discover/main.go REPOSITORY_ROOT` | Parses tagged Go test declarations and build headers with the standard Go AST; the ALL actual runner compares this complete inventory before executing tests. |
+| Actual Mooring execution evidence | `python3 scripts/ci/mooring-actual-results.py --package PACKAGE --test TEST GO_EVENTS_JSONL` | Verifies exact Go run/pass evidence; package success alone and missing, duplicate or skipped results fail. |
 | PR throughput evidence | `python3 scripts/ci/pr-throughput.py --since YYYY-MM-DD --output /tmp/throughput.json --raw-output /tmp/throughput-raw.json` | Read-only bounded GitHub queries for merged PR latency, workflow attempts, failures and queue/execution; see [metric definitions and limitations](ci/pr-throughput.md) |
 | Plan repository merge policy | `python3 scripts/ci/repository-policy.py --output /tmp/policy-plan.json` | Reads the current main ruleset and prepares a preservation-first queue/CodeQL plan. Every `--apply --plan ...` requires `--analysis-commit ...` for reviewed source already on main and actual PR canary review; queue activation also requires `--documentation-commit ...`. See [the policy runbook](../docs/runbooks/ci-cd-implementation-2026-09-11.md#review-and-apply-repository-policy-2932) |
 | Documentation inventory | `make docs-inventory:strict` | Checks documented API/CLI references and writes ignored inventory reports |
@@ -35,9 +42,13 @@ running the full suite with a deliberately adjusted timeout. Mutation tests
 | Script | Responsibility / outputs |
 | --- | --- |
 | [build-stamp.sh](build-stamp.sh) | Reads Git identity correctly in worktrees; supplies build metadata |
+| [WordCraft native source preparation](../tools/wordcraft-mooring-native/README.md) | Copies a fixed public Git revision into a new directory, checks the inventoried dormant seam patch and original/patched hashes; no changes to input tracked files/index, dependency download, service or capability enablement |
+| [Separate C1 renderer seam](../tools/wordcraft-c1-browser/README.md) | Prepares the pinned C1 renderer and actual WASM registry/codec harness in new owned directories; no legacy SDK, host authority, service or default build changes |
 | [embed-web-out.sh](embed-web-out.sh) | Stages/verifies the static export in `web/out/`; preserves the placeholder |
 | [check-chat-table-worker.mjs](check-chat-table-worker.mjs), [check-chat-xlsx-worker.mjs](check-chat-xlsx-worker.mjs) | Chromium acceptance of built `out/chat-workers` bundles with synthetic CSV/XLSX; runs through `pnpm test:chat-worker` / `pnpm test:chat-xlsx-worker` in CI Playwright PR subset; no live server or external parser |
 | [prepare-chat-workers.mjs](prepare-chat-workers.mjs) | Bundles chat preview workers as local JavaScript before frontend dev/build; public output is generated and ignored |
+| [prepare-mooring-editors.mjs](prepare-mooring-editors.mjs) | Reproducibly bundles the small reference editor and prints its manifest pin; writes reviewed embedded packages in `internal/editororigin/packages/`. See [SDK workflow](../docs/development/mooring-editor-sdk.md). |
+| [vendor-mooring-sdk.mjs](vendor-mooring-sdk.mjs) | Copies the committed editor SDK into a supplied GridCraft checkout and records source hashes, compiler version and reproducible native module bytes. See [SDK workflow](../docs/development/mooring-editor-sdk.md). |
 | [prepare-pdf-assets.mjs](prepare-pdf-assets.mjs) | Prepares browser PDF assets; invoked by frontend dev/build commands |
 | [gen-avatar-fixtures.mjs](gen-avatar-fixtures.mjs) | Regenerates avatar validator test fixtures |
 | [generate-team-avatars.mjs](generate-team-avatars.mjs) | Generates demo team portraits; distinct from validator fixtures |
@@ -55,10 +66,24 @@ publication or provider calls. The main-only `Native Worker Release` workflow
 owns candidate publication and signing; see the
 [release procedure](../docs/guides/restricted-native-codex.md#independent-release-candidates).
 
+`ci/prepare-text-release.sh /absolute/new/context-directory` prepares the
+`responses_text` runner, pinned image recipe, binary checksum, source identity
+and Go/project license bundle. The main-only `Text Worker Release` workflow
+publishes and signs candidates only when explicitly dispatched with
+`publish=true`, after exact-source CI/Security/CodeQL verification. The separate
+PR candidate check runs the actual production text-worker accounting canary
+against synthetic TLS data and refuses missing, skipped or failed execution.
+See the [runtime contract](../docs/specs/restricted-workflows.md#independent-text-worker-candidates).
+
 Publishing helpers under `ci/` are workflow components, not general local test
 commands. They may publish or remove release/package artifacts.
 
 ## Static checks and test infrastructure
+
+`crewship-heavy node --test scripts/wordcraft-numgen-node-test.mjs` checks that
+the vendored numeric-fixture generator preserves existing output, including a
+competing create immediately before its real filesystem open. It uses disposable
+files and stops before the large fixture-generation loop.
 
 | Location | Checks |
 | --- | --- |
@@ -180,3 +205,45 @@ runs `go vet -tags conformance ./...`, which compiles this test but does not
 execute Chromium. Executing either tagged test set requires the explicit browser
 environment and real static export; missing configuration fails rather than skips.
 `go test -tags conformance ./...` therefore also requires those prerequisites.
+
+`ci/native-noatime-fixture.sh IMAGE OUTPUT red|green` is restricted to a
+disposable Linux acceptance host with the unchanged native AppArmor policy and
+an owned atime fixture on its Docker network-file source directory. It invokes the real production native canary,
+rejecting skips; the RED control must exhibit the expected resolver remount
+failure. It neither publishes an image nor activates a runtime. Do not run its
+fixture setup on a shared development host; use the candidate workflow.
+
+`tools/wordcraft-capabilities/generate.mjs` exports the pinned compiled WordCraft
+registry into a shared JSON capability catalog. Its [README](../tools/wordcraft-capabilities/README.md)
+documents canonical inputs, qualification scope and drift checks.
+
+`wordcraft-typing-endurance.mjs` creates a new test command document through the
+normal authenticated UI for each run, then offers real keyboard input. Set
+`WORDCRAFT_ENDURANCE_BASE_URL`, `WORDCRAFT_ENDURANCE_SHA` (the exact deployed
+commit), `WORDCRAFT_ENDURANCE_WORKSPACE`, `WORDCRAFT_ENDURANCE_AUTH` (an existing
+private regular 0600 Playwright storage-state file), and
+`WORDCRAFT_ENDURANCE_OUTPUT` (a **new** directory under an existing parent). Run:
+
+```sh
+crewship-heavy node scripts/wordcraft-typing-endurance.mjs
+crewship-heavy pnpm exec vitest run scripts/wordcraft-typing-endurance-helpers.test.ts
+```
+
+Defaults are three 900-second observation windows with 250ms input pacing; the
+optional `WORDCRAFT_ENDURANCE_RUNS`, `WORDCRAFT_ENDURANCE_SECONDS` and
+`WORDCRAFT_ENDURANCE_INTERVAL_MS` record any override in the report. Authentication
+is checked before the deployed SHA. Each run uses its own private state copy and
+carries legitimate refreshed cookies into a new private state for the next run;
+the supplied original file is never changed. Output includes authentication
+state and synthetic original command files: keep the whole directory private.
+
+Initialization must confirm the newly created Page identity, native host status
+and visible canvas before a timed window starts. Startup failures produce fixed
+phase codes and screenshot attempts, with zero completed windows. After the first
+input/observation failure, input stops and the remaining clock window is still
+observed. Commands are never replayed. Unknown or unapplied input skips reload
+and retains its available original data for explicit investigation. Conditional
+reload requires both confirmed server text and a ready visible renderer. Receipt
+and native-text checks establish data evidence; screenshots are review artifacts
+and **are not automatic glyph or GPU paint verification**. Passing this harness
+does not qualify the wider command catalog or collaborative editing.

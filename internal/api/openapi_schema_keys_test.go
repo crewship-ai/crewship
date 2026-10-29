@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
+	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/webhook"
 )
 
@@ -43,7 +45,24 @@ var schemaKeyContracts = []struct {
 	// A zero value of the struct the handler serializes.
 	value any
 }{
+	{name: "ArtifactProjectComment", pointer: "/components/schemas/ArtifactProjectComment", value: artifactProjectComment{}},
+
+	{name: "ArtifactSlidesProjection", pointer: "/components/schemas/ArtifactSlidesProjection", value: artifacts.ArtifactSlidesProjection{}},
+	{name: "ArtifactSlideAnchor", pointer: "/components/schemas/ArtifactSlideAnchor", value: artifacts.ArtifactSlideAnchor{}},
+	{name: "ArtifactDataCollections", pointer: "/components/schemas/ArtifactDataCollections", value: artifactDataCollectionsResponse{}},
+	{name: "ArtifactDataResponse", pointer: "/components/schemas/ArtifactDataResponse", value: artifactDataResponse{}},
+	{name: "ArtifactDataDocument", pointer: "/components/schemas/ArtifactDataDocument", value: artifactDataDocumentResponse{}},
+	{name: "NativeCraftInitializeReceipt", pointer: "/components/schemas/NativeCraftInitializeReceipt", value: craftNativeInitializeResponse{}},
+	{name: "NativeCraftDocument", pointer: "/components/schemas/NativeCraftDocument", value: craftNativeDocumentResponse{}},
+	{name: "NativeCraftPreview", pointer: "/components/schemas/NativeCraftPreview", value: craftNativePreviewResponse{}},
+	{name: "NativeCraftShareReceipt", pointer: "/components/schemas/NativeCraftShareReceipt", value: craftNativeRestoreResponse{}},
+	{name: "NativeCraftDocumentQuota", pointer: "/components/schemas/NativeCraftDocumentQuota", value: craftNativeDocumentQuotaResponse{}},
+	{name: "NativeCraftSnapshotReceipt", pointer: "/components/schemas/NativeCraftSnapshotReceipt", value: mooring.NativeSaveReceipt{}},
+	{name: "NativeCraftRestoreReceipt", pointer: "/components/schemas/NativeCraftRestoreReceipt", value: craftNativeRestoreResponse{}},
 	{name: "WorkspacePendingRunResponseV1", pointer: "/components/schemas/WorkspacePendingRunResponseV1", value: pendingRunReceipt{}},
+	{name: "ChatDocumentAccessList", pointer: "/components/schemas/ChatDocumentAccessList", value: chatDocumentAccessResponse{}},
+	{name: "ChatDocumentAccess", pointer: "/components/schemas/ChatDocumentAccess", value: chatDocumentAccess{}},
+	{name: "ChatDocumentTaskView", pointer: "/components/schemas/ChatDocumentTaskView", value: collaborationAgentTaskView{}},
 	{name: "WorkspacePendingRunsResponseV1[]", pointer: "/components/schemas/WorkspacePendingRunsResponseV1/items", value: pendingRunReceipt{}},
 	{name: "Run", pointer: "/components/schemas/Run", value: runResponse{}},
 	{name: "RunList", pointer: "/components/schemas/RunList", value: runListResponse{}},

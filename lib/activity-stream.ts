@@ -177,6 +177,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
     "crew.member_changed",
     "member.role_changed",
     "member.removed",
+    "workspace.deleted",
     ],
   },
   {
@@ -265,6 +266,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "provisioning.failed",
       "provisioning.build_failed",
       "sidecar.stale",
+      "sidecar.recreated",
       "image.stale",
       // Pages (docs/specs/pages.md §5, §7.1b) — no dedicated facet yet, so
       // they land here explicitly rather than through the unclaimed
@@ -283,6 +285,14 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "page.spec.changed",
       // The ways a page leaves the product: a public link, a view against
       // one, and a webhook credential that writes a panel from outside.
+      "artifact.mooring_created",
+      "artifact.mooring_committed",
+      "artifact.mooring_mandate_admitted",
+      "artifact.mooring_mandate_revoked",
+      "artifact.project_shared",
+      "craft.native_preview_shared",
+      "artifact.orphaned_workbook_deleted",
+      "artifact.private_output_published",
       "page.published",
       "page.link_revoked",
       "page.public_view",

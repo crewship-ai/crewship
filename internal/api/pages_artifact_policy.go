@@ -184,11 +184,22 @@ func (h *PageHandler) UpdateArtifactCreationPolicy(w http.ResponseWriter, r *htt
 			return
 		}
 	}
+	// Which crews may create artifacts is an access ceiling: the change and
+	// its chained audit (old and new allowlist) commit together (F1).
+	next := artifactCreationPolicy{Enabled: *req.Enabled, CrewIDs: *req.CrewIDs, Version: current.Version + 1}
+	notify, err := appendSettingsAudit(r, tx, h.journal, "workspace.artifact_creation_policy.update", "WORKSPACE", workspace,
+		map[string]any{"previous": current, "current": next})
+	if err != nil {
+		replyInternalError(w, h.logger, "audit artifact creation policy", err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit artifact creation policy", err)
 		return
 	}
-	auditFromRequest(r, h.db, "workspace.artifact_creation_policy.update", "WORKSPACE", workspace, map[string]any{"enabled": *req.Enabled, "crew_count": len(*req.CrewIDs), "version": current.Version + 1})
+	if notify != nil {
+		notify()
+	}
 	broadcastWorkspaceEvent(h.hub, workspace, "workspace.updated", map[string]any{"workspace_id": workspace})
 	writeJSON(w, 200, artifactCreationPolicy{Enabled: *req.Enabled, CrewIDs: *req.CrewIDs, Version: current.Version + 1})
 }

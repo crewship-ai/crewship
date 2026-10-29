@@ -14,6 +14,11 @@ A crew is a team of AI agents that share one runtime container and a common Shar
 crewship crew <subcommand> [flags]
 ```
 
+Crew settings and deletion require their audit to commit with the change.
+Audit failures leave the previous settings and memberships in place. Changes
+to privileged mode and explicit capabilities retain their previous/new values
+without copying private environment settings into the audit.
+
 ## Subcommands
 
 | Command | Description |
@@ -95,6 +100,28 @@ crewship crew get <slug-or-id>
 ```
 
 **Output fields:** Name, Slug, ID, Description, Memory, CPUs, TTL, Network Mode, Allowed Domains, Created.
+
+---
+
+## `crewship crew access`
+
+Explain your own explicit Guest View/Use share, using
+`GET /api/v1/crews/{crewId}/access/me`. Trusted callers and unavailable shares
+receive 404. This command does not change permissions.
+
+```bash
+crewship crew access <slug-or-id>
+crewship crew access <slug-or-id> --format json
+```
+
+**Output:** ACTION, STATE, REASON for View, conditional Use and denied Manage.
+Use still requires each agent's authority and runtime preflight. No Delegate or
+credential access is implied.
+
+For Guests, `crew list` and `crew get` show only explicitly shared crew identities
+and counts; detail includes current agent identities/status. Configuration and
+runtime columns are omitted even with `crew list --runtime`; JSON/YAML retain
+only the safe projection. Existing trusted output remains unchanged.
 
 ---
 
@@ -1218,9 +1245,15 @@ crewship crew restart-agents <slug-or-id> --format json
 
 Backed by `POST /api/v1/crews/{crewId}/restart-agents`. The handler returns `{"restarted": <n>}`. Use `restart-agents` for hot config refreshes; reach for [`rebuild`](#crewship-crew-rebuild) only when the image itself has changed.
 
-`restart-agents` is also the fix for a **stale sidecar**: after a redeploy, a still-running crew container keeps executing the OLD bind-mounted `crewship-sidecar` (memory recall and egress policy can silently degrade). Crewship detects this on the next agent run and records a `sidecar.stale` **severity-error** entry in the activity feed (`GET /api/v1/journal?severity=error`) — recycle the container with `restart-agents` to pick up the fresh sidecar.
+You do **not** need `restart-agents` after an upgrade to pick up a new sidecar. A crew container keeps executing the `crewship-sidecar` it was created with (the binary is bind-mounted, and the mount pins the file of that moment), so every crew container is stamped with the hash of its sidecar (label `crewship.sidecar-hash`). When a crew starts and its stamp differs from the sidecar the server stages now, or the container has no stamp because an older version created it, Crewship replaces the container on its own:
 
-On servers built via `make build` / `make build:go`, the expected sidecar hash is baked into the server binary at build time, so detection also catches a **stale artifact** — a deploy that updated the server but never rebuilt/recopied `crewship-sidecar` (the on-disk file is as old as the running one, which runtime file-hashing alone cannot see). In that case the server additionally logs a `stale sidecar ARTIFACT detected` error: `restart-agents` is **not** enough, because a fresh container would remount the same old file — rebuild the sidecar (`make build:sidecar`), redeploy it, *then* run `restart-agents`. Builds without the baked-in hash (plain `go build`, `go run`) fall back to comparing against the on-disk binary, as before.
+- **Stopped** container: removed and recreated on that start.
+- **Running and idle** container: stopped and recreated before the new run starts, and a `sidecar.recreated` entry (severity info, with `previous_sidecar_hash` and `sidecar_hash`) is written to the activity feed.
+- **Running with an active run** (or a terminal session, or any work the server cannot confirm is finished): never interrupted. The new run uses the container as it is, the run still records a `sidecar.stale` **severity-error** entry (`GET /api/v1/journal?severity=error`), and the container is replaced at the next start that finds the crew idle.
+
+Recreating keeps what any recreate keeps: the home and tools volumes, the host-bound `/workspace`, `/output` and `/crew` data, and the credentials wiring, which is set up again for the new container. `restart-agents` remains available when you want to recycle a busy crew immediately.
+
+On servers built via `make build` / `make build:go`, the expected sidecar hash is baked into the server binary at build time, so detection also catches a **stale artifact** — a deploy that updated the server but never rebuilt/recopied `crewship-sidecar` (the on-disk file is as old as the running one, which runtime file-hashing alone cannot see). In that case the server additionally logs a `stale sidecar ARTIFACT detected` error: recreating is **not** enough, because a fresh container would remount the same old file, so the automatic replacement does not churn on it — rebuild the sidecar (`make build:sidecar`) and redeploy it; idle crews then pick it up on their next start. Builds without the baked-in hash (plain `go build`, `go run`) fall back to comparing against the on-disk binary, as before.
 
 <Note>
 `restarted: <n>` (n > 0) confirms the container was actually dropped; a fresh one is created cold on the next exec. `restarted: 0` means no running container was found for this crew — expected when the crew is idle, but if you *know* a container is up and still see `0`, you're on a build that predates the container-name-matching fix (the matcher looked for `crewship-team-<slug>` and missed the real `<prefix>-team-<slug>-<crewID>` name on any multi-instance or post-cross-tenant-fix deployment, so the drop silently no-op'd). Upgrade the server.
@@ -1388,3 +1421,33 @@ MANAGER or higher is required. The version must be nonnegative and match `crew s
 A conflict exits nonzero; reread current state before retrying. Success means intent was accepted,
 not that startup finished. Intent survives Crewship restart. Missing credentials block service
 startup, and agent wakeups do not override an explicit service stop.
+
+
+## Crew shares and the web controls
+
+Workspace OWNER/ADMIN users share View/Use with a Guest from crew Settings →
+Share or the person's Access editor → Crew. The equivalent CLI operations are:
+
+```bash
+crewship share crew <crew-id> --with <member> --operation view,use
+crewship unshare crew <crew-id> --with <member> --operation use
+```
+
+These use `PUT /api/v1/workspaces/{workspaceId}/members/{memberId}/access` with
+the saved membership ID and revision, preserving unrelated rights and account
+mode. Crew Use includes agent Chat/Run for the crew's current and future agents;
+agent authorization and execution preflight still apply. It never grants
+Delegate, credential visibility or crew administration. Existing grant issuers
+are retained unless an inactive grant is explicitly reissued; conflicts require
+reviewing the current policy, without a silent retry.
+
+### Explicit Manage and ordinary membership
+
+`crewship crew member add` and `crewship crew member remove` also use a live
+trusted crew Manage share. This permits only ordinary membership: assigning,
+editing or removing an explicit crew role retains the existing administrator
+check. Crew Settings mirrors this boundary using the signed-in actor's own
+`GET /api/v1/workspaces/{workspaceId}/access/me` explanation. Missing, inactive,
+unavailable or Guest-ceiling decisions never enable the additional controls.
+The API rechecks authority on the writer and after audit; stale UI state does
+not authorize a mutation.

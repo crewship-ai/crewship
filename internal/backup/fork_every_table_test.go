@@ -431,6 +431,14 @@ func seedRowPerBackupTable(t *testing.T, db *sql.DB, workspaceID string) (seeded
 	for {
 		progress := false
 		for _, table := range backup.BackupTables {
+			// Scope-bound operation fingerprints cannot be silently re-keyed for a
+			// fork. Dedicated exact-ID/refusal regressions cover these durable tables:
+			// TestMooringCollaborationBackupPreservesLedgerCheckpointTaskAudit and
+			// TestMooringCollaborationRestoreRefusesRemapAndCollisionBeforeWrites.
+			if strings.HasPrefix(table, "mooring_collab_") {
+				failures[table] = "qualified clone/remap unavailable; dedicated exact-ID/refusal tests"
+				continue
+			}
 			if done[table] {
 				continue
 			}

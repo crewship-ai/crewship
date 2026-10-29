@@ -101,7 +101,33 @@ func TestLiveNativeFrozenToolsAndDurableAccounting(t *testing.T) {
 		}
 		var output []any
 		if !followup {
-			args, _ := json.Marshal(map[string]any{"cmd": "printf OWN_" + actor + " > native-canary.txt; cat native-canary.txt", "shell": "/bin/sh", "login": false, "max_output_tokens": 100, "yield_time_ms": 1000})
+			command := `set -eu
+ deny() { if "$@" >/dev/null 2>&1; then echo sandbox-boundary-lost; exit 91; fi; }
+ test -r /etc/resolv.conf
+ deny /bin/sh -c 'printf bad > /etc/resolv.conf'
+ deny /bin/sh -c 'printf bad > /usr/bin/bwrap'
+ deny /bin/sh -c 'printf bad > /home/agent/outside-workspace'
+ deny mkdir .git
+ deny mkdir .codex
+ deny /bin/sh -c 'printf bad > .git/config'
+ deny /bin/sh -c 'printf bad > .codex/config.toml'
+ deny /bin/bash -c 'echo blocked > /dev/tcp/127.0.0.1/9121'
+ `
+			if os.Getenv("CREWSHIP_NATIVE_EXPECT_NOATIME") == "1" {
+				command += `found=0
+ while IFS=' ' read -r mountid parentid device root target flags rest; do
+   if [ "$target" = /etc/resolv.conf ]; then
+     found=1
+     for expected in ro nosuid nodev noatime; do
+       case ",$flags," in *,"$expected",*) ;; *) echo mount-protection-lost; exit 92;; esac
+     done
+   fi
+ done < /proc/self/mountinfo
+ test "$found" = 1
+ `
+			}
+			command += "printf OWN_" + actor + " > native-canary.txt; cat native-canary.txt"
+			args, _ := json.Marshal(map[string]any{"cmd": command, "shell": "/bin/sh", "login": false, "max_output_tokens": 100, "yield_time_ms": 1000})
 			output = []any{map[string]any{"type": "reasoning", "id": "rs_" + actor, "summary": []any{map[string]any{"type": "summary_text", "text": "synthetic reasoning"}}, "encrypted_content": "OPAQUE_" + actor}, map[string]any{"type": "function_call", "id": "fc_" + actor, "call_id": "call_" + actor, "name": "exec_command", "arguments": string(args), "status": "completed"}}
 		} else {
 			output = []any{map[string]any{"type": "message", "id": "msg_" + actor, "role": "assistant", "status": "completed", "content": []any{map[string]any{"type": "output_text", "text": "NATIVE_DONE_" + actor, "annotations": []any{}}}}}

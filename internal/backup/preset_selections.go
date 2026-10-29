@@ -8,11 +8,17 @@ import (
 // Preserve only selectors actually referenced by this workspace, including
 // historical operators no longer in its roster. Never export all global users.
 func includePresetSelectionUsers(ctx context.Context, tx *sql.Tx, workspace, where string, args []any) (string, []any, error) {
-	exists, err := tableExists(ctx, tx, "access_preset_selections")
-	if err != nil || !exists {
-		return where, args, err
+	for _, table := range []string{"access_preset_selections", "crew_access_preset_selections"} {
+		exists, err := tableExists(ctx, tx, table)
+		if err != nil {
+			return where, args, err
+		}
+		if exists {
+			where = "(" + where + ") OR id IN (SELECT selected_by FROM " + table + " WHERE workspace_id=? AND selected_by IS NOT NULL)"
+			args = append(args, workspace)
+		}
 	}
-	return "(" + where + `) OR id IN (SELECT selected_by FROM access_preset_selections WHERE workspace_id=? AND selected_by IS NOT NULL)`, append(args, workspace), nil
+	return where, args, nil
 }
 
 // A custom category subset can omit a choice's resource. Drop only dangling
@@ -34,16 +40,18 @@ func dropDanglingPresetSelections(dump *DBDump) {
 		}
 		return ids[table][id]
 	}
-	rows, ok := dump.Tables["access_preset_selections"]
-	if !ok {
-		return
-	}
-	kept := []map[string]any{}
-	for _, row := range rows {
-		resourcePresent := row["resource_kind"] == "project" && present("projects", row["project_id"]) || row["resource_kind"] == "routine" && present("pipelines", row["routine_id"])
-		if resourcePresent && present("workspace_members", row["member_id"]) && present("workspaces", row["workspace_id"]) && (row["selected_by"] == nil || present("users", row["selected_by"])) {
-			kept = append(kept, row)
+	for _, table := range []string{"access_preset_selections", "crew_access_preset_selections"} {
+		rows, ok := dump.Tables[table]
+		if !ok {
+			continue
 		}
+		kept := []map[string]any{}
+		for _, row := range rows {
+			resourcePresent := row["resource_kind"] == "project" && present("projects", row["project_id"]) || row["resource_kind"] == "routine" && present("pipelines", row["routine_id"]) || table == "crew_access_preset_selections" && row["resource_kind"] == "crew" && present("crews", row["crew_id"])
+			if resourcePresent && present("workspace_members", row["member_id"]) && present("workspaces", row["workspace_id"]) && (row["selected_by"] == nil || present("users", row["selected_by"])) {
+				kept = append(kept, row)
+			}
+		}
+		dump.Tables[table] = kept
 	}
-	dump.Tables["access_preset_selections"] = kept
 }

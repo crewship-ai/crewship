@@ -13,6 +13,8 @@ import (
 // RecordPresetSelectionIn records informational intent only after canonical
 // grant replacement and its audit in the caller's transaction. It never commits.
 // The expected membership is the post-replacement state, not a client revision.
+// Each preset version keeps one record per resource, so applying another
+// version never rewrites an earlier version's still-truthful choice.
 func (s Store) RecordPresetSelectionIn(ctx context.Context, tx *sql.Tx, actor, user, workspace string, expected Membership, req PresetRequest) error {
 	if tx == nil {
 		return ErrDenied
@@ -26,10 +28,10 @@ func (s Store) RecordPresetSelectionIn(ctx context.Context, tx *sql.Tx, actor, u
 	}
 	definition, known := ResolvePreset(req.PresetID, req.Version)
 	operations, levelKnown := definition.Operations(req.Level)
-	if !known || !levelKnown || definition.Kind != req.Resource.Kind || req.Resource.ID == "" || policy.Mode != "restricted" || len(operations) == 0 {
+	if !known || !levelKnown || definition.Kind != req.Resource.Kind || req.Resource.ID == "" || policy.Mode != "restricted" {
 		return ErrPresetInvalid
 	}
-	if err := resourceExists(ctx, tx, workspace, Right{req.Resource.Kind, req.Resource.ID, operations[0]}); err != nil {
+	if err := resourceExists(ctx, tx, workspace, Right{req.Resource.Kind, req.Resource.ID, definition.ManagedOperations[0]}); err != nil {
 		return err
 	}
 	actual := []string{}
@@ -48,7 +50,13 @@ func (s Store) RecordPresetSelectionIn(ctx context.Context, tx *sql.Tx, actor, u
 		return err
 	}
 	selectedAt := tsformat.Format(time.Now())
-	result, err := tx.ExecContext(ctx, `UPDATE access_preset_selections SET preset_id=?,preset_version=?,level=?,definition_hash=?,managed_operations=?,selected_by=?,selected_at=? WHERE workspace_id=? AND member_id=? AND resource_kind=? AND COALESCE(project_id,routine_id)=?`, definition.ID, definition.Version, req.Level, definition.Hash(), string(managed), actor, selectedAt, workspace, policy.ID, req.Resource.Kind, req.Resource.ID)
+	// Separate informational storage keeps the prior reader compatible. Both
+	// tables still feed one policy projection and neither grants authority.
+	update := `UPDATE access_preset_selections SET preset_id=?,preset_version=?,level=?,definition_hash=?,managed_operations=?,selected_by=?,selected_at=? WHERE workspace_id=? AND member_id=? AND resource_kind=? AND COALESCE(project_id,routine_id)=? AND preset_id=? AND preset_version=?`
+	if req.Resource.Kind == "crew" {
+		update = `UPDATE crew_access_preset_selections SET preset_id=?,preset_version=?,level=?,definition_hash=?,managed_operations=?,selected_by=?,selected_at=? WHERE workspace_id=? AND member_id=? AND resource_kind=? AND crew_id=? AND preset_id=? AND preset_version=?`
+	}
+	result, err := tx.ExecContext(ctx, update, definition.ID, definition.Version, req.Level, definition.Hash(), string(managed), actor, selectedAt, workspace, policy.ID, req.Resource.Kind, req.Resource.ID, definition.ID, definition.Version)
 	if err != nil {
 		return err
 	}
@@ -59,13 +67,17 @@ func (s Store) RecordPresetSelectionIn(ctx context.Context, tx *sql.Tx, actor, u
 	if changed != 0 {
 		return nil
 	}
-	var project, routine any
-	if req.Resource.Kind == "project" {
-		project = req.Resource.ID
+	if req.Resource.Kind == "crew" {
+		result, err = tx.ExecContext(ctx, `INSERT INTO crew_access_preset_selections(id,workspace_id,member_id,resource_kind,crew_id,preset_id,preset_version,level,definition_hash,managed_operations,selected_by,selected_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, randomID(), workspace, policy.ID, req.Resource.Kind, req.Resource.ID, definition.ID, definition.Version, req.Level, definition.Hash(), string(managed), actor, selectedAt)
 	} else {
-		routine = req.Resource.ID
+		var project, routine any
+		if req.Resource.Kind == "project" {
+			project = req.Resource.ID
+		} else {
+			routine = req.Resource.ID
+		}
+		result, err = tx.ExecContext(ctx, `INSERT INTO access_preset_selections(id,workspace_id,member_id,resource_kind,project_id,routine_id,preset_id,preset_version,level,definition_hash,managed_operations,selected_by,selected_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, randomID(), workspace, policy.ID, req.Resource.Kind, project, routine, definition.ID, definition.Version, req.Level, definition.Hash(), string(managed), actor, selectedAt)
 	}
-	result, err = tx.ExecContext(ctx, `INSERT INTO access_preset_selections(id,workspace_id,member_id,resource_kind,project_id,routine_id,preset_id,preset_version,level,definition_hash,managed_operations,selected_by,selected_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, randomID(), workspace, policy.ID, req.Resource.Kind, project, routine, definition.ID, definition.Version, req.Level, definition.Hash(), string(managed), actor, selectedAt)
 	if err != nil {
 		return err
 	}

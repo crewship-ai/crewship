@@ -1,0 +1,949 @@
+[
+  {
+    "id": "para.bullets",
+    "valid": [
+      {},
+      {
+        "kind": "\u2022"
+      },
+      {
+        "off": true
+      }
+    ],
+    "invalid": [
+      {
+        "kind": "bad-kind"
+      },
+      {
+        "off": "true"
+      }
+    ]
+  },
+  {
+    "id": "para.numbering",
+    "valid": [
+      {},
+      {
+        "kind": "numbered"
+      },
+      {
+        "off": true
+      }
+    ],
+    "invalid": [
+      {
+        "kind": "bogus"
+      },
+      {
+        "off": 1
+      }
+    ]
+  },
+  {
+    "id": "para.listLevel",
+    "valid": [
+      {
+        "level": 0
+      },
+      {
+        "level": 8
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "level": 9
+      },
+      {
+        "level": -1
+      },
+      {
+        "level": 1.5
+      }
+    ]
+  },
+  {
+    "id": "para.setNumberingValue",
+    "valid": [
+      {
+        "value": 0
+      },
+      {
+        "value": 42
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "value": -1
+      },
+      {
+        "value": 100001
+      }
+    ]
+  },
+  {
+    "id": "list.get",
+    "valid": [
+      {},
+      {
+        "num": 1
+      }
+    ],
+    "invalid": [
+      {
+        "num": -1
+      },
+      {
+        "num": 1.2
+      }
+    ]
+  },
+  {
+    "id": "list.multilevelPreset",
+    "valid": [
+      {
+        "preset": "headings"
+      },
+      {
+        "preset": "article"
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "preset": "bogus"
+      }
+    ]
+  },
+  {
+    "id": "list.define",
+    "valid": [
+      {
+        "levels": [
+          {
+            "format": "bullet",
+            "text": "\u2022"
+          }
+        ]
+      },
+      {
+        "levels": [
+          {
+            "format": "decimal",
+            "restartAfter": null,
+            "color": "FF0000",
+            "font": null
+          }
+        ],
+        "apply": false
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "levels": [
+          {
+            "format": "decimal",
+            "command": "file.open"
+          }
+        ]
+      },
+      {
+        "levels": [
+          {
+            "restartAfter": 9
+          }
+        ]
+      },
+      {
+        "levels": [
+          {
+            "color": "bad-color"
+          }
+        ]
+      },
+      {
+        "levels": [
+          {},
+          {},
+          {},
+          {},
+          {},
+          {},
+          {},
+          {},
+          {},
+          {}
+        ]
+      },
+      {
+        "levels": [
+          {
+            "color": "FF0000\n"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "caret.set",
+    "valid": [
+      {
+        "pos": {
+          "block": 0,
+          "off": 0
+        }
+      },
+      {
+        "page": 0,
+        "x": 1,
+        "y": 2
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "pos": {
+          "block": 0,
+          "off": 0,
+          "command": "file.open"
+        }
+      },
+      {
+        "page": 0,
+        "x": 1
+      }
+    ]
+  },
+  {
+    "id": "edit.find",
+    "valid": [
+      {
+        "text": "alpha",
+        "matchCase": true
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "text": "x",
+        "regex": "true"
+      }
+    ]
+  },
+  {
+    "id": "edit.advancedFind",
+    "valid": [
+      {},
+      {
+        "text": "alpha",
+        "in": "selection"
+      }
+    ],
+    "invalid": [
+      {
+        "in": "file"
+      },
+      {
+        "highlight": 1
+      }
+    ]
+  },
+  {
+    "id": "edit.deleteClipboardItem",
+    "valid": [
+      {
+        "index": 0
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "index": -1
+      }
+    ]
+  },
+  {
+    "id": "edit.pasteClipboardItem",
+    "valid": [
+      {
+        "index": 0
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "index": -1
+      }
+    ]
+  },
+  {
+    "id": "edit.findReplace",
+    "valid": [
+      {},
+      {
+        "tab": "find"
+      }
+    ],
+    "invalid": [
+      {
+        "tab": "run-macro"
+      }
+    ]
+  },
+  {
+    "id": "edit.goto",
+    "valid": [
+      {},
+      {
+        "page": 0
+      },
+      {
+        "pageBy": -1
+      }
+    ],
+    "invalid": [
+      {
+        "paragraph": -1
+      },
+      {
+        "bookmark": 4
+      }
+    ]
+  },
+  {
+    "id": "edit.pasteSpecial",
+    "valid": [
+      {
+        "as": "text",
+        "text": "alpha"
+      },
+      {
+        "as": "picture",
+        "picture": "YWJj"
+      }
+    ],
+    "invalid": [
+      {
+        "as": "file"
+      },
+      {
+        "picture": "???"
+      }
+    ]
+  },
+  {
+    "id": "edit.replace",
+    "valid": [
+      {
+        "text": "alpha",
+        "with": "beta",
+        "wholeWord": true
+      }
+    ],
+    "invalid": [
+      {
+        "text": "x"
+      },
+      {
+        "text": "x",
+        "with": "y",
+        "regex": 1
+      }
+    ]
+  },
+  {
+    "id": "edit.replaceAll",
+    "valid": [
+      {
+        "text": "alpha",
+        "with": "beta",
+        "wholeWord": true
+      }
+    ],
+    "invalid": [
+      {
+        "text": "x"
+      },
+      {
+        "text": "x",
+        "with": "y",
+        "regex": 1
+      }
+    ]
+  },
+  {
+    "id": "edit.undoTo",
+    "valid": [
+      {
+        "count": 1
+      }
+    ],
+    "invalid": [
+      {
+        "count": 0
+      },
+      {
+        "count": 33
+      }
+    ]
+  },
+  {
+    "id": "text.overtype",
+    "valid": [
+      {},
+      {
+        "value": true
+      }
+    ],
+    "invalid": [
+      {
+        "value": 1
+      }
+    ]
+  },
+  {
+    "id": "text.typeCode",
+    "valid": [
+      {
+        "code": "0233",
+        "ansi": 1252
+      }
+    ],
+    "invalid": [
+      {
+        "code": "x"
+      },
+      {
+        "code": "233",
+        "ansi": 999
+      },
+      {
+        "code": "0"
+      },
+      {
+        "code": "9999999999"
+      },
+      {
+        "code": "55296"
+      },
+      {
+        "code": "65\n"
+      }
+    ]
+  },
+  {
+    "id": "format.changeCase",
+    "valid": [
+      {},
+      {
+        "mode": "upper"
+      }
+    ],
+    "invalid": [
+      {
+        "mode": "bogus"
+      }
+    ]
+  },
+  {
+    "id": "format.color",
+    "valid": [
+      {
+        "color": "123456"
+      },
+      {
+        "color": "auto"
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "color": "nothex"
+      },
+      {
+        "color": "123456\n"
+      }
+    ]
+  },
+  {
+    "id": "format.enclose",
+    "valid": [
+      {
+        "shape": "circle"
+      },
+      {
+        "shape": null
+      },
+      {
+        "shape": "circle",
+        "text": "AB"
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "shape": "pentagon"
+      },
+      {
+        "shape": "circle",
+        "text": "ABC"
+      },
+      {
+        "shape": "circle",
+        "text": "\u6f22\u5b57"
+      },
+      {
+        "shape": "circle",
+        "text": "AB\n"
+      }
+    ]
+  },
+  {
+    "id": "format.highlight",
+    "valid": [
+      {},
+      {
+        "color": "yellow"
+      }
+    ],
+    "invalid": [
+      {
+        "color": "orange"
+      }
+    ]
+  },
+  {
+    "id": "format.phonetic",
+    "valid": [
+      {},
+      {
+        "ruby": "r",
+        "align": "center"
+      },
+      {
+        "ruby": null
+      }
+    ],
+    "invalid": [
+      {
+        "ruby": 1
+      },
+      {
+        "ruby": "r",
+        "align": "sideways"
+      }
+    ]
+  },
+  {
+    "id": "format.set",
+    "valid": [
+      {
+        "props": {
+          "bold": true,
+          "color": "123456",
+          "size": 18
+        }
+      },
+      {
+        "props": {
+          "font": null
+        }
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "props": {
+          "command": "file.open"
+        }
+      },
+      {
+        "props": {
+          "color": {
+            "Rgb": [
+              256,
+              0,
+              0
+            ]
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "format.shading",
+    "valid": [
+      {
+        "color": "ABCDEF"
+      },
+      {
+        "color": null
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "color": "nope"
+      }
+    ]
+  },
+  {
+    "id": "para.shading",
+    "valid": [
+      {
+        "color": "ABCDEF"
+      },
+      {
+        "color": null
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "color": "nope"
+      }
+    ]
+  },
+  {
+    "id": "format.textEffects",
+    "valid": [
+      {
+        "clear": true
+      },
+      {
+        "fill": {
+          "gradient": [
+            "FF0000",
+            "0000FF"
+          ],
+          "angle": 90
+        },
+        "glow": 4
+      }
+    ],
+    "invalid": [
+      {
+        "fill": {
+          "gradient": [
+            "FF0000"
+          ]
+        }
+      },
+      {
+        "shadow": {
+          "command": "file.open"
+        }
+      },
+      {
+        "outline": {
+          "width": -1
+        }
+      }
+    ]
+  },
+  {
+    "id": "format.underline",
+    "valid": [
+      {},
+      {
+        "value": true,
+        "style": "double"
+      }
+    ],
+    "invalid": [
+      {
+        "style": "bogus"
+      }
+    ]
+  },
+  {
+    "id": "format.underlineColor",
+    "valid": [
+      {
+        "color": "auto"
+      },
+      {
+        "color": "00FF00"
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "color": "blue"
+      }
+    ]
+  },
+  {
+    "id": "para.align",
+    "valid": [
+      {
+        "value": "center"
+      },
+      {
+        "value": "start"
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "value": "bogus"
+      }
+    ]
+  },
+  {
+    "id": "para.asianTypography",
+    "valid": [
+      {},
+      {
+        "kinsoku": true
+      }
+    ],
+    "invalid": [
+      {
+        "wordWrap": 1
+      }
+    ]
+  },
+  {
+    "id": "para.borders",
+    "valid": [
+      {
+        "kind": "bottom"
+      },
+      {
+        "sides": {
+          "top": {
+            "style": "single",
+            "width": 1
+          }
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "kind": "bogus"
+      },
+      {
+        "sides": {
+          "command": "file.open"
+        }
+      }
+    ]
+  },
+  {
+    "id": "para.defineNumber",
+    "valid": [
+      {
+        "format": "decimal",
+        "text": "%1.",
+        "start": 1
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "start": -1,
+        "format": "decimal"
+      }
+    ]
+  },
+  {
+    "id": "para.indents",
+    "valid": [
+      {},
+      {
+        "left": 10,
+        "firstLine": -5
+      }
+    ],
+    "invalid": [
+      {
+        "left": "10"
+      },
+      {
+        "right": 1585
+      }
+    ]
+  },
+  {
+    "id": "para.lineSpacing",
+    "valid": [
+      {
+        "value": 1.5
+      },
+      {
+        "atLeast": 12
+      },
+      {
+        "exactly": 18
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "value": 1,
+        "exactly": 12
+      },
+      {
+        "value": -1
+      },
+      {
+        "exactly": 0
+      },
+      {
+        "exactly": 0.1
+      }
+    ]
+  },
+  {
+    "id": "para.ltr",
+    "valid": [
+      {},
+      {
+        "value": true
+      }
+    ],
+    "invalid": [
+      {
+        "value": 1
+      }
+    ]
+  },
+  {
+    "id": "para.rtl",
+    "valid": [
+      {},
+      {
+        "value": true
+      }
+    ],
+    "invalid": [
+      {
+        "value": 1
+      }
+    ]
+  },
+  {
+    "id": "para.multilevel",
+    "valid": [
+      {},
+      {
+        "kind": "outline"
+      }
+    ],
+    "invalid": [
+      {
+        "kind": "bogus"
+      }
+    ]
+  },
+  {
+    "id": "para.set",
+    "valid": [
+      {
+        "props": {
+          "align": "center",
+          "numbering": {
+            "num": 1,
+            "level": 0
+          }
+        }
+      },
+      {
+        "props": {},
+        "onPage": {
+          "left": 20
+        }
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "props": {
+          "command": "file.open"
+        }
+      },
+      {
+        "props": {
+          "tabs": [
+            {
+              "pos": 2,
+              "command": "file.open"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "para.spacing",
+    "valid": [
+      {},
+      {
+        "before": 2,
+        "afterAuto": true
+      }
+    ],
+    "invalid": [
+      {
+        "before": -1
+      },
+      {
+        "beforeAuto": 1
+      }
+    ]
+  },
+  {
+    "id": "para.style",
+    "valid": [
+      {
+        "style": "Heading 1"
+      }
+    ],
+    "invalid": [
+      {},
+      {
+        "style": 1
+      }
+    ]
+  },
+  {
+    "id": "para.tabs",
+    "valid": [
+      {},
+      {
+        "set": [
+          {
+            "pos": 20,
+            "align": "left",
+            "leader": "dot"
+          }
+        ],
+        "default": 36
+      }
+    ],
+    "invalid": [
+      {
+        "set": [
+          {
+            "pos": 20,
+            "align": "bogus"
+          }
+        ]
+      },
+      {
+        "tabs": [
+          {
+            "pos": 20,
+            "file": "x"
+          }
+        ]
+      },
+      {
+        "default": 0
+      }
+    ]
+  }
+]

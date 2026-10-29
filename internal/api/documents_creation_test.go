@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
+	"github.com/crewship-ai/crewship/internal/documents"
 )
 
 func documentCreationFixture(t *testing.T) (*PageHandler, string, string, string, func(string, string) *httptest.ResponseRecorder) {
@@ -78,6 +79,16 @@ func TestDocumentCreationAtomicResultAndOriginalPayloadRetry(t *testing.T) {
 	if err := h.db.QueryRow(`SELECT p.owner_user_id,r.actor,COALESCE(p.created_by_agent_id,''),(SELECT COUNT(*) FROM page_grants WHERE page_id=p.id AND subject_type='agent') FROM pages p JOIN document_receipts r ON r.page_id=p.id WHERE p.id=?`, created.PageID).Scan(&owner, &actor, &creator, &grants); err != nil || owner != user || actor != "agent:principal-agent:principal-run" || creator != "principal-agent" || grants != 0 {
 		t.Fatalf("ownership, creator provenance or continuation changed: %s %s %s %d %v", owner, actor, creator, grants, err)
 	}
+	var pinID, pinActor string
+	var rev int64
+	var schema, count int
+	if err := h.db.QueryRow(`SELECT id,rev,schema_version,actor FROM document_checkpoints WHERE page_id=?`, created.PageID).Scan(&pinID, &rev, &schema, &pinActor); err != nil || rev != 0 || schema != 3 || pinActor != actor || len(pinID) > 128 {
+		t.Fatalf("initial creation checkpoint %q %d %d %q: %v", pinID, rev, schema, pinActor, err)
+	}
+	if err := h.db.QueryRow(`SELECT count(*) FROM document_checkpoints WHERE page_id=?`, created.PageID).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("duplicate creation history %d: %v", count, err)
+	}
+
 }
 
 func TestDocumentCreationConcurrentExactRetryHasOnePage(t *testing.T) {
@@ -121,7 +132,7 @@ func TestDocumentCreationConcurrentExactRetryHasOnePage(t *testing.T) {
 }
 
 func TestDocumentCreationPreparationRevocationAndSQLFaultRollback(t *testing.T) {
-	for _, kind := range []string{"node-failure", "revoke-after-prepare", "fault-after-page-insert", "fault-before-consume", "HTML-only-permission"} {
+	for _, kind := range []string{"node-failure", "revoke-after-prepare", "fault-after-page-insert", "fault-initial-checkpoint", "history-quota", "fault-before-consume", "HTML-only-permission"} {
 		t.Run(kind, func(t *testing.T) {
 			h, _, _, _, call := documentCreationFixture(t)
 			original := h.documentCall
@@ -143,6 +154,12 @@ func TestDocumentCreationPreparationRevocationAndSQLFaultRollback(t *testing.T) 
 			case "fault-after-page-insert":
 				want = 500
 				execOrFatal(t, h.db, `CREATE TRIGGER reject_created_document BEFORE INSERT ON documents BEGIN SELECT RAISE(ABORT,'synthetic create init fault'); END`)
+			case "fault-initial-checkpoint":
+				want = 500
+				execOrFatal(t, h.db, `CREATE TRIGGER reject_initial_checkpoint BEFORE INSERT ON document_checkpoints BEGIN SELECT RAISE(ABORT,'synthetic checkpoint fault'); END`)
+			case "history-quota":
+				want = 429
+				h.documentStoreOptions = documents.Options{MaxHistoryBytes: 1}
 			case "fault-before-consume":
 				want = 500
 				execOrFatal(t, h.db, `CREATE TRIGGER reject_creation_consume BEFORE UPDATE OF consumed_at ON document_creation_consents WHEN NEW.consumed_at IS NOT NULL BEGIN SELECT RAISE(ABORT,'synthetic consume fault'); END`)
@@ -152,7 +169,7 @@ func TestDocumentCreationPreparationRevocationAndSQLFaultRollback(t *testing.T) 
 			}
 			result := call(kind, documentCreationBody)
 			creationExpect(t, result, want)
-			for _, query := range []string{`SELECT COUNT(*) FROM pages WHERE slug='created-doc'`, `SELECT COUNT(*) FROM documents`, `SELECT COUNT(*) FROM document_receipts`, `SELECT COUNT(*) FROM document_creations`, `SELECT COUNT(*) FROM document_creation_consents WHERE consumed_at IS NOT NULL`} {
+			for _, query := range []string{`SELECT COUNT(*) FROM pages WHERE slug='created-doc'`, `SELECT COUNT(*) FROM documents`, `SELECT COUNT(*) FROM document_receipts`, `SELECT COUNT(*) FROM document_checkpoints`, `SELECT COUNT(*) FROM document_creations`, `SELECT COUNT(*) FROM document_creation_consents WHERE consumed_at IS NOT NULL`} {
 				var count int
 				if err := h.db.QueryRow(query).Scan(&count); err != nil || count != 0 {
 					t.Fatalf("failed creation left state: %s count%d err%v", query, count, err)

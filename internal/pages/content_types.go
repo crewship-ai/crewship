@@ -11,6 +11,13 @@ import (
 // It describes a format, not permissions or runtime availability; existing
 // authorization fences still control every adapter operation.
 type ContentTypeDescriptor struct {
+	// Optional package metadata describes shipped code/instructions, never an
+	// ACL grant or current runtime availability. Legacy formats omit it.
+	Release           string   `json:"release,omitempty"`
+	ContractVersion   int      `json:"contract_version,omitempty"`
+	ContentLocations  []string `json:"content_locations,omitempty"`
+	RequiredFeatures  []string `json:"required_features,omitempty"`
+	MCPTools          []string `json:"mcp_tools,omitempty"`
 	TypeID            string   `json:"type_id"`
 	SchemaVersion     int      `json:"schema_version"`
 	Viewer            string   `json:"viewer"`
@@ -60,6 +67,9 @@ func ContentTypes() []ContentTypeDescriptor {
 	for i, descriptor := range contentTypeRegistry {
 		descriptor.AnchorKinds = append([]string{}, descriptor.AnchorKinds...)
 		descriptor.ExportFormats = append([]string{}, descriptor.ExportFormats...)
+		descriptor.ContentLocations = append([]string(nil), descriptor.ContentLocations...)
+		descriptor.RequiredFeatures = append([]string(nil), descriptor.RequiredFeatures...)
+		descriptor.MCPTools = append([]string(nil), descriptor.MCPTools...)
 		result[i] = descriptor
 	}
 	return result
@@ -92,6 +102,8 @@ type ContentFacts struct {
 	HasBoard        bool   `json:"has_board"`
 	BoardFormat     string `json:"board_format"`
 	HasArtifact     bool   `json:"has_artifact"`
+	HasMooring      bool   `json:"has_mooring"`
+	HasWorkbook     bool   `json:"has_workbook"`
 	ArtifactProfile string `json:"artifact_profile"`
 	ArtifactVersion int    `json:"artifact_version"`
 	HasProject      bool   `json:"has_project"`
@@ -119,7 +131,7 @@ func contentReference(id string, version int) ContentReference {
 func DeriveContentTypes(facts ContentFacts) ContentDerivation {
 	result := ContentDerivation{ContentDescriptor: contentReference("panels", 1)}
 	specialized := 0
-	for _, present := range []bool{facts.HasSlides, facts.HasDocument, facts.HasBoard, facts.HasArtifact} {
+	for _, present := range []bool{facts.HasSlides, facts.HasDocument, facts.HasBoard, facts.HasArtifact, facts.HasWorkbook, facts.HasMooring} {
 		if present {
 			specialized++
 		}
@@ -139,6 +151,10 @@ func DeriveContentTypes(facts ContentFacts) ContentDerivation {
 			result.ContentDescriptor.Supported = false
 			result.ContentDescriptor.Reason = "unsupported-profile"
 		}
+	case facts.HasMooring:
+		result.ContentDescriptor = contentReference("mooring-app", 1)
+	case facts.HasWorkbook:
+		result.ContentDescriptor = contentReference("gridcraft-workbook", 1)
 	case facts.HasArtifact:
 		result.ContentDescriptor = contentReference("html", facts.ArtifactVersion)
 		if facts.ArtifactProfile != "static-html-v1" {

@@ -59,10 +59,22 @@ read.
 With the recovery kit on (`crewship admin instance backups recovery-kit on`,
 off by default, audited), every key version an envelope in the database
 references rides inside the **age-encrypted payload** of each instance bundle,
-as `recovery-kit/keys.json`, byte for byte as the source had it (the journal
-hash chain key is derived from the `ENCRYPTION_KEY` string itself). Workspace
-and crew bundles never carry it. `crewship recover` writes the keys to
+as `recovery-kit/keys.json`, byte for byte as the source had it. The encrypted
+kit also includes the independent audit signing keyring and its retained
+verification keys; legacy NULL-key audit rows still use the retained key
+derived from the original `ENCRYPTION_KEY` string. Workspace
+and crew bundles never carry it. `crewship recover` writes the vault keys to
 `<data-dir>/recovered-keys.env` (mode `0600`).
+
+It restores the audit keyring separately as `<data-dir>/audit-keyring.json`
+(mode `0600`, sealed under the kit's master key, which the recovered server
+runs with) and records its path in the recovered environment. A different
+keyring already in the target (`--force` onto a booted data directory) is kept
+as `audit-keyring.json.replaced-<UTC time>`, re-sealed under the recovered
+master key, and replaced atomically. Historical
+MACs remain unchanged. A missing old key is not reconstructed by signing old
+history again; an explicit OWNER reseal can qualify a new segment while the
+old history remains unverified.
 
 **Whoever holds a private backup key can read every secret in the instance.**
 Store the age private key on a different device from the one that keeps the

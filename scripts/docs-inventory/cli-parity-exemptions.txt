@@ -15,6 +15,7 @@
 /api/v1/system/setup-status                        public browser setup/signup discovery; CLI seed authenticates its explicit target and does not alter signup policy
 /api/v1/oauth/callback                             provider redirect target; the browser lands here, `crewship oauth` only names it
 /api/v1/pages/runtime/bootstrap                    serves the page-runtime iframe HTML (#2472)
+/api/v1/pages/{slug}/mooring/session/reauthorize     browser transport maintenance for an already joined original connection; requires its original login credential and same-origin POST, creates no session or application command
 /api/v1/public/pages/{token}                       anonymous share-link viewer, authenticated by the URL token
 /api/v1/public/pages/{token}/unlock                anonymous share-link viewer, password step
 /api/v1/waitpoint-tokens/{token}                   one-click approve/reject link sent by notifications; `crewship routine waitpoints` covers the authenticated path
@@ -31,3 +32,5 @@
 /api/v1/templates                                  no command as of 2026-09-15 (`crewship template` drives /crew-templates, not /templates)
 /api/v1/templates/{templateId}                     no command as of 2026-09-15 (`crewship template` drives /crew-templates, not /templates)
 /api/v1/workspaces/{workspaceId}/members/capabilities   no command as of 2026-09-15 (bulk variant; `workspace member capabilities` drives the per-member route)
+
+/api/v1/pages/{slug}/mooring/command-session     default-off native browser session transport with opaque identity-fenced views and exact-origin HTTP; no dedicated CLI command or MCP surface is registered

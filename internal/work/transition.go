@@ -316,6 +316,22 @@ func (s *Store) MarkRuntimeRequested(ctx context.Context, workID, runID string, 
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err = MarkRuntimeRequestedTx(ctx, tx, workID, runID, generation); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// MarkRuntimeRequestedTx records the existing bound creation transition in the
+// caller's transaction. It neither commits nor authorizes creation on its own.
+// The caller must use the canonical work database, acquire its SQL writer,
+// validate original authority in that same writer, and wait for successful
+// COMMIT before allowing any provider process. Rollback retains starting phase.
+func MarkRuntimeRequestedTx(ctx context.Context, tx *sql.Tx, workID, runID string, generation int64) error {
+	if tx == nil {
+		return ErrNotBound
+	}
+
 	it, err := getItemTx(ctx, tx, workID)
 	if err != nil {
 		return err
@@ -336,7 +352,7 @@ func (s *Store) MarkRuntimeRequested(ctx context.Context, workID, runID string, 
 		return fmt.Errorf("%w: attempt %s of %s is not a starting attempt awaiting its process",
 			ErrNotBound, runID, workID)
 	}
-	return tx.Commit()
+	return nil
 }
 
 // RecoveryOutcome is what one recovery pass did.

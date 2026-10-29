@@ -210,6 +210,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/crews", authed(wsCtx(http.HandlerFunc(crews.List))))
 	r.authedMut("POST", "/api/v1/crews", roleCreate, crews.Create)
 	r.mux.Handle("GET /api/v1/crews/{crewId}", authed(wsCtx(http.HandlerFunc(crews.Get))))
+	r.mux.Handle("GET /api/v1/crews/{crewId}/access/me", authed(wsCtx(http.HandlerFunc(crews.MyCrewAccess))))
 	// One-shot authoring dump: DSL schema + container caps + integration tools
 	// + agents + runtimes (#862). Literal "capabilities" beats the {crewId}
 	// catch-all in net/http matching, so no ordering hazard.
@@ -236,8 +237,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// the devcontainer config or triggers a rebuild, so it needs no more
 	// than the read role every other GET here uses.
 	r.mux.Handle("GET /api/v1/crews/{crewId}/credential-readiness", authed(wsCtx(http.HandlerFunc(crews.CredentialReadiness))))
-	r.authedMut("PATCH", "/api/v1/crews/{crewId}", roleManage, crews.Update)
-	r.authedMut("PUT", "/api/v1/crews/{crewId}", roleManage, crews.Update)
+	r.authedMut("PATCH", "/api/v1/crews/{crewId}", roleInline, crews.Update)
+	r.authedMut("PUT", "/api/v1/crews/{crewId}", roleInline, crews.Update)
+	// Crew existence is checked inside the transactional mutation helper.
+	// openapi: responses 404
 	r.authedMut("DELETE", "/api/v1/crews/{crewId}", roleManage, crews.Delete)
 
 	// Per-crew autonomy policy (PR-B F2). Workspace-scoped list +
@@ -258,9 +261,9 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 
 	// Crew members
 	r.mux.Handle("GET /api/v1/crews/{crewId}/members", authed(wsCtx(http.HandlerFunc(crews.ListMembers))))
-	r.authedMut("POST", "/api/v1/crews/{crewId}/members", roleCreate, crews.AddMember)
+	r.authedMut("POST", "/api/v1/crews/{crewId}/members", roleInline, crews.AddMember)
 	r.authedMut("PATCH", "/api/v1/crews/{crewId}/members/{memberId}", roleManage, crews.UpdateMemberRole)
-	r.authedMut("DELETE", "/api/v1/crews/{crewId}/members/{memberId}", roleManage, crews.RemoveMember)
+	r.authedMut("DELETE", "/api/v1/crews/{crewId}/members/{memberId}", roleInline, crews.RemoveMember)
 	r.authedMut("POST", "/api/v1/crews/{crewId}/apply-avatar-style", roleManage, crews.ApplyAvatarStyle)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/container-status", authed(wsCtx(http.HandlerFunc(crews.ContainerStatus))))
 	// roleCreate, matching provision / rebuild / restart-agents: starting a
@@ -274,6 +277,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 
 	// Crew Connections
 	conns := NewCrewConnectionHandler(r.db, r.logger)
+	conns.journal = r.journal
 	r.mux.Handle("GET /api/v1/crew-connections", authed(wsCtx(http.HandlerFunc(conns.List))))
 	r.authedMut("POST", "/api/v1/crew-connections", roleCreate, conns.Create)
 	r.authedMut("PUT", "/api/v1/crew-connections/{connectionId}/file-access", roleCreate, conns.UpdateFileAccess)
@@ -618,6 +622,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// Read is open to every workspace member (names are not secret, counts
 	// follow credential visibility); the handlers repeat the role gates.
 	credFolders := NewCredentialFolderHandler(r.db, r.logger)
+	credFolders.journal = r.journal
 	r.mux.Handle("GET /api/v1/credential-folders", authed(wsCtx(http.HandlerFunc(credFolders.List))))
 	r.authedMut("POST", "/api/v1/credential-folders", roleInline, credFolders.Create)
 	r.authedMut("PATCH", "/api/v1/credential-folders/{folderId}", roleInline, credFolders.Update)
@@ -668,7 +673,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// pattern is {workspaceId} everywhere else in the API, and changing
 	// it broke the workspace lookup on this route in the prior commit.
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/generate", roleInline, skillGen.Generate)
-	skillBulk := NewSkillBulkImportHandler(r.db, r.logger)
+	skillBulk := NewSkillBulkImportHandler(r.db, r.logger, r.skillGitImportPolicy)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/bulk-import", roleCreate, skillBulk.Import)
 
 	// Devcontainer feature catalog (auth required, no workspace context needed).

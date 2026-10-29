@@ -49,7 +49,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   for (const path of [socket, authoritySocket, tokenFile]) if (!isAbsolute(path) || normalize(path) !== path || Buffer.byteLength(path) > 100) throw new Error('clean absolute Unix socket path required (maximum 100 bytes)');
   const secret = await readServiceSecret(tokenFile);
   const build = createHash('sha256');
-  for (const file of ['pnpm-lock.yaml', 'schema.mjs', 'schema-core.mjs', 'service.mjs', 'create-document.mjs', 'secret.mjs']) build.update(await readFile(new URL(file, import.meta.url)));
+  for (const file of ['pnpm-lock.yaml', 'schema.mjs', 'schema-core.mjs', 'position-migrations.mjs', 'service.mjs', 'create-document.mjs', 'secret.mjs']) build.update(await readFile(new URL(file, import.meta.url)));
   const identity = { protocol: PROTOCOL, schema: RICH_VERSION, build: build.digest('hex') };
   const leases = new Map();
   const owner = randomUUID();const syncEpoch=state=>`${state.incarnation??"legacy"}:${owner}:${state.generation??state.epoch}`; const documents = new Map(); let queued = 0; let draining = false;let ready=false;let admitted=0;const decoding=new Set();

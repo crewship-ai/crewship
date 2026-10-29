@@ -414,6 +414,10 @@ func (h *PipelineHandler) ImportPipeline(w http.ResponseWriter, r *http.Request)
 // without this those two would report a 500 for a refusal that is entirely
 // actionable.
 func replyScheduleConflict(w http.ResponseWriter, err error) bool {
+	if errors.Is(err, pipeline.ErrInvalidTrigger) {
+		replyError(w, http.StatusUnprocessableEntity, err.Error())
+		return true
+	}
 	var conflict *pipeline.ScheduleDraftConflict
 	if !errors.As(err, &conflict) {
 		return false

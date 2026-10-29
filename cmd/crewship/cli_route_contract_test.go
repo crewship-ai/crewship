@@ -925,7 +925,8 @@ func callSitesInBody(fset *token.FileSet, resolver *pathResolver, body *ast.Bloc
 // authedAdmin, authedAdminMut and authedInstanceMut all wrap
 // RequireAuth(RequireWorkspace(...)) — see internal/api/rbac_routes.go and
 // instance_admin.go — so registration alone tells us whether a workspace is
-// mandatory. authedSelfMut and authedInstance are RequireAuth only.
+// mandatory. authedSelfMut and authedInstance do not require one;
+// authedAdminAny explicitly passes optional=true for an instance administrator.
 func collectAPIRoutes(t *testing.T) map[string]apiRoute {
 	t.Helper()
 	root := repoRoot(t)
@@ -982,7 +983,7 @@ func collectAPIRoutes(t *testing.T) map[string]apiRoute {
 				if !okM || !okP {
 					return true
 				}
-				add(method, pattern, sel.Sel.Name != "authedSelfMut" && sel.Sel.Name != "authedInstance", pos.String())
+				add(method, pattern, sel.Sel.Name != "authedSelfMut" && sel.Sel.Name != "authedInstance" && sel.Sel.Name != "authedAdminAny", pos.String())
 			case "Handle", "HandleFunc":
 				if len(call.Args) < 1 {
 					return true

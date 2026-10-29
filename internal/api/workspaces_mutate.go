@@ -185,6 +185,8 @@ type updateWorkspaceRequest struct {
 	// would silently delete what an operator typing 0 out of habit with
 	// its neighbours expected to keep. See internal/harbormaster/retention.go.
 	ApprovalsRetentionDays *int `json:"approvals_retention_days"`
+	// GuestRoutineMaxRunMinutes bounds future Guest-published runs (1-240).
+	GuestRoutineMaxRunMinutes *int `json:"guest_routine_max_run_minutes"`
 }
 
 // Update modifies workspace settings such as name, slug, logo, and preferred language.
@@ -247,6 +249,10 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// harbormaster.MaxApprovalsRetentionDays (~106751 days, ~292 years)
 	// and wraps NEGATIVE — a cutoff in the future that would match every
 	// terminal row regardless of age. See retention.go.
+	if req.GuestRoutineMaxRunMinutes != nil && (*req.GuestRoutineMaxRunMinutes < 1 || *req.GuestRoutineMaxRunMinutes > 240) {
+		replyError(w, http.StatusBadRequest, "guest_routine_max_run_minutes must be between 1 and 240")
+		return
+	}
 	if req.ApprovalsRetentionDays != nil && *req.ApprovalsRetentionDays > harbormaster.MaxApprovalsRetentionDays {
 		replyError(w, http.StatusBadRequest, fmt.Sprintf(
 			"approvals_retention_days is %d; the maximum is %d", *req.ApprovalsRetentionDays, harbormaster.MaxApprovalsRetentionDays))
@@ -349,16 +355,56 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 		}
 		ub.Set("approvals_retention_days", *req.ApprovalsRetentionDays)
 	}
+	if req.GuestRoutineMaxRunMinutes != nil {
+		ub.Set("guest_routine_max_run_minutes", *req.GuestRoutineMaxRunMinutes)
+	}
 	persisted := !ub.Empty()
+	var tx *sql.Tx
+	var expected []any
+	var previousPrivileged bool
+	var reader interface {
+		QueryRowContext(context.Context, string, ...any) *sql.Row
+	} = h.db
 	if persisted {
-		query, args := ub.Build("workspaces", "id = ?", workspaceID)
-		if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
+		var err error
+		tx, err = h.db.BeginTx(r.Context(), nil)
+		if err != nil {
+			replyInternalError(w, h.logger, "begin workspace settings", err)
+			return
+		}
+		defer tx.Rollback()
+		if !checkWorkspaceSettingsActor(w, r, tx, h.logger, req.AllowPrivilegedCredentials) {
+			return
+		}
+		if req.AllowPrivilegedCredentials != nil {
+			if err := tx.QueryRowContext(r.Context(), `SELECT allow_privileged_credentials FROM workspaces WHERE id=? AND deleted_at IS NULL`, workspaceID).Scan(&previousPrivileged); err != nil {
+				replyInternalError(w, h.logger, "read previous workspace privilege", err)
+				return
+			}
+		}
+		query, args := ub.Build("workspaces", "id = ? AND deleted_at IS NULL", workspaceID)
+		result, err := tx.ExecContext(r.Context(), query, args...)
+		if err != nil {
 			replyInternalError(w, h.logger, "update workspace", err)
 			return
 		}
+		if n, err := result.RowsAffected(); err != nil || n != 1 {
+			replyInternalError(w, h.logger, "update workspace", fmt.Errorf("workspace update not applied: %w", err))
+			return
+		}
+		if err := settingsUpdatePersisted(r.Context(), tx, "workspaces", workspaceID, ub); err != nil {
+			replyInternalError(w, h.logger, "acknowledge workspace settings", err)
+			return
+		}
+		expected, err = settingsNativeRow(r.Context(), tx, "workspaces", workspaceID)
+		if err != nil {
+			replyInternalError(w, h.logger, "read workspace settings", err)
+			return
+		}
+		reader = tx
 	}
 
-	ws, err := h.workspaceByID(r.Context(), workspaceID)
+	ws, err := workspaceSettingsResponse(r.Context(), reader, workspaceID)
 	if err != nil {
 		replyInternalError(w, h.logger, "get workspace after update", err)
 		return
@@ -401,11 +447,16 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.ApprovalsRetentionDays != nil {
 		changed = append(changed, "approvals_retention_days")
 	}
+	if req.GuestRoutineMaxRunMinutes != nil {
+		changed = append(changed, "guest_routine_max_run_minutes")
+	}
 	meta := map[string]interface{}{"fields": changed}
 	if req.AllowPrivilegedCredentials != nil {
 		changed = append(changed, "allow_privileged_credentials")
 		meta["fields"] = changed
 		meta["allow_privileged_credentials"] = *req.AllowPrivilegedCredentials
+		meta["previous"] = map[string]any{"allow_privileged_credentials": previousPrivileged}
+		meta["current"] = map[string]any{"allow_privileged_credentials": *req.AllowPrivilegedCredentials}
 	}
 	// Only a PATCH that actually persisted something is an event. A `{}`
 	// body (or one carrying nothing but ignored fields) skips the update
@@ -413,7 +464,25 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// that never happened — which is exactly the trail an operator later
 	// reads to find out when a setting moved.
 	if persisted {
-		auditFromRequest(r, h.db, "workspace.update", "WORKSPACE", workspaceID, meta)
+		notify, err := appendSettingsAudit(r, tx, h.policyJournal, "workspace.update", "WORKSPACE", workspaceID, meta)
+		if err != nil {
+			replyInternalError(w, h.logger, "audit workspace settings", err)
+			return
+		}
+		if err := acknowledgeSettingsRow(r.Context(), tx, "workspaces", workspaceID, expected); err != nil {
+			replyInternalError(w, h.logger, "acknowledge workspace settings", err)
+			return
+		}
+		if !checkWorkspaceSettingsActor(w, r, tx, h.logger, req.AllowPrivilegedCredentials) {
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			replyInternalError(w, h.logger, "commit workspace settings", err)
+			return
+		}
+		if notify != nil {
+			notify()
+		}
 		broadcastWorkspaceEvent(h.hub, workspaceID, "workspace.updated", map[string]string{"workspace_id": workspaceID})
 	}
 
@@ -423,12 +492,18 @@ func (h *WorkspaceHandler) Update(w http.ResponseWriter, r *http.Request) {
 // workspaceByID reads the workspace as the detail and update responses show
 // it. Update and the logo endpoints (#3005) answer with it.
 func (h *WorkspaceHandler) workspaceByID(ctx context.Context, workspaceID string) (workspaceResponse, error) {
+	return workspaceSettingsResponse(ctx, h.db, workspaceID)
+}
+
+func workspaceSettingsResponse(ctx context.Context, reader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, workspaceID string) (workspaceResponse, error) {
 	var ws workspaceResponse
-	err := h.db.QueryRowContext(ctx, `
+	err := reader.QueryRowContext(ctx, `
 		SELECT w.id, w.name, w.slug, w.kind, `+personalOwnerSQL+`, w.logo_url, w.preferred_language, w.created_at, w.updated_at,
 			w.allow_privileged_credentials, w.run_retention_days,
 			w.credential_audit_retention_days, w.audit_log_retention_days,
-			w.approvals_retention_days, w.pages_theme, w.appearance_default,
+			w.approvals_retention_days, w.guest_routine_max_run_minutes, w.pages_theme, w.appearance_default,
 			(SELECT COUNT(*) FROM crews WHERE workspace_id = w.id AND deleted_at IS NULL) AS crew_count,
 			(SELECT COUNT(*) FROM agents WHERE workspace_id = w.id AND deleted_at IS NULL) AS agent_count,
 			(SELECT COUNT(*) FROM workspace_members WHERE workspace_id = w.id) AS member_count
@@ -437,7 +512,7 @@ func (h *WorkspaceHandler) workspaceByID(ctx context.Context, workspaceID string
 	`, workspaceID).Scan(&ws.ID, &ws.Name, &ws.Slug, &ws.Kind, &ws.PersonalOwnerID, &ws.LogoURL, &ws.PreferredLanguage,
 		&ws.CreatedAt, &ws.UpdatedAt, &ws.AllowPrivilegedCredentials, &ws.RunRetentionDays,
 		&ws.CredentialAuditRetentionDays, &ws.AuditLogRetentionDays,
-		&ws.ApprovalsRetentionDays, &ws.pagesThemeJSON, &ws.appearanceDefaultJSON,
+		&ws.ApprovalsRetentionDays, &ws.GuestRoutineMaxRunMinutes, &ws.pagesThemeJSON, &ws.appearanceDefaultJSON,
 		&ws.CrewCount, &ws.AgentCount, &ws.MemberCount)
 	if err != nil {
 		return ws, err

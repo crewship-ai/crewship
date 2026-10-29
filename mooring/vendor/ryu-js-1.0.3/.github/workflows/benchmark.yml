@@ -1,0 +1,36 @@
+name: Benchmarks
+
+on:
+  pull_request:
+    branches:
+      - main
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmarks:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            target
+            ~/.cargo/git
+            ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - uses: boa-dev/criterion-compare-action@v3.2.4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branchName: ${{ github.base_ref }}
+

@@ -95,11 +95,11 @@ func TestInvitationJournalMutationAndAcceptance(t *testing.T) {
 		if err := rows.Scan(&kind, &actor, &payload); err != nil {
 			t.Fatal(err)
 		}
-		var data map[string]string
+		var data map[string]any
 		if err := json.Unmarshal([]byte(payload), &data); err != nil {
 			t.Fatal(err)
 		}
-		if len(data) != 3 || data["invitation_id"] == "" || data["role"] == "" {
+		if len(data) != 5 || data["invitation_id"] == "" || data["role"] == "" || data["access_mode"] != "trusted" || data["rights"] == nil {
 			t.Fatalf("unexpected audit schema: %s", payload)
 		}
 		if kind == "invitation.accepted" {

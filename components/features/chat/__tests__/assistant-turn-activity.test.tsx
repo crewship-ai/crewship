@@ -153,6 +153,51 @@ describe("CH-04 grouped activity", () => {
     expect(approval).toBeTruthy()
     expect(group.contains(approval)).toBe(false)
   })
+
+  // CH-04: approvals and questions stay outside the collapsed group, so closing
+  // the group can never hide them.
+  const awaiting = (id: string) =>
+    ({ ...part("activity", { tool_name: "Bash" }, "Bash"), tool_call_id: id, activity: { kind: "shell", name: "Bash", state: "awaiting_approval" } }) as TurnPart
+  const approvalHeader = () => screen.getAllByTestId("tool-header").find((h) => h.getAttribute("data-state") === "approval-requested")
+  const visibleAfterClosingEveryGroup = (container: HTMLElement, el: Element) => {
+    container.querySelectorAll("details").forEach((d) => { d.open = false; fireEvent(d, new Event("toggle")) })
+    for (let node: Element | null = el; node && node !== container; node = node.parentElement) {
+      if (node.tagName === "DETAILS" && !(node as HTMLDetailsElement).open) return false
+    }
+    return container.contains(el)
+  }
+
+  it.each([
+    ["between two runs of tools", (a: TurnPart) => [call("a"), result("a"), call("b"), result("b"), a, call("c"), result("c"), call("d"), result("d")]],
+    ["nested under a running parent", (a: TurnPart) => [call("p"), call("x", { parent_tool_call_id: "p" }), result("x"), { ...a, parent_tool_call_id: "p" } as TurnPart]],
+  ] as const)("an approval %s stays visible when every group is closed", (_where, build) => {
+    const { container } = renderTurn(turn(build(awaiting("c1")), true))
+    const approval = approvalHeader()!
+    expect(approval).toBeTruthy()
+    expect(visibleAfterClosingEveryGroup(container, approval)).toBe(true)
+  })
+
+  it("an approval that arrives after the reader closed the group is not inside it", () => {
+    const run = [call("a"), result("a"), call("b"), result("b")]
+    const { container, rerender } = renderTurn(turn(run, true))
+    expect(visibleAfterClosingEveryGroup(container, container)).toBe(true)
+    rerender(<AssistantTurn turn={turn([...run, awaiting("c1")], true)} onCopy={async () => true} onFileClick={() => {}} />)
+    const approval = approvalHeader()
+    expect(approval).toBeTruthy()
+    expect(container.querySelector("details[data-activity-tone]")!.contains(approval!)).toBe(false)
+    expect(visibleAfterClosingEveryGroup(container, approval!)).toBe(true)
+  })
+
+  it.each([
+    ["as a tool call", part("tool_call", { tool_name: "AskUserQuestion", tool_id: "q" }, "AskUserQuestion")],
+    ["as a typed activity", { ...part("activity", { tool_name: "AskUserQuestion" }, "AskUserQuestion"), tool_call_id: "q", activity: { kind: "tool", name: "AskUserQuestion", state: "running" } } as TurnPart],
+  ] as const)("a question %s after a run of tools stays visible when the group is closed", (_form, question) => {
+    const { container } = renderTurn(turn([call("a"), result("a"), call("b"), result("b"), question], true))
+    expect(container.querySelector("details[data-activity-tone]")).toBeTruthy()
+    const header = screen.getAllByTestId("tool-header").find((h) => h.textContent === "AskUserQuestion")
+    expect(header).toBeTruthy()
+    expect(visibleAfterClosingEveryGroup(container, header!)).toBe(true)
+  })
 })
 
 describe("review blockers: parallel calls, wire keys, history", () => {

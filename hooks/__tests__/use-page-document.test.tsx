@@ -118,6 +118,46 @@ it("retries rate admission with the exact request instead of discarding the draf
  try{await waitFor(()=>expect(result.current.status).toBe("Saved"));act(()=>content(result.current.doc).insert(0,"local "));await waitFor(()=>expect(result.current.status).toContain("rate limited"));expect(result.current.pending).toBe(1);expect(result.current.recovery).toBe(false);limited=false;await waitFor(()=>expect(result.current.pending).toBe(0));expect(bodies.length).toBeGreaterThan(1);expect(new Set(bodies).size).toBe(1)}finally{unmount();server.destroy()}
 })
 
+it("retries a 429 without a document code (the general per-IP limiter) instead of stalling the queue",async()=>{
+ const server=model();let limited=true;const bodies:string[]=[]
+ fetchMock.mockImplementation((_url:string,init?:RequestInit)=>{
+  if(init?.method==="POST"){bodies.push(init.body as string);const body=JSON.parse(init.body as string);if(limited){limited=false;return response({error:"Too many requests"},429)}return response({id:body.id,epoch:body.epoch,rev:5})}
+  return response(state(server,bodies.length>1?5:4))
+ })
+ const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))
+ try{await waitFor(()=>expect(result.current.status).toBe("Saved"));act(()=>content(result.current.doc).insert(0,"local "));await waitFor(()=>expect(bodies.length).toBe(2));await waitFor(()=>expect(result.current.pending).toBe(0));await waitFor(()=>expect(result.current.status).toBe("Saved"));expect(result.current.recovery).toBe(false);expect(new Set(bodies).size).toBe(1)}finally{unmount();server.destroy()}
+})
+
+// The write queue halts exactly where the poll blocks: one failure each, then a working server.
+const failures:[string,()=>Promise<unknown>,boolean][]=[
+ ["400",()=>response({error:"bad"},400),true],
+ ["401",()=>response({error:"signed out"},401),true],
+ ["403",()=>response({error:"forbidden"},403),true],
+ ["404",()=>response({error:"missing"},404),true],
+ ["409 epoch",()=>response({error:"stale epoch",code:"document_epoch"},409),true],
+ ["409 generation",()=>response({error:"changed generation",code:"document_generation"},409),true],
+ ["413",()=>response({error:"too large"},413),true],
+ ["422",()=>response({error:"invalid"},422),true],
+ ["429 document_quota",()=>response({error:"quota",code:"document_quota"},429),true],
+ ["429 document_rate_limit",()=>response({error:"wait",code:"document_rate_limit"},429),false],
+ ["429 without a code",()=>response({error:"Too many requests"},429),false],
+ ["503",()=>response({error:"not acknowledged"},503),false],
+ ["a network error",()=>Promise.reject(new TypeError("Failed to fetch")),false],
+]
+it.each(failures)("halts the queue on %s only when the poll blocks",async(_name,fail,blocks)=>{
+ const server=model();let posts=0
+ fetchMock.mockImplementation((_url:string,init?:RequestInit)=>{
+  if(init?.method==="POST"){posts++;const body=JSON.parse(init.body as string);return posts===1?fail():response({id:body.id,epoch:body.epoch,rev:5})}
+  return response(state(server,posts>1?5:4))
+ })
+ const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))
+ try{
+  await waitFor(()=>expect(result.current.status).toBe("Saved"));act(()=>content(result.current.doc).insert(0,"local "))
+  if(blocks){await waitFor(()=>expect(result.current.recovery).toBe(true));await new Promise(done=>setTimeout(done,1200));expect(posts).toBe(1);expect(result.current.pending).toBe(1)}
+  else{await waitFor(()=>expect(posts).toBe(2));await waitFor(()=>expect(result.current.pending).toBe(0));expect(result.current.recovery).toBe(false)}
+ }finally{unmount();server.destroy()}
+})
+
 it.each(["page","epoch"])("rejects a changed %s before replaying local bytes",async(changed)=>{
  const server=model(),foreign=model("foreign private text");let switched=false
  fetchMock.mockImplementation(()=>response(switched?state(foreign,4,changed==="epoch"?"different":"opaque",changed==="page"?"different":"page"):state(server)))

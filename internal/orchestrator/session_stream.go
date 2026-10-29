@@ -97,6 +97,16 @@ var errRunPanicked = errors.New("agent run crashed")
 // See the file comment for why the publication lives here rather than at each
 // dispatch site.
 func (o *Orchestrator) RunAgent(ctx context.Context, req AgentRunRequest, handler EventHandler) (err error) {
+	if req.strictContentPrivacy {
+		req = req.WithStrictContentPrivacy()
+		defer func() {
+			if recover() != nil {
+				// Also cover failures before runAgent's telemetry span exists.
+				// Never format, wrap or rethrow a private panic value.
+				err = ErrPrivateRunUnqualified
+			}
+		}()
+	}
 	pub := o.sessionPub()
 	// No publisher wired, no chat to publish on, or a caller that already owns
 	// the channel: run exactly as before. Note the empty-chat-id guard — the

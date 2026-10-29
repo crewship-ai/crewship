@@ -395,13 +395,7 @@ func TestResumeDeferredChatMessage(t *testing.T) {
 					t.Fatal("timed out waiting for the resume attempt")
 				}
 
-				// Drain the run_begin frame BeginSessionRun always opens
-				// with, then assert nothing else ever arrives.
-				select {
-				case <-obs.Frames():
-				case <-time.After(2 * time.Second):
-					t.Fatal("never even got the run_begin frame")
-				}
+				// Refusal must not open/reset a shared session run.
 				expectNoMoreFrames(t, obs)
 			},
 		},

@@ -21,6 +21,11 @@ The active workspace is stored in `~/.crewship/cli-config.yaml` under `workspace
 **Auth:** `list`, `get`, and `create` require `crewship login`. `update`, all `member` operations, and `invite` additionally require an active workspace. `use` writes the local config and validates the slug or ID against the server when you're already logged in. Role gates apply server-side — `OWNER`/`ADMIN` to update or invite, `OWNER` only to `delete`, `MEMBER+` to read.
 </Note>
 
+Workspace settings, member provisioning/removal and invitation changes require
+a durable audit before success. If audit storage or the final commit fails,
+the access change is rolled back. Provisioning audit records whether an account
+and setup link were created; it never includes the setup link itself.
+
 ## Subcommands
 
 | Command | Purpose |
@@ -84,6 +89,7 @@ Only flags you actually set are sent — passing nothing returns `no fields to u
 | `--credential-audit-retention-days` | Days of `credential_audit` history to keep. `0` means keep forever. Leave unset to use the 90-day default. |
 | `--audit-log-retention-days` | Days of `audit_logs` history to keep. `0` means keep forever, which is the default — `audit_logs` is the compliance trail and its retention obligation is yours to declare. |
 | `--approvals-retention-days` | Days of decided `approvals_queue` history (approved/denied/timeout/cancelled) to keep. `0` means keep forever. Leave unset to use the 90-day default. A pending approval is never swept regardless of age. Rejected above `106751` days (~292 years) — past that the day count overflows the retention sweep's `int64`-nanosecond cutoff arithmetic. |
+| `--guest-routine-max-run-minutes` | Hard limit, 1-240 minutes (default 30), for one Guest-published routine run, measured from its scheduled start. Applies to runs accepted afterwards. `OWNER`/`ADMIN` only, and audited. |
 | `--pages-theme <json\|@file>` | The shared colours every custom [Page application](/guides/pages#shared-company-colors) reads through the `--crewship-page-*` design tokens: a JSON object whose keys are `accent`, `background`, `surface`, `text`, `muted` and `border` and whose values are `#RRGGBB` colours. Inline (`'{"accent":"#0f766e"}'`) or `@theme.json`. The object **replaces** the stored one — omitted keys fall back to the SDK defaults — and `{}` resets it. Any other key, any other colour form, or more than 1 KiB is refused by the server. This is the same setting as **Settings → General → Pages appearance**; `OWNER`/`ADMIN` only, and audited. |
 | `--appearance-default <json\|@file>` | The default look members get until they choose their own: a JSON object with optional keys `style`, `knobs`, `accent` and `theme` (`dark`, `light` or `system`). Inline (`'{"style":"slate","accent":"teal","theme":"dark"}'`) or `@look.json`. The object **replaces** the stored one and `{}` resets it. Ids are checked for shape and the object for 2 KiB by the server. This is the same setting as **Settings → Appearance → Workspace default**; `OWNER`/`ADMIN` only (`403` for a Manager or Member), and audited. |
 
@@ -387,7 +393,7 @@ The shortcut form (`invite <email>`) and the explicit form (`invite create <emai
 
 - **`workspace "X" not found or not accessible`** — `workspace use` validated against `/api/v1/workspaces` and your token has no membership.
 - **`--name is required`** — `create` needs at least a name.
-- **`no fields to update`** — `update` was called without any of `--name` / `--slug` / `--language` / `--allow-privileged-credentials` / `--credential-audit-retention-days` / `--audit-log-retention-days` / `--approvals-retention-days` / `--pages-theme` / `--appearance-default`.
+- **`no fields to update`** — `update` was called without any of `--name` / `--slug` / `--language` / `--allow-privileged-credentials` / `--credential-audit-retention-days` / `--audit-log-retention-days` / `--approvals-retention-days` / `--guest-routine-max-run-minutes` / `--pages-theme` / `--appearance-default`.
 - **`--pages-theme must be a JSON object …`** — the value (or the `@file`) did not parse as a JSON object of strings. The colour vocabulary itself is checked by the server: `pages_theme supports accent, background, surface, text, muted and border as #RRGGBB colors` is its answer to an unknown key or a named colour.
 - **`--appearance-default must be a JSON object …`** — the value (or the `@file`) did not parse as a JSON object. The server answers an unknown key, theme or id with `appearance_default supports style, knobs, accent and theme` and similar.
 - **`no workspace selected`** — `update` ran without an active workspace. Run `crewship workspace use` first or pass `--workspace`.
@@ -428,7 +434,9 @@ To deliberately take over a saved share, use `workspace member access set MEMBER
 Replace the complete policy using its original membership ID and revision.
 Edit the `mode` and `rights` fields from `access get`; do not invent a revision.
 An explicit empty `rights` array in restricted mode denies all resource grants.
-Trusted mode requires empty rights and restores ordinary workspace access.
+Trusted mode restores ordinary workspace access and permits only explicit crew
+Manage shares for trusted MEMBER/MANAGER recipients. Revoke and save trusted-only
+shares before changing the account to Guest; otherwise the server returns422.
 
 | Flag | Required | Description |
 | --- | --- | --- |
@@ -531,10 +539,27 @@ The versioned member-policy commands remain available for complete policies.
 crewship workspace member access presets --format json
 ```
 
-Lists immutable definitions and hashes for the selected workspace using the administrative API catalog. JSON, YAML and NDJSON preserve the complete definitions and API field names; the table lists each explicit level. No permissions change. Preset application remains a later operation.
+Lists immutable definitions and hashes for the selected workspace using the administrative API catalog. JSON, YAML and NDJSON preserve the complete definitions and API field names; the table lists each explicit level. Listing changes no permissions; application uses preview and confirmation below.
+
+`routine-levels` v2 manages only Edit and Publish, with the levels `none`
+(removes both), `edit` (keeps Edit, revokes Publish) and `edit_publish`
+(**Edit + Publish**). It preserves existing View, Results and Run grants and
+their issuers and does not add them; publication still needs separate current
+View. The v1 definitions and hashes remain unchanged. Saved choices are kept
+per preset version, so `access get` can show a v1 and a v2 record for the same
+routine. A v1 level without Edit is refused with 422 while Publish is held.
 
 Administrative `workspace member access get --format json` (or YAML) preserves the server's informational `preset_selections`, including API field names in this new metadata. Existing policy YAML keys remain unchanged. These saved labels are not effective permissions. Read-edit-set can round-trip the read-only metadata, but `access set` cannot create a selection through it; the server computes the returned choices from canonical state. The default table continues to show grant issuers and active/inactive rights.
 
+
+For a Guest crew bundle, use the existing preview/apply commands with
+`resource: {kind: "crew", id: "CREW"}`, `preset_id: "crew-levels"`,
+`preset_version: 1` and level `none`, `view` or `use`. None removes only the
+crew-root View/Use shares; View selects `view`, Use selects `view,use`.
+Review the current/future-agent audience warning and exact checksum before
+apply. Individual agent rights, original issuers and other resource shares are
+preserved; execution still needs per-agent preflight. The person Access editor
+provides the same explicit preset flow after selecting Crew.
 
 ### `crewship workspace member access preset preview MEMBER`
 
@@ -570,7 +595,10 @@ Choose an eligible successor from the list. The transfer takes effect immediatel
 and preserves content and grant records. A successor who has lost read access,
 or an owner changed since review, causes refusal instead of an automatic grant.
 Workspace administrator access is required. Instance administrator access alone
-does not grant access to private content metadata. Use `--format json` for
+does not grant access to private content metadata. Workbooks are listed and
+transferred only by a workspace OWNER, and only after their owner has left, is
+suspended, or a removal or erasure was refused because of the workbook; see
+[When the owner leaves](/cli/workbook#when-the-owner-leaves). Use `--format json` for
 machine-readable responses, including `next_cursor` when more results exist.
 
 Scoped CLI credentials need `workspace:admin` for both listing and transfer.
@@ -597,3 +625,11 @@ Replace the entire administrative policy using the version just reviewed with
 
 A stale version refuses the change. Read the policy again before deciding on a
 replacement. Use `--format json` for machine-readable responses.
+
+
+### Routine Publish dependency
+
+Member access policies and invitation/provisioning rights require `edit` for
+any routine with `publish`; otherwise the server returns 422. Add `view`
+separately for effective publication access. Run remains separate. Preset
+preview/apply reject a policy that retains Publish after removing Edit.

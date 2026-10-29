@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
@@ -38,7 +39,11 @@ type pagesTransferRig struct {
 
 func pagesTransferSetup(t *testing.T) *pagesTransferRig {
 	t.Helper()
-	dbh := testutil.MigratedDB(t)
+	return pagesTransferSetupWithDB(t, testutil.MigratedDB(t))
+}
+
+func pagesTransferSetupWithDB(t *testing.T, dbh *database.DB) *pagesTransferRig {
+	t.Helper()
 	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
 	if _, err := dbh.Exec(`INSERT INTO workspaces (id, name, slug) VALUES ('ptws1','PT','pt')`); err != nil {
 		t.Fatalf("seed workspace: %v", err)

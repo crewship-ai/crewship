@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/net/websocket"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
 	"github.com/crewship-ai/crewship/internal/chataudience"
@@ -28,10 +29,13 @@ import (
 // existing callers stay source-compatible; only the WS dispatch supplies one.
 type ChatMessageOption struct {
 	// Server-owned fields. The WS decoder constructs only MaxTurns and Metadata.
-	HumanAuthority           *chataudience.Receipt     `json:"-"`
-	HumanResume              bool                      `json:"-"`
-	OriginalTriggerMessageID string                    `json:"-"`
-	DocumentCreationIntent   *documents.CreationIntent `json:"-"`
+	HumanAuthority           *chataudience.Receipt      `json:"-"`
+	OriginalCredential       auth.OriginalCredential    `json:"-"`
+	HumanResume              bool                       `json:"-"`
+	OriginalTriggerMessageID string                     `json:"-"`
+	DocumentCreationIntent   *documents.CreationIntent  `json:"-"`
+	DocumentIterationIntent  *documents.IterationIntent `json:"-"`
+	ArtifactProjectIntent    *artifacts.ProjectIntent   `json:"-"`
 	// MaxTurns overrides the adapter agent-loop cap for this run. 0 = leave the
 	// adapter default in place.
 	MaxTurns int
@@ -44,7 +48,8 @@ type ChatMessageOption struct {
 	//
 	// It arrives from an untrusted client, so no consumer may store it
 	// verbatim — see chatbridge.HandleChatMessage, which round-trips it
-	// through askforms.EnvelopeFromMetadata and keeps only what parses.
+	// through the current agent definition and askforms.ValidateAnswers before
+	// persistence, rejecting malformed explicit submissions.
 	Metadata map[string]any
 }
 
@@ -143,7 +148,9 @@ type Hub struct {
 	// can never stall Run's select loop behind a slow DB), and if a
 	// sweep is still running when the next tick fires, that tick is
 	// skipped rather than stacking a second concurrent sweep.
-	connSweepInFlight atomic.Bool
+	connSweepInFlight     atomic.Bool
+	workbookSweepInFlight atomic.Bool
+	workbookPages         map[string]WorkbookSessionRechecker
 
 	// authReadTimeout bounds how long HandleUpgrade waits for the
 	// post-upgrade auth message before closing an unauthenticated
@@ -360,6 +367,8 @@ func (h *Hub) Run(ctx context.Context) {
 	// STARTS the sweep (maybeStartConnSweep runs it on its own goroutine)
 	// so DB latency in the checks can never stall register/unregister/
 	// broadcast processing in this loop.
+	workbookTicker := time.NewTicker(time.Second)
+	defer workbookTicker.Stop()
 	connSweepTicker := time.NewTicker(connSweepInterval)
 	defer connSweepTicker.Stop()
 
@@ -370,6 +379,8 @@ func (h *Hub) Run(ctx context.Context) {
 			return
 		case <-sweepTicker.C:
 			h.streams.sweep(time.Now())
+		case <-workbookTicker.C:
+			h.maybeStartWorkbookSweep(ctx)
 		case <-connSweepTicker.C:
 			h.maybeStartConnSweep(ctx)
 		case client := <-h.register:

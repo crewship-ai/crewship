@@ -41,3 +41,27 @@ func TestMemberAccessGeneratedContract(t *testing.T) {
 		}
 	}
 }
+
+func TestPublicationDependencyHTTPContract(t *testing.T) {
+	raw, err := os.ReadFile("../../internal/api/openapi.gen.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec map[string]any
+	if err = json.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	paths := spec["paths"].(map[string]any)
+	for _, route := range []struct{ method, path string }{
+		{"put", "/api/v1/workspaces/{workspaceId}/members/{memberId}/access"},
+		{"post", "/api/v1/workspaces/{workspaceId}/invitations"},
+		{"post", "/api/v1/workspaces/{workspaceId}/members/provision"},
+		{"post", "/api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/preview"},
+		{"post", "/api/v1/workspaces/{workspaceId}/members/{memberId}/access/presets/apply"},
+	} {
+		responses := paths[route.path].(map[string]any)[route.method].(map[string]any)["responses"].(map[string]any)
+		if responses["422"] == nil {
+			t.Fatalf("%s %s omits Publish/Edit dependency422", route.method, route.path)
+		}
+	}
+}

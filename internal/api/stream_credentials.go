@@ -18,7 +18,8 @@ func earlierExpiry(a, b time.Time) time.Time {
 
 // authenticateStream validates the row identified by a signed WS ticket. Capture
 // the epoch before reading: a revoke between the read and Track cannot admit an
-// already-invalid credential. No database work is repeated per frame.
+// already-invalid credential. Browser sessions also have a fresh per-delivery
+// validator, covering revocations made by another process without a notifier.
 func (m *AuthMiddleware) authenticateStream(ctx context.Context, c *auth.Claims) (context.Context, func(), error) {
 	epoch := m.streams.Epoch()
 	defer m.streams.ReleaseEpoch(epoch)
@@ -55,10 +56,44 @@ func (m *AuthMiddleware) authenticateStream(ctx context.Context, c *auth.Claims)
 	if c.CredentialExpiresAt > 0 {
 		expiry = earlierExpiry(expiry, time.Unix(c.CredentialExpiresAt, 0))
 	}
-	tracked, release := m.streams.Track(ctx, epoch, c.ID, c.Sid, c.CLITokenID, expiry)
+	if original := c.OriginalCredential; original != nil {
+		if m.db == nil || !original.Valid() || original.UserID != c.ID || (original.Kind == AuthKindSession && original.ID != c.Sid) || (original.Kind == AuthKindCLIToken && original.ID != c.CLITokenID) {
+			return nil, nil, errors.New("invalid original stream credential")
+		}
+		horizon, err := validateOriginalHumanCredential(ctx, m.db, *original, scopeSelf)
+		if err != nil {
+			return nil, nil, err
+		}
+		expiry = earlierExpiry(expiry, horizon)
+	}
+	tracked, release := m.streams.Track(ctx, epoch, c.ID, c.Sid, c.CLITokenID, expiry, m.persistedSessionValidator(c.ID, c.Sid))
 	if !auth.StreamCredentialCurrent(tracked) {
 		release()
 		return nil, nil, errors.New("stream credential changed")
 	}
+	if c.OriginalCredential != nil {
+		tracked = auth.WithOriginalCredential(tracked, *c.OriginalCredential)
+	}
 	return tracked, release, nil
+}
+
+// persistedSessionValidator checks the exact session at each delivery fence.
+// It deliberately has no cached allow result. The deadline is a query context,
+// not a hard elapsed bound on native SQLite busy handling. CLI tokens retain
+// their existing in-memory revocation and expiry contract.
+func (m *AuthMiddleware) persistedSessionValidator(userID, sessionID string) func(context.Context) bool {
+	if sessionID == "" {
+		return nil
+	}
+	return func(deliveryCtx context.Context) bool {
+		if m.sessions == nil {
+			return false
+		}
+		// Use the current delivery context, never a captured upgrade/admission
+		// request context which may already have ended.
+		queryCtx, cancel := context.WithTimeout(deliveryCtx, 5*time.Second)
+		defer cancel()
+		s, err := m.sessions.Get(queryCtx, sessionID)
+		return err == nil && s != nil && s.UserID == userID && s.Active(time.Now())
+	}
 }

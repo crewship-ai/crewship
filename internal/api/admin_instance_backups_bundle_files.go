@@ -14,12 +14,13 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 
+	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/quiesce"
 )
@@ -37,7 +38,7 @@ func (h *InstanceBackupsHandler) InspectBundle(w http.ResponseWriter, r *http.Re
 		replyError(w, http.StatusUnprocessableEntity, "the backup's manifest could not be read")
 		return
 	}
-	writeJSON(w, http.StatusOK, m)
+	writeJSON(w, http.StatusOK, backupInspectResponse{Manifest: m, IntegrityVerified: false})
 }
 
 // VerifyBundle is GET /api/v1/admin/instance/backups/bundles/verify: proof
@@ -90,13 +91,19 @@ func (h *InstanceBackupsHandler) DownloadBundle(w http.ResponseWriter, r *http.R
 		h.fail(w, "stat bundle", err)
 		return
 	}
-	w.Header().Set("Content-Type", "application/zstd")
+	if err := backupDownloadAuthority(r, h.db, true); err != nil {
+		if errors.Is(err, access.ErrDenied) {
+			replyError(w, http.StatusForbidden, "backup authorization lost")
+		} else {
+			replyInternalError(w, h.logger, "authorize backup download", err)
+		}
+		return
+	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filepath.Base(entry.FilePath)))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Pragma", "no-cache")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	n, copyErr := io.Copy(w, f)
+	n, copyErr := copyBackupDownload(w, r, h.db, f, true)
 
 	// The audit entry is a write, and this is a GET the quiet window's gate
 	// does not count: enter it on its own (waiting out a window), on a

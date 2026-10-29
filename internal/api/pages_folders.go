@@ -61,6 +61,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pages"
 )
@@ -180,9 +182,13 @@ type pageFolderWriteRequest struct {
 // pointers so an omitted one is a 400 rather than a zero that happens to
 // match a page that has never moved.
 type pageFolderMoveRequest struct {
-	Page         string `json:"page"`
-	PagesVersion *int64 `json:"pages_version"`
-	ACLVersion   *int64 `json:"acl_version"`
+	Page            string `json:"page"`
+	PagesVersion    *int64 `json:"pages_version"`
+	ACLVersion      *int64 `json:"acl_version"`
+	DryRun          bool   `json:"dry_run,omitempty"`
+	Confirm         bool   `json:"confirm,omitempty"`
+	ReviewToken     string `json:"review_token,omitempty"`
+	reviewRequested bool
 }
 
 // ── Loading ────────────────────────────────────────────────────────────────
@@ -393,6 +399,11 @@ func (h *PageHandler) ListFolders(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "list page folders", err)
 		return
 	}
+	index.rows, err = pageCatalogVisibilityRows(r, index.rows)
+	if err != nil {
+		replyError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	counts := map[string]int{}
 	for i := range index.rows {
 		if id := index.rows[i].rec.FolderID; id != "" {
@@ -433,6 +444,11 @@ func (h *PageHandler) GetFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(index.rows) == 0 && !folderStanding(viewer, f, index.acl[f.ID]) {
 		replyError(w, http.StatusNotFound, fmt.Sprintf("folder %q not found", slug))
+		return
+	}
+	index.rows, err = pageCatalogVisibilityRows(r, index.rows)
+	if err != nil {
+		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	out := pageFolderShowWire{pageFolderWire: f.wire(len(index.rows), index.acl[f.ID], viewer), Pages: make([]pageListWire, 0, len(index.rows))}
@@ -623,13 +639,24 @@ func (h *PageHandler) DeleteFolder(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusForbidden, folderAdminRefusal("deleting", f))
 		return
 	}
-	// Empty means EMPTY, not "empty as far as you can see" (§1/9): the count
-	// is over every page, and the refusal does not say how many there are,
-	// because that number is exactly what §5/12 keeps from a caller who does
-	// not reach them.
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "begin folder deletion", err)
+		return
+	}
+	defer tx.Rollback() //nolint:errcheck
+	f, acl, err := h.folderACLMutationIn(r.Context(), tx, wsID, user.ID, f.ID)
+	if errors.Is(err, access.ErrDenied) {
+		replyError(w, http.StatusForbidden, "current folder administrator required")
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "authorize folder deletion", err)
+		return
+	}
 	var n int
-	if err := h.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM pages WHERE folder_id = ?`, f.ID).Scan(&n); err != nil {
-		replyInternalError(w, h.logger, "count page folder pages", err)
+	if err := tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM pages WHERE folder_id=?`, f.ID).Scan(&n); err != nil {
+		replyInternalError(w, h.logger, "count folder pages", err)
 		return
 	}
 	if n > 0 {
@@ -637,9 +664,7 @@ func (h *PageHandler) DeleteFolder(w http.ResponseWriter, r *http.Request) {
 			"folder %q is not empty; a folder is deleted only when no page is in it, including pages you cannot see — move them out first", f.Slug))
 		return
 	}
-	// The row's own ON DELETE RESTRICT covers the page filed between the
-	// count and the delete: the statement fails rather than orphaning it.
-	if _, err := h.db.ExecContext(r.Context(), `DELETE FROM page_folders WHERE id = ?`, f.ID); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `DELETE FROM page_folders WHERE id=?`, f.ID); err != nil {
 		if isForeignKeyViolation(err) {
 			replyError(w, http.StatusConflict, fmt.Sprintf("folder %q is not empty; move its pages out first", f.Slug))
 			return
@@ -647,7 +672,65 @@ func (h *PageHandler) DeleteFolder(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "delete page folder", err)
 		return
 	}
-	h.journalFolderChange(r.Context(), wsID, user, f, "deleted", nil)
+	var notifications []func()
+	var auditFrames []folderDeletionAuditFrame
+	for _, entry := range acl {
+		id := generateCUID()
+		notify, err := h.journalFolderACLTx(r.Context(), tx, wsID, user, f, "removed", entry, entry.SubjectID, folderACLAuditChange{acl, nil, f.ACLVersion}, id)
+		if err != nil {
+			replyInternalError(w, h.logger, "audit deleted folder permissions", err)
+			return
+		}
+		frame, err := captureFolderDeletionAudit(r.Context(), tx, id)
+		if err != nil {
+			replyInternalError(w, h.logger, "acknowledge deleted folder permissions", err)
+			return
+		}
+		auditFrames = append(auditFrames, frame)
+		if notify != nil {
+			notifications = append(notifications, notify)
+		}
+	}
+	lifecycleID := generateCUID()
+	notify, err := appendAuthorizationAudit(r.Context(), tx, h.journal, journal.Entry{
+		ID:          lifecycleID,
+		WorkspaceID: wsID, Type: entryPageFolderChanged, Severity: journal.SeverityInfo, ActorType: journal.ActorUser, ActorID: user.ID,
+		Summary: fmt.Sprintf("%s deleted page folder %s (crew/%s)", user.Email, f.Slug, f.OwnerCrewSlug),
+		Payload: map[string]any{"folder": f.Slug, "folder_id": f.ID, "op": "deleted", "owner": "crew/" + f.OwnerCrewSlug, "actor_user_id": user.ID},
+	})
+	if err != nil {
+		replyInternalError(w, h.logger, "audit folder deletion", err)
+		return
+	}
+	lifecycleFrame, err := captureFolderDeletionAudit(r.Context(), tx, lifecycleID)
+	if err != nil {
+		replyInternalError(w, h.logger, "acknowledge folder deletion audit", err)
+		return
+	}
+	auditFrames = append(auditFrames, lifecycleFrame)
+	if err := tx.QueryRowContext(r.Context(), `SELECT (SELECT COUNT(*) FROM page_folders WHERE id=?)+(SELECT COUNT(*) FROM page_folder_acl WHERE folder_id=?)`, f.ID, f.ID).Scan(&n); err != nil {
+		replyInternalError(w, h.logger, "acknowledge folder deletion", err)
+		return
+	}
+	if n != 0 {
+		replyInternalError(w, h.logger, "acknowledge folder deletion", errors.New("folder deletion not acknowledged"))
+		return
+	}
+	if err := acknowledgeFolderDeletionAudits(r.Context(), tx, auditFrames); err != nil {
+		replyInternalError(w, h.logger, "acknowledge folder deletion audit batch", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit folder deletion", err)
+		return
+	}
+	for _, publish := range notifications {
+		publish()
+	}
+	if notify != nil {
+		notify()
+	}
+
 	broadcastWorkspaceEvent(h.hub, wsID, pageFolderEvent, map[string]any{"slug": f.Slug, "folder_id": f.ID})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -671,6 +754,10 @@ func (h *PageHandler) AddFolderPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if req.reviewRequested {
+		h.reviewFolderMove(w, r, req)
+		return
+	}
 	if strings.TrimSpace(req.Page) == "" {
 		replyError(w, http.StatusBadRequest, "page is required: the slug of the page to file here")
 		return
@@ -690,6 +777,10 @@ func (h *PageHandler) AddFolderPage(w http.ResponseWriter, r *http.Request) {
 	if !h.isPageOwner(r.Context(), wsID, user.ID, rec) && !canRole(viewer.Role, "manage") {
 		replyError(w, http.StatusForbidden, fmt.Sprintf(
 			"moving page %q is initiated by its owner or a workspace admin; you are neither", rec.Slug))
+		return
+	}
+	if !workbookPageOwnerOnly(rec, user.ID) {
+		replyError(w, http.StatusForbidden, workbookFolderRefusal)
 		return
 	}
 	if !mayArrangeFolder(viewer, f, acl) {
@@ -716,7 +807,7 @@ func (h *PageHandler) AddFolderPage(w http.ResponseWriter, r *http.Request) {
 	// an ACL change that lands between the check above and this write makes
 	// the write miss, rather than filing the page under permissions the
 	// caller never saw (§3/12).
-	res, err := h.db.ExecContext(r.Context(), folderMoveStatement, f.ID, rec.ID, rec.PagesVersion, f.ID, f.ACLVersion)
+	res, err := h.db.ExecContext(r.Context(), folderMoveStatement, f.ID, rec.ID, rec.PagesVersion, f.ID, f.ACLVersion, user.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "move page into folder", err)
 		return
@@ -753,6 +844,10 @@ func (h *PageHandler) RemoveFolderPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if req.reviewRequested {
+		replyError(w, 400, "reviewed removal is not supported; no Page was changed")
+		return
+	}
 	if req.PagesVersion == nil {
 		replyError(w, http.StatusBadRequest, "pages_version is required: a removal is confirmed against the page as you last read it")
 		return
@@ -771,6 +866,10 @@ func (h *PageHandler) RemoveFolderPage(w http.ResponseWriter, r *http.Request) {
 			"removing page %q from its folder is the page owner's, a workspace admin's, or somebody the folder's permissions let edit it; nobody else has a say", rec.Slug))
 		return
 	}
+	if !workbookPageOwnerOnly(rec, user.ID) {
+		replyError(w, http.StatusForbidden, workbookFolderRefusal)
+		return
+	}
 	if rec.PagesVersion != *req.PagesVersion || rec.FolderID != f.ID {
 		// A page that is not in this folder is a page the client's view of
 		// has gone stale, which is what the fence exists to say.
@@ -779,7 +878,8 @@ func (h *PageHandler) RemoveFolderPage(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := h.db.ExecContext(r.Context(), `
 		UPDATE pages SET folder_id = NULL, pages_version = pages_version + 1
-		WHERE id = ? AND pages_version = ? AND folder_id = ?`, rec.ID, rec.PagesVersion, f.ID)
+		WHERE id = ? AND pages_version = ? AND folder_id = ?
+		  AND (owner_user_id = ? OR NOT EXISTS (SELECT 1 FROM gridcraft_heads WHERE page_id = pages.id))`, rec.ID, rec.PagesVersion, f.ID, user.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "remove page from folder", err)
 		return
@@ -942,6 +1042,13 @@ func (h *PageHandler) decodeFolderMove(w http.ResponseWriter, r *http.Request) (
 		replyError(w, http.StatusBadRequest, "invalid JSON body")
 		return nil, false
 	}
+	if hasPageReviewFields(body) {
+		if len(body) > 16<<10 || !pageReviewFieldsNonNull(body) || artifacts.DecodeDataJSON(body, &req, "page", "pages_version", "acl_version", "dry_run", "confirm", "review_token") != nil {
+			replyError(w, 400, "invalid folder review request")
+			return nil, false
+		}
+		req.reviewRequested = true
+	}
 	return &req, true
 }
 
@@ -998,10 +1105,11 @@ func (h *PageHandler) publishFolderMembership(ctx context.Context, wsID string, 
 		// HasDocument flag. Missing identity or failed classification hides even ID.
 		if err := h.db.QueryRowContext(ctx, `SELECT p.private_audience,COALESCE(p.owner_user_id,''),
  EXISTS(SELECT 1 FROM documents WHERE page_id=p.id),
+ EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=p.id),
  EXISTS(SELECT 1 FROM page_project_drafts WHERE page_id=p.id),
  EXISTS(SELECT 1 FROM page_project_live WHERE page_id=p.id AND published=1),
  EXISTS(SELECT 1 FROM page_panels WHERE page_id=p.id)
- FROM pages p WHERE p.id=? AND p.workspace_id=?`, rec.ID, wsID).Scan(&current.PrivateAudience, &current.OwnerUserID, &current.HasDocument, &current.HasProject, &current.HasApplication, &hasPanels); err == nil {
+ FROM pages p WHERE p.id=? AND p.workspace_id=?`, rec.ID, wsID).Scan(&current.PrivateAudience, &current.OwnerUserID, &current.HasDocument, &current.HasCollaboration, &current.HasProject, &current.HasApplication, &hasPanels); err == nil {
 			public = pageWorkspaceInvalidation(&current, hasPanels)
 		}
 	}

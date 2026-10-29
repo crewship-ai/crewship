@@ -57,7 +57,7 @@ func (w *Writer) EmitReplaySync(ctx context.Context, e Entry) (string, bool, err
 // JSON strings preserve integer precision and make field boundaries explicit.
 // A purpose-separated MAC binds receipts to this installation's journal key
 // without exposing an unkeyed digest of potentially sensitive event content.
-func (w *Writer) replayFingerprint(e Entry, payload, refs, expires string) (string, error) {
+func replayFingerprintForKey(key []byte, keyID sql.NullString, _ sql.NullInt64, e Entry, payload, refs, expires string) (string, error) {
 	data, err := json.Marshal([]string{e.ID, e.WorkspaceID, e.CrewID, e.AgentID, e.MissionID,
 		e.TS.UTC().Format("2006-01-02T15:04:05.000Z"), string(e.Type), string(e.Severity),
 		priorityOrNormal(e.Priority), string(e.ActorType), e.ActorID, e.Summary, payload, refs,
@@ -65,7 +65,10 @@ func (w *Writer) replayFingerprint(e Entry, payload, refs, expires string) (stri
 	if err != nil {
 		return "", err
 	}
-	mac := hmac.New(sha256.New, w.chainKey)
+	if keyID.Valid {
+		return versionedMAC(key, "crewship journal replay receipt", keyID.String, string(data)), nil
+	}
+	mac := hmac.New(sha256.New, key)
 	_, _ = mac.Write([]byte("crewship/journal/replay-receipt/v1\x00"))
 	_, _ = mac.Write(data)
 	return hex.EncodeToString(mac.Sum(nil)), nil
@@ -84,17 +87,34 @@ func (w *Writer) matchReplayEntry(ctx context.Context, e Entry) (bool, error) {
 	if e.ExpiresAt != nil {
 		expires = e.ExpiresAt.UTC().Format(time.RFC3339Nano) // tsformat:allow: fingerprint uses the existing journal expiry serialization
 	}
-	wanted, err := w.replayFingerprint(e, payload, refs, expires)
+	if w.signingKeyError != nil {
+		return false, w.signingKeyError
+	}
+	versioned, err := keyColumns(ctx, w.db, "journal_replay_receipts")
 	if err != nil {
 		return false, err
 	}
 	var actual string
-	err = w.db.QueryRowContext(ctx, `SELECT fingerprint FROM journal_replay_receipts WHERE id=?`, e.ID).Scan(&actual)
+	var keyID sql.NullString
+	var version sql.NullInt64
+	if versioned {
+		err = w.db.QueryRowContext(ctx, `SELECT fingerprint,chain_key_id,chain_mac_version FROM journal_replay_receipts WHERE id=?`, e.ID).Scan(&actual, &keyID, &version)
+	} else {
+		err = w.db.QueryRowContext(ctx, `SELECT fingerprint FROM journal_replay_receipts WHERE id=?`, e.ID).Scan(&actual)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("journal replay receipt lookup: %w", err)
+	}
+	key, err := w.signingKeys.verification(keyID, version)
+	if err != nil {
+		return false, err
+	}
+	wanted, err := replayFingerprintForKey(key, keyID, version, e, payload, refs, expires)
+	if err != nil {
+		return false, err
 	}
 	if !hmac.Equal([]byte(actual), []byte(wanted)) {
 		return false, ErrReplayConflict

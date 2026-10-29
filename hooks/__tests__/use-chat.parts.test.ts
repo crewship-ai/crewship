@@ -88,3 +88,15 @@ describe("messagesToTurns with structured parts", () => {
     })
   })
 })
+
+it("retains only explicitly supplied persisted message identity for a document task action", () => {
+  const timestamp = new Date()
+  const turns = messagesToTurns([
+    { id: "optimistic-id", role: "user", content: "same text", timestamp },
+    { id: "history-id", role: "user", content: "same text", timestamp, originalMessageId: "history-id", originalAuthorUserId: "human" },
+  ])
+  expect(turns[0].originalMessageId).toBeUndefined()
+  expect(turns[0].originalAuthorUserId).toBeUndefined()
+  expect(turns[1].originalMessageId).toBe("history-id")
+  expect(turns[1].originalAuthorUserId).toBe("human")
+})

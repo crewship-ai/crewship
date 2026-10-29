@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // Admin › Workspaces and Admin › Users.
@@ -439,6 +440,7 @@ func emailVerified(v sql.NullString) bool {
 // signed-in devices and CLI tokens, sign one or all of them out, and lift a
 // sign-in lockout.
 type AdminUsersHandler struct {
+	journal  journal.Emitter
 	db       *sql.DB
 	logger   *slog.Logger
 	sessions sessions.Store
@@ -612,71 +614,18 @@ func (h *AdminUsersHandler) Sessions(w http.ResponseWriter, r *http.Request) {
 // RevokeSession signs a person out of one device.
 // POST /api/v1/admin/users/{userId}/sessions/{sessionId}/revoke — ADMIN+.
 func (h *AdminUsersHandler) RevokeSession(w http.ResponseWriter, r *http.Request) {
-	_, _, targetID, ok := h.target(w, r)
-	if !ok {
-		return
-	}
-	sessionID := strings.TrimSpace(r.PathValue("sessionId"))
-	if sessionID == "" {
-		replyError(w, http.StatusBadRequest, "sessionId path parameter required")
-		return
-	}
-	sess, err := h.sessions.Get(r.Context(), sessionID)
-	if err != nil {
-		if errors.Is(err, sessions.ErrNotFound) {
-			replyError(w, http.StatusNotFound, "session not found")
-			return
-		}
-		replyInternalError(w, h.logger, "admin get session", err)
-		return
-	}
-	// A session of somebody else is "not found" — the id alone must not
-	// reach across people.
-	if sess.UserID != targetID {
-		replyError(w, http.StatusNotFound, "session not found")
-		return
-	}
-	if err := h.sessions.Revoke(r.Context(), sessionID, reasonAdminRevoke); err != nil {
-		if errors.Is(err, sessions.ErrNotFound) {
-			replyError(w, http.StatusNotFound, "session not found")
-			return
-		}
-		replyInternalError(w, h.logger, "admin revoke session", err)
-		return
-	}
-	auditFromRequest(r, h.db, "user.session_revoked", "USER", targetID, map[string]interface{}{"session_id": sessionID})
-	w.WriteHeader(http.StatusNoContent)
+	h.mutateSecurity(w, r, "one")
 }
 
 // RevokeAllSessions signs a person out everywhere. CLI tokens are separate
 // credentials and stay valid.
 // POST /api/v1/admin/users/{userId}/sessions/revoke-all — ADMIN+.
 func (h *AdminUsersHandler) RevokeAllSessions(w http.ResponseWriter, r *http.Request) {
-	_, _, targetID, ok := h.target(w, r)
-	if !ok {
-		return
-	}
-	n, err := h.sessions.RevokeAllForUser(r.Context(), targetID, reasonAdminInvalidate)
-	if err != nil {
-		replyInternalError(w, h.logger, "admin revoke all sessions", err)
-		return
-	}
-	auditFromRequest(r, h.db, "user.sessions_revoked", "USER", targetID, map[string]interface{}{"revoked": n})
-	writeJSON(w, http.StatusOK, adminRevokeAllResponse{Revoked: n})
+	h.mutateSecurity(w, r, "all")
 }
 
 // Unlock lifts a sign-in lockout and resets the failed-attempt counter.
 // POST /api/v1/admin/users/{userId}/unlock — ADMIN+.
 func (h *AdminUsersHandler) Unlock(w http.ResponseWriter, r *http.Request) {
-	_, _, targetID, ok := h.target(w, r)
-	if !ok {
-		return
-	}
-	if _, err := h.db.ExecContext(r.Context(),
-		`UPDATE users SET locked_until = NULL, failed_login_count = 0 WHERE id = ?`, targetID); err != nil {
-		replyInternalError(w, h.logger, "admin unlock user", err)
-		return
-	}
-	auditFromRequest(r, h.db, "user.unlocked", "USER", targetID, nil)
-	w.WriteHeader(http.StatusNoContent)
+	h.mutateSecurity(w, r, "unlock")
 }

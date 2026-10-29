@@ -1,0 +1,15 @@
+{
+  "url": "https://github.com/storytold/wordcraft",
+  "rev": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
+  "patch_sha256": "9c2ff901ae408c72d12bbb864895a63791f000551978bf615734a6b41e381581",
+  "files": {
+    "crates/engine/src/cmd/mod.rs": {
+      "before_sha256": "7f54c999b329ad504829f40c1591cbb598893faff51c18f329438e6828b75552",
+      "after_sha256": "05652b426bbac196a1a601307b4472e5e51e6ebbf09dbf20398ae515c625b4d1"
+    },
+    "crates/engine/src/session.rs": {
+      "before_sha256": "e5c3b7ac619f6ae89bae47e643b4cf090e045349d535453ba94a38836e7b6fab",
+      "after_sha256": "b77c6891eae1e56ce0c2041109d56cda77132ff81182f2ebbf86f3a2353595e9"
+    }
+  }
+}

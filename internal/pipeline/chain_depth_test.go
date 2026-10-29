@@ -125,7 +125,7 @@ func TestExecutor_ChainDepth_UnderCapStillRuns(t *testing.T) {
 	child := fakePipeline(t, "ok-child",
 		`{"dsl_version":"1.0","name":"ok-child","steps":[`+
 			`{"id":"c1","type":"agent_run","agent_slug":"cagent","prompt":"1"}]}`,
-		"crew_a", "agent_lead")
+		"crew_a", "agent_lead", store)
 	exec.WithPipelineResolver(pipeResolverFn(func(_ context.Context, _, slug string) (*Pipeline, error) {
 		if slug == "ok-child" {
 			return child, nil

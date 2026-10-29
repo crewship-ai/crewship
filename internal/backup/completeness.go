@@ -21,6 +21,7 @@ package backup
 
 import (
 	"archive/tar"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -141,14 +142,17 @@ func expectedInsertCounts(recorded map[string]int, reconciledUsers, issueCounter
 // what it needs (or hits real EOF), and does not itself guarantee every
 // byte of r was consumed — see Verify's drain step for why that matters
 // when r sits underneath a running checksum.
-func scanDumpFromTarEntry(r io.Reader) (*DBDump, error) {
-	tr, err := NewTarZstReader(r)
+func scanDumpFromTarEntry(r io.Reader, contexts ...context.Context) (*DBDump, error) {
+	tr, err := NewTarZstReader(r, contexts...)
 	if err != nil {
 		// Not a readable zstd stream at all — most likely an encrypted
 		// payload handed in by a caller that should have checked
 		// Encryption.Enabled first. Not found, not a hard error: callers
 		// that want a hard failure here already control when this is
 		// invoked.
+		if resourceFailure(err) {
+			return nil, err
+		}
 		return nil, nil //nolint:nilerr // caller decides whether "not found" matters
 	}
 	defer func() { _ = tr.Close() }()
@@ -164,7 +168,7 @@ func scanDumpFromTarEntry(r io.Reader) (*DBDump, error) {
 		if name != "db/dump.json" || hdr.Typeflag != tar.TypeReg {
 			continue
 		}
-		data, err := io.ReadAll(io.LimitReader(tr, maxBackupDBDumpBytes))
+		data, err := io.ReadAll(io.LimitReader(RestoreBufferedReader(tr.restoreContext(), tr), maxBackupDBDumpBytes))
 		if err != nil {
 			return nil, fmt.Errorf("backup: read db/dump.json from payload: %w", err)
 		}

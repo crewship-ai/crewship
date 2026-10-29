@@ -92,6 +92,152 @@ crewship audit --entity-type AGENT --entity-id a_xyz789ghi0 --since 30d
 crewship audit --action workspace.create --format json | jq '.[].user_email'
 ```
 
+## `crewship audit head`
+
+Inspect the current chain tail before deciding whether to start a new segment:
+
+```bash
+crewship audit head --scope workspace --format json
+crewship audit head --scope instance --format json
+```
+
+`--scope` defaults to `workspace`. Workspace scope uses the selected workspace;
+instance scope does not require one. The authenticated
+`GET /api/v1/admin/audit/head` uses the same current OWNER and token-scope checks
+as reseal. Request query parameters: `scope` is `workspace` or `instance`;
+`workspace_id` is required for workspace scope and omitted for instance scope.
+Response: `tail_seq` and `tail_hash`, or zero and an empty hash when
+there are no chained rows. This is a read of stored state, not an integrity
+verdict or approval of recovery. Inspect the alert and history separately.
+Statuses: 200 for a successful read, 400 for invalid scope parameters, 401 for
+missing authentication, 403 for insufficient OWNER authority, 404 for a
+restricted account, and 500 for a database failure.
+
+## `crewship audit reseal`
+
+After investigating a missing audit key or an integrity alert, the current
+OWNER can explicitly start a new audit segment. This preserves historical rows
+and their MACs; it does not repair or authenticate unverifiable history.
+
+```bash
+crewship audit reseal --scope workspace --expected-tail-seq 42 --expected-tail-hash <reviewed-tail-hash> --reason "Approved recovery after loss of the historical signing key"
+crewship audit reseal --scope instance --expected-tail-seq 42 --expected-tail-hash <reviewed-tail-hash> --reason "Approved instance recovery after historical key loss"
+```
+
+Use the independently inspected current tail from `audit head`, rather than
+copying these example values. A scope with no chained rows uses sequence `0`
+and an empty hash; legacy
+unchained rows still remain unverified. The command never discovers and accepts
+a newer tail automatically. A concurrent append returns 409 and requires a new
+inspection.
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--scope` | `workspace` | `workspace` or `instance`; instance scope needs no selected workspace. |
+| `--expected-tail-seq` | `-1` | Required, explicitly reviewed current chain sequence, at least zero. |
+| `--expected-tail-hash` | `""` | Exact current tail hash; required for a positive sequence. |
+| `--reason` | `""` | Required explanation, trimmed to 8–512 UTF-8 bytes. |
+
+The authenticated `POST /api/v1/admin/audit/reseal` requires a current trusted
+workspace OWNER and `workspace:admin`, or the configured instance OWNER and
+`instance:admin`. Instance ADMIN alone is insufficient. Suspended accounts and
+accounts restricted in any workspace cannot reseal. Authority and the reviewed
+tail are checked again inside the write transaction. Invalid bodies return 400,
+insufficient authority 403, and restricted accounts 404.
+
+Request body: a JSON object containing `scope`, `expected_tail_seq`,
+`expected_tail_hash` and `reason`, plus `workspace_id` only for workspace
+scope. Both tail fields must be explicitly present, including sequence zero
+and an empty hash for a scope with no chained rows. Unknown fields and JSON
+null tail values are rejected; the body is limited to 4096 bytes.
+
+The response identifies the committed checkpoint, its new tail and
+`historical_status`. `continuation_verified` describes the new segment only.
+Historical status remains `historical_unverified` or `historical_invalid` when
+the old history cannot be verified; this is not a clean whole-history verdict.
+The checkpoint and its exact old-tail acknowledgement commit together;
+failure rolls both back. No key material is sent through this command.
+
+## `crewship audit rotate-key`
+
+Adds a fresh random active signing key to the server's app-owned audit keyring
+(`<data-dir>/audit-keyring.json`, sealed at rest) instead of hand-editing it.
+Every earlier key stays in the keyring for verification only; no historical
+MAC is rewritten. The rotation is recorded as an `audit.signing_key_rotated`
+instance audit entry (key IDs and reason only, never key material), signed with
+the key the server is running with.
+
+```bash
+crewship audit rotate-key --reason "Scheduled audit signing key rotation"
+crewship audit rotate-key --expected-active-key-id key-0123abcd… --reason "Rotation after operator change"
+```
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--reason` | `""` | Required explanation, trimmed to 8–512 UTF-8 bytes. |
+| `--expected-active-key-id` | `""` | Optional: refuse with 409 unless this is the keyring's current active key. |
+
+The running server keeps signing with the keyring it booted with; the new key
+signs from the next server start (`effective: next_start`). Restart after
+rotating.
+
+The rotated keyring is first written beside the live one as
+`audit-keyring.json.pending-<entry id>` and renamed into place only after its
+audit entry committed. If the server stops in between, the next start installs
+the pending keyring only when that entry exists, is the newest
+`audit.signing_key_rotated` entry, names exactly the staged active key, and that
+key is not already in the keyring. Anything else — an uncommitted rotation, a
+stale or replayed pending file — is set aside as
+`audit-keyring.json.discarded-<entry id>` (with a numeric suffix if that name is
+taken; never installed, never overwritten or deleted), logged as a warning, and
+the start continues. If the audit log cannot be read, the pending file is left
+for the next start. A second rotation while one is pending is refused with 409.
+
+The authenticated `POST /api/v1/admin/audit/signing-keys/rotate` requires the
+same authority as an instance reseal: the configured instance OWNER with
+`instance:admin`, rechecked inside the transaction. Request body: a JSON object
+with `reason` and optionally `expected_active_key_id`; unknown fields are
+rejected and the body is limited to 4096 bytes. The response carries
+`previous_active_key_id`, `active_key_id` and `effective`. Statuses: 400 for an
+invalid body, 401 without authentication, 403 without that authority, 404 for a
+restricted account, 409 when the active key changed or the keyring is
+configured outside the data directory (`CREWSHIP_AUDIT_KEYRING_PATH`, which
+Crewship never rewrites), 500 when the audit entry cannot be committed — the
+previous keyring is then put back.
+
+## `crewship audit export-keyring`
+
+Host-local: decrypts this host's audit keyring and writes it **unencrypted** to a
+new file, for a rollback to a build that predates keyring sealing. It finds the
+keyring as `crewship admin reset-password` does and takes the master key from
+the environment or the data directory's `secrets.env`. No server or API is
+involved; the keys never cross the network.
+
+```bash
+crewship audit export-keyring --plaintext --output /root/audit-keyring.plain.json
+```
+
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--plaintext` | `false` | Required acknowledgement that the output holds every key in the clear. |
+| `--output` | `""` | Required new file; created with mode `0600`, never overwrites an existing file. |
+
+Stop the server, export, put the file in place of `<data-dir>/audit-keyring.json`
+(or point `CREWSHIP_AUDIT_KEYRING_PATH` at it), start the older build, and delete
+any other plaintext copy afterwards.
+
+## Background entries during chain repair
+
+A broken workspace chain or unavailable signing key can leave background journal entries in a bounded
+in-memory retry queue. It holds at most 10,000 entries and does **not** survive
+a restart; overflow drops the oldest entries with an ERROR. Resealing permits
+retry but does not recover entries already lost. Synchronous fallback writes
+return refusal errors to the caller and are not held. Permanently rejected retry
+entries are also dropped with an ERROR; no held-entry count is exposed. Persisted incident notices
+and delivery receipts have a separate lifecycle. See
+[the journal retention limits](/guides/crew-journal#entries-refused-by-a-broken-audit-chain)
+before planning a restart during repair.
+
 ## Common errors
 
 - **`bad --since: …`** / **`bad --until: …`** — the value is neither RFC3339 nor a duration. Accept formats: `2026-05-01T00:00:00Z`, `1h`, `24h`, `7d`.
