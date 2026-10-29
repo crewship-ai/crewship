@@ -1,7 +1,7 @@
 "use client"
 import Link from "next/link"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { AlertTriangle, ArrowLeft, ChevronLeft, Clock, Eye, Gauge, Info, Link2, Lock, MessageSquare, MousePointerClick, OctagonAlert, Search, Send, X } from "lucide-react"
+import { AlertTriangle, ArrowLeft, ArrowUpRight, ChevronLeft, Clock, Eye, Gauge, Info, Link2, Lock, MessageSquare, MousePointerClick, OctagonAlert, Search, Send, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -15,7 +15,7 @@ import { timeAgo } from "@/lib/time"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { cn } from "@/lib/utils"
-import { artifactDashboards } from "@/lib/feature-flags"
+import { artifactDashboards, artifactsLibrary } from "@/lib/feature-flags"
 import { parseDashboardManifest } from "@/lib/pages/artifact-dashboard"
 import { artifactSlidesMode } from "@/lib/pages/artifact-slides"
 import { useArtifactViewer, type ArtifactViewerTarget } from "../projects/artifact-viewer-context"
@@ -25,6 +25,7 @@ import { ArtifactPreviewFrame, type PreviewSelection } from "./artifact-preview-
 import { ArtifactDashboardPreview } from "./artifact-dashboard-preview"
 import { ArtifactSlidesPreview } from "./artifact-slides-preview"
 import { isValidAnchorSelector, screenLabel, screenLabels } from "./element-select"
+import { artifactsItemHref } from "../artifacts-href"
 
 export type ArtifactViewerVariant = "pane" | "fullscreen" | "library"
 
@@ -453,6 +454,10 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
     <StatusPill tone={isShared ? "success" : "muted"} label={isShared ? "Shared" : "Draft"} />
     <div className="flex-1" />
     {library && librarySwitch}
+    {/* The chat shows the artifact beside the conversation; its home, with the library, list and history, is Artifacts. */}
+    {!library && artifactsLibrary() && <Button asChild type="button" variant="ghost" size="sm" className="h-7 shrink-0 gap-1 px-2 coarse:min-h-[44px]">
+      <Link href={artifactsItemHref(workspaceId, data.page_id)}>Open in Artifacts<ArrowUpRight className="size-3.5" aria-hidden /></Link>
+    </Button>}
   </>
   const shareTarget = shown
   const canShare = mayShare && shareTarget !== sharedVersion

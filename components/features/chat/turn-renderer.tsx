@@ -34,6 +34,7 @@ import { CrewProvisioningCard } from "./crew-provisioning-card"
 import { useChatAgent } from "./chat-agent-context"
 import { ThinkingAvatar } from "./messages/thinking-avatar"
 import { ChatTurnUserAvatar } from "./messages/turn-user-avatar"
+import { chatItemHref } from "./artifact-context/artifacts-href"
 
 function formatTimestamp(date: Date): string {
   return date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
@@ -213,7 +214,7 @@ function TurnBody({ turn, onCopy, onFileClick, isLastAssistant, onRegenerate, on
         )}
         {pageProvenance && (
           <div data-testid="page-provenance" className="ml-auto mb-0.5 text-micro text-muted-foreground">
-            Page: <a className="underline" href={`/pages/${encodeURIComponent(pageProvenance.slug)}`}>{pageProvenance.name}</a>
+            Page: <a className="underline" href={chatItemHref(null, pageProvenance.pageId, `/pages/${encodeURIComponent(pageProvenance.slug)}`)}>{pageProvenance.name}</a>
             {" · "}snapshot {new Date(pageProvenance.snapshotAt).toLocaleString()}
           </div>
         )}
