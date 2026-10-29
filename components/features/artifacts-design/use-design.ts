@@ -38,7 +38,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const request = useCallback(async <T,>(path: string, body?: unknown, targetPageId?: string): Promise<T> => {
   const target = targetPageId ? `/api/v1/pages/@${encodeURIComponent(targetPageId)}/design` : endpoint
   const url = `${target}${path}${path.includes("?") ? "&" : "?"}workspace_id=${encodeURIComponent(workspaceId)}`
-  const response = await apiFetch(url, body === undefined ? { cache: "no-store" } : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+  const response = await apiFetch(url, body === undefined ? { cache: "no-store" } : { method: "POST", skipRefresh: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
   const data = await response.json().catch(() => null)
   if (!response.ok) throw Object.assign(new Error(data?.error ?? "Design could not be loaded."), { status: response.status })
   return data
