@@ -133,7 +133,7 @@ export function installDashboardBindings(config: DashboardPreviewOptions & { tok
     const known = Boolean(doc && (doc.source_kind === "human" || doc.source_kind === "agent") && typeof doc.source_label === "string" && doc.source_label)
     const stamp = doc && typeof doc.updated_at === "string" && Number.isFinite(Date.parse(doc.updated_at)) ? `updated ${new Date(doc.updated_at).toISOString().slice(0, 16).replace("T", " ")} UTC` : "not loaded"
     const location = `${collection || "?"}/${row || "?"}.${field || "?"}`
-    const note = known ? `Source: ${location} · ${doc!.source_label} · ${stamp}` : `zdroj neuveden · ${location} · ${stamp}`
+    const note = known ? `Source: ${location} · ${doc!.source_label} · ${stamp}` : `Source not stated · ${location} · ${stamp}`
     return { value, numeric, text, note, known }
   }
   function withinTextBudget(feeds: Map<string, DashboardCollection>): boolean {

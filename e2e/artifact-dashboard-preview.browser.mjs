@@ -48,7 +48,7 @@ try {
   await page.evaluate(document => window.feed([document], { seq: 2 }), { ...doc(12), source_label: "Former contributor", source_kind: "unknown" })
   await frame.locator('#artifact-value[data-crewship-provenance="missing"]').waitFor()
   await frame.locator("#artifact-value").focus()
-  await tooltip.filter({ hasText: "zdroj neuveden · sales/north.revenue · updated 2026-10-28 08:00 UTC" }).waitFor({ state: "visible" })
+  await tooltip.filter({ hasText: "Source not stated · sales/north.revenue · updated 2026-10-28 08:00 UTC" }).waitFor({ state: "visible" })
   await page.evaluate(() => window.openDashboard(false))
   await frame.getByRole("heading", { name: "Revenue" }).waitFor()
   await page.evaluate(document => window.feed([document]), doc(12))

@@ -57,7 +57,7 @@ describe("Dashboard number provenance", () => {
     const value = document.getElementById("revenue")!
     expect(value.textContent).toBe("1250")
     expect(value.getAttribute("data-crewship-provenance")).toBe("missing")
-    expect(description(value)).toBe("zdroj neuveden · sales/north.revenue · updated 2026-10-28 08:05 UTC")
+    expect(description(value)).toBe("Source not stated · sales/north.revenue · updated 2026-10-28 08:05 UTC")
   })
 
   it("marks a binding without a loaded dataset document as unsourced", () => {
@@ -65,7 +65,7 @@ describe("Dashboard number provenance", () => {
     const value = document.getElementById("revenue")!
     expect(value.textContent).toBe("Unavailable")
     expect(value.getAttribute("data-crewship-provenance")).toBe("missing")
-    expect(description(value)).toBe("zdroj neuveden · sales/north.revenue · not loaded")
+    expect(description(value)).toBe("Source not stated · sales/north.revenue · not loaded")
   })
 
   it("replaces provenance on refresh instead of retaining an earlier source", () => {
