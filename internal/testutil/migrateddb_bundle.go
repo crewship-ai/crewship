@@ -238,16 +238,15 @@ func exportMigratedBundle(dir string, identity migratedBundleMetadata) error {
 			return errors.New("race template export refuses an existing destination")
 		}
 	}
-	staging, err := os.CreateTemp(dir, ".template-building-")
+	// The normal migration helper refuses to replace any existing output,
+	// including an empty reserved file. Own a private directory instead, so
+	// the database target starts absent and publication stays fail-closed.
+	staging, err := os.MkdirTemp(dir, ".template-building-")
 	if err != nil {
 		return err
 	}
-	path := staging.Name()
-	if err := staging.Close(); err != nil {
-		_ = os.Remove(path)
-		return err
-	}
-	defer os.Remove(path)
+	defer os.RemoveAll(staging)
+	path := filepath.Join(staging, bundleDatabaseName)
 	if err := migrateTemplateAt(path); err != nil {
 		return err
 	}
