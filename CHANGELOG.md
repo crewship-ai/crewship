@@ -23,6 +23,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Add human Comment grants for shared artifact feedback without edit or agent execution rights, explicit QA item markers and catalog filters, and confirmed archive and folder-move previews with live access checks. Access reports include effective capabilities and their sources; existing content, history and grants remain intact.
 
+- **An unsent artifact comment survives a crash.** The chat and library artifact viewer keeps the comment text in this browser for the same person and Page, and offers it again after reopening; the place has to be selected again.
+
 - **Home-installed agent CLIs remain visible during startup checks.** Offline qualification uses a separate temporary home while preserving read-only executable paths from the immutable image.
 
 - **Design artifacts gain an opt-in collaborative canvas.** People and agents can edit frames, shapes, text and images through Yjs, with live presence and normal artifact version history. Agents can address their selected canvas by its immutable ID. Disabled by default. Long-running cookie sessions renew only their collaborative transport after fresh authority checks, retaining unsaved work. Restoring saved canvases preserves prototype-named node IDs and their original contents.
