@@ -136,6 +136,17 @@ describe("the one list of triggers", () => {
     expect(proposed.map((r) => r.status.label)).toEqual(["Starts after approval", "Starts after approval"])
   })
 
+  it("names the last fire's outcome in the schedule's detail (#3791)", () => {
+    const detail = (extra: object, lifecycle: "active" | "disabled" = "active") =>
+      routineTriggerRows({ slug: "x", lifecycle, schedules: [{ ...schedule, ...extra }], webhooks: [], automations: [], formatTime: () => "Thu 08:00" })[0].detail
+    expect(detail({ last_run_at: "2026-10-15T06:00:00Z", last_status: "QUEUED" })).toBe(
+      "Europe/Prague · next Thu 08:00 · if missed: run once · follows the published version · last fire Thu 08:00 · queued for capacity",
+    )
+    expect(detail({ last_run_at: "2026-10-15T06:00:00Z", last_status: "SKIPPED", last_missed_count: 2 })).toMatch(/· skipped: capacity or catch-up$/)
+    expect(detail({ last_run_at: "2026-10-15T06:00:00Z", last_status: "SKIPPED", last_missed_count: 0 }, "disabled")).toMatch(/· skipped: routine inactive$/)
+    expect(detail({ last_status: "QUEUED" })).not.toMatch(/last fire/)
+  })
+
   it("without anything else, only the Run button starts it", () => {
     const rows = routineTriggerRows({ slug: "x", lifecycle: "active", schedules: [], webhooks: [], automations: [] })
     expect(rows.map((r) => r.kind)).toEqual(["manual"])
