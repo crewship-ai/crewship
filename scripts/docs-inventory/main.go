@@ -14,9 +14,9 @@
 // Two checks were added after the 2026-09-15 audit showed the gates measuring
 // less than they claimed, and both are described where they live:
 //
-//   - CLI parity (cliparity.go): every public path in the OpenAPI document must
-//     be built somewhere in the CLI's Go source, or be excused with a reason
-//     in cli-parity-exemptions.txt.
+//   - CLI parity (cliparity.go): every public operation — method and path —
+//     in the OpenAPI document must be sent somewhere in the CLI's Go source,
+//     or be excused with a reason in cli-parity-exemptions.txt.
 //   - Section-scoped flags (flagsections.go): a flag is documented for a
 //     command only in that command's own heading section or on a line that
 //     invokes it; the misses that existed on the day the check landed are in
@@ -132,11 +132,15 @@ type apiRecord struct {
 	ResourceDocs []string `json:"resource_docs,omitempty"`
 	Status       string   `json:"status"`
 	TestSignals  []string `json:"test_signals,omitempty"`
-	// CLIParity is "cli" when cmd/crewship builds this path, "exempt" when
-	// scripts/docs-inventory/cli-parity-exemptions.txt says why it does not,
-	// and "missing" otherwise — see cliparity.go.
-	CLIParity              string         `json:"cli_parity"`
-	CLICallers             []string       `json:"cli_callers,omitempty"`
+	// CLIParity is "cli" when cmd/crewship sends this method to this path,
+	// "exempt" when scripts/docs-inventory/cli-parity-exemptions.txt says why
+	// it does not, and "missing" otherwise — see cliparity.go.
+	CLIParity  string   `json:"cli_parity"`
+	CLICallers []string `json:"cli_callers,omitempty"`
+	// CLIMethodUnknown is set when the operation is covered only by calls
+	// whose method could not be read: they reach the path, so it counts,
+	// but nothing proves this method is the one they send.
+	CLIMethodUnknown       bool           `json:"cli_method_unknown,omitempty"`
 	ConcreteResponseSchema bool           `json:"concrete_response_schema"`
 	GenericResponseSchema  bool           `json:"generic_response_schema"`
 	RequestBodyPresent     bool           `json:"request_body_present"`
@@ -174,6 +178,9 @@ type report struct {
 	// flagSectionMissesNew are the section-scoped flag misses the baseline
 	// does not list, as `<command> --<flag>`; derived, not published.
 	flagSectionMissesNew []string
+	// cliMethodUnknownSites is how many CLI request calls send a method the
+	// parity reader could not determine; derived, published in the summary.
+	cliMethodUnknownSites int
 }
 
 type surfaceRecord struct {
@@ -408,8 +415,19 @@ type summary struct {
 	// APIWithoutCLI counts public paths no cmd/crewship source builds and no
 	// exemption excuses. "Every API endpoint gets a CLI command" was a rule
 	// with no counter until 2026-09-15; five September routes had none.
-	APIWithoutCLI                  int `json:"api_without_cli"`
-	APIExemptFromCLI               int `json:"api_exempt_from_cli"`
+	APIWithoutCLI    int `json:"api_without_cli"`
+	APIExemptFromCLI int `json:"api_exempt_from_cli"`
+	// APIOperationsWithoutCLI is what -strict enforces: operations no CLI
+	// request sends with their method, and no exemption excuses. Until
+	// 2026-10-29 only paths were compared, and fifteen operations on paths
+	// the CLI reached with another method had no command.
+	APIOperationsWithoutCLI    int `json:"api_operations_without_cli"`
+	APIOperationsExemptFromCLI int `json:"api_operations_exempt_from_cli"`
+	// APIOperationsCLIPathOnly are covered only by calls whose method could
+	// not be read (path-level coverage); CLIMethodUnknownSites counts those
+	// calls in the CLI source.
+	APIOperationsCLIPathOnly       int `json:"api_operations_cli_path_only"`
+	CLIMethodUnknownSites          int `json:"cli_method_unknown_sites"`
 	APIWithConcreteResponseSchemas int `json:"api_with_concrete_response_schemas"`
 	APIGenericResponseSchemas      int `json:"api_generic_response_schemas"`
 	APIWithRequestBodies           int `json:"api_with_request_bodies"`
@@ -482,9 +500,9 @@ func strictGates() []gate {
 			func(r report) []string {
 				return apiRowsWhere(r, func(rec apiRecord) bool { return len(rec.Contract.Structural.Missing) > 0 })
 			}},
-		{"API paths with no CLI command (add one under cmd/crewship, or a reasoned line to " + cliParityExemptionsPath + ")", func(s summary) int { return s.APIWithoutCLI },
+		{"API operations with no CLI command for their method (add one under cmd/crewship, or a reasoned `[METHOD ]/api/...` line to " + cliParityExemptionsPath + ")", func(s summary) int { return s.APIOperationsWithoutCLI },
 			func(r report) []string {
-				return apiPathsWhere(r, func(rec apiRecord) bool { return rec.CLIParity == cliParityMissing })
+				return apiRowsWhere(r, func(rec apiRecord) bool { return rec.CLIParity == cliParityMissing })
 			}},
 		{"API operations with a generic response schema", func(s summary) int { return s.APIGenericResponseSchemas },
 			func(r report) []string {
@@ -542,17 +560,6 @@ func apiRowsWhere(r report, match func(apiRecord) bool) []string {
 	for _, rec := range r.API {
 		if match(rec) {
 			out = append(out, rec.Method+" "+rec.Path)
-		}
-	}
-	return out
-}
-
-// apiPathsWhere is apiRowsWhere without the method, one row per path.
-func apiPathsWhere(r report, match func(apiRecord) bool) []string {
-	var out []string
-	for _, rec := range r.API {
-		if match(rec) {
-			out = appendUnique(out, rec.Path)
 		}
 	}
 	return out
@@ -676,8 +683,8 @@ func run(openAPIFile, commandsFile string, strict bool) error {
 				rec.Status = "missing_docs"
 			}
 			rec.TestSignals = testContaining(path, tests)
-			rec.CLICallers = cliCallers(path, shapes, routes)
-			rec.CLIParity = cliParityFor(path, rec.CLICallers, exemptions)
+			rec.CLICallers, rec.CLIMethodUnknown = cliCallers(rec.Method, path, shapes, routes)
+			rec.CLIParity = cliParityFor(rec.Method, path, rec.CLICallers, exemptions)
 			rec.Contract = contractFor(rec.Method, path, evidence, rec.SourceFile, rec.TestSignals, op.RequestBody != nil || len(op.Parameters) > 0)
 			r.API = append(r.API, rec)
 			// Same classifier the published figures are derived through, so the
@@ -744,6 +751,7 @@ func run(openAPIFile, commandsFile string, strict bool) error {
 	}
 	r.Reverse = inventoryDocsToCode(openAPI, manifest, docs, r.Env, r.Manifest)
 	r.flagSectionMissesNew = newFlagSectionMisses(r.CLI, flagBaseline)
+	r.cliMethodUnknownSites = cliMethodUnknownSites(shapes)
 	r.Summary = summarize(r)
 
 	if err := os.MkdirAll(reportDir, 0o755); err != nil {
@@ -761,7 +769,7 @@ func run(openAPIFile, commandsFile string, strict bool) error {
 		return fmt.Errorf("write %s: %w", markdownReport, err)
 	}
 	fmt.Printf("docs-inventory: %d API operations, %d CLI commands\n", len(r.API), len(r.CLI))
-	fmt.Printf("docs-inventory: CLI parity %d API paths, %d with no command, %d exempt\n", countPaths(r.API), r.Summary.APIWithoutCLI, r.Summary.APIExemptFromCLI)
+	fmt.Printf("docs-inventory: %s\n", cliParitySummaryLine(r))
 	for _, stale := range staleCLIParityExemptions(exemptions, r.API) {
 		fmt.Printf("docs-inventory: notice: %s\n", stale)
 	}
@@ -1334,7 +1342,9 @@ func summarize(r report) summary {
 			s.ManifestKindsMissing++
 		}
 	}
-	parityCounted := map[string]bool{}
+	// parityCounted is each path's status: covered when any operation is,
+	// otherwise missing when any operation is, otherwise exempt.
+	parityCounted := map[string]string{}
 	for _, rec := range r.API {
 		switch rec.Status {
 		case "documented_exact":
@@ -1347,17 +1357,20 @@ func summarize(r report) summary {
 		if len(rec.TestSignals) > 0 {
 			s.APIWithTestSignals++
 		}
-		// Counted per path, not per operation: one command reaches every
-		// method on a path this gate can see, so a path with four methods
-		// and no command is one gap, not four.
-		if !parityCounted[rec.Path] {
-			parityCounted[rec.Path] = true
-			switch rec.CLIParity {
-			case cliParityMissing:
-				s.APIWithoutCLI++
-			case cliParityExempt:
-				s.APIExemptFromCLI++
+		// Operations are what -strict enforces; the per-path figures below
+		// keep the older, coarser count of paths no command reaches at all.
+		switch rec.CLIParity {
+		case cliParityMissing:
+			s.APIOperationsWithoutCLI++
+		case cliParityExempt:
+			s.APIOperationsExemptFromCLI++
+		case cliParityCovered:
+			if rec.CLIMethodUnknown {
+				s.APIOperationsCLIPathOnly++
 			}
+		}
+		if parityCounted[rec.Path] == "" || rec.CLIParity == cliParityCovered || (rec.CLIParity == cliParityMissing && parityCounted[rec.Path] == cliParityExempt) {
+			parityCounted[rec.Path] = rec.CLIParity
 		}
 		if rec.ConcreteResponseSchema {
 			s.APIWithConcreteResponseSchemas++
@@ -1381,6 +1394,15 @@ func summarize(r report) summary {
 			s.APIContractGaps++
 		}
 	}
+	for _, status := range parityCounted {
+		switch status {
+		case cliParityMissing:
+			s.APIWithoutCLI++
+		case cliParityExempt:
+			s.APIExemptFromCLI++
+		}
+	}
+	s.CLIMethodUnknownSites = r.cliMethodUnknownSites
 	for _, rec := range r.CLI {
 		if rec.Status == "documented_exact" || rec.Status == "documented_root" || rec.Status == "documented_exact_no_root" {
 			if len(rec.ExactDocs) > 0 {
@@ -1420,7 +1442,7 @@ func markdown(r report) string {
 	fmt.Fprintf(&b, "Request schema quality: %d operations have request bodies; %d have concrete JSON schemas, %d use non-JSON media types, and %d still use a generic JSON fallback.\n\n", r.Summary.APIWithRequestBodies, r.Summary.APIWithConcreteJSONRequests, r.Summary.APINonJSONRequestBodies, r.Summary.APIGenericJSONRequests)
 	fmt.Fprintf(&b, "CLI flag quality: %d commands define flags; %d document all of their flags and %d still have undocumented flag(s).\n\n", r.Summary.CLIWithFlags, r.Summary.CLIWithAllFlagsDocumented, r.Summary.CLIMissingFlagDocs)
 	fmt.Fprintf(&b, "CLI flag placement: %d flags are mentioned on their page but not in their command's own section or invocation; %d of those are not in `%s`.\n\n", r.Summary.CLIFlagsOutsideSection, r.Summary.CLIFlagsOutsideSectionNew, cliFlagSectionBaselinePath)
-	fmt.Fprintf(&b, "CLI parity: %d API paths; %d have no `crewship` command and %d are exempt with a reason in `%s`.\n\n", countPaths(r.API), r.Summary.APIWithoutCLI, r.Summary.APIExemptFromCLI, cliParityExemptionsPath)
+	fmt.Fprintf(&b, "CLI parity: %d API paths; %d have no `crewship` command and %d are exempt with a reason in `%s`. Of %d operations, %d have no command for their method and %d are exempt; %d are reached by path only, through %d request calls whose method could not be read.\n\n", countPaths(r.API), r.Summary.APIWithoutCLI, r.Summary.APIExemptFromCLI, cliParityExemptionsPath, len(r.API), r.Summary.APIOperationsWithoutCLI, r.Summary.APIOperationsExemptFromCLI, r.Summary.APIOperationsCLIPathOnly, r.Summary.CLIMethodUnknownSites)
 	fmt.Fprintf(&b, "Environment variables: %d discovered, %d missing documentation. Manifest kinds: %d discovered, %d missing documentation.\n\n", r.Summary.EnvironmentVariables, r.Summary.EnvironmentVariablesMissing, r.Summary.ManifestKinds, r.Summary.ManifestKindsMissing)
 	fmt.Fprintf(&b, "Docs → code references: %d commands, %d API paths, %d environment variables, %d manifest kinds, and %d flags; missing symbols: %d, %d, %d, %d, and %d respectively.\n\n", r.Reverse.CommandReferences, r.Reverse.APIPathReferences, r.Reverse.EnvReferences, r.Reverse.KindReferences, r.Reverse.FlagReferences, r.Reverse.MissingCommands, r.Reverse.MissingAPIPaths, r.Reverse.MissingEnv, r.Reverse.MissingKinds, r.Reverse.MissingFlags)
 

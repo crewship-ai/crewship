@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // CLI parity is the rule "every API endpoint gets a CLI command", measured.
@@ -23,26 +24,57 @@ import (
 // tool ran. The gates proved the route was described; none of them asked
 // whether the contract agents actually use could reach it.
 //
-// The check is a diff of two sets. One side is every public path the OpenAPI
-// document lists. The other is every request path the CLI can build, read out
-// of the Go source of cmd/crewship rather than out of a list someone maintains:
-// a string literal, a `+` chain of literals and variables, an fmt.Sprintf
-// format, a helper that returns one of those. Each becomes a SHAPE — the path
-// with every non-literal part replaced by a placeholder that matches exactly
-// one segment — and a route is covered when some shape matches it segment for
-// segment. A shape is only collected from the argument position of a call that
-// actually sends a request — the client methods (Get/Post/Do/…) and any
-// wrapper, package-level or closure, discovered to hand one of its parameters
-// into that position — so a "/api/…" string in help text, a log message or a
-// comparison cannot claim a route no request ever names. Methods are not
-// compared: a path the CLI reaches for GET but not for DELETE would need the
-// request wrappers traced per method too, and a path-level diff already
-// catches the failure the audit found, which was a path nobody called at all.
+// The check is a diff of two sets. One side is every public operation — method
+// and path — the OpenAPI document lists. The other is every request the CLI
+// can send, read out of the Go source of cmd/crewship rather than out of a
+// list someone maintains.
 //
-// A route can be exempted, with a reason, in cliParityExemptionsPath. The file
-// is the record the audit asked for: the one endpoint that serves iframe HTML,
-// the public dispatch routes a CLI cannot usefully drive, and — marked as such
-// — routes whose CLI is in flight on another branch.
+// The path of a request is read from a string literal, a `+` chain of
+// literals and variables, an fmt.Sprintf format, a helper that returns one of
+// those (or one result of a helper that returns several), a local or package
+// constant. Each becomes a SHAPE — the path with every non-literal part
+// replaced by a placeholder that matches exactly one segment — and a route is
+// reached when some shape matches it segment for segment. A shape is only
+// collected from the argument position of a call that actually sends a
+// request — the client methods (Get/Post/Do/…) and any wrapper, package-level
+// or closure, discovered to hand one of its parameters into that position — so
+// a "/api/…" string in help text, a log message or a comparison cannot claim a
+// route no request ever names.
+//
+// The method of each such call is read the same way, through the same
+// layers: the client method's name (Get, Patch), the method argument of Do
+// and NewRequest (a literal, an http.MethodX constant, a local bound to
+// either, a map or slice literal indexed or ranged over), a wrapper that
+// passes its own method parameter on (chatRoomRequest, teamSeedJSON), a
+// wrapper that dispatches on it (`if method == "GET" { Get } else { Post }`,
+// which sends only what it compares against), a callback (the union of the
+// function literals passed in), and a request function whose method arrives
+// from its callers (sharedProjectMilestoneRequest). Until 2026-10-29 only
+// paths were compared, so a path the CLI reached for DELETE counted for PATCH
+// too; fifteen operations were unreachable that way.
+//
+// Where the method cannot be read statically the call is METHOD-UNKNOWN. It
+// still reaches its path for every method — the path-level rule this gate
+// had before — so the gate never reports a gap it cannot prove, but nothing
+// is guessed either: those operations are flagged on the record, and the
+// summary line counts both them and the call sites behind them. A method set
+// and a path set read from the same call are combined as a product, so a call
+// whose method depends on whether an id was given (POST /milestones, PUT
+// /milestones/{id}) also claims the cross terms; that imprecision is the
+// same one a path variable bound twice already had.
+//
+// `crewship seed` provisions demo data through the API, and a route only seed
+// calls is not one a user's command reaches. A declaration in cmd_seed*.go
+// therefore contributes shapes only when a declaration outside those files
+// reaches it through a function or method call: the nuke commands' helpers
+// live in cmd_seed_data_nuke.go and keep counting, the seeders do not.
+//
+// An operation can be exempted, with a reason, in cliParityExemptionsPath —
+// either one method (`PUT /api/v1/crews/{crewId}  reason`) or, with no method,
+// every method on the path. The file is the record the audit asked for: the
+// one endpoint that serves iframe HTML, the public dispatch routes a CLI
+// cannot usefully drive, and — marked as such — operations whose CLI is in
+// flight on another branch.
 
 const (
 	cliParityExemptionsPath = "scripts/docs-inventory/cli-parity-exemptions.txt"
@@ -50,6 +82,10 @@ const (
 	// the shape is being built. It is not a byte that can occur in a Go string
 	// used as a URL path.
 	cliPathPlaceholder = "\x00"
+	// cliResultMarker names the synthetic call that stands for one result of
+	// a multi-value call (`client, base, err := guestIssueClient()` binds base
+	// to result 1). No Go identifier can contain the byte.
+	cliResultMarker = "\x00result"
 )
 
 // cliSourceRoots are where the CLI builds request paths: the commands, and the
@@ -73,6 +109,12 @@ func isCLISourceFile(path string) bool {
 	return false
 }
 
+// isCLISeedFile names the files of `crewship seed`, whose requests count only
+// where a user-facing command reaches them (see the file comment).
+func isCLISeedFile(path string) bool {
+	return strings.HasPrefix(path, "cmd/crewship/cmd_seed")
+}
+
 // cliParityStatus values carried on apiRecord.CLIParity.
 const (
 	cliParityCovered = "cli"
@@ -82,40 +124,83 @@ const (
 
 var sprintfVerb = regexp.MustCompile(`%[-+# 0-9.*\[\]]*[a-zA-Z]`)
 
-// cliPathShape is one request path the CLI source can build, and where.
+// httpMethods are the methods an operation or an exemption can name.
+var httpMethods = map[string]bool{
+	"GET": true, "HEAD": true, "POST": true, "PUT": true, "PATCH": true,
+	"DELETE": true, "OPTIONS": true, "TRACE": true, "CONNECT": true,
+}
+
+// cliPathShape is one request path the CLI source can build, where, and with
+// which methods.
 type cliPathShape struct {
 	Shape  string
 	Source string
+	// Methods are the methods the calls building this shape in Source send.
+	Methods []string
+	// MethodUnknown is set when at least one of those calls sends a method
+	// this tool cannot read; the shape then reaches its path for every
+	// method. UnknownSites are those calls, as file:line.
+	MethodUnknown bool
+	UnknownSites  []string
 }
 
-// cliSinkMethods are the client methods that send an HTTP request, and the
-// argument position that carries the request path. Matched by method name on
-// any receiver: a getter with one of these names whose argument is a query
-// key or a map key produces no shape, because such an argument never starts
-// with /api/.
-var cliSinkMethods = map[string]int{
-	"Get": 0, "Post": 0, "Patch": 0, "Put": 0, "Delete": 0,
-	"Do": 1, "NewRequest": 2,
+// sinkSpec says how a call sends a request: which argument carries the path,
+// and where the method comes from.
+type sinkSpec struct {
+	path int
+	// methods are sent whatever the arguments.
+	methods []string
+	// methodArg is the argument carrying the method, or -1.
+	methodArg int
+	// dispatch, when not nil, means the callee compares its method argument
+	// against these and sends one of them; an argument outside the set is
+	// sent as something this tool does not follow, so it is unknown.
+	dispatch []string
+	// unknown: the call can send a method this tool cannot read.
+	unknown bool
+}
+
+func (s sinkSpec) equal(o sinkSpec) bool {
+	return s.path == o.path && s.methodArg == o.methodArg && s.unknown == o.unknown &&
+		strings.Join(s.methods, ",") == strings.Join(o.methods, ",") &&
+		(s.dispatch == nil) == (o.dispatch == nil) && strings.Join(s.dispatch, ",") == strings.Join(o.dispatch, ",")
+}
+
+// cliSinkMethods are the client methods that send an HTTP request. Matched by
+// method name on any receiver: a getter with one of these names whose
+// argument is a query key or a map key produces no shape, because such an
+// argument never starts with /api/. Do is `Do(method, path, body)`;
+// NewRequest is `NewRequest(ctx, method, path, body)`. http.Client.Do(req)
+// has one argument and so no path position at all.
+var cliSinkMethods = map[string]sinkSpec{
+	"Get":        {path: 0, methods: []string{"GET"}, methodArg: -1},
+	"Post":       {path: 0, methods: []string{"POST"}, methodArg: -1},
+	"Patch":      {path: 0, methods: []string{"PATCH"}, methodArg: -1},
+	"Put":        {path: 0, methods: []string{"PUT"}, methodArg: -1},
+	"Delete":     {path: 0, methods: []string{"DELETE"}, methodArg: -1},
+	"Do":         {path: 1, methodArg: 0},
+	"NewRequest": {path: 2, methodArg: 1},
 }
 
 // sinkSet names the calls a shape may be collected from: client methods
 // directly, plus wrappers — functions, methods and closures discovered to
 // pass one of their parameters into the path position of such a call — as
-// name → path-argument index. A set is built per package (a name in
-// internal/cli must not match a call in cmd/crewship) and copied per
-// declaration so a closure's name stays scoped to its own declaration.
+// name → spec. A set is built per package (a name in internal/cli must not
+// match a call in cmd/crewship) and copied per declaration so a closure's
+// name stays scoped to its own declaration.
 type sinkSet struct {
-	methods map[string]int
-	funcs   map[string]int
+	methods map[string]sinkSpec
+	funcs   map[string]sinkSpec
 }
 
 // forDecl returns an independent copy, safe for per-declaration additions.
 // The method map is shared: method sinks bind wherever their receiver goes.
 func (s *sinkSet) forDecl() *sinkSet {
-	return &sinkSet{
-		methods: s.methods,
-		funcs:   cloneIntMap(s.funcs),
+	funcs := make(map[string]sinkSpec, len(s.funcs))
+	for k, v := range s.funcs {
+		funcs[k] = v
 	}
+	return &sinkSet{methods: s.methods, funcs: funcs}
 }
 
 func cloneIntMap(src map[string]int) map[string]int {
@@ -126,24 +211,254 @@ func cloneIntMap(src map[string]int) map[string]int {
 	return out
 }
 
-// pathArg reports which argument of call carries the request path.
-func (s *sinkSet) pathArg(call *ast.CallExpr) (int, bool) {
+// spec reports how call sends a request, if it does.
+func (s *sinkSet) spec(call *ast.CallExpr) (sinkSpec, bool) {
 	switch fn := call.Fun.(type) {
 	case *ast.SelectorExpr:
-		idx, ok := s.methods[fn.Sel.Name]
-		return idx, ok
+		spec, ok := s.methods[fn.Sel.Name]
+		return spec, ok
 	case *ast.Ident:
-		idx, ok := s.funcs[fn.Name]
-		return idx, ok
+		spec, ok := s.funcs[fn.Name]
+		return spec, ok
 	}
-	return 0, false
+	return sinkSpec{}, false
+}
+
+// methodSet is what a method expression, or a call, can send.
+type methodSet struct {
+	methods []string
+	// param is the parameter of the enclosing wrapper the method comes
+	// from, or -1; dispatch is carried with it (see sinkSpec).
+	param    int
+	dispatch []string
+	unknown  bool
+}
+
+func (m *methodSet) add(methods ...string) {
+	for _, method := range methods {
+		m.methods = appendUnique(m.methods, method)
+	}
+	sort.Strings(m.methods)
+}
+
+func (m *methodSet) merge(o methodSet) {
+	m.add(o.methods...)
+	m.unknown = m.unknown || o.unknown
+	if o.param >= 0 && (m.param < 0 || o.param < m.param) {
+		m.param = o.param
+	}
+	if o.dispatch != nil {
+		m.dispatch = appendUnique(m.dispatch, o.dispatch...)
+		sort.Strings(m.dispatch)
+	}
+}
+
+// cliPackage is one Go package of CLI source, with what the method reader
+// needs to look across declarations: who calls a function, and each
+// declaration's own bindings.
+type cliPackage struct {
+	env     *shapeEnv
+	sinks   *sinkSet
+	files   []*ast.File
+	callers map[string][]cliCallSite
+	envs    map[ast.Decl]*shapeEnv
+}
+
+type cliCallSite struct {
+	call *ast.CallExpr
+	decl ast.Decl
+}
+
+// declEnv is decl's local bindings over the package's.
+func (p *cliPackage) declEnv(decl ast.Decl) *shapeEnv {
+	if env, ok := p.envs[decl]; ok {
+		return env
+	}
+	env := newShapeEnv(p.env)
+	env.bindAssignments(decl)
+	p.envs[decl] = env
+	return env
+}
+
+// methodScope resolves identifiers in a method expression: params are the
+// wrapper parameters being discovered (nil outside discovery), fn the
+// enclosing top-level function whose callers can supply a parameter.
+type methodScope struct {
+	env    *shapeEnv
+	params map[string]int
+	fn     *ast.FuncDecl
+	pkg    *cliPackage
+	depth  int
+}
+
+// maxMethodDepth bounds method resolution through bindings and callers.
+const maxMethodDepth = 4
+
+func unknownMethod() methodSet { return methodSet{param: -1, unknown: true} }
+
+// evalMethod reads the methods expr can evaluate to.
+func evalMethod(expr ast.Expr, scope methodScope) methodSet {
+	out := methodSet{param: -1}
+	switch x := expr.(type) {
+	case *ast.BasicLit:
+		if x.Kind == token.STRING {
+			if value, err := strconv.Unquote(x.Value); err == nil && httpMethods[strings.ToUpper(value)] {
+				out.add(strings.ToUpper(value))
+				return out
+			}
+		}
+		return unknownMethod()
+	case *ast.ParenExpr:
+		return evalMethod(x.X, scope)
+	case *ast.SelectorExpr:
+		if pkg, ok := x.X.(*ast.Ident); ok && pkg.Name == "http" && strings.HasPrefix(x.Sel.Name, "Method") {
+			if method := strings.ToUpper(strings.TrimPrefix(x.Sel.Name, "Method")); httpMethods[method] {
+				out.add(method)
+				return out
+			}
+		}
+		return unknownMethod()
+	case *ast.CallExpr:
+		if sel, ok := x.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "ToUpper" && len(x.Args) == 1 {
+			if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "strings" {
+				return evalMethod(x.Args[0], scope)
+			}
+		}
+		return unknownMethod()
+	case *ast.IndexExpr:
+		return evalMethodElements(x.X, scope)
+	case *ast.Ident:
+		if scope.depth >= maxMethodDepth {
+			return unknownMethod()
+		}
+		resolved := false
+		if pi, ok := scope.params[x.Name]; ok {
+			out.param = pi
+			resolved = true
+		}
+		next := scope
+		next.depth++
+		if scope.env != nil {
+			values, _ := scope.env.lookup(x.Name)
+			for _, value := range values {
+				if id, ok := value.(*ast.Ident); ok && id.Name == x.Name {
+					continue
+				}
+				out.merge(evalMethod(value, next))
+				resolved = true
+			}
+		}
+		// A parameter of the enclosing function that is not a wrapper being
+		// discovered: its callers supply it, alongside any value the body
+		// assigns over it (`if method == "" { method = "GET" }`).
+		if scope.params == nil && scope.fn != nil && scope.pkg != nil {
+			if pi, ok := paramIndex(scope.fn.Type.Params)[x.Name]; ok {
+				out.merge(methodFromCallers(scope.fn.Name.Name, pi, scope))
+				resolved = true
+			}
+		}
+		if !resolved {
+			return unknownMethod()
+		}
+		return out
+	}
+	return unknownMethod()
+}
+
+// evalMethodElements reads every element of a map or slice literal — what an
+// index into it, or a range over it, can yield.
+func evalMethodElements(expr ast.Expr, scope methodScope) methodSet {
+	switch x := expr.(type) {
+	case *ast.CompositeLit:
+		if len(x.Elts) == 0 {
+			return unknownMethod()
+		}
+		out := methodSet{param: -1}
+		for _, elt := range x.Elts {
+			if kv, ok := elt.(*ast.KeyValueExpr); ok {
+				elt = kv.Value
+			}
+			out.merge(evalMethod(elt, scope))
+		}
+		return out
+	case *ast.Ident:
+		if scope.env == nil || scope.depth >= maxMethodDepth {
+			return unknownMethod()
+		}
+		values, _ := scope.env.lookup(x.Name)
+		if len(values) == 0 {
+			return unknownMethod()
+		}
+		next := scope
+		next.depth++
+		out := methodSet{param: -1}
+		for _, value := range values {
+			out.merge(evalMethodElements(value, next))
+		}
+		return out
+	}
+	return unknownMethod()
+}
+
+// methodFromCallers resolves a function's method parameter through every
+// call to it in the package: sharedProjectMilestoneRequest builds its own
+// path, and only its callers know which method it sends.
+func methodFromCallers(name string, param int, scope methodScope) methodSet {
+	sites := scope.pkg.callers[name]
+	if len(sites) == 0 {
+		return unknownMethod()
+	}
+	out := methodSet{param: -1}
+	for _, site := range sites {
+		if param >= len(site.call.Args) {
+			out.unknown = true
+			continue
+		}
+		caller := methodScope{env: scope.pkg.declEnv(site.decl), pkg: scope.pkg, depth: scope.depth + 1}
+		if fn, ok := site.decl.(*ast.FuncDecl); ok {
+			caller.fn = fn
+		}
+		got := evalMethod(site.call.Args[param], caller)
+		got.param = -1
+		out.merge(got)
+	}
+	return out
+}
+
+// callMethods reads what one request call sends, given its spec.
+func callMethods(call *ast.CallExpr, spec sinkSpec, scope methodScope) methodSet {
+	out := methodSet{param: -1, unknown: spec.unknown}
+	out.add(spec.methods...)
+	if spec.methodArg < 0 {
+		return out
+	}
+	if spec.methodArg >= len(call.Args) {
+		out.unknown = true
+		return out
+	}
+	got := evalMethod(call.Args[spec.methodArg], scope)
+	out.unknown = out.unknown || got.unknown
+	if got.param >= 0 {
+		out.param = got.param
+		if spec.dispatch != nil {
+			out.dispatch = append([]string{}, spec.dispatch...)
+		}
+	}
+	for _, method := range got.methods {
+		if spec.dispatch != nil && !contains(spec.dispatch, method) {
+			out.unknown = true
+			continue
+		}
+		out.add(method)
+	}
+	return out
 }
 
 // discoverDeclSinks adds closure wrappers (`fetch := func(path string)
 // {…}`) to the declaration's own sink set, to a fixpoint so a closure
 // calling an earlier-discovered closure is found too.
-func discoverDeclSinks(decl ast.Node, sinks *sinkSet) {
-	for {
+func discoverDeclSinks(decl ast.Node, sinks *sinkSet, scope methodScope) {
+	for range 8 {
 		changed := false
 		ast.Inspect(decl, func(n ast.Node) bool {
 			assign, ok := n.(*ast.AssignStmt)
@@ -159,11 +474,12 @@ func discoverDeclSinks(decl ast.Node, sinks *sinkSet) {
 				if !ok || lit.Body == nil {
 					continue
 				}
-				if _, dup := sinks.funcs[name.Name]; dup {
+				spec, ok := bodySinkSpec(lit.Body, paramIndex(lit.Type.Params), sinks, scope)
+				if !ok {
 					continue
 				}
-				if idx, ok := funcLitPathParam(lit, sinks); ok {
-					sinks.funcs[name.Name] = idx
+				if old, dup := sinks.funcs[name.Name]; !dup || !old.equal(spec) {
+					sinks.funcs[name.Name] = spec
 					changed = true
 				}
 			}
@@ -178,76 +494,98 @@ func discoverDeclSinks(decl ast.Node, sinks *sinkSet) {
 // callbackRequestSinks finds request-forwarding function literals passed to a
 // named function's function-typed parameter. The callback name is a sink only
 // within that receiving declaration: another function's `call` may just log.
-func callbackRequestSinks(files []*ast.File, sinks *sinkSet) map[*ast.FuncDecl]map[string]int {
+// Its methods are the union of every literal passed in — runCrewBudget's
+// `call` is Get from one command, Put and Delete from the others.
+func callbackRequestSinks(pkg *cliPackage) map[*ast.FuncDecl]map[string]sinkSpec {
 	functions := map[string]*ast.FuncDecl{}
-	for _, file := range files {
+	for _, file := range pkg.files {
 		for _, decl := range file.Decls {
 			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Body != nil {
 				functions[fn.Name.Name] = fn
 			}
 		}
 	}
-	out := map[*ast.FuncDecl]map[string]int{}
-	for _, file := range files {
-		ast.Inspect(file, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			name, ok := call.Fun.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			fn := functions[name.Name]
-			if fn == nil || fn.Type.Params == nil {
-				return true
-			}
-			position := 0
-			for _, field := range fn.Type.Params.List {
-				for _, param := range field.Names {
-					if _, callable := field.Type.(*ast.FuncType); callable && position < len(call.Args) {
-						if callback, ok := call.Args[position].(*ast.FuncLit); ok {
-							if path, ok := funcLitPathParam(callback, sinks); ok {
-								if out[fn] == nil {
-									out[fn] = map[string]int{}
+	out := map[*ast.FuncDecl]map[string]sinkSpec{}
+	for _, file := range pkg.files {
+		for _, decl := range file.Decls {
+			scope := methodScope{env: pkg.declEnv(decl), pkg: pkg}
+			ast.Inspect(decl, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				name, ok := call.Fun.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				fn := functions[name.Name]
+				if fn == nil || fn.Type.Params == nil {
+					return true
+				}
+				position := 0
+				for _, field := range fn.Type.Params.List {
+					for _, param := range field.Names {
+						if _, callable := field.Type.(*ast.FuncType); callable && position < len(call.Args) {
+							if callback, ok := call.Args[position].(*ast.FuncLit); ok {
+								if spec, ok := bodySinkSpec(callback.Body, paramIndex(callback.Type.Params), pkg.sinks, scope); ok {
+									if out[fn] == nil {
+										out[fn] = map[string]sinkSpec{}
+									}
+									if old, seen := out[fn][param.Name]; seen {
+										spec = unionSpecs(old, spec)
+									}
+									out[fn][param.Name] = spec
 								}
-								out[fn][param.Name] = path
 							}
 						}
+						position++
 					}
-					position++
+					if len(field.Names) == 0 {
+						position++
+					}
 				}
-				if len(field.Names) == 0 {
-					position++
-				}
-			}
-			return true
-		})
+				return true
+			})
+		}
 	}
 	return out
 }
 
-// wrapperPathParam reports which parameter of fn reaches the path position of
-// a request call in its body, if any. A parameter reaches the path position
-// when it is passed there directly (`client.Get(path)`) or through a plain
-// local alias (`p := path; client.Get(p)`); anything more convoluted is not
-// how these wrappers are written.
-func wrapperPathParam(fn *ast.FuncDecl, sinks *sinkSet) (int, bool) {
-	return bodyPathParam(fn.Body, paramIndex(fn.Type.Params), sinks)
+func unionSpecs(a, b sinkSpec) sinkSpec {
+	out := a
+	if b.path < out.path {
+		out.path = b.path
+	}
+	out.methods = appendUnique(append([]string{}, a.methods...), b.methods...)
+	sort.Strings(out.methods)
+	if out.methodArg < 0 {
+		out.methodArg = b.methodArg
+	}
+	if b.dispatch != nil {
+		out.dispatch = appendUnique(append([]string{}, a.dispatch...), b.dispatch...)
+		sort.Strings(out.dispatch)
+	}
+	out.unknown = a.unknown || b.unknown
+	return out
 }
 
-// funcLitPathParam is wrapperPathParam for a function literal.
-func funcLitPathParam(lit *ast.FuncLit, sinks *sinkSet) (int, bool) {
-	return bodyPathParam(lit.Body, paramIndex(lit.Type.Params), sinks)
-}
-
-// bodyPathParam walks body and reports the lowest parameter index that
-// reaches a request call's path argument. The lowest, because a wrapper
-// with two path-passing parameters would be ambiguous and the CLI does not
-// write those.
-func bodyPathParam(body ast.Node, params map[string]int, sinks *sinkSet) (int, bool) {
+// bodySinkSpec walks a function body and reports whether one of its
+// parameters reaches a request call's path argument — the lowest one,
+// because a wrapper with two path-passing parameters would be ambiguous and
+// the CLI does not write those — and what those calls send. A parameter
+// reaches the path position when it is passed there directly
+// (`client.Get(path)`) or through a plain local alias (`p := path;
+// client.Get(p)`); anything more convoluted is not how these wrappers are
+// written.
+//
+// The method is the union over those calls. A call whose method is one of
+// the wrapper's own parameters makes that parameter the wrapper's method
+// argument. A wrapper that sends fixed methods but compares a parameter
+// against a method (`if method == "GET"`) dispatches on it: its callers'
+// argument decides, within the methods it can send.
+func bodySinkSpec(body ast.Node, params map[string]int, sinks *sinkSet, scope methodScope) (sinkSpec, bool) {
 	if len(params) == 0 {
-		return 0, false
+		return sinkSpec{}, false
 	}
 	names := cloneIntMap(params)
 	ast.Inspect(body, func(n ast.Node) bool {
@@ -270,22 +608,72 @@ func bodyPathParam(body ast.Node, params map[string]int, sinks *sinkSet) (int, b
 		}
 		return true
 	})
+	local := scope
+	local.params = names
+	local.fn = nil
+	if scope.env != nil {
+		local.env = newShapeEnv(scope.env)
+		local.env.bindAssignments(body)
+	}
 	found := -1
+	methods := methodSet{param: -1}
 	ast.Inspect(body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
 		}
-		arg, ok := sinks.pathArg(call)
-		if !ok || arg >= len(call.Args) {
+		spec, ok := sinks.spec(call)
+		if !ok || spec.path >= len(call.Args) {
 			return true
 		}
-		id, ok := call.Args[arg].(*ast.Ident)
+		id, ok := call.Args[spec.path].(*ast.Ident)
 		if !ok {
 			return true
 		}
-		if pi, ok := names[id.Name]; ok && (found < 0 || pi < found) {
+		pi, ok := names[id.Name]
+		if !ok {
+			return true
+		}
+		if found < 0 || pi < found {
 			found = pi
+		}
+		methods.merge(callMethods(call, spec, local))
+		return true
+	})
+	if found < 0 {
+		return sinkSpec{}, false
+	}
+	out := sinkSpec{path: found, methods: methods.methods, methodArg: methods.param, dispatch: methods.dispatch, unknown: methods.unknown}
+	if out.methodArg < 0 && !out.unknown && len(out.methods) > 0 {
+		if pi, ok := dispatchParam(body, names, out.path, local); ok {
+			out.methodArg, out.dispatch, out.methods = pi, out.methods, nil
+		}
+	}
+	return out, true
+}
+
+// dispatchParam finds a parameter, other than the path, that the body
+// compares with == or != against a method.
+func dispatchParam(body ast.Node, names map[string]int, pathParam int, scope methodScope) (int, bool) {
+	scope.params = nil
+	found := -1
+	ast.Inspect(body, func(n ast.Node) bool {
+		bin, ok := n.(*ast.BinaryExpr)
+		if !ok || (bin.Op != token.EQL && bin.Op != token.NEQ) {
+			return true
+		}
+		for _, pair := range [][2]ast.Expr{{bin.X, bin.Y}, {bin.Y, bin.X}} {
+			id, ok := pair[0].(*ast.Ident)
+			if !ok {
+				continue
+			}
+			pi, ok := names[id.Name]
+			if !ok || pi == pathParam {
+				continue
+			}
+			if got := evalMethod(pair[1], scope); !got.unknown && len(got.methods) > 0 && (found < 0 || pi < found) {
+				found = pi
+			}
 		}
 		return true
 	})
@@ -311,6 +699,72 @@ func paramIndex(fields *ast.FieldList) map[string]int {
 	return names
 }
 
+// seedOnlyDecls returns the declarations of the seed files that no
+// declaration outside them reaches through a function or method call.
+// Variables are not followed: main.go registers seedCmd, and that is the
+// seed command, not a user-facing caller of what it runs.
+func seedOnlyDecls(files []*ast.File, paths []string) map[ast.Decl]bool {
+	funcs := map[string][]*ast.FuncDecl{}
+	methods := map[string][]*ast.FuncDecl{}
+	seedOnly := map[ast.Decl]bool{}
+	var queue []ast.Decl
+	for i, file := range files {
+		seed := isCLISeedFile(paths[i])
+		for _, decl := range file.Decls {
+			if !seed {
+				queue = append(queue, decl)
+				continue
+			}
+			seedOnly[decl] = true
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name != "init" {
+				if fn.Recv == nil {
+					funcs[fn.Name.Name] = append(funcs[fn.Name.Name], fn)
+				} else {
+					methods[fn.Name.Name] = append(methods[fn.Name.Name], fn)
+				}
+			}
+		}
+	}
+	if len(seedOnly) == 0 {
+		return seedOnly
+	}
+	visited := map[ast.Decl]bool{}
+	for len(queue) > 0 {
+		decl := queue[0]
+		queue = queue[1:]
+		if visited[decl] {
+			continue
+		}
+		visited[decl] = true
+		// A function's own name is not a reference to it, and every file's
+		// init would otherwise reach every seed file's init.
+		var body ast.Node = decl
+		if fn, ok := decl.(*ast.FuncDecl); ok {
+			if fn.Body == nil {
+				continue
+			}
+			body = fn.Body
+		}
+		ast.Inspect(body, func(n ast.Node) bool {
+			var targets []*ast.FuncDecl
+			switch x := n.(type) {
+			case *ast.Ident:
+				targets = funcs[x.Name]
+			case *ast.SelectorExpr:
+				targets = methods[x.Sel.Name]
+			}
+			for _, fn := range targets {
+				if !visited[fn] {
+					delete(seedOnly, fn)
+					queue = append(queue, fn)
+				}
+			}
+			return true
+		})
+	}
+	return seedOnly
+}
+
 // cliPathShapes reads every non-test Go file under cliSourceRoots out of
 // sources and returns the request-path shapes it can build.
 func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
@@ -332,22 +786,29 @@ func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
 		return nil, fmt.Errorf("no Go source under %s — the CLI moved, so this gate has nothing to compare routes against", strings.Join(cliSourceRoots, ", "))
 	}
 
-	pkgs := map[string]*shapeEnv{}
-	pkgSinks := map[string]*sinkSet{}
-	pkgFiles := map[string][]*ast.File{}
+	pkgs := map[string]*cliPackage{}
+	var dirs []string
 	// methodSinks is shared by every package: a method wrapper (StreamSSE)
 	// is declared in one package (internal/cli) but called from the others
 	// (cmd/crewship, internal/cli/tui), and a call site matches it by name
 	// wherever the receiver comes from. Ident-named wrappers stay
 	// package-local — that is the resolution rule for plain names.
-	methodSinks := cloneIntMap(cliSinkMethods)
+	methodSinks := map[string]sinkSpec{}
+	for name, spec := range cliSinkMethods {
+		methodSinks[name] = spec
+	}
 	for i, file := range files {
 		dir := filepath.Dir(paths[i])
 		if pkgs[dir] == nil {
-			pkgs[dir] = newShapeEnv(nil)
-			pkgSinks[dir] = &sinkSet{methods: methodSinks, funcs: map[string]int{}}
+			pkgs[dir] = &cliPackage{
+				env:     newShapeEnv(nil),
+				sinks:   &sinkSet{methods: methodSinks, funcs: map[string]sinkSpec{}},
+				callers: map[string][]cliCallSite{},
+				envs:    map[ast.Decl]*shapeEnv{},
+			}
+			dirs = append(dirs, dir)
 		}
-		pkgFiles[dir] = append(pkgFiles[dir], file)
+		pkgs[dir].files = append(pkgs[dir].files, file)
 	}
 	// Pass one: package-level names, per Go package — cmd/crewship (main)
 	// and internal/cli (cli) share no identifiers, and resolving a name
@@ -357,54 +818,69 @@ func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
 	// chatRoomPath(id string) string { return chatRoomBase + "/" +
 	// url.PathEscape(id) }`) are how the CLI avoids repeating prefixes, and
 	// a caller that writes `chatRoomPath(id) + "/messages"` only resolves
-	// to a route once those are known.
+	// to a route once those are known. Every call to a plain function name
+	// is indexed too, for methods that arrive from callers.
 	for i, file := range files {
 		pkg := pkgs[filepath.Dir(paths[i])]
 		for _, decl := range file.Decls {
 			switch d := decl.(type) {
 			case *ast.GenDecl:
 				for _, spec := range d.Specs {
-					value, ok := spec.(*ast.ValueSpec)
-					if !ok {
-						continue
-					}
-					for j, name := range value.Names {
-						if j < len(value.Values) {
-							pkg.bind(name.Name, value.Values[j])
-						}
+					if value, ok := spec.(*ast.ValueSpec); ok {
+						pkg.env.bindValueSpec(value)
 					}
 				}
 			case *ast.FuncDecl:
 				if d.Recv == nil && d.Body != nil {
-					pkg.bindFunc(d)
+					pkg.env.bindFunc(d)
 				}
 			}
+			ast.Inspect(decl, func(n ast.Node) bool {
+				if call, ok := n.(*ast.CallExpr); ok {
+					if name, ok := call.Fun.(*ast.Ident); ok {
+						pkg.callers[name.Name] = append(pkg.callers[name.Name], cliCallSite{call: call, decl: decl})
+					}
+				}
+				return true
+			})
 		}
 	}
 	// Pass one and a half: which functions and methods are request wrappers —
-	// pass one of their parameters into the path position of a request call.
-	// One fixpoint across every package: an ident wrapper binds in its own
-	// package only, a method wrapper binds everywhere its receiver travels.
-	for {
+	// pass one of their parameters into the path position of a request call —
+	// and what they send. One fixpoint across every package: an ident
+	// wrapper binds in its own package only, a method wrapper binds
+	// everywhere its receiver travels. The client methods themselves are
+	// never re-derived from their bodies.
+	for range 16 {
 		changed := false
-		for dir, sinks := range pkgSinks {
-			for _, file := range pkgFiles[dir] {
+		for _, dir := range dirs {
+			pkg := pkgs[dir]
+			for _, file := range pkg.files {
 				for _, decl := range file.Decls {
 					fn, ok := decl.(*ast.FuncDecl)
 					if !ok || fn.Body == nil {
 						continue
 					}
-					idx, ok := wrapperPathParam(fn, sinks)
+					if _, base := cliSinkMethods[fn.Name.Name]; base && fn.Recv != nil {
+						continue
+					}
+					scope := methodScope{env: pkg.env, pkg: pkg}
+					spec, ok := bodySinkSpec(fn.Body, paramIndex(fn.Type.Params), pkg.sinks, scope)
 					if !ok {
 						continue
 					}
-					if fn.Recv == nil {
-						if _, dup := sinks.funcs[fn.Name.Name]; !dup {
-							sinks.funcs[fn.Name.Name] = idx
-							changed = true
+					target := pkg.sinks.funcs
+					if fn.Recv != nil {
+						target = pkg.sinks.methods
+					}
+					if old, dup := target[fn.Name.Name]; !dup || !old.equal(spec) {
+						if dup && fn.Recv != nil {
+							spec = unionSpecs(old, spec)
+							if old.equal(spec) {
+								continue
+							}
 						}
-					} else if _, dup := sinks.methods[fn.Name.Name]; !dup {
-						sinks.methods[fn.Name.Name] = idx
+						target[fn.Name.Name] = spec
 						changed = true
 					}
 				}
@@ -415,60 +891,92 @@ func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
 		}
 	}
 
-	callbacks := map[*ast.FuncDecl]map[string]int{}
-	for dir, files := range pkgFiles {
-		for fn, params := range callbackRequestSinks(files, pkgSinks[dir]) {
+	callbacks := map[*ast.FuncDecl]map[string]sinkSpec{}
+	for _, dir := range dirs {
+		for fn, params := range callbackRequestSinks(pkgs[dir]) {
 			callbacks[fn] = params
 		}
 	}
 
-	seen := map[string]bool{}
+	byKey := map[string]int{}
 	var shapes []cliPathShape
-	for i, file := range files {
-		dir := filepath.Dir(paths[i])
+	for _, dir := range dirs {
 		pkg := pkgs[dir]
-		for _, decl := range file.Decls {
-			// Pass two, per top-level declaration: local assignments first,
-			// then the request calls in it rendered against local + package
-			// names. Declarations rather than functions because most of the
-			// CLI is `var xCmd = &cobra.Command{RunE: func(...) error
-			// {...}}` — the request is built inside a function literal in a
-			// var block. Closure wrappers assigned inside the declaration
-			// (`fetch := func(path string) {…}`) are discovered the same way
-			// package-level ones were, against this declaration's calls; the
-			// copy is per declaration so a closure's name never matches a
-			// call in a declaration it does not belong to.
-			local := newShapeEnv(pkg)
-			local.bindAssignments(decl)
-			sinks := pkgSinks[dir].forDecl()
-			if fn, ok := decl.(*ast.FuncDecl); ok {
-				for name, path := range callbacks[fn] {
-					sinks.funcs[name] = path
-				}
+		var pkgPaths []string
+		for i := range files {
+			if filepath.Dir(paths[i]) == dir {
+				pkgPaths = append(pkgPaths, paths[i])
 			}
-			discoverDeclSinks(decl, sinks)
-			ast.Inspect(decl, func(n ast.Node) bool {
-				call, ok := n.(*ast.CallExpr)
-				if !ok {
-					return true
+		}
+		seedOnly := seedOnlyDecls(pkg.files, pkgPaths)
+		for fi, file := range pkg.files {
+			source := pkgPaths[fi]
+			for _, decl := range file.Decls {
+				if seedOnly[decl] {
+					continue
 				}
-				arg, ok := sinks.pathArg(call)
-				if !ok || arg >= len(call.Args) {
-					return true
+				// Pass two, per top-level declaration: local assignments
+				// first, then the request calls in it rendered against local
+				// + package names. Declarations rather than functions
+				// because most of the CLI is `var xCmd = &cobra.Command{RunE:
+				// func(...) error {...}}` — the request is built inside a
+				// function literal in a var block. Closure wrappers assigned
+				// inside the declaration (`fetch := func(path string) {…}`)
+				// are discovered the same way package-level ones were,
+				// against this declaration's calls; the copy is per
+				// declaration so a closure's name never matches a call in a
+				// declaration it does not belong to.
+				local := pkg.declEnv(decl)
+				scope := methodScope{env: local, pkg: pkg}
+				if fn, ok := decl.(*ast.FuncDecl); ok {
+					scope.fn = fn
 				}
-				for _, shape := range local.shapes(call.Args[arg], 0) {
-					shape = normalizeShape(shape)
-					if shape == "" {
-						continue
+				sinks := pkg.sinks.forDecl()
+				if fn, ok := decl.(*ast.FuncDecl); ok {
+					for name, spec := range callbacks[fn] {
+						sinks.funcs[name] = spec
 					}
-					key := shape + "\n" + paths[i]
-					if !seen[key] {
-						seen[key] = true
-						shapes = append(shapes, cliPathShape{Shape: shape, Source: paths[i]})
-					}
 				}
-				return true
-			})
+				discoverDeclSinks(decl, sinks, scope)
+				ast.Inspect(decl, func(n ast.Node) bool {
+					call, ok := n.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					spec, ok := sinks.spec(call)
+					if !ok || spec.path >= len(call.Args) {
+						return true
+					}
+					rendered := local.shapes(call.Args[spec.path], 0)
+					var methods methodSet
+					resolvedMethods := false
+					for _, shape := range rendered {
+						shape = normalizeShape(shape)
+						if shape == "" {
+							continue
+						}
+						if !resolvedMethods {
+							methods = callMethods(call, spec, scope)
+							resolvedMethods = true
+						}
+						key := shape + "\n" + source
+						at, seen := byKey[key]
+						if !seen {
+							at = len(shapes)
+							byKey[key] = at
+							shapes = append(shapes, cliPathShape{Shape: shape, Source: source})
+						}
+						entry := &shapes[at]
+						entry.Methods = appendUnique(entry.Methods, methods.methods...)
+						sort.Strings(entry.Methods)
+						if methods.unknown || len(methods.methods) == 0 {
+							entry.MethodUnknown = true
+							entry.UnknownSites = appendUnique(entry.UnknownSites, fmt.Sprintf("%s:%d", source, fset.Position(call.Pos()).Line))
+						}
+					}
+					return true
+				})
+			}
 		}
 	}
 	sort.Slice(shapes, func(i, j int) bool {
@@ -478,6 +986,18 @@ func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
 		return shapes[i].Source < shapes[j].Source
 	})
 	return shapes, nil
+}
+
+// cliMethodUnknownSites counts the distinct request calls whose method could
+// not be read.
+func cliMethodUnknownSites(shapes []cliPathShape) int {
+	seen := map[string]bool{}
+	for _, shape := range shapes {
+		for _, site := range shape.UnknownSites {
+			seen[site] = true
+		}
+	}
+	return len(seen)
 }
 
 // shapeEnv resolves identifiers to the string expressions bound to them. A
@@ -495,9 +1015,11 @@ type shapeEnv struct {
 
 // funcShape is a package-level function as a path builder: what it returns,
 // under which parameter names, with its own local assignments in scope.
+// results holds each return statement's result list, so one result of a
+// multi-value helper can be rendered on its own.
 type funcShape struct {
 	params  []string
-	returns []ast.Expr
+	results [][]ast.Expr
 	local   *shapeEnv
 }
 
@@ -512,26 +1034,79 @@ func (e *shapeEnv) bind(name string, value ast.Expr) {
 	e.names[name] = append(e.names[name], value)
 }
 
-// bindAssignments records every `x := v`, `x = v` and `x += v` under node.
-// The compound form matters: `endpoint += "/source"` is how the page project
-// command reaches four routes from one base, and it is bound as
-// `endpoint + "/source"` so the earlier bindings of endpoint feed into it.
+// resultOf stands for result index of a multi-value call.
+func resultOf(call ast.Expr, index int) ast.Expr {
+	return &ast.CallExpr{Fun: ast.NewIdent(cliResultMarker), Args: []ast.Expr{call, &ast.BasicLit{Kind: token.INT, Value: strconv.Itoa(index)}}}
+}
+
+// bindMulti binds lhs to rhs pairwise, or — for `a, b, err := f()` — each
+// name to its result of the one call.
+func (e *shapeEnv) bindMulti(lhs []ast.Expr, rhs []ast.Expr, tok token.Token) {
+	if len(lhs) != len(rhs) {
+		if len(rhs) != 1 || len(lhs) < 2 {
+			return
+		}
+		if _, ok := rhs[0].(*ast.CallExpr); !ok {
+			return
+		}
+		if tok != token.ASSIGN && tok != token.DEFINE {
+			return
+		}
+		for j, l := range lhs {
+			if ident, ok := l.(*ast.Ident); ok {
+				e.bind(ident.Name, resultOf(rhs[0], j))
+			}
+		}
+		return
+	}
+	for j, l := range lhs {
+		ident, ok := l.(*ast.Ident)
+		if !ok {
+			continue
+		}
+		switch tok {
+		case token.ADD_ASSIGN:
+			e.bind(ident.Name, &ast.BinaryExpr{X: ident, Op: token.ADD, Y: rhs[j]})
+		case token.ASSIGN, token.DEFINE:
+			e.bind(ident.Name, rhs[j])
+		}
+	}
+}
+
+// bindValueSpec records `const x = v` / `var x = v`, at package level or
+// inside a function.
+func (e *shapeEnv) bindValueSpec(value *ast.ValueSpec) {
+	lhs := make([]ast.Expr, len(value.Names))
+	for j, name := range value.Names {
+		lhs[j] = name
+	}
+	if len(value.Values) > 0 {
+		e.bindMulti(lhs, value.Values, token.DEFINE)
+	}
+}
+
+// bindAssignments records every `x := v`, `x = v` and `x += v` under node,
+// every function-local `const`/`var`, and each value a `range` over a
+// literal yields. The compound form matters: `endpoint += "/source"` is how
+// the page project command reaches four routes from one base, and it is
+// bound as `endpoint + "/source"` so the earlier bindings of endpoint feed
+// into it.
 func (e *shapeEnv) bindAssignments(node ast.Node) {
 	ast.Inspect(node, func(n ast.Node) bool {
-		assign, ok := n.(*ast.AssignStmt)
-		if !ok || len(assign.Lhs) != len(assign.Rhs) {
-			return true
-		}
-		for j, lhs := range assign.Lhs {
-			ident, ok := lhs.(*ast.Ident)
-			if !ok {
-				continue
+		switch x := n.(type) {
+		case *ast.AssignStmt:
+			e.bindMulti(x.Lhs, x.Rhs, x.Tok)
+		case *ast.DeclStmt:
+			if gen, ok := x.Decl.(*ast.GenDecl); ok {
+				for _, spec := range gen.Specs {
+					if value, ok := spec.(*ast.ValueSpec); ok {
+						e.bindValueSpec(value)
+					}
+				}
 			}
-			switch assign.Tok {
-			case token.ADD_ASSIGN:
-				e.bind(ident.Name, &ast.BinaryExpr{X: ident, Op: token.ADD, Y: assign.Rhs[j]})
-			case token.ASSIGN, token.DEFINE:
-				e.bind(ident.Name, assign.Rhs[j])
+		case *ast.RangeStmt:
+			if value, ok := x.Value.(*ast.Ident); ok {
+				e.bind(value.Name, &ast.IndexExpr{X: x.X, Index: ast.NewIdent("_")})
 			}
 		}
 		return true
@@ -553,13 +1128,16 @@ func (e *shapeEnv) bindFunc(fn *ast.FuncDecl) {
 	}
 	shape.local.bindAssignments(fn.Body)
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if _, nested := n.(*ast.FuncLit); nested {
+			return false
+		}
 		ret, ok := n.(*ast.ReturnStmt)
 		if ok && len(ret.Results) >= 1 {
-			shape.returns = append(shape.returns, ret.Results[0])
+			shape.results = append(shape.results, ret.Results)
 		}
 		return true
 	})
-	if len(shape.returns) > 0 {
+	if len(shape.results) > 0 {
 		e.funcs[fn.Name.Name] = shape
 	}
 }
@@ -657,6 +1235,20 @@ func (e *shapeEnv) callShapes(call *ast.CallExpr, depth int) []string {
 		if depth >= maxShapeDepth {
 			return []string{cliPathPlaceholder}
 		}
+		index := 0
+		if fn.Name == cliResultMarker {
+			// One result of a multi-value call: the inner call, rendered at
+			// that result position.
+			inner, ok := call.Args[0].(*ast.CallExpr)
+			if !ok {
+				return []string{cliPathPlaceholder}
+			}
+			index, _ = strconv.Atoi(call.Args[1].(*ast.BasicLit).Value)
+			call = inner
+			if fn, ok = inner.Fun.(*ast.Ident); !ok {
+				return []string{cliPathPlaceholder}
+			}
+		}
 		if helper := e.lookupFunc(fn.Name); helper != nil {
 			callee := newShapeEnv(helper.local)
 			for i, param := range helper.params {
@@ -665,8 +1257,13 @@ func (e *shapeEnv) callShapes(call *ast.CallExpr, depth int) []string {
 				}
 			}
 			var out []string
-			for _, ret := range helper.returns {
-				out = append(out, callee.shapes(ret, depth+1)...)
+			for _, results := range helper.results {
+				if index < len(results) {
+					out = append(out, callee.shapes(results[index], depth+1)...)
+				}
+			}
+			if len(out) == 0 {
+				return []string{cliPathPlaceholder}
 			}
 			return out
 		}
@@ -784,16 +1381,28 @@ func shapeMatchesRoute(shape, route string, routes map[string]bool) bool {
 	return true
 }
 
-// cliCallers returns the CLI source files whose path shapes reach route.
-func cliCallers(route string, shapes []cliPathShape, routes map[string]bool) []string {
+// cliCallers returns the CLI source files whose requests reach method on
+// route. A shape whose calls send that method is a caller. When none does, a
+// method-unknown shape on the path still reaches it — the path-level rule —
+// and pathOnly reports that the operation is covered only that way.
+func cliCallers(method, route string, shapes []cliPathShape, routes map[string]bool) (callers []string, pathOnly bool) {
 	normalized := normalizeRoutePath(route)
-	var out []string
+	var known, unknown []string
 	for _, shape := range shapes {
-		if shapeMatchesRoute(shape.Shape, normalized, routes) {
-			out = appendUnique(out, shape.Source)
+		if !shapeMatchesRoute(shape.Shape, normalized, routes) {
+			continue
+		}
+		switch {
+		case contains(shape.Methods, method):
+			known = appendUnique(known, shape.Source)
+		case shape.MethodUnknown:
+			unknown = appendUnique(unknown, shape.Source)
 		}
 	}
-	return limitSignals(out)
+	if len(known) > 0 {
+		return limitSignals(known), false
+	}
+	return limitSignals(unknown), len(unknown) > 0
 }
 
 // specRoutes is the normalized path set of the OpenAPI document, the sibling
@@ -806,17 +1415,41 @@ func specRoutes(doc openAPIDocument) map[string]bool {
 	return routes
 }
 
-// cliParityExemption is one route the gate does not hold to parity, and why.
+// cliParityExemption is one operation — or, with no Method, every operation
+// on a path — the gate does not hold to parity, and why.
 type cliParityExemption struct {
+	Method string
 	Path   string
 	Reason string
 	Line   int
 }
 
-// readCLIParityExemptions parses the exemption file: one route per line,
-// followed by whitespace and the reason; `#` lines and blank lines are
-// skipped. A route with no reason is an error, because an exemption nobody
-// can justify is the gate quietly shrinking.
+func (ex cliParityExemption) matches(method, path string) bool {
+	return (ex.Method == "" || ex.Method == method) && normalizeRoutePath(ex.Path) == normalizeRoutePath(path)
+}
+
+func (ex cliParityExemption) String() string {
+	if ex.Method == "" {
+		return ex.Path
+	}
+	return ex.Method + " " + ex.Path
+}
+
+// cutField splits off the first whitespace-delimited field of s.
+func cutField(s string) (field, rest string) {
+	s = strings.TrimLeftFunc(s, unicode.IsSpace)
+	at := strings.IndexFunc(s, unicode.IsSpace)
+	if at < 0 {
+		return s, ""
+	}
+	return s[:at], strings.TrimSpace(s[at:])
+}
+
+// readCLIParityExemptions parses the exemption file: one line per exemption,
+// `[METHOD ]/api/... reason`; `#` lines and blank lines are skipped. A line
+// with no method exempts every method on the path. A route with no reason is
+// an error, because an exemption nobody can justify is the gate quietly
+// shrinking; so is a method that is not an upper-case HTTP method.
 func readCLIParityExemptions(name string) ([]cliParityExemption, error) {
 	file, err := os.Open(name)
 	if err != nil {
@@ -833,16 +1466,16 @@ func readCLIParityExemptions(name string) ([]cliParityExemption, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		path, reason, _ := strings.Cut(line, " ")
-		path, tabReason, tab := strings.Cut(path, "\t")
-		if tab {
-			reason = tabReason + " " + reason
+		method := ""
+		first, rest := cutField(line)
+		if httpMethods[first] {
+			method = first
+			first, rest = cutField(rest)
 		}
-		reason = strings.TrimSpace(reason)
-		if !strings.HasPrefix(path, "/api/") || reason == "" {
-			return nil, fmt.Errorf("%s:%d: expected `/api/... <reason>`, got %q", name, lineNo, line)
+		if !strings.HasPrefix(first, "/api/") || rest == "" {
+			return nil, fmt.Errorf("%s:%d: expected `[METHOD ]/api/... <reason>`, got %q", name, lineNo, line)
 		}
-		out = append(out, cliParityExemption{Path: path, Reason: reason, Line: lineNo})
+		out = append(out, cliParityExemption{Method: method, Path: first, Reason: rest, Line: lineNo})
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("read %s: %w", name, err)
@@ -850,42 +1483,57 @@ func readCLIParityExemptions(name string) ([]cliParityExemption, error) {
 	return out, nil
 }
 
-// cliParityFor decides one route's parity status: covered when a CLI shape
-// reaches it, exempt when the file says so, missing otherwise. The exemption
-// is consulted second so that a route which gained a CLI keeps reporting
-// "cli" — the stale exemption is then listed by staleCLIParityExemptions.
-func cliParityFor(path string, callers []string, exemptions []cliParityExemption) string {
+// cliParityFor decides one operation's parity status: covered when a CLI
+// request reaches it, exempt when the file says so, missing otherwise. The
+// exemption is consulted second so that an operation which gained a CLI keeps
+// reporting "cli" — the stale exemption is then listed by
+// staleCLIParityExemptions.
+func cliParityFor(method, path string, callers []string, exemptions []cliParityExemption) string {
 	if len(callers) > 0 {
 		return cliParityCovered
 	}
 	for _, ex := range exemptions {
-		if normalizeRoutePath(ex.Path) == normalizeRoutePath(path) {
+		if ex.matches(method, path) {
 			return cliParityExempt
 		}
 	}
 	return cliParityMissing
 }
 
-// staleCLIParityExemptions names exemptions the tree no longer needs: the route
-// has a CLI caller now, or is no longer in the spec. They are reported rather
-// than failed — the branch that adds the CLI should not have to edit this file
-// in the same commit — but every one of them is a line that should go.
+// staleCLIParityExemptions names exemptions the tree no longer needs: every
+// operation they cover has a CLI caller now, or they cover no operation in
+// the spec. They are reported rather than failed — the branch that adds the
+// CLI should not have to edit this file in the same commit — but every one
+// of them is a line that should go.
 func staleCLIParityExemptions(exemptions []cliParityExemption, records []apiRecord) []string {
-	status := map[string]string{}
-	for _, rec := range records {
-		key := normalizeRoutePath(rec.Path)
-		if status[key] != cliParityCovered {
-			status[key] = rec.CLIParity
-		}
-	}
 	var out []string
 	for _, ex := range exemptions {
-		switch status[normalizeRoutePath(ex.Path)] {
-		case cliParityCovered:
-			out = append(out, fmt.Sprintf("%s:%d: %s now has a CLI caller — remove the exemption", cliParityExemptionsPath, ex.Line, ex.Path))
-		case "":
-			out = append(out, fmt.Sprintf("%s:%d: %s is not in the OpenAPI document — remove the exemption", cliParityExemptionsPath, ex.Line, ex.Path))
+		matched, covered := 0, 0
+		for _, rec := range records {
+			if ex.matches(rec.Method, rec.Path) {
+				matched++
+				if rec.CLIParity == cliParityCovered {
+					covered++
+				}
+			}
+		}
+		switch {
+		case matched == 0:
+			out = append(out, fmt.Sprintf("%s:%d: %s is not in the OpenAPI document — remove the exemption", cliParityExemptionsPath, ex.Line, ex))
+		case matched == covered:
+			out = append(out, fmt.Sprintf("%s:%d: %s now has a CLI caller — remove the exemption", cliParityExemptionsPath, ex.Line, ex))
 		}
 	}
 	return out
+}
+
+// cliParitySummaryLine is the gate's one-line summary: the path-level counts
+// it has always printed, then the operation-level ones it enforces, then how
+// much of the coverage rests on calls whose method could not be read.
+func cliParitySummaryLine(r report) string {
+	s := r.Summary
+	return fmt.Sprintf("CLI parity %d API paths, %d with no command, %d exempt; %d operations, %d with no command for their method, %d exempt; %d reached by path only through %d method-unknown call sites",
+		countPaths(r.API), s.APIWithoutCLI, s.APIExemptFromCLI,
+		len(r.API), s.APIOperationsWithoutCLI, s.APIOperationsExemptFromCLI,
+		s.APIOperationsCLIPathOnly, s.CLIMethodUnknownSites)
 }
