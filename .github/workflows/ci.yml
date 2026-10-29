@@ -2279,8 +2279,36 @@ jobs:
   # go-race's list guard will not catch that, because from its side the
   # package is legitimately held back either way.
 
-  go-race-api-shards:
+  # Run genuine migrations once under race instrumentation. Workers import
+  # verified snapshots but retain private per-test databases. The aggregate
+  # counts this job's actual package elapsed time, including all migration work.
+  go-race-api-template:
     needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.go == 'true'
+    name: Go Race (internal/api template)
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build and measure genuine race migration template
+        run: python3 scripts/ci/api-race-shard.py bootstrap .ci-api-template 4600
+      - name: Upload template and actual execution evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: api-race-template-${{ github.sha }}
+          path: .ci-api-template/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  go-race-api-shards:
+    needs: [merge-conflict-markers, changes, go-race-api-template]
     if: needs.changes.outputs.go == 'true'
     name: Go Race (internal/api shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
@@ -2299,6 +2327,11 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
+      - name: Download this run's measured template
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: api-race-template-${{ github.sha }}
+          path: .ci-api-template/
       - name: Go test (race, internal/api partition)
         # go-shuffle retains full-package order-dependence coverage. Each
         # race parent and its subtests execute in exactly one partition.
@@ -2315,7 +2348,7 @@ jobs:
             echo "::error::API race timeout plus overhead exceeds the job cap."
             exit 1
           fi
-          python3 scripts/ci/api-race-shard.py run "$SHARD_INDEX" "$SHARD_COUNT" "$timeout_s"
+          python3 scripts/ci/api-race-shard.py run "$SHARD_INDEX" "$SHARD_COUNT" "$timeout_s" .ci-api-template
       - name: Upload test timings and partition evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
@@ -2327,7 +2360,7 @@ jobs:
           retention-days: 7
 
   go-race-api:
-    needs: [changes, go-race-api-shards]
+    needs: [changes, go-race-api-template, go-race-api-shards]
     if: always() && needs.changes.outputs.go == 'true'
     name: Go Race (internal/api)
     runs-on: ubuntu-latest
@@ -2335,8 +2368,11 @@ jobs:
     steps:
       - name: Require every API partition
         env:
+          BOOTSTRAP_RESULT: ${{ needs.go-race-api-template.result }}
           SHARD_RESULT: ${{ needs.go-race-api-shards.result }}
-        run: test "$SHARD_RESULT" = success
+        run: |
+          test "$BOOTSTRAP_RESULT" = success
+          test "$SHARD_RESULT" = success
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
@@ -2344,13 +2380,18 @@ jobs:
         with:
           pattern: timings-go-race-api-*-${{ github.sha }}
           path: .ci-api-shards/
+      - name: Download measured bootstrap evidence
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: api-race-template-${{ github.sha }}
+          path: .ci-api-template/
       - name: Verify complete API coverage and combined budget
         # Full-package baseline measured 2026-09-14: 2291–2358 seconds in
         # main runs 34828855474,34833070262,34835848487,34840188893.
         # Keep the 1.6x alarm and PR-warning/main-failure policy from #2031.
-        # Summing partitions is conservative: it repeats package setup. Six
-        # partitions summed 3150s on PR run 37475371053 (1.37x, alarm 3680s).
-        run: python3 scripts/ci/api-race-shard.py report .ci-api-shards 6 2300
+        # All six package durations plus the genuine migration bootstrap
+        # package duration exactly once. All setup/cleanup remains measured.
+        run: python3 scripts/ci/api-race-shard.py report .ci-api-shards 6 2300 .ci-api-template
 
 
   # ── Go: cross-platform test matrix ──
@@ -2637,7 +2678,7 @@ jobs:
   result:
     name: CI Result
     if: always()
-    needs: [release-rehearsal, image, changes, mooring, mooring-actual, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test-types, frontend-test-shards, frontend-test, binary, go, go-test, go-race, go-race-cli-shards, go-race-cli, cli-subprocess-race, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
+    needs: [release-rehearsal, image, changes, mooring, mooring-actual, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test-types, frontend-test-shards, frontend-test, binary, go, go-test, go-race, go-race-cli-shards, go-race-cli, cli-subprocess-race, go-race-api-template, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:

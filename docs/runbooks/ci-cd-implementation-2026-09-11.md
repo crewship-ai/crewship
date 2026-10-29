@@ -8,15 +8,22 @@ Tracking: #2504. Worktree: `/tmp/crewship-3-ci-hardening`.
 
 API, CLI and remaining Go race shards run independently. CI Result directly requires all shards, the shuffle job, and the reusable image build. Browser jobs download the same embedded server from Binary Build and retain independent databases, secrets and processes. Nightly browser and harness matrices likewise build their tools once per workflow run.
 
-The API race suite now enumerates race-built top-level tests into four sorted,
+The API race suite enumerates race-built top-level tests into six sorted,
 interleaved partitions, keeping every parent's subtests together. Each successful
 worker records its selected inventory and verifies actual terminal test events.
-The stable `Go Race (internal/api)` check verifies four distinct, exhaustive,
-non-overlapping inventories and sums their package durations for the existing
-2300-second baseline / 1.6x erosion alarm. Package setup runs in each worker,
-so the sum is conservative; the 4600-second hang deadline remains unchanged.
+The stable `Go Race (internal/api)` check verifies six distinct, exhaustive,
+non-overlapping inventories. A required bootstrap job runs the genuine migration
+chain once under the same race instrumentation and exports an immutable fixture
+bound to the exact source, workflow run, migration/dependency fingerprints and DB
+checksum. Workers validate it independently and give every test its own copy with
+the existing pragmas and cleanup. An invalid import fails rather than falling
+back to local migration. The aggregate verifies the original successful bootstrap
+test events and adds its whole package duration exactly once to the six worker
+package durations for the existing 2300-second baseline / 1.6x erosion alarm.
+All migration work and package setup/cleanup remain measured; the 4600-second
+hang deadline remains unchanged.
 Artifacts stay in separate directories. `CI Result` requires workers and the
-aggregate, and no failed worker cancels the others. Four partitions also keep
+aggregate, and no failed worker cancels the others. Six partitions also keep
 each test-selection argument under Linux's per-argument size limit; unexpected
 growth fails clearly instead of truncating coverage.
 

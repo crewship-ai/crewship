@@ -211,3 +211,44 @@ func (s *NativeStore) Restore(ctx context.Context, l EditLease, base, target int
 	}
 	return s.versions.Restore(ctx, nativeVersionKey(l.Scope), base, target, a)
 }
+
+// ReadShared returns only the current shared pin. The host's preview authority
+// and the immutable native profile are checked in that same fenced transaction.
+// It never acquires a lease, exposes private history or falls back to latest.
+func (s *NativeStore) ReadShared(ctx context.Context, k EditLeaseScope) (artifacts.VersionState, error) {
+	if err := s.ready(); err != nil {
+		return artifacts.VersionState{}, err
+	}
+	authorize := s.authority(k, nil, "preview")
+	view, err := s.versions.View(ctx, nativeVersionKey(k), func(ctx context.Context, tx *sql.Tx) (string, artifacts.VersionSelection, error) {
+		actor, err := authorize(ctx, tx)
+		return actor, artifacts.VersionSelection{SharedOnly: true}, err
+	})
+	return view.State, err
+}
+
+// Share publishes an existing validated native version under the same current
+// write authority, generation fence and base-version CAS as native writes.
+func (s *NativeStore) Share(ctx context.Context, l EditLease, base, target int64, publish func(context.Context, *sql.Tx, string) error) error {
+	if err := s.ready(); err != nil {
+		return err
+	}
+	if base < 1 || target < 1 || publish == nil {
+		return ErrInvalid
+	}
+	authorize := s.authority(l.Scope, &l, "write")
+	published := false
+	return s.versions.Share(ctx, nativeVersionKey(l.Scope), base, target, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		actor, err := authorize(ctx, tx)
+		if err != nil {
+			return "", err
+		}
+		if !published {
+			if err = publish(ctx, tx, actor); err != nil {
+				return "", err
+			}
+			published = true
+		}
+		return actor, nil
+	})
+}

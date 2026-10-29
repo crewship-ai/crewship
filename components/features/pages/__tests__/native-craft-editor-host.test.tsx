@@ -13,12 +13,12 @@ vi.mock("@/lib/mooring/native-draft",async()=>({...await vi.importActual("@/lib/
 vi.mock("@/lib/document-queue",async()=>({...await vi.importActual("@/lib/document-queue"),registerDocumentDraftWriter:m.registerPrivacy,purgeDocumentDrafts:m.purge}))
 vi.mock("../workbook-editor-host",()=>({editorFrameSupported:()=>true,createEditorFrame:(doc:Document,src:string,onLoad:()=>void)=>{const f=doc.createElement('iframe');f.setAttribute('sandbox','allow-scripts');f.setAttribute('credentialless','');f.setAttribute('referrerpolicy','no-referrer');f.srcdoc='';f.src=src;queueMicrotask(onLoad);return f}}))
 const deferred=<T,>()=>{let resolve!:(v:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve}}
-const emptyLease={holder:null,mine:false,generation:null,can_write:false,acquired_at:null,expires_at:null,handoff_requested_by:[]}
+const emptyLease={can_edit:true,holder:null,mine:false,generation:null,can_write:false,acquired_at:null,expires_at:null,handoff_requested_by:[]}
 const ownedLease={...emptyLease,holder:{actor_id:"user:human",display_name:"Pavel",kind:"human"},mine:true,generation:"9007199254740995",can_write:true,expires_at:'2099-01-01T00:00:00Z'}
 const receipt=(r:NativeSaveRequest)=>({...r,bytes:undefined,version:(BigInt(r.baseVersion)+1n).toString(),candidateHash:r.contentHash,durability:"node",issuedBy:"crewship",phase:"committed"})
 let privacyRetire:(()=>Promise<void>)|undefined
 let client:ReturnType<typeof clientRig>,journal:ReturnType<typeof journalRig>,ports:ReturnType<typeof portRig>[],portOptions:NativeEditorPortOptions[],stream:((event:"lease"|"session_retired",value:Record<string,unknown>)=>void)|undefined
-function clientRig(){return {open:vi.fn().mockResolvedValue({sessionId:"private-session",applicationId:"wordcraft"}),read:vi.fn().mockResolvedValue({version:"1",bytes:new TextEncoder().encode('{"body":[]}'),applicationId:"wordcraft",enginePin:"a".repeat(64),editorBundle:"b".repeat(64),editorURL:`https://native.example/b/${"b".repeat(64)}/index.html`,quota:{usedBytes:"12",limitBytes:"99999",warning:false,retention:"keep-all"}}),lease:vi.fn().mockResolvedValue(emptyLease),leaseAction:vi.fn(async(action:string):Promise<unknown>=>{if(action==='acquire')client.lease.mockResolvedValue(ownedLease);return ownedLease}),events:vi.fn((_signal:AbortSignal,callback:typeof stream)=>{stream=callback;return new Promise<void>(()=>{})}),reauthorize:vi.fn().mockResolvedValue(true),save:vi.fn(async(r:NativeSaveRequest)=>receipt(r)),reconcile:vi.fn(),close:vi.fn()}}
+function clientRig(){return {share:vi.fn(async(r:{targetVersion:string})=>({version:r.targetVersion,durability:'node',issuedBy:'crewship',phase:'shared'})),open:vi.fn().mockResolvedValue({sessionId:"private-session",applicationId:"wordcraft"}),read:vi.fn().mockResolvedValue({version:"1",bytes:new TextEncoder().encode('{"body":[]}'),applicationId:"wordcraft",enginePin:"a".repeat(64),editorBundle:"b".repeat(64),editorURL:`https://native.example/b/${"b".repeat(64)}/index.html`,quota:{usedBytes:"12",limitBytes:"99999",warning:false,retention:"keep-all"}}),lease:vi.fn().mockResolvedValue(emptyLease),leaseAction:vi.fn(async(action:string):Promise<unknown>=>{if(action==='acquire')client.lease.mockResolvedValue(ownedLease);return ownedLease}),events:vi.fn((_signal:AbortSignal,callback:typeof stream)=>{stream=callback;return new Promise<void>(()=>{})}),reauthorize:vi.fn().mockResolvedValue(true),save:vi.fn(async(r:NativeSaveRequest)=>receipt(r)),reconcile:vi.fn(),close:vi.fn()}}
 function journalRig(){return {persist:vi.fn().mockResolvedValue(undefined),confirm:vi.fn().mockResolvedValue(undefined),recovery:vi.fn().mockResolvedValue([]),onRetire:vi.fn(()=>()=>{}),close:vi.fn().mockResolvedValue(undefined),revokeRead:vi.fn().mockResolvedValue(undefined)}}
 function portRig(){return {loaded:vi.fn(),handleWindowMessage:vi.fn(),bootstrap:vi.fn().mockResolvedValue({bytes:new TextEncoder().encode('{"body":[]}'),editorRevision:"initial",documentId:"doc"}),snapshot:vi.fn().mockResolvedValue({bytes:new TextEncoder().encode('{"body":[1]}'),editorRevision:"snapshot-1",documentId:"doc"}),validate:vi.fn().mockResolvedValue(undefined),ack:vi.fn().mockResolvedValue(true),saveFailed:vi.fn(),setReadOnly:vi.fn(async(v:boolean)=>v),close:vi.fn()}}
 beforeEach(()=>{vi.stubGlobal('crypto',webcrypto);client=clientRig();journal=journalRig();ports=[];portOptions=[];stream=undefined;privacyRetire=undefined;m.purge.mockResolvedValue(undefined);m.registerPrivacy.mockImplementation((_human:string,retire:()=>Promise<void>)=>{privacyRetire=retire;return vi.fn()});m.createClient.mockReturnValue(client);m.openJournal.mockResolvedValue(journal);m.createPort.mockImplementation((o:NativeEditorPortOptions)=>{const p=portRig();ports.push(p);portOptions.push(o);queueMicrotask(()=>o.onReady?.('qualified'));return p})})
@@ -28,6 +28,41 @@ async function ready(){await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenC
 async function acquire(){fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(ports.at(-1)?.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)))}
 
 describe('native Word host authority and persistence',()=>{
+ it('publishes only the final saved and acknowledged version under current custody',async()=>{
+  mount();await ready();expect(screen.queryByRole('button',{name:'Publikovat náhled'})).not.toBeInTheDocument();await acquire()
+  const ack=deferred<boolean>();ports.at(-1)!.ack.mockReturnValueOnce(ack.promise)
+  act(()=>portOptions.at(-1)!.onChanged('last-before-preview','doc'))
+  fireEvent.click(screen.getByRole('button',{name:'Publikovat náhled'}))
+  await waitFor(()=>expect(ports.at(-1)!.ack).toHaveBeenCalledOnce());expect(client.share).not.toHaveBeenCalled()
+  await act(async()=>ack.resolve(true))
+  await waitFor(()=>expect(client.share).toHaveBeenCalledOnce())
+  expect(client.share).toHaveBeenCalledWith({workspaceId:'w',pageId:'p',applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'private-session',generation:'9007199254740995',baseVersion:'2',targetVersion:'2'},expect.any(AbortSignal))
+  await screen.findByText('Sdílený náhled · verze 2')
+  expect(client.save.mock.invocationCallOrder[0]).toBeLessThan(client.share.mock.invocationCallOrder[0])
+ })
+ it('does not publish an unconfirmed final save and keeps the native draft',async()=>{
+  mount();await ready();await acquire();client.save.mockRejectedValueOnce(Error('lost ack'))
+  fireEvent.click(screen.getByRole('button',{name:'Publikovat náhled'}))
+  await screen.findByRole('alert');expect(client.share).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled();expect(document.querySelector('iframe')).not.toBeNull()
+ })
+ it('never retries an ambiguous preview publication or changes native data',async()=>{
+  mount();await ready();await acquire();client.share.mockRejectedValueOnce(Error('lost publication reply'))
+  fireEvent.click(screen.getByRole('button',{name:'Publikovat náhled'}));await screen.findByRole('alert')
+  expect(client.share).toHaveBeenCalledOnce();expect(client.save).toHaveBeenCalledOnce();expect(journal.revokeRead).not.toHaveBeenCalled();expect(document.querySelector('iframe')).not.toBeNull()
+ })
+
+ it.each([false,undefined])('shows a read-only preview with no custody controls unless server confirms edit capability (%s)',async(canEdit)=>{
+  client.lease.mockResolvedValue({...emptyLease,can_edit:canEdit})
+  mount();await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalledOnce())
+  expect(screen.queryByRole('button',{name:'Převzít úpravy'})).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:'Požádat o předání'})).not.toBeInTheDocument()
+  expect(client.leaseAction).not.toHaveBeenCalled();expect(client.save).not.toHaveBeenCalled();expect(client.share).not.toHaveBeenCalled();expect(screen.queryByRole('button',{name:'Publikovat náhled'})).not.toBeInTheDocument();expect(m.openJournal).not.toHaveBeenCalled()
+  act(()=>stream?.('lease',{...ownedLease,mine:false,can_write:false,can_edit:canEdit}))
+  await screen.findByText('Upravuje Pavel')
+  expect(screen.queryByRole('button',{name:'Požádat o předání'})).not.toBeInTheDocument()
+  expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false)
+ })
+
  it('opens Grid with the same read-only lease gate, isolated port and matching draft namespace',async()=>{
   client.open.mockResolvedValueOnce({sessionId:'private-session',applicationId:'gridcraft'})
   const base=await client.read(new AbortController().signal)

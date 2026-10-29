@@ -15,18 +15,19 @@ import {downloadNativeExport} from "@/lib/mooring/native-export-download"
 import {NativeCraftLeaseBar,type NativeCraftLeaseAction,type NativeCraftLeaseView} from "./native-craft-lease-bar"
 
 interface Lease extends NativeCraftLeaseView {expires_at: string|null}
-const vacant:Lease={holder:null,mine:false,generation:null,can_write:false,acquired_at:null,expires_at:null,handoff_requested_by:[]}
+const vacant:Lease={can_edit:false,holder:null,mine:false,generation:null,can_write:false,acquired_at:null,expires_at:null,handoff_requested_by:[]}
 const object=(v:unknown):v is Record<string,unknown>=>Boolean(v)&&typeof v==='object'&&!Array.isArray(v)
 const text=(v:unknown):v is string=>typeof v==='string'&&v.length>0&&v.length<=512&&!v.includes('\0')
 function leaseView(raw:unknown):Lease {
  if(!object(raw)||typeof raw.mine!=='boolean'||typeof raw.can_write!=='boolean'||!(raw.generation===null||validNativeVersion(raw.generation)&&raw.generation!=='0')||!(raw.acquired_at===null||text(raw.acquired_at))||!(raw.expires_at===null||text(raw.expires_at))||!Array.isArray(raw.handoff_requested_by)||raw.handoff_requested_by.length>128)throw Error('invalid_lease')
  const actor=(v:unknown)=>object(v)&&text(v.actor_id)&&text(v.display_name)&&(v.kind==='human'||v.kind==='agent')
  if(raw.holder!==null&&!actor(raw.holder)||raw.handoff_requested_by.some(v=>!actor(v)||!object(v)||!text(v.request_id)))throw Error('invalid_lease')
+ if(raw.can_edit!==undefined&&typeof raw.can_edit!=='boolean')throw Error('invalid_lease')
  if(raw.can_stop_agent!==undefined&&typeof raw.can_stop_agent!=='boolean')throw Error('invalid_lease')
  if(raw.mine&&(!raw.holder||!raw.generation))throw Error('invalid_lease')
  return raw as unknown as Lease
 }
-function owns(view:Lease,generation?:string):boolean{return view.mine&&view.can_write&&view.generation!==null&&(!generation||view.generation===generation)&&typeof view.expires_at==='string'&&Date.parse(view.expires_at)>Date.now()}
+function owns(view:Lease,generation?:string):boolean{return view.can_edit===true&&view.mine&&view.can_write&&view.generation!==null&&(!generation||view.generation===generation)&&typeof view.expires_at==='string'&&Date.parse(view.expires_at)>Date.now()}
 /** The server selects the approved bundle. No query, credentials or alternative executable path is accepted. */
 export function nativeCraftFrameURL(snapshot:NativeDocumentSnapshot,hostOrigin:string):string|null {
  try{
@@ -43,10 +44,11 @@ export function nativeCraftFrameURL(snapshot:NativeDocumentSnapshot,hostOrigin:s
 interface Comparison {version:string;server:string;draft:string;serverHash:string;draftHash:string;equal:boolean}
 interface Props {workspaceId:string;pageId:string;humanId:string;enabled?:boolean}
 type Coordinator=ReturnType<typeof createSingleEditorSave>
-interface Runtime {port:NativeEditorPort;frame:HTMLIFrameElement;abort:AbortController;version:string;generation:string;ready:boolean;writable:boolean;nativeReadOnly:boolean;coordinator?:Coordinator;journal?:NativeDraftJournal;phase?:NativeSaveState;ackedVersion?:string;receiptAck?:Promise<boolean>;receiptVersion?:string;edit:number;blocked:boolean;capture?:NativeDraft;retiring?:Promise<boolean>;retirementFinished?:boolean}
+interface Runtime {enginePin:string;port:NativeEditorPort;frame:HTMLIFrameElement;abort:AbortController;version:string;generation:string;ready:boolean;writable:boolean;nativeReadOnly:boolean;coordinator?:Coordinator;journal?:NativeDraftJournal;phase?:NativeSaveState;ackedVersion?:string;receiptAck?:Promise<boolean>;receiptVersion?:string;edit:number;blocked:boolean;capture?:NativeDraft;retiring?:Promise<boolean>;retirementFinished?:boolean}
 
 /** One authenticated client/session owns both lease controls and the isolated full Craft editor. */
 export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}:Props){
+ const publishPreview=React.useRef<()=>void>(()=>{}),[publishedVersion,setPublishedVersion]=React.useState<string>()
  const stopAgent=React.useRef<()=>void>(()=>{})
  const compare=React.useRef<(draft:NativeDraft)=>void>(()=>{}),reconcile=React.useRef<()=>void>(()=>{}),[uncertain,setUncertain]=React.useState(false)
  const [applicationId,setApplicationId]=React.useState<NativeDocumentSnapshot['applicationId']>()
@@ -72,7 +74,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    setLabel(saved?'Uloženo':phase==='uncertain'?'Výsledek nepotvrzen':phase==='saving'?'Ukládám…':r.blocked?'Koncept zůstává v tomto editoru':r.phase?.dirty?'Neuložený koncept':r.writable?'Připraveno k úpravám':'Pouze čtení')
   }
   stopAgent.current=()=>{void(async()=>{
-   if(dead||networkRetired||transition||viewNow.holder?.kind!=='agent'||viewNow.can_stop_agent!==true)return
+   if(dead||networkRetired||transition||viewNow.can_edit!==true||viewNow.holder?.kind!=='agent'||viewNow.can_stop_agent!==true)return
    transition=true;setBusy(true);setError(undefined)
    try{
     const query=new URLSearchParams({workspace_id:workspaceId})
@@ -158,7 +160,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     onError(){clearTimeout(timer);reject(Error('native_lifecycle_failure'));if(r&&live(r))failNative(r,'Spojení s editorem skončilo. Poslední změny nejsou potvrzené; původní editor zůstává uzamčený.')},
     onReady(){if(!r||!live(r))return;void port.bootstrap(snapshot.bytes,abort.signal).then(()=>{if(r&&live(r)){r.ready=true;clearTimeout(timer);display(r);resolve(r)}}).catch(()=>{clearTimeout(timer);reject(Error('native_bootstrap_failed'));if(r&&live(r))stop('Dokument nelze bezpečně otevřít.')})},
    })}catch(cause){clearTimeout(timer);frame.remove();throw cause}
-   r={port,frame,abort,version:snapshot.version,generation,ready:false,writable:false,nativeReadOnly:true,edit:0,blocked:false};current=r
+   r={enginePin:snapshot.enginePin,port,frame,abort,version:snapshot.version,generation,ready:false,writable:false,nativeReadOnly:true,edit:0,blocked:false};current=r
    return ready
   }
   compare.current=draft=>{void(async()=>{
@@ -283,8 +285,20 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(!acknowledgement||!version||!await acknowledgement)return false
    return live(r)&&r.writable&&r.phase?.phase==='saved'&&!r.phase.dirty&&r.ackedVersion===version&&r.receiptAck===acknowledgement
   }
+  publishPreview.current=()=>{void(async()=>{
+   const r=current
+   if(dead||networkRetired||transition||!r?.ready||viewNow.can_edit!==true||!owns(viewNow,r.generation)||!r.writable)return
+   transition=true;setBusy(true);setError(undefined)
+   try{
+    if(!await flushBeforeTransfer(r)||!r.ackedVersion||!owns(viewNow,r.generation))throw Error('publish_save_unconfirmed')
+    const version=r.ackedVersion
+    const receipt=await client.share({workspaceId,pageId,applicationId:sessionApplication!,enginePin:r.enginePin,sessionId,generation:r.generation,baseVersion:version,targetVersion:version},lifetime.signal)
+    if(live(r))setPublishedVersion(receipt.version)
+   }catch{if(!dead)setError('Publikování náhledu nebylo potvrzeno. Dokument i místní koncept zůstávají zachovány.')}
+   finally{transition=false;if(live(r)){if(r.writable&&owns(viewNow,r.generation))resumeViewing(r);setBusy(false)}}
+  })()}
   control.current=(action,body)=>{
-   if(dead||networkRetired||transition||!current?.ready)return
+   if(dead||networkRetired||transition||viewNow.can_edit!==true||!current?.ready)return
    transition=true;setBusy(true);setError(undefined)
    void(async()=>{
     if(action==='acquire'){await acquire();return}
@@ -323,14 +337,16 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     void observeLease(value).catch(()=>stop('Aktuální přístup nelze potvrdit. Koncept zachován.'))
    }).catch(()=>{if(!dead)void retireConnection('Spojení přerušeno. Zápis není potvrzen.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})
   })().catch(()=>{if(!dead)stop('Dokument nelze bezpečně otevřít.')})
-  return()=>{unregisterPrivacy();window.removeEventListener('message',windowMessage);control.current=()=>{};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};stop('Editor uzavřen · koncept zachován',true)}
+  return()=>{unregisterPrivacy();window.removeEventListener('message',windowMessage);control.current=()=>{};publishPreview.current=()=>{};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};stop('Editor uzavřen · koncept zachován',true)}
  },[enabled,humanId,workspaceId,pageId])
  function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`${draft.applicationId}-recovery.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
  if(!enabled)return <p className="p-6">Nativní editor není zapnutý.</p>
  return <section className="flex h-full min-h-[600px] flex-col" aria-label={applicationId==='gridcraft'?'GridCraft sešit':'WordCraft dokument'}>
-  <NativeCraftLeaseBar view={view} mayEdit={Boolean(humanId)&&!connectionRetired} pending={busy} onAction={(action,body)=>control.current(action,body)} onStopAgent={()=>stopAgent.current()}/>
-  <NativeCraftAgentTaskStatus workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled={!connectionRetired}/>
-  {!connectionRetired&&view.mine&&view.can_write&&!ownsEditor&&<Button disabled={busy} onClick={()=>control.current('acquire',{})}>Převzít úpravy</Button>}
+  <NativeCraftLeaseBar view={view} mayEdit={view.can_edit===true&&!connectionRetired} pending={busy} onAction={(action,body)=>control.current(action,body)} onStopAgent={()=>stopAgent.current()}/>
+  <NativeCraftAgentTaskStatus workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled={view.can_edit===true&&!connectionRetired}/>
+  {!connectionRetired&&view.can_edit===true&&view.mine&&view.can_write&&!ownsEditor&&<Button disabled={busy} onClick={()=>control.current('acquire',{})}>Převzít úpravy</Button>}
+  {!connectionRetired&&view.can_edit===true&&ownsEditor&&<Button variant="outline" disabled={busy} onClick={()=>publishPreview.current()}>Publikovat náhled</Button>}
+  {publishedVersion&&<p className="px-3 py-2">Sdílený náhled · verze {publishedVersion}</p>}
   <div role="status" className="px-3 py-2"><span>{label}</span>{savedVersion&&<span> · verze {savedVersion}</span>}{quota&&<span className="ml-3 text-muted-foreground">Historie {quota.usedBytes} / {quota.limitBytes} B{quota.warning?' · blíží se limit':''}</span>}</div>
   {uncertain&&<Button variant="outline" onClick={()=>reconcile.current()}>Ověřit výsledek</Button>}
   {error&&<p role="alert" className="px-3 py-2">{error}</p>}

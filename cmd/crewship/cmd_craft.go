@@ -27,6 +27,7 @@ func newCraftCommand() *cobra.Command {
 		r, e := c.WithContext(cmd.Context()).Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/craft/availability")
 		return craftResponse(cmd, r, e, "")
 	}})
+	craft.AddCommand(&cobra.Command{Use: "preview <page>", Args: cobra.ExactArgs(1), Short: "Read only the published native preview without opening an editor session", RunE: craftPreview})
 	craft.AddCommand(&cobra.Command{Use: "connect <page>", Args: cobra.ExactArgs(1), Short: "Read bounded NDJSON actions; watch keeps the lease stream alive", RunE: craftConnect})
 	initialize := &cobra.Command{Use: "initialize <page>", Args: cobra.ExactArgs(1), Short: "Initialize an existing empty owned Page as Word native; keep its admission in this process", RunE: craftInitialize}
 	initialize.Flags().String("file", "", "Native Word document file (or - for stdin, without subsequent actions)")
@@ -82,6 +83,11 @@ func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http
 	}
 	token := admission.Token
 	c = c.WithHeader("X-Craft-Session", token)
+	// The scoped connection is a one-attempt transport. A same-origin307/308
+	// must not replay a native mutation with its private admission header.
+	httpClient := *c.HTTPClient
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	c.HTTPClient = &httpClient
 	fields := map[string]string{"session_id": admission.ID}
 	if initialized {
 		if !craftPositiveVersion(admission.Generation) || admission.Version != "1" || admission.Application != "wordcraft" || admission.Page == "" {
@@ -142,6 +148,8 @@ func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http
 			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/document/save", a.Snapshot)
 		case "import":
 			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/document/import", a.Snapshot)
+		case "share":
+			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/document/share", craftShareSelection{a.Snapshot.WorkspaceID, a.Snapshot.PageID, a.Snapshot.ApplicationID, a.Snapshot.EnginePin, a.Snapshot.SessionID, a.Snapshot.Generation, a.Snapshot.BaseVersion, a.Snapshot.TargetVersion})
 		case "restore":
 			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/document/restore", a.Snapshot)
 		case "reconcile":
