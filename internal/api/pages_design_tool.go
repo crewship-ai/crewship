@@ -42,7 +42,13 @@ func (h *PageHandler) DesignTool(w http.ResponseWriter, r *http.Request) {
 	forward := r.Clone(r.Context())
 	forward.Body = io.NopCloser(bytes.NewReader(p.Payload))
 	forward.ContentLength = int64(len(p.Payload))
-	forward.SetPathValue("slug", p.Slug)
+	reference := p.Slug
+	// The original human mandate already disambiguates this immutable ID.
+	// Never treat arbitrary bare IDs as Page references or widen the mandate.
+	if reference == bound.String {
+		reference = "@" + bound.String
+	}
+	forward.SetPathValue("slug", reference)
 	k, ok := h.designKey(w, forward)
 	if !ok {
 		return
