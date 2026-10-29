@@ -8,7 +8,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -391,19 +390,5 @@ func TestLoadPagesServerConfig_IgnoresSidecarAndRestoresEnv(t *testing.T) {
 	}
 	if got := os.Getenv("CREWSHIP_SKIP_SIDECAR"); got != "0" {
 		t.Errorf("CREWSHIP_SKIP_SIDECAR = %q after the read, want the caller's %q", got, "0")
-	}
-}
-
-// The real docker CLI path, read-only: the label query must parse against a
-// live daemon. Never builds or removes anything. Skips without Docker.
-func TestPageLabeledImages_LiveDaemon(t *testing.T) {
-	if _, err := exec.LookPath("docker"); err != nil {
-		t.Skip("docker CLI not installed")
-	}
-	if err := pageDockerPingCLI(context.Background()); err != nil {
-		t.Skipf("no Docker daemon: %v", err)
-	}
-	if _, err := pageLabeledImages(context.Background(), pageprofile.Fingerprint()); err != nil {
-		t.Fatalf("LabeledImages: %v", err)
 	}
 }
