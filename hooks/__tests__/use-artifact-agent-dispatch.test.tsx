@@ -4,7 +4,8 @@ const state=vi.hoisted(()=>({options:null as unknown as {onOwnMessageSaved:(text
 vi.mock("@tanstack/react-query",()=>({useQuery:()=>({data:true,isError:false})}))
 vi.mock("@/hooks/use-auth",()=>({useSessionSafe:()=>({data:{user:{id:"owner"}}})}))
 vi.mock("@/lib/server-base",()=>({resolveWsBase:()=>"ws://localhost"}))
-vi.mock("@/hooks/use-chat",()=>({useChat:(options:typeof state.options)=>{state.options=options;return {sendMessage:state.send,connectionStatus:state.connected?"connected":"disconnected",isStreaming:false}}}))
+vi.mock("@/hooks/use-chat",()=>({useChat:(options:typeof state.options)=>{state.options=options;return {sendMessage:state.send,connectionStatus:state.connected?"connected":"disconnected",isStreaming:false,markHistoryUnavailable}}}))
+const markHistoryUnavailable=()=>{}
 import { useArtifactAgentDispatch } from "../use-artifact-agent-dispatch"
 afterEach(()=>{cleanup();vi.clearAllMocks();state.connected=true})
 const comment={id:"comment-1",version:2,path:"details.html",selector:"#heading",quote:"Old heading",text:"Change heading"}
