@@ -45,17 +45,31 @@ Workspace flags for Artifacts (all default off; turn on per workspace with
   artifact_slides            Slides views and PDF export; also needs
                              artifact_projects
   artifacts_design           Design artifacts
-  gridcraft_editor           live workbook editing; also needs the instance
-                             config gridcraft.enabled and
-                             gridcraft.editor_enabled
+  gridcraft_editor           live workbook editing; also needs the server
+                             settings gridcraft.enabled and
+                             gridcraft.editor_enabled in the server YAML
+                             config (or CREWSHIP_GRIDCRAFT_ENABLED and
+                             CREWSHIP_GRIDCRAFT_EDITOR_ENABLED set to
+                             "true"); restart the server after changing them
 
 An operator can force the first four on for every workspace with the server
 environment variables CREWSHIP_ARTIFACT_PROJECTS_ENABLED,
 CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED, CREWSHIP_ARTIFACT_SLIDES_ENABLED
 and CREWSHIP_ARTIFACTS_DESIGN_ENABLED set to "true"; "list" does not show that.
 
-The web screens for these artifacts also depend on build-time NEXT_PUBLIC_*
-switches of the web app, which this command does not change.`,
+The web screens for these artifacts also need build-time switches of the web
+app, set to "true" when the web app is built (default off, rebuild required;
+this command does not change them):
+  artifact_projects          NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS (cards and
+                             viewer in chat) and NEXT_PUBLIC_ARTIFACTS_LIBRARY
+                             (the /artifacts library)
+  artifact_dashboard_data    NEXT_PUBLIC_ARTIFACT_DASHBOARDS
+  artifact_slides            NEXT_PUBLIC_ARTIFACT_SLIDES
+  artifacts_design           NEXT_PUBLIC_ARTIFACTS_DESIGN
+The bundled .env.production sets NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=false.
+
+Server settings and environment variables, including the gridcraft ones:
+https://docs.crewship.ai/configuration/environment`,
 	Example: `  crewship feature-flag list
   crewship feature-flag enable artifact_projects
   crewship flag inherit artifact_projects`,
