@@ -9,7 +9,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/artifacts"
 )
 
-func TestNativeProposalRetainedBytesUseHistoryQuota(t *testing.T) {
+func TestNativeProposalRetainedBytesUseOwnQuota(t *testing.T) {
 	s, _, _, scope, acting, _ := nativeProposalFixture(t)
 	human := *acting
 	lease, _, err := s.Initialize(t.Context(), scope, human, []byte(`{"v":1}`))
@@ -26,57 +26,45 @@ func TestNativeProposalRetainedBytesUseHistoryQuota(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, err := s.Read(t.Context(), scope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if after.Quota.UsedBytes < before.Quota.UsedBytes+int64(len(raw)) {
-		t.Errorf("proposal storage excluded: before=%+v after=%+v", before.Quota, after.Quota)
+	used, err := nativeProposalBytes(t.Context(), s.db, scope)
+	if err != nil || used < int64(len(raw)) {
+		t.Fatal("proposal excluded from retained quota", used, err)
 	}
 	*acting = human
 	if _, err := s.RejectProposal(t.Context(), scope, p.ID); err != nil {
 		t.Fatal(err)
 	}
-	rejected, err := s.Read(t.Context(), scope)
-	if err != nil || rejected.Quota.UsedBytes < after.Quota.UsedBytes {
-		t.Fatalf("rejection hid retained bytes: %+v %v", rejected.Quota, err)
+	rejected, err := nativeProposalBytes(t.Context(), s.db, scope)
+	if err != nil || rejected < used {
+		t.Fatal("rejection replenished retained quota", rejected, err)
 	}
-	// Tighten the test policy around the stored data. Rejections must never
-	// replenish the byte allowance while retaining the entire candidate.
-	s.config.MaxHistoryBytes = before.Quota.UsedBytes + int64(len(raw)) + 2000
-	s.versions = artifacts.NewVersionStore(s.db, artifacts.VersionOptions{Enabled: true, ContentType: s.config.Application, MaxHistoryBytes: s.config.MaxHistoryBytes})
+	s.config.MaxProposalBytes = int64(len(raw)) + 2000
 	*acting = nativeProposalAgent
 	if _, err := s.Propose(t.Context(), scope, 1, "two", "Review", raw); !errors.Is(err, artifacts.ErrVersionQuota) {
-		t.Errorf("retained proposal flood bypassed history quota: %v", err)
+		t.Fatal("retained proposal flood bypassed its own quota", err)
 	}
 	list, err := s.Proposals(t.Context(), scope)
 	if err != nil || len(list) != 1 || list[0].ID != p.ID || list[0].State != "rejected" {
-		t.Fatalf("refusal changed confirmed proposals: %+v %v", list, err)
+		t.Fatal("refusal changed confirmed proposals", list, err)
 	}
 	*acting = human
 	state, err := s.Read(t.Context(), scope)
-	if err != nil || state.LatestVersion != 1 || string(state.Manifest.Files["document.json"].Content) != `{"v":1}` {
-		t.Fatalf("quota refusal changed confirmed document: %+v %v", state, err)
+	if err != nil || state.LatestVersion != 1 || state.Quota.UsedBytes != before.Quota.UsedBytes {
+		t.Fatal("proposal consumed human history allowance", state, err)
 	}
-	// Version publication shares the same allowance with retained proposals.
 	big := []byte(fmt.Sprintf(`{"v":"%s"}`, strings.Repeat("y", len(raw)+1000)))
-	if _, err := s.Save(t.Context(), lease, 1, big); !errors.Is(err, artifacts.ErrVersionQuota) {
-		t.Errorf("save ignored retained proposal bytes: %v", err)
+	if _, err := s.Save(t.Context(), lease, 1, big); err != nil {
+		t.Fatal("proposal quota blocked the human save", err)
 	}
 }
 
-func TestNativeProposalConcurrentCandidatesShareHistoryQuota(t *testing.T) {
+func TestNativeProposalConcurrentCandidatesShareOwnQuota(t *testing.T) {
 	s, _, _, scope, acting, _ := nativeProposalFixture(t)
 	if _, _, err := s.Initialize(t.Context(), scope, *acting, []byte(`{"v":1}`)); err != nil {
 		t.Fatal(err)
 	}
-	before, err := s.Read(t.Context(), scope)
-	if err != nil {
-		t.Fatal(err)
-	}
 	raw := []byte(`{"v":"` + strings.Repeat("x", 4096) + `"}`)
-	s.config.MaxHistoryBytes = before.Quota.UsedBytes + int64(len(raw)) + 2000
-	s.versions = artifacts.NewVersionStore(s.db, artifacts.VersionOptions{Enabled: true, ContentType: s.config.Application, MaxHistoryBytes: s.config.MaxHistoryBytes})
+	s.config.MaxProposalBytes = int64(len(raw)) + 2000
 	*acting = nativeProposalAgent
 	start := make(chan struct{})
 	results := make(chan error, 2)
@@ -97,15 +85,15 @@ func TestNativeProposalConcurrentCandidatesShareHistoryQuota(t *testing.T) {
 		case errors.Is(err, artifacts.ErrVersionQuota):
 			refused++
 		default:
-			t.Errorf("unexpected concurrent result: %v", err)
+			t.Fatal(err)
 		}
 	}
 	if accepted != 1 || refused != 1 {
-		t.Fatalf("shared quota admitted %d candidates, refused %d", accepted, refused)
+		t.Fatal("proposal budget was not atomic", accepted, refused)
 	}
 	list, err := s.Proposals(t.Context(), scope)
 	if err != nil || len(list) != 1 {
-		t.Fatalf("quota rollback lost or retained wrong candidates: %+v %v", list, err)
+		t.Fatal("quota rollback changed confirmed candidates", list, err)
 	}
 }
 
@@ -130,8 +118,12 @@ func TestNativeProposalQuotaCountsLegacyTextBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	after, err := s.Read(t.Context(), scope)
-	if err != nil || after.Quota.UsedBytes < before.Quota.UsedBytes+2*int64(len(raw)) {
-		t.Fatalf("legacy TEXT was charged as characters instead of bytes: %+v %v", after.Quota, err)
+	if err != nil || after.Quota.UsedBytes != before.Quota.UsedBytes {
+		t.Fatalf("legacy proposals consumed human history allowance: %+v %v", after.Quota, err)
+	}
+	used, err := nativeProposalBytes(t.Context(), s.db, scope)
+	if err != nil || used < 2*int64(len(raw)) {
+		t.Fatalf("legacy TEXT charged as characters instead of bytes: %d %v", used, err)
 	}
 }
 
@@ -221,5 +213,61 @@ func TestNativeProposalOpenRemainsDiscoverableAfterDecidedHistory(t *testing.T) 
 	}
 	if !found {
 		t.Fatal("undecided proposal disappeared behind newer decided history")
+	}
+}
+
+func TestNativeProposalCannotConsumeHumanHistoryAllowance(t *testing.T) {
+	s, _, _, scope, acting, _ := nativeProposalFixture(t)
+	human := *acting
+	lease, _, err := s.Initialize(t.Context(), scope, human, []byte(`{"v":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.config.MaxHistoryBytes = 10000
+	s.versions = artifacts.NewVersionStore(s.db, artifacts.VersionOptions{Enabled: true, ContentType: s.config.Application, MaxHistoryBytes: 10000})
+	*acting = nativeProposalAgent
+	candidate := []byte(`{"v":"` + strings.Repeat("p", 6000) + `"}`)
+	if _, err := s.Propose(t.Context(), scope, 1, "pending-human-save", "", candidate); err != nil {
+		t.Fatal(err)
+	}
+	*acting = human
+	content := []byte(`{"v":"` + strings.Repeat("h", 7000) + `"}`)
+	if _, err := s.Save(t.Context(), lease, 1, content); err != nil {
+		t.Fatal("retained agent proposal blocked the human's available history budget", err)
+	}
+	state, err := s.Read(t.Context(), scope)
+	if err != nil || state.LatestVersion != 2 || string(state.Manifest.Files["document.json"].Content) != string(content) {
+		t.Fatal("human save was not confirmed", state, err)
+	}
+}
+
+func TestNativeProposalOwnRetainedBudgetSurvivesRejectAndReplay(t *testing.T) {
+	s, _, _, scope, acting, _ := nativeProposalFixture(t)
+	human := *acting
+	if _, _, err := s.Initialize(t.Context(), scope, human, []byte(`{"v":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	s.config.MaxProposalBytes = 6000
+	*acting = nativeProposalAgent
+	raw := []byte(`{"v":"` + strings.Repeat("x", 4096) + `"}`)
+	first, err := s.Propose(t.Context(), scope, 1, "bounded-one", "", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	*acting = human
+	if _, err := s.RejectProposal(t.Context(), scope, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	*acting = nativeProposalAgent
+	replay, err := s.Propose(t.Context(), scope, 1, "bounded-one", "", raw)
+	if err != nil || !replay.Replayed || replay.ID != first.ID {
+		t.Fatal("exact retry lost confirmed proposal", replay, err)
+	}
+	if _, err := s.Propose(t.Context(), scope, 1, "bounded-two", "", raw); !errors.Is(err, artifacts.ErrVersionQuota) {
+		t.Fatal("agent bypassed its own retained budget", err)
+	}
+	list, err := s.Proposals(t.Context(), scope)
+	if err != nil || len(list) != 1 || list[0].State != "rejected" {
+		t.Fatal("quota refusal changed confirmed proposals", list, err)
 	}
 }

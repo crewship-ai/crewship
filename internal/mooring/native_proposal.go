@@ -21,6 +21,17 @@ var ErrNativeProposalDecided = errors.New("native Craft proposal already decided
 // may hold a full native document, so a busy human is never flooded.
 const MaxOpenNativeProposals = 16
 
+// SQLite can obtain a BLOB's length without loading its bytes. The TEXT
+// fallback preserves exact UTF-8 byte accounting for old restored candidates.
+const nativeProposalBytesQuery = `SELECT coalesce(sum(CASE WHEN typeof(content)='blob' THEN length(content) ELSE length(CAST(content AS BLOB)) END+length(CAST(summary AS BLOB))+length(CAST(author_actor_id AS BLOB))+length(CAST(request_id AS BLOB))+length(id)+length(engine_pin)+length(content_hash)+length(created_at)+512),0) FROM craft_native_proposals WHERE workspace_id=? AND page_id=?`
+
+func nativeProposalBytes(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, k EditLeaseScope) (used int64, err error) {
+	err = q.QueryRowContext(ctx, nativeProposalBytesQuery, k.WorkspaceID, k.ArtifactID).Scan(&used)
+	return
+}
+
 // nativeProposalSuperseded records that no person decided a stale proposal:
 // the document moved past its base before anyone accepted it.
 const nativeProposalSuperseded = "system:superseded"
@@ -124,8 +135,12 @@ func (s *NativeStore) Propose(ctx context.Context, k EditLeaseScope, base int64,
 		if _, err = tx.ExecContext(ctx, `INSERT INTO craft_native_proposals(id,page_id,workspace_id,application_id,engine_pin,author_actor_id,request_id,base_version,summary,content_hash,content) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, k.ArtifactID, k.WorkspaceID, s.config.Application, s.EnginePin(), actor, requestID, base, summary, hash, b); err != nil {
 			return "", err
 		}
-		if err = s.versions.CheckHistoryBudget(ctx, tx, nativeVersionKey(k)); err != nil {
+		used, err := nativeProposalBytes(ctx, tx, k)
+		if err != nil {
 			return "", err
+		}
+		if used > s.config.MaxProposalBytes {
+			return "", artifacts.ErrVersionQuota
 		}
 		out, err = scanNativeProposal(tx.QueryRowContext(ctx, `SELECT `+nativeProposalColumns+` FROM craft_native_proposals WHERE id=?`, id))
 		return actor, err

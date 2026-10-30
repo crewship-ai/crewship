@@ -376,13 +376,21 @@ such a proposal can no longer be accepted. A proposal over an older version with
 identical content stays open, since accept still applies it on the head. The same agent `request_id` returns the original proposal.
 
 All retained proposal content, including rejected, stale and accepted rows,
-counts toward the same per-document history allowance as native versions.
-Accounting uses bytes even for older rows restored as TEXT, and reserves decision
-metadata up front. Insertion and the budget check share the authorized writer
-transaction; a refusal rolls back the new candidate without deleting any
-confirmed candidate or version. Reject does not replenish the allowance. Accept
-must also fit its new saved version beside the retained candidate. This is a
-document allowance, not a host-wide disk reservation.
+counts toward its own per-document proposal allowance (64 MiB by default,
+`NativeStoreConfig.MaxProposalBytes` for trusted host configuration). This
+allowance is separate from human version history: filling it refuses additional
+proposals while leaving the human's available history allowance intact. Accept
+charges the newly saved version to version history and keeps the candidate in
+the proposal allowance. Reject never replenishes either retained candidate space
+or the human's version history.
+
+Accounting uses exact bytes for older rows restored as TEXT and reserves decision
+metadata up front. Native BLOB lengths use SQLite's metadata-only length path;
+Read, View and Save do not scan retained candidate payloads. Insertion and the
+proposal budget check share the authorized writer transaction; a refusal rolls
+back the new candidate without deleting any confirmed candidate or version.
+These are document allowances; aggregate workspace/disk reservations remain a
+separate storage requirement.
 
 A proposal is a successful task outcome: the work item and run succeed with
 `native_outcome: "proposal"` and `native_proposal_id`, and the task status shows

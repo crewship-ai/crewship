@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Native Word and Sheet proposals share the document history allowance.** Every retained candidate, including rejected and superseded proposals, consumes the same byte budget as saved versions. Concurrent proposals cannot exceed it; a refusal rolls back the new candidate without deleting existing work or history.
+- **Native Word and Sheet proposals have a separate retained storage allowance.** Every retained candidate counts toward a 64 MiB default budget, including rejected and superseded proposals. Concurrent proposals cannot exceed it, and filling it leaves the human’s available history allowance intact. Reads and saves no longer scan proposal payloads. A refusal preserves existing work and history.
 
 - **A Page opens with its content inside Artifacts.** Its application or panels show in the library detail with the same views Pages uses, read by the page's immutable ID; the detail no longer sends you to Pages.
 
