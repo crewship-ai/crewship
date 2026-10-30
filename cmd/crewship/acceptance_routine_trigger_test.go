@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -45,9 +46,18 @@ func (unusedAgentRunner) RunStep(context.Context, pipeline.AgentStepRequest) (pi
 
 func startRoutineTriggerAcceptanceServer(t *testing.T) (cfgPath, authorCrewID string) {
 	t.Helper()
+	cfgPath, authorCrewID, _, _ = startRoutineTriggerAcceptanceServerDB(t)
+	return cfgPath, authorCrewID
+}
+
+// startRoutineTriggerAcceptanceServerDB is startRoutineTriggerAcceptanceServer
+// that also hands back the seeded DB and server URL, so a test can add
+// lower-role members and point a second CLI config at the same server.
+func startRoutineTriggerAcceptanceServerDB(t *testing.T) (cfgPath, authorCrewID string, db *sql.DB, serverURL string) {
+	t.Helper()
 
 	dbh := testutil.MigratedDB(t)
-	db := dbh.DB
+	db = dbh.DB
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 	mustExec := func(q string, args ...any) {
@@ -99,7 +109,7 @@ func startRoutineTriggerAcceptanceServer(t *testing.T) (cfgPath, authorCrewID st
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	return cfgPath, authorCrewID
+	return cfgPath, authorCrewID, db, srv.URL
 }
 
 func runRoutineTriggerCLI(t *testing.T, cfgPath string, args ...string) (string, error) {
