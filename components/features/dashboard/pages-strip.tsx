@@ -38,6 +38,20 @@ import { usePages, summarisePages } from "@/hooks/use-pages"
 import { PAGE_STATE_META } from "@/components/features/pages/page-state"
 import type { PanelState } from "@/components/features/pages/panels/types"
 import { EM_DASH, formatInstant } from "@/components/features/pages/panels/freshness"
+import { artifactsLibrary } from "@/lib/feature-flags"
+import type { PageView } from "@/hooks/use-pages"
+
+/**
+ * Where a row opens: with the Artifacts library on, the item's own address
+ * there (its immutable ID, or the legacy item link that canonicalizes to it);
+ * otherwise its Page.
+ */
+function rowHref(page: PageView): string {
+  if (!artifactsLibrary()) return `/pages/${encodeURIComponent(page.slug)}`
+  return page.immutablePageId
+    ? `/artifacts/${encodeURIComponent(page.immutablePageId)}`
+    : `/artifacts?${new URLSearchParams({ item: page.slug })}`
+}
 
 /** Three rows: the card is a glance, the full list is one click away. */
 const STRIP_LIMIT = 3
@@ -93,7 +107,7 @@ export function PagesStrip({ now }: PagesStripProps) {
         : "all fresh"
 
   return (
-    <DashCard title="Artifacts" concept="pages" meta={hint} link={{ label: "All artifacts", href: "/pages" }}>
+    <DashCard title="Artifacts" concept="pages" meta={hint} link={{ label: "All artifacts", href: artifactsLibrary() ? "/artifacts" : "/pages" }}>
       {loading && pages.length === 0 ? (
         <div className="space-y-2 border-t border-border px-4 py-3">
           {Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="h-8 w-full rounded-md" />)}
@@ -119,7 +133,7 @@ export function PagesStrip({ now }: PagesStripProps) {
                 title={p.name}
                 // Absolute, never "a while ago" (§4 rule 3).
                 sub={[p.ownerLabel, `updated ${formatInstant(p.lastProducedAt!, clock)}`].filter(Boolean).join(" · ")}
-                href={`/pages/${encodeURIComponent(p.slug)}`}
+                href={rowHref(p)}
                 // No pill when the server sent no state: an unknown state is
                 // never shown as fresh.
                 right={p.state ? <StatusPill tone={STATE_TONE[p.state]} label={PAGE_STATE_META[p.state].label} /> : undefined}
