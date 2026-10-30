@@ -34,8 +34,10 @@ vi.mock("@/components/features/chat/artifact-context/new-artifact/use-artifact-c
   useArtifactCapabilities: () => ({ projects: true, dashboards: false, slides: false, documents: true, sheets: false, pages: true }),
 }))
 vi.mock("../new-artifact-dialog", () => ({
-  NewArtifactDialog: ({ defaultKind, defaultFolderSlug }: { defaultKind?: string; defaultFolderSlug?: string }) =>
-    <div role="dialog" aria-label="New artifact" data-kind={defaultKind ?? ""} data-folder={defaultFolderSlug ?? ""} />,
+  NewArtifactDialog: ({ defaultKind, defaultFolderSlug, onCreated }: { defaultKind?: string; defaultFolderSlug?: string; onCreated: (slug: string) => void }) =>
+    <div role="dialog" aria-label="New artifact" data-kind={defaultKind ?? ""} data-folder={defaultFolderSlug ?? ""}>
+      <button type="button" onClick={() => onCreated("fresh-design")}>Create</button>
+    </div>,
 }))
 vi.mock("@/components/layout/secondary-panel", async importOriginal => ({ ...(await importOriginal<typeof import("@/components/layout/secondary-panel")>()), SecondaryPanel: ({ label, children }: { label: string; children: React.ReactNode }) => <aside aria-label={label}>{children}</aside> }))
 vi.mock("@/components/features/chat/artifact-context/craft/craft-lock-bar", () => ({
@@ -117,6 +119,15 @@ it("New artifact in the bar opens the dialog in the folder being looked at", () 
   fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
   const dialog = screen.getByRole("dialog", { name: "New artifact" })
   expect([dialog.dataset.kind, dialog.dataset.folder]).toEqual(["", "sales"])
+})
+
+it("a just-created artifact opens by its slug, never as an ID, so it does not land on not available", () => {
+  renderLibrary()
+  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  fireEvent.click(screen.getByRole("button", { name: "Create" }))
+  // The new item is not in the list yet; the route opens it by slug and moves to its ID once it resolves.
+  expect(state.select).toHaveBeenCalledWith(null, "fresh-design")
+  expect(state.select).not.toHaveBeenCalledWith("fresh-design")
 })
 
 it("searches with operators, filters by kind with counts and switches to a table", () => {
