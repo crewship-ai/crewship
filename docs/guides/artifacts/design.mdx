@@ -1,0 +1,253 @@
+---
+title: Design canvas
+description: "Lay out screens with other people on a live canvas, keep versions, share one version and send feedback to an agent."
+icon: "frame"
+stability: experimental
+tag: Experimental
+---
+
+A Design is an artifact that holds a shared canvas. You arrange screens,
+rectangles, text and images on it, and everyone who has the Design open sees
+each change and each other's cursors as it happens. Crewship keeps numbered
+versions of the canvas, lets the owner share one version with readers, and
+can pass a comment on a layer to the agent of a chat you connect.
+
+Designs live in **Artifacts**, next to Projects, Dashboards and Slides.
+
+## Turn Design on
+
+Design is off by default. It needs two switches, and both must be on:
+
+| Switch | Where | Value |
+|---|---|---|
+| `NEXT_PUBLIC_ARTIFACTS_DESIGN` | Build-time variable of the web UI | `true` |
+| `artifacts_design` | Workspace feature flag | enabled |
+
+Enable the workspace flag with the CLI:
+
+```bash
+crewship feature-flag enable artifacts_design
+```
+
+An operator can instead set `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true` in the
+server environment. That turns the server side on for every workspace on the
+instance, regardless of the workspace flag.
+
+The `artifacts_design` flag is independent of `artifact_projects`, the flag for
+Project artifacts. You can turn Design on without Projects.
+
+With `NEXT_PUBLIC_ARTIFACTS_DESIGN` on, `/artifacts` opens the Artifacts library
+even if `NEXT_PUBLIC_ARTIFACTS_LIBRARY` is off. Without it, Designs are hidden
+from the library, and a Design editor shows **Design is not enabled.**
+
+<Note>
+  The **Design** tile in **New artifact** follows the build-time variable only.
+  If the UI was built with Design on but the workspace flag is off, the tile is
+  still offered and creating a Design fails with `design not found`. Enable
+  `artifacts_design` for the workspace and try again.
+</Note>
+
+## Create a Design
+
+You need permission to create pages in the workspace. Agents cannot create a
+Design; they can only edit one that a person made.
+
+1. Open **Artifacts** in the sidebar.
+2. Click **New artifact**, or the **Design** tile under **Make something** on the
+   library home.
+3. Select **Design** ("A shared canvas with screens").
+4. Enter a **Name**, for example `Checkout flow`. Optionally choose a **Folder**.
+   **Start with** offers only **Blank canvas**.
+5. Click **Create and edit**.
+
+A new Design is visible only to you until you share it. Crewship saves the empty
+canvas as version 1.
+
+To open a Design later, select it in the library and click **Open** in the side
+panel. The Design opens at its own address, `/artifacts/<id>`.
+
+## The editor
+
+The editor has four areas:
+
+- **Header**: the connection status, the **Access**, **History** and
+  **Save version** buttons, and the initials of the other people on the canvas.
+- **Screens** list on the left: every screen and, indented under it, its layers.
+  Click an entry to select it.
+- **Canvas** in the middle, with the toolbar **Screen**, **Rectangle**, **Text**
+  and **Image** above it.
+- **Properties** on the right, with **Comments** below.
+
+The status in the header tells you where your changes are:
+
+| Status | Meaning |
+|---|---|
+| **Connecting…** | The editor is opening the live connection. |
+| **Live · up to date** | Connected, and nothing has changed since the last saved version. |
+| **Live · changes saved as you work** | Connected. Your changes have reached the server but are not yet in a numbered version. |
+| **Offline · changes kept in this browser** | The connection dropped. Keep the window open; the editor reconnects and sends your changes. |
+| **Access changed · reopen to continue** | Your access or session changed. Reopen the Design. |
+
+People with read access see a **Read only** badge next to the status.
+
+## Add and edit layers
+
+1. Click **Screen** to add a 360 × 640 screen. Further screens line up to the
+   right of the previous one.
+2. With a screen selected, click **Rectangle**, **Text** or **Image**. The new
+   layer goes into the selected screen, or into the first screen if none is
+   selected.
+3. Drag a layer on the canvas to move it.
+4. Change the selected layer in **Properties**:
+   - **Name** as shown in the **Screens** list.
+   - **X**, **Y**, **W** and **H** in pixels. Positions of layers are relative
+     to their screen.
+   - **Fill** (or **Text color** for text), with a color picker or a value such
+     as `#16a34a`.
+   - **Text** for a text layer.
+   - **Image URL** for an image: an `https://` address, or an embedded PNG,
+     JPEG, WebP or GIF data URL. Other addresses are not drawn.
+   - **Screen**, to move a layer into another screen or to **On canvas**.
+5. To remove the selection, click **Delete layer**. Deleting a screen with
+   **Delete screen and layers** also removes every layer inside it.
+
+Every change goes to the other people on the canvas as you make it. The editor
+also keeps a copy of your unsaved canvas in this browser, so a crash or a lost
+connection does not discard it. If browser storage is full or blocked, the
+editor says so; keep the window open until it is connected and save a version.
+
+## Save versions
+
+The live canvas and its versions are separate. A version is a fixed copy of the
+canvas with a number and a message.
+
+- Click **Save version** to save the current canvas now. The button works only
+  while the editor is connected.
+- While you edit, the editor saves an **Automatic checkpoint** version after
+  about 10 seconds without further changes.
+- Saving a comment from an editable canvas first saves a
+  **Checkpoint before feedback** version, so the comment points at the canvas
+  you saw.
+
+## Browse and restore versions
+
+1. Click **History** in the header. The button shows the latest version, for
+   example **History · v4**.
+2. The panel lists each version with its number, message and time. Click a
+   version to view it. The header shows **Version 3** and a **History** badge,
+   and the canvas cannot be edited.
+3. Click **Restore** under a version to bring it back. Crewship saves the
+   restored canvas as a new version on top of the history, so nothing is
+   overwritten, and everyone on the canvas sees it immediately.
+4. Click **Live canvas** to return to the editable canvas.
+
+**Restore** and **Share** are shown only to people who can edit the Design.
+
+## Share a version with readers
+
+Readers do not see your working history. They see the live canvas and the one
+version that the owner has shared.
+
+1. Open **History**.
+2. Click **Share** under the version you want readers to see. Only the owner of
+   the Design can share; an editor who is not the owner gets a permission error.
+3. The version is marked **Shared**, and the panel shows
+   **Open shared version N**, which opens that version on its own page.
+
+Sharing another version replaces the previous one.
+
+## Give people access
+
+1. Click **Access** in the editor header. The **Design access** dialog opens.
+2. Choose the subject: a **user**, a **crew**, an **agent** or
+   **Everyone in this workspace**. For a user, enter their email address.
+3. Choose the level and click **Grant**:
+   - **read** follows the live canvas and sees the shared version.
+   - **write** can change the canvas, save versions and restore them.
+4. To remove access, click **Revoke** next to the grant.
+
+Only the owner or a workspace administrator can change access. Changes take
+effect immediately: a person whose access is removed is disconnected from the
+canvas. Grants for agents do not give an agent permission to run tasks; that is
+controlled separately.
+
+## What a reader sees
+
+A person with **read** access who opens the Design sees:
+
+- the live canvas, with a **Read only** badge and **Follow changes live** in the
+  toolbar,
+- the cursors and initials of the people editing,
+- in **History**, only the shared version,
+- comments on the shared version only.
+
+Readers cannot add comments.
+
+## Comment on a layer
+
+Comments are tied to one layer in one version.
+
+1. Select a layer, in the **Screens** list or on the canvas. The **Comments**
+   area shows **On** and the layer name.
+2. Type in **What should change?**
+3. Click **Save comment**, or **Send to agent** if an agent chat is connected.
+
+The comment appears in the list with its version and layer, for example
+`v4 · Screen 1`. Click that line to select the layer again. Your unsent comment
+draft stays in this browser if you close the Design.
+
+## Send feedback to an agent
+
+The owner can connect one of their private agent chats. Comments then go to
+that agent, which changes the canvas and answers in the comment.
+
+1. Open the private chat with the agent you want to use, and copy its ID from
+   the address: `/chat/<chat-id>`. The chat must be yours, private and bound to
+   an agent.
+2. In the Design, under **Comments**, paste the ID into **Chat ID** and click
+   **Connect agent chat**. The section then shows **Open agent chat**.
+3. Select a layer, write the comment and click **Send to agent**.
+
+The comment shows its delivery state:
+
+| State | Meaning |
+|---|---|
+| **Sending to agent…** | The message is going to the chat. |
+| **Sent to agent** | The chat accepted it. The agent reads the Design, applies the change and saves a new version. |
+| **Waiting for agent** | The comment is queued as a task for the agent. |
+| **Comment saved. The agent is busy; retry when it finishes.** | The agent was running. Click **Retry delivery** later. |
+| **Comment saved. Retry when the source chat is connected.** | The chat was not reachable. Click **Retry delivery** when it is. |
+| **Done · vN** | The agent replied; its answer appears under the comment with the version it saved. |
+
+Delivery works only while the connected chat is open to realtime messages and
+runs with the trusted execution profile. Only the person who connected the
+chat sends comments to the agent. Comments from other people are saved on the
+Design without being delivered.
+
+The agent works through the `design_get`, `design_apply`, `design_snapshot`,
+`design_versions` and `design_restore` tools, under the permissions of the
+person who connected the chat.
+
+## Errors
+
+| Message | What happened | What to do |
+|---|---|---|
+| `Design changed; reload and reapply` | Someone else changed or saved the canvas between reading and writing it, or a comment points at a version that is no longer the latest. | Reload the Design and repeat the change or comment. |
+| `Design capacity is full; existing work is retained` | The Design's version history is full, or the workspace has reached its limit of pages and artifacts. Nothing was lost. | Delete artifacts you no longer need, or ask an administrator. |
+| `current Design edit permission required` | You lack edit access, or you tried to share or connect a chat without being the owner. | Ask the owner for **write** access. |
+| `design not found` | The Design does not exist, you cannot see it, or `artifacts_design` is off for the workspace. | Check the address, your access and the flag. |
+| `Design engine is unavailable; changes are not acknowledged` | The server could not process the canvas. | Keep the window open and try again; your changes stay in the browser. |
+
+## Limits
+
+- Each version can hold up to 32 MiB, and the history of one Design up to
+  256 MiB.
+- The browser copy of an unsaved canvas is kept only up to 2 MiB.
+- A workspace holds at most 100 pages and artifacts in total.
+
+## Command line
+
+The same actions are available from the CLI under `crewship page design`:
+`create`, `get`, `versions`, `apply`, `snapshot`, `restore`, `share`,
+`comments`, `comment`, `agent` and `watch`. Run
+`crewship page design --help` for the details.
