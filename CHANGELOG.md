@@ -9,8 +9,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Workspace identity erasure also clears Mooring human attribution.** Collaboration edits keep their exact saved history while losing the erased person's ID; generic Mooring mandates keep their preconditions and revocation state and can no longer authorize that person's agent. Other people and workspaces remain unchanged.
-
 - **A Page opens with its content inside Artifacts.** Its application or panels show in the library detail with the same views Pages uses, read by the page's immutable ID; the detail no longer sends you to Pages.
 
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
@@ -24,6 +22,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.
 
 - **Shared artifact commenters can post feedback in the preview.** Comments stay anchored to the shared version without granting editing or agent execution rights; changing accounts, workspace or permissions retires an unfinished selection.
+
+- **Workspace identity erasure also clears Mooring human attribution.** Collaboration edits keep their exact saved history while losing the erased person's ID; generic Mooring mandates keep their preconditions and revocation state and can no longer authorize that person's agent. Other people and workspaces remain unchanged.
 
 - **Project source edits survive a lost save reply and a closed tab.** If the save reply is lost, the editor confirms the exact next version instead of reporting a false conflict, and an unsaved source draft is kept in the browser and offered back until it is saved or discarded.
 
