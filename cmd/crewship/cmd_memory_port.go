@@ -34,7 +34,10 @@ Omit --agent to export the crew-shared tier.
 
 Examples:
   crewship memory export --crew engineering --agent alex --out ./alex-memory
-  crewship memory export --crew engineering --out ./crew-memory`,
+  crewship memory export --crew engineering --out ./crew-memory
+  crewship memory export --crew engineering --out ./crew-memory --format json   # {"out","documents","skipped"}
+
+Requires OWNER or ADMIN: an export reads every private note an agent holds.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -104,6 +107,26 @@ Examples:
 		}
 		if err := memport.ExportOKF(out, docs); err != nil {
 			return err
+		}
+		// The bundle is written either way; a machine format reports what
+		// was written instead of the prose listing below.
+		if f := newFormatter(); !f.RoutesToHuman() {
+			type skipped struct {
+				Source string `json:"source" yaml:"source"`
+				Reason string `json:"reason" yaml:"reason"`
+			}
+			report := struct {
+				Out       string    `json:"out" yaml:"out"`
+				Documents []string  `json:"documents" yaml:"documents"`
+				Skipped   []skipped `json:"skipped" yaml:"skipped"`
+			}{Out: out, Documents: make([]string, 0, len(docs)), Skipped: make([]skipped, 0, len(payload.Skipped))}
+			for _, d := range docs {
+				report.Documents = append(report.Documents, d.RelPath)
+			}
+			for _, sk := range payload.Skipped {
+				report.Skipped = append(report.Skipped, skipped{Source: sk.Source, Reason: sk.Reason})
+			}
+			return f.AutoHuman(report, func() {})
 		}
 		fmt.Fprintf(os.Stdout, "exported %d documents to %s\n", len(docs), out)
 		for _, d := range docs {
