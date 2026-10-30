@@ -27,8 +27,9 @@ you pick a document, person, workspace or server. The task covers the one
 document and the instruction in that person's chat message, for at most one
 hour, and the person can stop it at any time.
 
-A person starts the task in the app or with
+A person starts the task with the CLI:
 `crewship craft task start <page> --chat-id <chat> --message-id <message> --whole-document=true`.
+They can stop it in the app or with `crewship craft task stop <page>`.
 The instance must enable native documents and native agents with
 `CREWSHIP_CRAFT_NATIVE_ENABLED=true` and
 `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true`. Both are off by default.
@@ -122,10 +123,12 @@ the task again when the document is free.
   have happened. Send the exact same `craft_apply` arguments again, with the
   same `request_id`, `generation`, `base_version` and `commands`. The host then
   checks that one saved attempt instead of running the commands twice. Do not
-  start any other edit first, because new edits are refused with `409` until
-  the uncertain one is settled. If this check fails with `409`, for example
-  because the lease ran out, stop and tell the person that the save outcome is
-  unknown and that they should check the document.
+  start any other edit first: until the uncertain save is settled, every
+  `craft_apply` answers `503` "original native save outcome unconfirmed;
+  reconcile the exact original request". If the reconcile itself answers that
+  `503` again, or fails with `409` (for example because the lease ran out),
+  stop and tell the person that the save outcome is unknown and that they
+  should check the document. Never retry it in a loop.
 
 ## Comments and replies
 

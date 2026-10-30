@@ -5,15 +5,19 @@ version: 1.0.0
 category: DESIGN
 license: Apache-2.0
 runtime: INSTRUCTIONS
-description: Edit an existing Crewship Design artifact (a canvas of frames, rectangles, text and images) with the design_* tools, keeping node IDs stable and every change a retained version. Use when the owner asks you to change a Design, or a Design comment was sent to you; not for Project, Dashboard or Slides artifacts or native Craft documents.
+description: Edit an existing Crewship Design artifact (a canvas of frames, rectangles, text and images) with the design_* tools, keeping node IDs stable and every change a retained version. Use when the owner sent you a node comment from the Design editor through a connected agent chat; not for Project, Dashboard or Slides artifacts or native Craft documents.
 ---
 
 ## When to Activate
 
-Use this playbook when your run was started for one existing Design artifact:
-the owner asked for a change in their private chat with you, or sent you a
-comment from the Design editor. A Design is a canvas of stable nodes shared
-live with people who have it open.
+Use this playbook when your run was started for one existing Design artifact
+by a node comment from the Design editor. The owner first connects one of
+their private chats with you to the Design ("Connect agent chat" in the
+editor, or `crewship page design agent <slug> --chat-id <chat>`). After that,
+a comment they send on a selected node ("Send to agent") reaches you in that
+chat as a Design request. A plain chat message does not give you a Design
+mandate. A Design is a canvas of stable nodes shared live with people who
+have it open.
 
 Use another playbook for other kinds of work:
 
@@ -21,7 +25,10 @@ Use another playbook for other kinds of work:
 - Native Word or Sheet documents: `crewship-craft`.
 
 You cannot create a Design. Creation is a human action; if the owner wants a
-new canvas, ask them to create it in Artifacts and then send you the request.
+new canvas, ask them to create it in the Artifacts library (or with
+`crewship page design create <slug> --name <title>`), connect your chat to it
+and send you the request as a comment. The Artifacts library is off by
+default and needs the build-time `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true`.
 
 ## Rights and mandate
 
@@ -32,18 +39,21 @@ Every call succeeds only when all of these hold:
 - Design is enabled for the workspace: the `artifacts_design` workspace flag
   (`crewship feature-flag enable artifacts_design`) or the instance switch
   `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true`. Both are off by default. The
-  browser canvas also needs the build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN=true`.
+  browser canvas also needs the build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN=true`,
+  and creating a Design in the browser needs the Artifacts library
+  (`NEXT_PUBLIC_ARTIFACTS_LIBRARY=true`). Both build-time switches are off by
+  default.
 - Your crew is on the workspace's agent artifact policy
   (`crewship workspace artifact-policy show`).
-- This run comes from the owner's own message in their private chat with you,
-  and that message selected this exact Design. The mandate covers that one
-  Design for this run only.
+- This run comes from a Design comment the owner sent from the editor to
+  their connected private chat with you, and that request names this exact
+  Design. The mandate covers that one Design for this run only.
 - The owner still has edit rights to the Design.
 
 You never choose a person, workspace, server or other Design in tool
 arguments. If a call returns `403` or `404`, do not try another slug or
 identity. Tell the owner which permission is missing and ask them to send the
-request again from their chat once it is in place.
+comment again from the Design editor once it is in place.
 
 ## Tools
 
