@@ -130,7 +130,17 @@ func listedDraftRevision(t *testing.T, cfg, slug string) int {
 }
 
 func TestAcceptance_RoutineDraftLifecycleCLI(t *testing.T) {
-	cfg, _, _, _ := startRoutineTriggerAcceptanceServerDB(t)
+	for _, role := range []string{"OWNER", "MANAGER", "ADMIN"} {
+		t.Run(role, func(t *testing.T) { acceptanceRoutineDraftLifecycleCLI(t, role) })
+	}
+}
+
+func acceptanceRoutineDraftLifecycleCLI(t *testing.T, role string) {
+	t.Helper()
+	cfg, _, db, serverURL := startRoutineTriggerAcceptanceServerDB(t)
+	if role != "OWNER" {
+		cfg = addRoutineAcceptanceMember(t, db, serverURL, "draft-"+strings.ToLower(role), role)
+	}
 	dir := t.TempDir()
 
 	// save → a revision envelope with a server-issued id.
@@ -151,6 +161,8 @@ func TestAcceptance_RoutineDraftLifecycleCLI(t *testing.T) {
 		t.Fatalf("draft list revision = %d, want 1", rev)
 	}
 
+	storedDefinition := routineStoredDraftDefinition(t, db, "acc-draft")
+
 	// get returns the same revision; a draft does not create the live recipe.
 	out, errOut, code = runRoutineCLISplit(t, cfg, "routine", "draft", "get", "acc-draft", "--format", "json")
 	if code != 0 {
@@ -158,6 +170,7 @@ func TestAcceptance_RoutineDraftLifecycleCLI(t *testing.T) {
 	}
 	var got routineDraftEnvelope
 	decodeRoutineJSON(t, "draft get", out, &got)
+	assertRoutineDraftDefinition(t, got.Document, storedDefinition)
 	var gotDoc struct {
 		Definition struct {
 			Steps []struct {
@@ -188,6 +201,7 @@ func TestAcceptance_RoutineDraftLifecycleCLI(t *testing.T) {
 	if rev := listedDraftRevision(t, cfg, "acc-draft"); rev != 0 {
 		t.Fatalf("publication must consume the draft, list still shows revision %d", rev)
 	}
+	assertRoutinePublishedDefinition(t, db, "acc-draft", storedDefinition)
 	// The consumed revision cannot be published twice.
 	_, errOut, code = runRoutineCLISplit(t, cfg, "routine", "draft", "publish", savedPath)
 	if code != 5 || !strings.Contains(errOut, "409") {
@@ -233,7 +247,17 @@ func TestAcceptance_RoutineDraftLifecycleCLI(t *testing.T) {
 // A draft saved by the browser (literal JSON.stringify bytes) must publish
 // from the CLI: get → file → publish validates exactly the stored definition.
 func TestAcceptance_RoutineDraftPublishBrowserSavedCLI(t *testing.T) {
-	cfg, _, _, serverURL := startRoutineTriggerAcceptanceServerDB(t)
+	for _, role := range []string{"OWNER", "MANAGER", "ADMIN"} {
+		t.Run(role, func(t *testing.T) { acceptanceRoutineDraftPublishBrowserSavedCLI(t, role) })
+	}
+}
+
+func acceptanceRoutineDraftPublishBrowserSavedCLI(t *testing.T, role string) {
+	t.Helper()
+	cfg, _, db, serverURL := startRoutineTriggerAcceptanceServerDB(t)
+	if role != "OWNER" {
+		cfg = addRoutineAcceptanceMember(t, db, serverURL, "draft-"+strings.ToLower(role), role)
+	}
 	raw, err := os.ReadFile(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -260,6 +284,10 @@ func TestAcceptance_RoutineDraftPublishBrowserSavedCLI(t *testing.T) {
 		t.Fatalf("browser draft save: status %d", resp.StatusCode)
 	}
 
+	storedDefinition := routineStoredDraftDefinition(t, db, "browser-draft")
+	if storedDefinition != routineDraftDefinition("browser-draft") {
+		t.Fatalf("browser save changed definition bytes: %s", storedDefinition)
+	}
 	out, errOut, code := runRoutineCLISplit(t, cfg, "routine", "draft", "get", "browser-draft", "--format", "json")
 	if code != 0 {
 		t.Fatalf("draft get: exit %d\n%s%s", code, out, errOut)
@@ -267,6 +295,9 @@ func TestAcceptance_RoutineDraftPublishBrowserSavedCLI(t *testing.T) {
 	if !strings.Contains(out, `"name": "browser-draft",`+"\n"+`      "dsl_version"`) || !strings.Contains(out, "Sales & Ops <review>") {
 		t.Fatalf("draft get must print the stored definition bytes (order, no HTML escapes):\n%s", out)
 	}
+	var got routineDraftEnvelope
+	decodeRoutineJSON(t, "browser draft get", out, &got)
+	assertRoutineDraftDefinition(t, got.Document, storedDefinition)
 	path := filepath.Join(t.TempDir(), "browser.json")
 	if err := os.WriteFile(path, []byte(out), 0o600); err != nil {
 		t.Fatal(err)
@@ -275,6 +306,7 @@ func TestAcceptance_RoutineDraftPublishBrowserSavedCLI(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("publish of a browser-saved draft: exit %d\n%s%s", code, out, errOut)
 	}
+	assertRoutinePublishedDefinition(t, db, "browser-draft", storedDefinition)
 	if out, errOut, code := runRoutineCLISplit(t, cfg, "routine", "get", "browser-draft"); code != 0 {
 		t.Fatalf("published routine not readable: exit %d\n%s%s", code, out, errOut)
 	}
@@ -316,9 +348,20 @@ func routineStatus(t *testing.T, cfg, slug string) string {
 }
 
 func TestAcceptance_RoutineGovernanceCLI(t *testing.T) {
+	for _, role := range []string{"OWNER", "ADMIN"} {
+		t.Run(role, func(t *testing.T) { acceptanceRoutineGovernanceCLI(t, role) })
+	}
+}
+
+func acceptanceRoutineGovernanceCLI(t *testing.T, role string) {
+	t.Helper()
 	owner, crewID, db, serverURL := startRoutineTriggerAcceptanceServerDB(t)
 	member := addRoutineAcceptanceMember(t, db, serverURL, "trg-member", "MEMBER")
 	manager := addRoutineAcceptanceMember(t, db, serverURL, "trg-manager", "MANAGER")
+	actor := owner
+	if role == "ADMIN" {
+		actor = addRoutineAcceptanceMember(t, db, serverURL, "trg-admin", "ADMIN")
+	}
 
 	propose := func(slug string) {
 		t.Helper()
@@ -342,9 +385,9 @@ func TestAcceptance_RoutineGovernanceCLI(t *testing.T) {
 			t.Fatalf("%s refusal must name the required role %q:\n%s", verb, role, errOut)
 		}
 	}
-	decide := func(verb, slug, want string) map[string]any {
+	decideBy := func(cfg, verb, slug, want string) map[string]any {
 		t.Helper()
-		out, errOut, code := runRoutineCLISplit(t, owner, "routine", verb, slug, "--format", "json")
+		out, errOut, code := runRoutineCLISplit(t, cfg, "routine", verb, slug, "--format", "json")
 		if code != 0 {
 			t.Fatalf("%s: exit %d\n%s%s", verb, code, out, errOut)
 		}
@@ -354,6 +397,10 @@ func TestAcceptance_RoutineGovernanceCLI(t *testing.T) {
 			t.Fatalf("%s returned %v, want slug=%s status=%s", verb, body, slug, want)
 		}
 		return body
+	}
+
+	decide := func(verb, slug, want string) map[string]any {
+		return decideBy(actor, verb, slug, want)
 	}
 
 	propose("acc-approve")
@@ -366,21 +413,22 @@ func TestAcceptance_RoutineGovernanceCLI(t *testing.T) {
 		t.Fatalf("approved routine status = %q", got)
 	}
 	// A second approval is a readable conflict, not a silent success.
-	_, errOut, code := runRoutineCLISplit(t, owner, "routine", "approve", "acc-approve")
+	_, errOut, code := runRoutineCLISplit(t, actor, "routine", "approve", "acc-approve")
 	if code != 5 || !strings.Contains(errOut, "not awaiting approval") {
 		t.Fatalf("re-approve: exit %d, want 5 with reason\n%s", code, errOut)
 	}
 	// Human output stays the one-line receipt.
-	out, errOut, code := runRoutineCLISplit(t, owner, "routine", "disable", "acc-approve")
+	out, errOut, code := runRoutineCLISplit(t, actor, "routine", "disable", "acc-approve")
 	if code != 0 || !strings.Contains(out, "Routine acc-approve → disabled") {
 		t.Fatalf("human disable: exit %d\n%s%s", code, out, errOut)
 	}
-	out, errOut, code = runRoutineCLISplit(t, owner, "routine", "enable", "acc-approve")
+	out, errOut, code = runRoutineCLISplit(t, actor, "routine", "enable", "acc-approve")
 	if code != 0 || !strings.Contains(out, "Routine acc-approve → active") {
 		t.Fatalf("human enable: exit %d\n%s%s", code, out, errOut)
 	}
 
 	// The airbag is OWNER/ADMIN only: a MANAGER who may approve may not disable.
+	refused(member, "disable", "acc-approve", "ADMIN")
 	refused(manager, "disable", "acc-approve", "ADMIN")
 	body := decide("disable", "acc-approve", "disabled")
 	if body["cancelled_runs"] != float64(0) {
@@ -389,6 +437,7 @@ func TestAcceptance_RoutineGovernanceCLI(t *testing.T) {
 	if got := routineStatus(t, owner, "acc-approve"); got != "disabled" {
 		t.Fatalf("disabled routine status = %q", got)
 	}
+	refused(member, "enable", "acc-approve", "ADMIN")
 	refused(manager, "enable", "acc-approve", "ADMIN")
 	decide("enable", "acc-approve", "active")
 	if got := routineStatus(t, owner, "acc-approve"); got != "active" {
@@ -400,5 +449,18 @@ func TestAcceptance_RoutineGovernanceCLI(t *testing.T) {
 	decide("reject", "acc-reject", "rejected")
 	if got := routineStatus(t, owner, "acc-reject"); got != "" {
 		t.Fatalf("rejected routine is still readable with status %q", got)
+	}
+
+	if role == "OWNER" {
+		propose("acc-manager-approve")
+		decideBy(manager, "approve", "acc-manager-approve", "active")
+		if got := routineStatus(t, owner, "acc-manager-approve"); got != "active" {
+			t.Fatalf("manager approval did not persist: %q", got)
+		}
+		propose("acc-manager-reject")
+		decideBy(manager, "reject", "acc-manager-reject", "rejected")
+		if got := routineStatus(t, owner, "acc-manager-reject"); got != "" {
+			t.Fatalf("manager rejection left routine readable: %q", got)
+		}
 	}
 }
