@@ -114,8 +114,10 @@ canvas, for example after people edited it in the browser.
 everyone on the canvas. It never deletes history. Read `design_versions` first
 and restore only the version the owner named.
 
-The shared version is what readers see. Your applies, snapshots and restores
-never change it. Only a person can share a version.
+Readers can see the live Design canvas without edit rights. Their retained
+version reads, history and comments are limited to the shared version. Your
+applies, snapshots and restores never change that shared pin. Only a person
+can share a version.
 
 ## Errors
 
