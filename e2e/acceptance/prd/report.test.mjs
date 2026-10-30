@@ -54,6 +54,16 @@ test("formatTable lists requirement, result with reason, short SHA and evidence;
   assert.match(lines[3], /B\.project\.version: Agent revises after a comment .* passed .* evidence\/project\/v2\/result\.json/)
 })
 
+test("formatTable escapes backslashes so a trailing backslash cannot swallow the cell separator", () => {
+  const t = formatTable([row({ reason: "path C:\\ | x\\", result: "failed", evidence: "end\\" })])
+  const line = t.split("\n")[2]
+  assert.ok(line.includes("failed (path C:\\\\ \\| x\\\\)"), line)
+  assert.ok(line.endsWith("| end\\\\ |"), line)
+  // Unescaped separators: every remaining "|" not preceded by an odd run of "\\".
+  const separators = line.match(/(?<!\\)(?:\\\\)*\|/g) ?? []
+  assert.equal(separators.length, 6)
+})
+
 test("readRows + writeSummary round-trip", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "prd-report-"))
   try {

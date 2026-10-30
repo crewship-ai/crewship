@@ -52,8 +52,14 @@ export function summarize(rows) {
   return { ...counts, total: rows.length, ok: rows.length > 0 && counts.failed === 0 }
 }
 
+// Escape backslashes before pipes, so a value ending in "\\" cannot turn the
+// cell separator that follows it into an escaped literal pipe.
 function cell(v) {
-  return String(v ?? "").replace(/\|/g, "\\|").replace(/\s+/g, " ").trim()
+  return String(v ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\|/g, "\\|")
+    .replace(/\s+/g, " ")
+    .trim()
 }
 
 /** Markdown table: requirement | result | app SHA | evidence. @param {PrdRow[]} rows */
