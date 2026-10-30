@@ -124,8 +124,18 @@ seconds, with a fifteen-second lease. Browser focus does not control custody.
 No document bytes travel through this stream. `lease` events contain advisory
 status; `session_retired` stops delivery and explicitly says `draft: "retain"`
 or `draft: "purge"`. Generic 401/403 responses alone do not prove read loss and
-must not trigger local erasure. Unclassified authority changes conservatively
-retire the old admission; a fresh read admission is separate from reacquisition.
+must not trigger local erasure. An admission captures the author-relevant
+generations of its own human and its own Page (`mooring_authority_generations`
+`user` and `page` rows, installed at admission if absent). Any change whose
+recipients include that person or that Page (their grants, crew or workspace
+membership, folder ACL, account status, the Page's owner, audience, folder or
+panels) retires the old admission, including a revoke-then-restore cycle. The
+broad workspace delivery epoch (`workspaces.authority_revision`) is not part of
+this fence: creating another Page, changing a grant for someone else on another
+Page or adding a member does not retire a live editor. Current Page rights,
+membership revision and the original credential are still checked live on
+every operation and stream heartbeat. A fresh read admission is separate from
+reacquisition.
 
 Original expired or revoked credentials never regain an old admission. Explicit
 reauthorization accepts only a separately authenticated newer expiry for the same
@@ -211,7 +221,9 @@ does not authorize replaying a save. Restore supplies the current binding and
 
 Read returns `version`, base64 `bytes`, `applicationId`, `enginePin`,
 `editorBundle`, `editorURL` and quota (`usedBytes`, `limitBytes`, `warning`,
-`retention`). Quota byte counters are strings. Quota exhaustion returns 413;
+`level`, `retention`). Quota byte counters are strings. `level` is `none`,
+`near` (from 80%), `critical` (from 95%) or `full` (at the limit) so the editor
+can warn before saving fails. Quota exhaustion returns 413;
 conflict or stale custody 409; invalid native data 422. Existing versions remain
 available. Generic denied writes retain the local draft; only proven read loss
 requires its erasure.

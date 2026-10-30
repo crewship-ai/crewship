@@ -5,14 +5,16 @@ version: 1.1.0
 category: CODING
 license: Apache-2.0
 runtime: INSTRUCTIONS
-description: Create and revise Crewship Project, Dashboard and Slides artifacts with complete manifests, data version checks, anchored agent feedback and restorable code versions. Use for these artifacts, not native Craft documents or website deployment.
+description: Create and revise Crewship Project, Dashboard and Slides artifacts with complete manifests, data version checks, anchored agent feedback and restorable code versions, and edit selected Design canvases. Use for these artifacts, not native Craft documents or website deployment.
 ---
 
 ## When to Activate
 
 Use this playbook for a multi-screen Project, an inert data-bound Dashboard,
-or a closed-profile Slides deck. The compiled packages are `artifact-project`,
-`artifact-dashboard` and `artifact-slides`, release 1.1.0 / contract 1. Package
+a closed-profile Slides deck, or an existing Design canvas. The compiled
+packages are `artifact-project`, `artifact-dashboard` and `artifact-slides`,
+release 1.1.0 / contract 1; the `design` content type names this skill as its
+authoring skill. Package
 metadata describes shipped capabilities; it does not enable a backend or grant
 access. Keep type instructions and host renderer sources separate from the
 instance's files and datasets. Never attempt to replace a bundled skill or host
@@ -23,8 +25,10 @@ new instance version.
 
 Use the `artifact_create`, `artifact_versions`, `artifact_publish`,
 `artifact_restore`, `artifact_comments` and `artifact_reply` tools from the
-Crewship sidecar. The backend must enable artifact projects and the workspace
-must allow this crew. The owner must explicitly authorize the exact live chat
+Crewship sidecar. Artifact projects are disabled by default: the workspace
+`artifact_projects` feature flag (or server `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true`)
+must be on, and the workspace must allow this crew. A tool being listed does
+not mean the feature is enabled. The owner must explicitly authorize the exact live chat
 run for either one new project or one existing project. A captured conversation
 identity alone is not permission. If permission is missing, ask the owner to
 use the chat's authorization action; never switch credentials or nominate an
@@ -88,7 +92,8 @@ CLI profile. The owner can pin a retained version with `page artifact share`.
 ## Dashboard
 
 Require both `artifact_projects` and `artifact_dashboard_data` plus the exact
-workspace/crew policy and live run mandate. Discover `artifact_data_batch`,
+workspace/crew policy and live run mandate. `artifact_dashboard_data` is off by
+default (server override: `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED=true`). Discover `artifact_data_batch`,
 `artifact_data_read` and `artifact_data_collections` before relying on them.
 The preview must opt in to Dashboard mode; never deliver dataset values to an
 ordinary Project's authored JavaScript.
@@ -126,7 +131,8 @@ connector lineage. Restoring code does not restore an older dataset.
 
 ## Slides
 
-Require `artifact_projects` and `artifact_slides`. Discover
+Require `artifact_projects` and `artifact_slides`; `artifact_slides` is off by
+default (server override: `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true`). Discover
 `artifact_slides_read` and `artifact_export_pdf`; both require an explicit
 positive selected code version. A reader's version must match the current
 shared pin. Do not use a native Slides editor or write native slide storage.
@@ -163,3 +169,50 @@ Then publish the complete deck with the existing manifest CAS and reply to
 the saved comment. Export only the explicit authorized code version; report
 an unsupported or unavailable response honestly. Presentation, thumbnails and
 PDF are host capabilities, not custom scripts inside the slide HTML.
+
+## Design
+
+Design canvases are disabled by default. They require the workspace
+`artifacts_design` feature flag (or server `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true`);
+when it is off the host answers 404. Discover `design_get`, `design_apply`,
+`design_snapshot`, `design_versions` and `design_restore` before relying on them.
+An agent cannot create a Design: a human creates it (`crewship page design create`),
+the owner connects a private chat (`crewship page design agent <slug> --chat-id`)
+and the run must carry the owner's exact-run permission for that Page. `slug`
+accepts the Page slug or that bound Page ID, with or without `@`; it never selects
+another Page.
+
+Read `design_get` first. It returns `nodes`, `order`, `can_edit`, `version`,
+`latest_version` and `shared_version`; a positive `version` reads a retained
+snapshot instead of the live canvas. Then call `design_apply` with 1–500
+`operations`:
+
+```json
+{"slug":"checkout","operations":[{"op":"upsert","node":{"id":"cart","type":"frame","name":"Cart","x":20,"y":20,"width":390,"height":844,"fill":"#ffffff"}}],"message":"Add cart frame"}
+```
+
+`{"op":"delete","id":"cart"}` removes a node; `{"op":"reorder","order":[...]}`
+replaces the whole order and may name only existing nodes. Node fields are
+limited to `id`, `type` (`frame`, `rect`, `text`, `image`), `name`, `x`, `y`,
+`width`, `height`, `fill`, `parentId`, `text` and `src`; any other field is
+rejected. An upsert of an existing ID changes only the supplied fields; a new
+node needs `type` and numeric geometry. Geometry is finite with absolute value
+at most 1,000,000 and non-negative size. Keep existing node IDs when changing
+color, text or geometry. A canvas holds at most 2000 nodes and 4 MiB of
+encoded state; arguments are bounded to 1 MiB.
+
+`design_apply` changes the same live Yjs document people see, also without an
+open browser, and each successful call publishes a new retained version
+returned as `version`. `design_snapshot` saves the current live canvas,
+including browser edits, as a retained version. `design_restore` takes only the
+retained `version` and creates a new version from it. None of these deletes
+history or moves the shared version.
+
+A 409 (`Design changed; reload and reapply`) means the canvas moved: read
+`design_get` again and reapply intentionally rather than blindly. A 413 means
+capacity is full and existing work is retained. An unavailable or 503 outcome
+is uncertain: inspect with `design_get` before retrying. When the run was
+started from a Design comment sent to the agent, the comment addresses an exact
+version and a stable node ID; the first successful `design_apply` records the
+reply and marks that task answered. Report success only with the returned
+version.

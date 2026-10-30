@@ -1,0 +1,319 @@
+---
+title: "Sharing and access"
+description: "Share an artifact version, give people Read, Comment or Edit, use folders, and check who can open an artifact."
+icon: "share-2"
+stability: experimental
+tag: Experimental
+---
+
+A new project artifact in the Artifacts library starts private to you. This
+page covers how to let other people in: sharing a version, giving people a level of
+access, filing artifacts in shared folders, and checking who can open what.
+
+<Note>
+The Artifacts library at `/artifacts` is off in a default build. Build the
+web UI with `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` to show it. Project artifacts
+also need the `artifact_projects` workspace flag, which is off by default:
+
+```bash
+crewship feature-flag enable artifact_projects
+```
+
+Sharing itself has no separate flag. Leave `NEXT_PUBLIC_ARTIFACTS_SHARING_MOCK`
+unset: it replaces the server with an in-browser demo, and nothing you change
+under it reaches anyone else.
+</Note>
+
+## How access works
+
+An artifact has one owner, the person who created it. Who else can open it
+comes from these sources, and the Access tab shows each one:
+
+| Source | Shown as | Changed where |
+|---|---|---|
+| Ownership | **Owner** | Fixed. The owner always has Edit. |
+| Workspace role | **Workspace role** | Workspace members settings. Workspace owners and admins can open shared artifacts. |
+| Folder | **Via folder &lt;name&gt;** | The folder's **Folder settings**. |
+| Crew | **Member of crew &lt;name&gt;** or **Through a crew** | Crew membership. |
+| Direct share | **Shared directly** | The artifact's **Share** dialog. |
+
+### Private until you share a version
+
+A project created with a private audience is open only to its owner until
+publication. Workspace ownership does not grant access to its project versions.
+The audited workspace-owner access available for some other Pages does not
+bypass this project restriction. While it is private, folders, crews and direct
+shares do not apply, even if they are listed.
+
+The artifact stops being private the first time you share a version (see
+[Share a version](#share-a-version)). Until then the **Share** dialog refuses
+to add anyone and shows: *private artifact audience requires explicit
+publication; ordinary grants cannot widen it*. In the list, a private artifact
+carries a **Private** pill.
+
+### Access levels
+
+People get one of three levels. Each level includes the ones before it.
+
+| Level | In the API and CLI | What the person can do |
+|---|---|---|
+| **Read** | `read` | Open the shared version. |
+| **Comment** | `comment` | Open the shared version and leave comments for the agent. Cannot change content, versions or sharing. |
+| **Edit** | `write` | Open the latest version and publish new versions. |
+
+Some limits always apply, whatever the level:
+
+- People with Read or Comment see only the **shared version**. Later versions
+  stay hidden until the owner shares them.
+- People with Edit work on the **latest version**. They cannot see the older
+  history, restore an older version or choose the shared version. Only the
+  owner can do those.
+- Only the owner, or a workspace owner or admin, can change who has access.
+  Only the owner can share a version. Other people opening the Access tab see
+  *Only people who can share this artifact see its access list.*
+- Sharing works only inside the workspace. There are no guests and no
+  expiry. The Share dialog says *Only people in this workspace. No public
+  links.*
+
+## Share a version
+
+Shared versions belong to project artifacts. The shared version is the one
+everyone except you and your editors sees.
+
+<Steps>
+<Step title="Open the artifact">
+In **Artifacts**, click the artifact to select it, then click **Open** in the
+preview panel. On a phone, tap the artifact. The detail view opens on
+**Content**. The header shows
+**Draft** next to the kind, and the version switch shows **Latest v2** and a
+greyed-out **Shared —** while nothing is shared yet.
+</Step>
+<Step title="Choose the version">
+To share an older version, open **History** and click **View** on it.
+Otherwise you are looking at the latest version.
+</Step>
+<Step title="Share it">
+Click **Share** (the link icon) in the viewer toolbar. A short confirmation
+appears: *People with access will see v2. Later versions stay private until
+you share them.* Click **Share vN** for the version selected (for example,
+**Share v2**).
+</Step>
+<Step title="Check the result">
+If you shared the latest version, the header changes to **Shared**. If you
+shared an older one, it stays on **Draft**. The version switch shows **Shared vN** for that version, and
+the version is marked **Shared** in **History**. In the library list, the
+artifact shows **Shared v2** instead of **Not shared**.
+</Step>
+</Steps>
+
+To move the shared version later, view another version and share it the same
+way. When you are viewing the shared version and a newer one exists, a banner
+offers **Share v&lt;latest&gt;** directly.
+
+From the CLI, `crewship page artifact share <slug> --base-version <latest>
+--version <n>` does the same. An agent run cannot share a version.
+
+## Share an artifact with people
+
+<Steps>
+<Step title="Open the Share dialog">
+Open the artifact and click **Share** in the top bar, next to **Content** and
+**Access**. You can also click **Share**, or **Manage** next to *Who can
+open*, in the preview panel of the list.
+</Step>
+<Step title="Choose who and how">
+In **Add a person…**, pick a workspace member or **Everyone in this
+workspace**. In the level menu, pick **Edit**, **Comment** or **Read**. The
+line under the form describes the chosen level. For **Edit** it says the person
+can restore older versions, but they cannot: only the owner can restore a
+version or choose the shared version (see [Access levels](#access-levels)).
+</Step>
+<Step title="Share">
+Click **Share**. The person appears under **Who has access** with the note
+**Shared directly**. Each change is saved as you make it. **Done** only closes
+the dialog.
+</Step>
+</Steps>
+
+### Change or remove someone's access
+
+In the same dialog, rows marked **Shared directly** have a level menu and a
+**Remove** button:
+
+- Pick another level in the row's menu to change it. The new level is added
+  first and the old one removed. If removing the old one fails, the dialog
+  says which level the person still has.
+- Click **Remove** to take the direct share away.
+
+Rows with a lock icon come from somewhere else, and the dialog says where to
+change them: *The owner always has Edit*, *Change in folder settings*, *Set by
+their workspace role* or *Set by crew membership*. Removing a direct share
+does not remove access a person also has through a folder or a crew.
+
+## See who has access
+
+Open the artifact and click **Access** next to **Content**. Under *Who can
+open it* you see a count such as *3 people and groups · 1 Edit, 1 Comment, 1
+Read*, then one group per level. Each row names the person or group and
+where the access comes from. Click **Share…** to change it.
+
+To check your own access to any artifact you can open:
+
+```bash
+crewship page access <slug> --me
+```
+
+The answer lists your paths, for example `owner`, `role`, `folder:<slug>` or
+`grant`, and the folder the artifact is in. The full list for an artifact,
+which only its owner or a workspace admin can read, comes from
+`crewship page access <slug>` and `crewship page grants <slug>`.
+
+## Folders
+
+A folder shares everything in it. Anyone the folder shares with can open the
+shared versions of the artifacts filed there, now and later.
+
+- A folder shares **Read** or **Edit** only. Give Comment on each artifact
+  from its Share dialog.
+- Folders belong to a crew. Create them with
+  `crewship page folder create <slug> --name <name> --owner crew/<slug>`. The
+  library has no button for this.
+- Only a workspace admin, or a manager (or higher) of the owning crew, can
+  change who a folder shares with.
+- Folder access does not open a private artifact. Share a version first.
+
+### Change who a folder shares with
+
+<Steps>
+<Step title="Open the folder">
+In the library sidebar, under **Folders**, click the folder. Its name appears
+above the list with a **Folder settings** button.
+</Step>
+<Step title="Open Folder settings">
+Click **Folder settings**. **Shared with** lists the current entries. An empty
+folder reads *Only the people who add artifacts here.*
+</Step>
+<Step title="Add, change or remove entries">
+Pick a person or **Everyone in this workspace** in **Choose who…**, pick
+**Read** or **Edit**, and click **Add**. Change an existing entry with its
+level menu, or click **Remove**. The line under the form counts the entries.
+</Step>
+<Step title="Save">
+Click **Save**. Changes are sent one at a time. If one fails, the dialog shows
+how many were saved before it. Reopen **Folder settings** to see what the
+folder has now.
+</Step>
+</Steps>
+
+### Move an artifact to a folder
+
+Moving an artifact changes who can open it, so you check a preview first.
+
+<Steps>
+<Step title="Start the move">
+Open the artifact and click **Move to folder** (the folder icon next to
+**Share**). To move several artifacts, select them in the list and click
+**Move…**.
+</Step>
+<Step title="Pick the folder">
+In **To**, choose a folder, or **Unfiled** to take the artifact out of its
+folder. The dialog checks each artifact and shows *1 will move*, with the
+change for each one, for example *Gains: Everyone in this workspace (Read).*
+or *No change in who can open it.*
+</Step>
+<Step title="Confirm">
+Click **Move 1** (the number of artifacts that can move). Artifacts marked
+**Skipped** stay where they are, and the reason is shown next to them.
+</Step>
+</Steps>
+
+Moving to **Unfiled** is not previewed by the server. The dialog warns that
+whoever the old folder gave access to loses it.
+
+## Act on several artifacts at once
+
+In a list view, tick the checkbox on each artifact, or use **Select all** in
+the clean-up views. On a phone, tap **Select** first. A bar shows *2
+selected* with **Move…**, **Share…**, **Archive** (or **Unarchive** in the
+Archive view) and **Clear**.
+
+<Steps>
+<Step title="Pick the action">
+Click **Share…**, choose who and the level, or click **Move…** and choose a
+folder. **Archive** and **Unarchive** need no choice.
+</Step>
+<Step title="Read the preview">
+The dialog shows *Checking what would change…*, then a total such as *2 will
+be shared, 1 skipped* and one line per artifact. A skipped artifact shows why,
+for example *Already has this access*.
+</Step>
+<Step title="Confirm">
+Click the button with the count, for example **Share 2**. Only the artifacts
+in the preview are changed.
+</Step>
+</Steps>
+
+After confirmation the library clears the selection and removes the bulk bar
+and its dialog. A partial failure report can disappear with it, so the dialog
+closing does not prove that every change succeeded. Open each artifact’s
+**Access** tab afterwards to verify the result.
+
+The preview does not check whether an artifact is private. A private artifact
+can be listed as *will be shared*, but the actual share is refused. That
+failure may disappear when the selection is cleared. Before you share several at once, check that none of them shows the
+**Private** or **Not shared** pill, and share a version of each one that does.
+You can act on at most 200 artifacts at a time. Archiving hides an artifact
+and never deletes it. Restore it from the **Archive** view.
+
+## Agents
+
+Existing agent grants can appear as locked rows in the Share dialog. The
+dialog cannot add or change them, and agent shares do not open a project
+artifact. An agent works on a project artifact only inside a chat run
+started by the artifact's owner, and that run cannot share a version or change
+who has access.
+
+The rest of this section applies to library items that are not project
+artifacts (Pages-backed items). Give an agent access to one with the CLI:
+
+```bash
+crewship page grant <slug> --agent <agent> --level read
+```
+
+The server enforces these rules:
+
+- **Comment is for people.** A Comment share cannot name an agent.
+- **Produce names one subject.** `produce` lets an agent or crew push data
+  into named panels (`--panels`). It cannot be given to everyone in the
+  workspace.
+- **Only a person shares.** An agent with Edit can change content but can
+  never widen who can open it.
+- **Native Sheets name editors differently.** On a workbook, Edit is refused.
+  The owner names editors with `crewship workbook share`.
+
+In the Share dialog, an agent's Read or Edit share is locked, with the note
+*An agent's access is set with crewship page grant*. Produce shares are not
+listed there.
+
+## Public links
+
+Artifacts have no public links. Everything on this page stays inside the
+workspace. The older Pages public links (`crewship page publish`) serve only
+panels marked `public: true`. They refuse a private artifact, and a project
+artifact has no such panels, so they do not apply to artifacts.
+
+## CLI reference
+
+| Task | Command |
+|---|---|
+| Share a version | `crewship page artifact share <slug> --base-version <latest> --version <n>` |
+| Give a person or everyone a level | `crewship page grant <slug> --user <email> --level comment` or `--workspace --level read` |
+| Remove a level | `crewship page revoke <slug> --user <email> --level comment` |
+| List direct shares | `crewship page grants <slug>` |
+| Who can open an artifact | `crewship page access <slug>` |
+| Your own access | `crewship page access <slug> --me` |
+| Folder entries | `crewship page folder acl <slug>` |
+| Share a folder | `crewship page folder share <slug> <subject> --view` or `--edit` |
+| Move into a folder | `crewship page move <page> --folder <slug>` |
+
+See [`crewship page`](/cli/page) for every flag.

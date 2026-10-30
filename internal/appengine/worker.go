@@ -227,31 +227,6 @@ type WorkerRequest struct {
 	Command  Command         `json:"command"`
 }
 
-// ServeGridCraftWorker handles exactly one bounded, offline task. A fresh process
-// per candidate makes discard and recovery independent of upstream undo state.
-func ServeGridCraftWorker(ctx context.Context, binary, scratch string, in io.Reader, out io.Writer) error {
-	raw, err := io.ReadAll(io.LimitReader(in, 2*MaxSnapshotBytes+1))
-	if err != nil {
-		return err
-	}
-	if len(raw) > 2*MaxSnapshotBytes {
-		return ErrInvalid
-	}
-	var request WorkerRequest
-	if err = DecodeStrict(raw, &request); err != nil {
-		return err
-	}
-	result, err := RunGridCraftWorker(ctx, binary, scratch, request.Snapshot, request.Command)
-	if err != nil {
-		return err
-	}
-	// Keep the candidate bytes exactly as checked; HTML escaping would change
-	// them and break the report's digest binding.
-	enc := json.NewEncoder(out)
-	enc.SetEscapeHTML(false)
-	return enc.Encode(result)
-}
-
 const recalcReportLimit = 1 << 20
 
 // verifyRecalc checks a candidate's recalculation in a confined execution.

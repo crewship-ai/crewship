@@ -23,7 +23,9 @@ crewship commands --format json | jq '.commands[] | select(.path=="routine") .co
 ```
 
 Pass a canonical command path (separate words or one quoted argument) to
-return only that subtree, retaining the global flags. Unknown paths exit 3.
+return only that subtree, retaining the global flags. Aliases are not accepted
+in the path. Unknown paths print `command not found: <path>` and exit 3. The
+lookup never contacts a server, so it works without login.
 
 ```bash
 crewship commands routine run --format json
@@ -32,8 +34,9 @@ crewship commands routine run --format json
 Each command includes `runnable`, optional `example`, and `inherited_flags`.
 Global flags appear once in `global_flags`; `inherited_flags` contains only
 options inherited from intermediate command groups.
-Local flags include `required: true` when Cobra marks them individually required,
-and `deprecated` when applicable. Conditional flag groups are still described by
+Local flags include `required: true` when Cobra marks them individually required.
+The schema also has a `deprecated` field, but marking a flag deprecated hides it,
+and hidden flags are left out, so current builds never emit it. Conditional flag groups are still described by
 command help; `required` is not a complete input schema. Defaults come from the
 flag definitions, never the current flag values or stored credentials.
 
@@ -45,21 +48,44 @@ For API operations and request/response schemas, see [API](/cli/api).
 {
   "version": "1.2.3",
   "global_flags": [
-    {"name": "format", "shorthand": "f", "type": "string", "default": "", "usage": "…"}
+    {"name": "format", "shorthand": "f", "type": "string", "usage": "…"},
+    {"name": "no-color", "type": "bool", "default": "false", "usage": "…"}
   ],
   "commands": [
     {
+      "runnable": true,
       "path": "routine run",
       "use": "run <slug>",
       "short": "…",
-      "flags": [{"name": "wait", "type": "bool", "default": "false", "usage": "…"}],
-      "commands": []
+      "flags": [{"name": "wait", "type": "bool", "default": "false", "usage": "…"}]
+    },
+    {
+      "runnable": true,
+      "inherited_flags": [{"name": "local", "type": "bool", "default": "false", "usage": "…"}],
+      "path": "db migration-status",
+      "use": "…"
     }
   ]
 }
 ```
 
-Hidden commands and cobra's built-in help plumbing are excluded.
+Empty fields are omitted rather than printed empty: a flag whose default is the
+empty string has no `default` key, and `shorthand`, `example`, `aliases`,
+`inherited_flags`, `flags`, `commands` and `required` appear only when set. `version`, `global_flags`, `commands` at the top level and `runnable`,
+`path` and `use` on each command are always present.
+
+Hidden commands, hidden flags (including deprecated aliases) and cobra's
+built-in `help` command are excluded. `completion` is included. A hidden
+command whose feature is paused stays in the manifest so agents can still find
+its documented pause; `hooks` is the current example.
+
+## Output formats
+
+| Format | Output |
+| --- | --- |
+| `table` (default) | Indented tree of command names and one-line descriptions, followed by a pointer to the JSON manifest. |
+| `json`, `yaml`, `ndjson` | The full manifest described above. |
+| `quiet` | One canonical command path per line, depth-first (for example `routine run`), with nothing else. |
 
 ## See also
 

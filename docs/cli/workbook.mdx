@@ -4,8 +4,9 @@ stability: experimental
 tag: Experimental
 ---
 
-The experimental `workbook` commands are disabled on the server by default.
-They support personal, human-owned private Pages and native GridCraft JSON.
+The experimental `workbook` commands are disabled on the server by default;
+the operator turns them on with `CREWSHIP_GRIDCRAFT_ENABLED=true` (see
+[environment variables](/configuration/environment)). They support personal, human-owned private Pages and native GridCraft JSON.
 The Page owner, and on a published workbook each named editor, can edit cells
 from several editor sessions through `workbook session open` and
 `workbook edit`, and follow every confirmed revision with `workbook commits`.
@@ -546,8 +547,10 @@ mandate and exhausted worker capacity reject the candidate without a new revisio
 
 ## `crewship workbook create <page-slug>`
 
-`--name <name>` (required) names the new empty personal private Page. Returns
-`page_id`, `slug` and `name`; `201` on creation, `200` on an identical retry.
+`--name <name>` (required) names the new empty personal private Page.
+`--test-item` explicitly marks the new Page as a test item (for probes in a QA
+workspace). Returns `page_id`, `slug` and `name`; `201` on creation, `200` on an
+identical retry.
 
 ## `crewship workbook read <page-slug|@ID>`
 
@@ -559,13 +562,15 @@ Read the confirmed native snapshot and its revision/generation.
 
 ## `crewship workbook edit <page-slug|@ID>`
 
-`--file <path|->` supplies the exact edit packet. Retain it on retry. Only the
-Page owner may edit, from a live session (`workbook session open`). On a conflict the command prints the `409` body and exits
-with status 5.
+`--file <path|->` supplies the exact edit packet. Retain it on retry. The Page
+owner, and on a published workbook each named editor, edits from a live session
+(`workbook session open`). On a conflict the command prints the `409` body and
+exits with status 5.
 
 ## `crewship workbook session open <page-slug|@ID>`
 
-Open an editor session for the Page owner. `--renew <session-id>` renews one of
+Open an editor session for the Page owner or, on a published workbook, a named
+editor. `--renew <session-id>` renews one of
 your live sessions instead (heartbeat). Returns the session; see Live editing.
 
 ## `crewship workbook session close <page-slug|@ID> <session-id>`
