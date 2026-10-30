@@ -40,7 +40,12 @@ for one message.
 - The workspace artifact policy is on and lists that agent's crew. A workspace
   owner or admin checks it with `crewship workspace artifact-policy show` and
   changes it with `crewship workspace artifact-policy set`. Without it the
-  agent's create call is refused.
+  agent’s create call is refused. To identify the crew, use `crewship agent
+  list` (the **CREW** column), then `crewship crew get <crew-slug>`. Read the
+  policy’s current `version` and use `artifact-policy set --base-version
+  <version> --enabled --crew-id <crew-id>` with the complete crew allowlist;
+  `set` replaces it. Use the workspace ID when selecting the workspace.
+  See [workspace artifact policy](/cli/workspace#crewship-workspace-artifact-policy-set).
 
 ### Steps
 
@@ -73,6 +78,14 @@ cannot be sent to an agent.
 The agent saves all files in one step as version 1. The new Project is private
 to you until you share a version. The agent cannot share it, choose an owner or
 pick an audience.
+
+## Share a version
+
+After reviewing the latest version, the owner opens **Share** above the preview,
+chooses the version and confirms **Share vN**. This selects the version readers
+can see; publishing another version later does not move it. Grant people
+access separately in the artifact’s **Access** or **Share** dialog. Agents
+cannot share a version.
 
 ## Switch between screens
 
@@ -169,12 +182,12 @@ from:
 | Someone else who can edit it | **Cancel**, **Save comment** |
 
 - **Send to agent** saves the comment as a task and immediately posts a request
-  in the chat where the Project was created. That message starts the agent on
-  this one comment.
+  in the chat where the Project was created. Successful delivery submits the
+  task; it does not confirm that the agent run has started.
 - **Add to queue** saves the task without starting the agent ("Added to the
   queue. The agent starts when you send it."). When you are ready, open
   **Comments** and click **Send N to agent**. Waiting tasks go out one by one;
-  the first that does not start stops the rest.
+  the first delivery failure stops the rest.
 - **Save comment** only records the comment. It never starts an agent.
 
 A comment starts the agent only when you send it. The request needs the source
@@ -189,8 +202,7 @@ Each comment in **Comments** shows its state:
 | Label | Meaning |
 | --- | --- |
 | No label | Saved with **Save comment**; it is not for the agent |
-| **Waiting** | Saved for the agent, not started yet |
-| **Sent to agent** | The request went out; the agent's run has not reported back yet |
+| **Waiting** | Saved for the agent; its run has not started yet, including after delivery |
 | **Agent working** | The agent's run has picked it up |
 | **Done · v2** | The agent published version 2 and replied |
 | **Needs a new selection** | The agent could not find the element and asked you to select it again |
@@ -200,10 +212,10 @@ for example "v2: Added the shipping date". When you see **Needs a new
 selection**, read the reply, select the element on the latest version and send
 a new comment.
 
-The number on the **Comments** tab counts only tasks in **Waiting**, that is
-comments for the agent that have not been sent yet. Saved comments and tasks the
-agent already has are not counted, so the tab can show no number while it holds
-comments. On a wide window the same list also sits beside the preview.
+The number on the **Comments** tab counts tasks whose status is `pending`
+(**Waiting**), including requests already delivered but whose runs have not
+started. Ordinary saved comments and tasks with other statuses are not counted,
+so the tab can show no number while it holds comments. On a wide window the same list also sits beside the preview.
 
 ### When something changed meanwhile
 
