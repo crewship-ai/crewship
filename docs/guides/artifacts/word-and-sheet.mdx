@@ -161,11 +161,13 @@ startup switches alone do not supply that runtime. Before starting, finish
 your save and choose **Uvolnit úpravy** so the human editor no longer renews
 the lease; a task cannot take it away from a person.
 
-1. Collect three IDs:
-   - **Page ID.** Open the document's editor (**Edit** or **Open in Pages**).
-     Its address has the form
-     `https://crewship.example.com/pages/craft/editor?page_id=<page-id>&workspace_id=<workspace-id>`.
-     The `page_id` value is the page ID.
+1. Collect four IDs:
+   - **Page ID.** For a native Word or Sheet open at `/artifacts/<id>`, the
+     immutable `<id>` is the page ID. Alternatively, run
+     `crewship page get <slug> --format json` and use its `id` field. A dedicated
+     editor address carries the same ID as its `page_id` query parameter.
+   - **Workspace ID.** Run `crewship workspace list` and use the **ID** column
+     for the document's workspace.
    - **Chat ID.** In an agent chat, send your instruction for the document.
      `crewship chat list <agent>` shows that chat's ID in the **ID** column.
    - **Message ID.** `crewship chat source messages agent_session <chat-id> --format json`
@@ -180,8 +182,8 @@ the lease; a task cannot take it away from a person.
    ```
 
    The response contains a work ID. Accepted means queued, not done.
-3. To watch the task, open the editor address from step 1 with
-   `&craft_task_id=<work-id>` at the end:
+3. To watch the task, open the dedicated Craft editor route with the collected
+   page and workspace IDs plus `craft_task_id=<work-id>`:
    `https://crewship.example.com/pages/craft/editor?page_id=<page-id>&workspace_id=<workspace-id>&craft_task_id=<work-id>`.
    A panel under the lease bar shows the task state:
 
