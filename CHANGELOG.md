@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- ⚠️ **Behaviour change: an oversized JSON body on crew and backup writes answers 413, not 400.** Creating or updating a crew (`POST /api/v1/crews`, `PATCH`/`PUT /api/v1/crews/{crewId}`, over 8 MiB) and writing a backup plan or the backup settings (`POST /api/v1/admin/instance/backups/plans`, `PUT /api/v1/admin/instance/backups/plans/{id}`, `PUT /api/v1/admin/instance/backups/settings`, over 1 MiB) now reply `413` with `"code": "body_too_large"`, so a client can tell "shrink it" from "fix the JSON". Invalid JSON within the limit still answers `400` with the same message.
+
 - **A Page opens with its content inside Artifacts.** Its application or panels show in the library detail with the same views Pages uses, read by the page's immutable ID; the detail no longer sends you to Pages.
 
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
