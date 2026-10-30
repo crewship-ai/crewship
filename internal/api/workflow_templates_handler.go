@@ -340,16 +340,19 @@ func (h *WorkflowTemplateHandler) Update(w http.ResponseWriter, r *http.Request)
 
 	// Verify existence + workspace scope first so we return 404 (not 400)
 	// when the row doesn't belong to the caller.
-	var existingID string
-	err := h.db.QueryRowContext(r.Context(),
-		`SELECT id FROM workflow_templates WHERE id = ? AND workspace_id = ?`,
-		id, wsID).Scan(&existingID)
+	// Verify existence + workspace scope first so we return 404 (not 400)
+	// when the row doesn't belong to the caller.
+	found, builtin, err := h.lookupBuiltin(r, id, wsID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeProblem(w, r, http.StatusNotFound, "Workflow template not found")
-			return
-		}
 		internalError(w, r, h.logger, "get workflow template for update", err)
+		return
+	}
+	if !found {
+		writeProblem(w, r, http.StatusNotFound, "Workflow template not found")
+		return
+	}
+	if builtin {
+		writeProblem(w, r, http.StatusForbidden, "Cannot modify built-in workflow templates")
 		return
 	}
 
@@ -452,8 +455,21 @@ func (h *WorkflowTemplateHandler) Delete(w http.ResponseWriter, r *http.Request)
 
 	id := r.PathValue("id")
 	wsID := WorkspaceIDFromContext(r.Context())
+	found, builtin, err := h.lookupBuiltin(r, id, wsID)
+	if err != nil {
+		internalError(w, r, h.logger, "get workflow template for delete", err)
+		return
+	}
+	if !found {
+		writeProblem(w, r, http.StatusNotFound, "Workflow template not found")
+		return
+	}
+	if builtin {
+		writeProblem(w, r, http.StatusForbidden, "Cannot delete built-in workflow templates")
+		return
+	}
 
-	found, err := deleteByID(r.Context(), h.db, "workflow_templates", id, wsID)
+	found, err = deleteByID(r.Context(), h.db, "workflow_templates", id, wsID)
 	if err != nil {
 		internalError(w, r, h.logger, "delete workflow template", err)
 		return
@@ -465,6 +481,21 @@ func (h *WorkflowTemplateHandler) Delete(w http.ResponseWriter, r *http.Request)
 
 	broadcastWorkspaceEvent(h.hub, wsID, "workflow_template.deleted", map[string]string{"id": id})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// lookupBuiltin reports whether template id exists in workspace wsID and,
+// if so, whether it is a built-in. Built-ins are read-only, as on the legacy
+// /api/v1/templates routes: List re-seeds them, so a deleted built-in would
+// reappear and a renamed one would be duplicated. The callers write their
+// own statuses so the OpenAPI generator sees each one in the handler.
+func (h *WorkflowTemplateHandler) lookupBuiltin(r *http.Request, id, wsID string) (found, builtin bool, err error) {
+	err = h.db.QueryRowContext(r.Context(),
+		`SELECT is_builtin FROM workflow_templates WHERE id = ? AND workspace_id = ?`,
+		id, wsID).Scan(&builtin)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	return err == nil, builtin, err
 }
 
 // isUniqueConstraintErr reports whether `err` looks like a SQLite UNIQUE

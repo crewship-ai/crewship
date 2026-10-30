@@ -299,7 +299,11 @@ owner (enforced server-side).`,
 			return fmt.Errorf("nothing to update: pass at least one of --enabled, --categories, --min-priority, --events")
 		}
 		id := args[0]
-		resp, err := newAPIClient().Patch("/api/v1/notification-channels/"+url.PathEscape(id), body)
+		segment, err := guestCLIPathSegment(id)
+		if err != nil {
+			return err
+		}
+		resp, err := newAPIClient().Patch("/api/v1/notification-channels/"+segment, body)
 		if err != nil {
 			return err
 		}

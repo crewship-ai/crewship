@@ -83,6 +83,19 @@ func TestAcceptance_CLIMethods(t *testing.T) {
 			wantOut: []string{"cleared"},
 		},
 		{
+			// The server ranks roles by upper-case name; a typed `manager`
+			// must not be rejected as an unknown role.
+			name:    "crew_member_set_role_normalises_case",
+			args:    []string{"crew", "member", "set-role", "core", "m_1", "manager"},
+			want:    methodsCall{http.MethodPatch, "/api/v1/crews/crew_1/members/m_1", "", `{"role":"MANAGER"}`},
+			wantOut: []string{"MANAGER"},
+		},
+		{
+			name:      "crew_member_set_role_rejects_dot_segment",
+			args:      []string{"crew", "member", "set-role", "core", "..", "ADMIN"},
+			wantFails: true,
+		},
+		{
 			name:      "crew_member_set_role_needs_role_or_clear",
 			args:      []string{"crew", "member", "set-role", "core", "m_1"},
 			wantFails: true,

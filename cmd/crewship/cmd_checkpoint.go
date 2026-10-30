@@ -111,8 +111,12 @@ var checkpointGetCmd = &cobra.Command{
 		if err := requireWorkspace(); err != nil {
 			return err
 		}
+		id, err := guestCLIPathSegment(args[0])
+		if err != nil {
+			return err
+		}
 		client := newAPIClient()
-		resp, err := client.Get("/api/v1/checkpoints/" + url.PathEscape(args[0]))
+		resp, err := client.Get("/api/v1/checkpoints/" + id)
 		if err != nil {
 			return err
 		}

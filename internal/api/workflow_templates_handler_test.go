@@ -468,3 +468,58 @@ func jsonQuote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
 }
+
+// List re-seeds the built-ins, so a built-in that Update or Delete could
+// change would come back on the next list: deleted, it reappears; renamed, it
+// is duplicated. Like the legacy /api/v1/templates routes, both refuse a
+// built-in with 403 and leave it as it was.
+func TestWorkflowTemplate_BuiltinsAreReadOnly(t *testing.T) {
+	h, userID, wsID := newWorkflowTemplateHandler(t)
+	ctx := func(req *http.Request) *http.Request {
+		return req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	}
+	list := func() []workflowTemplateResponse {
+		rr := httptest.NewRecorder()
+		h.List(rr, ctx(httptest.NewRequest("GET", "/", nil)))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("list: %d body=%s", rr.Code, rr.Body.String())
+		}
+		var out []workflowTemplateResponse
+		mustUnmarshal(t, rr, &out)
+		return out
+	}
+	before := list()
+	if len(before) == 0 || !before[0].IsBuiltin {
+		t.Fatalf("expected seeded built-ins, got %+v", before)
+	}
+	builtin := before[0]
+
+	tests := []struct {
+		name string
+		call http.HandlerFunc
+		req  *http.Request
+	}{
+		{"rename", h.Update, httptest.NewRequest("PATCH", "/", bytes.NewReader([]byte(`{"name":"my-flow"}`)))},
+		{"delete", h.Delete, httptest.NewRequest("DELETE", "/", nil)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.req.SetPathValue("id", builtin.ID)
+			rr := httptest.NewRecorder()
+			tt.call(rr, ctx(tt.req))
+			if rr.Code != http.StatusForbidden {
+				t.Fatalf("%s built-in: %d body=%s, want 403", tt.name, rr.Code, rr.Body.String())
+			}
+		})
+	}
+
+	after := list()
+	if len(after) != len(before) {
+		t.Fatalf("list has %d templates after refused writes, want %d", len(after), len(before))
+	}
+	for _, tpl := range after {
+		if tpl.ID == builtin.ID && tpl.Name != builtin.Name {
+			t.Fatalf("built-in renamed to %q", tpl.Name)
+		}
+	}
+}

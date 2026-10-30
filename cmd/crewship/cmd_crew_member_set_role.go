@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -27,13 +28,18 @@ Examples:
 		clear, _ := cmd.Flags().GetBool("clear")
 		role := ""
 		if len(args) == 3 {
-			role = args[2]
+			// The server ranks roles by their upper-case names.
+			role = strings.ToUpper(strings.TrimSpace(args[2]))
 		}
 		switch {
 		case clear && role != "":
 			return fmt.Errorf("pass either a role or --clear, not both")
 		case !clear && role == "":
 			return fmt.Errorf("a role is required (OWNER, ADMIN, MANAGER, MEMBER, VIEWER), or pass --clear")
+		}
+		member, err := guestCLIPathSegment(args[1])
+		if err != nil {
+			return err
 		}
 		client, err := requireAuthAndWorkspace()
 		if err != nil {
@@ -43,7 +49,7 @@ Examples:
 		if err != nil {
 			return err
 		}
-		path := "/api/v1/crews/" + url.PathEscape(crewID) + "/members/" + url.PathEscape(args[1])
+		path := "/api/v1/crews/" + url.PathEscape(crewID) + "/members/" + member
 		if err := patchJSON(client, path, map[string]string{"role": role}, nil); err != nil {
 			return err
 		}

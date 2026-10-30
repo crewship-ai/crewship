@@ -632,7 +632,7 @@ func TestCLIParityIsCountedPerOperation(t *testing.T) {
 		{Method: "DELETE", Path: "/api/v1/half", Status: "documented_exact", ConcreteResponseSchema: true, CLIParity: cliParityCovered, CLIMethodUnknown: true},
 		{Method: "GET", Path: "/api/v1/orphan", Status: "documented_exact", ConcreteResponseSchema: true, CLIParity: cliParityMissing},
 		{Method: "POST", Path: "/api/v1/orphan", Status: "documented_exact", ConcreteResponseSchema: true, CLIParity: cliParityMissing},
-	}, cliMethodUnknownSites: 3}
+	}, cliMethodUnknownSites: []string{"cmd/crewship/a.go:1", "cmd/crewship/a.go:9", "cmd/crewship/b.go:4"}}
 	r.Summary = summarize(r)
 	s := r.Summary
 	if s.APIOperationsWithoutCLI != 3 || s.APIOperationsExemptFromCLI != 1 || s.APIOperationsCLIPathOnly != 1 || s.CLIMethodUnknownSites != 3 {
@@ -645,7 +645,7 @@ func TestCLIParityIsCountedPerOperation(t *testing.T) {
 	if err == nil {
 		t.Fatal("an operation with no CLI command must fail -strict")
 	}
-	for _, row := range []string{"PATCH /api/v1/half", "GET /api/v1/orphan", "POST /api/v1/orphan"} {
+	for _, row := range []string{"PATCH /api/v1/half", "GET /api/v1/orphan", "POST /api/v1/orphan", "cannot determine", "cmd/crewship/b.go:4"} {
 		if !strings.Contains(err.Error(), row) {
 			t.Errorf("offender %q not named:\n%s", row, err)
 		}
@@ -660,5 +660,142 @@ func TestCLIParityIsCountedPerOperation(t *testing.T) {
 		if !strings.Contains(line, part) {
 			t.Errorf("summary line %q missing %q", line, part)
 		}
+	}
+}
+
+// A name bound in one closure is not visible in its sibling. Two cobra RunE
+// literals in one constructor, each with its own `path`, used to have their
+// bindings unioned — so the GET claimed the DELETE's path and the reverse.
+// That is how GET /pages/{slug}/artifact/versions was falsely covered.
+func TestCLIPathShapesScopeBindingsToTheirClosure(t *testing.T) {
+	tests := []struct {
+		name string
+		code string
+		want map[string][]string
+	}{
+		{"sibling closures", `func newXCmd() *cobra.Command {
+	list := &cobra.Command{RunE: func(cmd *cobra.Command, args []string) error {
+		path := "/api/v1/things"
+		_, err := client.Get(path)
+		return err
+	}}
+	del := &cobra.Command{RunE: func(cmd *cobra.Command, args []string) error {
+		path := "/api/v1/things/" + args[0]
+		_, err := client.Delete(path)
+		return err
+	}}
+	list.AddCommand(del)
+	return list
+}`, map[string][]string{"api/v1/things": {"GET"}, "api/v1/things/{}": {"DELETE"}}},
+		{"an enclosing binding is visible inside", `func newYCmd() *cobra.Command {
+	base := "/api/v1/ys"
+	return &cobra.Command{RunE: func(cmd *cobra.Command, args []string) error {
+		endpoint := base + "/" + args[0]
+		_, err := client.Patch(endpoint, nil)
+		return err
+	}}
+}`, map[string][]string{"api/v1/ys/{}": {"PATCH"}}},
+		{"the page artifact pattern", `func newPageArtifactCommand() *cobra.Command {
+	for _, action := range []string{"create", "publish"} {
+		_ = &cobra.Command{RunE: func(cmd *cobra.Command, args []string) error {
+			endpoint := "/api/v1/pages/" + url.PathEscape(args[0]) + "/artifact/versions"
+			_, err := client.Post(endpoint, nil)
+			return err
+		}}
+	}
+	for _, action := range []string{"get", "versions"} {
+		_ = &cobra.Command{RunE: func(cmd *cobra.Command, args []string) error {
+			endpoint := "/api/v1/pages/" + url.PathEscape(args[0]) + "/artifact"
+			_, err := client.Get(endpoint)
+			return err
+		}}
+	}
+	return nil
+}`, map[string][]string{"api/v1/pages/{}/artifact/versions": {"POST"}, "api/v1/pages/{}/artifact": {"GET"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := methodsByShape(t, []docFile{{Path: "cmd/crewship/cmd_s.go", Text: "package main\n\n" + tt.code + "\n"}})
+			if len(got) != len(tt.want) {
+				t.Fatalf("shapes = %v, want %v", got, tt.want)
+			}
+			for shape, want := range tt.want {
+				if !slices.Equal(got[shape], want) {
+					t.Errorf("methods for %s = %v, want %v (all: %v)", shape, got[shape], want, got)
+				}
+			}
+		})
+	}
+}
+
+// Seed code must not lend a user-facing request function its methods —
+// neither as the method argument it is called with, nor as the callback it
+// is passed — and a method that only shares a name with a seed type's
+// method does not make that seed method reachable.
+func TestCLIPathShapesSeedCallersLendNoMethods(t *testing.T) {
+	sources := []docFile{
+		{Path: "cmd/crewship/cmd_y.go", Text: `package main
+func yRequest(method, id string) error { _, err := client.Do(method, "/api/v1/y/"+id, nil); return err }
+func runZ(call func(c *Client, path string) error) error { return call(client, "/api/v1/z") }
+var yCmd = &cobra.Command{RunE: func(cmd *cobra.Command, args []string) error {
+	_ = runZ(func(c *Client, path string) error { _, err := c.Get(path); return err })
+	return yRequest("GET", args[0])
+}}
+var doctorCmd = &cobra.Command{RunE: func(cmd *cobra.Command, args []string) error { return check.run() }}
+var verifyCmd = &cobra.Command{RunE: func(cmd *cobra.Command, args []string) error { return newVerifier().verify() }}
+`},
+		{Path: "cmd/crewship/cmd_seed_y.go", Text: `package main
+func seedY() error {
+	_ = runZ(func(c *Client, path string) error { _, err := c.Delete(path); return err })
+	return yRequest("DELETE", "z")
+}
+type packVerifier struct{}
+func (v *packVerifier) run() error { _, err := client.Get("/api/v1/seed-verify"); return err }
+type verifier struct{}
+func newVerifier() *verifier { return &verifier{} }
+func (v *verifier) verify() error { _, err := client.Get("/api/v1/user-verify"); return err }
+`},
+	}
+	got := methodsByShape(t, sources)
+	for shape, want := range map[string][]string{
+		"api/v1/y/{}":        {"GET"},
+		"api/v1/z":           {"GET"},
+		"api/v1/user-verify": {"GET"},
+	} {
+		if !slices.Equal(got[shape], want) {
+			t.Errorf("methods for %s = %v, want %v (all: %v)", shape, got[shape], want, got)
+		}
+	}
+	if _, ok := got["api/v1/seed-verify"]; ok {
+		t.Errorf("check.run() must not reach (*packVerifier).run: %v", got)
+	}
+}
+
+// Method wrappers are matched by name at the call site, where the receiver's
+// type is unknown. Two same-named wrappers sending different methods must
+// not lend each other theirs: the call is method-unknown instead.
+func TestCLIPathShapesMethodWrappersOfOneNameDoNotShareMethods(t *testing.T) {
+	got := methodsByShape(t, []docFile{{Path: "cmd/crewship/cmd_r.go", Text: `package main
+type reader struct{}
+type deleter struct{}
+func (r *reader) send(path string) error { _, err := client.Get(path); return err }
+func (d *deleter) send(path string) error { _, err := client.Delete(path); return err }
+func f() { r.send("/api/v1/s") }
+`}})
+	if !slices.Contains(got["api/v1/s"], "?") {
+		t.Fatalf("methods for api/v1/s = %v, want the call to be method-unknown", got["api/v1/s"])
+	}
+}
+
+// The method-unknown fallback has a ratchet: -strict fails on any such call
+// site even when every operation is otherwise covered.
+func TestStrictFailsOnMethodUnknownCallSites(t *testing.T) {
+	r := report{API: []apiRecord{
+		{Method: "GET", Path: "/api/v1/a", Status: "documented_exact", ConcreteResponseSchema: true, CLIParity: cliParityCovered, CLIMethodUnknown: true},
+	}, cliMethodUnknownSites: []string{"cmd/crewship/cmd_a.go:12"}}
+	r.Summary = summarize(r)
+	err := enforce(r)
+	if err == nil || !strings.Contains(err.Error(), "cmd/crewship/cmd_a.go:12") {
+		t.Fatalf("a method-unknown call site must fail -strict and be named, got %v", err)
 	}
 }

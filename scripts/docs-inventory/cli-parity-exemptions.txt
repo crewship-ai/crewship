@@ -31,6 +31,7 @@ POST /api/v1/auth/reset                            browser reset-link flow: the 
 GET /api/v1/workspaces/{workspaceId}/logo          image bytes for an <img> tag; `crewship workspace logo set|remove` manages it
 GET /api/v1/users/{id}/avatar                      image bytes for an <img> tag; `crewship auth avatar` uploads and clears it
 PUT /api/v1/crews/{crewId}                         alias of PATCH on the same handler; `crewship crew update` sends PATCH
+GET /api/v1/pages/{slug}/artifact/versions         alias of GET /api/v1/pages/{slug}/artifact on the same handler (GetArtifactProject), which `crewship page artifact versions` reads
 GET /api/v1/crews/{crewId}/issues/{identifier}     redundant with GET /api/v1/issues/{identifier} (identifiers are workspace-unique), which `crewship issue get` reads
 
 # --- Pre-existing gaps: authenticated routes with no command when this gate was

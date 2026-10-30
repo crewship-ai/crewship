@@ -178,9 +178,10 @@ type report struct {
 	// flagSectionMissesNew are the section-scoped flag misses the baseline
 	// does not list, as `<command> --<flag>`; derived, not published.
 	flagSectionMissesNew []string
-	// cliMethodUnknownSites is how many CLI request calls send a method the
-	// parity reader could not determine; derived, published in the summary.
-	cliMethodUnknownSites int
+	// cliMethodUnknownSites are the CLI request calls (file:line) whose
+	// method the parity reader could not determine; derived, the count is
+	// published in the summary and -strict fails on any.
+	cliMethodUnknownSites []string
 }
 
 type surfaceRecord struct {
@@ -504,6 +505,11 @@ func strictGates() []gate {
 			func(r report) []string {
 				return apiRowsWhere(r, func(rec apiRecord) bool { return rec.CLIParity == cliParityMissing })
 			}},
+		// A method-unknown call covers every method on its path — the
+		// fallback that keeps the gate from reporting gaps it cannot prove.
+		// It is free at zero and must not grow back silently.
+		{"CLI request calls whose HTTP method the parity reader cannot determine (pass a literal or http.MethodX, or teach scripts/docs-inventory/cliparity.go the pattern)", func(s summary) int { return s.CLIMethodUnknownSites },
+			func(r report) []string { return r.cliMethodUnknownSites }},
 		{"API operations with a generic response schema", func(s summary) int { return s.APIGenericResponseSchemas },
 			func(r report) []string {
 				return apiRowsWhere(r, func(rec apiRecord) bool { return rec.GenericResponseSchema })
@@ -1402,7 +1408,7 @@ func summarize(r report) summary {
 			s.APIExemptFromCLI++
 		}
 	}
-	s.CLIMethodUnknownSites = r.cliMethodUnknownSites
+	s.CLIMethodUnknownSites = len(r.cliMethodUnknownSites)
 	for _, rec := range r.CLI {
 		if rec.Status == "documented_exact" || rec.Status == "documented_root" || rec.Status == "documented_exact_no_root" {
 			if len(rec.ExactDocs) > 0 {

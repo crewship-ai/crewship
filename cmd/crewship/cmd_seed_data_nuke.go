@@ -553,8 +553,17 @@ func nukeInbox(ctx context.Context, client *cli.Client, kind string) error {
 // intent and the conversation history the judge was shown.
 func nukeKeeperRequests(ctx context.Context, client *cli.Client) error {
 	_, err := purgeKeeperRequests(ctx, client)
+	if errors.Is(err, errKeeperPurgeCountsUnreadable) {
+		// The purge succeeded; nuke all reports no counts, so an unreadable
+		// body costs it nothing.
+		return nil
+	}
 	return err
 }
+
+// errKeeperPurgeCountsUnreadable marks a successful purge whose response did
+// not say how many rows went.
+var errKeeperPurgeCountsUnreadable = errors.New("keeper requests were purged but the response did not say how many")
 
 // keeperPurgeResult is the DELETE /api/v1/admin/keeper/requests answer.
 // Supported is false when the server predates the endpoint (404/405), so the
@@ -587,7 +596,11 @@ func purgeKeeperRequests(ctx context.Context, client *cli.Client) (keeperPurgeRe
 		return res, fmt.Errorf("DELETE %s: HTTP %d", path, r.StatusCode)
 	}
 	res.Supported = true
-	_ = json.NewDecoder(r.Body).Decode(&res)
+	if err := json.NewDecoder(r.Body).Decode(&res); err != nil {
+		// The rows are gone, but how many is unknown: say so rather than
+		// report "0 requests, 0 events".
+		return res, fmt.Errorf("DELETE %s succeeded but its response could not be read (%v): %w", path, err, errKeeperPurgeCountsUnreadable)
+	}
 	return res, nil
 }
 

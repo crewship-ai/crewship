@@ -67,7 +67,10 @@ member of the active workspace in a single request (ADMIN+ required).
 		if len(args) == 0 {
 			return listAllMemberCaps(client, wsID)
 		}
-		userID := args[0]
+		userID, err := guestCLIPathSegment(args[0])
+		if err != nil {
+			return err
+		}
 		resp, err := client.Get(
 			fmt.Sprintf("/api/v1/workspaces/%s/members/%s/capabilities", wsID, userID),
 		)
@@ -207,7 +210,11 @@ func patchCapsRaw(userID string, bodyBytes []byte) error {
 	}
 	client := newAPIClient()
 	wsID := client.GetWorkspaceID()
-	path := fmt.Sprintf("/api/v1/workspaces/%s/members/%s/capabilities", wsID, userID)
+	member, err := guestCLIPathSegment(userID)
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/api/v1/workspaces/%s/members/%s/capabilities", wsID, member)
 	resp, err := client.Patch(path, json.RawMessage(bodyBytes))
 	if err != nil {
 		return err

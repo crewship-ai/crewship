@@ -60,14 +60,23 @@ import (
 // summary line counts both them and the call sites behind them. A method set
 // and a path set read from the same call are combined as a product, so a call
 // whose method depends on whether an id was given (POST /milestones, PUT
-// /milestones/{id}) also claims the cross terms; that imprecision is the
-// same one a path variable bound twice already had.
+// /milestones/{id}) also claims the cross terms. A name's bindings are
+// scoped to the function literal or declaration that made them (and those
+// nested in it), so a sibling cobra RunE's `endpoint` is never in scope; a
+// name bound twice in one function still renders both values. Method wrappers
+// are matched by name at the call site, where the receiver's type is unknown,
+// so two same-named wrappers on different types that send different methods
+// make their callers method-unknown rather than lending each other methods.
+//
+// Method-unknown has a ratchet: -strict fails on any such call site.
 //
 // `crewship seed` provisions demo data through the API, and a route only seed
 // calls is not one a user's command reaches. A declaration in cmd_seed*.go
 // therefore contributes shapes only when a declaration outside those files
-// reaches it through a function or method call: the nuke commands' helpers
-// live in cmd_seed_data_nuke.go and keep counting, the seeders do not.
+// reaches it (see seedOnlyDecls): the nuke commands' helpers live in
+// cmd_seed_data_nuke.go and keep counting, the seeders do not. A seed-only
+// declaration lends nothing else either — not the method it passes a shared
+// request function, not the callback it hands one.
 //
 // An operation can be exempted, with a reason, in cliParityExemptionsPath —
 // either one method (`PUT /api/v1/crews/{crewId}  reason`) or, with no method,
@@ -257,11 +266,14 @@ func (m *methodSet) merge(o methodSet) {
 // needs to look across declarations: who calls a function, and each
 // declaration's own bindings.
 type cliPackage struct {
-	env     *shapeEnv
-	sinks   *sinkSet
-	files   []*ast.File
-	callers map[string][]cliCallSite
-	envs    map[ast.Decl]*shapeEnv
+	env   *shapeEnv
+	sinks *sinkSet
+	files []*ast.File
+	paths []string
+	// seedOnly are the declarations only `crewship seed` reaches.
+	seedOnly map[ast.Decl]bool
+	callers  map[string][]cliCallSite
+	envs     map[ast.Decl]*shapeEnv
 }
 
 type cliCallSite struct {
@@ -339,7 +351,7 @@ func evalMethod(expr ast.Expr, scope methodScope) methodSet {
 		next := scope
 		next.depth++
 		if scope.env != nil {
-			values, _ := scope.env.lookup(x.Name)
+			values, _ := scope.env.lookup(x.Name, x.Pos())
 			for _, value := range values {
 				if id, ok := value.(*ast.Ident); ok && id.Name == x.Name {
 					continue
@@ -385,7 +397,7 @@ func evalMethodElements(expr ast.Expr, scope methodScope) methodSet {
 		if scope.env == nil || scope.depth >= maxMethodDepth {
 			return unknownMethod()
 		}
-		values, _ := scope.env.lookup(x.Name)
+		values, _ := scope.env.lookup(x.Name, x.Pos())
 		if len(values) == 0 {
 			return unknownMethod()
 		}
@@ -508,6 +520,9 @@ func callbackRequestSinks(pkg *cliPackage) map[*ast.FuncDecl]map[string]sinkSpec
 	out := map[*ast.FuncDecl]map[string]sinkSpec{}
 	for _, file := range pkg.files {
 		for _, decl := range file.Decls {
+			if pkg.seedOnly[decl] {
+				continue
+			}
 			scope := methodScope{env: pkg.declEnv(decl), pkg: pkg}
 			ast.Inspect(decl, func(n ast.Node) bool {
 				call, ok := n.(*ast.CallExpr)
@@ -546,6 +561,48 @@ func callbackRequestSinks(pkg *cliPackage) map[*ast.FuncDecl]map[string]sinkSpec
 				}
 				return true
 			})
+		}
+	}
+	return out
+}
+
+// receiverTypeName is the base type of a method's receiver: `T` for both
+// `(t T)` and `(t *T)`, and for a generic `(t *T[K])`.
+func receiverTypeName(fn *ast.FuncDecl) string {
+	if fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return ""
+	}
+	expr := fn.Recv.List[0].Type
+	for {
+		switch x := expr.(type) {
+		case *ast.StarExpr:
+			expr = x.X
+		case *ast.IndexExpr:
+			expr = x.X
+		case *ast.IndexListExpr:
+			expr = x.X
+		case *ast.Ident:
+			return x.Name
+		default:
+			return ""
+		}
+	}
+}
+
+// combineMethodWrappers is the one spec a method name stands for at its call
+// sites, given each receiver type's own (see cliPathShapes).
+func combineMethodWrappers(byReceiver map[string]sinkSpec) sinkSpec {
+	keys := make([]string, 0, len(byReceiver))
+	for k := range byReceiver {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := byReceiver[keys[0]]
+	for _, k := range keys[1:] {
+		next := byReceiver[k]
+		if !out.equal(next) {
+			out = unionSpecs(out, next)
+			out.unknown = true
 		}
 	}
 	return out
@@ -700,12 +757,37 @@ func paramIndex(fields *ast.FieldList) map[string]int {
 }
 
 // seedOnlyDecls returns the declarations of the seed files that no
-// declaration outside them reaches through a function or method call.
+// declaration outside them reaches. Edges are what a call can follow without
+// type information, kept to the ones that cannot collide:
+//
+//   - a plain identifier naming a seed-file function;
+//   - a seed-file type's name (a composite literal, a conversion, a
+//     constructor's body), which makes that type's methods reachable — a
+//     selector `check.run()` elsewhere does not, because `run` on a seed type
+//     and `run` on any other type share only a name;
+//   - a selector naming a method a seed file declares on a type declared
+//     outside the seed files.
+//
 // Variables are not followed: main.go registers seedCmd, and that is the
-// seed command, not a user-facing caller of what it runs.
+// seed command, not a user-facing caller of what it runs. A function's own
+// name is not a reference to it, and init is never a target.
 func seedOnlyDecls(files []*ast.File, paths []string) map[ast.Decl]bool {
+	seedTypes := map[string]bool{}
+	for i, file := range files {
+		if !isCLISeedFile(paths[i]) {
+			continue
+		}
+		for _, decl := range file.Decls {
+			if gen, ok := decl.(*ast.GenDecl); ok && gen.Tok == token.TYPE {
+				for _, spec := range gen.Specs {
+					seedTypes[spec.(*ast.TypeSpec).Name.Name] = true
+				}
+			}
+		}
+	}
 	funcs := map[string][]*ast.FuncDecl{}
-	methods := map[string][]*ast.FuncDecl{}
+	typeMethods := map[string][]*ast.FuncDecl{}
+	foreignMethods := map[string][]*ast.FuncDecl{}
 	seedOnly := map[ast.Decl]bool{}
 	var queue []ast.Decl
 	for i, file := range files {
@@ -716,12 +798,17 @@ func seedOnlyDecls(files []*ast.File, paths []string) map[ast.Decl]bool {
 				continue
 			}
 			seedOnly[decl] = true
-			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name != "init" {
-				if fn.Recv == nil {
-					funcs[fn.Name.Name] = append(funcs[fn.Name.Name], fn)
-				} else {
-					methods[fn.Name.Name] = append(methods[fn.Name.Name], fn)
-				}
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name.Name == "init" {
+				continue
+			}
+			switch recv := receiverTypeName(fn); {
+			case fn.Recv == nil:
+				funcs[fn.Name.Name] = append(funcs[fn.Name.Name], fn)
+			case seedTypes[recv]:
+				typeMethods[recv] = append(typeMethods[recv], fn)
+			default:
+				foreignMethods[fn.Name.Name] = append(foreignMethods[fn.Name.Name], fn)
 			}
 		}
 	}
@@ -736,8 +823,6 @@ func seedOnlyDecls(files []*ast.File, paths []string) map[ast.Decl]bool {
 			continue
 		}
 		visited[decl] = true
-		// A function's own name is not a reference to it, and every file's
-		// init would otherwise reach every seed file's init.
 		var body ast.Node = decl
 		if fn, ok := decl.(*ast.FuncDecl); ok {
 			if fn.Body == nil {
@@ -745,13 +830,18 @@ func seedOnlyDecls(files []*ast.File, paths []string) map[ast.Decl]bool {
 			}
 			body = fn.Body
 		}
+		selectors := map[*ast.Ident]bool{}
 		ast.Inspect(body, func(n ast.Node) bool {
 			var targets []*ast.FuncDecl
 			switch x := n.(type) {
 			case *ast.Ident:
-				targets = funcs[x.Name]
+				// `x.run` names a method, never the seed function run.
+				if !selectors[x] {
+					targets = append(append(targets, funcs[x.Name]...), typeMethods[x.Name]...)
+				}
 			case *ast.SelectorExpr:
-				targets = methods[x.Sel.Name]
+				selectors[x.Sel] = true
+				targets = foreignMethods[x.Sel.Name]
 			}
 			for _, fn := range targets {
 				if !visited[fn] {
@@ -809,6 +899,13 @@ func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
 			dirs = append(dirs, dir)
 		}
 		pkgs[dir].files = append(pkgs[dir].files, file)
+		pkgs[dir].paths = append(pkgs[dir].paths, paths[i])
+	}
+	// Seed-only declarations are settled first: they contribute no shapes,
+	// and neither the method they hand a shared request function nor the
+	// callback they pass one may count either.
+	for _, dir := range dirs {
+		pkgs[dir].seedOnly = seedOnlyDecls(pkgs[dir].files, pkgs[dir].paths)
 	}
 	// Pass one: package-level names, per Go package — cmd/crewship (main)
 	// and internal/cli (cli) share no identifiers, and resolving a name
@@ -835,6 +932,9 @@ func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
 					pkg.env.bindFunc(d)
 				}
 			}
+			if pkg.seedOnly[decl] {
+				continue
+			}
 			ast.Inspect(decl, func(n ast.Node) bool {
 				if call, ok := n.(*ast.CallExpr); ok {
 					if name, ok := call.Fun.(*ast.Ident); ok {
@@ -851,6 +951,11 @@ func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
 	// wrapper binds in its own package only, a method wrapper binds
 	// everywhere its receiver travels. The client methods themselves are
 	// never re-derived from their bodies.
+	// A method wrapper is keyed by name at its call sites — the receiver's
+	// type is not known there — so wrappers of one name on different types
+	// combine: identical specs stand, differing ones become method-unknown
+	// rather than lending each other their methods.
+	methodWrappers := map[string]map[string]sinkSpec{}
 	for range 16 {
 		changed := false
 		for _, dir := range dirs {
@@ -869,18 +974,21 @@ func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
 					if !ok {
 						continue
 					}
-					target := pkg.sinks.funcs
 					if fn.Recv != nil {
-						target = pkg.sinks.methods
-					}
-					if old, dup := target[fn.Name.Name]; !dup || !old.equal(spec) {
-						if dup && fn.Recv != nil {
-							spec = unionSpecs(old, spec)
-							if old.equal(spec) {
-								continue
-							}
+						name := fn.Name.Name
+						if methodWrappers[name] == nil {
+							methodWrappers[name] = map[string]sinkSpec{}
 						}
-						target[fn.Name.Name] = spec
+						methodWrappers[name][dir+"."+receiverTypeName(fn)] = spec
+						spec = combineMethodWrappers(methodWrappers[name])
+						if old, dup := pkg.sinks.methods[name]; !dup || !old.equal(spec) {
+							pkg.sinks.methods[name] = spec
+							changed = true
+						}
+						continue
+					}
+					if old, dup := pkg.sinks.funcs[fn.Name.Name]; !dup || !old.equal(spec) {
+						pkg.sinks.funcs[fn.Name.Name] = spec
 						changed = true
 					}
 				}
@@ -902,15 +1010,9 @@ func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
 	var shapes []cliPathShape
 	for _, dir := range dirs {
 		pkg := pkgs[dir]
-		var pkgPaths []string
-		for i := range files {
-			if filepath.Dir(paths[i]) == dir {
-				pkgPaths = append(pkgPaths, paths[i])
-			}
-		}
-		seedOnly := seedOnlyDecls(pkg.files, pkgPaths)
+		seedOnly := pkg.seedOnly
 		for fi, file := range pkg.files {
-			source := pkgPaths[fi]
+			source := pkg.paths[fi]
 			for _, decl := range file.Decls {
 				if seedOnly[decl] {
 					continue
@@ -988,25 +1090,39 @@ func cliPathShapes(sources []docFile) ([]cliPathShape, error) {
 	return shapes, nil
 }
 
-// cliMethodUnknownSites counts the distinct request calls whose method could
-// not be read.
-func cliMethodUnknownSites(shapes []cliPathShape) int {
+// cliMethodUnknownSites lists, sorted, the distinct request calls whose
+// method could not be read.
+func cliMethodUnknownSites(shapes []cliPathShape) []string {
 	seen := map[string]bool{}
+	var out []string
 	for _, shape := range shapes {
 		for _, site := range shape.UnknownSites {
-			seen[site] = true
+			if !seen[site] {
+				seen[site] = true
+				out = append(out, site)
+			}
 		}
 	}
-	return len(seen)
+	sort.Strings(out)
+	return out
 }
 
 // shapeEnv resolves identifiers to the string expressions bound to them. A
 // name may be bound more than once — `path` is reassigned in half the CLI's
 // list commands — and every binding is kept, because a gate that picked one
 // would silently drop the routes the others build.
+//
+// A binding is visible only inside the function — closure or declaration —
+// whose body made it, and the functions nested in that one. Two cobra RunE
+// literals in one constructor each binding `endpoint` are two scopes: the GET
+// in one must not render the other's path, which under method comparison is
+// false credit (GET /pages/{slug}/artifact/versions was claimed that way).
 type shapeEnv struct {
 	parent *shapeEnv
-	names  map[string][]ast.Expr
+	names  map[string][]shapeBinding
+	// scopes are the function ranges of the node being bound, innermost
+	// last among those containing a position; see bindAssignments.
+	scopes []scopeRange
 	// rendered holds names already reduced to shapes: a helper's parameters,
 	// bound to the caller's arguments at the call site.
 	rendered map[string][]string
@@ -1023,15 +1139,37 @@ type funcShape struct {
 	local   *shapeEnv
 }
 
-func newShapeEnv(parent *shapeEnv) *shapeEnv {
-	return &shapeEnv{parent: parent, names: map[string][]ast.Expr{}, rendered: map[string][]string{}, funcs: map[string]*funcShape{}}
+// shapeBinding is one value bound to a name, and the source range of the
+// function it is visible in; a zero range is visible everywhere (package
+// level).
+type shapeBinding struct {
+	value ast.Expr
+	scope scopeRange
 }
 
-func (e *shapeEnv) bind(name string, value ast.Expr) {
+type scopeRange struct{ lo, hi token.Pos }
+
+func (r scopeRange) contains(at token.Pos) bool {
+	return r.lo == token.NoPos || at == token.NoPos || (r.lo <= at && at <= r.hi)
+}
+
+func newShapeEnv(parent *shapeEnv) *shapeEnv {
+	return &shapeEnv{parent: parent, names: map[string][]shapeBinding{}, rendered: map[string][]string{}, funcs: map[string]*funcShape{}}
+}
+
+// bind records value under name, scoped to the innermost function range of
+// the node being bound that contains the binding's position.
+func (e *shapeEnv) bind(name string, value ast.Expr, at token.Pos) {
 	if name == "_" {
 		return
 	}
-	e.names[name] = append(e.names[name], value)
+	scope := scopeRange{}
+	for _, r := range e.scopes {
+		if r.lo <= at && at <= r.hi && r.lo >= scope.lo {
+			scope = r
+		}
+	}
+	e.names[name] = append(e.names[name], shapeBinding{value: value, scope: scope})
 }
 
 // resultOf stands for result index of a multi-value call.
@@ -1054,7 +1192,7 @@ func (e *shapeEnv) bindMulti(lhs []ast.Expr, rhs []ast.Expr, tok token.Token) {
 		}
 		for j, l := range lhs {
 			if ident, ok := l.(*ast.Ident); ok {
-				e.bind(ident.Name, resultOf(rhs[0], j))
+				e.bind(ident.Name, resultOf(rhs[0], j), ident.Pos())
 			}
 		}
 		return
@@ -1066,9 +1204,9 @@ func (e *shapeEnv) bindMulti(lhs []ast.Expr, rhs []ast.Expr, tok token.Token) {
 		}
 		switch tok {
 		case token.ADD_ASSIGN:
-			e.bind(ident.Name, &ast.BinaryExpr{X: ident, Op: token.ADD, Y: rhs[j]})
+			e.bind(ident.Name, &ast.BinaryExpr{X: ident, Op: token.ADD, Y: rhs[j]}, ident.Pos())
 		case token.ASSIGN, token.DEFINE:
-			e.bind(ident.Name, rhs[j])
+			e.bind(ident.Name, rhs[j], ident.Pos())
 		}
 	}
 }
@@ -1091,7 +1229,22 @@ func (e *shapeEnv) bindValueSpec(value *ast.ValueSpec) {
 // the page project command reaches four routes from one base, and it is
 // bound as `endpoint + "/source"` so the earlier bindings of endpoint feed
 // into it.
+//
+// Each binding is scoped to the innermost function literal or declaration
+// under node that contains it, or to node itself.
 func (e *shapeEnv) bindAssignments(node ast.Node) {
+	saved := e.scopes
+	defer func() { e.scopes = saved }()
+	e.scopes = []scopeRange{{lo: node.Pos(), hi: node.End()}}
+	ast.Inspect(node, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.FuncLit:
+			e.scopes = append(e.scopes, scopeRange{lo: x.Pos(), hi: x.End()})
+		case *ast.FuncDecl:
+			e.scopes = append(e.scopes, scopeRange{lo: x.Pos(), hi: x.End()})
+		}
+		return true
+	})
 	ast.Inspect(node, func(n ast.Node) bool {
 		switch x := n.(type) {
 		case *ast.AssignStmt:
@@ -1106,7 +1259,7 @@ func (e *shapeEnv) bindAssignments(node ast.Node) {
 			}
 		case *ast.RangeStmt:
 			if value, ok := x.Value.(*ast.Ident); ok {
-				e.bind(value.Name, &ast.IndexExpr{X: x.X, Index: ast.NewIdent("_")})
+				e.bind(value.Name, &ast.IndexExpr{X: x.X, Index: ast.NewIdent("_")}, value.Pos())
 			}
 		}
 		return true
@@ -1142,13 +1295,21 @@ func (e *shapeEnv) bindFunc(fn *ast.FuncDecl) {
 	}
 }
 
-func (e *shapeEnv) lookup(name string) ([]ast.Expr, []string) {
+// lookup returns what name is bound to where it is used, at: the bindings
+// whose scope contains at, from the innermost environment that has any.
+func (e *shapeEnv) lookup(name string, at token.Pos) ([]ast.Expr, []string) {
 	for env := e; env != nil; env = env.parent {
 		if values, ok := env.rendered[name]; ok {
 			return nil, values
 		}
-		if values, ok := env.names[name]; ok {
-			return values, nil
+		var visible []ast.Expr
+		for _, b := range env.names[name] {
+			if b.scope.contains(at) {
+				visible = append(visible, b.value)
+			}
+		}
+		if len(visible) > 0 {
+			return visible, nil
 		}
 	}
 	return nil, nil
@@ -1199,7 +1360,7 @@ func (e *shapeEnv) shapes(expr ast.Expr, depth int) []string {
 		if depth >= maxShapeDepth {
 			return []string{cliPathPlaceholder}
 		}
-		values, rendered := e.lookup(x.Name)
+		values, rendered := e.lookup(x.Name, x.Pos())
 		if len(rendered) > 0 {
 			return rendered
 		}

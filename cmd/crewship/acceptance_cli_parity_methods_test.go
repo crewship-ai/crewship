@@ -271,3 +271,58 @@ func TestAcceptance_WorkspaceMemberCapabilitiesList(t *testing.T) {
 		t.Errorf("single: calls=%+v out=%s", stub.got(), out)
 	}
 }
+
+// An id of "." or ".." would name the collection, not a member of it, once
+// the path is cleaned. Each command refuses it before sending anything, and
+// a member id is escaped into a single segment.
+func TestAcceptance_CLIParityCommandsRejectDotSegments(t *testing.T) {
+	for _, args := range [][]string{
+		{"checkpoint", "get", ".."},
+		{"notifychannel", "update", ".", "--enabled=false"},
+		{"workspace", "member", "capabilities", "list", ".."},
+		{"workspace", "member", "capabilities", "grant", "..", "chat"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			stub := &parityStub{handler: func(m, p string) (int, string) { return 200, `{}` }}
+			srv := stub.start(t)
+			out, err := runIssueStopCLI(t, srv.URL, args...)
+			if err == nil || !strings.Contains(out, "invalid resource identifier") {
+				t.Fatalf("err=%v out=%s", err, out)
+			}
+			for _, c := range stub.got() {
+				if c.Method != http.MethodGet || !strings.HasPrefix(c.Path, "/api/v1/workspaces/") || strings.Contains(c.Path, "member") {
+					t.Errorf("invalid id reached the server: %+v", c)
+				}
+			}
+		})
+	}
+	t.Run("member id is one escaped segment", func(t *testing.T) {
+		var raw string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.Contains(r.URL.Path, "/members/") {
+				raw = r.URL.EscapedPath()
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"user_id":"a/b","role":"MEMBER","capabilities":[]}`))
+		}))
+		t.Cleanup(srv.Close)
+		out, err := runIssueStopCLI(t, srv.URL, "workspace", "member", "capabilities", "list", "a/b")
+		if err != nil {
+			t.Fatalf("%v\n%s", err, out)
+		}
+		if raw != "/api/v1/workspaces/ws_test/members/a%2Fb/capabilities" {
+			t.Errorf("escaped path = %q", raw)
+		}
+	})
+}
+
+// A 2xx whose body cannot be read leaves the counts unknown: the purge must
+// fail loudly instead of reporting "0 requests, 0 events".
+func TestAcceptance_NukeKeeperRequests_UnreadableBodyFails(t *testing.T) {
+	stub := &parityStub{handler: func(m, p string) (int, string) { return 200, `not json` }}
+	srv := stub.start(t)
+	out, err := runIssueStopCLI(t, srv.URL, "nuke", "keeper-requests", "--yes")
+	if err == nil || strings.Contains(out, "purged (") || !strings.Contains(out, "could not be read") {
+		t.Fatalf("err=%v out=%s", err, out)
+	}
+}
