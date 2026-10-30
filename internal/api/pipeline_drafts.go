@@ -23,7 +23,20 @@ func (h *PipelineHandler) GetDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.attachDraftTestResult(r.Context(), d)
-	writeJSON(w, 200, d)
+	writeDraftJSON(w, 200, d)
+}
+
+// writeDraftJSON is writeJSON without HTML escaping. A draft's definition is
+// returned byte-for-byte as stored, because publication proof (save_token) is
+// bound to those bytes: writeJSON would turn a stored "&" into "\u0026", and a
+// client that validates the definition it was handed would then hold a proof
+// for different bytes and be refused with 422.
+func writeDraftJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	encoder := json.NewEncoder(w)
+	encoder.SetEscapeHTML(false)
+	_ = encoder.Encode(v)
 }
 
 // attachDraftTestResult sets d.TestResult to the latest Test run of the exact
@@ -127,7 +140,7 @@ func (h *PipelineHandler) SaveDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.attachDraftTestResult(r.Context(), saved)
-	writeJSON(w, 200, saved)
+	writeDraftJSON(w, 200, saved)
 }
 
 func draftDefinitionObject(raw json.RawMessage) bool {
