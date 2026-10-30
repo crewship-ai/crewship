@@ -196,8 +196,12 @@ crewship page artifact publish quarterly-review --base-version 1 --file manifest
 Running the same command again, still with `--base-version 1`, returns
 `409 artifact_version_conflict` and exit code `5`.
 
-To edit the current version, read it, build a manifest from it and publish
-with `.latest_version` as the base. The `manifest` object that `get` returns
+As an **alternative to the publish command above**, read the current version,
+build a manifest from it and publish with `.latest_version` as the base. Run
+only one of the two publish examples after creating version 1. The remaining
+examples assume this read/edit/publish recipe produced version 2 with the
+message "Shorter title"; running both recipes would create version 3 and
+require newer base/version numbers below. The `manifest` object that `get` returns
 also carries `created_at`, `restored_from` and `version`, which the CLI
 rejects (`unknown manifest field "restored_from"`), so copy only `entrypoint`
 and `files` and add your own `message`:
