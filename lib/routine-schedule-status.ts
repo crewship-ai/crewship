@@ -12,21 +12,21 @@ import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 // backlog), and nothing in the schedule tells that apart from a capacity skip
 // (#4490), so a counted SKIPPED names both causes.
 //
-// An uncounted SKIPPED is an inactive routine or, for an active one with
+// An uncounted SKIPPED is an inactive routine or, with
 // `concurrency_policy: skip`, a tick dropped because the previous run was
-// still going. The routine's lifecycle now is the only hint: an inactive
-// routine was inactive then, while an active one may have been either.
-// Other statuses keep the server's word.
+// still going. The routine's lifecycle now does not tell which: a routine
+// disabled after a busy skip was active when it skipped. Until the schedule
+// records the cause (#4490) the label names both. Other statuses keep the
+// server's word.
 export function scheduleLastStatusLabel(
   s: Pick<PipelineSchedule, "last_status" | "last_missed_count">,
-  lifecycle: "active" | "proposed" | "disabled",
 ): string | undefined {
   const status = s.last_status
   if (!status) return undefined
   if (status === "QUEUED") return "queued for capacity"
   if (status === "SKIPPED") {
     if ((s.last_missed_count ?? 0) > 0) return "skipped: capacity or catch-up"
-    return lifecycle === "active" ? "skipped: previous run busy or routine inactive" : "skipped: routine inactive"
+    return "skipped: previous run busy or routine inactive"
   }
   return status
 }
