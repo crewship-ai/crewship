@@ -31,6 +31,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Shared artifact commenters can post feedback in the preview.** Comments stay anchored to the shared version without granting editing or agent execution rights; changing accounts, workspace or permissions retires an unfinished selection.
 
+- ⚠️ **Behaviour change: a Comment grant can no longer queue agent work on an artifact project.** The Artifacts detail now offers Select and Save comment to Comment-level readers, as `/pages/<slug>?artifact=1` already did. `POST /artifact/comments` with `send_to_agent:true` returns `403` and stores nothing unless the author has Edit, matching Design comments. An agent run whose intent names no comment may answer feedback only with a version it published, never with `needs_clarification`, and no run may answer a task another run holds.
+
 - **Project source edits survive a lost save reply and a closed tab.** If the save reply is lost, the editor confirms the exact next version instead of reporting a false conflict, and an unsaved source draft is kept in the browser and offered back until it is saved or discarded.
 
 - **Test Design canvases can be identified in the library.** Human canvas creation now retains the explicit test-item marker for catalog filtering.
