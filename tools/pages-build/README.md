@@ -16,7 +16,9 @@ or a container alias does not configure remote viewers; localhost is their machi
 ## Operator setup
 
 Enable Pages Apps on the server host with the binary of the release you run
-(network access is needed during image installation, never during a Page build):
+(network access is needed during image installation, never during a Page build).
+The server must already run with `CREWSHIP_PAGE_PROJECTS_PATH` configured;
+`enable` does not set it:
 
 ```sh
 crewship page enable

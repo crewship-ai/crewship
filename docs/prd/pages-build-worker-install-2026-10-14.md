@@ -1,8 +1,19 @@
 # Pages Apps — zapnutí jedním příkazem
 
 Stav: veřejný návrh z 2026-10-14, revize `main` @ `612908edc`. Řeší
-[#3108](https://github.com/crewship-ai/crewship/issues/3108). Implementováno
-kromě §4.3 (výchozí úložiště projektů), kroku 8 z §5 (dev a CI, viz §4.6) a §8 (odloženo); kontrakt je
+[#3108](https://github.com/crewship-ai/crewship/issues/3108). Rozděleno na dvě
+části (rozhodnutí vlastníka 2026-10-30):
+
+- **Část 1 (PR #4497): instalátor pro předkonfigurovaný server.** Server už má
+  nastavené `CREWSHIP_PAGE_PROJECTS_PATH` a běží s ním; `crewship page enable`
+  postaví a zaznamená image kompilátoru a běžící server ho převezme bez
+  restartu. Pokrývá §4.1, §4.2, §4.4, §4.5 a G3.
+- **Část 2 (pozdější PR, #3108 zůstává otevřené):** výchozí úložiště projektů
+  (§4.3), zapnutí bez restartu na serveru spuštěném bez úložiště, čistá
+  instalace bez editace konfigurace (G1, G2, akceptační kritérium 1) a dev/CI
+  (krok 8 z §5, G4, kritérium 9).
+
+§8 je odloženo. Kontrakt je
 [docs/specs/pages-apps.md](../specs/pages-apps.md), provozní postup
 [docs/guides/pages-apps-operations.mdx](../guides/pages-apps-operations.mdx).
 Změna pravidla „digest image v konfiguraci“ (§4.1) je zapsaná jako
@@ -13,8 +24,8 @@ přijaté 2026-10-29 delegovaným rozhodnutím maintainera.
 
 | | Dnes | Po změně |
 | --- | --- | --- |
-| Lokální instalace a vývoj | zdrojový checkout, ruční `docker build`, 2–3 proměnné, restart | `crewship page enable` |
-| Produkce | totéž + DNS/TLS pro druhý web | `crewship page enable` + `CREWSHIP_PAGE_RUNTIME_ORIGIN` + DNS/TLS |
+| Lokální instalace a vývoj | zdrojový checkout, ruční `docker build`, 2–3 proměnné, restart | část 1: `CREWSHIP_PAGE_PROJECTS_PATH` + restart (jednou), pak `crewship page enable`; část 2: jen `crewship page enable` |
+| Produkce | totéž + DNS/TLS pro druhý web | `crewship page enable` + `CREWSHIP_PAGE_PROJECTS_PATH` (do části 2) + `CREWSHIP_PAGE_RUNTIME_ORIGIN` + DNS/TLS |
 | Upgrade binárky | build stránky selže obecnou chybou | server, `doctor` i API řeknou „spusťte `crewship page enable`“ |
 | Bez internetu | ruční build a digest | `docker save`/`docker load` image z `enable --image-only` + `CREWSHIP_PAGE_BUILD_IMAGE` |
 
@@ -57,9 +68,14 @@ instalace při startu je proto vyloučena; zapnutí musí být výslovný krok.
 **Cíle**
 
 - G1. Na stroji s Dockerem zapne Pages Apps jeden příkaz, bez checkoutu a bez editace konfigurace.
+  **Část 2.** Část 1 splňuje jen „bez checkoutu“: úložiště projektů musí být
+  nastavené předem a server s ním spuštěný.
 - G2. Lokálně není potřeba nastavit nic dalšího; v produkci jen runtime origin.
-- G3. Každé místo, které narazí na chybějící nebo zastaralý kompilátor, řekne, který příkaz spustit.
+  **Část 2.** Část 1 odvozuje lokální runtime origin (§4.2), ale
+  `CREWSHIP_PAGE_PROJECTS_PATH` je dál potřeba nastavit ručně.
+- G3. Každé místo, které narazí na chybějící nebo zastaralý kompilátor, řekne, který příkaz spustit. (Část 1.)
 - G4. `./dev.sh start` + `crewship seed` vytvoří publikované demo aplikace.
+  **Odloženo** (část 2, krok 8 z §5): vyžaduje změnu řídicích souborů CI.
 
 **Necíle**
 
@@ -110,7 +126,7 @@ vývojovou výjimku same-origin. Ve všech ostatních případech (vzdálení u�
 HTTPS, vlastní doména) se nic neodvozuje a chyba řekne, že je potřeba nastavit
 `CREWSHIP_PAGE_RUNTIME_ORIGIN`.
 
-### 4.3 Výchozí úložiště projektů (samostatný PR, po prvním)
+### 4.3 Výchozí úložiště projektů (část 2, samostatný PR)
 
 Odloženo z prvního PR: `page_projects_path` čtou i zálohy a obnova
 (`internal/backup/runner_create.go:456`, `runner_restore.go:976`), `crewship reset`
@@ -207,9 +223,11 @@ Kroky 1–3 mají hodnotu samy o sobě a lze je mergnout dřív než zbytek.
 
 ## 6. Akceptační kritéria
 
-1. Čistá instalace binárkou na Linuxu s Dockerem, Studio na `http://localhost:8080`:
+1. **Část 2.** Čistá instalace binárkou na Linuxu s Dockerem, Studio na `http://localhost:8080`:
    `crewship page enable` → bez restartu a bez editace konfigurace jde Page
    aplikace postavit, zkontrolovat a publikovat.
+   Část 1 splňuje užší variantu: server spuštěný s `CREWSHIP_PAGE_PROJECTS_PATH`
+   → `crewship page enable` → bez restartu jde Page aplikace postavit a publikovat.
 2. Totéž s vlastní doménou: bez `CREWSHIP_PAGE_RUNTIME_ORIGIN` vrací publikace 503
    `page_runtime_origin_missing`; po nastavení a restartu funguje.
 3. Bez Dockeru: `enable` skončí nenulovým kódem a srozumitelnou zprávou.

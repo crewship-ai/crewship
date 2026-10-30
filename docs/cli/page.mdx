@@ -1496,7 +1496,9 @@ image whose ID equals the recorded one **and** that carries the exact local tag
 `crewship-pages-build:<fingerprint prefix>` **and** the label
 `ai.crewship.pages.image=<build context fingerprint>` of its own release. A
 running server picks the record up within about 10 seconds, with no restart and
-no configuration change. The label alone is never trusted: images built `FROM`
+no configuration change — provided it already runs with
+`CREWSHIP_PAGE_PROJECTS_PATH` set. `enable` does not configure page project
+storage; a fresh installation sets the path and restarts the server once first. The label alone is never trusted: images built `FROM`
 a labelled base (for example a crew's cache image) inherit it.
 
 Run it on the Docker host **as the account the server runs as**, with the same

@@ -199,9 +199,11 @@ func newPageEnableCommand() *cobra.Command {
 version on the local Docker daemon, tag it crewship-pages-build:<profile> and
 record its exact image ID in the server's page project storage
 (<CREWSHIP_PAGE_PROJECTS_PATH>/` + pagebuild.BuildImageRecordFile + `, mode 0600). The server uses
-only the recorded image, and only while it keeps that ID, tag and label; it
-picks the record up within about 10 seconds, with no restart and no
-configuration change.
+only the recorded image, and only while it keeps that ID, tag and label. A
+server already running with CREWSHIP_PAGE_PROJECTS_PATH set picks the record
+up within about 10 seconds, with no restart. This command does not configure
+page project storage: without it, it refuses to run (set the path, restart the
+server once, then re-run).
 
 Run it on the Docker host as the account the server runs as (or with sudo:
 the record is then given to the owner of the storage directory), with the same

@@ -94,10 +94,15 @@ stay an explicit operator act.
 
 ## Consequences
 
-- Local installations enable Pages Apps with one command and no configuration
-  edit; together with the derived loopback runtime origin
-  (`internal/config/page_projects.go`, `PageRuntimeOrigin`) a localhost Studio
-  needs no Pages setting at all.
+- On a server that already runs with page project storage configured
+  (`CREWSHIP_PAGE_PROJECTS_PATH`), Pages Apps are enabled with one command and
+  no further configuration edit or restart; together with the derived loopback
+  runtime origin (`internal/config/page_projects.go`, `PageRuntimeOrigin`) a
+  localhost Studio needs no other Pages setting. This decision does not provide
+  a default storage location: a fresh installation still sets the projects path
+  and restarts once. That gap, and enabling Pages Apps on a fresh install with
+  no configuration at all, is part 2 of #3108 (PRD §4.3), deferred to a later
+  change.
 - After a binary upgrade that changes the profile, the server ignores the old
   image until `crewship page enable` is run again. Old images stay recorded for
   rollback until `crewship page disable --all` or `docker rmi` removes them.

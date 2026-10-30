@@ -11,7 +11,15 @@ other browsers can use the Page panels.
 
 ## Enable Pages applications
 
-On the server host, with the Crewship binary of the release you run:
+**Prerequisite:** page project storage is configured and the server runs with
+it. Set `CREWSHIP_PAGE_PROJECTS_PATH` (or `storage.page_projects_path`) to an
+absolute directory outside the storage base path and restart the server once
+(see [Host requirements](#host-requirements)). There is no default location yet,
+and `crewship page enable` refuses to run without one; a default and enabling
+Pages applications on a fresh installation without any configuration are
+planned as a follow-up to #3108.
+
+Then, on the server host, with the Crewship binary of the release you run:
 
 ```bash
 crewship page enable
@@ -29,8 +37,8 @@ progress and hints go to stderr. Running it again with the same release does
 nothing, and it exits nonzero when Docker is unavailable or project storage is
 not configured.
 
-The server reads the record and notices it within seconds, so no restart and no
-configuration edit is needed. It uses an image only when its ID equals the
+A server already running with that storage reads the record and notices it
+within seconds, so no further restart or configuration edit is needed. It uses an image only when its ID equals the
 recorded ID **and** it carries the exact tag and its release's label; the label
 alone is never trusted, because images built `FROM` a labelled base — such as a
 crew's runtime or cache image, which workspace managers choose — inherit it.
