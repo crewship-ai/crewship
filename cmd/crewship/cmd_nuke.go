@@ -17,12 +17,13 @@ import (
 //	crewship nuke inbox        DELETE /api/v1/inbox            [--kind]
 //	crewship nuke escalations  DELETE crew escalations         [--crew]
 //	crewship nuke runtimes     POST  /api/v1/admin/prune-crew-runtimes
+//	crewship nuke keeper-requests  DELETE /api/v1/admin/keeper/requests
 //
 // `crewship seed --nuke` is an alias for `nuke all` (it calls the same nukeAll
 // orchestrator), kept for the seed-then-reseed workflow.
 //
 // The two full-DB wipes (all, data) reuse the confirmNuke typed-slug gate. The
-// narrower purges (inbox, escalations, runtimes) use a lighter --yes gate and
+// narrower purges (inbox, escalations, runtimes, keeper-requests) use a lighter --yes gate and
 // refuse to run non-interactively without it.
 var nukeCmd = &cobra.Command{
 	Use:   "nuke",
@@ -34,6 +35,7 @@ var nukeCmd = &cobra.Command{
   crewship nuke inbox        # inbox items      (--kind to scope)
   crewship nuke escalations  # crew escalations (--crew to scope; default all crews)
   crewship nuke runtimes     # each crew's docker container(s)+volumes (cached images kept)
+  crewship nuke keeper-requests  # keeper decision history + its ledger
 
 'crewship seed --nuke' is an alias for 'nuke all'.`,
 }
@@ -192,6 +194,39 @@ reported as having nothing to do.`,
 	},
 }
 
+var nukeKeeperRequestsCmd = &cobra.Command{
+	Use:   "keeper-requests",
+	Short: "Delete the keeper decision history and its ledger for the workspace",
+	Long: `Hard-delete the workspace's keeper requests (agent-authored intents and the
+conversation history the judge was shown) together with their append-only
+event ledger. 'nuke all' already does this as part of the full teardown; this
+is the narrow purge for clearing the decision log alone.
+
+On a server that predates the endpoint (404/405) nothing is deleted: the
+command warns and exits non-zero rather than claiming success.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := requireAuth(); err != nil {
+			return err
+		}
+		if err := requireWorkspace(); err != nil {
+			return err
+		}
+		if err := nukeGate(cmd, "every keeper request and its event ledger"); err != nil {
+			return err
+		}
+		res, err := purgeKeeperRequests(cmd.Context(), newAPIClient())
+		if err != nil {
+			return err
+		}
+		if !res.Supported {
+			cli.PrintWarning("This server does not support purging keeper requests; nothing was deleted")
+			return fmt.Errorf("keeper request purge unsupported by this server")
+		}
+		cli.PrintSuccess(fmt.Sprintf("Keeper requests purged (%d requests, %d events)", res.DeletedRequests, res.DeletedEvents))
+		return nil
+	},
+}
+
 func init() {
 	nukeCmd.PersistentFlags().Bool("yes", false, "Confirm the deletion (skips the prompt)")
 	nukeInboxCmd.Flags().String("kind", "", "Scope to one kind: waitpoint|escalation|failed_run|message")
@@ -202,4 +237,5 @@ func init() {
 	nukeCmd.AddCommand(nukeInboxCmd)
 	nukeCmd.AddCommand(nukeEscalationsCmd)
 	nukeCmd.AddCommand(nukeRuntimesCmd)
+	nukeCmd.AddCommand(nukeKeeperRequestsCmd)
 }
