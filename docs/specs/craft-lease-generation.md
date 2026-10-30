@@ -55,7 +55,7 @@ time; everyone else with access reads.
 | Renew | unchanged | caller; expiry moves forward |
 | Release | unchanged | none |
 | Handoff to a requester | previous + 1 | requester |
-| Revoke (a rights change or stopping an agent) | unchanged | none |
+| Revoke (agent task stopped or retired) | unchanged | none |
 | Server restart | unchanged in storage | none (reads as free) |
 
 Generations never go backwards and are never reused for a document. Because a
@@ -64,6 +64,9 @@ that kept an old generation cannot renew, release, save or hand off with it
 after anyone, including itself, has acquired again. A lease status read
 before the first acquisition reports `generation: null`. After a release it
 still reports the last generation, with `holder: null` and `mine: false`.
+
+Losing Page edit rights does not revoke a human's lease. The holder's writes
+fail the authority check, and the lease expires on its own.
 
 ### Writes are fenced by generation and version
 
@@ -75,11 +78,13 @@ transaction the server:
 2. checks that the stored lease has the same holder, the same generation and
    has not expired on the current boot,
 3. compares `baseVersion` with the latest stored version (compare-and-set), and
-4. publishes exactly one new version, then rechecks authority and the lease
-   again before commit.
+4. for a save, import, restore or agent apply, publishes exactly one new
+   version, then rechecks authority and the lease again before commit.
 
-A mismatch in step 2 or 3 returns **409** and publishes nothing. Saved versions
-are never overwritten; a restore publishes a new version.
+Share publishes nothing. It selects an existing version as the shared version
+and returns that version. A mismatch in step 2 or 3 returns **409** and
+changes nothing. Saved versions are never overwritten; a restore publishes a
+new version.
 
 ## Human lease operations
 
@@ -183,19 +188,34 @@ cannot choose the document, actor, run or profile.
 `craft_apply` carries `generation`, `base_version`, a new `request_id`
 (1–128 characters from `A–Z a–z 0–9 _ . : -`) and 1–64 commands.
 
+The agent's sidecar checks every MCP call before it reaches the host:
+
+- A JSON-RPC body over 128 KiB, or one that is not a valid JSON-RPC 2.0
+  request, gets a JSON-RPC error `invalid bounded request` with HTTP 400.
+- Tool arguments over 96 KiB, an unknown field, a generation or
+  `base_version` that is not a canonical positive decimal string, a bad
+  `request_id`, or a `commands` list that is empty, longer than 64 entries or
+  over 64 KiB get a tool result 400
+  `explicit bounded native operation required`.
+- A call without a live task token gets 403 `live native Craft task required`.
+
+Calls that pass these checks are forwarded to the host. The table lists what
+the agent then receives as the tool result.
+
 | Status | Meaning | What the agent does |
 |---|---|---|
 | 200 | Committed receipt with the new version. Only this proves Saved. | Continue from the new version. |
-| 400 | `invalid native Craft operation`: unknown operation, extra field, bad generation, version or `request_id`, or a command list outside 1–64. | Fix the request. |
+| 400 | Rejected by the sidecar checks above, or by the host as `invalid native Craft operation`. | Fix the request. |
 | 403 | `confirmed native Craft task required`: the call is not bound to a live, confirmed task. | Stop. |
 | 409 | Lease generation changed, `base_version` is not the latest version, or the same `request_id` was reused with different content. | Read again; do not reuse the `request_id` for new content. |
-| 413 | Request over 128 KiB, history byte budget full, or the task already used its 64 apply IDs. | Stop and report. |
+| 413 | History byte budget full, or the task already used its 64 apply IDs. | Stop and report. |
 | 422 | The original engine refused the commands or produced an invalid document. | Change the commands. |
 | 503 | `original native save outcome unconfirmed; reconcile the exact original request`. The task is blocked for new edits until the uncertain attempt is reconciled. | Resend the exact original request (same `request_id` and content). That only reconciles the first attempt; it never runs the engine again. |
 
-The sidecar also returns 503 with the original request echoed back when the
-host could not be reached. Treat it the same way: the result is unknown, not
-failed.
+When the sidecar cannot reach the host, it returns 503
+`native task outcome uncertain; retain exact original request` with the
+forwarded request echoed back. Treat it the same way: the result is unknown,
+not failed.
 
 ## Quotas and retention
 
@@ -213,20 +233,3 @@ Native Craft documents do not use Yjs or any other live merge. The lease
 enforces one writer at a time, and the version store keeps a linear history.
 Design artifacts store Yjs state in their versions; that model does not apply
 here. The Craft authority check has no collaboration-document dependency.
-
-## Proposals
-
-Agent proposals for Craft documents, where an agent prepares a change that a
-human compares and then accepts or rejects, are not part of the current
-release. There is no server API for them. Until they ship, an agent changes a
-Craft document only through a consented native agent task holding the lease,
-as described above.
-
-The client already assumes these invariants for a future proposal:
-
-- A proposal names its author (human or agent), the version it was prepared
-  on and a short summary.
-- Nothing changes in the document until a human accepts. Accepting publishes
-  a new version after that base; rejecting leaves the document as it was.
-- A proposal whose base version is no longer the latest is stale. It can be
-  compared but not accepted or rejected.
