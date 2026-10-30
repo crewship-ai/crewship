@@ -136,6 +136,7 @@
               "guides/git-links",
               "guides/issue-attachments",
               "guides/templates",
+              "guides/artifacts/library",
               {
                 "group": "Memory",
                 "icon": "brain",

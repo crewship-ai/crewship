@@ -361,3 +361,63 @@ archived items.
 - [Document history, revert and proposals](/guides/document-history-review):
   history for native Word documents
 - [feature-flag](/cli/feature-flag): enable workspace flags
+
+
+## Design System token preview
+
+A Design System is a Project artifact whose version includes a file named
+`design-system.json`. It uses the same versions, access rules and sharing as
+Projects. It is separate from the collaborative Design canvas and does not
+apply tokens to another artifact automatically.
+
+The read-only preview needs `NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM=true` in the
+web build, plus the Project server flag and a library or chat viewer enabled
+as described above. For example, build from source with:
+
+```bash
+NEXT_PUBLIC_ARTIFACTS_LIBRARY=true NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM=true make build
+```
+
+1. Ask an authorized agent to create a Project containing `index.html` and the
+   token file, or supply those files through `crewship page artifact create`.
+2. Open the artifact in the library. The viewer badge reads **Design System**.
+   It displays color swatches, typography samples, spacing and radius samples,
+   and optional component names and descriptions.
+3. Use the version picker to inspect retained token values you may read. The
+   owner can restore an old version as a new version and share it separately.
+   The preview has no token editor; publish a complete manifest to change it.
+
+A minimal `design-system.json` is:
+
+```json
+{
+  "schema_version": 1,
+  "name": "Harbor",
+  "colors": {"primary": "#1d4ed8"},
+  "typography": {"body": {"size": 16, "weight": 400}},
+  "spacing": {"md": 16},
+  "radii": {"sm": 4},
+  "components": [{"name": "Button", "description": "Primary action"}]
+}
+```
+
+The file must be at most 32 KiB and have exactly one entry in the manifest.
+`schema_version`, `colors`, `typography`, `spacing` and `radii` are required;
+`name` and `components` are optional. Unknown fields or duplicate JSON keys
+reject the whole preview. Each token group permits at most 128 entries. Token
+names start with a lowercase letter and contain only lowercase letters,
+digits and hyphens, at most 48 characters; `constructor` and `prototype`
+are reserved.
+
+Colors are literal six-digit hex values. Spacing and radii are integer pixels
+from 0 to 4096. Typography requires integer `size` from 1 to 512 and optionally
+`font_family` (a plain font-family list), `weight` (100–900 in steps of 100),
+and `line_height` (0.5–4). The optional component list holds at most 64 uniquely
+named entries with plain-text names up to 80 characters and descriptions up
+to 280. Tokens cannot contain CSS expressions, markup or URLs.
+
+An invalid file shows **This Design System file is invalid or uses an
+unsupported format.** Saving a Project does not validate this preview format:
+correct the token file and publish a new complete version. With the preview
+flag off it remains a normal Project. A Slides manifest takes precedence over
+the Design System preview; keep these formats in separate artifacts.
