@@ -2,6 +2,8 @@ package chatbridge
 
 import (
 	"encoding/json"
+	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -35,5 +37,35 @@ func TestHostChatOwnershipAcknowledgementRequired(t *testing.T) {
 				t.Fatal("ownership capability reusable")
 			}
 		})
+	}
+}
+
+func TestHostChatInheritedOriginKeepsExistingOwnership(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		if _, present := payload["host_chat_work"]; present {
+			t.Error("inherited origin acquired ordinary host-chat admission flag")
+		}
+		if _, present := payload["human_authority"]; present {
+			t.Error("origin provenance replaced by human receipt")
+		}
+		if payload["chat_origin_id"] != "existing-dispatcher-origin" {
+			t.Errorf("origin lost: %+v", payload)
+		}
+		// Existing owner does not implement the new ownership handshake.
+		_, _ = w.Write([]byte(`{"id":"inherited-run","status":"RUNNING"}`))
+	}))
+	defer server.Close()
+	resolver := NewIPCResolver(server.URL, "synthetic-host-token", slog.Default())
+	ctx := chataudience.WithReceipt(t.Context(), &chataudience.Receipt{UserID: "human", WorkspaceID: "ws", AgentID: "agent", ChatID: "chat"})
+	ctx = WithHostChatWorkAdmission(runauthority.WithOriginID(ctx, "existing-dispatcher-origin"))
+	if err := resolver.CreateRun(ctx, "inherited-run", "agent", "chat", "ws", "USER", nil); err != nil {
+		t.Fatalf("inherited execution rejected for new handshake: %v", err)
+	}
+	if resolver.takeHostChatWork("inherited-run") {
+		t.Fatal("inherited dispatcher attempt adopted by chat lifecycle")
 	}
 }

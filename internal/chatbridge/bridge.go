@@ -1300,7 +1300,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	ctx = runauthority.WithTriggerMessage(ctx, triggerMessageID)
 	ctx = chataudience.WithReceipt(ctx, info.HumanAuthority)
-	if info.HumanAuthority != nil {
+	if info.HumanAuthority != nil && runauthority.OriginIDFromContext(ctx) == "" {
 		ctx = WithHostChatWorkAdmission(ctx)
 	}
 	if err := b.resolver.CreateRun(ctx, runID, info.AgentID, chatID, info.WorkspaceID, "USER", runMeta); err != nil {

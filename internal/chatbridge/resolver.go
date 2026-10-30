@@ -314,6 +314,9 @@ func (r *IPCResolver) CreateChat(ctx context.Context, req CreateChatRequest) err
 func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string, metadata map[string]interface{}) error {
 	reqURL := fmt.Sprintf("%s/api/v1/internal/runs", r.baseURL)
 	requestedWork, _ := ctx.Value(hostChatAdmissionKey{}).(bool)
+	// Inherited dispatcher provenance keeps its existing settlement owner,
+	// including when a caller context also retains a human receipt/marker.
+	requestedWork = requestedWork && runauthority.OriginIDFromContext(ctx) == ""
 	payload := map[string]interface{}{
 		"id": runID, "agent_id": agentID, "chat_id": chatID,
 		"workspace_id": workspaceID, "trigger_type": triggerType,
