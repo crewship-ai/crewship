@@ -183,6 +183,7 @@
               "guides/hooks",
               "guides/automations",
               "guides/pages",
+              "guides/artifacts",
               "guides/pages-apps-operations",
               "guides/artifacts/operations",
               "guides/quartermaster",
