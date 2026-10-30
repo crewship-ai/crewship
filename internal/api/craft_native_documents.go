@@ -102,7 +102,7 @@ func (d *craftNativeDocumentsHTTP) readSnapshot(w http.ResponseWriter, r *http.R
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, craftNativeDocumentResponse{Version: strconv.FormatInt(state.LatestVersion, 10), Bytes: file.Content, ApplicationID: entry.application, EnginePin: s.EnginePin(), EditorURL: profile.EditorURL, EditorBundle: profile.Store.EditorBundle, Quota: craftNativeDocumentQuotaResponse{UsedBytes: strconv.FormatInt(state.Quota.UsedBytes, 10), LimitBytes: strconv.FormatInt(state.Quota.LimitBytes, 10), Warning: state.Quota.Warning, Retention: state.Quota.Retention}})
+	writeJSON(w, 200, craftNativeDocumentResponse{Version: strconv.FormatInt(state.LatestVersion, 10), Bytes: file.Content, ApplicationID: entry.application, EnginePin: s.EnginePin(), EditorURL: profile.EditorURL, EditorBundle: profile.Store.EditorBundle, Quota: craftNativeDocumentQuotaResponse{UsedBytes: strconv.FormatInt(state.Quota.UsedBytes, 10), LimitBytes: strconv.FormatInt(state.Quota.LimitBytes, 10), Warning: state.Quota.Warning, Level: state.Quota.Level, Retention: state.Quota.Retention}})
 }
 func (d *craftNativeDocumentsHTTP) mutateSnapshot(w http.ResponseWriter, r *http.Request, operation string) {
 	r, entry, s, _, err := d.bind(r)

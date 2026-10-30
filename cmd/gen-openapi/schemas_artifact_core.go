@@ -31,7 +31,9 @@ func artifactProjectCoreComponents() map[string]any {
 		"version": integer(1), "entrypoint": path(), "message": str(), "actor": str(), "created_at": stamp(), "restored_from": integer(0),
 	}, "version", "entrypoint", "message", "actor", "created_at", "restored_from")
 	schemas["ArtifactProjectQuota"] = object(map[string]any{
-		"used_bytes": integer(0), "limit_bytes": integer(0), "warning": boolean(), "retention": map[string]any{"type": "string", "description": "Visible keep-all policy; the server never silently deletes retained versions. Quota refusal preserves existing data."},
+		"used_bytes": integer(0), "limit_bytes": integer(0), "warning": map[string]any{"type": "boolean", "description": "True from the near threshold upwards; prefer level."},
+		"level":     map[string]any{"type": "string", "enum": []string{"none", "near", "critical", "full"}, "description": "none below 80% of limit_bytes, near from 80%, critical from 95%, full when used_bytes reaches limit_bytes. Omitted when the quota is withheld (shared or editor views report limit_bytes 0)."},
+		"retention": map[string]any{"type": "string", "description": "Visible keep-all policy; the server never silently deletes retained versions. Quota refusal preserves existing data."},
 	}, "used_bytes", "limit_bytes", "warning", "retention")
 	schemas["ArtifactProjectAvailability"] = object(map[string]any{"enabled": boolean()}, "enabled")
 	manifestProps := map[string]any{"entrypoint": path(), "files": files("ArtifactProjectFileInput"), "message": text(4096)}

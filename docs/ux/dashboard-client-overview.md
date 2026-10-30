@@ -67,5 +67,9 @@ Cards are `DashCard` (`components/features/dashboard/dash-card.tsx`): radius
 10, no shadow, one grey link; an empty card is one line and a failed read
 replaces only its own card with Retry. Loading is the kit's `PageLoading`;
 a workspace without crews is one `PageEmpty`. Tablet (768–1279 px) shows the
-tiles and figures 2 × 2. The Routines dashboard still uses the earlier widgets
-(`legacy-overview.tsx`).
+tiles and figures 2 × 2. The Routines dashboard
+(`components/features/routines/routines-dashboard.tsx`) is built from the same
+`DashCard` and `RunVolumeChart`; it takes only the `OutcomeKpiData` type from
+`dashboard-overview.tsx`. The pre-Harbor-2 widgets in `legacy-overview.tsx`
+(`AttentionStrip`, `OutcomeKpis`, `UpNext`) are still re-exported there, but no
+page renders them (status checked 2026-10-29).

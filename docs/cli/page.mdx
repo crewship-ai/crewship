@@ -2127,8 +2127,20 @@ leaves the latest version unchanged; both require owner authority. Read and
 Comment grants reach only the current shared pin. Readers cannot publish,
 comment, restore or share; Comment permits feedback without content writes.
 Storage usage and the keep-all policy are returned with the owner snapshot.
+`quota.level` warns before saving fails: `none` below 80% of `limit_bytes`,
+`near` from 80%, `critical` from 95% and `full` once `used_bytes` reaches the
+limit (`warning` stays true from `near` upwards). Shared readers and Edit-only
+editors get a withheld quota with `limit_bytes` 0 and no level.
 Quota rejection retains every prior version; keep the candidate manifest file
 until publication is acknowledged.
+
+`page artifact versions` also prints the owner-only `retention_preview`: a dry
+run of the proposed rule "keep every version from the last `recent_days`
+(14) days, then the newest version of each older UTC day; always keep the
+latest, shared, named (non-empty message), restored and restore-source
+versions, and any version of unknown age". `would_thin` lists the versions
+that rule would remove; `dry_run` is always `true`. Nothing is deleted and
+`quota.retention` stays `keep-all`.
 
 For an agent, enable **Create artifact project** in the original private chat.
 The host binds that explicit request to the actual human credential and one

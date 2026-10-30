@@ -31,7 +31,10 @@ func commentGrantFixture(t *testing.T, level string) (*PageHandler, string, stri
 	return h, page, owner, user, call
 }
 
-const sharedCommentBody = `{"version":1,"path":"index.html","selector":"#hero","quote":"Shared one","text":"Feedback only","send_to_agent":true}`
+const sharedCommentBody = `{"version":1,"path":"index.html","selector":"#hero","quote":"Shared one","text":"Feedback only"}`
+
+// Queuing an agent task needs Edit; a Comment grant may only leave feedback.
+const sharedAgentCommentBody = `{"version":1,"path":"index.html","selector":"#hero","quote":"Shared one","text":"Feedback only","send_to_agent":true}`
 
 func TestArtifactCommentGrantSharedPinAndNoContentAuthority(t *testing.T) {
 	h, page, owner, user, call := commentGrantFixture(t, "comment")
@@ -48,7 +51,7 @@ func TestArtifactCommentGrantSharedPinAndNoContentAuthority(t *testing.T) {
 		t.Fatalf("feedback actor %q %v", author, err)
 	}
 	var taskCount, intents int
-	if err := h.db.QueryRow(`SELECT count(*) FROM artifact_project_comment_tasks WHERE page_id=?`, page).Scan(&taskCount); err != nil || taskCount != 1 {
+	if err := h.db.QueryRow(`SELECT count(*) FROM artifact_project_comment_tasks WHERE page_id=?`, page).Scan(&taskCount); err != nil || taskCount != 0 {
 		t.Fatalf("tasks %d %v", taskCount, err)
 	}
 	if err := h.db.QueryRow(`SELECT count(*) FROM artifact_project_message_intents WHERE page_id=?`, page).Scan(&intents); err != nil || intents != 0 {
