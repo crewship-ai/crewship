@@ -9,8 +9,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Label, project, milestone and bulk issue updates honor machine output.** Their CLI commands now emit the updated record or update counts for JSON and YAML output instead of only a human receipt.
-
 - **A Page opens with its content inside Artifacts.** Its application or panels show in the library detail with the same views Pages uses, read by the page's immutable ID; the detail no longer sends you to Pages.
 
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
@@ -1578,6 +1576,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Approval or signal delivery arriving while a routine is parking waits for the original execution to release its slot before resuming, preventing a decided run from remaining stuck in waiting.
 - Incoming webhooks use the shared Integrations explorer, overview and endpoint detail on desktop and phones. Creation opens from Add integration, target links survive reload, and Refresh reloads endpoints and receipts. Agent catalogs report whether a signing key is configured without exposing it; paged catalogs are fully read before counting endpoints.
 - **Manifest:** a standalone `Project` can name a workspace agent as lead, `Project.status` uses the API vocabulary (`backlog|planned|in_progress|paused|completed|cancelled`; a bad value is a 400 naming the field instead of a 500), re-applying a `Label` is idempotent, and `Issue.status` is honoured on create — `POST …/issues` and `crewship issue create --status` accept a starting status. (#2426)
+
+- **Label, project, milestone and bulk issue updates honor machine output.** Their CLI commands now emit the updated record or update counts for JSON and YAML output instead of only a human receipt.
+
 - **Provisioning:** a cache hit is confirmed against the Docker daemon before it is reported, a container start on a missing image invalidates the memoised image list, and a message deferred to a rebuild backs off and stops after three consecutive rebuilds with a clear error — `docker rmi crewship-cache:*` no longer triggers 80+ provisions a second and a dead chat. (#2431)
 - An agent re-saving a routine without a description no longer erases the stored one: the sidecar IPC save and the `save_routine` tool are PATCH-like (omitted preserves, `""` clears), matching the CLI and UI path. (#2405)
 - Script and code step environments (1,024 entries), script arguments (256) and per-item foreach inputs (1,024) are bounded before allocation; an over-cap step fails naming the field and the maximum. (#2456)
