@@ -41,8 +41,12 @@ func TestAssignmentChatOriginAdmissionAndRevocation(t *testing.T) {
 	if err := f.h.db.QueryRow(`SELECT COALESCE(chat_origin_id,''),status FROM assignments WHERE id=?`, response.ID).Scan(&origin, &status); err != nil {
 		t.Fatal(err)
 	}
-	if origin == "" || status != "QUEUED" {
+	if origin == "" || status != "PENDING" {
 		t.Fatalf("durable queued origin=%q status=%q", origin, status)
+	}
+	var accepted int
+	if err := f.h.db.QueryRow(`SELECT COUNT(*) FROM work_items WHERE source='assignment' AND domain_id=?`, response.ID).Scan(&accepted); err != nil || accepted != 1 {
+		t.Fatalf("missing durable assignment work: count=%d err=%v", accepted, err)
 	}
 	a, err := runauthority.ValidateOrigin(t.Context(), f.h.db, origin, "origin-worker", f.workspace)
 	if err != nil || a.HumanAuthority == nil || a.HumanAuthority.UserID != f.user || a.ChatID != f.chat {

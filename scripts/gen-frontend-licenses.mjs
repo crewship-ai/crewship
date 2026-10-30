@@ -35,6 +35,7 @@ const EXCEPTIONS = {
   // Dependency refresh (2026-10-29): inspected each exact registry tarball,
   // matched its SHA-512 against pnpm-lock.yaml, and checked package.json.
   // Still no package-level license text; same declarations as before.
+  "@ai-sdk/provider-utils@5.0.71": "package.json declares Apache-2.0; exact locked tarball inspected: https://registry.npmjs.org/@ai-sdk/provider-utils/-/provider-utils-5.0.71.tgz",
   "@ai-sdk/provider-utils@5.0.70": "package.json declares Apache-2.0; exact locked tarball inspected: https://registry.npmjs.org/@ai-sdk/provider-utils/-/provider-utils-5.0.70.tgz",
   "@next/env@16.4.3": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@next/env/-/env-16.4.3.tgz",
   "@next/swc-linux-x64-gnu@16.4.3": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@next/swc-linux-x64-gnu/-/swc-linux-x64-gnu-16.4.3.tgz",

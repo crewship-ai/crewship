@@ -320,7 +320,7 @@ func abandonPendingDelivery(ctx context.Context, db *sql.DB, deliveryID string) 
 // this statement touches is already uniquely owned by this run — there is no
 // second writer to lose a race against, the same reasoning attachDeliveryRun
 // itself relies on.
-func consumeDeliveriesForRun(ctx context.Context, db *sql.DB, runID string) (int64, error) {
+func consumeDeliveriesForRun(ctx context.Context, db dbConn, runID string) (int64, error) {
 	if runID == "" {
 		return 0, nil
 	}
@@ -350,7 +350,7 @@ func consumeDeliveriesForRun(ctx context.Context, db *sql.DB, runID string) (int
 // ever being read — precisely the lie review caught elsewhere on this
 // path. Passing exact ids closes that window: a delivery not in the list
 // stays 'pending' for the next run to finish on this session to pick up.
-func claimPendingDeliveriesByID(ctx context.Context, db *sql.DB, deliveryIDs []string, runID string) (int64, error) {
+func claimPendingDeliveriesByID(ctx context.Context, db dbConn, deliveryIDs []string, runID string) (int64, error) {
 	if len(deliveryIDs) == 0 || runID == "" {
 		return 0, nil
 	}
