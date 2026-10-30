@@ -11,12 +11,14 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 // Exercise the actual HTTP boundary: the save commits and sends 201 headers,
 // but the connection closes before its advertised body is complete.
 func TestPageArtifactPublishReconcilesTruncatedSuccess(t *testing.T) {
-	for _, scenario := range []string{"matching", "different", "absent", "read-fails", "definitive-refusal", "rejected-refusal", "rate-refusal"} {
+	for _, scenario := range []string{"matching", "different", "absent", "read-fails", "definitive-refusal", "rejected-refusal", "rate-refusal", "clean-partial"} {
 		t.Run(scenario, func(t *testing.T) {
 			guardCLIState(t)
 			saveCLIState(t)
@@ -48,7 +50,11 @@ func TestPageArtifactPublishReconcilesTruncatedSuccess(t *testing.T) {
 					if err := json.NewDecoder(r.Body).Decode(&committed); err != nil {
 						t.Error(err)
 					}
-					w.Header().Set("Content-Length", "1000")
+					if scenario != "clean-partial" {
+						// clean-partial: no length, so the chunked body ends
+						// cleanly on an incomplete document.
+						w.Header().Set("Content-Length", "1000")
+					}
 					w.WriteHeader(http.StatusCreated)
 					_, _ = io.WriteString(w, `{"manifest":`)
 				case http.MethodGet:
@@ -82,12 +88,33 @@ func TestPageArtifactPublishReconcilesTruncatedSuccess(t *testing.T) {
 			}
 			t.Setenv("CREWSHIP_CONFIG", cfgPath)
 			out, err := runParityArtifact(t, newPageArtifactCommand, "publish", "demo", "--base-version", "7", "--file", pageBundleFile(t, parityManifest))
-			if scenario == "matching" {
+			// Each outcome must be distinguishable: exit code plus the
+			// detail a caller needs to decide whether to publish again.
+			want := map[string]struct {
+				code int
+				text string
+			}{
+				"different":          {cli.ExitConflict, "exists with different content"},
+				"absent":             {cli.ExitNotFound, "publishing again with --base-version 7 is safe"},
+				"read-fails":         {cli.ExitGeneric, "may or may not have been applied"},
+				"definitive-refusal": {cli.ExitValidation, "invalid manifest"},
+				"rejected-refusal":   {cli.ExitValidation, "invalid manifest"},
+				"rate-refusal":       {cli.ExitRateLimited, "30"},
+			}[scenario]
+			switch {
+			case scenario == "matching" || scenario == "clean-partial":
 				if err != nil || !strings.Contains(out, `"reconciled": true`) {
 					t.Errorf("committed save not confirmed: output=%s err=%v", out, err)
 				}
-			} else if err == nil {
+			case err == nil:
 				t.Error("unproven save reported as successful")
+			default:
+				if got := cli.ExitCodeFor(err); got != want.code {
+					t.Errorf("exit code %d, want %d (err=%v)", got, want.code, err)
+				}
+				if !strings.Contains(err.Error(), want.text) {
+					t.Errorf("error %q lacks %q", err, want.text)
+				}
 			}
 			wantGets := 1
 			if strings.HasSuffix(scenario, "refusal") {

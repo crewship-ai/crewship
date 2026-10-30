@@ -90,7 +90,10 @@ func artifactReconcile(client *cli.Client, slug string, base int64, local map[st
 		return result, err
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, (9<<20)+1))
-	if err != nil || len(raw) > 9<<20 {
+	if err != nil {
+		return result, fmt.Errorf("read artifact: %w", err)
+	}
+	if len(raw) > 9<<20 {
 		return result, fmt.Errorf("artifact response exceeds limit")
 	}
 	var snapshot struct {
@@ -136,6 +139,10 @@ func artifactPublishHuman(cmd *cobra.Command, slug string, base int64, body map[
 				postErr = fmt.Errorf("read publish acknowledgement: %w", err)
 			case len(raw) > 9<<20:
 				postErr = fmt.Errorf("project response exceeds limit")
+			case !json.Valid(raw):
+				// A connection closed without a length ends the read cleanly
+				// on a partial body; that is the same lost acknowledgement.
+				postErr = fmt.Errorf("read publish acknowledgement: incomplete response body")
 			default:
 				return pageEmitMachine(artifactCmdFormatter(cmd), raw, "{}")
 			}
@@ -146,10 +153,29 @@ func artifactPublishHuman(cmd *cobra.Command, slug string, base int64, body map[
 	}
 	result, err := artifactReconcile(client, slug, base, body)
 	if err != nil {
-		return postErr
+		return artifactReconcileError(err, base, postErr)
 	}
 	fmt.Fprintf(cmd.ErrOrStderr(), "save reply was lost (%v); version %d holds exactly this manifest, so the save is confirmed\n", postErr, result.Version)
 	return artifactCmdMachine(cmd, result)
+}
+
+// artifactReconcileError turns a failed successor read into the outcome the
+// caller acts on. postErr is the lost publish reply, nil for a manual reconcile.
+func artifactReconcileError(err error, base int64, postErr error) error {
+	lost := ""
+	if postErr != nil {
+		lost = fmt.Sprintf("save reply was lost (%v); ", postErr)
+	}
+	switch {
+	case errors.Is(err, errArtifactSuccessorAbsent):
+		return cli.NotFoundf("%sversion %d does not exist: the save was not applied; publishing again with --base-version %d is safe", lost, base+1, base)
+	case errors.Is(err, errArtifactSuccessorDiffers):
+		return cli.WithExitCode(fmt.Errorf("%sversion %d exists with different content: the save was not applied as sent; read the latest version and merge before publishing again", lost, base+1), cli.ExitConflict)
+	case postErr != nil:
+		// Unknown outcome: keep the original error's class and say how to settle it.
+		return fmt.Errorf("%w; version %d could not be read (%v), so the save may or may not have been applied; confirm with `crewship page artifact reconcile --base-version %d` before publishing again", postErr, base+1, err, base)
+	}
+	return err
 }
 
 // A lost acknowledgement surfaces as a transport error, a 5xx, or a 409 on
@@ -194,13 +220,8 @@ with the same --base-version is safe). Exit 5 when base+1 exists with other cont
 			return err
 		}
 		result, err := artifactReconcile(client.WithContext(cmd.Context()), args[0], base, body)
-		switch {
-		case errors.Is(err, errArtifactSuccessorAbsent):
-			return cli.NotFoundf("version %d does not exist: the save was not applied; publishing again with --base-version %d is safe", base+1, base)
-		case errors.Is(err, errArtifactSuccessorDiffers):
-			return cli.WithExitCode(fmt.Errorf("version %d exists with different content: the save was not applied as sent; read the latest version and merge before publishing again", base+1), cli.ExitConflict)
-		case err != nil:
-			return err
+		if err != nil {
+			return artifactReconcileError(err, base, nil)
 		}
 		return artifactCmdMachine(cmd, result)
 	}}

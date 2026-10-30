@@ -15,8 +15,10 @@ func TestCraftHTTPErrorRedactsTokenAcrossBodyLimit(t *testing.T) {
 		if err == nil {
 			t.Fatal("conflict accepted")
 		}
-		if strings.Contains(err.Error(), secret[:8]) {
-			t.Fatalf("token prefix leaked at offset %d", offset)
+		// The token follows the x run directly, so any leaked prefix — even
+		// a single byte cut by the body limit — shows up right after it.
+		if strings.Contains(err.Error(), "x"+secret[:1]) {
+			t.Fatalf("token prefix leaked at offset %d: %q", offset, err.Error()[max(0, len(err.Error())-40):])
 		}
 	}
 }

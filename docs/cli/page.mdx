@@ -2067,12 +2067,20 @@ A conflict leaves the candidate available for deliberate reconciliation.
 crewship page artifact publish demo --base-version 1 --file manifest.json
 ```
 
-When the reply is lost — a transport error, a `5xx`, or a `409` that may be the
-echo of the first attempt — the CLI reads version `base+1` once and compares it
-with your manifest (same entrypoint; same path, content and media type for every
-file). If it matches, the save is confirmed: the command prints
-`{"reconciled": true, "version": N}` and exits `0`. Otherwise the original error
-is returned unchanged. The CLI never publishes twice.
+When the reply is lost — a transport error, a `5xx`, a `409` that may be the
+echo of the first attempt, or a success response whose body is cut off — the CLI
+reads version `base+1` once and compares it with your manifest (same entrypoint;
+same path, content and media type for every file). The CLI never publishes twice.
+
+| Version `base+1` | Result |
+|---|---|
+| Holds exactly your manifest | Save confirmed: prints `{"reconciled": true, "version": N}`, exit `0` |
+| Does not exist | Not saved; publishing again with the same `--base-version` is safe, exit `3` |
+| Exists with other content | Another save took it; read the latest version and merge, exit `5` |
+| Cannot be read | Outcome unknown; the original error is kept with a hint to run `artifact reconcile` |
+
+Validation and rate-limit refusals (`4xx` other than `409`) are definitive: no
+read follows and the server's detail is kept.
 
 ### `crewship page artifact reconcile <slug>`
 
