@@ -270,3 +270,13 @@ it("tolerates unreachable localStorage: sign-out and settle still complete, capt
     expect(() => drafts.removeCapturedLegacyLocalDrafts([{ key: "crewship-design:alice", text: "x" }])).not.toThrow()
   } finally { blocked.mockRestore() }
 })
+
+it("capture tolerates a localStorage getter that throws", async () => {
+  const drafts = await load()
+  const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage")
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new DOMException("blocked site storage", "SecurityError") } })
+  try {
+    expect(drafts.captureLegacyLocalDrafts()).toEqual([])
+    expect(() => drafts.removeCapturedLegacyLocalDrafts([{ key: "crewship-design:alice", text: "x" }])).not.toThrow()
+  } finally { if (original) Object.defineProperty(globalThis, "localStorage", original) }
+})

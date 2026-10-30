@@ -323,9 +323,9 @@ const LOCAL_PREFIXES = ["crewship-design:v2:", "design-comment:v2:", ...KINDS.ma
 export interface CapturedLegacyLocalDraft { key: string; text: string }
 /** Old localStorage copies are included in sign-out's visible discard warning. */
 export function captureLegacyLocalDrafts(human?: string): CapturedLegacyLocalDraft[] {
-  if (typeof localStorage === "undefined") return []
   const rows: CapturedLegacyLocalDraft[] = []
   try {
+    if (typeof localStorage === "undefined") return rows
     for (const key of Object.keys(localStorage)) {
       const prefix = LOCAL_PREFIXES.find(start => key.startsWith(start))
       if (!prefix || (human && key.slice(prefix.length).split(":")[0] !== human)) continue
