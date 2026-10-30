@@ -172,8 +172,9 @@ func artifactReconcileError(err error, base int64, postErr error) error {
 	case errors.Is(err, errArtifactSuccessorDiffers):
 		return cli.WithExitCode(fmt.Errorf("%sversion %d exists with different content: the save was not applied as sent; read the latest version and merge before publishing again", lost, base+1), cli.ExitConflict)
 	case postErr != nil:
-		// Unknown outcome: keep the original error's class and say how to settle it.
-		return fmt.Errorf("%w; version %d could not be read (%v), so the save may or may not have been applied; confirm with `crewship page artifact reconcile --base-version %d` before publishing again", postErr, base+1, err, base)
+		// Unknown outcome. Not %w: the original 409 would otherwise exit 5,
+		// which promises "another save took it" — a fact nobody has read.
+		return fmt.Errorf("%v; version %d could not be read (%v), so the save may or may not have been applied; confirm with `crewship page artifact reconcile --base-version %d` before publishing again", postErr, base+1, err, base)
 	}
 	return err
 }
@@ -203,7 +204,8 @@ same files (path, content, media type). Read-only — it never publishes.
 Exit 0 with {"reconciled":true,"version":N} when that version holds exactly your
 manifest. Exit 3 when base+1 does not exist (nothing was saved; publishing again
 with the same --base-version is safe). Exit 5 when base+1 exists with other content
-(another save took it; read the latest version and merge before publishing).`, RunE: func(cmd *cobra.Command, args []string) error {
+(another save took it; read the latest version and merge before publishing).
+Any other failure means the version could not be read; the outcome is still unknown.`, RunE: func(cmd *cobra.Command, args []string) error {
 		if os.Getenv("CREWSHIP_AGENT_TOKEN") != "" {
 			return errors.New("artifact reconcile requires human authentication; an agent run reads artifact_versions")
 		}

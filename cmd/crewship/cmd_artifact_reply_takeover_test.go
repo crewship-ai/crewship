@@ -18,7 +18,7 @@ import (
 // Exercise the actual HTTP boundary: the save commits and sends 201 headers,
 // but the connection closes before its advertised body is complete.
 func TestPageArtifactPublishReconcilesTruncatedSuccess(t *testing.T) {
-	for _, scenario := range []string{"matching", "different", "absent", "read-fails", "definitive-refusal", "rejected-refusal", "rate-refusal", "clean-partial"} {
+	for _, scenario := range []string{"matching", "different", "absent", "read-fails", "definitive-refusal", "rejected-refusal", "rate-refusal", "clean-partial", "conflict-unreadable"} {
 		t.Run(scenario, func(t *testing.T) {
 			guardCLIState(t)
 			saveCLIState(t)
@@ -47,6 +47,11 @@ func TestPageArtifactPublishReconcilesTruncatedSuccess(t *testing.T) {
 						_, _ = io.WriteString(w, `{"error":"invalid manifest"}`)
 						return
 					}
+					if scenario == "conflict-unreadable" {
+						w.WriteHeader(http.StatusConflict)
+						_, _ = io.WriteString(w, `{"error":"version conflict"}`)
+						return
+					}
 					if err := json.NewDecoder(r.Body).Decode(&committed); err != nil {
 						t.Error(err)
 					}
@@ -67,7 +72,7 @@ func TestPageArtifactPublishReconcilesTruncatedSuccess(t *testing.T) {
 						_, _ = io.WriteString(w, `{"error":"absent"}`)
 						return
 					}
-					if scenario == "read-fails" {
+					if scenario == "read-fails" || scenario == "conflict-unreadable" {
 						w.WriteHeader(503)
 						_, _ = io.WriteString(w, `{"error":"unavailable"}`)
 						return
@@ -94,12 +99,14 @@ func TestPageArtifactPublishReconcilesTruncatedSuccess(t *testing.T) {
 				code int
 				text string
 			}{
-				"different":          {cli.ExitConflict, "exists with different content"},
-				"absent":             {cli.ExitNotFound, "publishing again with --base-version 7 is safe"},
-				"read-fails":         {cli.ExitGeneric, "may or may not have been applied"},
-				"definitive-refusal": {cli.ExitValidation, "invalid manifest"},
-				"rejected-refusal":   {cli.ExitValidation, "invalid manifest"},
-				"rate-refusal":       {cli.ExitRateLimited, "30"},
+				"different":  {cli.ExitConflict, "exists with different content"},
+				"absent":     {cli.ExitNotFound, "publishing again with --base-version 7 is safe"},
+				"read-fails": {cli.ExitGeneric, "may or may not have been applied"},
+				// A 409 whose successor cannot be read is unknown, not exit 5.
+				"conflict-unreadable": {cli.ExitGeneric, "may or may not have been applied"},
+				"definitive-refusal":  {cli.ExitValidation, "invalid manifest"},
+				"rejected-refusal":    {cli.ExitValidation, "invalid manifest"},
+				"rate-refusal":        {cli.ExitRateLimited, "30"},
 			}[scenario]
 			switch {
 			case scenario == "matching" || scenario == "clean-partial":
