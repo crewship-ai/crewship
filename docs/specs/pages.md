@@ -1479,8 +1479,10 @@ The existing human Design-create API accepts `source_page_id`, `expected_human`
 and base64 `initial_state` together for this action. The decoded Yjs state is
 bounded to 4 MiB. Current source Edit authority, the expected identity and target
 Page-create authority are checked under the same writer transaction as the new
-Page and initial version. Failure rolls back the entire new Page and leaves the
-source unchanged. Copying does not transfer comments or their anchors. The
+Page and initial version. After the final document insert, identity, creation
+and source authority are checked again, followed by exact Page/document
+acknowledgement. Failure rolls back the entire new Page and leaves the source
+unchanged. Copying does not transfer comments or their anchors. The
 normal empty-create and CLI behavior is unchanged.
 
 The corresponding agent tools are `design_get`, `design_apply`,

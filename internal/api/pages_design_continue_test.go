@@ -127,3 +127,41 @@ func TestDesignContinueRejectsIdentityPermissionAndInvalidStateWithoutOrphans(t 
 		})
 	}
 }
+
+func TestDesignContinueAdministratorSourceAuditCommitsWithCopy(t *testing.T) {
+	for _, corrupt := range []bool{false, true} {
+		t.Run(map[bool]string{false: "confirmed", true: "late_audit_corruption"}[corrupt], func(t *testing.T) {
+			f := newDesignAuthorityFixture(t)
+			actor := "continuing-admin"
+			f.addUser(t, actor)
+			mustExec(t, f.h.db, `UPDATE workspace_members SET role='ADMIN' WHERE workspace_id=? AND user_id=?`, f.workspace, actor)
+			var source []byte
+			if err := f.h.db.QueryRow(`SELECT state FROM artifact_design_documents WHERE page_id=?`, f.page).Scan(&source); err != nil {
+				t.Fatal(err)
+			}
+			if corrupt {
+				mustExec(t, f.h.db, `CREATE TRIGGER corrupt_copy_source_audit AFTER INSERT ON artifact_design_documents WHEN EXISTS(SELECT 1 FROM pages WHERE id=NEW.page_id AND slug='admin-copy') BEGIN UPDATE journal_entries SET payload='{}' WHERE json_extract(payload,'$.action')='design.workspace_admin_accessed'; END`)
+			}
+			body, _ := json.Marshal(map[string]any{"slug": "admin-copy", "name": "Admin copy", "source_page_id": f.page, "expected_human": actor, "initial_state": base64.StdEncoding.EncodeToString(source)})
+			w := httptest.NewRecorder()
+			f.h.CreateDesign(w, f.request(t, actor, "POST", "", string(body)))
+			if !corrupt && w.Code != 201 || corrupt && w.Code != 500 {
+				t.Fatalf("copy status %d: %s", w.Code, w.Body)
+			}
+			var pages, receipts int
+			if err := f.h.db.QueryRow(`SELECT count(*) FROM pages WHERE workspace_id=?`, f.workspace).Scan(&pages); err != nil {
+				t.Fatal(err)
+			}
+			if err := f.h.db.QueryRow(`SELECT count(*) FROM audit_logs a JOIN journal_entries j ON j.id=a.id WHERE a.action='design.workspace_admin_accessed' AND a.user_id=? AND json_extract(j.payload,'$.entity_id')=a.entity_id`, actor).Scan(&receipts); err != nil {
+				t.Fatal(err)
+			}
+			wantPages, wantReceipts := 2, 1
+			if corrupt {
+				wantPages, wantReceipts = 1, 0
+			}
+			if pages != wantPages || receipts != wantReceipts || f.versions(t) != 1 {
+				t.Fatalf("non-atomic continuation: pages=%d receipts=%d sourceVersions=%d", pages, receipts, f.versions(t))
+			}
+		})
+	}
+}
