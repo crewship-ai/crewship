@@ -24,9 +24,11 @@ off, the create, version and comment routes answer `404`.
 ## The Artifacts library
 
 The `/artifacts` library is a browser view over the Pages the caller can
-read. It is built only when `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` is set at
-build time. Without it, `/artifacts` sends the browser to `/pages` and the
-**Artifacts** sidebar entry opens Pages. `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS=true`
+read. `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` at build time opens this library
+and makes the **Artifacts** sidebar entry lead there. The Design build flag
+`NEXT_PUBLIC_ARTIFACTS_DESIGN=true` also opens `/artifacts`, but without the
+library flag the sidebar still leads to `/pages`; open `/artifacts` directly.
+When both flags are off, `/artifacts` sends the browser to `/pages`. `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS=true`
 additionally sends the Pages overview to the library; it has no effect unless
 the library flag is also on.
 
@@ -50,19 +52,24 @@ and `owner:` operators, for example `kind:word is:private owner:you budget`.
 
 ## Versions
 
-Create a project from a manifest file and publish successors against the exact
-latest version you read:
+Save this complete example as `manifest.json`:
+
+```json
+{"entrypoint":"index.html","files":[{"path":"index.html","content":"<h1 id=\"artifact-heading\">Current title</h1>","media_type":"text/html"}],"message":"First version"}
+```
+
+Create version 1, publish version 2 against the exact latest version you read,
+then restore version 1 as a new version 3:
 
 ```bash
 crewship page artifact create demo --name "Demo" --file manifest.json
 crewship page artifact get demo
 crewship page artifact publish demo --base-version 1 --file manifest.json
 crewship page artifact versions demo
-crewship page artifact restore demo --base-version 3 --version 1
+crewship page artifact restore demo --base-version 2 --version 1
 ```
 
-The manifest is `{"entrypoint": "index.html", "files": [{"path", "content",
-"media_type"}], "message": "..."}`. Every file is listed every time: a file
+Every file is listed every time: a file
 left out of the manifest is absent from the new version. If someone else
 saved first, the server answers `409` with code `artifact_version_conflict`
 and stores nothing; the CLI does not retry. Read the latest version, compare,
@@ -104,8 +111,16 @@ A comment is bound to one version, one file and one element:
 ```bash
 crewship page artifact comment demo --version 3 --path index.html \
   --selector '#artifact-heading' --quote 'Current title' \
-  --text 'Make this title shorter' --send-to-agent
+  --text 'Make this title shorter'
 crewship page artifact comments demo
+```
+
+Replace `COMMENT_ID` below with the comment response’s `id`. Change the
+heading text in `manifest.json` while keeping its `artifact-heading` ID, then
+publish that complete manifest as version 4 before replying:
+
+```bash
+crewship page artifact publish demo --base-version 3 --file manifest.json
 crewship page artifact reply demo COMMENT_ID --version 4 --text "Shortened the title"
 ```
 
@@ -116,7 +131,9 @@ an outdated version returns `409` (`artifact_version_conflict`); a selection
 that no longer matches returns `409` (`artifact_anchor_mismatch`). Neither
 stores anything.
 
-`--send-to-agent` queues a task bound to that version. A queued task is not
+For an agent-created project with a source chat, add `--send-to-agent` to
+queue a task bound to that version. The CLI-created project above has no
+source chat; this flag does not connect one. A queued task is not
 proof that an agent received it. A comment from a Comment grantee is stored
 with a task, but it never starts the owner's agent. A reply normally names a
 newer version that made the change; `--needs-clarification` replies on the
@@ -140,7 +157,9 @@ Identical file contents are stored once per project. The owner's project
 response carries `quota` with `used_bytes`, `limit_bytes` and `warning`, which
 turns true at 80 % of the limit. A save that would exceed the history limit
 returns `413` with code `artifact_history_quota` and keeps every existing
-version; keep your local draft. Other readers see a `quota` that names only
+version; keep your local draft. A direct creation at the 100-Page workspace
+limit also returns `413 artifact_history_quota`; that refusal need not mean
+an existing project’s history is full. Other readers see a `quota` that names only
 their retention (`latest-version-only` or `shared-version-only`).
 
 ## Related
