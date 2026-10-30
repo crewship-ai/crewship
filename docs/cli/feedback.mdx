@@ -55,8 +55,12 @@ agent peers API; they are separate from daily peer-card Markdown.
 ```bash
 crewship feedback create --message cmsg… --signal helpful --reason "Next time, keep answers concise."
 crewship feedback list --message cmsg… --format json
-crewship feedback preferences --agent agent… --format json
+crewship feedback preferences --agent alex --format json
 ```
+
+`--agent` takes the agent's slug or id. The table shows ID, REVISION, STATUS,
+VALUE (the preference the agent recalls, e.g. "prefers concise answers from
+this agent") and REASON (the catalogue sentence it came from).
 
 Catalogue v1 accepts exactly `Next time, keep answers concise.`,
 `Next time, start with the conclusion.`, `Příště piš stručněji.` and
@@ -70,8 +74,14 @@ The server reprocesses the new source revision asynchronously. A stale revision
 returns 409; editing a withdrawn entry cannot restore it.
 
 ```bash
-crewship feedback edit-preference --agent agent… --entry entry… --revision 1 --reason "Next time, start with the conclusion."
+crewship feedback edit-preference --agent alex --entry entry… --revision 1 --reason "Next time, start with the conclusion."
 ```
+
+`--reason` must be one of the four catalogue v1 sentences above, exactly; any
+other text is refused before the request is sent. The route answers `204`;
+with `--format json` the command prints
+`{"agent_id": …, "entry_id": …, "revision": <the revision you sent>, "reason": …, "updated": true}`.
+Read the new revision back with `feedback preferences`.
 
 ## `crewship feedback delete-preference`
 
@@ -79,5 +89,26 @@ Withdraw your own entry using its current revision. A durable tombstone prevents
 pending work and daily Markdown rewrites from restoring that source.
 
 ```bash
-crewship feedback delete-preference --agent agent… --entry entry… --revision 2
+crewship feedback delete-preference --agent alex --entry entry… --revision 2
 ```
+
+With `--format json` it prints
+`{"agent_id": …, "entry_id": …, "revision": …, "withdrawn": true}`.
+
+## `crewship feedback peer-card`
+
+Print the peer card one agent keeps about you — the Markdown it reads before
+working with you. Only your own card is readable; your user id is looked up
+from the server, and every read is recorded in the peer-card audit log. An
+agent with no card about you exits non-zero (`404`).
+
+```bash
+crewship feedback peer-card --agent alex
+crewship feedback peer-card --agent alex --format json   # agent_id, user_id, user_slug, content, bytes
+```
+
+| Flag | Notes |
+|---|---|
+| `--agent` | Agent slug or id (required). |
+
+Backed by `GET /api/v1/agents/{agentId}/peers/{userId}`.

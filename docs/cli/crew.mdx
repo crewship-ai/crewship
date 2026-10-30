@@ -496,6 +496,10 @@ Crew deleted.
 Removed auto-managed service credentials: REDIS_PASSWORD
 ```
 
+With `--format json|yaml|ndjson` the command prints the server's outcome
+document — `removed_credentials`, `cleanup` and `sidecar_teardown` — instead
+of these lines, or `{"deleted": true, "crew_id": …}` when the server sent none.
+
 User-created credentials are never removed, even when they have the same name.
 An auto-managed credential that another crew's agent or a workspace-wide
 binding still uses is also kept. Orphans left by crews deleted before this

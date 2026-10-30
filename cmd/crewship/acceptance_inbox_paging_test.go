@@ -34,6 +34,9 @@ func TestAcceptance_InboxList_CursorQueryAndFilters(t *testing.T) {
 				w.WriteHeader(http.StatusBadRequest)
 				_, _ = w.Write([]byte(`{"error":"invalid cursor"}`))
 			}
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/crews":
+			// --crew takes a slug and sends the id the server filters on.
+			_, _ = w.Write([]byte(`[{"id":"crew-1","slug":"platform"}]`))
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/inbox/counts":
 			countsQueries = append(countsQueries, r.URL.Query())
 			_, _ = w.Write([]byte(`{"total":3,"unread":3,"spaces":{"action":3,"updates":0,"history":0},"by_kind":{},"by_attention":{"decision":3},"by_deadline":{"none":3}}`))
@@ -45,7 +48,7 @@ func TestAcceptance_InboxList_CursorQueryAndFilters(t *testing.T) {
 	defer srv.Close()
 
 	filters := []string{"--query", "deploy", "--space", "action", "--unread", "--attention", "decision",
-		"--deadline", "soon", "--crew", "crew-1", "--agent", "riley"}
+		"--deadline", "soon", "--crew", "platform", "--agent", "riley"}
 
 	// --all follows next_cursor and never sends offset.
 	out, err := runInboxReadStateCLI(t, srv.URL, append([]string{"inbox", "list", "--state", "all", "--limit", "2", "--all"}, filters...)...)
