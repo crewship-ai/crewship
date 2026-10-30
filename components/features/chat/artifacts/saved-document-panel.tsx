@@ -10,7 +10,7 @@ import { PageDocument } from "@/components/features/pages/page-document"
 import { DocumentViewer } from "../artifact-viewer/document-viewer"
 import { CraftLockBarView, craftEditorHref } from "../artifact-context/craft/craft-lock-bar"
 import { useCraftLeaseState } from "../artifact-context/craft/use-craft-lease"
-import { chatItemHref } from "../artifact-context/artifacts-href"
+import { artifactsItemHref, chatItemHref } from "../artifact-context/artifacts-href"
 import type { DocumentViewerProps } from "../artifact-viewer/types"
 
 export type SavedDocumentPanelProps = Omit<DocumentViewerReadInput, "hold"> & Pick<DocumentViewerProps,
@@ -45,6 +45,10 @@ export function SavedDocumentPanel({ headerExtra, onClose, ...props }: SavedDocu
   </Button>
   return <DocumentViewer {...props} onClose={close} scopeKey={scopeKey} read={read}
     headerExtra={typeof headerExtra === "function" ? headerExtra(read.status === "ready") : headerExtra}
+    // Without a preview the panel would be a dead end; Artifacts checks access itself.
+    fallbackAction={artifactsLibrary() && props.target ? <Button asChild variant="outline" size="sm" className="coarse:min-h-[44px]">
+      <a href={artifactsItemHref(props.target.workspaceId, props.target.pageId)} target="_blank" rel="noopener noreferrer">Open in Artifacts<ExternalLink className="size-4" aria-hidden /></a>
+    </Button> : undefined}
     renderBody={document => <div className="space-y-3">
       {ask && <LeaveWithUnsent action={ask} onKeep={() => { setAsking(null); actionButton.current?.focus() }} onLeave={ask === "close" ? onClose : done} />}
       <div className="flex flex-wrap items-center gap-2">

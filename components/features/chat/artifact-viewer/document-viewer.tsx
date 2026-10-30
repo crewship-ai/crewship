@@ -16,7 +16,7 @@ function sameTarget(a: ViewerTarget, b: ViewerTarget) {
 }
 
 /** Controlled presentation only. The host owns resolution, current authority and placement. */
-export function DocumentViewer<Content>({ target, scopeKey, read, renderBody, layout, expanded, onClose, onExpandedChange, openerRef, headerExtra }: DocumentViewerProps<Content>) {
+export function DocumentViewer<Content>({ target, scopeKey, read, renderBody, layout, expanded, onClose, onExpandedChange, openerRef, headerExtra, fallbackAction }: DocumentViewerProps<Content>) {
   const closeButton = useRef<HTMLButtonElement>(null)
   const identity = target ? JSON.stringify([scopeKey, target.workspaceId, target.pageId, target.type, target.mode]) : null
   const previousIdentity = useRef(identity)
@@ -84,12 +84,16 @@ export function DocumentViewer<Content>({ target, scopeKey, read, renderBody, la
     </header>
     <div className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
       {authorized ? <div aria-label="Document content">{renderBody(authorized)}</div>
-        : <p role={read.status === "denied" || read.status === "error" ? "alert" : "status"}>
-          {read.status === "loading" ? "Loading document…"
-            : read.status === "denied" ? "Document access is unavailable."
-            : read.status === "error" ? "Document could not be loaded. Try reopening the preview."
-            : "Preview unavailable. Reopen the saved document to check access."}
-        </p>}
+        : <div className="grid justify-items-start gap-3">
+          <p role={read.status === "denied" || read.status === "error" ? "alert" : "status"}>
+            {read.status === "loading" ? "Loading document…"
+              : read.status === "denied" ? "Document access is unavailable."
+              : read.status === "error" ? "Document could not be loaded. Try reopening the preview."
+              // 503 or the preview switched off: the server cannot show it here, which says nothing about access.
+              : "Preview isn’t available here right now."}
+          </p>
+          {(read.status === "unavailable" || read.status === "error") && fallbackAction}
+        </div>}
     </div>
   </section>
 }

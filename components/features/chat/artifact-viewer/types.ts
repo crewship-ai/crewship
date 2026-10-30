@@ -30,4 +30,6 @@ export interface DocumentViewerProps<Content = unknown> {
   openerRef?: RefObject<HTMLElement | null>
   /** Optional host controls under the title (linked-item switcher). Absent leaves the header unchanged. */
   headerExtra?: ReactNode
+  /** Shown under the message when the preview cannot be shown (not on denial), e.g. a way to open the item elsewhere. */
+  fallbackAction?: ReactNode
 }
