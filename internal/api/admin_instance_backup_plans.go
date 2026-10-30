@@ -78,8 +78,10 @@ func (p *InstanceBackupPlansHandler) GetPlan(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, plan)
 }
 
+// readBody reads a backup plan or settings body of at most 1 MiB; a longer
+// one is errBodyTooLarge.
 func readBody(r *http.Request) ([]byte, error) {
-	return io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	return readBodyLimit(r, maxJSONBodyBytes)
 }
 
 // CreatePlan is POST …/backups/plans. The preset's defaults fill every
@@ -88,7 +90,7 @@ func (p *InstanceBackupPlansHandler) CreatePlan(w http.ResponseWriter, r *http.R
 	ctx := r.Context()
 	body, err := readBody(r)
 	if err != nil {
-		replyError(w, http.StatusBadRequest, "invalid request body")
+		replyJSONBodyError(w, err, "invalid request body")
 		return
 	}
 	var head struct {
@@ -183,7 +185,7 @@ func (p *InstanceBackupPlansHandler) UpdatePlan(w http.ResponseWriter, r *http.R
 	}
 	body, err := readBody(r)
 	if err != nil {
-		replyError(w, http.StatusBadRequest, "invalid request body")
+		replyJSONBodyError(w, err, "invalid request body")
 		return
 	}
 	plan := *existing

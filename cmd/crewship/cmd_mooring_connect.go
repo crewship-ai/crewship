@@ -23,8 +23,25 @@ func newMooringConnectCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "connect <page-slug|@ID>",
 		Short: "Exchange original collaboration frames over an authenticated connection",
-		Long:  "Send one original JSON frame per input line. Print server frames as JSON lines by default, or YAML documents with -f yaml. The first frame must be the original session_join. Keep the original packets for retries; this command creates no receipts.",
-		Args:  cobra.ExactArgs(1),
+		Long: `Open the authenticated WebSocket of a Mooring session and exchange its
+original protocol frames. The server must run with CREWSHIP_MOORING_ENABLED
+(off by default); otherwise the upgrade is refused. A human CLI credential is
+required; an agent token is refused before any request.
+
+Pass the connection_ref returned by 'crewship mooring session' with
+--connection, and one original JSON frame per input line with --file (- reads
+stdin). The first frame must be the original session_join with its one-use
+ticket. Each frame is limited to 256 KiB.
+
+Server frames print as JSON lines by default and with -f json or -f ndjson, or
+as YAML documents with -f yaml; -f quiet is refused. A refused upgrade reports
+"Mooring connection rejected" without the HTTP status. A pending frame is not a
+saved change and this command creates no receipts: keep the original packets
+for retries.`,
+		Example: `  crewship mooring session my-doc --file session.json -f json
+  crewship mooring connect my-doc --connection <connection-ref> --file frames.ndjson
+  cat frames.ndjson | crewship mooring connect @<page-id> --connection <connection-ref> --file - -f yaml`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := humanWorkbookClient()
 			if err != nil {

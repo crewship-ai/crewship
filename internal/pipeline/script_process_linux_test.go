@@ -25,19 +25,24 @@ func TestScriptProcessStop_KillsChildBeforeSideEffect(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	// Redirection creates pid before printf writes it. Keep the nonempty read;
+	// observing the file alone can pass an empty expected PID to the stop guard.
+	var pid []byte
+	var err error
 	for i := 0; i < 100; i++ {
-		if _, err := os.Stat(filepath.Join(control, "pid")); err == nil {
+		pid, err = os.ReadFile(filepath.Join(control, "pid"))
+		if err == nil && len(pid) > 0 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	pid, err := os.ReadFile(filepath.Join(control, "pid"))
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || len(pid) == 0 {
+		t.Fatalf("PID publication not ready: pid=%q err=%v", pid, err)
 	}
-	stop := exec.Command("sh", "-c", scriptStopWrapper, "crewship-script-stop", control, string(pid))
+	// Capture guard diagnostics for any future failure without weakening it.
+	stop := exec.Command("sh", "-x", "-c", scriptStopWrapper, "crewship-script-stop", control, string(pid))
 	if out, err := stop.CombinedOutput(); err != nil {
-		t.Fatalf("stop failed: %v %s", err, out)
+		t.Fatalf("stop failed for expected PID %q: %v %s", pid, err, out)
 	}
 	time.Sleep(1100 * time.Millisecond)
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {

@@ -33,6 +33,8 @@ type projectItem struct {
 var projectListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all projects",
+	Example: `  crewship project list
+  crewship project list --format json | jq -r '.[] | "\(.id) \(.name)"'`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -80,6 +82,11 @@ var projectListCmd = &cobra.Command{
 var projectCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a project",
+	Long: `Create a project. Requires the MANAGER role or higher.
+The slug is derived from the name and is unique per workspace; a name that
+maps to an existing slug is rejected with 409.`,
+	Example: `  crewship project create --name "Website relaunch"
+  crewship project create --name Billing --priority high --target-date 2026-12-31 --format json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -211,7 +218,12 @@ var projectGetCmd = &cobra.Command{
 var projectUpdateCmd = &cobra.Command{
 	Use:   "update <id>",
 	Short: "Update mutable project fields",
-	Args:  cobra.ExactArgs(1),
+	Long: `Update a project. Only the flags you pass are sent; pass an empty value
+(e.g. --description "") to clear a text field. Requires the MANAGER role or
+higher. Prints the updated project; --format json emits the full server record.`,
+	Example: `  crewship project update <project-id> --status in_progress --health at_risk
+  crewship project update <project-id> --name "Billing v2" --format json`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -261,8 +273,13 @@ var projectUpdateCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		cli.PrintSuccess(fmt.Sprintf("Project %s updated.", args[0]))
-		return nil
+		var updated map[string]interface{}
+		if err := cli.ReadJSON(resp, &updated); err != nil {
+			return err
+		}
+		return resolvedFormatter(cmd).AutoHuman(updated, func() {
+			cli.PrintSuccess(fmt.Sprintf("Project %s updated.", args[0]))
+		})
 	},
 }
 
@@ -305,7 +322,9 @@ var projectDeleteCmd = &cobra.Command{
 var projectStatsCmd = &cobra.Command{
 	Use:   "stats <id>",
 	Short: "Show project breakdown (status / assignee / label / crews)",
-	Args:  cobra.ExactArgs(1),
+	Example: `  crewship project stats <project-id>
+  crewship project stats <project-id> --format json | jq .by_status`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err

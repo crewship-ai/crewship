@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { apiFetch } from "@/lib/api-fetch"
+import { readApiError } from "@/lib/api-error"
 import { controlHeight } from "@/components/features/settings/shared"
 
 /**
@@ -47,8 +48,7 @@ export function UserDataActions({ userId, email, workspaceId, onErased }: UserDa
     try {
       const r = await apiFetch(dataURL, { headers: { Accept: "application/json" } })
       if (!r.ok) {
-        const txt = await r.text().catch(() => "")
-        toast.error(`Export failed (${r.status}): ${txt.slice(0, 200) || r.statusText}`)
+        toast.error(await readApiError(r, "Export failed. Nothing was downloaded."))
         return
       }
       const data = await r.json()
@@ -84,8 +84,7 @@ export function UserDataActions({ userId, email, workspaceId, onErased }: UserDa
         body: JSON.stringify({ reason: reason.trim() }),
       })
       if (!r.ok) {
-        const txt = await r.text().catch(() => "")
-        toast.error(`Erase failed (${r.status}): ${txt.slice(0, 200) || r.statusText}`)
+        toast.error(await readApiError(r, "Erase failed. No data was removed."))
         throw new Error(`erase failed (${r.status})`)
       }
       const body = (await r.json().catch(() => ({}))) as DeleteResponse

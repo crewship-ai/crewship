@@ -65,7 +65,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const [dirty, setDirty] = useState(false)
  const [draftError, setDraftError] = useState(false)
  const provider = useRef<DesignProvider | null>(null)
- const editable = Boolean(authorityRevision !== null && query.data?.can_edit && !query.isError && !selectedVersion && connection !== "denied")
+ const editable = Boolean(authorityRevision !== null && query.data?.can_edit && !query.isError && !selectedVersion && connection !== "denied" && connection !== "rejected")
  const editableRef = useRef(editable)
  useEffect(() => { editableRef.current = editable; provider.current?.setEditable(editable) }, [editable])
  const canConnect = Boolean(pageId && authorityRevision !== null && !query.isError && !selectedVersion)
