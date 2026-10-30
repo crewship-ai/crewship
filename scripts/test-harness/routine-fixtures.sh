@@ -40,7 +40,7 @@ trap harness_fixture_cleanup EXIT
 trap 'exit 143' TERM
 trap 'exit 130' INT
 harness_fixture() {
-  local kind="$1" crew="$2" variable="$3" slug file id random
+  local kind="$1" crew="$2" variable="$3" slug file id random saved status
   random="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
   [[ "$random" =~ ^[0-9a-f]{32}$ ]] || { _fail "allocate fixture name"; finish; }
   slug="harness-$random-$kind"
@@ -64,8 +64,25 @@ harness_fixture() {
   fi
   # Older CLIs print human text from save even with --format json. Read the
   # saved identity through get, whose machine contract already exists.
-  id="$(cs routine get "$slug" --format json | jq -er --arg slug "$slug" 'select(.slug == $slug) | .id | select(type == "string" and length > 0)')" || { _fail "saved fixture reports its identity"; finish; }
+  saved="$(cs routine get "$slug" --format json)" || { _fail "read saved fixture identity"; finish; }
+  id="$(printf '%s' "$saved" | jq -er --arg slug "$slug" 'select(.slug == $slug) | .id | select(type == "string" and length > 0)')" || { _fail "saved fixture reports its identity"; finish; }
   _HARNESS_FIXTURE_SLUGS+=("$slug")
   _HARNESS_FIXTURE_IDS+=("$id")
+  status="$(printf '%s' "$saved" | jq -r '.status // "active"')"
+  if [[ "$status" == proposed ]]; then
+    # Code steps use the normal maker-checker queue. Approve only this saved
+    # fixture through the existing MANAGER+ door, never bypass the policy.
+    if ! cs routine approve "$slug" >"$_HARNESS_FIXTURE_DIR/approve.log" 2>&1; then
+      _fail "approve owned $kind fixture"
+      finish
+    fi
+    if ! cs routine get "$slug" --format json | jq -e --arg id "$id" '.id == $id and .status == "active"' >/dev/null; then
+      _fail "owned fixture approval readback"
+      finish
+    fi
+  elif [[ "$status" != active ]]; then
+    _fail "owned fixture is active" "unexpected status=$status"
+    finish
+  fi
   printf -v "$variable" '%s' "$slug"
 }

@@ -93,20 +93,22 @@ done
 
 if [[ -n "$token" && "$token" != "null" ]]; then
   _pass "approval-gate-demo created a pending waitpoint"
+  approval_run_id="$(cs routine waitpoints list --format json | jq -er --arg token "$token" '.[] | select(.token == $token) | .pipeline_run_id')"
+  if [[ -z "$approval_run_id" ]]; then
+    _fail "owned waitpoint identifies its run"
+    finish
+  fi
   if cs routine waitpoints approve "$token" --comment "harness LGTM" >/dev/null 2>&1; then
     _pass "waitpoint approved via CLI"
   else
     _fail "waitpoint approved via CLI" "approve call failed for token $token"
   fi
   wait "$run_pid" 2>/dev/null
-  if have jq; then
-    st="$(cs routine records "$APPROVAL_ROUTINE" --json --limit 1 2>/dev/null | jq -r '.[0].status // empty')"
-    if [[ "$st" == "completed" ]]; then
-      _pass "run resumed and completed after approval"
-    else
-      _fail "run completion after approval" "latest status=$st"
-    fi
-  fi
+  # Approval schedules durable resume asynchronously. Check this exact run's
+  # terminal status with a bounded wait, rather than sampling 'waiting' once.
+  poll_until "exact approved run resumed and completed" 30 \
+    "cs routine records '$APPROVAL_ROUTINE' --json --limit 1 | jq -e --arg id '$approval_run_id' 'any(.[]; .id == \$id and .status == \"completed\")'"
+
 else
   _fail "HITL approval gate" "no queryable waitpoint within ${wp_window}s — check 'routine waitpoints list --format json' output"
   kill "$run_pid" 2>/dev/null  # don't let a blocked run hang the suite

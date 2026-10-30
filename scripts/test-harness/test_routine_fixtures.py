@@ -27,7 +27,9 @@ cs() {
         return 0
       fi
       touch "$TMPDIR/reads"
-      printf '{"id":"owned-id","slug":"%s"}\n' "$3"
+      status=active
+      [[ "$MODE" != proposed || -f "$TMPDIR/approved" ]] || status=proposed
+      printf '{"id":"owned-id","slug":"%s","status":"%s"}\n' "$3" "$status"
     else
       echo 'API error (404): pipeline not found' >&2
       return 1
@@ -40,6 +42,8 @@ cs() {
     else
       printf '{"id":"owned-id","slug":"%s"}\n' "$4"
     fi
+  elif [[ "$1 $2" == "routine approve" ]]; then
+    touch "$TMPDIR/approved"
   elif [[ "$1 $2" == "routine delete" ]]; then
     [[ "$FAIL_DELETE" == 0 ]] || return 1
     rm "$TMPDIR/saved"
@@ -50,7 +54,7 @@ source "$1/routine-fixtures.sh"
             result = subprocess.run(["bash", "-c", shell, "fixture-test", str(HERE)], env=env, capture_output=True, text=True)
             log = Path(env["FIXTURE_LOG"])
             calls = log.read_text().splitlines() if log.exists() else []
-            leftovers = [p.name for p in Path(directory).iterdir() if p.name not in {"calls", "saved", "reads"}]
+            leftovers = [p.name for p in Path(directory).iterdir() if p.name not in {"calls", "saved", "reads", "approved"}]
             return result, calls, leftovers
 
     def test_success_removes_only_owned_unique_slug(self):
@@ -106,6 +110,14 @@ source "$1/routine-fixtures.sh"
         result, calls, leftovers = self.run_fixture('harness_fixture probe ops OWNED\n', mode="human-save")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(calls[-1].startswith("routine delete "))
+        self.assertEqual(leftovers, [])
+
+    def test_proposed_fixture_uses_normal_approval_and_identity_readback(self):
+        result, calls, leftovers = self.run_fixture('harness_fixture probe ops OWNED\necho "$OWNED"\n', mode="proposed")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        slug = result.stdout.strip()
+        self.assertIn("routine approve " + slug, calls)
+        self.assertEqual(calls[-1], "routine delete " + slug + " --yes")
         self.assertEqual(leftovers, [])
 
 if __name__ == "__main__":
