@@ -13,6 +13,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
 
+- **Home's Artifacts card opens Artifacts.** With the Artifacts library on, *All artifacts* goes to `/artifacts` and each recent item to its own `/artifacts/<id>` address instead of Pages. Without the flag nothing changes.
+
 - **Design System artifacts get an opt-in token preview.** An artifact project with a `design-system.json` file (colors, typography, spacing, radii and an optional component list) opens as a read-only sheet of swatches, type scale, spacing and radii when the web UI is built with `NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM=true`. Agents and the CLI create and version it through the existing `page artifact create/publish/restore` commands; no new endpoint or storage. Default off.
 
 - ⚠️ **Behaviour change: notification channel URLs are checked more strictly.** The delivery library (shoutrrr 0.22.1) rejects a channel URL that could never send when a channel is created from the provider form or tested, and at send time for raw URLs: Gotify needs a real application token (15 characters starting with `A`, or a Gotify 3 `gtfya.` token), Google Chat needs both `key` and `token`, Mattermost needs a host, and ntfy topics follow ntfy's naming rule. Saved channels are never checked at startup or when listed; a Google Chat channel saved without `key` or `token` now reports a delivery error. SQLite driver updated to modernc.org/sqlite 1.61.0.
@@ -22,6 +24,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **An agent runtime is no longer held busy by another crew's interrupted run.** A run recovered without a container but recorded for a different crew no longer blocks refreshing this crew's runtime; a run with an unknown crew still blocks it (#4486).
 
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.
+
+- **Artifacts is the single home for a page and its Word or Sheet.** Behind the same two flags, `/pages/<slug>` resolves the page's immutable ID and opens `/artifacts/<id>` in the same workspace for a Page, a native Word or Sheet or a versioned project. Reference links, pinned versions, edit addresses, restricted members and any page whose ID cannot be resolved stay on Pages. A native Word or Sheet is edited inside its Artifacts detail in the single Craft editor with its lease (who edits now, ask for the handoff) when the server confirms the editor is available; otherwise the detail keeps its lock bar and saved preview. Off by default.
 
 - **Shared artifact commenters can post feedback in the preview.** Comments stay anchored to the shared version without granting editing or agent execution rights; changing accounts, workspace or permissions retires an unfinished selection.
 
