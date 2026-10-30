@@ -39,6 +39,11 @@ set to `true` in the server environment:
 | `page artifact data …` | `artifact_projects` and `artifact_dashboard_data` | `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED` |
 | `page artifact slides`, `page artifact export-pdf` | `artifact_projects` and `artifact_slides` | `CREWSHIP_ARTIFACT_SLIDES_ENABLED` |
 
+The `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED` and
+`CREWSHIP_ARTIFACT_SLIDES_ENABLED` switches replace only the
+`artifact_dashboard_data` and `artifact_slides` flags. Data and Slides still
+need `artifact_projects` (or `CREWSHIP_ARTIFACT_PROJECTS_ENABLED`) to be on.
+
 ```bash
 crewship feature-flag enable artifact_projects
 crewship feature-flag enable artifact_dashboard_data
@@ -202,8 +207,9 @@ jq '{entrypoint: .manifest.entrypoint, files: .manifest.files, message: "Shorter
 crewship page artifact publish quarterly-review \
   --base-version "$(jq -r '.latest_version' snapshot.json)" --file manifest.json
 ```
- A user with an explicit Edit
-grant can publish under their own identity; owner history stays private.
+
+A user with an explicit Edit grant can publish under their own identity;
+owner history stays private.
 
 ### `crewship page artifact get <slug>`
 
