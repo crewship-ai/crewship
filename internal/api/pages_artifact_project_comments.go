@@ -335,6 +335,16 @@ func (h *PageHandler) CreateArtifactProjectComment(w http.ResponseWriter, r *htt
 	}
 	out := artifactProjectComment{ID: generateCUID(), Version: p.Version, Path: p.Path, Selector: p.Selector, Quote: p.Quote, Text: p.Text, Replies: []artifactProjectReply{}, CreatedAt: tsformat.Format(h.clock.Now()), Status: "comment"}
 	err := h.artifactProjectCommentTxAuthorized(r, k, h.artifactProjectCommentAuthority(r, k), func(ctx context.Context, tx *sql.Tx, actor string) error {
+		// A Comment grant is feedback only. Queuing an agent task needs Edit in
+		// this same fenced transaction, as Design comments do.
+		if p.SendToAgent {
+			if _, err := h.artifactProjectAuthority(r, k, true, false)(ctx, tx); err != nil {
+				if errors.Is(err, artifacts.ErrVersionNotFound) {
+					return errArtifactProjectAccess
+				}
+				return err
+			}
+		}
 		head, err := h.artifactCommentVersion(ctx, tx, k, actor)
 		if err != nil {
 			return err
@@ -420,6 +430,19 @@ func (h *PageHandler) ReplyArtifactProjectComment(w http.ResponseWriter, r *http
 				return e
 			}
 			if target != "" && target != r.PathValue("commentId") {
+				return errArtifactProjectAccess
+			}
+			// A run with no comment target may answer only with a version it
+			// published below; it cannot close feedback as needs_clarification.
+			if target == "" && p.NeedsClarification {
+				return errArtifactProjectAccess
+			}
+			// No run answers a task another run holds.
+			var heldByOther bool
+			if e := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM artifact_project_comment_tasks WHERE comment_id=? AND active_run_id IS NOT NULL AND active_run_id<>?)`, r.PathValue("commentId"), a.RunID).Scan(&heldByOther); e != nil {
+				return e
+			}
+			if heldByOther {
 				return errArtifactProjectAccess
 			}
 			if !p.NeedsClarification {

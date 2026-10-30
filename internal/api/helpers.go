@@ -375,7 +375,21 @@ const (
 	errCodeAgentSlugTaken    = "agent_slug_taken"
 	errCodeAgentSlugReserved = "agent_slug_reserved"
 	errCodeCrewLeadExists    = "crew_lead_exists"
+	// errCodeBodyTooLarge marks a 413 for a request body over the reader's
+	// limit, so a client can tell "shrink it" from "fix the JSON".
+	errCodeBodyTooLarge = "body_too_large"
 )
+
+// replyJSONBodyError answers a failed request-body read or decode: 413 with
+// errCodeBodyTooLarge when the body was over its limit (errBodyTooLarge),
+// otherwise 400 with the caller's existing sentence (invalidMsg).
+func replyJSONBodyError(w http.ResponseWriter, err error, invalidMsg string) {
+	if errors.Is(err, errBodyTooLarge) {
+		replyErrorCode(w, http.StatusRequestEntityTooLarge, "Request body too large", errCodeBodyTooLarge, "")
+		return
+	}
+	replyError(w, http.StatusBadRequest, invalidMsg)
+}
 
 // replyErrorCode is replyError plus an optional machine code and the request
 // field the refusal concerns: {"error": msg, "code": code, "field": field}.
@@ -426,13 +440,47 @@ func replyInternalError(w http.ResponseWriter, logger *slog.Logger, msg string, 
 	replyError(w, http.StatusInternalServerError, "Internal server error")
 }
 
-// readJSON decodes the request body (up to 1 MB) into v.
+// maxJSONBodyBytes is readJSON's ceiling on a request body.
+const maxJSONBodyBytes = 1 << 20 // 1 MiB
+
+// readJSON decodes the request body (up to 1 MiB) into v. A longer body is
+// errBodyTooLarge rather than a truncated prefix; answer it with
+// replyJSONBodyError to give the client a 413.
 func readJSON(r *http.Request, v interface{}) error {
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
+	return readJSONBounded(r, v, maxJSONBodyBytes)
+}
+
+// readJSONBounded decodes a request body of at most max bytes into v.
+//
+// Reading through a bare io.LimitReader and handing the prefix to
+// json.Unmarshal would turn an oversized body into "invalid JSON", or, when
+// the cut falls in trailing whitespace, into a successfully parsed prefix.
+// "Too big" is the likeliest failure for a large payload and the caller can
+// act on it, so it is errBodyTooLarge (and, via replyJSONBodyError, a 413).
+func readJSONBounded(r *http.Request, v interface{}, max int64) error {
+	body, err := readBodyLimit(r, max)
 	if err != nil {
 		return err
 	}
 	return json.Unmarshal(body, v)
+}
+
+// readBodyLimit reads a request body of at most max bytes. A longer body is
+// errBodyTooLarge, including one cut short by the router's BodyCap
+// http.MaxBytesReader (*http.MaxBytesError), which is the same condition.
+func readBodyLimit(r *http.Request, max int64) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, max+1))
+	if err != nil {
+		var maxBytes *http.MaxBytesError
+		if errors.As(err, &maxBytes) {
+			return nil, errBodyTooLarge
+		}
+		return nil, err
+	}
+	if int64(len(body)) > max {
+		return nil, errBodyTooLarge
+	}
+	return body, nil
 }
 
 // requireRole checks the request's actor role against canRole. On failure it

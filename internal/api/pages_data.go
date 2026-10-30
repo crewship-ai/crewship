@@ -67,6 +67,12 @@ type pageRejection struct {
 	Kind     string         `json:"kind"`
 	Detail   map[string]any `json:"detail,omitempty"`
 	Message  string         `json:"message,omitempty"`
+	// Error repeats Message under the key every generic client reads
+	// (lib/api-error.ts apiErrorMessage, internal/cli CheckError), so a
+	// refusal shows its sentence instead of "Request failed (HTTP 422)" or
+	// raw JSON. Additive: the fields above are unchanged. writeRejection
+	// sets it; callers fill Message only.
+	Error string `json:"error,omitempty"`
 }
 
 // writeRejection sends the rejection as 422 Unprocessable Entity. 422 and not
@@ -75,6 +81,7 @@ type pageRejection struct {
 // what a producer script branches on (internal/cli/errors.go).
 func writeRejection(w http.ResponseWriter, rej pageRejection) {
 	rej.Rejected = true
+	rej.Error = rej.Message
 	writeJSON(w, http.StatusUnprocessableEntity, rej)
 }
 
