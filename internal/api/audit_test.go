@@ -265,7 +265,7 @@ func TestAudit_List_DefaultLimitClamped(t *testing.T) {
 	userID := seedTestUser(t, db)
 	wsID := seedTestWorkspace(t, db, userID)
 
-	// limit > 100 should clamp to default 50
+	// limit > 100 clamps down to the max (100), not back to the default 50
 	req := httptest.NewRequest("GET", "/api/v1/audit?limit=99999", nil)
 	ctx := withWorkspace(req.Context(), wsID, "OWNER")
 	req = req.WithContext(ctx)
@@ -276,7 +276,7 @@ func TestAudit_List_DefaultLimitClamped(t *testing.T) {
 	}
 	var resp auditListResponse
 	json.Unmarshal(rr.Body.Bytes(), &resp)
-	if resp.Pagination.Limit != 50 {
-		t.Errorf("limit = %d, want clamped to 50", resp.Pagination.Limit)
+	if resp.Pagination.Limit != 100 {
+		t.Errorf("limit = %d, want clamped to 100", resp.Pagination.Limit)
 	}
 }

@@ -1840,6 +1840,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Pages demo setup leaves time for a full compiler run and publication; invalid container resource limits no longer produce healthy snapshots.
 - **Pages restart verification** (#2472) — require the real CLI publication/restart scenario in the Docker CI lane and use a runtime origin accepted by current configuration validation.
 - **Page application history** (#2472) — use a fixed bounded allocation and verify zero, negative and oversized pagination limits are rejected.
+
+- **List requests above the pagination cap return the maximum allowed page.** Keeper logs, checkpoints, approvals, eval runs, inbox, top spenders, runs, audit logs and persona history now clamp an oversized limit to their existing ceiling instead of falling back to a smaller default. Their effective pagination parameters remain documented in OpenAPI.
+
 - **Deferred routine dispatch** (#2472) — preserve the scheduled occurrence when loading due runs, so rearming a one-time row receives a new dispatch identity instead of replaying the old run.
 
 - Routines waiting for a decision resume their captured recipe after publication or restart, preserving the original form and effective step settings.
@@ -7373,6 +7376,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **GDPR export and erase failures show the server's reason.** The admin user-data toasts now show the API's error sentence (or "Export failed. Nothing was downloaded." / "Erase failed. No data was removed.") instead of a raw status code and response body.
 
 - **`crewship routine schedules now` names an unknown schedule instead of a missing endpoint.** An id that is not a schedule in this workspace now prints the server's `API error (404): schedule not found` and exits 3 (not found); it used to print "force-fire endpoint unavailable on this server" and exit 1. The "endpoint unavailable" hint remains for a server that has no force-fire route. ⚠️ **Behaviour change:** scripts that matched the old message or exit code 1 for an unknown id need updating.
+
 
 ## [1.0.0-rc.1] — 2026-07-12
 
