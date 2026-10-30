@@ -1012,6 +1012,11 @@ Examples:
 var issueBulkUpdateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Bulk-update many issues (PATCH /api/v1/issues/bulk)",
+	Long: `Apply the same patch to up to 100 issues. Requires the MANAGER role or
+higher. IDs the server cannot apply (unknown, invalid status transition,
+assignee outside the workspace) are skipped and only counted.`,
+	Example: `  crewship issue bulk update --ids <id1>,<id2> --priority high
+  crewship issue bulk update --ids <id1>,<id2> --labels <label-id> --format json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -1105,8 +1110,9 @@ var issueBulkUpdateCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
-		cli.PrintSuccess(fmt.Sprintf("Bulk update applied to %d/%d issue(s).", out.Updated, len(clean)))
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(out, func() {
+			cli.PrintSuccess(fmt.Sprintf("Bulk update applied to %d/%d issue(s).", out.Updated, len(clean)))
+		})
 	},
 }
 

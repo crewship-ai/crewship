@@ -149,7 +149,7 @@ func (p *InstanceBackupPlansHandler) PutSettings(w http.ResponseWriter, r *http.
 	}
 	body, err := readBody(r)
 	if err != nil {
-		replyError(w, http.StatusBadRequest, "invalid request body")
+		replyJSONBodyError(w, err, "invalid request body")
 		return
 	}
 	next := before

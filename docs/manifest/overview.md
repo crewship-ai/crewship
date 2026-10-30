@@ -68,7 +68,7 @@ spec:
 
 | Kind | What it is | Lifecycle | Doc |
 |---|---|---|---|
-| [`FeatureFlag`](/manifest/feature_flag) | Toggle experimental features (instance-default + per-workspace override) | full CRUD | [feature_flag.md](/manifest/feature_flag) |
+| [`FeatureFlag`](/manifest/feature_flag) | Toggle experimental features (instance-default + per-workspace override) | create + override only ([limitations](/manifest/feature_flag)) | [feature_flag.md](/manifest/feature_flag) |
 | [`InstanceSetting`](/manifest/instance_setting) | Key/value config (SMTP, branding, …) — admin-only | full CRUD | [instance_setting.md](/manifest/instance_setting) |
 
 ## Foreign-key references
@@ -143,7 +143,7 @@ Every kind also has a per-entity CLI surface for one-off operations (no manifest
 | SavedView | `crewship saved-view list/delete` |
 | Page | `crewship page list/get/create/update/delete/set/grant/revoke` |
 | WorkflowTemplate | `crewship workflow list/get/create/delete` |
-| FeatureFlag | `crewship feature-flag list/enable/disable/inherit` |
+| FeatureFlag | `crewship feature-flag list/create/update/delete/enable/disable/inherit` |
 | InstanceSetting | `crewship instance settings list/get/set/delete` |
 | Hook | `crewship hooks list/enable/disable` |
 | Recipe | _(manifest-only — install via `crewship apply`)_ |

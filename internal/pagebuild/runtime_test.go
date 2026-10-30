@@ -120,3 +120,41 @@ func TestRuntimeSerializesDefaultPortsLikeBrowser(t *testing.T) {
 		}
 	}
 }
+
+func TestLoopbackHost(t *testing.T) {
+	for host, want := range map[string]bool{
+		"localhost": true, "LOCALHOST:8080": true, "127.0.0.1:8080": true, "127.1.2.3": true,
+		"[::1]:8080": true, "::1": true, "crewship.example.com": false, "localhost.example.com:8080": false,
+		"192.168.1.10:8080": false, "0.0.0.0:8080": false, "": false,
+	} {
+		if got := LoopbackHost(host); got != want {
+			t.Errorf("LoopbackHost(%q) = %v, want %v", host, got, want)
+		}
+	}
+}
+
+func TestDerivedRuntimeApplies(t *testing.T) {
+	for _, tc := range []struct {
+		host, header string
+		want         bool
+	}{
+		{host: "localhost:8080", want: true},
+		{host: "127.0.0.1:8080", want: true},
+		{host: "crewship.example.com", want: false},
+		{host: "localhost:8080", header: "X-Forwarded-For", want: false},
+		{host: "localhost:8080", header: "x-forwarded-host", want: false},
+		{host: "localhost:8080", header: "X-Forwarded-Proto", want: false},
+		{host: "localhost:8080", header: "Forwarded", want: false},
+		{host: "localhost:8080", header: "X-Real-IP", want: false},
+		{host: "localhost:8080", header: "X-Request-Id", want: true},
+	} {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Host = tc.host
+		if tc.header != "" {
+			r.Header[tc.header] = []string{"203.0.113.7"}
+		}
+		if got := DerivedRuntimeApplies(r); got != tc.want {
+			t.Errorf("host %s header %q: %v, want %v", tc.host, tc.header, got, tc.want)
+		}
+	}
+}
