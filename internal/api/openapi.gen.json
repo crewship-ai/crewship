@@ -14040,6 +14040,16 @@
           "operation_inflight": {
             "type": "boolean"
           },
+          "outcome": {
+            "enum": [
+              "saved",
+              "proposal"
+            ],
+            "type": "string"
+          },
+          "proposal_id": {
+            "type": "string"
+          },
           "run_id": {
             "type": "string"
           },
@@ -14094,6 +14104,7 @@
               "acquire",
               "renew",
               "apply",
+              "propose",
               "release"
             ],
             "type": "string"

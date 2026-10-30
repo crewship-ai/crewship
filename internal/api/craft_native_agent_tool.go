@@ -43,6 +43,48 @@ type craftNativeAgentToolState struct {
 	currentAttempt   *craftNativeAgentToolAttempt
 	lease            mooring.EditLease
 	requests         map[string]*craftNativeAgentToolAttempt
+	// proposals maps this run's propose request IDs to the proposal each one
+	// recorded; proposal is the latest. A replay of another run's request ID
+	// is never entered here.
+	proposals map[string]string
+	proposal  *craftNativeAgentProposalRecord
+}
+
+// craftNativeAgentProposalRecord binds a proposal to the run session that
+// recorded it, the way a save receipt carries its session.
+type craftNativeAgentProposalRecord struct{ ID, SessionID string }
+
+// craftNativeAgentProposalOutcome copies this run's latest own proposal. Like
+// craftNativeAgentCompletion it reports uncertainty instead of waiting for an
+// in-flight tool call.
+func craftNativeAgentProposalOutcome(e *craftNativeAgentEntry) (*craftNativeAgentProposalRecord, bool) {
+	if e == nil || !e.callMu.TryLock() {
+		return nil, true
+	}
+	defer e.callMu.Unlock()
+	if e.tool == nil || e.tool.proposal == nil {
+		return nil, false
+	}
+	copy := *e.tool.proposal
+	return &copy, false
+}
+
+// rememberNativeAgentProposal records a proposal as this run's own only when
+// this call created it, or when it is this run's exact retry of a request it
+// already recorded. The store returns another run's proposal for a reused
+// request ID; that one must not become this task's outcome.
+func rememberNativeAgentProposal(e *craftNativeAgentEntry, requestID string, p mooring.NativeProposal) {
+	if p.ID == "" {
+		return
+	}
+	if p.Replayed && e.tool.proposals[requestID] != p.ID {
+		return
+	}
+	if e.tool.proposals == nil {
+		e.tool.proposals = make(map[string]string)
+	}
+	e.tool.proposals[requestID] = p.ID
+	e.tool.proposal = &craftNativeAgentProposalRecord{ID: p.ID, SessionID: craftNativeAgentPrincipal(e).SessionID}
 }
 
 // Runtime completion observes a copy, never mutates tool authority or receipts.
@@ -427,7 +469,12 @@ func (m *craftNativeAgentManager) proposeTool(ctx context.Context, e *craftNativ
 	if err = m.toolAuthority(ctx, e); err != nil {
 		return mooring.NativeProposal{}, err
 	}
-	return store.Propose(ctx, e.grant.Scope, base, input.RequestID, input.Summary, candidate)
+	proposal, err := store.Propose(ctx, e.grant.Scope, base, input.RequestID, input.Summary, candidate)
+	if err != nil {
+		return mooring.NativeProposal{}, err
+	}
+	rememberNativeAgentProposal(e, input.RequestID, proposal)
+	return proposal, nil
 }
 
 func knownNativeAgentRefusal(err error) bool {
