@@ -2008,13 +2008,18 @@ body {
      grow a box. Checkboxes, radios and switches keep their drawn size and
      get an invisible 44px hit area instead (switch: components/ui/switch).
      Links count too: min-height has no effect on an inline text link, so only
-     links laid out as boxes — card links, list rows — grow. */
+     links laid out as boxes — card links, list rows — grow. A <summary>
+     toggles its <details>, and Radix checkbox/radio menu items carry
+     menuitemcheckbox/menuitemradio, which [role="menuitem"] does not match. */
   :where(
     a[href],
     button,
+    summary,
     [role="button"],
     [role="tab"],
     [role="menuitem"],
+    [role="menuitemcheckbox"],
+    [role="menuitemradio"],
     [role="option"],
     [role="combobox"],
     select,
