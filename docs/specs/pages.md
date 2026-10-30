@@ -1443,7 +1443,9 @@ must drain. Failed capture, unavailable storage, and an over-limit Design draft
 keep the live model mounted behind recovery UI and block navigation. Explicit
 sign-out warns before deleting persistent recovery copies and deletes only the
 revisions covered by that confirmation. Later writes remain for recovery.
-Recovering a draft never automatically replays a server mutation.
+Recovery does not replay native snapshot saves, custody operations or agent
+dispatch. Design resumes standard CRDT synchronization only after fresh
+same-person Edit admission; read-only viewers do not restore a writer canvas.
 
 ### Design canvases (opt-in)
 
