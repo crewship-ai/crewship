@@ -50,7 +50,11 @@ func TestAssignmentDirectDSLRetainsHumanOriginAtRealHandler(t *testing.T) {
 	if err := f.h.db.QueryRow(`SELECT COALESCE(chat_origin_id,''),status FROM assignments WHERE task='Delegated DSL task'`).Scan(&origin, &status); err != nil {
 		t.Fatal(err)
 	}
-	if expected == "" || origin != expected || status != "QUEUED" {
+	var accepted int
+	if err := f.h.db.QueryRow(`SELECT COUNT(*) FROM work_items w JOIN assignments a ON a.id=w.domain_id WHERE w.source='assignment' AND a.task='Delegated DSL task'`).Scan(&accepted); err != nil || accepted != 1 {
+		t.Fatalf("missing durable DSL assignment work: count=%d err=%v", accepted, err)
+	}
+	if expected == "" || origin != expected || status != "PENDING" {
 		t.Fatalf("DSL child lost authority origin=%q expected=%q status=%s", origin, expected, status)
 	}
 }
