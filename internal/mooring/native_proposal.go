@@ -21,6 +21,17 @@ var ErrNativeProposalDecided = errors.New("native Craft proposal already decided
 // may hold a full native document, so a busy human is never flooded.
 const MaxOpenNativeProposals = 16
 
+// SQLite can obtain a BLOB's length without loading its bytes. The TEXT
+// fallback preserves exact UTF-8 byte accounting for old restored candidates.
+const nativeProposalBytesQuery = `SELECT coalesce(sum(CASE WHEN typeof(content)='blob' THEN length(content) ELSE length(CAST(content AS BLOB)) END+length(CAST(summary AS BLOB))+length(CAST(author_actor_id AS BLOB))+length(CAST(request_id AS BLOB))+length(id)+length(engine_pin)+length(content_hash)+length(created_at)+512),0) FROM craft_native_proposals WHERE workspace_id=? AND page_id=?`
+
+func nativeProposalBytes(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, k EditLeaseScope) (used int64, err error) {
+	err = q.QueryRowContext(ctx, nativeProposalBytesQuery, k.WorkspaceID, k.ArtifactID).Scan(&used)
+	return
+}
+
 // nativeProposalSuperseded records that no person decided a stale proposal:
 // the document moved past its base before anyone accepted it.
 const nativeProposalSuperseded = "system:superseded"
@@ -124,6 +135,13 @@ func (s *NativeStore) Propose(ctx context.Context, k EditLeaseScope, base int64,
 		if _, err = tx.ExecContext(ctx, `INSERT INTO craft_native_proposals(id,page_id,workspace_id,application_id,engine_pin,author_actor_id,request_id,base_version,summary,content_hash,content) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, k.ArtifactID, k.WorkspaceID, s.config.Application, s.EnginePin(), actor, requestID, base, summary, hash, b); err != nil {
 			return "", err
 		}
+		used, err := nativeProposalBytes(ctx, tx, k)
+		if err != nil {
+			return "", err
+		}
+		if used > s.config.MaxProposalBytes {
+			return "", artifacts.ErrVersionQuota
+		}
 		out, err = scanNativeProposal(tx.QueryRowContext(ctx, `SELECT `+nativeProposalColumns+` FROM craft_native_proposals WHERE id=?`, id))
 		return actor, err
 	})
@@ -133,8 +151,9 @@ func (s *NativeStore) Propose(ctx context.Context, k EditLeaseScope, base int64,
 	return out, nil
 }
 
-// Proposals lists this document's proposals, newest first, under current read
-// authority. Candidate bytes are only returned by ProposalContent.
+// Proposals lists at most 50 proposals under current read authority. Open
+// proposals come first so decided history cannot hide work awaiting a human;
+// each group is newest first. Candidate bytes are only in ProposalContent.
 func (s *NativeStore) Proposals(ctx context.Context, k EditLeaseScope) ([]NativeProposal, error) {
 	if err := s.ready(); err != nil {
 		return nil, err
@@ -148,7 +167,7 @@ func (s *NativeStore) Proposals(ctx context.Context, k EditLeaseScope) ([]Native
 			return actor, err
 		}
 		listed = true
-		rows, err := tx.QueryContext(ctx, `SELECT `+nativeProposalColumns+` FROM craft_native_proposals WHERE page_id=? AND workspace_id=? AND engine_pin=? ORDER BY created_at DESC, id DESC LIMIT 50`, k.ArtifactID, k.WorkspaceID, s.EnginePin())
+		rows, err := tx.QueryContext(ctx, `SELECT `+nativeProposalColumns+` FROM craft_native_proposals WHERE page_id=? AND workspace_id=? AND engine_pin=? ORDER BY (state='open') DESC, created_at DESC, id DESC LIMIT 50`, k.ArtifactID, k.WorkspaceID, s.EnginePin())
 		if err != nil {
 			return "", err
 		}
