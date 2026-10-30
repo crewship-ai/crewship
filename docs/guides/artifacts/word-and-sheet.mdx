@@ -60,15 +60,24 @@ offers **Word** and **Sheet**. It opens at `/pages` on your Crewship address
 
 ## Open the editor
 
-1. In **Artifacts**, open the Word document or Sheet.
-2. For a Word document, the detail view shows the saved version read-only. With
-   the lock bar enabled, a bar above it shows the current state:
-   - **Free** · *nobody is editing*, with an **Edit** button;
-   - **Editing: you** · *in the editor*, with **Open in new tab**;
-   - **Editing: *name*** · *you see a read-only preview*, with **Request edit**.
-     When an agent holds the lease, its name is followed by **(agent)**.
-3. Choose **Edit** (it opens the editor in a new tab) or **Open in Pages** (it
-   opens the same editor in this tab). Without the lock bar, use **Open in Pages**.
+Open the native Word document or Sheet in **Artifacts**. With both build flags
+`NEXT_PUBLIC_ARTIFACTS_LIBRARY` and `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` enabled,
+the Craft editor opens inside the detail when the server confirms editing is
+available. Follow [Take over editing](#take-over-editing) in that editor. In this
+mode there is no **Open in Pages** button, and `/pages/<slug>` leads back to
+the artifact detail. Readers without edit access get the shared preview.
+
+Outside that mode, Word detail shows the saved version read-only. With the
+lock bar enabled, a bar above it shows:
+
+- **Free** · *nobody is editing*, with **Edit**;
+- **Editing: you** · *in the editor*, with **Open in new tab**;
+- **Editing: *name*** · *you see a read-only preview*, with **Request edit**.
+  When an agent holds the lease, its name is followed by **(agent)**.
+
+Choose **Edit** to open an editor in a new tab, or **Open in Pages** to open
+one in this tab. Without the lock bar, or for a Sheet outside the inline mode,
+use **Open in Pages**.
 
 A document result in chat has the same bar in its side panel. There, **Edit**
 also opens the editor in a new tab. Chat never takes the lease itself.
