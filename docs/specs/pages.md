@@ -1463,11 +1463,8 @@ changes supplied fields of a stable node; new nodes need complete geometry:
 
 Delete uses `{"op":"delete","id":"cart"}`; reorder uses
 `{"op":"reorder","order":["cart"]}`. Keep existing IDs when changing colors,
-text or geometry. Each successful `apply` also publishes a new retained version
-and returns it as `version`. A snapshot saves the current live canvas, including
-browser edits over the websocket, as an ordinary retained artifact version;
-restore creates a new version and preserves history. None of these moves the
-shared version.
+text or geometry. A snapshot creates an ordinary retained artifact version;
+restore creates a new version and preserves history.
 
 The corresponding agent tools are `design_get`, `design_apply`,
 `design_snapshot`, `design_versions` and `design_restore`. CLI invocations with a
