@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Routine saves honor machine output formats.** `routine save --format json|yaml|ndjson` returns the saved routine identity and trigger metadata without progress text; the human receipt stays unchanged (#4621).
+
 - **Agent peer-card errors no longer expose server internals.** When reading or deleting an agent's peer cards fails inside the server, the API now answers `Internal server error` and logs the cause, instead of returning database driver text or a host file path.
 - **Artifact MCP tools advertise the inputs they accept.** Tool descriptions now name the Slides/data flag dependencies and explain mandate, version conflict and quota behavior; version schemas require the positive values already enforced by the host.
 
