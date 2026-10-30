@@ -274,7 +274,11 @@ func TestAcceptanceIssueSubresources(t *testing.T) {
 	}
 	run("sub-viewer", "csubresourcews0000000001", 403, base+"/attachments", "issue", "attach", "SUB-1", "fixture.log")
 	var att map[string]any
-	decode(owner(201, base+"/attachments", "issue", "attach", "SUB-1", "fixture.log", "--format", "json"), &att)
+	attached := owner(201, base+"/attachments", "issue", "attach", "SUB-1", "fixture.log", "--format", "json")
+	if attached.stderr != "" {
+		t.Fatalf("attach --format json wrote to stderr (no receipt expected): %q", attached.stderr)
+	}
+	decode(attached, &att)
 	attID, _ := att["id"].(string)
 	if attID == "" || att["filename"] != "fixture.log" || att["size_bytes"] != float64(len(payload)) {
 		t.Fatalf("attach json = %v", att)
@@ -325,8 +329,9 @@ func TestAcceptanceIssueSubresources(t *testing.T) {
 // needs a provider fetch, and no GitHub/GitLab is reachable from a test. A
 // stub server stands in for the Crewship API (the provider call happens
 // server-side, so the CLI contract is identical) and the built binary must
-// put the link document on STDOUT under -f json while the human receipt
-// stays on stderr.
+// put the link document alone on STDOUT under -f json with nothing on
+// stderr (AutoHuman skips the receipt for machine formats), and put the
+// human receipt on stderr only in the default human format.
 func TestAcceptanceIssueSubresources_LinkJSON(t *testing.T) {
 	link := `{"id":"lnk_1","provider":"GITHUB","host":"github.com","owner":"acme","repo":"thing","number":8,` +
 		`"url":"https://github.com/acme/thing/pull/8","title":"Stub PR","state":"MERGED"}`
@@ -366,7 +371,10 @@ func TestAcceptanceIssueSubresources_LinkJSON(t *testing.T) {
 		{"issue", "link", "SUB-1", "https://github.com/acme/thing/pull/8"},
 		{"issue", "relink", "SUB-1", "lnk_1"},
 	} {
-		stdout, _ := run(append(args, "-f", "json")...)
+		stdout, jsonStderr := run(append(args, "-f", "json")...)
+		if jsonStderr != "" {
+			t.Fatalf("%v -f json wrote to stderr (no receipt expected): %q", args, jsonStderr)
+		}
 		var got map[string]any
 		if err := json.Unmarshal([]byte(stdout), &got); err != nil {
 			t.Fatalf("%v -f json stdout is not JSON: %v\n%q", args, err, stdout)

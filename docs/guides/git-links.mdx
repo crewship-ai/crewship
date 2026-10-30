@@ -128,10 +128,11 @@ Each maps to one route under
 `POST …/{linkId}/refresh`, `DELETE …/{linkId}`). Attaching, refreshing and
 removing need **MANAGER or above**; listing needs any workspace member.
 
-With `-f json`, `issue link` and `issue relink` print the stored link on stdout
-(the same fields `issue links -f json` emits) and keep the human receipt on
-stderr, so a script can take the new link's `id` straight from
-`crewship issue link ENG-4 <url> -f json | jq -r .id`.
+With `-f json`, `issue link` and `issue relink` print only the stored link on
+stdout (the same fields `issue links -f json` emits) and no receipt at all, so a
+script can take the new link's `id` straight from
+`crewship issue link ENG-4 <url> -f json | jq -r .id`. The one-line human
+receipt is printed, on stderr, only in the default human format.
 
 State is **not** polled. A link shows what the last successful fetch returned,
 with `last_synced_at` saying when that was; `relink` is how you ask again.
