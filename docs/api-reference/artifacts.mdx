@@ -114,7 +114,7 @@ nothing in history is deleted. Each family guards its writes differently.
   readers get the shared version. Design’s REST `get` without a `version`
   parameter returns the live canvas to an authorized reader; explicitly
   selecting a retained version restricts a non-editor to the shared version.
-  Its WebSocket read-only connection also receives the shared snapshot.
+  Its read-only WebSocket clients can receive live updates but cannot write.
 - **Dashboard data** is versioned per JSON document. Each write in a batch
   carries `ifVersion` (`0` creates the document), and the batch names the
   project's current `base_version`. One stale `ifVersion` fails the whole batch
