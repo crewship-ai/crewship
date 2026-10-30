@@ -95,6 +95,7 @@ var restrictedAllowedPatterns = []string{
 	"POST /api/v1/chats/{chatId}/restricted-memory",
 	"POST /api/v1/chats/{chatId}/restricted-run",
 	"POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId}",
+	"POST /api/v1/pages/{slug}/draft-key",
 	"POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}",
 	"POST /api/v1/users/me/password",
 	"POST /api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight",
@@ -122,6 +123,7 @@ var restrictedAgentCheckedPatterns = []string{
 var restrictedPrivateCustodyPatterns = []string{
 	"GET /api/v1/pages/{slug}/versions",
 	"GET /api/v1/pages/{slug}/export",
+	"POST /api/v1/pages/{slug}/draft-key",
 	"GET /api/v1/pages/{slug}/document",
 	"GET /api/v1/pages/{slug}/document/checkpoints",
 	"GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}",

@@ -377,6 +377,7 @@ POST /api/v1/pages/{slug}/design/snapshots roleInline
 POST /api/v1/pages/{slug}/document/initialize roleInline
 POST /api/v1/pages/{slug}/document/patch roleInline
 POST /api/v1/pages/{slug}/document/restore roleInline
+POST /api/v1/pages/{slug}/draft-key roleInline
 POST /api/v1/pages/{slug}/mooring/commands roleInline
 POST /api/v1/pages/{slug}/mooring/mandates roleInline
 POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId} roleCreate

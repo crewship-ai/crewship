@@ -58,6 +58,7 @@ var restrictedAgentChatGrant = restrictedRule{check: func(m *AuthMiddleware, sto
 // restricted_route_table_test.go in the same change.
 var restrictedRoutes = map[string]restrictedRule{
 	// Exact live private custody only; ordinary Page authority is not widened.
+	"POST /api/v1/pages/{slug}/draft-key":                        restrictedPrivateCustody,
 	"GET /api/v1/pages/{slug}/versions":                          restrictedPrivateCustody,
 	"GET /api/v1/pages/{slug}/export":                            restrictedPrivateCustody,
 	"GET /api/v1/pages/{slug}/document":                          restrictedPrivateCustody,

@@ -1494,3 +1494,34 @@ crewship page design watch checkout --count 1
 human credential with the normal server-host guard; agent runs use the bounded
 MCP read/apply tools. `get` returns the current canvas, while `versions` lists
 immutable retained snapshots. Sharing never grants a reader edit rights.
+
+### Browser-local draft key recovery
+
+`POST /api/v1/pages/{slug}/draft-key` accepts only an explicit immutable
+`@<page-id>` reference, a current human credential with `pages:read`, and the
+current workspace. It uses the existing per-Page read model, including Design's
+local administrative restriction. Restricted members may use only the existing
+exact private-custodian boundary. No document bytes or server rows are created.
+
+`{"human":"<expected-human-id>","operation":"wrap","key":"<base64 32-byte data key>"}` returns
+`{"envelope":"<versioned encrypted key>"}`. The encrypted payload contains an
+explicit domain, original human ID, workspace ID and Page ID. A missing server
+master key refuses protection; the plaintext-secrets escape hatch does not apply.
+`{"human":"<expected-human-id>","operation":"unwrap","envelope":"..."}` returns `{"key":"..."}` only to
+that original human after a fresh current-read check under the SQL writer fence.
+All responses use `Cache-Control: no-store`. A stale client identity is refused
+before creating a key envelope; an account switch cannot rebind the draft.
+Slugs cannot alias an old draft.
+
+A 403 with `code: "draft_read_revoked"` is positive evidence for deleting that
+Page's local draft. `draft_identity_mismatch`, generic 403, 400 (unavailable or
+invalid envelope), 401 (sign in again), 500 and 503 do not authorize deletion.
+An offline browser cannot immediately learn revocation. This endpoint is the
+key-protection primitive; retention, sealing and explicit sign-out confirmation
+in the browser are separate integration work, not established by this route.
+
+Browser key envelopes are external to the server database. Keep their master-key
+versions resolvable while those drafts may need recovery; a successful database
+re-encryption walk does not migrate browser envelopes or prove old versions safe
+to remove. See [encryption rotation](../security/encryption.mdx).
+

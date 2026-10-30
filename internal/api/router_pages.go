@@ -59,6 +59,8 @@ func (r *Router) registerPageRoutes() {
 	// sweeper has to run against the same clock and journal.
 	r.pages = p
 	r.registerArtifactProjectCreateRoutes()
+	// openapi: responses 200,400,401,403,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/draft-key", roleInline, p.LocalDraftKey)
 	r.registerDesignRoutes()
 	r.registerArtifactProjectVersionRoutes()
 	r.registerArtifactSlidesRoutes()
