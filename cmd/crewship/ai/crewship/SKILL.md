@@ -192,8 +192,9 @@ optional parentId, text, src), `delete` an `id`, or `reorder` with `order`.
 Changes land on the live canvas people are editing, so keep existing node IDs
 and touch only the nodes you mean to change. Finish with `snapshot <slug>
 --message "..."` to save a version; `versions` and `restore --version <n>`
-work as for Projects. When a person sent a Design comment to your run, saving
-a newer snapshot answers it. Creating a Design, `share`, `comment` and `agent`
+work as for Projects. When a person sent a Design comment to your run, the
+`apply` that changes the node records the answer on the version it creates; a
+`snapshot` does not answer it. Creating a Design, `share`, `comment` and `agent`
 (connecting a private chat) are for people.
 
 ### Craft Word and Sheet
