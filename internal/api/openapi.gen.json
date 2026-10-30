@@ -1977,7 +1977,7 @@
             "type": "integer"
           },
           "retention": {
-            "description": "Owner views use keep-all with history usage; non-owner editors use latest-version-only and other readers shared-version-only, with zero usage/limit values. These visibility labels do not prune stored versions.",
+            "description": "Owner views use keep-all with history usage; non-owner editors use latest-version-only and other readers shared-version-only, with zero usage/limit values. These visibility labels do not prune stored versions; quota refusal preserves existing data.",
             "type": "string"
           },
           "used_bytes": {
