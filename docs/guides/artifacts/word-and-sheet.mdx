@@ -40,15 +40,16 @@ quotes each label as shown, with its English meaning.
    detail view.
 
 **A Sheet can't be created from Artifacts in this release:** **Sheet** is
-listed under **Coming** in this dialog. **Word document** appears there only
-when the instance's document service is available.
+listed under **Coming** in this dialog. **Word document** is offered only when
+the instance's document service is available; otherwise it is listed under
+**Coming** too.
 
 The older Pages view still has a **New Doc** button whose **Format** field
 offers **Word** and **Sheet**. It opens at `/pages` on your Crewship address
-(for example `https://crewship.example.com/pages`), but only on builds where
-`NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` is not `true`. When that build flag is
-`true`, `/pages` opens Artifacts instead, and there is no place in the app to
-create a Sheet.
+(for example `https://crewship.example.com/pages`), but only when
+`/pages` does not redirect to Artifacts. It redirects when both build flags
+`NEXT_PUBLIC_ARTIFACTS_LIBRARY` and `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` are
+`true`; then there is no place in the app to create a Sheet.
 
 ## Open the editor
 
@@ -58,6 +59,7 @@ create a Sheet.
    - **Free** · *nobody is editing*, with an **Edit** button;
    - **Editing: you** · *in the editor*, with **Open in new tab**;
    - **Editing: *name*** · *you see a read-only preview*, with **Request edit**.
+     When an agent holds the lease, its name is followed by **(agent)**.
 3. Choose **Edit** (it opens the editor in a new tab) or **Open in Pages** (it
    opens the same editor in this tab).
 
