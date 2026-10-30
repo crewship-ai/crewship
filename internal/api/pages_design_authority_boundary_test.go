@@ -408,11 +408,14 @@ func TestDesignRenewalAdmissionRejectsStaleBrowserAuthority(t *testing.T) {
 	}
 	token := f.token(t, "editor")
 	authority := func() string {
-		var revision string
-		if err := f.h.db.QueryRow(`SELECT CAST(authority_revision AS TEXT) FROM workspaces WHERE id=?`, f.workspace).Scan(&revision); err != nil {
-			t.Fatal(err)
+		w := f.call(t, "editor", "get", "")
+		var view struct {
+			AuthorityRevision string `json:"authority_revision"`
 		}
-		return revision
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &view) != nil || view.AuthorityRevision == "" {
+			t.Fatalf("metadata authority %d %s", w.Code, w.Body)
+		}
+		return view.AuthorityRevision
 	}
 	previous := authority()
 	f.regrantSameTransaction(t, "editor", "write")

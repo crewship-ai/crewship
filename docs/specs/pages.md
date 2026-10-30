@@ -1439,6 +1439,17 @@ and unsaved draft. Fresh metadata must confirm the same actor, immutable Page,
 Edit capability and opaque authority revision. Browser websocket admission sends
 that `authority_revision`; the host rejects a mismatch before upgrading, including
 a revoke-and-regrant gap. Revocation never restores an earlier writer draft.
+The authority revision is scoped to the authenticated person and this Design
+Page: it is built from their `user` and `page` rows in
+`mooring_authority_generations` (installed on a fresh admission if absent),
+the same generations native Craft sessions use. A change whose recipients
+include that person or that Page (their grants, crew or workspace membership,
+folder ACL, account status, or the Page's owner, audience or folder) closes
+an open Design websocket, including a revoke-then-restore cycle. The broad
+workspace delivery epoch is not part of it, so creating another Page, changing
+a grant for someone else on another Page or adding a member does not close an
+open canvas or drop its unconfirmed edits. Current Page rights, membership and
+the credential are still checked live on every frame and heartbeat.
 Credential renewal does not replay an HTTP snapshot or mutation.
 Human Design creation accepts the optional create-only `created_by_test` boolean
 and retains it in Page catalog metadata, just like other artifact creation.
