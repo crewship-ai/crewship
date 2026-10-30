@@ -5,15 +5,41 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/design"
 	"github.com/gorilla/websocket"
 )
+
+// Close codes. 1008 means only that this socket's authority is no longer
+// current; the browser re-admits on it, so a refused update or a protocol
+// condition must never use it, or the client loops forever as "denied".
+const (
+	designCloseRejected = 4400 // the engine refused the update; resending it cannot succeed
+)
+
+var (
+	errDesignProtocol = errors.New("invalid Design protocol message")
+)
+
+func designCloseFor(err error) (int, string) {
+	switch {
+	case errors.Is(err, errDesignAccess), errors.Is(err, artifacts.ErrVersionAuthority), errors.Is(err, sql.ErrNoRows), errors.Is(err, artifacts.ErrDisabled):
+		return websocket.ClosePolicyViolation, "Design permissions changed"
+	case errors.Is(err, design.ErrInvalid), errors.Is(err, artifacts.ErrVersionInvalid):
+		return designCloseRejected, "Design update rejected"
+	case errors.Is(err, errDesignProtocol):
+		return websocket.CloseProtocolError, "Invalid Design protocol message"
+	default:
+		return websocket.CloseInternalServerErr, "Design operation failed; changes are not acknowledged"
+	}
+}
 
 type designClient struct {
 	conn            *websocket.Conn
@@ -299,8 +325,9 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 	defer ticker.Stop()
 	ping := time.NewTicker(20 * time.Second)
 	defer ping.Stop()
-	closePolicy := func() {
-		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(1008, "Design permissions changed"), time.Now().Add(time.Second))
+	closeWith := func(err error) {
+		code, reason := designCloseFor(err)
+		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason), time.Now().Add(time.Second))
 	}
 	// Every content delivery is protected by the writer fence too: a committed
 	// revocation cannot leave a queued update readable on an old socket.
@@ -317,8 +344,8 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 		case <-done:
 			return
 		case frame := <-client.out:
-			if send(frame) != nil {
-				closePolicy()
+			if e := send(frame); e != nil {
+				closeWith(e)
 				return
 			}
 		case <-ping.C:
@@ -328,7 +355,7 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 		case <-ticker.C:
 			e := h.designTx(r, k, canEdit, func(_ context.Context, _ *sql.Tx, _ string) error { return nil })
 			if e != nil {
-				closePolicy()
+				closeWith(e)
 				return
 			}
 			if canEdit {
@@ -345,7 +372,7 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 		case frame := <-incoming:
 			kind, sub, e := designSyncKind(frame)
 			if e != nil {
-				closePolicy()
+				closeWith(fmt.Errorf("%w: %v", errDesignProtocol, e))
 				return
 			}
 			room.mu.Lock()
@@ -356,6 +383,8 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 					sanitized, e = designAwareness(frame, client, room)
 					if e == nil {
 						room.broadcast(sanitized, client)
+					} else {
+						e = fmt.Errorf("%w: %v", errDesignProtocol, e)
 					}
 				}
 			} else if kind == 0 {
@@ -388,11 +417,11 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			} else {
-				e = errors.New("unsupported Design protocol message")
+				e = errDesignProtocol
 			}
 			room.mu.Unlock()
 			if e != nil {
-				closePolicy()
+				closeWith(e)
 				return
 			}
 		}
