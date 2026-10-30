@@ -46,11 +46,13 @@ Workspace flags for Artifacts (all default off; turn on per workspace with
                              artifact_projects
   artifacts_design           Design artifacts
   gridcraft_editor           live workbook editing; also needs the server
-                             settings gridcraft.enabled and
-                             gridcraft.editor_enabled in the server YAML
-                             config (or CREWSHIP_GRIDCRAFT_ENABLED and
-                             CREWSHIP_GRIDCRAFT_EDITOR_ENABLED set to
-                             "true"); restart the server after changing them
+                             to run the workbook engine with a qualified
+                             worker and editor: gridcraft.enabled and
+                             gridcraft.editor_enabled plus the worker
+                             service socket and token file, the editor
+                             origin and the editor bundle settings. With only
+                             the two enable switches the server refuses to
+                             start. Restart the server after changing them
 
 An operator can force the first four on for every workspace with the server
 environment variables CREWSHIP_ARTIFACT_PROJECTS_ENABLED,
@@ -66,7 +68,10 @@ this command does not change them):
   artifact_dashboard_data    NEXT_PUBLIC_ARTIFACT_DASHBOARDS
   artifact_slides            NEXT_PUBLIC_ARTIFACT_SLIDES
   artifacts_design           NEXT_PUBLIC_ARTIFACTS_DESIGN
-The bundled .env.production sets NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=false.
+Prebuilt releases ship with these off. To turn them on, build from source
+with the variables exported, for example
+NEXT_PUBLIC_ARTIFACTS_LIBRARY=true make build; exported variables override
+the bundled .env.production, which sets NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=false.
 
 Server settings and environment variables, including the gridcraft ones:
 https://docs.crewship.ai/configuration/environment`,
