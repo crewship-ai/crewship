@@ -10255,6 +10255,9 @@
             "created_at": {
               "type": "string"
             },
+            "created_by_caller": {
+              "type": "boolean"
+            },
             "ended_at": {
               "type": "string"
             },
@@ -10316,6 +10319,9 @@
             },
             "unread_count": {
               "type": "integer"
+            },
+            "visibility": {
+              "type": "string"
             },
             "workspace_id": {
               "type": "string"
@@ -53490,6 +53496,9 @@
                     "created_at": {
                       "type": "string"
                     },
+                    "created_by_caller": {
+                      "type": "boolean"
+                    },
                     "ended_at": {
                       "nullable": true,
                       "type": "string"
@@ -53522,6 +53531,9 @@
                     },
                     "unread_count": {
                       "type": "integer"
+                    },
+                    "visibility": {
+                      "type": "string"
                     },
                     "workspace_id": {
                       "type": "string"

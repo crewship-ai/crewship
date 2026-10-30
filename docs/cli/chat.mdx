@@ -234,7 +234,16 @@ crewship chat export c_abc123 -o incident.md
 
 ### `chat retry <chat-id>`
 
-Retry selects only a turn explicitly attributed to the authenticated caller. Legacy turns without an author are not retried; use a new message instead.
+Retry resends **your** latest message: the newest user turn whose
+`author_user_id` is the authenticated caller (from
+`GET /api/v1/auth/cli-token/validate`, which answers for both CLI tokens and
+browser-login sessions). Turns by other members of a group chat are skipped.
+A turn without an author predates group-chat attribution; it is retried only
+when the server reports the chat as your own private chat (`visibility:
+"private"` and `created_by_caller: true` on `GET /api/v1/agents/{id}/chats`).
+Otherwise — a group chat, someone else's private chat you can read as an
+admin, or a server that does not report ownership — retry refuses and asks you
+to send the message again with `crewship run --chat <chat-id>`.
 
 | Flag | Default | Effect |
 | --- | --- | --- |
@@ -283,12 +292,27 @@ sharing a chat ID does not make those tasks part of `chat stop`.
 Sends `cancel_message` over the WebSocket, the frame the chat's Stop button
 sends. The server scopes a cancel to its sender: it stops a run **you** started
 on that chat — from this terminal, another one or a browser tab. With `--wait`,
-the CLI sends a unique request ID and requires the matching private server
-result after that exact run exits with cancellation. Another member's `done`,
-a naturally completed run or a missing run cannot confirm a stop. An older
-server without this confirmation protocol times out; it cannot report success.
+the CLI sends a unique request ID; the server acknowledges it
+(`cancel_accepted`) and answers with a private `cancel_result` once that exact
+run has ended (see the [WebSocket reference](/api-reference/websocket)).
+Another member's `done`, a naturally completed run, a server shutdown or a
+missing run cannot confirm a stop.
 
-`--format json` prints `{"chat_id": …, "status": "requested" | "stopped"}`.
+**Server requirement.** Confirmation needs a server with the
+`cancel_accepted`/`cancel_result` protocol (this release or later). Against an
+older server the stop still works, but nothing confirms it: when the run's
+`done` arrives and the server has not acknowledged the request within a few
+seconds, the command reports `run ended; cancellation not confirmed by server
+(server too old?)` and exits **9**. `crewship run` stopped with Ctrl-C or
+SIGTERM degrades the same way: it keeps the output, prints
+`[ended — stop not confirmed]` and exits 9.
+
+| Outcome | Exit | `--format json` |
+| --- | --- | --- |
+| Stop confirmed | `0` | `{"chat_id": …, "status": "stopped"}` |
+| Sent without `--wait` | `0` | `{"chat_id": …, "status": "requested"}` |
+| Server answered `cancelled:false`, or no answer within `--timeout` | `1` | error envelope |
+| Run ended, server did not confirm (older server) | `9` | error envelope |
 
 ```bash
 crewship chat stop c_abc123

@@ -703,7 +703,146 @@ func TestAcceptance_ChatRetryRefusesUnattributedTurns(t *testing.T) {
 	s := newChatParityStub(t)
 	s.messagesBody = `{"messages":[{"role":"user","content":"unknown author request","agent_id":"ag_parity"}]}`
 	_, errOut, err := s.run("chat", "retry", parityChatID, "--no-stream")
-	if err == nil || !strings.Contains(errOut, "no message of yours") || len(s.Frames("send_message")) != 0 {
+	if err == nil || !strings.Contains(errOut, "predates author attribution") || len(s.Frames("send_message")) != 0 {
 		t.Fatalf("unattributed turn replayed: %v %s", err, errOut)
+	}
+}
+
+// A legacy turn (no author_user_id) is retried only in the caller's own
+// private chat, as the server reports it; a group chat or another member's
+// private chat (an admin reading it) is refused.
+func TestAcceptance_ChatRetryLegacyTurnOnlyInOwnPrivateChat(t *testing.T) {
+	for _, tc := range []struct {
+		name, chatList string
+		retried        bool
+	}{
+		{"own-private", `[{"id":"` + parityChatID + `","visibility":"private","created_by_caller":true}]`, true},
+		{"group", `[{"id":"` + parityChatID + `","visibility":"group","created_by_caller":true}]`, false},
+		{"someone-elses-private", `[{"id":"` + parityChatID + `","visibility":"private"}]`, false},
+		{"older-server", `[{"id":"` + parityChatID + `"}]`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newChatParityStub(t)
+			s.messagesBody = `{"messages":[{"role":"user","content":"legacy request","agent_id":"` + parityAgentID + `"}]}`
+			s.chatList = tc.chatList
+			s.onFrame = func(conn *websocket.Conn, f cli.WSMessage) bool {
+				if f.Type == "send_message" {
+					sendEvents(conn, wsproto.ChatEvent{Type: "text", Content: "answer"}, wsproto.ChatEvent{Type: "done"})
+				}
+				return true
+			}
+			_, errOut, err := s.run("chat", "retry", parityChatID, "--no-stream")
+			frames := s.Frames("send_message")
+			if tc.retried {
+				if err != nil || len(frames) != 1 || !strings.Contains(string(frames[0].Payload), "legacy request") {
+					t.Fatalf("own legacy turn not retried: %v %s %+v", err, errOut, frames)
+				}
+				return
+			}
+			if err == nil || len(frames) != 0 || !strings.Contains(errOut, "predates author attribution") {
+				t.Fatalf("legacy turn retried outside own private chat: %v %s", err, errOut)
+			}
+		})
+	}
+}
+
+// ─── stop against a server without cancel confirmation ──────────────────
+
+func sendCancelAccepted(conn *websocket.Conn, request cli.WSMessage) {
+	var payload map[string]any
+	_ = json.Unmarshal(request.Payload, &payload)
+	_ = websocket.JSON.Send(conn, map[string]any{"type": "cancel_accepted", "payload": map[string]any{"session_id": payload["session_id"], "request_id": payload["request_id"]}})
+}
+
+// An older server answers a stop with the run's done only. The CLI neither
+// calls that a confirmed stop nor waits out --timeout: it degrades to the
+// documented "ended, not confirmed" outcome (exit 9) shortly after the done.
+func TestAcceptance_ChatStop_OlderServerDegradesExplicitly(t *testing.T) {
+	s := newChatParityStub(t)
+	s.onFrame = func(conn *websocket.Conn, f cli.WSMessage) bool {
+		if f.Type == "cancel_message" {
+			sendEvents(conn, wsproto.ChatEvent{Type: "done"})
+		}
+		return true
+	}
+	start := time.Now()
+	out, errOut, err := s.run("chat", "stop", parityChatID, "--wait", "--timeout", "40s", "--format", "json")
+	if code := exitCodeOf(t, err); code != exitStopEndedUnconfirmed {
+		t.Fatalf("exit %d (%v), want %d\n%s", code, err, exitStopEndedUnconfirmed, errOut)
+	}
+	if !strings.Contains(errOut, "cancellation not confirmed by server") || strings.Contains(out, `"stopped"`) {
+		t.Fatalf("outcome not explicit: stdout=%q stderr=%s", out, errOut)
+	}
+	if elapsed := time.Since(start); elapsed > 20*time.Second {
+		t.Fatalf("waited out the timeout: %s", elapsed)
+	}
+}
+
+// A current server acknowledges the request, so an unrelated done (another
+// member's run) neither degrades nor confirms; only the late result does.
+func TestAcceptance_ChatStop_AcknowledgedRequestIgnoresUnrelatedDone(t *testing.T) {
+	s := newChatParityStub(t)
+	s.onFrame = func(conn *websocket.Conn, f cli.WSMessage) bool {
+		if f.Type == "cancel_message" {
+			sendCancelAccepted(conn, f)
+			sendEvents(conn, wsproto.ChatEvent{Type: "done"})
+			time.Sleep(stopResultGrace + time.Second)
+			sendCancelResult(conn, f, true)
+		}
+		return true
+	}
+	out, errOut, err := s.run("chat", "stop", parityChatID, "--wait", "--timeout", "30s", "--format", "json")
+	if err != nil || !strings.Contains(out, `"stopped"`) {
+		t.Fatalf("acknowledged stop not confirmed: %v stdout=%q\n%s", err, out, errOut)
+	}
+}
+
+// A signal-driven stop of `run` against an older server: the output is kept,
+// the run is reported ended-but-unconfirmed with exit 9, not [cancelled].
+func TestAcceptance_Run_StopAgainstOlderServerDegradesExplicitly(t *testing.T) {
+	s := newChatParityStub(t)
+	s.onFrame = func(conn *websocket.Conn, f cli.WSMessage) bool {
+		switch f.Type {
+		case "send_message":
+			sendEvents(conn, wsproto.ChatEvent{Type: "text", Content: "working on it"})
+		case "cancel_message":
+			sendEvents(conn, wsproto.ChatEvent{Type: "text", Content: " tail"}, wsproto.ChatEvent{Type: "done"})
+		}
+		return true
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := s.command(ctx, "run", "viktor", "a long task")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(20 * time.Second)
+	for len(s.Frames("send_message")) == 0 {
+		select {
+		case <-deadline:
+			t.Fatalf("no send_message; stderr:\n%s", stderr.String())
+		case <-s.gotFrame:
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
+	start := time.Now()
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	err := cmd.Wait()
+	if code := exitCodeOf(t, err); code != exitStopEndedUnconfirmed {
+		t.Fatalf("exit %d (%v), want %d\nstderr:\n%s", code, err, exitStopEndedUnconfirmed, stderr.String())
+	}
+	if elapsed := time.Since(start); elapsed > 20*time.Second {
+		t.Fatalf("waited out the stop grace: %s", elapsed)
+	}
+	errText := stderr.String()
+	if strings.Contains(errText, "[cancelled]") || !strings.Contains(errText, "stop not confirmed") {
+		t.Errorf("outcome not explicit:\n%s", errText)
+	}
+	if !strings.Contains(stdout.String(), "working on it tail") {
+		t.Errorf("output lost: %q", stdout.String())
 	}
 }

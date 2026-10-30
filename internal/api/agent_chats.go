@@ -147,12 +147,13 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 			c.message_count, c.started_at, c.ended_at, c.created_at, c.origin,
 			COALESCE(c.last_activity_at,
 				strftime('%Y-%m-%dT%H:%M:%fZ', c.started_at),
-				c.started_at) AS last_activity_at
+				c.started_at) AS last_activity_at,
+			c.visibility, COALESCE(c.created_by = ?, 0)
 		FROM chats c
 		WHERE c.agent_id = ? AND c.workspace_id = ?`+audienceWhere+kindWhere+`
 		ORDER BY last_activity_at DESC
 		LIMIT ? OFFSET ?
-	`, append(args, limit, offset)...)
+	`, append(append([]any{userID}, args...), limit, offset)...)
 	if err != nil {
 		replyInternalError(w, h.logger, "list agent chats", err)
 		return
@@ -169,7 +170,7 @@ func (h *AgentHandler) ListChats(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&c.ID, &c.AgentID, &c.WorkspaceID, &c.Title,
 			&c.Mode, &c.Status, &c.MessageCount,
 			&c.StartedAt, &c.EndedAt, &c.CreatedAt, &c.Origin,
-			&c.LastActivityAt); err != nil {
+			&c.LastActivityAt, &c.Visibility, &c.CreatedByCaller); err != nil {
 			replyInternalError(w, h.logger, "scan chat", err)
 			return
 		}

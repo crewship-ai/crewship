@@ -18,6 +18,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -48,20 +49,62 @@ func retryContent(m map[string]any) (content, pageSlug string) {
 	return content, pageSlug
 }
 
-// lastUserMessage returns the newest turn with explicit caller attribution.
-// An absent author cannot safely establish ownership, including in shared chats.
-func lastUserMessage(messages []map[string]any, caller string) map[string]any {
+// lastUserMessage returns the caller's newest user turn. A turn attributed to
+// another member is never chosen. The caller's newest attributed turn wins;
+// unattributed turns predate group-chat attribution (so they are older than
+// any attributed one). Only when the caller has no attributed turn is the
+// newest unattributed turn considered: it is chosen when legacyOwned (the
+// chat is the caller's own private chat, so every legacy turn in it is
+// theirs), otherwise needsOwnership reports that ownership must be checked.
+func lastUserMessage(messages []map[string]any, caller string, legacyOwned bool) (msg map[string]any, needsOwnership bool) {
+	if caller == "" {
+		return nil, false
+	}
+	var legacy map[string]any
 	for i := len(messages) - 1; i >= 0; i-- {
 		role, _ := messages[i]["role"].(string)
-		if r := strings.ToLower(role); r == "user" || r == "human" {
-			author, _ := messages[i]["author_user_id"].(string)
-			if caller == "" || author != caller {
-				continue
-			}
-			return messages[i]
+		if r := strings.ToLower(role); r != "user" && r != "human" {
+			continue
+		}
+		author, _ := messages[i]["author_user_id"].(string)
+		switch {
+		case author == caller:
+			return messages[i], false
+		case author == "" && legacy == nil:
+			legacy = messages[i]
 		}
 	}
-	return nil
+	if legacy == nil {
+		return nil, false
+	}
+	if legacyOwned {
+		return legacy, false
+	}
+	return nil, true
+}
+
+// chatOwnedPrivately reports whether chatID is the caller's own private chat,
+// from the agent's chat list (visibility, created_by_caller). A server that
+// does not send those fields, or a chat the list does not return, is not
+// proof of ownership.
+func chatOwnedPrivately(client *cli.Client, agentID, chatID string) (bool, error) {
+	if agentID == "" {
+		return false, nil
+	}
+	var chats []struct {
+		ID              string `json:"id" yaml:"id"`
+		Visibility      string `json:"visibility" yaml:"visibility"`
+		CreatedByCaller bool   `json:"created_by_caller" yaml:"created_by_caller"`
+	}
+	if err := getJSON(client, "/api/v1/agents/"+url.PathEscape(agentID)+"/chats?chat_id="+url.QueryEscape(chatID), &chats); err != nil {
+		return false, err
+	}
+	for _, c := range chats {
+		if c.ID == chatID {
+			return c.Visibility == "private" && c.CreatedByCaller, nil
+		}
+	}
+	return false, nil
 }
 
 // resendToChat streams one new send on an existing chat, the way `run --chat`
@@ -137,7 +180,17 @@ Examples:
 		if me.UserID == "" {
 			return fmt.Errorf("could not determine your user id for retry")
 		}
-		last := lastUserMessage(messages, me.UserID)
+		last, needsOwnership := lastUserMessage(messages, me.UserID, false)
+		if last == nil && needsOwnership {
+			owned, err := chatOwnedPrivately(client, transcriptAgentID(messages), chatID)
+			if err != nil {
+				return err
+			}
+			if !owned {
+				return fmt.Errorf("the latest message of chat %s predates author attribution and the chat is not confirmed as your private chat, so retry cannot tell whose it is; send it again with `crewship run --chat %s`", chatID, chatID)
+			}
+			last, _ = lastUserMessage(messages, me.UserID, true)
+		}
 		if last == nil {
 			return fmt.Errorf("chat %s has no message of yours to retry", chatID)
 		}
