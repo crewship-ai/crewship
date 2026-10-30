@@ -39,10 +39,11 @@ comes from these sources, and the Access tab shows each one:
 
 ### Private until you share a version
 
-A new project artifact is private. Only you can open it. A workspace owner
-can also open it, and each such read is recorded in the audit log. While it is
-private, folders, crews and direct shares do not apply, even if they are
-listed.
+A project created with a private audience is open only to its owner until
+publication. Workspace ownership does not grant access to its project versions.
+The audited workspace-owner access available for some other Pages does not
+bypass this project restriction. While it is private, folders, crews and direct
+shares do not apply, even if they are listed.
 
 The artifact stops being private the first time you share a version (see
 [Share a version](#share-a-version)). Until then the **Share** dialog refuses
@@ -94,11 +95,12 @@ Otherwise you are looking at the latest version.
 <Step title="Share it">
 Click **Share** (the link icon) in the viewer toolbar. A short confirmation
 appears: *People with access will see v2. Later versions stay private until
-you share them.* Click **Share v2**.
+you share them.* Click **Share vN** for the version selected (for example,
+**Share v2**).
 </Step>
 <Step title="Check the result">
 If you shared the latest version, the header changes to **Shared**. If you
-shared an older one, it stays on **Draft**. The version switch shows **Shared v2**, and
+shared an older one, it stays on **Draft**. The version switch shows **Shared vN** for that version, and
 the version is marked **Shared** in **History**. In the library list, the
 artifact shows **Shared v2** instead of **Not shared**.
 </Step>
@@ -251,21 +253,23 @@ in the preview are changed.
 </Step>
 </Steps>
 
-If every artifact was changed, the dialog closes. If some were not, it stays
-open with a total such as *2 shared, 1 not* and the reason for each artifact
-that was not changed.
+After confirmation the library clears the selection and removes the bulk bar
+and its dialog. A partial failure report can disappear with it, so the dialog
+closing does not prove that every change succeeded. Open each artifact’s
+**Access** tab afterwards to verify the result.
 
 The preview does not check whether an artifact is private. A private artifact
-is listed as *will be shared*, and its share is then refused and reported in
-that list. Before you share several at once, check that none of them shows the
+can be listed as *will be shared*, but the actual share is refused. That
+failure may disappear when the selection is cleared. Before you share several at once, check that none of them shows the
 **Private** or **Not shared** pill, and share a version of each one that does.
 You can act on at most 200 artifacts at a time. Archiving hides an artifact
 and never deletes it. Restore it from the **Archive** view.
 
 ## Agents
 
-Agents never appear in the Share dialog, and agent shares do not open a
-project artifact. An agent works on a project artifact only inside a chat run
+Existing agent grants can appear as locked rows in the Share dialog. The
+dialog cannot add or change them, and agent shares do not open a project
+artifact. An agent works on a project artifact only inside a chat run
 started by the artifact's owner, and that run cannot share a version or change
 who has access.
 

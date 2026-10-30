@@ -78,6 +78,7 @@
               "guides/devcontainers",
               "guides/crew-image-freshness",
               "guides/credentials",
+              "guides/artifacts/sharing-and-access",
               "guides/auto-managed-credentials",
               "guides/model-discovery",
               "guides/multi-provider-llm",
