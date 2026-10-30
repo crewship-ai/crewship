@@ -136,8 +136,9 @@ func (s *NativeStore) Propose(ctx context.Context, k EditLeaseScope, base int64,
 	return out, nil
 }
 
-// Proposals lists this document's proposals, newest first, under current read
-// authority. Candidate bytes are only returned by ProposalContent.
+// Proposals lists at most 50 proposals under current read authority. Open
+// proposals come first so decided history cannot hide work awaiting a human;
+// each group is newest first. Candidate bytes are only in ProposalContent.
 func (s *NativeStore) Proposals(ctx context.Context, k EditLeaseScope) ([]NativeProposal, error) {
 	if err := s.ready(); err != nil {
 		return nil, err
@@ -151,7 +152,7 @@ func (s *NativeStore) Proposals(ctx context.Context, k EditLeaseScope) ([]Native
 			return actor, err
 		}
 		listed = true
-		rows, err := tx.QueryContext(ctx, `SELECT `+nativeProposalColumns+` FROM craft_native_proposals WHERE page_id=? AND workspace_id=? AND engine_pin=? ORDER BY created_at DESC, id DESC LIMIT 50`, k.ArtifactID, k.WorkspaceID, s.EnginePin())
+		rows, err := tx.QueryContext(ctx, `SELECT `+nativeProposalColumns+` FROM craft_native_proposals WHERE page_id=? AND workspace_id=? AND engine_pin=? ORDER BY (state='open') DESC, created_at DESC, id DESC LIMIT 50`, k.ArtifactID, k.WorkspaceID, s.EnginePin())
 		if err != nil {
 			return "", err
 		}

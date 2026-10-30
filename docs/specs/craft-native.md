@@ -407,3 +407,7 @@ session-bound read gate as the document, so a Read-only admission can review
 but not decide; Comment-only access is not admitted at all. A proposal id is
 resolved only within the admitted page and workspace; another page's id
 answers 404. The agent cannot decide its own proposal.
+
+The bounded proposal review list puts all open proposals before decided history,
+then orders each group by creation time. Newer decisions cannot hide a pending
+proposal; the per-document open-proposal cap remains 16 and the list cap 50.

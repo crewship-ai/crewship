@@ -173,3 +173,53 @@ func TestNativeProposalFullQuotaRollsBackAcceptAndAllowsReject(t *testing.T) {
 		t.Fatalf("rejection replenished budget or needed extra space: %+v %v", after.Quota, err)
 	}
 }
+
+func TestNativeProposalOpenRemainsDiscoverableAfterDecidedHistory(t *testing.T) {
+	s, _, _, scope, acting, _ := nativeProposalFixture(t)
+	human := *acting
+	if _, _, err := s.Initialize(t.Context(), scope, human, []byte(`{"v":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	*acting = nativeProposalAgent
+	open, err := s.Propose(t.Context(), scope, 1, "old-open", "Still awaiting a decision", []byte(`{"v":"open"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Seed an older persisted pending row without changing immutable fields.
+	oldID := "ncp_000000000000000000000001"
+	if _, err = s.db.ExecContext(t.Context(), `INSERT INTO craft_native_proposals(id,page_id,workspace_id,application_id,engine_pin,author_actor_id,request_id,base_version,summary,content_hash,content,created_at) SELECT ?,page_id,workspace_id,application_id,engine_pin,author_actor_id,'older-persisted-open',base_version,summary,content_hash,content,'2000-01-01T00:00:00Z' FROM craft_native_proposals WHERE id=?`, oldID, open.ID); err != nil {
+		t.Fatal(err)
+	}
+	*acting = human
+	if _, err = s.RejectProposal(t.Context(), scope, open.ID); err != nil {
+		t.Fatal(err)
+	}
+	open.ID = oldID
+	for i := range 51 {
+		*acting = nativeProposalAgent
+		decided, err := s.Propose(t.Context(), scope, 1, fmt.Sprintf("newer-decided-%d", i), "Already reviewed", []byte(`{"v":"declined"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		*acting = human
+		if _, err = s.RejectProposal(t.Context(), scope, decided.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, err := s.Proposals(t.Context(), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 50 {
+		t.Fatalf("expected bounded review list, got %d", len(list))
+	}
+	found := false
+	for _, p := range list {
+		if p.ID == open.ID && p.State == "open" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("undecided proposal disappeared behind newer decided history")
+	}
+}
