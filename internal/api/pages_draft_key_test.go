@@ -229,6 +229,10 @@ func TestLocalDraftKeyOperationalFailureNeverProvesRevocation(t *testing.T) {
 		if w := call(f.owner); w.Code != 403 || !strings.Contains(w.Body.String(), "draft_identity_mismatch") {
 			t.Fatal("another identity could trigger draft deletion", w.Code, w.Body)
 		}
+		t.Setenv("CREWSHIP_ARTIFACTS_DESIGN_ENABLED", "false")
+		if w := call("recovery-reader"); w.Code != 403 || !strings.Contains(w.Body.String(), "draft_read_revoked") {
+			t.Fatal("disabled surface masked proven membership removal", w.Code, w.Body)
+		}
 	})
 }
 

@@ -168,9 +168,6 @@ func (h *PageHandler) localDraftRead(ctx context.Context, r *http.Request, key a
 	}
 	// Use the canonical Page ACL, without Design's outward-facing error
 	// masking. A failed lookup must never authorize browser data deletion.
-	if family == "design" && !h.designEnabled(ctx) {
-		return artifacts.ErrDisabled
-	}
 	human := UserFromContext(ctx)
 	viewer, err := h.livePrivatePageReader(ctx, key.WorkspaceID, human.ID)
 	if err != nil {
@@ -178,6 +175,9 @@ func (h *PageHandler) localDraftRead(ctx context.Context, r *http.Request, key a
 	}
 	if viewer == nil {
 		return errLocalDraftReadDenied
+	}
+	if family == "design" && !h.designEnabled(ctx) {
+		return artifacts.ErrDisabled
 	}
 	// Owner decision is local to Design. livePrivatePageReader suppresses
 	// manager power for any restricted membership; other Page families keep
