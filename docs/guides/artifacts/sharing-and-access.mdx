@@ -81,8 +81,9 @@ everyone except you and your editors sees.
 
 <Steps>
 <Step title="Open the artifact">
-In **Artifacts**, click the artifact, or select it and click **Open** in the
-preview panel. The detail view opens on **Content**. The header shows
+In **Artifacts**, click the artifact to select it, then click **Open** in the
+preview panel. On a phone, tap the artifact. The detail view opens on
+**Content**. The header shows
 **Draft** next to the kind, and the version switch shows **Latest v2** and a
 greyed-out **Shared —** while nothing is shared yet.
 </Step>
@@ -96,7 +97,8 @@ appears: *People with access will see v2. Later versions stay private until
 you share them.* Click **Share v2**.
 </Step>
 <Step title="Check the result">
-The header changes to **Shared**, the version switch shows **Shared v2**, and
+If you shared the latest version, the header changes to **Shared**. If you
+shared an older one, it stays on **Draft**. The version switch shows **Shared v2**, and
 the version is marked **Shared** in **History**. In the library list, the
 artifact shows **Shared v2** instead of **Not shared**.
 </Step>
@@ -120,7 +122,9 @@ open*, in the preview panel of the list.
 <Step title="Choose who and how">
 In **Add a person…**, pick a workspace member or **Everyone in this
 workspace**. In the level menu, pick **Edit**, **Comment** or **Read**. The
-line under the form explains what the chosen level allows.
+line under the form describes the chosen level. For **Edit** it says the person
+can restore older versions, but they cannot: only the owner can restore a
+version or choose the shared version (see [Access levels](#access-levels)).
 </Step>
 <Step title="Share">
 Click **Share**. The person appears under **Who has access** with the note
@@ -247,14 +251,23 @@ in the preview are changed.
 </Step>
 </Steps>
 
-Share a version of each artifact before you share several at once: the
-server refuses to share a private artifact. You can act on at most 200
+The preview does not check whether an artifact is private. A private artifact
+is listed as *will be shared*, but the share then fails and the dialog closes
+without a message. Before you share several at once, check that none of them
+shows the **Private** or **Not shared** pill, and share a version of each one
+that does. You can act on at most 200
 artifacts at a time. Archiving hides an artifact
 and never deletes it. Restore it from the **Archive** view.
 
 ## Agents
 
-Agents never appear in the Share dialog. Give an agent access with the CLI:
+Agents never appear in the Share dialog, and agent shares do not open a
+project artifact. An agent works on a project artifact only inside a chat run
+started by the artifact's owner, and that run cannot share a version or change
+who has access.
+
+The rest of this section applies to library items that are not project
+artifacts (Pages-backed items). Give an agent access to one with the CLI:
 
 ```bash
 crewship page grant <slug> --agent <agent> --level read
