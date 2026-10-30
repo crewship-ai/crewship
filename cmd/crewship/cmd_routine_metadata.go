@@ -159,7 +159,8 @@ To wake every run waiting on an event without knowing the run ids, use
 
 Examples:
   crewship routine signal run_abc123 --event approve
-  crewship routine signal run_abc123 --event deploy.finished --payload "v1.4.2"`,
+  crewship routine signal run_abc123 --event deploy.finished --payload "v1.4.2"
+  crewship routine signal run_abc123 --event approve -f json   # {run_id, event_type, delivered}`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -185,8 +186,22 @@ Examples:
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		fmt.Printf("Signal %q delivered to run %s.\n", event, args[0])
-		return nil
+		var body struct {
+			Delivered bool `json:"delivered"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
+		// The machine form is what a script branches on; the sentence is
+		// for a person. Both say the same thing: which event reached which
+		// run.
+		return resolvedFormatter(cmd).AutoHuman(struct {
+			RunID     string `json:"run_id" yaml:"run_id"`
+			EventType string `json:"event_type" yaml:"event_type"`
+			Delivered bool   `json:"delivered" yaml:"delivered"`
+		}{args[0], event, body.Delivered}, func() {
+			fmt.Printf("Signal %q delivered to run %s.\n", event, args[0])
+		})
 	},
 }
 

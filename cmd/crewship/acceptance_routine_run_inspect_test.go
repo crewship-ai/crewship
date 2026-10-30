@@ -444,12 +444,20 @@ func TestAcceptanceRoutineRunInspect_MetadataAndSignal(t *testing.T) {
 		t.Fatalf("a non-member was not refused a signal, err=%v:\n%s", err, out)
 	}
 
-	sigOut, err := runRoutineDetailCLI(t, cfgs.owner, "routine", "signal", parked, "--event", "approve", "--payload", "approved-by-cli")
+	// -f json must be honoured like on every other command: a script that
+	// asks for JSON and gets a sentence cannot tell delivery from failure
+	// without scraping text.
+	sigJSON, err := runRoutineDetailCLI(t, cfgs.owner, "routine", "signal", parked, "--event", "approve", "--payload", "approved-by-cli", "-f", "json")
 	if err != nil {
-		t.Fatalf("routine signal: %v\n%s", err, sigOut)
+		t.Fatalf("routine signal -f json: %v\n%s", err, sigJSON)
 	}
-	if !strings.Contains(sigOut, `Signal "approve" delivered to run `+parked) {
-		t.Fatalf("unexpected signal output:\n%s", sigOut)
+	var sig struct {
+		RunID     string `json:"run_id"`
+		EventType string `json:"event_type"`
+		Delivered bool   `json:"delivered"`
+	}
+	if err := json.Unmarshal([]byte(sigJSON), &sig); err != nil || sig.RunID != parked || sig.EventType != "approve" || !sig.Delivered {
+		t.Fatalf("signal -f json is not {run_id, event_type, delivered} (err=%v):\n%s", err, sigJSON)
 	}
 
 	// The resume runs in the background; follow it to the end through the
@@ -472,6 +480,17 @@ func TestAcceptanceRoutineRunInspect_MetadataAndSignal(t *testing.T) {
 	}
 	// Once the wait is consumed there is nothing left to wake.
 	mustFailWith(t, cfgs.owner, []string{"404", "no run waiting on that event"}, "routine", "signal", parked, "--event", "approve")
+
+	// The human form names the event and the run.
+	park2Out, err := runRoutineDetailCLI(t, cfgs.owner, "routine", "run", "inspect-event")
+	m2 := routineDetailRunIDRE.FindStringSubmatch(park2Out)
+	if err != nil || m2 == nil {
+		t.Fatalf("second routine run inspect-event: %v\n%s", err, park2Out)
+	}
+	humanOut, err := runRoutineDetailCLI(t, cfgs.owner, "routine", "signal", m2[1], "--event", "approve")
+	if err != nil || !strings.Contains(humanOut, `Signal "approve" delivered to run `+m2[1]) {
+		t.Fatalf("unexpected human signal output, err=%v:\n%s", err, humanOut)
+	}
 }
 
 func runInspectString(v any) string {
