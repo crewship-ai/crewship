@@ -19,6 +19,15 @@ func truncateID(id string, n int) string {
 	return id[:n]
 }
 
+// workspaceKindOf reads an empty kind (a server that predates personal
+// workspaces) as team, which is what every workspace on it is.
+func workspaceKindOf(kind string) string {
+	if kind == "" {
+		return "team"
+	}
+	return kind
+}
+
 var workspaceCmd = &cobra.Command{
 	Use:     "workspace",
 	Aliases: []string{"ws"},
@@ -44,18 +53,27 @@ var workspaceListCmd = &cobra.Command{
 			return err
 		}
 
+		raw, err := readServerDocument(resp)
+		if err != nil {
+			return err
+		}
+		docs, err := serverRows(raw)
+		if err != nil {
+			return err
+		}
 		var workspaces []struct {
 			ID   string `json:"id" yaml:"id"`
 			Name string `json:"name" yaml:"name"`
 			Slug string `json:"slug" yaml:"slug"`
+			Kind string `json:"kind" yaml:"kind"`
 			Role string `json:"currentUserRole" yaml:"currentUserRole"`
 		}
-		if err := cli.ReadJSON(resp, &workspaces); err != nil {
-			return err
+		if err := json.Unmarshal(raw, &workspaces); err != nil {
+			return fmt.Errorf("decode response: %w", err)
 		}
 
 		f := newFormatter()
-		headers := []string{"SLUG", "NAME", "ID", "ROLE"}
+		headers := []string{"SLUG", "NAME", "KIND", "ID", "ROLE"}
 		var rows [][]string
 		activeWS := cli.ResolveWorkspace(flagWorkspace, cliCfg)
 		for _, ws := range workspaces {
@@ -63,9 +81,11 @@ var workspaceListCmd = &cobra.Command{
 			if ws.Slug == activeWS || ws.ID == activeWS {
 				marker = " *"
 			}
-			rows = append(rows, []string{ws.Slug + marker, ws.Name, ws.ID, ws.Role})
+			rows = append(rows, []string{ws.Slug + marker, ws.Name, workspaceKindOf(ws.Kind), ws.ID, ws.Role})
 		}
-		return f.Auto(workspaces, headers, rows)
+		// Machine formats carry the server's rows (kind, personal owner,
+		// retention settings, counts …), not the five fields above (#4508).
+		return f.Auto(docs, headers, rows)
 	},
 }
 
@@ -228,9 +248,21 @@ var workspaceGetCmd = &cobra.Command{
 			// AppearanceDefault is the default look `workspace update
 			// --appearance-default` writes (style, knobs, accent, theme).
 			AppearanceDefault map[string]any `json:"appearance_default" yaml:"appearance_default"`
+			// Kind is team or personal; PersonalOwnerID is whose personal
+			// account a personal workspace is.
+			Kind            string  `json:"kind" yaml:"kind"`
+			PersonalOwnerID *string `json:"personal_owner_id" yaml:"personal_owner_id"`
+			// GuestRoutineMaxRunMinutes is the hard limit for one run of a
+			// Guest-published routine (`workspace update
+			// --guest-routine-max-run-minutes`).
+			GuestRoutineMaxRunMinutes *int `json:"guest_routine_max_run_minutes" yaml:"guest_routine_max_run_minutes"`
 		}
-		if err := cli.ReadJSON(resp, &ws); err != nil {
+		raw, err := readServerDocument(resp)
+		if err != nil {
 			return err
+		}
+		if err := json.Unmarshal(raw, &ws); err != nil {
+			return fmt.Errorf("decode response: %w", err)
 		}
 
 		lang := "-"
@@ -238,18 +270,32 @@ var workspaceGetCmd = &cobra.Command{
 			lang = *ws.PreferredLanguage
 		}
 
+		guestMax := "-"
+		if ws.GuestRoutineMaxRunMinutes != nil {
+			guestMax = fmt.Sprintf("%d min", *ws.GuestRoutineMaxRunMinutes)
+		}
 		f := newFormatter()
 		pairs := [][]string{
 			{"Name", ws.Name},
 			{"Slug", ws.Slug},
+			{"Kind", workspaceKindOf(ws.Kind)},
+		}
+		if ws.PersonalOwnerID != nil && *ws.PersonalOwnerID != "" {
+			pairs = append(pairs, []string{"Personal owner", *ws.PersonalOwnerID})
+		}
+		pairs = append(pairs, [][]string{
 			{"Language", lang},
 			{"Allow privileged credentials", fmt.Sprintf("%t", ws.AllowPrivilegedCredentials)},
 			{"Pages theme", formatPagesTheme(ws.PagesTheme)},
 			{"Appearance default", formatAppearanceDefault(ws.AppearanceDefault)},
+			{"Guest routine max run", guestMax},
 			{"ID", ws.ID},
 			{"Created", ws.CreatedAt},
-		}
-		return f.AutoDetail(ws, pairs)
+		}...)
+		// The quiet format prints the first pair's value, which has always
+		// been the name; the machine formats print the server's document
+		// rather than the fields this command renders (#4508).
+		return f.AutoDetail(cli.RawJSON(raw), pairs)
 	},
 }
 

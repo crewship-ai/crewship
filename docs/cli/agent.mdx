@@ -357,6 +357,9 @@ moment its process would start. The response reports the outcome as `runs`:
 
 The agent's memory, chats and attachments are kept.
 
+With `--format json|yaml|ndjson` the command prints the server's response —
+the `runs` outcome above included — instead of the `Agent deleted.` receipt.
+
 ---
 
 ## `crewship agent runs`
@@ -433,6 +436,9 @@ is in a non-terminal state. A stored `running` record — a run that outlived a
 restart — is stopped at its recorded container and session and reported as
 `stopped` once the runtime confirms it is gone.
 
+With `--format json|yaml|ndjson` the command prints the server's response,
+whose `outcome` (`already_stopped` for an idle agent) is what the two human
+lines above are written from.
 ---
 
 After a server restart, persisted runtime identities remain visible until their

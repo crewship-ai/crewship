@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
@@ -92,7 +93,9 @@ var inboxListCmd = &cobra.Command{
 
 		q := url.Values{}
 		q.Set("workspace_id", cli.ResolveWorkspace(flagWorkspace, cliCfg))
-		setInboxFilterParams(cmd, q)
+		if err := setInboxFilterParams(cmd, client, q, false); err != nil {
+			return err
+		}
 		if state != "" && state != "all" {
 			q.Set("state", state)
 		} else if state == "all" {
@@ -842,14 +845,28 @@ func addInboxFilterFlags(c *cobra.Command) {
 	c.Flags().Bool("unread", false, "Only items unread for you")
 	c.Flags().String("attention", "", "Only active items of one attention class: decision|input|review|repair")
 	c.Flags().String("deadline", "", "Only items by deadline: hour|today|soon|none")
-	c.Flags().String("crew", "", "Only items about one crew (id)")
+	c.Flags().String("crew", "", "Only items about one crew (slug or id)")
 	c.Flags().String("agent", "", "Only items about one agent (id, slug or name)")
+	c.Flags().String("day-end", "", "End of \"today\" for the deadline buckets, RFC 3339 (default: the end of your local day)")
 }
 
-// setInboxFilterParams copies the filter flags that were set into q.
-func setInboxFilterParams(cmd *cobra.Command, q url.Values) {
+// inboxLocalDayEnd is the last millisecond of now's calendar day in now's own
+// zone, as RFC 3339 — what the web inbox sends (endOfLocalDay in
+// inbox-v2-derive.ts). Without it the server ends "today" at midnight UTC,
+// which for anyone east or west of Greenwich is not today.
+func inboxLocalDayEnd(now time.Time) string {
+	end := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 59, 999_000_000, now.Location())
+	return end.Format(time.RFC3339Nano)
+}
+
+// setInboxFilterParams copies the filter flags that were set into q. --crew
+// is resolved to the id the server filters on (a slug matched nothing).
+// withDayEnd says whether this request reads a "today" deadline bucket — the
+// counts always do (by_deadline), the list only for --deadline today — and
+// then the caller's local end of day goes with it unless --day-end overrides.
+func setInboxFilterParams(cmd *cobra.Command, client *cli.Client, q url.Values, withDayEnd bool) error {
 	for flag, param := range map[string]string{"query": "q", "space": "space", "attention": "attention",
-		"deadline": "deadline", "crew": "crew", "agent": "agent"} {
+		"deadline": "deadline", "agent": "agent"} {
 		if v, _ := cmd.Flags().GetString(flag); v != "" {
 			q.Set(param, v)
 		}
@@ -857,6 +874,32 @@ func setInboxFilterParams(cmd *cobra.Command, q url.Values) {
 	if v, _ := cmd.Flags().GetBool("unread"); v {
 		q.Set("unread", "true")
 	}
+	if crew, _ := cmd.Flags().GetString("crew"); strings.TrimSpace(crew) != "" {
+		id, err := resolveCrewID(client, crew)
+		if err != nil {
+			// Historical inbox rows retain the ID after a crew is deleted.
+			// Only a not-found CUID may pass through; auth/network failures
+			// and unresolved slugs must remain errors.
+			if !looksLikeCUID(crew) || cli.ExitCodeFor(err) != cli.ExitNotFound {
+				return err
+			}
+			id = crew
+		}
+		q.Set("crew", id)
+	}
+	dayEnd, _ := cmd.Flags().GetString("day-end")
+	if dayEnd != "" {
+		if _, err := time.Parse(time.RFC3339, dayEnd); err != nil {
+			return fmt.Errorf("invalid --day-end %q: want RFC 3339, e.g. 2026-10-29T23:59:59+01:00", dayEnd)
+		}
+	}
+	if withDayEnd || q.Get("deadline") == "today" {
+		if dayEnd == "" {
+			dayEnd = inboxLocalDayEnd(time.Now())
+		}
+		q.Set("day_end", dayEnd)
+	}
+	return nil
 }
 
 type inboxSpaceCounts struct {
@@ -886,6 +929,10 @@ The same filters as 'inbox list' (--query, --space, --unread, --attention,
 would return. With no filter, by_attention counts active items per attention
 class and by_deadline per deadline bucket.
 
+"today" ends at the end of your local day, as on the web page: the CLI sends
+it as day_end. --day-end sets another end (RFC 3339), e.g. for a script that
+reports on someone else's day.
+
 Examples:
   crewship inbox counts
   crewship inbox counts --attention decision
@@ -899,7 +946,9 @@ Examples:
 		}
 		client := newAPIClient()
 		q := url.Values{}
-		setInboxFilterParams(cmd, q)
+		if err := setInboxFilterParams(cmd, client, q, true); err != nil {
+			return err
+		}
 		if kind, _ := cmd.Flags().GetString("kind"); kind != "" {
 			q.Set("kind", kind)
 		}

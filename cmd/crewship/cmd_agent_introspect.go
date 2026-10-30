@@ -90,11 +90,17 @@ var agentStopCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return agentStopRefusal(err, args[0])
 		}
-		defer resp.Body.Close()
+		raw, err := readServerDocument(resp)
+		if err != nil {
+			return err
+		}
 		var stopped struct {
 			Outcome string `json:"outcome" yaml:"outcome"`
 		}
-		_ = json.NewDecoder(resp.Body).Decode(&stopped)
+		_ = json.Unmarshal(raw, &stopped)
+		if handled, err := machineMutationResult(cmd, raw, map[string]any{"agent_id": agentID, "outcome": stopped.Outcome}); handled {
+			return err
+		}
 
 		if stopped.Outcome == "already_stopped" {
 			cli.PrintSuccess(fmt.Sprintf("Agent %s was not running; nothing to stop.", args[0]))
