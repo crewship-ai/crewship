@@ -27,20 +27,22 @@ variable is on shows nothing until the server reports the feature available.
 
 | Screen | Build-time UI variable | Workspace flag | Instance switch |
 |---|---|---|---|
-| Artifacts library at `/artifacts` and the **Artifacts** sidebar link | `NEXT_PUBLIC_ARTIFACTS_LIBRARY` | — | — |
+| Artifacts library at `/artifacts`; the **Artifacts** sidebar link opens `/artifacts` instead of `/pages` | `NEXT_PUBLIC_ARTIFACTS_LIBRARY` | — | — |
 | `/pages` overview opens the Artifacts library | `NEXT_PUBLIC_ARTIFACTS_LIBRARY` and `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` | — | — |
 | Artifact project cards and the side viewer in chat | `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` | `artifact_projects` | — |
-| Dashboard with live data | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` | `artifact_projects` and `artifact_dashboard_data` | — |
-| Slides artifact preview and PDF export | `NEXT_PUBLIC_ARTIFACT_SLIDES` | `artifact_projects` and `artifact_slides` | — |
+| Dashboard with live data | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` plus `NEXT_PUBLIC_ARTIFACTS_LIBRARY` or `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` | `artifact_projects` and `artifact_dashboard_data` | — |
+| Slides artifact preview and PDF export | `NEXT_PUBLIC_ARTIFACT_SLIDES` plus `NEXT_PUBLIC_ARTIFACTS_LIBRARY` or `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` | `artifact_projects` and `artifact_slides` | — |
 | Design canvas | `NEXT_PUBLIC_ARTIFACTS_DESIGN` | `artifacts_design` | — |
 | Craft edit lease bar and draft recovery in chat | `NEXT_PUBLIC_CHAT_CRAFT_LEASE` | — | `craft_native.enabled` with a Word or Sheet profile |
-| Native Craft Word and Sheet editors | — | — | `craft_native.enabled` with a Word or Sheet profile |
+| Native Craft Word or Sheet editor at `/pages/craft/editor` and **New Doc** for native documents | — | — | `craft_native.enabled` with a qualified profile for that application |
 | Creating a Word document (Docs) | — | — | `documents.enabled` |
 | Live workbook editing | — | `gridcraft_editor` | `gridcraft.enabled` and `gridcraft.editor_enabled` |
 | Native Slides editor on a Page | `NEXT_PUBLIC_SLIDES_EDITOR` | — | `slides.enabled` |
 
-`NEXT_PUBLIC_ARTIFACTS_DESIGN` alone also opens `/artifacts`, so a Design-only
-build can reach the canvas. Without either library variable, a saved
+The Dashboard and Slides previews render only inside the Artifacts library or
+the chat and Page viewer, so their own variable does nothing without one of
+those two. `NEXT_PUBLIC_ARTIFACTS_DESIGN` alone also opens `/artifacts`, so a
+Design-only build can reach the canvas. Without either library variable, a saved
 `/artifacts` link falls back to `/pages`. Artifacts is the main place for this
 work; turn on `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` together with the library so
 the old overview leads there too.
@@ -78,12 +80,19 @@ crewship feature-flag inherit artifact_slides
 crewship feature-flag disable artifact_slides
 ```
 
-Change the instance default for every workspace without an override (instance
-administrator):
+Change the instance default for every workspace without an override. `--enabled`
+is a boolean flag, so turning the default back off needs `--enabled=false`:
 
 ```bash
 crewship feature-flag update artifacts_design --enabled
+crewship feature-flag update artifacts_design --enabled=false
 ```
+
+Only an **instance administrator** may change a default: the account named by
+`CREWSHIP_OWNER_EMAIL` on the server, or anyone named with
+[`crewship admin instance add-admin`](/cli/admin#crewship-admin-instance).
+Being OWNER or ADMIN of a workspace is not enough; that role can only set the
+workspace override.
 
 The same operations are available as `PUT` and `DELETE`
 `/api/v1/feature-flags/{key}/override` and `PATCH /api/v1/feature-flags/{key}`.
@@ -112,15 +121,49 @@ restart the server instead.
 ## Instance startup switches
 
 These switches are read once when the server starts. Set them in the
-[YAML configuration](/configuration/yaml-config) or as
-[environment variables](/configuration/environment); an environment variable
-overrides the YAML value. Boolean switches accept `true` or `1`. Change them
-only with a restart. A switch that is off removes or refuses its routes for
-every workspace.
+[YAML configuration](/configuration/yaml-config) file or as environment
+variables; an environment variable overrides the YAML value. Boolean switches
+accept `true` or `1`. Change them only with a restart. A switch that is off
+removes or refuses its routes for every workspace.
+
+Each switch is a top-level YAML section. Every setting on this page also has a
+YAML key, so none of them is environment-only; the variable names are listed in
+the tables below:
+
+```yaml
+documents:
+  enabled: true
+  authority_socket: /run/crewship/documents-authority.sock
+  service_socket: /run/crewship/documents-service.sock
+  service_token_file: /etc/crewship/documents-service.token
+  max_documents_per_workspace: 128
+  max_operations_per_window: 10000
+  operation_window_seconds: 600
+gridcraft:
+  enabled: true
+  editor_enabled: true
+slides:
+  enabled: true
+mooring:
+  enabled: true
+  commands_enabled: false
+craft_native:
+  enabled: true
+  agents_enabled: false
+  editor_bundle_dir: /opt/crewship/editor-bundles
+  profiles:
+    wordcraft:
+      application: wordcraft
+      engine_revision: <engine-revision>
+      cli_path: /opt/crewship/bin/wordcraft
+      cli_sha256: <cli-sha256>
+      editor_bundle: <bundle-sha256>
+      editor_url: /_editor/b/<bundle-sha256>/index.html
+```
 
 | YAML key | Environment variable | Default | What it starts |
 |---|---|---|---|
-| `craft_native.enabled` | `CREWSHIP_CRAFT_NATIVE_ENABLED` | off | Native Craft Word and Sheet editing. Active only with at least one qualified application profile. |
+| `craft_native.enabled` | `CREWSHIP_CRAFT_NATIVE_ENABLED` | off | The per-Page Craft session and edit lease API for Pages that already use the whole-native profile; existing Pages are never converted. A Word or Sheet editor, native New Doc and `wordcraft_native` / `gridcraft_native` in the document status need a qualified profile for that application. |
 | `craft_native.agents_enabled` | `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED` | off | Agent editing in native Craft documents |
 | `documents.enabled` | `CREWSHIP_DOCUMENTS_ENABLED` | off | The Docs (Word) document engine and document creation |
 | `gridcraft.enabled` | `CREWSHIP_GRIDCRAFT_ENABLED` | off | The workbook (Sheet) engine |
@@ -132,17 +175,19 @@ every workspace.
 ### Native Craft profiles
 
 Native Craft runs only operator-qualified releases. Each application profile is
-pinned at startup; requests cannot override it. Set the profile per
-application, where `<APP>` is `WORD` (Word) or `GRID` (Sheet):
+pinned at startup; requests cannot override it. In YAML a profile sits under
+`craft_native.profiles.wordcraft` (Word) or `craft_native.profiles.gridcraft`
+(Sheet), and its `application` must repeat that key. As environment variables,
+`<APP>` is `WORD` (Word) or `GRID` (Sheet):
 
-| Variable | Meaning |
-|---|---|
-| `CREWSHIP_CRAFT_NATIVE_EDITOR_BUNDLE_DIR` | Clean absolute directory that holds the qualified editor bundles |
-| `CREWSHIP_CRAFT_NATIVE_<APP>_ENGINE_REVISION` | Engine revision of the qualified release |
-| `CREWSHIP_CRAFT_NATIVE_<APP>_CLI_PATH` | Path of the engine command-line tool |
-| `CREWSHIP_CRAFT_NATIVE_<APP>_CLI_SHA256` | SHA-256 of that tool |
-| `CREWSHIP_CRAFT_NATIVE_<APP>_EDITOR_BUNDLE` | SHA-256 digest of the editor bundle |
-| `CREWSHIP_CRAFT_NATIVE_<APP>_EDITOR_URL` | Server-owned editor URL for that bundle |
+| YAML key | Variable | Meaning |
+|---|---|---|
+| `craft_native.editor_bundle_dir` | `CREWSHIP_CRAFT_NATIVE_EDITOR_BUNDLE_DIR` | Clean absolute directory that holds the qualified editor bundles |
+| `engine_revision` | `CREWSHIP_CRAFT_NATIVE_<APP>_ENGINE_REVISION` | Engine revision of the qualified release |
+| `cli_path` | `CREWSHIP_CRAFT_NATIVE_<APP>_CLI_PATH` | Absolute path of the engine command-line tool |
+| `cli_sha256` | `CREWSHIP_CRAFT_NATIVE_<APP>_CLI_SHA256` | SHA-256 of that tool |
+| `editor_bundle` | `CREWSHIP_CRAFT_NATIVE_<APP>_EDITOR_BUNDLE` | SHA-256 digest of the editor bundle |
+| `editor_url` | `CREWSHIP_CRAFT_NATIVE_<APP>_EDITOR_URL` | Server-owned editor URL for that bundle: `/_editor/b/<bundle-sha256>/index.html`, or `https://<editor-origin>/b/<bundle-sha256>/index.html` with a dedicated editor origin |
 
 The full names are `CREWSHIP_CRAFT_NATIVE_WORD_ENGINE_REVISION`,
 `CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH`, `CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256`,
@@ -158,21 +203,23 @@ may name at most four pins. The qualification rules are in the
 all different from one another. The Docs engine needs Unix sockets, so it does
 not start on Windows.
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `CREWSHIP_DOCUMENTS_AUTHORITY_SOCKET` | — | Socket of the private document authority |
-| `CREWSHIP_DOCUMENTS_SERVICE_SOCKET` | — | Socket of the document engine service |
-| `CREWSHIP_DOCUMENTS_SERVICE_TOKEN_FILE` | — | File with the service token |
-| `CREWSHIP_DOCUMENTS_MAX_DOCUMENTS_PER_WORKSPACE` | 128 | Documents allowed per workspace |
-| `CREWSHIP_DOCUMENTS_MAX_OPERATIONS_PER_WINDOW` | 10000 | Saved operations accepted per window |
-| `CREWSHIP_DOCUMENTS_OPERATION_WINDOW_SECONDS` | 600 | Length of that window, at most 86400 |
+| YAML key (under `documents`) | Variable | Default | Meaning |
+|---|---|---|---|
+| `authority_socket` | `CREWSHIP_DOCUMENTS_AUTHORITY_SOCKET` | — | Socket of the private document authority |
+| `service_socket` | `CREWSHIP_DOCUMENTS_SERVICE_SOCKET` | — | Socket of the document engine service |
+| `service_token_file` | `CREWSHIP_DOCUMENTS_SERVICE_TOKEN_FILE` | — | File with the service token |
+| `max_documents_per_workspace` | `CREWSHIP_DOCUMENTS_MAX_DOCUMENTS_PER_WORKSPACE` | 128 | Documents allowed per workspace |
+| `max_operations_per_window` | `CREWSHIP_DOCUMENTS_MAX_OPERATIONS_PER_WINDOW` | 10000 | Saved operations accepted per window |
+| `operation_window_seconds` | `CREWSHIP_DOCUMENTS_OPERATION_WINDOW_SECONDS` | 600 | Length of that window, at most 86400 |
 
 A limit set to `0` uses the default. With `documents.enabled`, a negative or
 non-numeric limit stops the server from starting.
 
 The workbook engine and editor use `CREWSHIP_GRIDCRAFT_SERVICE_SOCKET`,
 `CREWSHIP_GRIDCRAFT_SERVICE_TOKEN_FILE`, `CREWSHIP_GRIDCRAFT_EDITOR_BUNDLE_DIR`,
-`CREWSHIP_GRIDCRAFT_EDITOR_BUNDLES` and `CREWSHIP_EDITOR_RUNTIME_ORIGIN`; see
+`CREWSHIP_GRIDCRAFT_EDITOR_BUNDLES` and `CREWSHIP_EDITOR_RUNTIME_ORIGIN`
+(YAML `gridcraft.service_socket`, `service_token_file`, `editor_bundle_dir`,
+`editor_bundles` and `editor_origin`); see
 [Environment variables](/configuration/environment).
 
 ## Build-time UI variables
@@ -184,15 +231,15 @@ only when its value is exactly `true`.
 
 | Variable | Default | Shows |
 |---|---|---|
-| `NEXT_PUBLIC_ARTIFACTS_LIBRARY` | off | The Artifacts library at `/artifacts` and its sidebar link |
+| `NEXT_PUBLIC_ARTIFACTS_LIBRARY` | off | The Artifacts library at `/artifacts`. The **Artifacts** sidebar link is always shown; with this variable it opens `/artifacts` instead of `/pages`. |
 | `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` | off | Sends the `/pages` overview to the library. Needs `NEXT_PUBLIC_ARTIFACTS_LIBRARY`. |
 | `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` | off (`false` in `.env.production`) | Artifact project cards and the side viewer in chat |
 | `NEXT_PUBLIC_CHAT_CRAFT_LEASE` | off (`false` in `.env.production`) | The Craft edit lease bar and local draft recovery in chat |
-| `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` | off | Live data previews in Dashboard artifacts. No data requests while off. |
-| `NEXT_PUBLIC_ARTIFACT_SLIDES` | off | Slides previews of artifact versions |
+| `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` | off | Live data previews in Dashboard artifacts, inside the library or the chat and Page viewer. No data requests while off. |
+| `NEXT_PUBLIC_ARTIFACT_SLIDES` | off | Slides previews of artifact versions, inside the library or the chat and Page viewer |
 | `NEXT_PUBLIC_ARTIFACTS_DESIGN` | off | The Design canvas |
 | `NEXT_PUBLIC_SLIDES_EDITOR` | off | The native Slides editor on a Page that has Slides. Edits stay a local draft. |
-| `NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS` | off | Document revert and proposal review. See [Document history](/guides/document-history-review). |
+| `NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS` | off | Development only. Leave off: the server does not serve the revert and proposal endpoints this client calls. |
 | `NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT` | off | Development only. Leave off. |
 | `NEXT_PUBLIC_ARTIFACT_COPY_MOVE` | off | Development only. Leave off. |
 | `NEXT_PUBLIC_STATIC_APP_PREVIEW` | off | Development only. Leave off. |
@@ -256,13 +303,24 @@ crewship doc status
 
 `enabled` is true when the Docs engine is running. `wordcraft_native` and
 `gridcraft_native` are true when native Craft is on with a qualified Word or
-Sheet profile. The web UI offers document creation only when this check
-succeeds.
+Sheet profile. A successful answer is not enough: the web UI offers **New Doc**
+only when at least one of `enabled`, `wordcraft_native` or `gridcraft_native`
+is `true` (or Mooring reports its optional Word fields). The response above,
+with every value `false`, offers nothing.
 
 ## Upgrades
 
 The flags on this page arrive through ordinary migrations and start off. After
 an upgrade, nothing changes for users until you enable the flags, set the
-startup switches and deploy a UI build with the matching variables. To roll a
-surface back, disable its flag or clear the override; stored artifacts stay in
-the database.
+startup switches and deploy a UI build with the matching variables.
+
+To roll a surface back, undo it in the layer that turned it on. Stored
+artifacts stay in the database in every case.
+
+| Turned on by | Roll back with |
+|---|---|
+| Workspace override | `crewship feature-flag disable <key>`, or `inherit <key>` when the instance default is off |
+| Instance default | `crewship feature-flag update <key> --enabled=false` (instance administrator) |
+| Server environment bypass | Remove the `CREWSHIP_*_ENABLED` variable and restart the server; per-workspace flags cannot override it |
+| Instance startup switch | Set it to `false` in YAML or the environment and restart the server |
+| Build-time UI variable | Rebuild the UI without it and deploy the build |
