@@ -106,7 +106,12 @@ A conflict or quota error never discards anything: earlier versions and data
 are kept, and the CLI never retries with a newer base. Keep your local file,
 read the current state and decide what to save. Validation that happens in the
 CLI before any request (a missing flag, a manifest over 9 MiB, a data batch
-over its limit) exits with `1` or `2` and prints the message only.
+over its limit) exits with `1` or `2`. It prints the message only, or with
+`-f json` an envelope without `status` or `extensions`:
+
+```json
+{"error": {"message": "--base-version must be the exact positive latest version; use create for a new project", "exit_code": 1}}
+```
 
 ## Create and save versions
 
@@ -181,7 +186,23 @@ crewship page artifact publish quarterly-review --base-version 1 --file manifest
 ```
 
 Running the same command again, still with `--base-version 1`, returns
-`409 artifact_version_conflict` and exit code `5`. A user with an explicit Edit
+`409 artifact_version_conflict` and exit code `5`.
+
+To edit the current version, read it, build a manifest from it and publish
+with `.latest_version` as the base. The `manifest` object that `get` returns
+also carries `created_at`, `restored_from` and `version`, which the CLI
+rejects (`unknown manifest field "restored_from"`), so copy only `entrypoint`
+and `files` and add your own `message`:
+
+```bash
+crewship page artifact get quarterly-review -f json > snapshot.json
+jq '{entrypoint: .manifest.entrypoint, files: .manifest.files, message: "Shorter title"}' \
+  snapshot.json > manifest.json
+# edit the content of the files in manifest.json
+crewship page artifact publish quarterly-review \
+  --base-version "$(jq -r '.latest_version' snapshot.json)" --file manifest.json
+```
+ A user with an explicit Edit
 grant can publish under their own identity; owner history stays private.
 
 ### `crewship page artifact get <slug>`
@@ -367,10 +388,19 @@ crewship page artifact reply quarterly-review <comment-id> --version 4 \
 ## Dashboard data
 
 Requires `artifact_dashboard_data` as well as `artifact_projects`. A version
-declares its collections in a `dashboard.json` file in the manifest:
+declares its collections in a `dashboard.json` file in the manifest, with the
+media type `application/json` and the content
+`{"schema_version":1,"collections":["sales"]}`. The examples below use an
+artifact created from this manifest:
 
 ```json
-{"schema_version":1,"collections":["sales"]}
+{"entrypoint":"index.html","message":"Dashboard","files":[
+  {"path":"index.html","media_type":"text/html","content":"<h1 id=\"title\">Sales</h1>"},
+  {"path":"dashboard.json","media_type":"application/json","content":"{\"schema_version\":1,\"collections\":[\"sales\"]}"}]}
+```
+
+```bash
+crewship page artifact create sales-dashboard --name "Sales dashboard" --file dashboard-manifest.json
 ```
 
 Data is versioned per document, separately from code versions. Writing data
@@ -453,12 +483,49 @@ crewship page artifact data collections sales-dashboard --version 1 -f ndjson
 ## Slides
 
 Requires `artifact_slides` as well as `artifact_projects`. A deck is an
-artifact version with a `deck.json` (`{"schema_version":1,"order":[…]}`) and
-one `slides/<id>.html` file per slide, each a `<section id="<id>">` with
-absolutely positioned elements. Content outside this profile returns
-`422 artifact_slides_unsupported`. Both commands need an exact `--version`
-(at most 9007199254740991); owners can read any retained version, Edit grants
-the latest version, and readers only the shared version.
+ordinary artifact version that follows a closed Slides profile. Content
+outside the profile returns `422 artifact_slides_unsupported`. Both commands
+need an exact `--version` (at most 9007199254740991); owners can read any
+retained version, Edit grants the latest version, and readers only the shared
+version.
+
+This manifest creates a two-slide deck with every supported element:
+
+```json
+{"entrypoint":"slides/intro.html","message":"Deck","files":[
+  {"path":"deck.json","media_type":"application/json","content":"{\"schema_version\":1,\"order\":[\"intro\",\"summary\"]}"},
+  {"path":"slides/intro.html","media_type":"text/html","content":"<section id=\"intro\"><p id=\"intro-title\" style=\"left:80px;top:80px;width:1600px;height:180px;font-size:48px;color:#112233;text-align:left\">Q3 review</p><div id=\"intro-bar\" data-shape=\"rectangle\" style=\"left:80px;top:280px;width:400px;height:12px;background-color:#2255AA;border-color:#2255AA;border-width:0px\"></div><aside id=\"intro-notes\">Open with the headline number.</aside></section>"},
+  {"path":"slides/summary.html","media_type":"text/html","content":"<section id=\"summary\"><table id=\"summary-table\" style=\"left:80px;top:80px;width:1200px;height:240px;font-size:32px;color:#111111;background-color:#FFFFFF;border-color:#CCCCCC\"><tbody><tr><td>Region</td><td>Revenue</td></tr><tr><td>North</td><td>1250</td></tr></tbody></table></section>"}]}
+```
+
+```bash
+crewship page artifact create quarterly-deck --name "Quarterly deck" --file deck-manifest.json
+```
+
+The profile rules:
+
+- The manifest holds exactly `deck.json` (`application/json`) and one
+  `slides/<id>.html` file (`text/html`) for each ID in `order`, and no other
+  files. `deck.json` has only `schema_version: 1` and `order` (1–100 slide
+  IDs).
+- A slide file is a single `<section id="<id>">` whose ID matches its file
+  name. Its children are `p`, `div`, `table` and at most one `aside`, with no
+  further nesting; headings, images, `span` and other tags are rejected.
+- Every element has a unique `id` (a letter, then up to 63 letters, digits,
+  `_` or `-`) and a `style` attribute with exactly the properties below; any
+  other attribute or property, including `position`, is rejected.
+
+| Element | Becomes | Required `style` properties |
+|---|---|---|
+| `<p>` with plain text | Text | `left`, `top`, `width`, `height`, `font-size`, `color`, `text-align` |
+| Empty `<div>` with `data-shape` set to `rectangle` or `ellipse` | Shape | `left`, `top`, `width`, `height`, `background-color`, `border-color`, `border-width` |
+| `<table><tbody><tr><td>` with plain-text cells | Table | `left`, `top`, `width`, `height`, `font-size`, `color`, `background-color`, `border-color` |
+| `<aside id="…">`, last in the section | Speaker notes | none (`id` only) |
+
+Sizes are whole pixels (`80px`), colors are six-digit hex (`#112233`),
+`text-align` is `left`, `center` or `right`, `font-size` is 1–160 pixels and
+`border-width` 0–16 pixels. `font-family` is optional on text and tables and
+accepts only `Go Regular` or `sans-serif`. The canvas is 1920 × 1080.
 
 ### `crewship page artifact slides <slug-or-id>`
 
@@ -630,10 +697,12 @@ instead, under the identity of the person who started the run:
 | `data collections`, `data get`, `data batch` | `artifact_data_collections`, `artifact_data_read`, `artifact_data_batch` |
 | `slides`, `export-pdf` | `artifact_slides_read`, `artifact_export_pdf` |
 
-`share`, `comment`, `availability`, `archive` and `unarchive` are not
-available to an agent and fail with
-`artifact or Design operation unavailable to an agent run`. In this mode the
-`--config`, `--server`, `--profile`, `--workspace` and `--server-allow-mismatch`
+`share`, `comment` and `availability` are not available to an agent and fail
+with `artifact or Design operation unavailable to an agent run`. `archive` and
+`unarchive` do not use the run capability: they send the saved profile's
+request with the normal CLI credentials, and the server refuses an agent or
+run caller with `403`. In this
+mode the `--server`, `--profile`, `--workspace` and `--server-allow-mismatch`
 flags are rejected, and a token that is not a run capability fails with
 `original live run capability required; no human profile fallback`. A refused
 tool call prints `artifact tool refused: {…}`. If the outcome is unknown, the
