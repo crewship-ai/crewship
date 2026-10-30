@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { toPageView, type PageView, type WirePage } from "@/hooks/use-pages"
 
@@ -83,19 +83,30 @@ it("shows the server's read-only preview when only the preview is enabled", asyn
 })
 
 it.each([
-  ["the editor is off", () => { state.availability = { enabled: false } }],
-  ["this person may not edit", () => { state.availability = { enabled: true, can_edit: false } }],
-  ["availability is not confirmed", () => { state.status = 503 }],
-])("keeps the saved preview, and no Edit that opens the Pages editor, when %s", async (_name, setup) => {
+  ["the editor is off", () => { state.availability = { enabled: false } }, "Editing is not available here right now."],
+  ["this person may not edit", () => { state.availability = { enabled: true, can_edit: false } }, "You can read this document but not edit it."],
+  ["availability is not confirmed", () => { state.status = 503 }, /Editing could not be confirmed right now/],
+])("keeps the saved preview, and no Edit that opens the Pages editor, when %s", async (_name, setup, notice) => {
   setup()
   open()
   // /pages/craft/editor makes the same availability decision, so it would open nothing either.
-  expect(await screen.findByText("Editing is not available here right now.")).toBeInTheDocument()
+  expect(await screen.findByText(notice)).toBeInTheDocument()
   expect(screen.getByText("saved preview")).toBeInTheDocument()
   expect(screen.queryByTestId("lock-bar")).toBeNull()
   expect(screen.queryByRole("link", { name: /Open in Pages/ })).toBeNull()
   expect(screen.queryByText(/Open in Pages/)).toBeNull()
   expect(screen.queryByTestId("native-host")).toBeNull()
+})
+
+it("asks again after an unconfirmed availability answer and opens the editor once confirmed", async () => {
+  state.status = 503
+  open()
+  const retry = await screen.findByRole("button", { name: "Try again" })
+  expect(screen.queryByTestId("native-host")).toBeNull()
+  state.status = 200
+  fireEvent.click(retry)
+  expect(await screen.findByTestId("native-host")).toBeInTheDocument()
+  expect(state.fetch).toHaveBeenCalledTimes(2)
 })
 
 it("a native Sheet whose editor is off says so instead of an empty detail", async () => {

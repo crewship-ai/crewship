@@ -372,7 +372,6 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
       // Without the editor here there is none on Pages either: /pages/craft/editor asks the same
       // availability, so the fallback offers no Edit that opens it, only the saved version.
       : nativeEditor ? <ArtifactNativeEditor workspaceId={workspaceId} pageId={item.pageId!} fallback={<>
-        <p role="status" className="text-sm text-muted-foreground">Editing is not available here right now.</p>
         {item.kind === "word" && !item.empty && <WordPreview workspaceId={workspaceId} item={item} />}
       </>} />
       : item.native && item.kind === "word" && item.pageId ? <WordLockBar workspaceId={workspaceId} pageId={item.pageId} />
