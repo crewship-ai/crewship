@@ -374,6 +374,21 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 	// (collectAgentStream, #998); timeout 0 = block until the server closes
 	// the stream, the historical interactive behaviour.
 	res := collectAgentStream(ws, 0, stop)
+	if !res.Cancelled && (res.StopEndedUnconfirmed || stop.endedUnconfirmed()) {
+		// The run is over, but the server never confirmed that the stop
+		// ended it (an older server). Its output is printed; the outcome is
+		// neither "cancelled" nor a hang.
+		if res.Text != "" {
+			fmt.Print(sanitizeTerminal(res.Text))
+			if !strings.HasSuffix(res.Text, "\n") {
+				fmt.Println()
+			}
+		}
+		if !quiet {
+			fmt.Fprintf(os.Stderr, "%s[ended — stop not confirmed]%s\n", cli.Yellow, cli.Reset)
+		}
+		return stopEndedUnconfirmedError()
+	}
 	if stop.didTimeOut() {
 		return fmt.Errorf("stop was requested but the run did not confirm it within %s", runStopGrace)
 	}
@@ -603,6 +618,20 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			if closeReason != "" {
 				return joinErrs(fmt.Errorf("server rejected the connection: %s", closeReason))
 			}
+			if activeRunStop.endedUnconfirmed() {
+				// A done followed the stop, but the server never
+				// acknowledged it: an older server. The run is over and
+				// its output complete; the stop is not confirmed.
+				if save != nil && saveErr == nil {
+					if err := save.Commit(); err != nil {
+						saveErr = fmt.Errorf("save commit: %w", err)
+					}
+				}
+				if !quiet {
+					fmt.Fprintf(os.Stderr, "\n%s[ended — stop not confirmed]%s\n", cli.Yellow, cli.Reset)
+				}
+				return joinErrs(stopEndedUnconfirmedError())
+			}
 			if activeRunStop.didTimeOut() {
 				return joinErrs(fmt.Errorf("stop was requested but the run did not confirm it within %s", runStopGrace))
 			}
@@ -618,6 +647,9 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 		}
 
 		if activeRunStop.wasRequested() {
+			if activeRunStop.noteAccepted(msg) {
+				continue
+			}
 			if matched, cancelled := cancellationResult(msg, activeRunStop.chatID, activeRunStop.requestID); matched {
 				flush()
 				if !cancelled {
@@ -750,6 +782,9 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 				continue
 			}
 			if activeRunStop.wasRequested() {
+				// Not a confirmation. noteDone arms the bounded fallback
+				// for a server that never acknowledged the stop.
+				activeRunStop.noteDone()
 				continue
 			}
 			flush()

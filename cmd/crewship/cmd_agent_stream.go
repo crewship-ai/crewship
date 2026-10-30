@@ -32,8 +32,11 @@ type collectResult struct {
 	StreamErr string
 	GotDone   bool
 	Cancelled bool
-	ReadErr   error
-	TimedOut  bool
+	// StopEndedUnconfirmed: a stop was requested, a done followed, and the
+	// server never acknowledged the request (errStopEndedUnconfirmed).
+	StopEndedUnconfirmed bool
+	ReadErr              error
+	TimedOut             bool
 	// Busy is set when the server bounced the send off the per-agent run
 	// lock (#2269): the agent already had a live run, this message was
 	// never persisted and nothing ran. Distinct from StreamErr because the
@@ -92,8 +95,15 @@ func collectAgentStream(src chatEventSource, timeout time.Duration, stops ...*ru
 	var res collectResult
 	var fullText []byte
 	var wait provisioningWait
+	// legacy fires when a done followed an unacknowledged stop request: the
+	// server may predate cancel confirmation (see errStopEndedUnconfirmed).
+	var legacy <-chan time.Time
 	for {
 		select {
+		case <-legacy:
+			res.StopEndedUnconfirmed = true
+			res.Text = string(fullText)
+			return res
 		case <-deadline:
 			res.TimedOut = true
 			res.Text = string(fullText)
@@ -105,6 +115,10 @@ func collectAgentStream(src chatEventSource, timeout time.Duration, stops ...*ru
 				return res
 			}
 			if cancellation.wasRequested() {
+				if cancellation.noteAccepted(r.msg) {
+					legacy = nil
+					continue
+				}
 				if matched, cancelled := cancellationResult(r.msg, cancellation.chatID, cancellation.requestID); matched {
 					res.Cancelled = cancelled
 					if !cancelled {
@@ -140,6 +154,13 @@ func collectAgentStream(src chatEventSource, timeout time.Duration, stops ...*ru
 					continue // the deferral's done; the replayed run follows
 				}
 				if cancellation.wasRequested() {
+					// Never a confirmation by itself. Against a server that
+					// has not acknowledged the request, wait briefly for its
+					// answer and then degrade explicitly.
+					cancellation.noteDone()
+					if cancellation.endedUnconfirmed() && legacy == nil {
+						legacy = time.After(stopResultGrace)
+					}
 					continue
 				}
 				res.GotDone = true

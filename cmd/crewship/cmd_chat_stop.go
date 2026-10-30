@@ -39,6 +39,11 @@ stays connected until the server confirms cancellation of your exact request, an
 non-zero if no confirmation arrives within --timeout (no run of yours was
 active, or it belongs to someone else).
 
+Confirmation needs a server with cancel confirmation (cancel_accepted /
+cancel_result). Against an older server, once the run's done arrives without
+an acknowledgement the command reports "run ended; cancellation not confirmed
+by server" and exits 9.
+
 Examples:
   crewship chat stop c_abc123
   crewship chat stop c_abc123 --wait
@@ -106,6 +111,29 @@ Examples:
 // package (and its tests) can tell "no confirmation" from a transport failure.
 var errStopUnconfirmed = errors.New("no cancellation was confirmed")
 
+// errStopEndedUnconfirmed is the degraded outcome against a server that
+// predates cancel confirmation: a run on the chat ended (`done`) after the
+// stop was sent, but the server never acknowledged the request
+// (`cancel_accepted`) nor answered it (`cancel_result`). The run is over; why
+// it ended is unknown, so it is neither reported as stopped nor as a hang.
+var errStopEndedUnconfirmed = errors.New("run ended; cancellation not confirmed by server (server too old?)")
+
+// exitStopEndedUnconfirmed is the exit code of errStopEndedUnconfirmed, for
+// `chat stop --wait` and a signal-stopped `run`. Command-specific, like
+// `crewship wait`'s run-outcome codes; documented in docs/cli/chat.mdx.
+const exitStopEndedUnconfirmed = 9
+
+func stopEndedUnconfirmedError() error {
+	return cli.WithExitCode(errStopEndedUnconfirmed, exitStopEndedUnconfirmed)
+}
+
+// stopResultGrace is how long a `done` observed after an unacknowledged stop
+// waits for a late cancel_accepted/cancel_result before the outcome degrades
+// to errStopEndedUnconfirmed. A current server acknowledges the request as
+// soon as it reads it and queues its result right after the run's own done,
+// so this only expires against an older server. A var so tests can shorten it.
+var stopResultGrace = 3 * time.Second
+
 // waitForRunEnd requires the private result of this request. Shared done and
 // unrelated request IDs cannot confirm cancellation.
 func waitForRunEnd(ws *cli.WSClient, chatID, requestID string, timeout time.Duration) error {
@@ -132,9 +160,16 @@ func waitForRunEnd(ws *cli.WSClient, chatID, requestID string, timeout time.Dura
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
 	var closeReason string
+	var accepted, sawDone bool
+	var legacy <-chan time.Time
 	for {
 		select {
+		case <-legacy:
+			return stopEndedUnconfirmedError()
 		case <-deadline.C:
+			if sawDone && !accepted {
+				return stopEndedUnconfirmedError()
+			}
 			return cli.WithExitCode(fmt.Errorf("%w within %s — no run of yours was active on this chat, or it was started by another member",
 				errStopUnconfirmed, timeout), cli.ExitGeneric)
 		case r := <-reads:
@@ -148,11 +183,21 @@ func waitForRunEnd(ws *cli.WSClient, chatID, requestID string, timeout time.Dura
 				closeReason = reason
 				continue
 			}
+			if cancellationAccepted(r.msg, chatID, requestID) {
+				accepted, legacy = true, nil
+				continue
+			}
 			if matched, cancelled := cancellationResult(r.msg, chatID, requestID); matched {
 				if !cancelled {
 					return fmt.Errorf("%w: server did not confirm cancellation of an active run of yours", errStopUnconfirmed)
 				}
 				return nil
+			}
+			if ev, err := cli.ParseChatEvent(r.msg); err == nil && ev != nil && ev.Type == "done" && !accepted && legacy == nil {
+				// Possibly an older server: wait briefly for its answer,
+				// then degrade explicitly instead of waiting out --timeout.
+				sawDone = true
+				legacy = time.After(stopResultGrace)
 			}
 		}
 	}
@@ -174,6 +219,69 @@ type runStop struct {
 	timedOut  bool
 	chatID    string
 	requestID string
+	// accepted: the server acknowledged this request (cancel_accepted), so
+	// it supports confirmation and a cancel_result will follow.
+	accepted bool
+	// sawDone: a done arrived on the chat after the stop was requested.
+	sawDone bool
+	// closer ends a blocking read loop; legacy is its pending timer.
+	closer func()
+	legacy *time.Timer
+}
+
+// noteAccepted records msg when it is this request's cancel_accepted.
+func (s *runStop) noteAccepted(msg *cli.WSMessage) bool {
+	if s == nil || !cancellationAccepted(msg, s.chatID, s.requestID) {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.accepted = true
+	if s.legacy != nil {
+		s.legacy.Stop()
+		s.legacy = nil
+	}
+	return true
+}
+
+// noteDone records a done seen after the stop request. Without an
+// acknowledgement the server may predate cancel confirmation; when a closer
+// is set, the read loop is ended after stopResultGrace so the caller reports
+// errStopEndedUnconfirmed instead of waiting out runStopGrace.
+func (s *runStop) noteDone() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sawDone = true
+	if s.accepted || s.legacy != nil || s.closer == nil {
+		return
+	}
+	s.legacy = time.AfterFunc(stopResultGrace, s.closer)
+}
+
+// endedUnconfirmed reports the degraded outcome: the run ended after the stop
+// request, and the server never acknowledged the request.
+func (s *runStop) endedUnconfirmed() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.requested && s.sawDone && !s.accepted
+}
+
+func (s *runStop) stopLegacyTimer() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.legacy != nil {
+		s.legacy.Stop()
+		s.legacy = nil
+	}
 }
 
 // activeRunStop is read by streamEvents to word its terminal line. Package
@@ -207,7 +315,7 @@ func (s *runStop) didTimeOut() bool {
 // installRunStop wires SIGINT and SIGTERM to a confirmed stop of chatID. The
 // returned func detaches the handler; call it when the stream ends.
 func installRunStop(ws *cli.WSClient, chatID string) (*runStop, func()) {
-	stop := &runStop{chatID: chatID, requestID: uuid.NewString()}
+	stop := &runStop{chatID: chatID, requestID: uuid.NewString(), closer: func() { _ = ws.Close() }}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	done := make(chan struct{})
@@ -243,12 +351,13 @@ func installRunStop(ws *cli.WSClient, chatID string) (*runStop, func()) {
 		once.Do(func() {
 			signal.Stop(sig)
 			close(done)
+			stop.stopLegacyTimer()
 		})
 	}
 }
 
 func init() {
-	chatStopCmd.Flags().Bool("wait", false, "Stay connected until the run's terminal event confirms the stop")
+	chatStopCmd.Flags().Bool("wait", false, "Stay connected until the server confirms the stop")
 	chatStopCmd.Flags().Duration("timeout", chatStopDefaultWait, "With --wait: give up after this long without confirmation")
 	chatCmd.AddCommand(chatStopCmd)
 }
@@ -267,4 +376,17 @@ func cancellationResult(msg *cli.WSMessage, chatID, requestID string) (bool, boo
 		return false, false
 	}
 	return true, result.Cancelled
+}
+
+// cancellationAccepted reports this exact request's acknowledgement: the
+// server registered it and will answer with a cancel_result.
+func cancellationAccepted(msg *cli.WSMessage, chatID, requestID string) bool {
+	if msg == nil || msg.Type != "cancel_accepted" || requestID == "" {
+		return false
+	}
+	var ack struct {
+		ChatID    string `json:"session_id" yaml:"session_id"`
+		RequestID string `json:"request_id" yaml:"request_id"`
+	}
+	return json.Unmarshal(msg.Payload, &ack) == nil && ack.ChatID == chatID && ack.RequestID == requestID
 }

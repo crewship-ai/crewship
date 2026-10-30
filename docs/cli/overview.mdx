@@ -48,7 +48,7 @@ Every command exits with a classified code, so scripts and agents can branch on 
 | `7` | Server error (HTTP 5xx) |
 | `8` | Network failure — the request never produced a response |
 
-`crewship wait` keeps its own run-outcome codes (0 completed / 1 failed / 2 cancelled / 3 timeout / 4 connection error) — those describe the *run's* terminal state, not a command failure. See the [Wait page](/cli/wait).
+`crewship wait` keeps its own run-outcome codes (0 completed / 1 failed / 2 cancelled / 3 timeout / 4 connection error) — those describe the *run's* terminal state, not a command failure. See the [Wait page](/cli/wait). `crewship chat stop --wait` and a signal-stopped `crewship run` exit `9` when the run ended but the server did not confirm the stop (a server that predates cancel confirmation) — see [chat stop](/cli/chat).
 
 When the output format is `json`, `ndjson`, or `yaml`, errors are emitted on **stderr** as a structured envelope in that same format (stdout stays reserved for success output):
 
