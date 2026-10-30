@@ -18,7 +18,7 @@ crewship journal priority <entry-id> --mark <marker> [--reason <text>]
 crewship journal verify
 ```
 
-The top-level command is the list view. `--follow` opens an SSE connection to `/api/v1/journal/stream` and prints entries as they arrive (Ctrl-C to exit). The CLI auto-reconnects on transient failure with bounded exponential backoff (1 s → 30 s) and threads `Last-Event-ID` so a brief disconnect resumes without dropping or duplicating entries. For pretty in-browser viewing, the web UI `/journal` page is also available.
+The top-level command is the list view. `--follow` opens an SSE connection to `/api/v1/journal/stream`, first replays recent entries, then prints new ones as they arrive (Ctrl-C exits with status 0). The CLI auto-reconnects on transient failure with bounded exponential backoff (1 s → 30 s) and threads `Last-Event-ID` so a brief disconnect resumes without dropping or duplicating entries. A refusal (401, 403 or 404 — for example a token that is not a member of the workspace) is permanent: the CLI prints the error and exits non-zero instead of reconnecting. `--follow` always prints the text line format; `--format json` does not apply to the live tail. For pretty in-browser viewing, the web UI `/journal` page is also available.
 
 A `run.recovered_stop` entry records a confirmed stop whose start was never
 recorded (`start_recorded: false`). It is audit-only: it does not represent a
@@ -175,7 +175,12 @@ Annotate one entry with a priority marker (`normal`, `high`, `pin`, `permanent`)
 crewship journal priority j_abc --mark permanent --reason "FX compliance rule"
 crewship journal priority j_abc --mark pin --reason "team playbook entry"
 crewship journal priority j_abc --mark normal
+crewship journal priority j_abc --mark high --format json
 ```
+
+Text output is one line, `Entry j_abc: priority pin → high`. With `--format json` (or `yaml` / `ndjson`) the command prints the server's answer instead — `{"id": "j_abc", "priority": "high", "previous": "pin"}` — so a script can read the previous marker without parsing prose.
+
+A MEMBER is refused by the server (`API error (403): Forbidden`), and an unknown ID returns `API error (404): entry not found`; both exit non-zero.
 
 The `--mark` value is validated client-side before the request goes out. Each invocation also writes a `memory.priority_changed` audit entry to the journal carrying the previous and new priority plus the supplied reason — so the curation history is itself queryable.
 

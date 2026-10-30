@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { readFileSync } from "node:fs"
 import { parseEnv } from "node:util"
+import { buildProfile, refTargetsMain, RELEASE_FLAGS } from "../../e2e/build-profile"
 import { artifactDesignSystem, artifactSlides, artifactsLibrary, chatArtifactProjects, chatCraftLease, crewsUnifiedUI, legacyMcpIntegrations, pagesOpenArtifacts } from "@/lib/feature-flags"
 
 describe.each([
@@ -10,10 +11,10 @@ describe.each([
 ] as const)("production %s", (name, enabled) => {
   afterEach(() => vi.unstubAllEnvs())
 
-  it("stays off with the checked-in production build configuration", () => {
-    const defaults = parseEnv(readFileSync(".env.production", "utf8"))
-    vi.stubEnv(name, defaults[name])
-    expect(enabled()).toBe(false)
+  it("follows the checked-in build profile", () => {
+    const profile = buildProfile()
+    vi.stubEnv(name, profile.env[name])
+    expect(enabled()).toBe(profile.name === "release")
   })
 
   it("allows an explicit build-time opt-in", () => {
@@ -25,11 +26,11 @@ describe.each([
 describe("pagesOpenArtifacts", () => {
   afterEach(() => vi.unstubAllEnvs())
 
-  it("stays off with the checked-in production build configuration", () => {
-    const defaults = parseEnv(readFileSync(".env.production", "utf8"))
-    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", defaults.NEXT_PUBLIC_ARTIFACTS_LIBRARY)
-    vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", defaults.NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS)
-    expect(pagesOpenArtifacts()).toBe(false)
+  it("follows the checked-in build profile", () => {
+    const profile = buildProfile()
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", profile.env.NEXT_PUBLIC_ARTIFACTS_LIBRARY)
+    vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", profile.env.NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS)
+    expect(pagesOpenArtifacts()).toBe(profile.name === "release")
   })
 
   it("needs the library itself as well as its own opt-in", () => {
@@ -111,9 +112,26 @@ describe("artifactSlides", () => {
     vi.stubEnv("NEXT_PUBLIC_ARTIFACT_SLIDES", "true")
     expect(artifactSlides()).toBe(true)
   })
-  it("keeps the tracked production build configuration default-off", () => {
-    const production = readFileSync(".env.production", "utf8")
-    expect(production.match(/^NEXT_PUBLIC_ARTIFACT_SLIDES\s*=\s*(.*?)\s*$/m)?.[1]).not.toBe("true")
+  it("follows the checked-in build profile", () => {
+    const profile = buildProfile()
+    expect(profile.env.NEXT_PUBLIC_ARTIFACT_SLIDES === "true").toBe(profile.name === "release")
+  })
+})
+
+describe("build profile", () => {
+  it("is main for anything bound for main", () => {
+    if (refTargetsMain()) expect(buildProfile().name).toBe("main")
+  })
+  it("recognises pushes and merge-queue refs of main only", () => {
+    expect(refTargetsMain("refs/heads/main")).toBe(true)
+    expect(refTargetsMain("refs/heads/gh-readonly-queue/main/pr-4484-abc")).toBe(true)
+    expect(refTargetsMain("refs/pull/4484/merge")).toBe(false)
+    expect(refTargetsMain("refs/heads/demo/release-dev-20261029-r2")).toBe(false)
+  })
+  it("main keeps every release flag off; release turns each on without the sharing mock", () => {
+    const profile = buildProfile()
+    for (const flag of RELEASE_FLAGS) expect(profile.env[flag] === "true", flag).toBe(profile.name === "release")
+    expect(profile.env.NEXT_PUBLIC_ARTIFACTS_SHARING_MOCK).not.toBe("true")
   })
 })
 

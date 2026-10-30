@@ -1,40 +1,144 @@
 ---
 title: "Slides Commands"
-description: "Initialize and read a saved native presentation with a human credential."
+description: "Initialize and read a native Slides deck with a human credential."
 stability: experimental
 tag: Experimental
 ---
 
 # crewship slides
 
-Read or initialize a schema-1 presentation on an existing empty private Page.
-The server must enable `CREWSHIP_SLIDES_ENABLED`. The singular `slide` alias
-accepts the same commands. These human commands refuse agent credentials.
+Read or initialize a native schema-1 Slides deck. The deck is saved on a
+private artifact, and the artifact's slug or `@<artifact-id>` addresses it. With
+the Artifacts library enabled, the deck is listed there as **Slides**. The
+singular `slide` alias accepts the same commands. These human commands refuse
+agent credentials.
 
-## `crewship slides read <page-slug|@ID>`
+```bash
+crewship slides <read|at-rev|initialize> <slug|@artifact-id> [flags]
+```
 
-Read the confirmed head using a current human credential with `pages:read`.
-The result contains `schema_version`, `revision`, `order_version`, `content_hash`
-and the complete native `deck`. Another workspace OWNER needs audited private
-access; ADMIN and other unrelated users receive 404.
+## Availability
 
-## `crewship slides at-rev <page-slug|@ID> <revision>`
+| Switch | Kind | Default | Effect |
+|---|---|---|---|
+| `CREWSHIP_SLIDES_ENABLED=true` (or `slides.enabled: true`) | Server startup | Off | Registers the three routes. While it is off, every subcommand returns `404` with `404 page not found`. |
+| `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` | Web build | Off | Shows saved decks in the Artifacts library. The CLI does not need it. |
 
-Read one positive immutable revision. A missing revision returns 404; the
-command never substitutes the latest head.
+This is the native Slides adapter. It is separate from the Slides preview of a
+typed artifact version (`crewship page artifact slides`), which the
+`artifact_slides` workspace flag controls. Enabling one does not enable the
+other.
 
-## `crewship slides initialize <page-slug|@ID> --file <request.json>`
+## Access
 
-The Page's current human custodian can initialize its populated deck using
-`pages:write`. The required `--file` accepts a JSON file or `-` for stdin. Supply
-`page_id`, `schema_version: 1`, `base_rev: 0`, a stable `mutation_id` and a complete
-`deck` with the same immutable `deck_id`. See the
-[native Slides guide](/guides/slides-native) for the bounded schema fixture.
+| Command | Credential | Scoped token | Who can use it |
+|---|---|---|---|
+| `read`, `at-rev` | Human session or CLI token | `pages:read` | The artifact's owner. Another workspace OWNER can read after a mandatory private-access audit. |
+| `initialize` | Human session or CLI token | `pages:write` | The artifact's current human owner only. |
 
-Keep the exact request file when confirmation is uncertain. Retrying it with
-the same current actor returns the original receipt, marked `duplicate: true`.
-Changed content under the same mutation ID conflicts. The receipt contains
-`mutation_id`, `revision`, `order_version`, `content_hash` and `duplicate`.
+An ADMIN role or an ordinary share does not widen a private artifact's audience.
+A missing artifact, an artifact you cannot see and a deck that has no revision
+yet all return the same `404 Slides not found`, so the error does not reveal
+which one applies. Agent, internal and acting-agent credentials are refused; with
+`CREWSHIP_AGENT_TOKEN` set, the CLI stops before sending the request.
 
-Initialization creates no Page or sharing grant. Patch, reorder, restore,
-agent creation, presentation mode and export are separate capabilities.
+## `crewship slides read <slug|@artifact-id>`
+
+Read the confirmed head. The result contains `schema_version`, `revision`,
+`order_version`, `content_hash` and the complete native `deck`.
+
+```bash
+crewship slides read @<artifact-id> -f json
+```
+
+```json
+{
+  "content_hash": "f7b83398…",
+  "deck": {
+    "deck_id": "<artifact-id>",
+    "height": 540,
+    "schema_version": 1,
+    "slide_order": ["slide_b", "slide_a"],
+    "slides": [ … ],
+    …
+  },
+  "order_version": 1,
+  "revision": 1,
+  "schema_version": 1
+}
+```
+
+The default table format prints the same object as one line of JSON.
+`-f yaml` prints it as YAML.
+
+## `crewship slides at-rev <slug|@artifact-id> <revision>`
+
+Read one immutable revision. The output has the same fields as `read`. The
+revision must be a positive integer; `0` or a non-number stops locally with
+`positive revision required` (exit `1`). A revision that does not exist returns
+`404`. The command never substitutes the latest head.
+
+```bash
+crewship slides at-rev @<artifact-id> 1
+```
+
+## `crewship slides initialize <slug|@artifact-id> --file <request.json>`
+
+Save revision 1 of a deck. `--file` is required; `--file -` reads stdin. The
+request is at most 2 MiB of JSON with `page_id`, `schema_version: 1`,
+`base_rev: 0`, a stable `mutation_id` and a complete `deck` whose `deck_id`
+equals `page_id`. See the [native Slides guide](/guides/slides-native) for the
+schema fixture. The CLI validates the request before sending it. Unknown or
+wrongly cased fields fail locally with
+`Slides object contains unknown or incorrectly cased fields`.
+
+The target must be a private artifact that you own personally, with no other
+content: no document, typed version, Project, board, workbook, panels or live
+project. A private artifact is visible only to its owner and, after an audit,
+to the workspace OWNER.
+
+The current release has no CLI command or UI control that creates such an
+empty private artifact for a deck. `crewship page create`, with or without
+`--allow-empty`, creates an artifact that is shared with the workspace in the
+usual way. That artifact is a valid target for
+[`crewship doc initialize`](/cli/doc), which does not require a private
+artifact, but this command refuses it with `404 Slides not found`. Without such
+a target, use `slides read` and `slides at-rev` on decks that already exist.
+
+```bash
+crewship slides initialize @<artifact-id> --file initialize.json -f json
+```
+
+```json
+{
+  "content_hash": "f7b83398…",
+  "duplicate": false,
+  "mutation_id": "deck-init-1",
+  "order_version": 1,
+  "revision": 1
+}
+```
+
+Keep the exact request file if you are not sure the request was confirmed.
+Retrying it with the same current actor returns the original receipt with
+`duplicate: true`. Changed content under the same mutation ID returns `409`
+(`Slides identity or mutation conflict`).
+
+Initialization creates no artifact and no sharing grant. Patch, reorder,
+restore, agent creation, presentation mode and export are not available
+through these commands.
+
+## Errors
+
+With `-f json`, errors are printed as an `error` object with `message`,
+`status`, `detail` and `exit_code`. See
+[exit codes](/cli/overview#exit-codes-&-machine-readable-errors).
+
+| Situation | Status | Message | Exit |
+|---|---|---|---|
+| Server switch off | 404 | `404 page not found` | 3 |
+| No such artifact, no access, or no revision yet | 404 | `Slides not found` | 3 |
+| Same `mutation_id` with changed content, or already initialized | 409 | `Slides identity or mutation conflict` | 5 |
+| Stored deck uses an unsupported schema | 409 | `Slides schema unavailable` | 5 |
+| Missing `--file`, invalid request, oversize file | — | Local message | 1 |
+| `CREWSHIP_AGENT_TOKEN` set | — | `human Slides commands require a human credential` | 1 |

@@ -27,11 +27,73 @@ var featureFlagCmd = &cobra.Command{
 	Use:     "feature-flag",
 	Aliases: []string{"flag"},
 	Short:   "Manage feature flags and per-workspace overrides",
+	Long: `Feature flags are instance-wide definitions (key, default, description)
+plus an optional on/off override per workspace. The effective value for a
+workspace is its override when one exists, otherwise the definition's default.
+A key with no definition is off. The stored percentage is not evaluated.
+
+Who can do what:
+  list                       any member of the workspace
+  enable, disable, inherit   workspace OWNER or ADMIN
+  create, update, delete     instance administrator who is also OWNER or
+                             ADMIN of the selected workspace
+
+Workspace flags for Artifacts (all default off; turn on per workspace with
+"crewship feature-flag enable <key>"):
+  artifact_projects          multi-screen HTML Project artifacts
+  artifact_dashboard_data    Dashboard datasets; also needs artifact_projects
+  artifact_slides            Slides views and PDF export; also needs
+                             artifact_projects
+  artifacts_design           Design artifacts
+  gridcraft_editor           live workbook editing; also needs the server
+                             to run the workbook engine with a qualified
+                             worker and editor: gridcraft.enabled and
+                             gridcraft.editor_enabled plus the worker
+                             service socket and token file, the editor
+                             origin and the editor bundle settings. With only
+                             the two enable switches the server refuses to
+                             start. Restart the server after changing them
+
+An operator can force the first four on for every workspace with the server
+environment variables CREWSHIP_ARTIFACT_PROJECTS_ENABLED,
+CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED, CREWSHIP_ARTIFACT_SLIDES_ENABLED
+and CREWSHIP_ARTIFACTS_DESIGN_ENABLED set to "true"; "list" does not show that.
+
+The web screens for these artifacts also need build-time switches of the web
+app, set to "true" when the web app is built (default off, rebuild required;
+this command does not change them):
+  artifact_projects          NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS (cards and
+                             viewer in chat) and NEXT_PUBLIC_ARTIFACTS_LIBRARY
+                             (the /artifacts library)
+  artifact_dashboard_data    NEXT_PUBLIC_ARTIFACT_DASHBOARDS
+  artifact_slides            NEXT_PUBLIC_ARTIFACT_SLIDES
+  artifacts_design           NEXT_PUBLIC_ARTIFACTS_DESIGN
+Prebuilt releases ship with these off. To turn them on, build from source
+with the variables exported, for example
+NEXT_PUBLIC_ARTIFACTS_LIBRARY=true make build; exported variables override
+the bundled .env.production, which sets NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=false.
+
+Server settings and environment variables, including the gridcraft ones:
+https://docs.crewship.ai/configuration/environment`,
+	Example: `  crewship feature-flag list
+  crewship feature-flag enable artifact_projects
+  crewship flag inherit artifact_projects`,
 }
 
 var featureFlagListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List feature flags + this workspace's overrides",
+	Long: `List shows every flag definition with its instance default (DEFAULT),
+this workspace's override (WORKSPACE: on, off or inherit) and the value the
+server uses for this workspace (EFFECTIVE). Any workspace member can list.
+
+With -f json, yaml or ndjson each flag is printed as an object with id, key,
+description, enabled (the default), percentage, created_at, updated_at and,
+only when this workspace has an override, override_enabled. -f quiet prints
+the keys only.`,
+	Example: `  crewship feature-flag list
+  crewship feature-flag list -f json
+  crewship flag list -f quiet`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -87,8 +149,15 @@ var featureFlagCreateCmd = &cobra.Command{
 "list" shows in the DEFAULT column and that "enable"/"disable"/"inherit"
 target with a per-workspace override.
 
-This is ADMIN-only server-side and instance-global: the flag becomes visible
-to every workspace, not just the one the CLI is currently pointed at.`,
+The flag is instance-global: it becomes visible to every workspace, not just
+the one the CLI is currently pointed at. The server requires an instance
+administrator who is also OWNER or ADMIN of the selected workspace; anyone
+else gets 403. A duplicate key returns 409.
+
+--percentage is stored and shown by "list", but the server does not use it
+when it decides whether a flag is on.`,
+	Example: `  crewship feature-flag create --key provisioner-v2 --description "v2 provisioner"
+  crewship feature-flag create --key provisioner-v2 --enabled -f json`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -148,7 +217,13 @@ instance-wide default, not this workspace's override. Only flags explicitly
 passed are sent, so omitting a flag leaves its current value untouched.
 
 Use "crewship feature-flag enable/disable <key>" instead if you only want to
-flip the effective value for the current workspace.`,
+flip the effective value for the current workspace.
+
+Requires an instance administrator who is also OWNER or ADMIN of the
+selected workspace (403 otherwise; 404 for an unknown key). Prints a
+one-line confirmation; the global -f/--format flag does not change it.`,
+	Example: `  crewship feature-flag update provisioner-v2 --enabled
+  crewship feature-flag update provisioner-v2 --description "now the default"`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -204,7 +279,15 @@ flip the effective value for the current workspace.`,
 var featureFlagEnableCmd = &cobra.Command{
 	Use:   "enable <key>",
 	Short: "Enable a feature flag for the current workspace (PUT override)",
-	Args:  cobra.ExactArgs(1),
+	Long: `Enable sets this workspace's override to on, whatever the instance
+default is. Other workspaces are not affected. Requires workspace OWNER or
+ADMIN (403 otherwise). The flag definition must exist (404 otherwise); a
+key with no definition cannot be overridden.
+
+Prints a one-line confirmation; the global -f/--format flag does not change it.`,
+	Example: `  crewship feature-flag enable artifact_projects
+  crewship feature-flag enable artifacts_design`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return setOverride(args[0], true)
 	},
@@ -213,7 +296,14 @@ var featureFlagEnableCmd = &cobra.Command{
 var featureFlagDisableCmd = &cobra.Command{
 	Use:   "disable <key>",
 	Short: "Disable a feature flag for the current workspace (PUT override)",
-	Args:  cobra.ExactArgs(1),
+	Long: `Disable sets this workspace's override to off, even when the instance
+default is on. Other workspaces are not affected. Requires workspace OWNER
+or ADMIN (403 otherwise). The flag definition must exist (404 otherwise).
+
+Prints a one-line confirmation; the global -f/--format flag does not change it.`,
+	Example: `  crewship feature-flag disable artifact_slides
+  crewship feature-flag disable run_verdict_summaries`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return setOverride(args[0], false)
 	},
@@ -222,7 +312,14 @@ var featureFlagDisableCmd = &cobra.Command{
 var featureFlagInheritCmd = &cobra.Command{
 	Use:   "inherit <key>",
 	Short: "Drop this workspace's override and revert to the instance default",
-	Args:  cobra.ExactArgs(1),
+	Long: `Inherit removes this workspace's override, so the workspace uses the
+definition's default again (off for the Artifacts flags). Running it when
+there is no override succeeds and changes nothing. Requires workspace OWNER
+or ADMIN (403 otherwise); an unknown key returns 404.
+
+Prints a one-line confirmation; the global -f/--format flag does not change it.`,
+	Example: `  crewship feature-flag inherit artifact_projects`,
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -252,10 +349,17 @@ var featureFlagDeleteCmd = &cobra.Command{
 	Short: "Delete a feature flag definition (DELETE /api/v1/feature-flags/{key})",
 	Long: `Delete removes the feature flag *definition* itself — not just this
 workspace's override. It cascades to every workspace's override rows for
-the flag, instance-wide. ADMIN-only server-side.
+the flag, instance-wide. Requires an instance administrator who is also
+OWNER or ADMIN of the selected workspace (403 otherwise).
+
+Without --yes the command asks for confirmation and aborts when there is no
+answer. Prints a one-line confirmation; the global -f/--format flag does not
+change it.
 
 Use "crewship feature-flag inherit <key>" instead if you only want to
 drop this workspace's override and fall back to the instance default.`,
+	Example: `  crewship feature-flag delete provisioner-v2
+  crewship feature-flag delete provisioner-v2 --yes`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -332,12 +436,12 @@ func init() {
 	featureFlagCreateCmd.Flags().String("key", "", "Flag identifier — REQUIRED (e.g. provisioner-v2)")
 	featureFlagCreateCmd.Flags().String("description", "", "Free-form description shown in `feature-flag list`")
 	featureFlagCreateCmd.Flags().Bool("enabled", false, "Instance default value (a workspace override still wins)")
-	featureFlagCreateCmd.Flags().Int("percentage", 0, "Gradual-rollout percentage, 0-100 (bypassed by any override)")
+	featureFlagCreateCmd.Flags().Int("percentage", 0, "Rollout percentage, 0-100; stored and listed, not evaluated by the server")
 	_ = featureFlagCreateCmd.MarkFlagRequired("key")
 
 	featureFlagUpdateCmd.Flags().String("description", "", "New description (pass \"\" to clear)")
 	featureFlagUpdateCmd.Flags().Bool("enabled", false, "New instance default value")
-	featureFlagUpdateCmd.Flags().Int("percentage", 0, "New gradual-rollout percentage, 0-100")
+	featureFlagUpdateCmd.Flags().Int("percentage", 0, "New rollout percentage, 0-100; stored and listed, not evaluated by the server")
 
 	featureFlagCmd.AddCommand(featureFlagListCmd)
 	featureFlagCmd.AddCommand(featureFlagCreateCmd)

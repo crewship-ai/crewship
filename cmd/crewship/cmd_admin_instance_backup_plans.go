@@ -201,6 +201,9 @@ type backupOverview struct {
 		Proof        int     `json:"proof" yaml:"proof"`
 	} `json:"workspaces,omitempty" yaml:"workspaces,omitempty"`
 	InstanceSummary *string `json:"instance_summary" yaml:"instance_summary"`
+	// CrewlessWorkspaces counts selected workspaces holding no crew; they are
+	// left out of Workspaces and summed up in one attention item instead.
+	CrewlessWorkspaces int `json:"crewless_workspaces" yaml:"crewless_workspaces"`
 }
 
 const instanceBackupsAPI = "/api/v1/admin/instance/backups"
@@ -813,6 +816,9 @@ contents_checked, checksum_only or none.`,
 			}
 			for _, row := range out.Workspaces {
 				fmt.Fprintf(w, "  %-20s %-4s last %s · plan %s · %s\n", row.Name, row.Status, backupStrOr(row.LastBackupAt, "never"), backupStrOr(row.Plan, "none"), proofLabel(row.Proof))
+			}
+			if out.CrewlessWorkspaces > 0 {
+				fmt.Fprintf(w, "  + %d workspace(s) with no crew, not listed\n", out.CrewlessWorkspaces)
 			}
 		})
 	},

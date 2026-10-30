@@ -464,6 +464,16 @@ var crewDeleteCmd = &cobra.Command{
 		if !unreadable && len(bytes.TrimSpace(body)) > 0 {
 			unreadable = json.Unmarshal(body, &deleted) != nil
 		}
+		// -f json gets the server's outcome document (cleanup,
+		// sidecar_teardown, removed_credentials) — or, when there is none to
+		// give, a document that says the crew is gone and nothing more.
+		machineBody := body
+		if unreadable {
+			machineBody = nil
+		}
+		if handled, err := machineMutationResult(cmd, machineBody, map[string]any{"deleted": true, "crew_id": crewID}); handled {
+			return err
+		}
 
 		cli.PrintSuccess("Crew deleted.")
 		if len(deleted.RemovedCredentials) > 0 {

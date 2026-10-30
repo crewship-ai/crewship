@@ -138,6 +138,9 @@ provider's API using a stored credential in this workspace. For a self-hosted
 GitHub or GitLab, label the credential with the forge's host (its "account
 label") so it is matched by host.
 
+With -f json the stored link is printed on stdout (the same fields 'issue links'
+emits); its id is what 'issue relink' and 'issue unlink' take.
+
 Examples:
   crewship issue link ENG-4 https://github.com/acme/thing/pull/7
   crewship issue link ENG-4 https://gitlab.com/acme/thing/-/merge_requests/7
@@ -163,9 +166,12 @@ Examples:
 		if err := cli.ReadJSON(resp, &link); err != nil {
 			return err
 		}
-		cli.PrintSuccess(fmt.Sprintf("Linked %s/%s#%d (%s) to %s.",
-			link.Owner, link.Repo, link.Number, derefStr(link.State, "UNKNOWN"), identifier))
-		return nil
+		// Under -f json the link itself is the result: its id is what
+		// `issue relink` and `issue unlink` address it by.
+		return resolvedFormatter(cmd).AutoHuman(link, func() {
+			cli.PrintSuccess(fmt.Sprintf("Linked %s/%s#%d (%s) to %s.",
+				link.Owner, link.Repo, link.Number, derefStr(link.State, "UNKNOWN"), identifier))
+		})
 	},
 }
 
@@ -192,9 +198,10 @@ var issueRelinkCmd = &cobra.Command{
 		if err := cli.ReadJSON(resp, &link); err != nil {
 			return err
 		}
-		cli.PrintSuccess(fmt.Sprintf("%s/%s#%d is %s.",
-			link.Owner, link.Repo, link.Number, derefStr(link.State, "UNKNOWN")))
-		return nil
+		return resolvedFormatter(cmd).AutoHuman(link, func() {
+			cli.PrintSuccess(fmt.Sprintf("%s/%s#%d is %s.",
+				link.Owner, link.Repo, link.Number, derefStr(link.State, "UNKNOWN")))
+		})
 	},
 }
 
