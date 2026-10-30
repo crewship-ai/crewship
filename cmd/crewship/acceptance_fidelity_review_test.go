@@ -100,10 +100,24 @@ func TestAcceptance_FidelityMemoryFileBound(t *testing.T) {
 	if err := os.WriteFile(path, []byte(strings.Repeat("x", (128<<10)+1)), 0600); err != nil {
 		t.Fatal(err)
 	}
-	rig := &fidelityRig{t: t}
-	// Validation must happen before client/config setup or any network call.
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	cfg := filepath.Join(t.TempDir(), "cli.yaml")
+	if err := os.WriteFile(cfg, []byte("server: "+srv.URL+"\nworkspace: cfidws00000000000000001\ntoken: synthetic-fidelity\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	rig := &fidelityRig{t: t, config: cfg}
+	// Validation must happen before any network call; even the RED run is
+	// fenced to this test's own server rather than a default CLI profile.
 	out, err := rig.run(nil, "memory", "initialize", "--crew", "backend", "--doc", "CREW.md=@"+path)
 	if err == nil || !strings.Contains(out, "128 KiB") {
-		t.Fatalf("oversized file not refused locally: %v %s", err, out)
+		t.Errorf("oversized file not refused locally: %v %s", err, out)
+	}
+	if requests.Load() != 0 {
+		t.Errorf("oversized file sent %d requests", requests.Load())
 	}
 }
