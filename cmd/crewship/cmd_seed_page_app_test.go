@@ -46,6 +46,10 @@ func TestSeedPageAppLifecycle(t *testing.T) {
 			opts := []api.RouterOption{api.WithPageProjectsPath(t.TempDir())}
 			if mode == "publish" {
 				opts = append(opts, api.WithPageBuildImage(image), api.WithPageRuntime("https://pages.example.net", "https://studio.example.com"))
+			} else {
+				// Pin "not enabled": a Pages image installed on this machine
+				// must not turn the disabled case into a real build.
+				opts = append(opts, api.WithPageBuildImageLookup(func(context.Context) ([]string, error) { return nil, nil }))
 			}
 			router, err := api.NewRouter(db, "this-is-a-32-char-test-secret-pad", slog.Default(), opts...)
 			if err != nil {
@@ -90,8 +94,10 @@ func TestSeedPageAppLifecycle(t *testing.T) {
 			}
 			err = seed()
 			if mode == "disabled-worker" {
-				if err == nil || !strings.Contains(err.Error(), "worker") {
-					t.Fatalf("expected clear disabled worker error: %v", err)
+				// The seed branches on the machine-readable code, and the
+				// sentence names the one remedy.
+				if reason, skip := seedPageAppSkip(err); err == nil || !skip || !strings.Contains(reason, "crewship page enable") {
+					t.Fatalf("expected the page_apps_not_enabled refusal: %v", err)
 				}
 			} else if err != nil {
 				t.Fatal(err)
