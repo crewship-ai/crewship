@@ -170,3 +170,8 @@ export function artifactDashboards(): boolean {
 export function artifactsDesign(): boolean {
   return process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN === "true"
 }
+
+/** Read-only Design System token preview for artifacts with `design-system.json`. Default off. */
+export function artifactDesignSystem(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM === "true"
+}
