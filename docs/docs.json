@@ -43,19 +43,7 @@
           {
             "group": "Get Started",
             "icon": "rocket",
-            "pages": [
-              "index",
-              "quickstart",
-              "guides/task-index",
-              "guides/first-projects",
-              "concepts",
-              "guides/use-cases",
-              "guides/writing-good-tasks",
-              "guides/when-not-to-use",
-              "philosophy",
-              "production-checklist",
-              "architecture"
-            ]
+            "pages": ["index", "quickstart", "guides/task-index", "guides/first-projects", "concepts", "guides/use-cases", "guides/writing-good-tasks", "guides/when-not-to-use", "philosophy", "production-checklist", "architecture"]
           },
           {
             "group": "Guides",
@@ -76,12 +64,17 @@
                 ]
               },
               "guides/first-crew",
+              "guides/artifacts/project",
               "guides/chat-sessions",
+              "guides/artifacts/chat",
               "guides/document-drafts",
+              "guides/artifacts/design",
               "guides/chat-run-images",
               "guides/document-history-review",
+              "guides/artifacts/word-and-sheet",
               "guides/chat-surface-limits",
               "guides/slides-native",
+              "guides/artifacts/slides",
               "guides/ask-forms",
               "guides/chat-demo-walkthrough",
               "guides/demo-use-cases",
@@ -90,6 +83,7 @@
               "guides/devcontainers",
               "guides/crew-image-freshness",
               "guides/credentials",
+              "guides/artifacts/sharing-and-access",
               "guides/auto-managed-credentials",
               "guides/model-discovery",
               "guides/multi-provider-llm",
@@ -148,6 +142,7 @@
               "guides/git-links",
               "guides/issue-attachments",
               "guides/templates",
+              "guides/artifacts/library",
               {
                 "group": "Memory",
                 "icon": "brain",
@@ -190,25 +185,12 @@
               "guides/hooks",
               "guides/automations",
               "guides/pages",
-              {
-                "group": "Artifacts",
-                "icon": "layers",
-                "pages": [
-                  "guides/artifacts",
-                  "guides/artifacts/library",
-                  "guides/artifacts/sharing-and-access",
-                  "guides/artifacts/project",
-                  "guides/artifacts/design",
-                  "guides/artifacts/dashboard",
-                  "guides/artifacts/slides",
-                  "guides/artifacts/word-and-sheet",
-                  "guides/artifacts/chat",
-                  "guides/artifacts/operations"
-                ]
-              },
+              "guides/artifacts",
               "guides/pages-apps-operations",
+              "guides/artifacts/operations",
               "guides/quartermaster",
               "guides/watch-roster",
+              "guides/artifacts/dashboard",
               {
                 "group": "Operations",
                 "icon": "wrench",
@@ -292,7 +274,7 @@
             "pages": [
               "cli/overview",
               "cli/commands",
-              "cli/api",
+                "cli/api",
               "cli/ai",
               "cli/start",
               "cli/onboarding",
@@ -344,8 +326,8 @@
               "cli/history",
               "cli/recall",
               "cli/recap",
-              "cli/inspect",
-              "cli/model",
+              "cli/inspect"
+              ,"cli/model",
               "cli/provider",
               "cli/rehire"
             ]
@@ -493,8 +475,8 @@
               "cli/credential",
               "cli/oauth",
               "cli/seed",
-              "cli/nuke",
-              "cli/db"
+              "cli/nuke"
+              ,"cli/db"
             ]
           },
           {
