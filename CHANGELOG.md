@@ -7245,6 +7245,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Add optional artifact project previews, versioned element comments, shared-version navigation and explicit chat creation intent behind backend availability.
 
+- **GDPR export and erase failures show the server's reason.** The admin user-data toasts now show the API's error sentence (or "Export failed. Nothing was downloaded." / "Erase failed. No data was removed.") instead of a raw status code and response body.
+
 ## [1.0.0-rc.1] — 2026-07-12
 
 ### Security
