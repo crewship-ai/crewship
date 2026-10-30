@@ -110,7 +110,7 @@ func jsonLogBuf() (*slog.Logger, *bytes.Buffer) {
 
 // TestPanicRecovery_LogsStructuredFields_WithMethodPathPanicStack guards
 // the operator-facing log shape: a recovered panic must emit a single
-// ERROR record carrying method, path, the panic value, and a stack
+// ERROR record carrying method, route pattern, the panic type, and a stack
 // trace. The dashboard alert query depends on these field names, so
 // renames here ripple to ops tooling.
 func TestPanicRecovery_LogsStructuredFields_WithMethodPathPanicStack(t *testing.T) {
@@ -120,7 +120,9 @@ func TestPanicRecovery_LogsStructuredFields_WithMethodPathPanicStack(t *testing.
 		panic("specific-panic-marker-xyz")
 	})
 	logger, buf := jsonLogBuf()
-	wrapped := panicRecoveryMiddleware(logger, panicker)
+	mux := http.NewServeMux()
+	mux.Handle("POST /api/v1/structured-fields", panicker)
+	wrapped := panicRecoveryMiddleware(logger, mux)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/structured-fields", nil)
@@ -143,10 +145,10 @@ func TestPanicRecovery_LogsStructuredFields_WithMethodPathPanicStack(t *testing.
 	if got, want := entry["method"], http.MethodPost; got != want {
 		t.Errorf("method: want %q, got %v", want, got)
 	}
-	if got, want := entry["path"], "/api/v1/structured-fields"; got != want {
+	if got, want := entry["path"], "POST /api/v1/structured-fields"; got != want {
 		t.Errorf("path: want %q, got %v", want, got)
 	}
-	if got, want := entry["panic"], "specific-panic-marker-xyz"; got != want {
+	if got, want := entry["panic"], "string"; got != want {
 		t.Errorf("panic: want %q, got %v", want, got)
 	}
 	stack, ok := entry["stack"].(string)
@@ -177,7 +179,9 @@ func TestPanicRecovery_CallsCrashreportCapture_WithSurfaceTags(t *testing.T) {
 		panic(errors.New("synthesised-handler-failure"))
 	})
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	wrapped := panicRecoveryMiddleware(logger, panicker)
+	mux := http.NewServeMux()
+	mux.Handle("PATCH /api/v1/tagged-capture", panicker)
+	wrapped := panicRecoveryMiddleware(logger, mux)
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/tagged-capture", nil)
@@ -198,8 +202,8 @@ func TestPanicRecovery_CallsCrashreportCapture_WithSurfaceTags(t *testing.T) {
 	if !strings.Contains(ev.err.Error(), "PATCH") || !strings.Contains(ev.err.Error(), "/api/v1/tagged-capture") {
 		t.Errorf("captured error should mention method+path, got %q", ev.err.Error())
 	}
-	if !strings.Contains(ev.err.Error(), "synthesised-handler-failure") {
-		t.Errorf("captured error should wrap the panic value, got %q", ev.err.Error())
+	if strings.Contains(ev.err.Error(), "synthesised-handler-failure") || !strings.Contains(ev.err.Error(), "*errors.errorString") {
+		t.Errorf("captured error must identify only the panic type, got %q", ev.err.Error())
 	}
 	if got, want := ev.tags["surface"], "http_handler"; got != want {
 		t.Errorf("tag surface: want %q, got %q", want, got)
@@ -207,7 +211,7 @@ func TestPanicRecovery_CallsCrashreportCapture_WithSurfaceTags(t *testing.T) {
 	if got, want := ev.tags["method"], "PATCH"; got != want {
 		t.Errorf("tag method: want %q, got %q", want, got)
 	}
-	if got, want := ev.tags["path"], "/api/v1/tagged-capture"; got != want {
+	if got, want := ev.tags["path"], "PATCH /api/v1/tagged-capture"; got != want {
 		t.Errorf("tag path: want %q, got %q", want, got)
 	}
 }
@@ -261,8 +265,8 @@ func TestPanicRecovery_WebSocketUpgrade_DoesNotWrite500Body(t *testing.T) {
 			if !strings.Contains(buf.String(), "HTTP handler panic recovered") {
 				t.Errorf("ws upgrade path: panic must still be logged, log was: %s", buf.String())
 			}
-			if !strings.Contains(buf.String(), "ws-handler-blew-up") {
-				t.Errorf("ws upgrade path: log must include panic value, log was: %s", buf.String())
+			if strings.Contains(buf.String(), "ws-handler-blew-up") {
+				t.Errorf("ws upgrade path: log must omit panic value, log was: %s", buf.String())
 			}
 		})
 	}
@@ -355,7 +359,7 @@ func TestPanicRecovery_PanicAfterWriteHeader_NoCrash(t *testing.T) {
 	if !strings.Contains(body, "internal server error") {
 		t.Errorf("middleware should still attempt the 500 body even after flush, got %q", body)
 	}
-	if !strings.Contains(buf.String(), "after-flush") {
-		t.Errorf("log should still record the panic value, got: %s", buf.String())
+	if strings.Contains(buf.String(), "after-flush") {
+		t.Errorf("log must omit the panic value, got: %s", buf.String())
 	}
 }
