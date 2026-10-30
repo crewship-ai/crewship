@@ -179,7 +179,9 @@ func versionHead(ctx context.Context, tx *sql.Tx, k VersionKey) (latest, shared 
 func (s *VersionStore) quota(ctx context.Context, tx *sql.Tx, k VersionKey) (q VersionQuota, err error) {
 	q.LimitBytes = s.opts.MaxHistoryBytes
 	q.Retention = "keep-all"
-	err = tx.QueryRowContext(ctx, `SELECT coalesce((SELECT sum(length(content)) FROM artifact_version_blobs WHERE workspace_id=? AND page_id=?),0)+coalesce((SELECT sum(length(CAST(manifest_json AS BLOB))+length(CAST(message AS BLOB))+length(CAST(actor AS BLOB))+length(created_at)+128) FROM artifact_versions WHERE workspace_id=? AND page_id=?),0)`, k.WorkspaceID, k.PageID, k.WorkspaceID, k.PageID).Scan(&q.UsedBytes)
+	// Charge every proposal state, with decision metadata reserved up front so
+	// accepting/rejecting does not replenish capacity or need fresh allowance.
+	err = tx.QueryRowContext(ctx, `SELECT coalesce((SELECT sum(length(content)) FROM artifact_version_blobs WHERE workspace_id=? AND page_id=?),0)+coalesce((SELECT sum(length(CAST(manifest_json AS BLOB))+length(CAST(message AS BLOB))+length(CAST(actor AS BLOB))+length(created_at)+128) FROM artifact_versions WHERE workspace_id=? AND page_id=?),0)+coalesce((SELECT sum(length(CAST(content AS BLOB))+length(CAST(summary AS BLOB))+length(CAST(author_actor_id AS BLOB))+length(CAST(request_id AS BLOB))+length(id)+length(engine_pin)+length(content_hash)+length(created_at)+512) FROM craft_native_proposals WHERE workspace_id=? AND page_id=?),0)`, k.WorkspaceID, k.PageID, k.WorkspaceID, k.PageID, k.WorkspaceID, k.PageID).Scan(&q.UsedBytes)
 	q.Warning = q.UsedBytes*100 >= q.LimitBytes*int64(s.opts.WarningPercent)
 	return
 }
@@ -393,6 +395,20 @@ func (s *VersionStore) Quota(ctx context.Context, k VersionKey, a VersionAuthori
 		return VersionQuota{}, err
 	}
 	return
+}
+
+// CheckHistoryBudget checks retained versions and native proposals after a
+// mutation in the caller's authorized, writer-fenced transaction. A refusal
+// must roll that transaction back, preserving all previously confirmed data.
+func (s *VersionStore) CheckHistoryBudget(ctx context.Context, tx *sql.Tx, k VersionKey) error {
+	q, err := s.quota(ctx, tx, k)
+	if err != nil {
+		return err
+	}
+	if q.UsedBytes > q.LimitBytes {
+		return ErrVersionQuota
+	}
+	return nil
 }
 
 // VersionSelection is chosen only by host authority, never directly by an

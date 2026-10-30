@@ -375,6 +375,15 @@ current head `stale` (decided by `system:superseded`; rows are kept), because
 such a proposal can no longer be accepted. A proposal over an older version with
 identical content stays open, since accept still applies it on the head. The same agent `request_id` returns the original proposal.
 
+All retained proposal content, including rejected, stale and accepted rows,
+counts toward the same per-document history allowance as native versions.
+Accounting uses bytes even for older rows restored as TEXT, and reserves decision
+metadata up front. Insertion and the budget check share the authorized writer
+transaction; a refusal rolls back the new candidate without deleting any
+confirmed candidate or version. Reject does not replenish the allowance. Accept
+must also fit its new saved version beside the retained candidate. This is a
+document allowance, not a host-wide disk reservation.
+
 A proposal is a successful task outcome: the work item and run succeed with
 `native_outcome: "proposal"` and `native_proposal_id`, and the task status shows
 `outcome: "proposal"` with `proposal_id`. Only a proposal recorded by this run's

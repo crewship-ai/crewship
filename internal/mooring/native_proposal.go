@@ -124,6 +124,9 @@ func (s *NativeStore) Propose(ctx context.Context, k EditLeaseScope, base int64,
 		if _, err = tx.ExecContext(ctx, `INSERT INTO craft_native_proposals(id,page_id,workspace_id,application_id,engine_pin,author_actor_id,request_id,base_version,summary,content_hash,content) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, k.ArtifactID, k.WorkspaceID, s.config.Application, s.EnginePin(), actor, requestID, base, summary, hash, b); err != nil {
 			return "", err
 		}
+		if err = s.versions.CheckHistoryBudget(ctx, tx, nativeVersionKey(k)); err != nil {
+			return "", err
+		}
 		out, err = scanNativeProposal(tx.QueryRowContext(ctx, `SELECT `+nativeProposalColumns+` FROM craft_native_proposals WHERE id=?`, id))
 		return actor, err
 	})
