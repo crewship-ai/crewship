@@ -37,6 +37,8 @@ harness_fixture_cleanup() {
   exit "$rc"
 }
 trap harness_fixture_cleanup EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 harness_fixture() {
   local kind="$1" crew="$2" variable="$3" slug file id random
   random="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"

@@ -91,5 +91,11 @@ source "$1/routine-fixtures.sh"
         self.assertFalse(any(c.startswith("routine delete") for c in calls))
         self.assertIn("refused changed identity", result.stderr)
 
+    def test_actual_term_runs_owned_cleanup(self):
+        result, calls, leftovers = self.run_fixture('harness_fixture probe ops OWNED\nkill -TERM "$$"\n')
+        self.assertEqual(result.returncode, 143)
+        self.assertTrue(calls[-1].startswith("routine delete "))
+        self.assertEqual(leftovers, [])
+
 if __name__ == "__main__":
     unittest.main()
