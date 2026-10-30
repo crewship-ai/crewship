@@ -1247,6 +1247,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Routine budget views clear data when their workspace changes and ignore obsolete mutation responses. A pending read can no longer overwrite a successfully edited cap.
 
+- **Routine tag and step override commands honor machine output.** Tag additions/removals and step override writes now emit structured results for JSON and YAML output while keeping the existing human messages.
+
 - Keep the skills browser scoped to the current workspace and Installed lens across imports; rebuild active search results after catalog changes and show crew-assignment network failures in the dialog.
 - Isolate Docker network integration-test installations and subnet leases so concurrent runs cannot adopt or remove each other’s containers.
 - Workflow graphs omit dependency and permission edges whose source or target is absent from the displayed graph.
@@ -7247,7 +7249,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Add optional artifact project previews, versioned element comments, shared-version navigation and explicit chat creation intent behind backend availability.
 
-- **Routine tag and step override commands honor machine output.** Tag additions/removals and step override writes now emit structured results for JSON and YAML output while keeping the existing human messages.
 
 ## [1.0.0-rc.1] — 2026-07-12
 
