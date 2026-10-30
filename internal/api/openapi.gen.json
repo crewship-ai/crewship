@@ -12939,6 +12939,109 @@
         ],
         "type": "object"
       },
+      "LocalDraftKeyRequest": {
+        "description": "At most 4 KiB JSON; requires a current human credential and current read of the immutable Page.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "envelope": {
+                "enum": [
+                  ""
+                ],
+                "type": "string"
+              },
+              "human": {
+                "description": "Expected original human identity; must equal the current credential.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "key": {
+                "description": "Canonical base64 encoding of exactly 32 bytes.",
+                "pattern": "^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$",
+                "type": "string"
+              },
+              "operation": {
+                "enum": [
+                  "wrap"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "human",
+              "operation",
+              "key"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "envelope": {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              "human": {
+                "description": "Expected original human identity; must equal the current credential.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "key": {
+                "enum": [
+                  ""
+                ],
+                "type": "string"
+              },
+              "operation": {
+                "enum": [
+                  "unwrap"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "human",
+              "operation",
+              "envelope"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "LocalDraftKeyResponse": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "envelope": {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "envelope"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "description": "Canonical base64 encoding of exactly 32 bytes.",
+                "pattern": "^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "key"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "MCPServerError": {
         "properties": {
           "message": {
@@ -141720,6 +141823,131 @@
           }
         ],
         "summary": "Restore page document",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/draft-key": {
+      "post": {
+        "description": "Submit page draft key (POST /api/v1/pages/{slug}/draft-key).",
+        "operationId": "post_api_v1_pages_slug_draft-key",
+        "parameters": [
+          {
+            "description": "Explicit immutable @Page ID; slug aliases are rejected.",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "pattern": "^@[A-Za-z0-9_-]{1,128}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug; the workspace header is also accepted.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalDraftKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalDraftKeyResponse"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page draft key",
         "tags": [
           "pages"
         ],

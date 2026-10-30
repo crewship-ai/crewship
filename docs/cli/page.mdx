@@ -2419,3 +2419,23 @@ stream requires human authentication and the normal server-host credential guard
 ```bash
 crewship page design watch checkout --count 1
 ```
+
+### `crewship page draft-key <@page-id>`
+
+Protect a browser-local draft key or recover it as the same signed-in human with
+current Page read access. This command calls
+`POST /api/v1/pages/{slug}/draft-key` with an immutable `@page-id`.
+
+```bash
+crewship page draft-key @PAGE_ID --file request.json --format json
+# Or supply the JSON on stdin:
+crewship page draft-key @PAGE_ID --file - --format json
+```
+
+`--file` is required. The bounded JSON input is
+`{"human":"EXPECTED_USER_ID","operation":"wrap","key":"BASE64_32_BYTE_KEY"}`
+or `{"human":"EXPECTED_USER_ID","operation":"unwrap","envelope":"VERSIONED_ENVELOPE"}`.
+Keep input files private. Output contains the protected envelope or recovered key;
+only direct it to a trusted destination. Agent runs cannot substitute a saved
+human profile. An unavailable service does not mean that a local draft may be
+deleted; only `403` with `code: "draft_read_revoked"` proves read revocation.

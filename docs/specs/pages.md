@@ -1539,3 +1539,45 @@ content write. Unacknowledged or corrupted receipts refuse access and preserve
 confirmed content. Manager edits
 use the existing room lock, revision checks and VersionStore. This policy is
 local to Design and does not alter other Page families' audience rules.
+
+### Browser-local draft key recovery
+
+`POST /api/v1/pages/{slug}/draft-key` accepts only an explicit immutable
+`@<page-id>` reference, a current human credential with `pages:read`, and the
+current workspace. It uses the canonical per-Page read model, including
+workspace administrators. Restricted members may use only the existing
+exact private-custodian boundary. No document bytes or server rows are created.
+
+`{"human":"<expected-human-id>","operation":"wrap","key":"<base64 32-byte data key>"}` returns
+`{"envelope":"<versioned encrypted key>"}`. The encrypted payload contains an
+explicit domain, original human ID, workspace ID and Page ID. A missing server
+master key refuses protection; the plaintext-secrets escape hatch does not apply.
+`{"human":"<expected-human-id>","operation":"unwrap","envelope":"..."}` returns `{"key":"..."}` only to
+that original human after a fresh current-read check under the SQL writer fence.
+All responses use `Cache-Control: no-store`. A stale client identity is refused
+before creating a key envelope; an account switch cannot rebind the draft.
+Slugs cannot alias an old draft.
+
+A 403 with `code: "draft_read_revoked"` is positive evidence for deleting that
+Page's local draft. `draft_identity_mismatch`, generic 403, 400 (unavailable or
+invalid envelope), 401 (sign in again), 500 and 503 do not authorize deletion.
+An offline browser cannot immediately learn revocation. This endpoint is the
+key-protection primitive; retention, sealing and explicit sign-out confirmation
+in the browser are separate integration work, not established by this route.
+
+Browser key envelopes are external to the server database. Keep their master-key
+versions resolvable while those drafts may need recovery; a successful database
+re-encryption walk does not migrate browser envelopes or prove old versions safe
+to remove. See [encryption rotation](../security/encryption.mdx).
+
+The matching CLI is `crewship page draft-key @PAGE_ID --file -` (or a local
+JSON file). Input is `{human,operation:"wrap",key}` or
+`{human,operation:"unwrap",envelope}`. Key material belongs in stdin/a protected
+file, not shell arguments. Output contains sensitive key material. Agent runs
+cannot use a saved human profile for this command.
+
+For draft-key recovery only, workspace resolution does not pre-empt the fenced
+membership check: a current credential for the expected human with removed
+membership receives `403 draft_read_revoked`. ACL/storage faults return 5xx and
+retain drafts. Workspace administrators use the canonical Page read policy;
+the envelope still belongs to its original human and cannot cross identities.
