@@ -42,9 +42,12 @@ time; everyone else with access reads.
 - **Time to live.** Fifteen seconds. The editor's event stream renews its own
   lease every five seconds while the connection is authorised. Browser focus
   and typing do not affect custody.
-- **Restart.** A lease is live only on the server boot that issued it. After a
-  restart every previous lease reads as free, and every Craft admission must be
-  opened again.
+- **Restart.** On Linux the clock uses the host kernel boot ID and monotonic
+  boot time. A host reboot makes earlier leases read as free. A server process
+  restart clears in-memory Craft admissions and handoff requests, but does not
+  change that boot ID or immediately clear a persisted lease; it can remain
+  occupied until its fifteen-second expiry. Reopen admissions after a process
+  restart and read the current lease before acquiring.
 
 ### How the generation moves
 
@@ -56,7 +59,8 @@ time; everyone else with access reads.
 | Release | unchanged | none |
 | Handoff to a requester | previous + 1 | requester |
 | Revoke (agent task stopped or retired) | unchanged | none |
-| Server restart | unchanged in storage | none (reads as free) |
+| Server process restart on Linux | unchanged in storage | persisted holder until expiry; admission must reopen |
+| Host reboot | unchanged in storage | none (reads as free) |
 
 Generations never go backwards and are never reused for a document. Because a
 release keeps the stored number and the next acquisition adds one, a client
@@ -133,7 +137,8 @@ another handoff happens), the old request no longer applies and the requester
 must ask again. A requester that already holds the
 lease, or asks while the lease is free or expired, gets 409: acquire a free
 lease instead. Requests are kept in the server process as well as in storage;
-a restart clears them together with the leases.
+a process restart clears the in-memory requests and admissions. Persisted
+leases on the same Linux boot may remain live until expiry.
 
 Before handing off, the holder's editor should settle any save whose outcome
 it has not confirmed and keep its local draft. Handoff only moves custody. It

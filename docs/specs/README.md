@@ -56,6 +56,8 @@ public contract here. Superseded a spec? Move it to
 
 ## Pages and project files
 
+- [Craft lease generations](craft-lease-generation.md): session-bound handoff,
+  generation fencing, expiry and restart boundaries.
 - [Native Craft human sessions and edit leases](craft-native.md): separate default-off whole-native profile admission, named holders and requested handoff.
 - [Mooring session transport](mooring-session-transport.md): default-off Rust session HTTP/WS contracts and current qualification limits.
 - [Mooring pilot JSON profile](mooring-pilot.md): manifest-driven personal documents, typed commands, durable receipts and isolated editors.
