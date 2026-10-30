@@ -20,6 +20,9 @@ const (
 	ExitRateLimited = 6 // HTTP 429
 	ExitServer      = 7 // HTTP 5xx
 	ExitConnection  = 8 // network failure before any response was read
+	// ExitBusy: the agent already has a live run, so the message was not
+	// delivered or persisted. Nothing to undo; retry once the run ends.
+	ExitBusy = 9
 )
 
 // ExitCoder is implemented by errors that carry a CLI exit code.

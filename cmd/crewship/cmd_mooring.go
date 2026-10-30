@@ -8,6 +8,8 @@ package main
 // DELETE /api/v1/pages/{slug}/mooring/mandates/{mandate} mooring revoke
 // POST /api/v1/internal/mooring mooring agent
 // POST /api/v1/pages/{slug}/mooring/session mooring session
+// POST /api/v1/pages/{slug}/mooring/session/reauthorize mooring session --reauthorize
+// POST /api/v1/pages/{slug}/mooring/command-session mooring command-session
 // GET /api/v1/pages/{slug}/mooring/ws mooring connect
 // GET /api/v1/pages/{slug}/mooring/provenance mooring provenance
 
@@ -29,7 +31,7 @@ import (
 
 func newMooringCommand() *cobra.Command {
 	root := &cobra.Command{Use: "mooring", Short: "Manifest-driven experimental application documents"}
-	for _, op := range []string{"apps", "create", "read", "command", "admit", "revoke", "session", "provenance"} {
+	for _, op := range []string{"apps", "create", "read", "command", "admit", "revoke", "session", "command-session", "provenance"} {
 		operation := op
 		cmd := &cobra.Command{Use: op, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 			client, e := humanWorkbookClient()
@@ -39,7 +41,7 @@ func newMooringCommand() *cobra.Command {
 
 			var response *http.Response
 			var raw []byte
-			if operation == "create" || operation == "command" || operation == "admit" || operation == "session" {
+			if operation == "create" || operation == "command" || operation == "admit" || operation == "session" || operation == "command-session" {
 				raw, e = workbookInput(cmd)
 				if e != nil {
 					return e
@@ -57,7 +59,23 @@ func newMooringCommand() *cobra.Command {
 			case "command":
 				response, e = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/mooring/commands", json.RawMessage(raw))
 			case "session":
+				if reauthorize, _ := cmd.Flags().GetBool("reauthorize"); reauthorize {
+					// Same-origin browser transport maintenance: the host
+					// requires Origin to equal its own public origin.
+					client, e = mooringSameOriginClient(client)
+					if e != nil {
+						return e
+					}
+					response, e = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/mooring/session/reauthorize", bytes.NewReader(raw))
+					break
+				}
 				response, e = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/mooring/session", bytes.NewReader(raw))
+			case "command-session":
+				client, e = mooringSameOriginClient(client)
+				if e != nil {
+					return e
+				}
+				response, e = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/mooring/command-session", bytes.NewReader(raw))
 			case "admit":
 				response, e = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/mooring/mandates", json.RawMessage(raw))
 			case "revoke":
@@ -78,8 +96,14 @@ func newMooringCommand() *cobra.Command {
 			cmd.Args = cobra.ExactArgs(2)
 			cmd.Use += " <mandate>"
 		}
-		if op == "create" || op == "command" || op == "admit" || op == "session" {
+		if op == "create" || op == "command" || op == "admit" || op == "session" || op == "command-session" {
 			cmd.Flags().String("file", "", "Exact JSON packet; - reads stdin")
+		}
+		if op == "session" {
+			cmd.Flags().Bool("reauthorize", false, "Refresh a still-live joined connection: --file holds {\"connection_ref\":…}")
+		}
+		if op == "command-session" {
+			cmd.Short = "Open a native command editor session (experimental, default-off profile)"
 		}
 		root.AddCommand(cmd)
 	}
@@ -131,3 +155,14 @@ func newMooringCommand() *cobra.Command {
 	return root
 }
 func init() { rootCmd.AddCommand(newMooringCommand()) }
+
+// mooringSameOriginClient adds the Origin header the host requires on its
+// browser-transport routes: the configured server's own scheme://host, the
+// same value `mooring connect` sends on the WebSocket upgrade.
+func mooringSameOriginClient(client *cli.Client) (*cli.Client, error) {
+	u, err := url.Parse(client.BaseURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, errors.New("HTTP or HTTPS server required")
+	}
+	return client.WithHeader("Origin", u.Scheme+"://"+u.Host), nil
+}

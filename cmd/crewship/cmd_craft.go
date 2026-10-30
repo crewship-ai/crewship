@@ -53,10 +53,13 @@ func craftConnect(cmd *cobra.Command, args []string) error {
 	c = c.WithContext(cmd.Context())
 	r, e := c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/sessions", struct{}{})
 	if e != nil {
-		return fmt.Errorf("native session request failed")
+		return craftTransportError("native session request failed")
 	}
 	defer r.Body.Close()
 	if r.StatusCode != 201 {
+		if r.StatusCode < 200 || r.StatusCode >= 300 {
+			return craftHTTPError(r, "")
+		}
 		return fmt.Errorf("native session HTTP %d", r.StatusCode)
 	}
 	return craftUseAdmission(cmd, args, c, r, false)
@@ -199,6 +202,9 @@ func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http
 			limit = craftNativeJSONLimit
 		}
 		if e = craftResponseLimit(cmd, r, e, token, limit); e != nil {
+			if craftLeaseAction(a.Action) {
+				return craftWithLeaseHolder(c, args[0], e, token)
+			}
 			return e
 		}
 	}
@@ -264,11 +270,11 @@ func craftResponse(cmd *cobra.Command, r *http.Response, err error, secret strin
 }
 func craftResponseLimit(cmd *cobra.Command, r *http.Response, err error, secret string, limit int64) error {
 	if err != nil {
-		return fmt.Errorf("native request failed")
+		return craftTransportError("native request failed")
 	}
 	defer r.Body.Close()
 	if r.StatusCode < 200 || r.StatusCode >= 300 {
-		return fmt.Errorf("native HTTP %d", r.StatusCode)
+		return craftHTTPError(r, secret)
 	}
 	raw, e := craftReadJSONLimit(r.Body, limit)
 	if e != nil {
@@ -285,10 +291,13 @@ func craftWatch(cmd *cobra.Command, c *cli.Client, page, secret string) error {
 	stream.HTTPClient = &hc
 	r, e := stream.Get("/api/v1/pages/" + pagePathEscape(page) + "/craft/events")
 	if e != nil {
-		return fmt.Errorf("native stream failed")
+		return craftTransportError("native stream failed")
 	}
 	defer r.Body.Close()
 	if r.StatusCode != 200 {
+		if r.StatusCode < 200 || r.StatusCode >= 300 {
+			return craftHTTPError(r, secret)
+		}
 		return fmt.Errorf("native stream HTTP %d", r.StatusCode)
 	}
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "text/event-stream") {
