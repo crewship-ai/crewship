@@ -61,6 +61,7 @@ interface Runtime {enginePin:string;port:NativeEditorPort;frame:HTMLIFrameElemen
 export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}:Props){
  const publishPreview=React.useRef<()=>void>(()=>{}),[publishedVersion,setPublishedVersion]=React.useState<string>()
  const stopAgent=React.useRef<()=>void>(()=>{})
+ const [quotaFull,setQuotaFull]=React.useState(false),downloadDraft=React.useRef<()=>void>(()=>{})
  const compare=React.useRef<(draft:NativeDraft)=>void>(()=>{}),reconcile=React.useRef<()=>void>(()=>{}),[uncertain,setUncertain]=React.useState(false)
  const [applicationId,setApplicationId]=React.useState<NativeDocumentSnapshot['applicationId']>()
  const mount=React.useRef<HTMLDivElement>(null),control=React.useRef<(action:NativeCraftLeaseAction,body:{generation?:string;request_id?:string})=>void>(()=>{})
@@ -82,6 +83,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    setDirty(r.phase?.dirty??false)
    const saved=phase==='saved'&&r.ackedVersion!==undefined&&r.writable&&!r.blocked
    setSavedVersion(saved?r.ackedVersion:undefined)
+   setQuotaFull(phase==='draft'&&r.phase?.reason==='quota')
    setLabel(saved?'Uloženo':phase==='uncertain'?'Výsledek nepotvrzen':phase==='saving'?'Ukládám…':r.blocked?'Koncept zůstává v tomto editoru':r.phase?.dirty?'Neuložený koncept':r.writable?'Připraveno k úpravám':'Pouze čtení')
   }
   stopAgent.current=()=>{void(async()=>{
@@ -181,6 +183,13 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    const decoder=new TextDecoder('utf-8',{fatal:true})
    if(!dead&&!lifetime.signal.aborted)setComparison({version:snapshot.version,server:decoder.decode(snapshot.bytes),draft:decoder.decode(draft.bytes),serverHash,draftHash,equal:serverHash===draftHash})
   })().catch(()=>{if(!dead)setError('Porovnání se nepodařilo načíst. Koncept se nepřepsal.')})}
+  // With full history the unsaved draft stays in this browser; the person can
+  // still take the current document out as a file. Nothing is deleted.
+  downloadDraft.current=()=>{void(async()=>{
+   const r=current;if(!r||!live(r)||!r.ready)return
+   const snapshot=await r.port.snapshot(lifetime.signal)
+   copy({bytes:snapshot.bytes,applicationId:sessionApplication!} as NativeDraft)
+  })().catch(()=>{if(!dead)setError('Koncept se nepodařilo stáhnout. Zůstává v tomto prohlížeči.')})}
   reconcile.current=()=>{const r=current;if(r&&live(r)&&r.writable&&r.phase?.phase==='uncertain')void r.coordinator?.reconcile()}
   const windowMessage=(event:MessageEvent)=>{current?.port.handleWindowMessage(event)}
   window.addEventListener('message',windowMessage)
@@ -351,7 +360,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     void observeLease(value).catch(()=>stop('Aktuální přístup nelze potvrdit. Koncept zachován.'))
    }).catch(()=>{if(!dead)void retireConnection('Spojení přerušeno. Zápis není potvrzen.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})
   })().catch(()=>{if(!dead)stop('Dokument nelze bezpečně otevřít.')})
-  return()=>{unregisterPrivacy();window.removeEventListener('message',windowMessage);control.current=()=>{};publishPreview.current=()=>{};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};stop('Editor uzavřen · koncept zachován',true)}
+  return()=>{unregisterPrivacy();window.removeEventListener('message',windowMessage);control.current=()=>{};publishPreview.current=()=>{};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};downloadDraft.current=()=>{};stop('Editor uzavřen · koncept zachován',true)}
  },[enabled,humanId,workspaceId,pageId])
  function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`${draft.applicationId}-recovery.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
  if(!enabled)return <p className="p-6">Nativní editor není zapnutý.</p>
@@ -362,6 +371,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   {!connectionRetired&&view.can_edit===true&&ownsEditor&&<Button variant="outline" disabled={busy} onClick={()=>publishPreview.current()}>Publikovat náhled</Button>}
   {publishedVersion&&<p className="px-3 py-2">Sdílený náhled · verze {publishedVersion}</p>}
   <div role="status" className="px-3 py-2"><span>{label}</span>{savedVersion&&<span> · verze {savedVersion}</span>}{quota&&<span className="ml-3 text-muted-foreground">Historie {quota.usedBytes} / {quota.limitBytes} B{quota.warning?' · blíží se limit':''}</span>}</div>
+  {quotaFull&&<div role="alert" className="space-y-2 border-y px-3 py-2"><p><b>Historie dokumentu je plná ({quota?.usedBytes} / {quota?.limitBytes} B).</b> Další verze se neuloží. Všechny dosavadní verze zůstávají a vaše neuložené změny jsou v tomto prohlížeči.</p><p className="text-sm text-muted-foreground">Navýšení ani mazání historie aplikace zatím nenabízí. Práci si stáhněte jako soubor koncept nebo exportem z editoru; koncept se nabídne i po znovuotevření.</p><Button variant="outline" onClick={()=>downloadDraft.current()}>Stáhnout koncept</Button></div>}
   {uncertain&&<Button variant="outline" onClick={()=>reconcile.current()}>Ověřit výsledek</Button>}
   {error&&<p role="alert" className="px-3 py-2">{error}</p>}
   {recoveries.map((recovery,index)=><div key={index} className="flex gap-2 px-3 py-2"><span>Místní koncept · verze {recovery.draft.baseVersion}</span><Button variant="outline" onClick={()=>compare.current(recovery.draft)}>Porovnat</Button><Button variant="outline" onClick={()=>copy(recovery.draft)}>Kopie konceptu</Button></div>)}
