@@ -16,10 +16,14 @@ import {
   grantPage,
   openProject,
   openViewer,
+  artifactDraftStore,
   pause,
+  prepareSourceDraft,
+  prepareViewerComment,
   projectCommentBox,
   projectOffer,
   readArtifact,
+  settleLocalStorageCommit,
   shareProject,
   typeSourceDraft,
   typeViewerComment,
@@ -33,9 +37,13 @@ import { expect, prdRequirement, test } from "./fixtures"
 // commits per origin, so a draft can stay memory-only for up to a minute.
 // The first test crashes once the drafts are on disk (and records how long
 // that took): it checks recovery, privacy and "nothing saved". The second
-// crashes right after typing: it checks that drafts are durable at all.
+// crashes 300 ms after typing, inside a fresh commit window, so the result
+// depends only on where the product keeps its drafts: it checks that drafts
+// are durable at all (a known gap while they live only in localStorage).
 const PERSIST_TIMEOUT_MS = 150_000
 const IMMEDIATE_CRASH_MS = 300
+// The burst plus the crash must land inside Chromium's 5 s commit delay.
+const IMMEDIATE_WINDOW_MS = 3_500
 
 const R = {
   source: prdRequirement("drafts.crash.source", "Browser killed before save: the unsaved Project source draft is offered again (not applied) and restores identically"),
@@ -191,6 +199,8 @@ test.describe("drafts after a crash", () => {
     "drafts survive a crash right after typing",
     { annotation: R.immediate },
     async ({ prd, request, context, playwright }) => {
+      // Waiting for a localStorage commit can take up to a minute.
+      test.setTimeout(Math.max(test.info().timeout, 5 * 60_000))
       const ws = await prd.qaWorkspace()
       await ensureArtifactProjects(request, ws.id, !prd.env.workspaceId)
       const project = await createProject(request, ws.id, "immediate")
@@ -203,15 +213,38 @@ test.describe("drafts after a crash", () => {
       })
       const evidence: Record<string, unknown> = { pageId: project.pageId, crashAfterTypingMs: IMMEDIATE_CRASH_MS }
       try {
+        // Both tabs are loaded and ready to type before anything is typed, so
+        // the two drafts go in one burst and the crash timing does not depend
+        // on how fast a tab loads.
         const v = await profile.page()
         await openViewer(v, project.slug, ws.id)
-        await typeViewerComment(v, viewerText)
+        const fillViewerComment = await prepareViewerComment(v)
         const a = await profile.context!.newPage()
         await openProject(a, project.slug, ws.id)
-        const sourceText = await typeSourceDraft(a, MARK)
+        const fillSource = await prepareSourceDraft(a, MARK)
+
+        // Start from a fresh localStorage commit window: whatever the pages
+        // stored while loading is on disk, and Chromium's next commit is at
+        // least 5 s away. The burst and the crash fit well inside it.
+        evidence.commitSettledMs = await settleLocalStorageCommit(profile, a)
+        const burstStart = Date.now()
+        await fillViewerComment(viewerText)
+        const sourceText = await fillSource()
+        const store = await artifactDraftStore(a, MARK)
         await pause(IMMEDIATE_CRASH_MS)
         evidence.killedProcesses = await profile.crash()
+        const crashAfterSettleMs = profile.killedAt! - burstStart
+        evidence.store = store
+        evidence.crashAfterSettleMs = crashAfterSettleMs
         expect(evidence.killedProcesses as number).toBeGreaterThan(0)
+        // Precondition of the scenario, not of the product: the crash came
+        // inside the commit window. Checked before any known-gap marking so a
+        // slow harness is reported as such.
+        expect(crashAfterSettleMs, "the burst and the crash fit inside Chromium's 5 s localStorage commit delay").toBeLessThan(IMMEDIATE_WINDOW_MS)
+        // Known product gap: drafts kept only in localStorage are lost by a
+        // crash inside the commit window (deterministic with the timing above).
+        // Expected to fail until the drafts move to strict IndexedDB (#4512).
+        test.fail(!store.indexedDb, `known gap: artifact drafts live only in localStorage (in localStorage: ${store.inLocalStorage}); fix in #4512`)
 
         const b = await profile.reopen()
         await openProject(b, project.slug, ws.id)

@@ -25,6 +25,8 @@ export class CrashableProfile {
   readonly dir: string
   context: BrowserContext | null = null
   readonly traffic: Traffic = { writes: [] }
+  /** Date.now() when the last `crash()` sent SIGKILL. */
+  killedAt: number | null = null
 
   constructor(
     private readonly chromium: BrowserType,
@@ -73,7 +75,7 @@ export class CrashableProfile {
    * lazily and rate-limits commits per origin, so how long this takes is
    * itself evidence. Returns the wait in ms, or null if it timed out.
    */
-  async waitPersisted(markers: string[], timeoutMs: number): Promise<number | null> {
+  async waitPersisted(markers: string[], timeoutMs: number, pollMs = 1000): Promise<number | null> {
     const t0 = Date.now()
     const needles = markers.flatMap((m) => [Buffer.from(m, "latin1"), Buffer.from(m, "utf16le")])
     const root = path.join(this.dir, "Default")
@@ -102,7 +104,7 @@ export class CrashableProfile {
         }
       }
       if (found.size === markers.length) return Date.now() - t0
-      await pause(1000)
+      await pause(pollMs)
     }
     return null
   }
@@ -123,6 +125,7 @@ export class CrashableProfile {
       .filter((line) => line.includes(marker))
       .map((line) => Number(line.split(/\s+/, 1)[0]))
       .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid)
+    this.killedAt = Date.now()
     for (const pid of pids) {
       try {
         process.kill(pid, "SIGKILL")
@@ -265,21 +268,70 @@ export async function openViewer(page: Page, slug: string, ws: string): Promise<
 
 /** Opens the source editor and replaces the paragraph with `marker`; returns the typed file text. */
 export async function typeSourceDraft(page: Page, marker: string): Promise<string> {
+  const fill = await prepareSourceDraft(page, marker)
+  return fill()
+}
+
+/**
+ * Opens the source editor and returns a function that types the draft (the
+ * paragraph replaced with `marker`) in one step and returns the typed text.
+ */
+export async function prepareSourceDraft(page: Page, marker: string): Promise<() => Promise<string>> {
   await page.getByRole("button", { name: "Edit source", exact: true }).click()
   const src = page.getByRole("textbox", { name: "Source file", exact: true })
   const text = (await src.inputValue()).replace("Drafts crash paragraph.", `${marker} typed but never saved`)
   expect(text).toContain(marker)
-  await src.fill(text)
-  return text
+  return async () => {
+    await src.fill(text)
+    return text
+  }
 }
 
 /** Selects the heading in the viewer preview and types an unsent comment. */
 export async function typeViewerComment(page: Page, text: string): Promise<void> {
+  const fill = await prepareViewerComment(page)
+  await fill(text)
+}
+
+/** Selects the heading in the viewer preview; returns a function that types the unsent comment. */
+export async function prepareViewerComment(page: Page): Promise<(text: string) => Promise<void>> {
   await page.getByRole("button", { name: "Select", exact: true }).click()
   await previewFrame(page).locator("#qa-head").click()
   const form = page.locator('form[aria-label="New comment"]')
   await expect(form).toBeVisible({ timeout: 15_000 })
-  await form.getByRole("textbox", { name: "Comment" }).fill(text)
+  const box = form.getByRole("textbox", { name: "Comment" })
+  return (text) => box.fill(text)
+}
+
+/**
+ * Where the open page keeps artifact drafts: the strict IndexedDB store, or
+ * localStorage only. Chromium commits localStorage to disk on a timer, so
+ * a localStorage-only draft typed just before a crash is lost by design.
+ */
+export async function artifactDraftStore(page: Page, marker: string) {
+  return page.evaluate(async (m) => {
+    const dbs = typeof indexedDB.databases === "function" ? await indexedDB.databases() : []
+    let inLocalStorage = false
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k && (localStorage.getItem(k) ?? "").includes(m)) inLocalStorage = true
+    }
+    return { indexedDb: dbs.some((d) => d.name === "crewship-artifact-drafts"), inLocalStorage }
+  }, marker)
+}
+
+/**
+ * Lets Chromium commit pending localStorage changes of the page's origin and
+ * returns when that commit is on disk. Chromium waits at least 5 s after the
+ * first change before the next commit, so changes made right after this
+ * returns stay in memory for at least that long.
+ */
+export async function settleLocalStorageCommit(profile: CrashableProfile, page: Page, timeoutMs = 90_000): Promise<number> {
+  const sentinel = `PRD-COMMIT-SENTINEL-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  await page.evaluate((v) => localStorage.setItem("prd-acceptance-commit-sentinel", v), sentinel)
+  const waited = await profile.waitPersisted([sentinel], timeoutMs, 50)
+  expect(waited, "the browser committed localStorage to disk").not.toBeNull()
+  return waited!
 }
 
 export async function viewerCommentValue(page: Page): Promise<string | null> {
