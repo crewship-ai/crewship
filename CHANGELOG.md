@@ -52,6 +52,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - ⚠️ **Behaviour change: a Comment grant can no longer queue agent work on an artifact project.** The Artifacts detail now offers Select and Save comment to Comment-level readers, as `/pages/<slug>?artifact=1` already did. `POST /artifact/comments` with `send_to_agent:true` returns `403` and stores nothing unless the author has Edit, matching Design comments. An agent run whose intent names no comment may answer feedback only with a version it published, never with `needs_clarification`, and no run may answer a task another run holds.
 
+- **Workspace identity erasure also clears Mooring human attribution.** Collaboration edits keep their exact saved history while losing the erased person's ID; generic Mooring mandates keep their preconditions and revocation state and can no longer authorize that person's agent. Other people and workspaces remain unchanged.
+
 - **Project source edits survive a lost save reply and a closed tab.** If the save reply is lost, the editor confirms the exact next version instead of reporting a false conflict, and an unsaved source draft is kept in the browser and offered back until it is saved or discarded.
 
 - **Agents gain bundled Design and native Craft playbooks.** They explain scoped mandates, retained Design versions, session-bound leases and confirmed native saves. Design tool descriptions clarify version and conflict handling.
