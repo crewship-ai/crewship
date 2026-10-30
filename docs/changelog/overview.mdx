@@ -53,9 +53,16 @@ last column:
 
 Dashboard data and Slides answer only where versioned projects are on as well,
 through the workspace flag or the server switch. The web UI is built into the `crewship` binary, so the `NEXT_PUBLIC_*`
-switches are read only when the web UI is built (`pnpm build`) and a running
-server cannot change them; published builds leave them off. See
-[Environment variables](/configuration/environment). Agents author projects
+switches are read only when the web UI is built. A running server cannot
+change them; published builds leave them off. For a source build, set the
+variables in the environment of `make build`, for example:
+
+```bash
+NEXT_PUBLIC_ARTIFACTS_LIBRARY=true NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true make build
+```
+
+See [installation](/quickstart#installation). Set a server bypass to exactly
+`true` and restart the server for it to take effect. Agents author projects
 with the `page artifact` commands and MCP tools on servers that enable them.
 
 ## Documents with honest save status
