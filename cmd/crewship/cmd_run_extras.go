@@ -186,7 +186,7 @@ func prepareRunExtras(ctx context.Context, client *cli.Client, agentID, chatID, 
 
 // sendRunMessageWithExtras is sendRunMessage plus runMessageExtras. With no
 // extras it IS sendRunMessage, so a plain run sends the same frame as before.
-func sendRunMessageWithExtras(ws *cli.WSClient, channel, chat, prompt string, maxTurns int, targets ...*documents.IterationIntent) error {
+func sendRunMessageWithExtras(ws *cli.WSClient, channel, chat, prompt string, maxTurns int, targets ...map[string]any) error {
 	if len(runMessageExtras) == 0 {
 		return sendRunMessage(ws, channel, chat, prompt, maxTurns, targets...)
 	}
@@ -194,8 +194,10 @@ func sendRunMessageWithExtras(ws *cli.WSClient, channel, chat, prompt string, ma
 	for k, v := range runMessageExtras {
 		metadata[k] = v
 	}
-	if len(targets) > 0 && targets[0] != nil {
-		metadata["document_iteration_intent"] = targets[0]
+	if len(targets) > 0 {
+		for k, v := range targets[0] {
+			metadata[k] = v
+		}
 	}
 	return ws.SendMessageWithMetadata(channel, chat, prompt, maxTurns, metadata)
 }
