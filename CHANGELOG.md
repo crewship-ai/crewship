@@ -7307,6 +7307,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Disclosure toggles and checkable menu rows meet the 44 px touch floor.** On touch screens a `<summary>` that opens a collapsed section and checkbox or radio items in menus are now at least 44 px tall, like buttons and plain menu items already were; mouse and trackpad layouts are unchanged.
 
+- **GDPR export and erase failures show the server's reason.** The admin user-data toasts now show the API's error sentence (or "Export failed. Nothing was downloaded." / "Erase failed. No data was removed.") instead of a raw status code and response body.
 
 ## [1.0.0-rc.1] — 2026-07-12
 
