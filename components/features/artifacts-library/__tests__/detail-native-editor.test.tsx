@@ -5,7 +5,7 @@ import { toPageView, type PageView, type WirePage } from "@/hooks/use-pages"
 // A native Word or Sheet opens in the one Craft editor inside its Artifacts
 // detail, behind the single-home switch and the server's availability answer;
 // every other kind, and every refusal, keeps the detail it had.
-const state = vi.hoisted(() => ({ pages: [] as unknown[], userId: "u1", availability: { enabled: true, can_edit: true } as unknown, status: 200, fetch: vi.fn() }))
+const state = vi.hoisted(() => ({ pages: [] as unknown[], userId: "u1", availability: { enabled: true, can_edit: true } as unknown, status: 200, fetch: vi.fn(), read: "ready" }))
 vi.mock("@/hooks/use-pages", async importOriginal => ({
   ...(await importOriginal<typeof import("@/hooks/use-pages")>()),
   usePages: () => ({ pages: state.pages, loading: false, error: null, refresh: vi.fn() }),
@@ -23,7 +23,7 @@ vi.mock("../page-content", () => ({ ArtifactPageContent: () => <div data-testid=
 vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-project-data", () => ({ useArtifactProjectsAvailable: () => false }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: state.userId } } }) }))
 vi.mock("@/hooks/use-document-viewer-read", () => ({
-  useDocumentViewerRead: () => ({ scopeKey: "k", refresh: vi.fn(), read: { status: "ready", title: "Brief", content: { schema: 3, rev: 2, content: { type: "doc" } } } }),
+  useDocumentViewerRead: () => ({ scopeKey: "k", refresh: vi.fn(), read: state.read === "ready" ? { status: "ready", title: "Brief", content: { schema: 3, rev: 2, content: { type: "doc" } } } : { status: state.read } }),
 }))
 vi.mock("@/components/features/pages/document-readonly/document-readonly", () => ({ DocumentReadonly: () => <div>saved preview</div> }))
 vi.mock("@/hooks/use-user-preference", async () => {
@@ -53,6 +53,7 @@ beforeEach(() => {
   state.userId = "u1"
   state.availability = { enabled: true, can_edit: true }
   state.status = 200
+  state.read = "ready"
   state.fetch.mockReset()
   state.pages = [page({ artifact_kind: "word", has_document: true, artifact_shared_version: 2, native_craft_application: "wordcraft" })]
   vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
@@ -85,12 +86,55 @@ it.each([
   ["the editor is off", () => { state.availability = { enabled: false } }],
   ["this person may not edit", () => { state.availability = { enabled: true, can_edit: false } }],
   ["availability is not confirmed", () => { state.status = 503 }],
-])("keeps the lock bar and saved preview when %s", async (_name, setup) => {
+])("keeps the saved preview, and no Edit that opens the Pages editor, when %s", async (_name, setup) => {
   setup()
   open()
-  expect(await screen.findByTestId("lock-bar")).toBeInTheDocument()
+  // /pages/craft/editor makes the same availability decision, so it would open nothing either.
+  expect(await screen.findByText("Editing is not available here right now.")).toBeInTheDocument()
   expect(screen.getByText("saved preview")).toBeInTheDocument()
+  expect(screen.queryByTestId("lock-bar")).toBeNull()
+  expect(screen.queryByRole("link", { name: /Open in Pages/ })).toBeNull()
+  expect(screen.queryByText(/Open in Pages/)).toBeNull()
   expect(screen.queryByTestId("native-host")).toBeNull()
+})
+
+it("a native Sheet whose editor is off says so instead of an empty detail", async () => {
+  state.pages = [page({ artifact_kind: "sheet", has_workbook: true, native_craft_application: "gridcraft" })]
+  state.availability = { enabled: false }
+  open()
+  expect(await screen.findByText("Editing is not available here right now.")).toBeInTheDocument()
+  expect(screen.queryByText(/Open in Pages/)).toBeNull()
+})
+
+it("a native Word whose saved preview fails does not point to Pages, which sends it back here", async () => {
+  state.availability = { enabled: false }
+  state.read = "error"
+  open()
+  expect(await screen.findByText(/The document preview could not be loaded\./)).toBeInTheDocument()
+  expect(screen.queryByText(/Open in Pages/)).toBeNull()
+})
+
+it.each(["unavailable", "error"])("an old-editor Word whose document answers %s has no Open in Pages: Pages reads the same document", status => {
+  state.pages = [page({ has_document: true })]
+  state.read = status
+  open()
+  expect(screen.getByText(/older version of the editor/)).toBeInTheDocument()
+  expect(screen.queryByRole("link", { name: /Open in Pages/ })).toBeNull()
+})
+
+it("an old-editor Word that still reads keeps Open in Pages, where its editor opens it", () => {
+  state.pages = [page({ has_document: true })]
+  open()
+  expect(screen.getByText("saved preview")).toBeInTheDocument()
+  expect(screen.getByRole("link", { name: /Open in Pages/ })).toHaveAttribute("href", "/pages/brief?workspace_id=ws1")
+})
+
+it("with the switch off an old-editor Word keeps Open in Pages as before", () => {
+  vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", "false")
+  state.pages = [page({ has_document: true })]
+  state.read = "unavailable"
+  open()
+  expect(screen.getByRole("link", { name: /Open in Pages/ })).toBeInTheDocument()
 })
 
 it("is unchanged with the single-home switch off: lock bar, preview and Open in Pages", async () => {
