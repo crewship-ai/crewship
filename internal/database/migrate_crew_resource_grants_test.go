@@ -66,7 +66,7 @@ func TestCrewGrantUpgradePreservesAuthorityAndRollsBackDDL(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			err := Migrate(t.Context(), db, logger)
+			err := applyCrewGrantFoundation(t, db, logger)
 			if (err != nil) != fail {
 				t.Fatalf("migration=%v failure=%v", err, fail)
 			}
@@ -101,7 +101,7 @@ func TestCrewGrantUpgradePreservesAuthorityAndRollsBackDDL(t *testing.T) {
 				t.Fatal(err)
 			}
 			if !fail {
-				if err := Migrate(t.Context(), db, logger); err != nil {
+				if err := applyCrewGrantFoundation(t, db, logger); err != nil {
 					t.Fatal(err)
 				}
 				if !reflect.DeepEqual(after, crewGrantSchema(t, db)) {
@@ -112,6 +112,26 @@ func TestCrewGrantUpgradePreservesAuthorityAndRollsBackDDL(t *testing.T) {
 				}
 				if err := db.QueryRow(`SELECT count(*) FROM live_access_grants`).Scan(&count); err != nil || count != 0 {
 					t.Fatalf("inert issuer still grants authority: %d %v", count, err)
+				}
+				// The preservation assertions above belong to the foundation's
+				// DDL rebuild. Later migrations may intentionally replace other
+				// schema objects; still exercise the full upgrade after checking
+				// that boundary, without exempting any object from preservation.
+				if err := Migrate(t.Context(), db, logger); err != nil {
+					t.Fatal(err)
+				}
+				complete := crewGrantSchema(t, db)
+				if err := Migrate(t.Context(), db, logger); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(complete, crewGrantSchema(t, db)) {
+					t.Fatal("repeat full upgrade changed schema")
+				}
+				if _, err := db.Exec(`UPDATE workspaces SET name='Still valid after all upgrades' WHERE id='w'`); err != nil {
+					t.Fatal(err)
+				}
+				if err := db.QueryRow(`SELECT count(*) FROM live_access_grants`).Scan(&count); err != nil || count != 0 {
+					t.Fatalf("full upgrade restored inert issuer authority: %d %v", count, err)
 				}
 			} else {
 				if err := db.QueryRow(`SELECT count(*) FROM _migrations WHERE name='crew_resource_grants'`).Scan(&count); err != nil || count != 0 {
@@ -149,7 +169,7 @@ func TestCrewGrantUpgradeRefusesCaseInsensitiveIncomingForeignKeys(t *testing.T)
 			if err := db.QueryRow(`SELECT access_revision FROM workspace_members WHERE id='h'`).Scan(&beforeRevision); err != nil {
 				t.Fatal(err)
 			}
-			err := Migrate(t.Context(), db, logger)
+			err := applyCrewGrantFoundation(t, db, logger)
 			if err == nil {
 				t.Fatal("migration accepted an incoming foreign key")
 			}
@@ -188,4 +208,18 @@ func migrateBeforeCrewGrantFoundation(t *testing.T, db *sql.DB, logger *slog.Log
 		}
 	}
 	return applyRegistry(t.Context(), db, before, logger)
+}
+
+// Apply the actual registered foundation in its normal migration transaction.
+// Comparing its DDL rebuild against every future unrelated migration would
+// reject legitimate later replacements rather than test preservation here.
+func applyCrewGrantFoundation(t *testing.T, db *sql.DB, logger *slog.Logger) error {
+	t.Helper()
+	for _, m := range migrations {
+		if m.name == "crew_resource_grants" {
+			return applyRegistry(t.Context(), db, []migration{m}, logger)
+		}
+	}
+	t.Fatal("crew_resource_grants missing from migration registry")
+	return nil
 }
