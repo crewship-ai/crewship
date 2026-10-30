@@ -97,6 +97,8 @@ exception in the other direction: it prints YAML unless you ask for
 | `project panel-history <slug> <panel> --publication <v>` | Read a panel's payload ring through the published application |
 | `project fsck <slug>` | Verify a Page's source, checkpoint and artifact integrity |
 | `project compact` | Reclaim Page storage across the workspace |
+| `enable` | Build the Pages Apps compiler image on this Docker host (turns Pages Apps on) |
+| `disable --yes [--all]` | Remove this version's Pages Apps compiler image from this Docker host (turns Pages Apps off) |
 
 ---
 
@@ -1468,9 +1470,110 @@ unknown `--level`, both of which are checked there and not here.
 
 The opt-in Pages application profile uses React, TypeScript and Vite. Projects
 are source drafts; saving/importing one does not execute or publish its code.
-The operator must configure protected source storage, a pinned build image and
-a separate-site runtime origin. The current profile accepts its fixed dependency
+The operator turns Pages Apps on with [`crewship page enable`](#crewship-page-enable)
+on the Docker host, and configures protected source storage
+(`CREWSHIP_PAGE_PROJECTS_PATH`) and, unless Studio is served on
+`http://localhost`, a separate-site runtime origin
+(`CREWSHIP_PAGE_RUNTIME_ORIGIN`). While Pages Apps are not enabled, builds,
+reviews and publications answer `503` with `"code": "page_apps_not_enabled"`.
+The current profile accepts its fixed dependency
 set and lockfile, with custom React and CSS. It does not install arbitrary packages.
+
+### `crewship page enable`
+
+```bash
+crewship page enable
+image=$(crewship page enable)          # stdout is only the image ID
+crewship page enable --config /etc/crewship/config.yaml
+crewship page enable --image-only      # Compose / air-gapped: print, do not record
+```
+
+Builds the isolated compiler image Pages Apps use on the **local Docker
+daemon** and **records its exact image ID** in the server's page project
+storage: `<CREWSHIP_PAGE_PROJECTS_PATH>/pages-build-image.json`, written
+atomically with mode `0600`. The record is the opt-in: the server uses only an
+image whose ID equals the recorded one **and** that carries the exact local tag
+`crewship-pages-build:<fingerprint prefix>` **and** the label
+`ai.crewship.pages.image=<build context fingerprint>` of its own release. A
+running server picks the record up within about 10 seconds, with no restart and
+no configuration change — provided it already runs with
+`CREWSHIP_PAGE_PROJECTS_PATH` set. `enable` does not configure page project
+storage; a fresh installation sets the path and restarts the server once first. The label alone is never trusted: images built `FROM`
+a labelled base (for example a crew's cache image) inherit it.
+
+Run it on the Docker host **as the account the server runs as**, with the same
+crewship version and configuration as the server (`--config` for a YAML
+configuration). Run with `sudo`, the record is given to the owner of the storage
+directory so the server can read it.
+
+1. Checks that the `docker` CLI exists and its daemon answers, and reads the
+   server configuration; it exits `1` without building when Docker is
+   unreachable, the configuration is unreadable, or
+   `CREWSHIP_PAGE_PROJECTS_PATH` is not set (the record lives there).
+2. If the recorded image for this version still verifies (ID, tag, label),
+   prints `Pages Apps already enabled` to stderr and its ID to stdout, and
+   builds nothing.
+3. Otherwise writes the build context embedded in this binary to a temporary
+   directory, runs `docker build --label ai.crewship.pages.image=<fingerprint>
+   --tag crewship-pages-build:<fingerprint prefix> --iidfile …` (build output
+   streams to stderr), inspects the result (immutable `sha256:` ID, exact tag,
+   label), records the ID and removes the temporary directory. This build needs
+   network access once — the pinned base image and npm packages; Page builds
+   themselves always run with `--network=none`. A record that exists but can
+   not be read (wrong permissions, not a regular file) is reported, never
+   overwritten.
+4. Reports recorded images of other versions (kept for rollback) and what is
+   still missing for Pages Apps to work end to end — the effective runtime
+   origin (or that `CREWSHIP_PAGE_RUNTIME_ORIGIN` must be set to a separate
+   site). This is advice and does not change the exit code.
+
+stdout carries **only** the image ID followed by a newline; everything else
+goes to stderr. Exit `0` when the image is built (or already in place) and
+recorded, `1` otherwise.
+
+**Docker Compose deployments and air-gapped hosts.** The bundled
+`docker-socket-proxy` runs with `BUILD=0`, so a build through it is refused
+(`403 Forbidden`), and the server container does not read the host's files. Run
+`crewship page enable --image-only` on the Docker host itself with the **same
+crewship version** and set `CREWSHIP_PAGE_BUILD_IMAGE` to the printed ID. For an
+offline host, `docker save` that image on a connected machine with the same
+version, `docker load` it on the target and pin it the same way.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--config <file>` | | Server configuration file (YAML), as passed to `crewship start --config`: where the record is written and what the setup report checks. |
+| `--image-only` | | Build and print the image ID without recording it; pin it with `CREWSHIP_PAGE_BUILD_IMAGE`. |
+
+### `crewship page disable`
+
+```bash
+crewship page disable --yes
+```
+
+Removes this crewship version from the image record first — the server fails
+closed within about 10 seconds and refuses new Page application builds with
+`page_apps_not_enabled` — then deletes the image the record named with
+`docker image rm`, **only** after checking that it still has the recorded ID,
+the exact tag `crewship-pages-build:<fingerprint prefix>` and the label. An image
+that merely carries the Pages label (crew images built `FROM` a labelled base
+inherit it) is never removed; one that no longer verifies is forgotten and
+reported, not deleted. Recorded images of other versions are kept for rollback;
+`--all` removes every recorded version. Prints each removed ID on stdout and
+the explanation on stderr. **Published applications keep serving**, because they
+are static artifacts that need no compiler. Turn Pages Apps back on with
+`crewship page enable`.
+
+Asks for confirmation unless `--yes` is given. With nothing recorded it says
+Pages Apps are not enabled and exits `0` without asking. An image used by a
+running build cannot be removed: it is reported, the others are still removed,
+and the command exits `1`; the record no longer names it, so remove it with
+`docker image rm` when the build finishes.
+
+| Flag | Required | Description |
+|---|:---:|---|
+| `--yes`, `-y` | | Skip the interactive confirmation prompt. |
+| `--all` | | Also remove the recorded compiler images of other crewship versions. |
+| `--config <file>` | | Server configuration file (YAML), as passed to `crewship start --config`: where the record is read. |
 
 Every `page project` subcommand prints the server's document — JSON unless
 `--format yaml` or `ndjson` asks otherwise; there is no table form — except
@@ -2024,8 +2127,20 @@ leaves the latest version unchanged; both require owner authority. Read and
 Comment grants reach only the current shared pin. Readers cannot publish,
 comment, restore or share; Comment permits feedback without content writes.
 Storage usage and the keep-all policy are returned with the owner snapshot.
+`quota.level` warns before saving fails: `none` below 80% of `limit_bytes`,
+`near` from 80%, `critical` from 95% and `full` once `used_bytes` reaches the
+limit (`warning` stays true from `near` upwards). Shared readers and Edit-only
+editors get a withheld quota with `limit_bytes` 0 and no level.
 Quota rejection retains every prior version; keep the candidate manifest file
 until publication is acknowledged.
+
+`page artifact versions` also prints the owner-only `retention_preview`: a dry
+run of the proposed rule "keep every version from the last `recent_days`
+(14) days, then the newest version of each older UTC day; always keep the
+latest, shared, named (non-empty message), restored and restore-source
+versions, and any version of unknown age". `would_thin` lists the versions
+that rule would remove; `dry_run` is always `true`. Nothing is deleted and
+`quota.retention` stays `keep-all`.
 
 For an agent, enable **Create artifact project** in the original private chat.
 The host binds that explicit request to the actual human credential and one
@@ -2127,6 +2242,45 @@ Agent tools `artifact_data_batch`, `artifact_data_read` and
 Page mandate. Protected CLI runs use that sidecar transport and cannot fall back
 to human credentials. Code restore/share/comments retain the existing artifact
 version and comment operations; restoring code does not rewind mutable data.
+
+### Design System tokens (preview disabled by default)
+
+A Design System is an ordinary artifact project whose manifest includes a
+`design-system.json` file. There is no separate endpoint or store: create,
+publish, restore, share and comment use the `page artifact` commands above, and
+each publish is a retained version. Build the web UI with
+`NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM=true` to open such an artifact as a
+read-only token sheet (color swatches, type scale, spacing and radii);
+otherwise it opens like any other project.
+
+```json
+{
+  "schema_version": 1,
+  "name": "Harbor",
+  "colors": {"primary": "#1d4ed8", "surface": "#ffffff"},
+  "typography": {"body": {"size": 16, "weight": 400, "line_height": 1.5, "font_family": "Inter, sans-serif"}},
+  "spacing": {"sm": 8, "md": 16},
+  "radii": {"sm": 4},
+  "components": [{"name": "Button", "description": "Primary action"}]
+}
+```
+
+```bash
+crewship page artifact create harbor --name "Harbor tokens" --file manifest.json
+crewship page artifact publish harbor --base-version 1 --file manifest.json
+crewship page artifact restore harbor --base-version 2 --version 1
+```
+
+`schema_version`, `colors`, `typography`, `spacing` and `radii` are required;
+groups may be empty. `name` (up to 80 characters) and `components` (up to 64
+entries of `name` and optional `description`) are optional. Token names are
+lowercase ASCII letters, digits and hyphens starting with a letter, at most 48
+bytes, and at most 128 per group. Colors are `#rrggbb`; spacing and radii are
+integer pixels from 0 to 4096; a type style needs an integer `size` (1–512) and
+may set `weight` (100–900 in steps of 100), `line_height` (0.5–4) and a plain
+`font_family` list. The file is at most 32 KiB. Unknown fields, duplicate keys,
+CSS expressions or URLs make the preview refuse the whole file; the server still
+stores it as a normal project file.
 
 ### `crewship page artifact slides <slug-or-id>`
 

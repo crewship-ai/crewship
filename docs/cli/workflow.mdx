@@ -25,11 +25,12 @@ crewship workflows list                              # alias
 
 Output columns: `ID`, `NAME`, `BUILTIN`, `STAGES`, `ICON`, `COLOR`. The `STAGES` column counts entries inside the stored `template_json` blob — a value of `0` indicates a corrupt row that should be inspected via `workflow get`.
 
-## `crewship workflow get <slug>`
+## `crewship workflow get <id|slug>`
 
-`GET /api/v1/workflow-templates/{id}` after resolving `<slug>` via the list endpoint. Prints every column including the full `template_json` so you can pipe it through `jq` to inspect the stage list.
+`GET /api/v1/workflow-templates/{id}`. The argument is tried as a template id first (one request); only when the server answers 404 is it matched against template names and slugs from the list endpoint. Prints every column including the full `template_json` so you can pipe it through `jq` to inspect the stage list.
 
 ```bash
+crewship workflow get wft_abc123                   # by id
 crewship workflow get engineering-standard
 crewship workflow get "Engineering Standard"        # exact name also works
 ```
@@ -89,7 +90,7 @@ crewship workflow update engineering-standard --file engineering-standard.yaml
 crewship workflow update "Engineering Standard" --file engineering-standard.yaml   # exact name
 ```
 
-Built-in templates (`is_builtin: true`) and rows in another workspace surface as `404 Not found`; renaming into an existing template's name returns `409 Conflict`.
+Built-in templates (`is_builtin: true`) are read-only and answer `403 Forbidden`; rows in another workspace surface as `404 Not found`; renaming into an existing template's name returns `409 Conflict`.
 
 ## `crewship workflow delete <slug>`
 
@@ -104,7 +105,7 @@ crewship workflow delete engineering-standard
 crewship workflow rm engineering-standard -y         # alias + non-interactive
 ```
 
-Workflow templates are reference data — crews that still point at the deleted template fall back to the runtime default lifecycle rather than failing.
+Workflow templates are reference data — crews that still point at the deleted template fall back to the runtime default lifecycle rather than failing. Built-in templates cannot be deleted (`403 Forbidden`): listing templates creates any missing built-in again, so their names (`sequential`, `parallel`, `pipeline`, `dev-test-loop`) are taken in every workspace once it has been listed.
 
 ## See also
 

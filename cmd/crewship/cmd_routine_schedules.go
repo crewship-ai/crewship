@@ -9,6 +9,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -664,15 +665,17 @@ var routineSchedulesNowCmd = &cobra.Command{
 			return err
 		}
 		defer resp.Body.Close()
-		// 404 means the /run endpoint isn't yet wired on the
-		// server. Surface as a non-zero error so CI scripts that
-		// chained `routine schedules now <id> && next-step` don't
-		// silently swallow the missing capability and assume the
-		// schedule fired.
-		if resp.StatusCode == http.StatusNotFound {
-			return fmt.Errorf("force-fire endpoint unavailable on this server; toggle disable/enable to fire on next 30s tick instead")
-		}
 		if err := cli.CheckError(resp); err != nil {
+			// A 404 with a JSON body is the handler's own answer
+			// ("schedule not found", "schedule target pipeline not
+			// found") and is relayed as-is. Only a 404 WITHOUT one — the
+			// mux's plain-text reply on a server that predates the /run
+			// route — means the endpoint is missing. Either way the exit
+			// is non-zero, so `now <id> && next-step` never assumes a fire.
+			var apiErr *cli.APIError
+			if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound && apiErr.Extensions == nil {
+				return fmt.Errorf("force-fire endpoint unavailable on this server; toggle disable/enable to fire on next 30s tick instead")
+			}
 			return err
 		}
 		// #1219: force-fire is the one schedule operation a test

@@ -748,7 +748,13 @@ func (s *Server) mountAPIRouter(
 	if cfg.Auth.GoogleClientID != "" {
 		opts = append(opts, goapi.WithGoogleOAuth(cfg.Auth.GoogleClientID, cfg.Auth.GoogleSecret, cfg.Auth.NextjsURL))
 	}
-	opts = append(opts, goapi.WithStoragePath(cfg.Storage.BasePath), goapi.WithPageProjectsPath(cfg.Storage.PageProjectsPath), goapi.WithPageBuildImage(cfg.Storage.PageBuildImage), goapi.WithPageRuntime(cfg.Storage.PageRuntimeOrigin, cfg.PageStudioOrigin(), cfg.Storage.PageRuntimeDevelopmentSameOrigin))
+	// A localhost Studio gets a derived 127.0.0.1 runtime origin (#3108);
+	// say so once, since nothing in the configuration shows it.
+	pageRuntimeOrigin := cfg.PageRuntimeOrigin()
+	if pageRuntimeOrigin != "" && cfg.Storage.PageRuntimeOrigin == "" {
+		logger.Info("pages: runtime origin derived for a localhost Studio; set CREWSHIP_PAGE_RUNTIME_ORIGIN to override", "origin", pageRuntimeOrigin)
+	}
+	opts = append(opts, goapi.WithStoragePath(cfg.Storage.BasePath), goapi.WithPageProjectsPath(cfg.Storage.PageProjectsPath), goapi.WithPageBuildImage(cfg.Storage.PageBuildImage), goapi.WithPageRuntime(pageRuntimeOrigin, cfg.PageStudioOrigin(), cfg.Storage.PageRuntimeDevelopmentSameOrigin), goapi.WithDerivedPageRuntime(pageRuntimeOrigin != "" && cfg.Storage.PageRuntimeOrigin == ""))
 	if s.editor != nil {
 		editor := s.editor
 		opts = append(opts, goapi.WithWorkbookEditor(editor.LearnOrigin, func() any { return editor.Detail() }))

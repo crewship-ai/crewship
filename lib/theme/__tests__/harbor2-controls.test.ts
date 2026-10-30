@@ -59,6 +59,17 @@ describe("coarse pointer targets", () => {
     expect(rule?.[1]).toContain("a[href]")
   })
 
+  it("disclosure summaries and checkable menu items get the 44px floor too", () => {
+    // <summary> toggles a <details>; Radix renders DropdownMenuCheckboxItem and
+    // DropdownMenuRadioItem as menuitemcheckbox / menuitemradio, which an exact
+    // [role="menuitem"] match does not cover.
+    const rule = /:where\(([^{]*)\)[^{]*\{\s*min-height:\s*44px;/.exec(coarse)
+    const selectors = (rule?.[1] ?? "").split(/,\s*(?![^()]*\))/).map((s) => s.trim())
+    expect(selectors).toContain("summary")
+    expect(selectors).toContain('[role="menuitemcheckbox"]')
+    expect(selectors).toContain('[role="menuitemradio"]')
+  })
+
   it("buttons are at least 44px wide, but checkboxes, radios and switches are not stretched", () => {
     expect(coarse).toMatch(/min-width:\s*44px;/)
     expect(coarse).toMatch(/:not\(\[role="checkbox"\], \[role="radio"\], \[role="switch"\]\)/)

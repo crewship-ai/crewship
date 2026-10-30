@@ -31,6 +31,9 @@ func TestArtifactFeedbackBackupPreservesThreadsWithoutRuntimeAuthority(t *testin
 	exec(`INSERT INTO conversation_messages(id,session_id,agent_id,role,content,ts,author_user_id) VALUES('feedback-message','feedback-chat','feedback-agent','user','Original request',datetime('now'),'u_admin')`)
 	exec(`INSERT INTO artifact_project_comments(id,workspace_id,page_id,version,path,selector,quote,text,author,created_at) VALUES('feedback-comment',?,'feedback-page',1,'index.html','#hero','Retained','Change this','u_admin',datetime('now'))`, ws)
 	exec(`INSERT INTO artifact_project_comment_tasks(id,comment_id,workspace_id,page_id,base_version,created_at) VALUES('feedback-task','feedback-comment',?,'feedback-page',1,datetime('now'))`, ws)
+	// The send-to-agent writer stores the task id back on the comment
+	// (pages_artifact_project_comments.go); every reader joins t.id=c.task_id.
+	exec(`UPDATE artifact_project_comments SET task_id='feedback-task' WHERE id='feedback-comment'`)
 	exec(`INSERT INTO artifact_project_comment_replies(id,comment_id,version,text,author,created_at) VALUES('feedback-reply','feedback-comment',1,'Need clarification','u_admin',datetime('now'))`)
 	exec(`INSERT INTO artifact_project_origins(page_id,workspace_id,human_user_id,chat_id,agent_id,message_id,created_at) VALUES('feedback-page',?,'u_admin','feedback-chat','feedback-agent','feedback-message',datetime('now'))`, ws)
 	exec(`INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at) SELECT 'feedback-run',?,'feedback-agent','feedback-crew','u_admin','feedback-chat','feedback-message',m.id,m.access_revision,c.authority_generation,c.authority_revision,datetime('now','+1 hour') FROM workspace_members m JOIN chats c ON c.id='feedback-chat' WHERE m.workspace_id=? AND m.user_id='u_admin'`, ws, ws)
@@ -55,6 +58,13 @@ func TestArtifactFeedbackBackupPreservesThreadsWithoutRuntimeAuthority(t *testin
 			err := target.QueryRow(`SELECT count(*) FROM artifact_project_comments c JOIN artifact_project_comment_replies r ON r.comment_id=c.id JOIN artifact_project_comment_tasks t ON t.comment_id=c.id AND t.page_id=c.page_id AND t.workspace_id=c.workspace_id JOIN artifact_project_origins o ON o.page_id=c.page_id AND o.workspace_id=c.workspace_id JOIN pages p ON p.id=c.page_id AND p.workspace_id=c.workspace_id WHERE c.quote='Retained' AND c.text='Change this' AND r.text='Need clarification'`).Scan(&threads)
 			if err != nil || threads != 1 {
 				t.Fatalf("feedback graph lost: %d: %v", threads, err)
+			}
+			// A fork remints artifact_project_comment_tasks.id; the comment's
+			// back-reference must follow it or the hand-off list and dispatch
+			// (both join t.id=c.task_id) lose the pending feedback.
+			var linked int
+			if err := target.QueryRow(`SELECT count(*) FROM artifact_project_comments c JOIN artifact_project_comment_tasks t ON t.id=c.task_id AND t.comment_id=c.id WHERE c.text='Change this'`).Scan(&linked); err != nil || linked != 1 {
+				t.Fatalf("comment.task_id does not link to its task after restore: %d: %v", linked, err)
 			}
 			for _, table := range []string{"artifact_run_principals", "artifact_project_run_consents", "artifact_project_message_intents"} {
 				var n int

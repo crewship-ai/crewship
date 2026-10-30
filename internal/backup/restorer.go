@@ -184,16 +184,6 @@ func (p *ExtractedPayload) OpenVolume(ctx context.Context, slug, vol string) (io
 	return f, true, nil
 }
 
-// HasCrew reports whether the bundle carried the /crew section — the
-// agent and crew-shared memory tree — for the given slug. False for
-// every bundle produced before #1713 was fixed, which is the signal
-// callers use to tell the operator that a restore from it will not
-// bring memory back.
-func (p *ExtractedPayload) HasCrew(slug string) bool {
-	_, ok := p.crewPathBySlug[slug]
-	return ok
-}
-
 // OpenCrew returns a reader for the /crew tar of the given crew slug.
 // Returns (nil, false, nil) for bundles that predate the section.
 func (p *ExtractedPayload) OpenCrew(ctx context.Context, slug string) (io.ReadCloser, bool, error) {
@@ -240,12 +230,6 @@ func (p *ExtractedPayload) OpenSystem(ctx context.Context, slug, kind string) (i
 		return nil, true, fmt.Errorf("backup: open system section %s/%s: %w", slug, kind, err)
 	}
 	return f, true, nil
-}
-
-// HasMemoryBlobs reports whether the bundle carried a memory-blobs
-// section (content-addressed memory_versions blobs).
-func (p *ExtractedPayload) HasMemoryBlobs() bool {
-	return p.memoryBlobsPath != ""
 }
 
 // OpenMemoryBlobs returns a reader over the inner tar of memory-version

@@ -165,7 +165,12 @@ func (d *craftNativeDocumentsHTTP) initialize(w http.ResponseWriter, r *http.Req
 		craftNativeDocumentError(w, errCraftNativeAccess)
 		return
 	}
-	entry := &craftNativeSession{id: id, tokenHash: sha256.Sum256([]byte(token)), source: source, scope: scope, application: body.ApplicationID, workspaceEpoch: proof.workspaceEpoch, memberID: proof.memberID, memberRevision: proof.memberRevision, boot: boot, deadline: now + cap}
+	generations, err := captureCraftNativeGenerations(ctx, tx, scope, source.UserID)
+	if err != nil {
+		craftNativeDocumentError(w, err)
+		return
+	}
+	entry := &craftNativeSession{id: id, tokenHash: sha256.Sum256([]byte(token)), source: source, scope: scope, application: body.ApplicationID, memberID: proof.memberID, memberRevision: proof.memberRevision, generations: generations, boot: boot, deadline: now + cap}
 	if err = tx.Commit(); err != nil {
 		craftNativeDocumentError(w, err)
 		return
@@ -205,8 +210,11 @@ func (d *craftNativeDocumentsHTTP) initialize(w http.ResponseWriter, r *http.Req
 		if e != nil {
 			return mooring.EditLeasePrincipal{}, e
 		}
-		if p.workspaceEpoch != entry.workspaceEpoch || p.memberID != entry.memberID || p.memberRevision != entry.memberRevision {
+		if p.memberID != entry.memberID || p.memberRevision != entry.memberRevision {
 			return mooring.EditLeasePrincipal{}, errCraftNativeAccess
+		}
+		if e = craftNativeGenerationsCurrent(ctx, tx, entry); e != nil {
+			return mooring.EditLeasePrincipal{}, e
 		}
 		b, n, e := m.clock.Now()
 		if e != nil || b != entry.boot || n < 0 || n >= entry.deadline {

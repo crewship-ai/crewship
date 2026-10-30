@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -529,15 +528,8 @@ func TestStartAuditWatcher_MissingRoot_DefersAndStartsOnCreate(t *testing.T) {
 	}
 }
 
-// stringContains is a small helper so log-assertions stay readable.
-// Not a critical helper — kept inline so changes don't ripple.
-func stringContains(s, substr string) bool {
-	return strings.Contains(s, substr)
-}
-
 // Compile-time sanity: AuditWatcherConfig has the exported fields the
 // server lifecycle wires (BasePath, BlobRoot, Scrubber). A future
 // rename would break the server build, but this file would catch the
 // regression faster.
 var _ = AuditWatcherConfig{BasePath: "", BlobRoot: "", Scrubber: nil}
-var _ = stringContains

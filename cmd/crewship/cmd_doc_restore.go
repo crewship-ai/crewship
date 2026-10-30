@@ -12,7 +12,10 @@ import (
 )
 
 func newDocRestoreCommand() *cobra.Command {
-	cmd := &cobra.Command{Use: "restore <page-slug>", Short: "Restore a checkpoint as a new revision using the original confirmed packet", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "restore <page-slug>", Short: "Restore a retained checkpoint as a new revision", Long: `Send one JSON packet (at most 4 KiB) with page_id, id, schema, epoch, ifRev and
+checkpoint. Read the document first to get the current epoch and rev. Keep the
+exact packet for a retry after an uncertain response; never refresh its
+revision or epoch. A successful restore increments the revision.`, Example: `  crewship doc restore @<artifact-id> --file restore.json`, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		filename, _ := cmd.Flags().GetString("file")
 		if filename == "" {
 			return fmt.Errorf("--file is required; preserve the original restore packet for retry")
