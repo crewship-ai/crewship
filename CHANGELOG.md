@@ -9,7 +9,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Routine signals support machine output.** `routine signal -f json` and YAML output now return the run ID, event type and delivery result instead of a human sentence.
 
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
 
@@ -7248,6 +7247,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Bind artifact requests to explicit human chat intent and one signed run, preserving the original Page and version authority. Recheck live original authority and exact consent after the final chat or task write before committing admission.
 
 - Add optional artifact project previews, versioned element comments, shared-version navigation and explicit chat creation intent behind backend availability.
+
+- **Routine signals support machine output.** `routine signal -f json` and YAML output now return the run ID, event type and delivery result instead of a human sentence.
 
 ## [1.0.0-rc.1] — 2026-07-12
 
