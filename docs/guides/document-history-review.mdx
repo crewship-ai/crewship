@@ -1,15 +1,18 @@
 ---
-title: "Document history, revert and proposals"
-description: "Compare a retained revision with the saved version and revert one change. Agent proposals are not available yet."
+title: "Document history and compare"
+description: "Compare a retained Docs revision with the saved document and restore a checkpoint through the CLI."
 icon: "history"
 stability: experimental
 tag: Experimental
 ---
 
+This page covers the Docs backend. Native Craft Word and Sheet documents use
+[Word and Sheet editing](/guides/artifacts/word-and-sheet).
+
 <Note>
-Revert and proposal review are off by default
-(`NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS=true`) until the matching server
-endpoints ship. History browsing and compare do not need them.
+History browsing and compare do not need `NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS`.
+Keep that development-only flag off: the server does not serve the review
+endpoints its client controls call.
 </Note>
 
 ## Compare
@@ -19,35 +22,14 @@ block is labelled **Added**, **Removed**, **Changed** or **Moved** with its
 before and after text. The comparison is against the last saved version; unsent
 edits are not included, and the page says so. Comparing never edits the document.
 
+Compare also reports formatting and attribute changes (a link target or a
+heading level). Blocks are matched by stable ID, or by identical content when
+a block has none.
+
 ## Revert a change
 
-**Revert this change** undoes only the change recorded at that checkpoint and
-keeps later work. If later work touches the same blocks, nothing changes and the
-conflict is shown. (Restoring a whole earlier version is a separate action with
-its own confirmation, see the CLI guide for `doc restore`.)
-
-Revert asks for confirmation and is offered only to people who can edit the
-document. If you have unsent edits, revert and accept stay disabled until the
-edits are confirmed; you can download them from the same place. The request
-names the revision you were reviewing; if the document moved on, a revision is no
-longer retained, or your access changed, the result says so and nothing is
-changed.
-
-If the connection drops or the server answers with an error, the result is
-**unknown**: the action may or may not have completed. Check the document
-history, then use **Try again (same request)**; the repeat carries the same
-request key, so it cannot apply twice.
-
-Compare also reports formatting and attribute changes (a link target, a heading
-level) and tells blocks apart by their stable ID, or by identical content when a
-block has none.
-
-## Proposals
-
-Agent proposals are not available in this release. The server doesn't serve
-them yet, so with `NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS=true` the **Proposals**
-panel shows *Proposals could not be loaded.* Agents edit documents directly.
-
-Native Word documents and Sheets in Artifacts have no proposals either; an
-agent task there saves versions directly. See
-[Word and Sheet editing](/guides/artifacts/word-and-sheet).
+The per-change review action is not a supported workflow in this release.
+To recover saved content, inspect the retained checkpoint first. The existing
+`crewship doc restore` command restores a checkpoint as a new revision with
+revision and epoch checks; preserve its original request packet if the outcome
+is unknown. See [Docs CLI](/cli/doc).
