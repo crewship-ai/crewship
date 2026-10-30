@@ -45,6 +45,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Design artifacts gain an opt-in collaborative canvas.** People and agents can edit frames, shapes, text and images through Yjs, with live presence and normal artifact version history. Agents can address their selected canvas by its immutable ID. Disabled by default. Long-running cookie sessions renew only their collaborative transport after fresh authority checks, retaining unsaved work. Restoring saved canvases preserves prototype-named node IDs and their original contents.
 
+- A shared dev release now switches one checked-in build profile (`CREWSHIP_BUILD_PROFILE` in `.env.production`); the flag tests and the phone browser contract verify the main and the release profile, and main must keep the main profile.
+
 - **"Send to agent" on Design and Project comments reports delivery correctly.** A delivered comment no longer turns into "Retry when the source chat is connected" after 15 seconds, and a busy agent is reported at once instead of after a timeout.
 
 - **Native Craft editing can continue past access-token expiry.** The browser refreshes its cookie before admitting or renewing the same editing connection and replaces only its authenticated metadata stream. Unsaved work, the lease generation and in-flight saves remain in place; document mutations are never replayed.
