@@ -175,7 +175,7 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    ready()
    if(eventRunning)throw new Error('native_stream_already_active')
    eventRunning=true
-   let reconnecting=false,retries=0,networkRetries=0
+   let reconnecting=false,transportRecovery=false,retries=0,networkRetries=0
    try{
     while(active&&!signal.aborted){
      const controller=new AbortController(),startedRotation=rotation
@@ -188,14 +188,17 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
       try{response=await send(`${base}events?${query}`,{method:'GET',cache:'no-store',signal:controller.signal,headers:{Accept:'text/event-stream','X-Craft-Session':token!}})}
       catch(error){if(controller.signal.aborted)throw error;throw new NativeMetadataTransportError('native_stream_unavailable')}
       ready();if(controller.signal.aborted)throw controller.signal.reason
-      // Closing the old fetch can precede the server's live-stream cleanup.
-      // Only a planned credential rotation permits bounded duplicate-GET retries.
-      if(response.status===409&&reconnecting&&retries<8){
-       retries++;await response.body?.cancel().catch(()=>{});await reconnectPause(controller.signal);continue
+      // A reset may leave the old server stream alive for several seconds.
+      // Network recovery uses its shared exponential budget; planned credential
+      // rotation keeps the short bounded handoff grace.
+      if(response.status===409&&reconnecting){
+       await response.body?.cancel().catch(()=>{})
+       if(transportRecovery)throw new NativeMetadataTransportError('native_stream_unavailable')
+       if(retries<8){retries++;await reconnectPause(controller.signal);continue}
       }
       if([408,429,500,502,503,504].includes(response.status)){await response.body?.cancel().catch(()=>{});throw new NativeMetadataTransportError('native_stream_unavailable')}
       if(!response.ok||!response.headers.get('Content-Type')?.startsWith('text/event-stream')||!response.body)throw new Error('native_stream_unavailable')
-      retries=0;reconnecting=false;streamStarted=Date.now()
+      retries=0;reconnecting=false;transportRecovery=false;streamStarted=Date.now()
       const reader=response.body.getReader(),decoder=new TextDecoder('utf-8',{fatal:true});let buffer=''
       try{
        while(true){
@@ -245,7 +248,7 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
        try{await client.reauthorize(controller.signal);ready();if(controller.signal.aborted)throw controller.signal.reason;authorized=true}
        catch(renewalError){if(!(renewalError instanceof NativeMetadataTransportError)||!active||signal.aborted||controller.signal.aborted)throw renewalError}
       }
-      reconnecting=true;retries=0
+      reconnecting=true;transportRecovery=true;retries=0
      }finally{eventRecovering=false;signal.removeEventListener('abort',abort);if(eventAbort===controller)eventAbort=undefined}
     }
     ready();throw new Error('native_stream_aborted')

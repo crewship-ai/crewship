@@ -143,8 +143,11 @@ enter the cookie-refresh flow.
 
 A transport reset, clean SSE EOF or temporary HTTP failure reconnects only
 metadata after current same-admission reauthorization. At most eight recovery
-attempts back off from 100 ms to five seconds; a valid lease on a stream shorter
-than five seconds does not reset that budget. Invalid metadata, authorization
+attempts back off from 100 ms to five seconds. A 409 while the server still holds
+an old stream after transport loss uses the same exponential budget, allowing
+several seconds for cleanup. Planned credential rotation keeps its separate
+short handoff grace. A valid lease on a stream shorter than five seconds does
+not reset the recovery budget. Invalid metadata, authorization
 refusal and explicit session retirement are terminal. Exhaustion uses the
 existing draft-retaining disconnection path. Closing the client cancels both
 the stream and a coalesced periodic/recovery authorization. No save, custody

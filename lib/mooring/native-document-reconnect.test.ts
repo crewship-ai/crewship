@@ -120,3 +120,42 @@ it("close cancels recovery coalesced onto an existing periodic authorization",as
   expect(send.mock.calls.filter(([url])=>String(url).includes("/events?"))).toHaveLength(1)
  }finally{periodic.abort();lifetime.abort();client.close();await Promise.allSettled([running,renewing]);authorize.mockRestore()}
 })
+
+it.each([false,true])("backs off transport-recovery 409 without retrying mutations (permanent hold: %s)",async permanent=>{
+ vi.useFakeTimers()
+ let first!:ReadableStreamDefaultController<Uint8Array>,busyUntil=0,gets=0,outcome="pending"
+ const send=vi.fn(async(input:RequestInfo|URL)=>{
+  const url=String(input)
+  if(url.includes("/sessions?"))return admission()
+  if(url.includes("/sessions/reauthorize?"))return new Response('{"renewed":false}')
+  if(!url.includes("/events?"))throw new Error("unexpected mutation or lease route")
+  gets++
+  if(gets>1&&Date.now()<busyUntil)return new Response('{}',{status:409})
+  return new Response(new ReadableStream<Uint8Array>({start(controller){
+   if(gets===1){first=controller;controller.enqueue(packet("lease",lease))}
+   else{controller.enqueue(packet("lease",{...lease,generation:"4"}));controller.enqueue(packet("session_retired",retirement));controller.close()}
+  }}),{headers:{"Content-Type":"text/event-stream"}})
+ })
+ const client=createNativeDocumentClient({...scope,fetch:send}),lifetime=new AbortController(),messages:unknown[]=[]
+ await client.open(lifetime.signal)
+ const running=client.events(lifetime.signal,(_,value)=>messages.push(value))
+ void running.then(()=>{outcome="resolved"},()=>{outcome="rejected"})
+ try{
+  await vi.advanceTimersByTimeAsync(0)
+  expect(messages).toEqual([lease])
+  busyUntil=permanent?Infinity:Date.now()+2500
+  first.error(new TypeError("wifi reset"))
+  await vi.advanceTimersByTimeAsync(permanent?17000:4000)
+  if(permanent){
+   expect(outcome).toBe("rejected")
+   await expect(running).rejects.toThrow("native_stream_unavailable")
+   expect(messages).toEqual([lease]);expect(gets).toBe(9)
+  }else{
+   expect(outcome).toBe("resolved")
+   await running
+   expect(messages).toEqual([lease,{...lease,generation:"4"},retirement]);expect(gets).toBe(6)
+  }
+  expect(send.mock.calls.filter(([url])=>String(url).includes("/sessions?"))).toHaveLength(1)
+  expect(send.mock.calls.every(([url])=>/\/(events|sessions|sessions\/reauthorize)\?/.test(String(url)))).toBe(true)
+ }finally{lifetime.abort();client.close();await running.catch(()=>{})}
+})
