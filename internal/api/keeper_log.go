@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"log/slog"
 	"net/http"
-	"strconv"
 )
 
 // KeeperLogHandler provides endpoints for querying the Keeper decision audit log.
@@ -64,18 +63,7 @@ func (h *KeeperLogHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := 50
-	offset := 0
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
-			limit = n
-		}
-	}
-	if v := r.URL.Query().Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
-	}
+	limit, offset := parsePagination(r, 50, 200)
 
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT

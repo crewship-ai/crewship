@@ -1462,6 +1462,17 @@ and unsaved draft. Fresh metadata must confirm the same actor, immutable Page,
 Edit capability and opaque authority revision. Browser websocket admission sends
 that `authority_revision`; the host rejects a mismatch before upgrading, including
 a revoke-and-regrant gap. Revocation never restores an earlier writer draft.
+The authority revision is scoped to the authenticated person and this Design
+Page: it is built from their `user` and `page` rows in
+`mooring_authority_generations` (installed on a fresh admission if absent),
+the same generations native Craft sessions use. A change whose recipients
+include that person or that Page (their grants, crew or workspace membership,
+folder ACL, account status, or the Page's owner, audience or folder) closes
+an open Design websocket, including a revoke-then-restore cycle. The broad
+workspace delivery epoch is not part of it, so creating another Page, changing
+a grant for someone else on another Page or adding a member does not close an
+open canvas or drop its unconfirmed edits. Current Page rights, membership and
+the credential are still checked live on every frame and heartbeat.
 Credential renewal does not replay an HTTP snapshot or mutation.
 Human Design creation accepts the optional create-only `created_by_test` boolean
 and retains it in Page catalog metadata, just like other artifact creation.
@@ -1487,7 +1498,17 @@ changes supplied fields of a stable node; new nodes need complete geometry:
 Delete uses `{"op":"delete","id":"cart"}`; reorder uses
 `{"op":"reorder","order":["cart"]}`. Keep existing IDs when changing colors,
 text or geometry. A snapshot creates an ordinary retained artifact version;
-restore creates a new version and preserves history.
+restore creates a new version and preserves history. The CLI reads at most
+1 MiB from `--file`; the HTTP route accepts up to 4 MiB.
+
+Persistence has two layers. The live Yjs head (at most 4 MiB encoded) is
+written on every accepted websocket update and REST operation. Each `apply` and
+`restore` also commits a retained version. Browser edits become a retained
+version through `snapshot` or through an automatic `Automatic Design checkpoint`
+snapshot, taken while an editor's websocket is open once the live head has been
+idle for about 10 seconds. Engine limits (500 operations per request, 2,000
+nodes, 4,000 order entries, unknown node fields) answer 400; history quota
+answers 413 and keeps existing versions.
 
 When saved history is full, the editor shows the refused checkpoint and offers
 both a draft download (canvas and unsent feedback) and **Continue in a new
@@ -1518,7 +1539,11 @@ agents edit an explicitly selected existing Design. The host rejects calls when 
 not enabled. A failed response is never automatically retried.
 The agent tool's `slug` accepts a Page slug or the exact immutable Page ID
 selected by that run's original human mandate, with or without `@`. This does
-not permit selecting another Page.
+not permit selecting another Page. Tool arguments are closed objects of at most
+1 MiB. When the run was triggered by a `--send-to-agent` comment, a successful
+`design_apply` that commits a newer version answers that one bound comment task
+with the reply "Updated the selected Design element."; snapshot and restore do
+not.
 
 Additional human CLI commands list or create anchored comments, pin a shared
 version, and connect the owner's private chat:

@@ -1033,6 +1033,20 @@ jobs:
           E2E_PASSWORD: password123
           CREWSHIP_INSTANCE_ID: pr-playwright
         run: pnpm exec playwright test --config=playwright.pr.config.ts
+      # PRD acceptance, quick mode (docs/development/prd-acceptance.md): the
+      # same ephemeral seeded server, no agent, no extra accounts. Opt-in via
+      # the repository variable PRD_ACCEPTANCE_QUICK=1 until the scenarios
+      # have been measured stable here; full mode never runs in CI.
+      - name: PRD acceptance (quick mode, opt-in)
+        if: vars.PRD_ACCEPTANCE_QUICK == '1'
+        timeout-minutes: 10
+        env:
+          CI: "1"
+          PRD_ORIGIN: http://localhost:8080
+          E2E_EMAIL: demo@crewship.ai
+          E2E_PASSWORD: password123
+          CREWSHIP_INSTANCE_ID: prd-acceptance
+        run: pnpm acceptance:prd --quick --output prd-acceptance-results
       - name: Verify local chat table workers
         timeout-minutes: 3
         run: |
@@ -1062,6 +1076,7 @@ jobs:
           path: |
             playwright-pr-report.json
             test-results/
+            prd-acceptance-results/
             reveal-test-results/
             pool-ui-test-results/
             restricted-test-results/
@@ -1574,6 +1589,9 @@ jobs:
       - name: Static App preview engine selection tests
         timeout-minutes: 3
         run: node --test e2e/static-app-engines.test.mjs
+      - name: PRD acceptance runner tests
+        timeout-minutes: 2
+        run: node --test e2e/acceptance/prd/report.test.mjs
 
   frontend-test-shards:
     needs: [merge-conflict-markers, changes]

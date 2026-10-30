@@ -2,6 +2,50 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
+import * as auth from "@/hooks/use-auth"
+
+/**
+ * Whose device copy this is. A user id once the session is known; null while
+ * an AuthProvider is still settling or nobody is signed in (no device copy is
+ * read or written then); "" with no AuthProvider at all (a surface or test
+ * outside the signed-in app), which keeps the unscoped legacy key.
+ *
+ * Read through the namespace with a fallback because many component tests
+ * mock "@/hooks/use-auth" with only the exports they use, and a missing mock
+ * export throws on access. The hooks called here are plain useContext reads,
+ * so a render that falls back still calls hooks in a stable order.
+ */
+function usePreferenceOwner(): string | null {
+  let id: string | null = null
+  try {
+    id = auth.useSessionSafe().data?.user?.id ?? null
+  } catch {
+    /* mocked without useSessionSafe */
+  }
+  if (id) return id
+  try {
+    return auth.useAuthAvailable() ? null : ""
+  } catch {
+    return ""
+  }
+}
+
+function deviceKey(owner: string | null, key: string): string | null {
+  if (owner == null) return null
+  if (owner === "") return `crewship.pref.${key}`
+  return `crewship.pref.u.${encodeURIComponent(owner)}.${key}`
+}
+
+function readDevice<T>(lsKey: string | null, fallback: T): T {
+  if (lsKey == null || typeof window === "undefined") return fallback
+  try {
+    const raw = window.localStorage.getItem(lsKey)
+    if (raw == null) return fallback
+    return JSON.parse(raw) as T
+  } catch {
+    return fallback
+  }
+}
 
 /**
  * Per-user UI preference with cross-device sync via the server +
@@ -28,6 +72,16 @@ import { apiFetch } from "@/lib/api-fetch"
  * page is hidden (`pagehide`, `visibilitychange`), and a write that still
  * did not land keeps its mark, so the next load re-sends it.
  *
+ * The device copy belongs to one signed-in user
+ * (`crewship.pref.u.<user id>.<key>`). Two accounts in one browser used to
+ * share `crewship.pref.<key>`: the next account's first paint showed the
+ * previous account's value, the server had nothing to override it with, and
+ * its next write uploaded the previous account's private values (recently
+ * opened artifacts) into its own server preference. Nothing is read from or
+ * written to the device while the session is unknown, the old unscoped copy is
+ * dropped once it is, and a write made for one user is never sent after the
+ * session changed to another. Outside an AuthProvider the unscoped key stays.
+ *
  * The hook is generic; key namespace is the caller's responsibility.
  * Use dotted keys like "crews.bottomPanel.height" to keep things tidy.
  */
@@ -35,19 +89,17 @@ export function useUserPreference<T>(
   key: string,
   defaultValue: T,
 ): [T, (next: T) => void, { ready: boolean }] {
-  const lsKey = `crewship.pref.${key}`
-  const unsyncedKey = `${lsKey}.unsynced`
+  const owner = usePreferenceOwner()
+  const lsKey = deviceKey(owner, key)
+  const unsyncedKey = lsKey == null ? null : `${lsKey}.unsynced`
+  // The current device copy; a write is sent only while the copy it was made
+  // for is still this one. Kept in render so that an effect cleanup running on
+  // the session change (the unmount flush below) already sees the new owner.
+  const lsKeyRef = useRef(lsKey)
+  lsKeyRef.current = lsKey
 
-  const [value, setLocal] = useState<T>(() => {
-    if (typeof window === "undefined") return defaultValue
-    try {
-      const raw = window.localStorage.getItem(lsKey)
-      if (raw == null) return defaultValue
-      return JSON.parse(raw) as T
-    } catch {
-      return defaultValue
-    }
-  })
+  const [value, setLocal] = useState<T>(() => readDevice(lsKey, defaultValue))
+  const [loadedKey, setLoadedKey] = useState(lsKey)
   const [ready, setReady] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // hasPendingRef is the source of truth — pendingValueRef can be a
@@ -60,7 +112,32 @@ export function useUserPreference<T>(
   // Each write gets a number; only the newest confirmed write clears the mark.
   const writeSeq = useRef(0)
 
+  // The session changed (signed in, out, or to another account): drop the
+  // previous account's value and its pending write before anything is sent.
+  // That write stays marked unconfirmed in its own account's copy, so it is
+  // sent again the next time that account signs in here.
+  if (loadedKey !== lsKey) {
+    setLoadedKey(lsKey)
+    setLocal(readDevice(lsKey, defaultValue))
+    setReady(false)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    hasPendingRef.current = false
+    pendingValueRef.current = undefined
+  }
+
+  // The unscoped copy predates per-user keys and may be another account's.
+  useEffect(() => {
+    if (!owner) return
+    try {
+      window.localStorage.removeItem(`crewship.pref.${key}`)
+      window.localStorage.removeItem(`crewship.pref.${key}.unsynced`)
+    } catch {
+      /* ignore */
+    }
+  }, [owner, key])
+
   const isUnsynced = useCallback(() => {
+    if (unsyncedKey == null) return false
     try {
       return window.localStorage.getItem(unsyncedKey) != null
     } catch {
@@ -70,6 +147,8 @@ export function useUserPreference<T>(
 
   const put = useCallback(
     (next: T | undefined, keepalive = false) => {
+      // Written for another session's device copy: not this user's to send.
+      if (lsKeyRef.current !== lsKey) return
       const seq = ++writeSeq.current
       apiFetch(`/api/v1/me/preferences/${encodeURIComponent(key)}`, {
         method: "PUT",
@@ -80,7 +159,7 @@ export function useUserPreference<T>(
         body: JSON.stringify(next),
       })
         .then((res) => {
-          if (res?.ok && seq === writeSeq.current && !hasPendingRef.current) {
+          if (res?.ok && unsyncedKey != null && seq === writeSeq.current && !hasPendingRef.current) {
             try {
               window.localStorage.removeItem(unsyncedKey)
             } catch {
@@ -92,7 +171,7 @@ export function useUserPreference<T>(
           /* localStorage already saved — the mark makes the next load retry */
         })
     },
-    [key, unsyncedKey],
+    [key, lsKey, unsyncedKey],
   )
 
   // First paint: pull the server-side value. If it differs, override
@@ -101,6 +180,9 @@ export function useUserPreference<T>(
   // a local change it never confirmed, which is sent again.
   useEffect(() => {
     let cancelled = false
+    // While the session is unknown the server's answer is still applied (it
+    // is the cookie's user), only never stored on the device; it runs again
+    // once the owner is known.
     apiFetch("/api/v1/me/preferences")
       .then((r) => (r.ok ? r.json() : null))
       .then((data: Record<string, unknown> | null) => {
@@ -115,7 +197,7 @@ export function useUserPreference<T>(
           if (!same) {
             setLocal(remote)
             try {
-              window.localStorage.setItem(lsKey, JSON.stringify(remote))
+              if (lsKey != null) window.localStorage.setItem(lsKey, JSON.stringify(remote))
             } catch {
               /* quota / private browsing */
             }
@@ -135,8 +217,10 @@ export function useUserPreference<T>(
     (next: T) => {
       setLocal(next)
       try {
-        window.localStorage.setItem(lsKey, JSON.stringify(next))
-        window.localStorage.setItem(unsyncedKey, "1")
+        if (lsKey != null && unsyncedKey != null) {
+          window.localStorage.setItem(lsKey, JSON.stringify(next))
+          window.localStorage.setItem(unsyncedKey, "1")
+        }
       } catch {
         /* ignore */
       }

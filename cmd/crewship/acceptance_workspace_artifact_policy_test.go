@@ -91,6 +91,23 @@ func TestAcceptance_WorkspaceArtifactPolicy(t *testing.T) {
 	if policy.Enabled || policy.Version != 2 || len(policy.CrewIDs) != 0 {
 		t.Fatalf("disabled policy %+v", policy)
 	}
+	// The workspace chosen by slug, as every other command accepts it, must
+	// reach the same policy: the slug is resolved to the ID before the path
+	// is built, so it is not sent raw into /workspaces/{id}/.
+	output, err := run("show", "--workspace", "artifact-policy-cli")
+	if err != nil || json.Unmarshal([]byte(output), &policy) != nil || policy.Version != 2 {
+		t.Fatalf("show by slug: %v %s", err, output)
+	}
+	if output, err := run("set", "-w", "artifact-policy-cli", "--base-version", "2", "--enabled=true", "--crew-id", "policy-crew"); err != nil {
+		t.Fatalf("set by slug: %v %s", err, output)
+	}
+	read()
+	if !policy.Enabled || policy.Version != 3 || len(policy.CrewIDs) != 1 {
+		t.Fatalf("policy set by slug %+v", policy)
+	}
+	if output, err := run("show", "--workspace", "no-such-workspace"); err == nil || !strings.Contains(output, "no-such-workspace") {
+		t.Fatalf("unknown slug must fail naming it: %v %s", err, output)
+	}
 	if _, err := db.Exec(`UPDATE cli_tokens SET scopes='["pages:read"]' WHERE id='policy-cli-token'`); err != nil {
 		t.Fatal(err)
 	}

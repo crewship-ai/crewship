@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -266,18 +265,7 @@ func (h *InboxHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	state := r.URL.Query().Get("state")
 	kind := r.URL.Query().Get("kind")
-	limit := 100
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 500 {
-			limit = n
-		}
-	}
-	offset := 0
-	if v := r.URL.Query().Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
-	}
+	limit, offset := parsePagination(r, 100, 500)
 	// Keyset paging: ?cursor= is the next_cursor of the previous page. It
 	// replaces ?offset=, which shifts when a row is added or resolved mid-walk.
 	var after inboxCursor

@@ -1467,6 +1467,8 @@ crewship routine step-override clear my-routine summarize
 
 Only non-empty fields win — a prompt-only override leaves the authored model untouched. Full reference: [Per-step prompt/model override](/manifest/routine).
 
+Setting or clearing an override needs MANAGER or above; listing is open to every member. The step id must exist in the routine's current definition — an unknown id is refused with `step not found in routine definition` (HTTP 404) rather than stored against a step that never runs. With `-f json`, `set` and `clear` print `{"ok":true,"slug":"…","step_id":"…"}` and `list` prints the array of `{step_id, prompt, model_override}` rows. Definition tags behave the same way: `crewship routine tag <slug> --add billing -f json` prints `{"slug","added","tags"}` (the routine's tag set after the add), and a `--remove` only unassigns the label, it deletes nothing else.
+
 ## Debug a single step (`step-run`)
 
 Iterating on one step's prompt shouldn't cost a whole pipeline run. `crewship routine step-run` executes a **single step against an input fixture**, in isolation — no upstream steps, no DAG, no persisted run record — and prints the step output, validation verdict, and (for `agent_run`) cost.
@@ -2379,6 +2381,7 @@ crewship routine budget set my-routine --amount 50    # cap at $50/month
 crewship routine budget get my-routine
 # my-routine (2026-07): [#####---------------]
 #   $12.50 of $50.00 (25%)
+#   (reporting only — does not stop or block runs; use the DSL's max_cost_usd for a hard per-run gate)
 crewship routine budget set my-routine --amount 0      # clear the cap
 crewship routine budget summary                        # workspace roll-up
 ```
@@ -2390,12 +2393,15 @@ This is **not** the same knob as DSL `max_cost_usd` (above) — that's a per-RUN
 ```bash
 $ crewship routine budget summary
 ROUTINE          BUDGET   SPENT   PCT   STATUS
-my-routine       $50.00   $12.50  25%
+my-routine       $50.00   $12.50  25%   ok
 cost-report      $20.00   $22.10  111%  OVER
 summarize-text   —        $3.40   —
 
-2026-07 total: $37.99 spent of $70.00 budgeted
+2026-07 total: $38.00 spent of $70.00 budgeted
+(reporting only — budgets do not stop or block runs; use each routine's DSL max_cost_usd for a hard per-run gate)
 ```
+
+Setting or clearing a budget needs workspace OWNER or ADMIN. Every member can read `get` and `summary`, but below ADMIN the dollar amounts are withheld: the state (`has_budget`, `over_budget`) stays, and `-f json` carries `null` for `monthly_budget_usd` and `spent_usd` — never a misleading `0`. A negative `--amount` is refused by the CLI before any request is sent.
 
 The routine detail page shows the same meter (spent-vs-cap bar) when a budget is set, and the workspace roll-up appears on the routines list page. API: `GET/PATCH /api/v1/workspaces/{ws}/pipelines/{slug}/budget`, `GET /api/v1/workspaces/{ws}/pipelines/budget-summary` — see the [CLI reference](/cli/routine#crewship-routine-budget) for the full flag/response shape.
 
