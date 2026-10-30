@@ -64,6 +64,10 @@ crewship routine schedules now <schedule_id>
 
 The same operations are also available on the REST API under `/api/v1/workspaces/{ws}/pipeline-schedules` -- the CLI is a thin wrapper around those endpoints, so server-side behavior (cron parsing, 30 s tick resolution, timezone handling) is identical.
 
+**Who can do what.** Any workspace member can `list` schedules. `create` needs the MANAGER role or higher, or a MEMBER who holds the explicit `routine.create` capability. `now` needs MANAGER or higher. `update`, `enable` and `disable` change the stored schedule through `PATCH .../pipeline-schedules/{id}` and need ADMIN or higher. A refused call prints `API error (403): Forbidden` and exits with code `4`. With `--format json`, the error is printed as a JSON envelope on stderr that carries `status` and `exit_code`.
+
+**Errors you may see.** An invalid cron expression is refused by the server with `400`, and the message names the expression (for example `invalid cron expression "not a cron": expected exactly 5 fields, found 3`). The CLI exits with code `2`. A routine slug that does not exist is `400 target_pipeline_slug not found`. A schedule ID that is not in this workspace is `404 schedule not found` and exits with code `3`. Missing or conflicting flags (`--slug`, `--cron`/`--when`, malformed `--inputs` JSON, or `update` with no field to change) are caught before any request is sent, and the CLI exits with code `1`.
+
 ### Pinning a schedule to a routine version
 
 By default a schedule fires the routine's **head** (latest) version -- an edit to the routine immediately changes what the next tick runs. For production schedules that must not drift when an agent (or teammate) edits the routine, pin the schedule to an immutable version:
