@@ -221,7 +221,9 @@ does not authorize replaying a save. Restore supplies the current binding and
 
 Read returns `version`, base64 `bytes`, `applicationId`, `enginePin`,
 `editorBundle`, `editorURL` and quota (`usedBytes`, `limitBytes`, `warning`,
-`retention`). Quota byte counters are strings. Quota exhaustion returns 413;
+`level`, `retention`). Quota byte counters are strings. `level` is `none`,
+`near` (from 80%), `critical` (from 95%) or `full` (at the limit) so the editor
+can warn before saving fails. Quota exhaustion returns 413;
 conflict or stale custody 409; invalid native data 422. Existing versions remain
 available. Generic denied writes retain the local draft; only proven read loss
 requires its erasure.
