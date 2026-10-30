@@ -1,5 +1,10 @@
+// UI lifecycle tests use a cipher seam; real browser tests cover encryption/admission.
+vi.mock("@/lib/local-draft-seal", () => ({
+ createLocalDraftCipher: async () => ({ seal: async (text:string) => text, open: async (text:string) => text, close() {} }),
+ forgetLocalDraftPage() {}, isSealedLocalDraft: () => true, LocalDraftReadRevoked: class extends Error {},
+}))
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import * as Y from "yjs"
 import { DesignEditor } from "../design-editor"
 import { designNodes } from "../design-document"
@@ -19,22 +24,22 @@ vi.mock("../use-design", () => ({ useDesign: () => {
 beforeEach(() => { vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true"); state.editable = true; state.pageId = "old-private-page"; state.user = false; state.doc = new Y.Doc() })
 afterEach(() => { cleanup(); state.doc?.destroy(); vi.unstubAllEnvs() })
 describe("Design editor controls", () => {
- it("clears private unsent feedback when the same slug resolves to a new Page", () => {
+ it("clears private unsent feedback when the same slug resolves to a new Page", async () => {
   state.user = true
   const view = render(<DesignEditor workspaceId="workspace" slug="same-slug" />)
-  fireEvent.change(screen.getByLabelText("Comment for agent"), { target: { value: "Private feedback about old Page" } })
+  await waitFor(()=>expect(screen.getByLabelText("Comment for agent")).not.toBeDisabled()); fireEvent.change(screen.getByLabelText("Comment for agent"), { target: { value: "Private feedback about old Page" } })
   expect(screen.getByLabelText("Comment for agent")).toHaveValue("Private feedback about old Page")
   state.pageId = "new-shared-page"
   view.rerender(<DesignEditor workspaceId="workspace" slug="same-slug" />)
   expect(screen.getByLabelText("Comment for agent")).toHaveValue("")
  })
- it("creates a screen and keeps awareness visible", () => {
+ it("creates a screen and keeps awareness visible", async () => {
   render(<DesignEditor workspaceId="workspace" slug="shop" />)
   fireEvent.click(screen.getByRole("button", { name: "Screen" }))
   expect(designNodes(state.doc!)).toMatchObject([{ type: "frame", name: "Screen 1", width: 360, height: 640 }])
   expect(screen.getByLabelText("Marie cursor")).toBeInTheDocument()
  })
- it("does not offer edit or save controls to readers", () => {
+ it("does not offer edit or save controls to readers", async () => {
   state.editable = false
   render(<DesignEditor workspaceId="workspace" slug="shop" />)
   expect(screen.getByText("Read only")).toBeInTheDocument()

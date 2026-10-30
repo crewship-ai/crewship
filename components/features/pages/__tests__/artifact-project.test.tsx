@@ -1,8 +1,13 @@
+// UI lifecycle tests use a cipher seam; real browser tests cover encryption/admission.
+vi.mock("@/lib/local-draft-seal", () => ({
+ createLocalDraftCipher: async () => ({ seal: async (text:string) => text, open: async (text:string) => text, close() {} }),
+ forgetLocalDraftPage() {}, isSealedLocalDraft: () => true, LocalDraftReadRevoked: class extends Error {},
+}))
 import React from "react"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { setArtifactDraftStore } from "@/lib/artifact-drafts"
-const state = vi.hoisted(() => ({ user: "owner", token: "", save: vi.fn(), comment: vi.fn(), dispatch: vi.fn(), data: { can_write: true, can_comment: false, can_share: true, can_restore: true, can_send_to_agent: true, latest_version: 2, shared_version: 1, manifest: { version: 2, entrypoint: "index.html", files: [{ path: "index.html", content: "<h1>Hello</h1>", media_type: "text/html" }, { path: "details.html", content: "<h1>Details</h1>", media_type: "text/html" }] }, versions: [{ version: 2 }, { version: 1 }], quota: { used_bytes: 10, limit_bytes: 100, warning: false }, comments: [] }, restore: vi.fn(), share: vi.fn() }))
+const state = vi.hoisted(() => ({ user: "owner", token: "", save: vi.fn(), comment: vi.fn(), dispatch: vi.fn(), data: { page_id:"demo", can_write: true, can_comment: false, can_share: true, can_restore: true, can_send_to_agent: true, latest_version: 2, shared_version: 1, manifest: { version: 2, entrypoint: "index.html", files: [{ path: "index.html", content: "<h1>Hello</h1>", media_type: "text/html" }, { path: "details.html", content: "<h1>Details</h1>", media_type: "text/html" }] }, versions: [{ version: 2 }, { version: 1 }], quota: { used_bytes: 10, limit_bytes: 100, warning: false }, comments: [] }, restore: vi.fn(), share: vi.fn() }))
 vi.mock("@/hooks/use-artifact-agent-dispatch", () => ({ useArtifactAgentDispatch: () => ({ dispatch: state.dispatch, ready: false }) }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: state.user } } }) }))
 vi.mock("@/hooks/use-artifact-project", () => ({ useArtifactProject: () => ({ query: { data: state.data }, restore: { mutate: state.restore }, share: { mutate: state.share }, comment: { mutate: state.comment }, save: { mutate: state.save } }) }))
@@ -20,6 +25,7 @@ const row = (human:string, kind:string) => JSON.stringify([human, kind, "w", "de
 beforeEach(() => {
  disk.clear(); held.length = 0; hold = false
  setArtifactDraftStore({
+  capture: async () => [], removeCaptured: async rows => { for(const row of rows) disk.delete(JSON.stringify(row.row)) },
   get: async key => disk.get(JSON.stringify(key)),
   put: (key, text) => new Promise<void>(resolve => { const done = () => { disk.set(JSON.stringify(key), text); resolve() }; if (hold) held.push(done); else done() }),
   delete: async key => { disk.delete(JSON.stringify(key)) },
@@ -32,7 +38,7 @@ async function editSource() {
  fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
 }
 afterEach(() => { cleanup(); vi.clearAllMocks(); state.data.can_write = true; state.user = "owner"; localStorage.clear(); setArtifactDraftStore(undefined) })
-it("switches screens, restores with the latest base and shares only the selected version", () => {
+it("switches screens, restores with the latest base and shares only the selected version", async () => {
  render(<ArtifactProject workspaceId="w" slug="demo" />)
  fireEvent.click(screen.getByRole("button", { name: "details.html" }))
  expect(screen.getByTitle("Artifact preview")).toHaveAttribute("data-screen", "details.html")
@@ -42,7 +48,7 @@ it("switches screens, restores with the latest base and shares only the selected
  fireEvent.click(screen.getByRole("button", { name: "Share version 1" }))
  expect(state.share).toHaveBeenCalledWith({ version: 1, base_version: 2 })
 })
-it("keeps all write controls unavailable to a reader", () => {
+it("keeps all write controls unavailable to a reader", async () => {
  state.data.can_write = false
  render(<ArtifactProject workspaceId="w" slug="demo" />)
  expect(screen.queryByRole("button", { name: /Restore version/ })).toBeNull()
@@ -55,7 +61,7 @@ it("keeps all write controls unavailable to a reader", () => {
 
 it("never moves an unsent draft into another user browser scope", async () => {
  const view=render(<ArtifactProject workspaceId="w" slug="demo" />)
- fireEvent.change(screen.getByLabelText("Comment for agent"),{target:{value:"Owner private draft"}})
+ await waitFor(()=>expect(screen.getByLabelText("Comment for agent")).not.toBeDisabled()); fireEvent.change(screen.getByLabelText("Comment for agent"),{target:{value:"Owner private draft"}})
  await waitFor(() => expect(disk.get(row("owner","artifact-comment"))).toBe("Owner private draft"))
  state.user="reader"
  view.rerender(<ArtifactProject workspaceId="w" slug="demo" />)
@@ -69,20 +75,20 @@ it("never moves an unsent draft into another user browser scope", async () => {
  await waitFor(() => expect(screen.getByLabelText("Comment for agent")).toHaveValue("Owner private draft"))
 })
 
-it("retains 500 Unicode codepoints in a normalized selected quote sent to the agent", () => {
+it("retains 500 Unicode codepoints in a normalized selected quote sent to the agent", async () => {
  render(<ArtifactProject workspaceId="w" slug="demo" />)
  fireEvent.click(screen.getByRole("button", { name: "Select an element" }))
  const frame = screen.getByTitle("Artifact preview") as HTMLIFrameElement
  const quote = "  \ufeffŽluťoučký\u0085  kůň\u00a0pěl\nďábelské\tódy  " + "🙂".repeat(520)
  fireEvent(window, new MessageEvent("message", { origin: "null", source: frame.contentWindow, data: { token: state.token, selector: "#artifact-unicode-quote", quote } }))
- fireEvent.change(screen.getByLabelText("Comment for agent"), { target: { value: "Uprav nadpis" } })
+ await waitFor(()=>expect(screen.getByLabelText("Comment for agent")).not.toBeDisabled()); fireEvent.change(screen.getByLabelText("Comment for agent"), { target: { value: "Uprav nadpis" } })
  fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
  const expected = Array.from("\ufeffŽluťoučký kůň pěl ďábelské ódy " + "🙂".repeat(520)).slice(0,500).join("")
  expect(state.comment.mock.calls[0][0].quote).toBe(expected)
  expect(state.comment.mock.calls[0][0].send_to_agent).toBe(true)
 })
 
-it("keeps the Page Project preview when the Dashboard flag is off and dashboard.json is only an asset", () => {
+it("keeps the Page Project preview when the Dashboard flag is off and dashboard.json is only an asset", async () => {
  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", "false")
  state.data.manifest.files.push({ path: "dashboard.json", media_type: "application/json", content: '{"schema_version":1,"collections":["sales"]}' })
  try {
@@ -92,7 +98,7 @@ it("keeps the Page Project preview when the Dashboard flag is off and dashboard.
  } finally { state.data.manifest.files.pop(); vi.unstubAllEnvs() }
 })
 
-it.each([["true", "slides", "typed"], ["true", undefined, "unsupported"], ["false", "slides", "legacy"]] as const)("keeps the Pages Slides route safe with flag %s", (flag, kind, mode) => {
+it.each([["true", "slides", "typed"], ["true", undefined, "unsupported"], ["false", "slides", "legacy"]] as const)("keeps the Pages Slides route safe with flag %s", async (flag, kind, mode) => {
  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_SLIDES", flag)
  const previous = state.data
  state.data = Object.assign({}, previous, { artifact_kind: kind, page_id: "page", manifest: { ...previous.manifest, files: [...previous.manifest.files, { path: "deck.json", media_type: "application/json", content: '{}' }] } })
@@ -122,7 +128,7 @@ it("allows a pinned shared commenter to select and post feedback without agent e
   state.data = Object.assign({}, state.data, {origin:{chat_id:"owner-chat",agent_id:"owner-agent"}})
   render(<ArtifactProject workspaceId="w" slug="demo" />)
   selectAnchor()
-  fireEvent.change(screen.getByLabelText("Comment"), {target:{value:"Shared feedback"}})
+  await waitFor(()=>expect(screen.getByLabelText("Comment")).not.toBeDisabled()); fireEvent.change(screen.getByLabelText("Comment"), {target:{value:"Shared feedback"}})
   fireEvent.click(screen.getByRole("button", {name:"Post comment"}))
   expect(state.comment).toHaveBeenCalledWith({version:1,path:"index.html",selector:"#shared",quote:"Shared heading",text:"Shared feedback",send_to_agent:false},expect.anything())
   expect(screen.queryByRole("button",{name:/Restore version|Share version|Send to agent/})).toBeNull()
@@ -130,7 +136,7 @@ it("allows a pinned shared commenter to select and post feedback without agent e
   expect(state.dispatch).not.toHaveBeenCalled()
  } finally { state.data = previous }
 })
-it("rejects commenter selection outside the shared pin", () => {
+it("rejects commenter selection outside the shared pin", async () => {
  const previous = state.data
  try {
   state.data = {...state.data, can_write:false, can_comment:true}
@@ -139,13 +145,13 @@ it("rejects commenter selection outside the shared pin", () => {
   expect(screen.queryByRole("textbox")).toBeNull()
  } finally { state.data = previous }
 })
-it.each(["revoke","user","workspace","slug"])("retires selected comment anchors on %s while preserving the scoped draft", change => {
+it.each(["revoke","user","workspace","slug"])("retires selected comment anchors on %s while preserving the scoped draft", async change => {
  const previous = state.data
  try {
   sharedCommenter()
   const view=render(<ArtifactProject workspaceId="w" slug="demo" />)
   selectAnchor()
-  fireEvent.change(screen.getByLabelText("Comment"),{target:{value:"Keep this feedback"}})
+  await waitFor(()=>expect(screen.getByLabelText("Comment")).not.toBeDisabled()); fireEvent.change(screen.getByLabelText("Comment"),{target:{value:"Keep this feedback"}})
   if(change==="revoke")state.data={...state.data,can_comment:false}
   if(change==="user")state.user="other"
   view.rerender(<ArtifactProject workspaceId={change==="workspace"?"other":"w"} slug={change==="slug"?"other":"demo"} />)
@@ -161,7 +167,7 @@ it.each(["revoke","user","workspace","slug"])("retires selected comment anchors 
  } finally { state.data=previous }
 })
 
-it.each(["slides","dashboard"])("allows shared Comment selection in the typed %s preview", kind => {
+it.each(["slides","dashboard"])("allows shared Comment selection in the typed %s preview", async kind => {
  const previous=state.data
  vi.stubEnv(kind==="slides"?"NEXT_PUBLIC_ARTIFACT_SLIDES":"NEXT_PUBLIC_ARTIFACT_DASHBOARDS","true")
  try {
@@ -171,7 +177,7 @@ it.each(["slides","dashboard"])("allows shared Comment selection in the typed %s
   expect(screen.getByRole("button",{name:"Pick typed element"})).toBeDisabled()
   fireEvent.click(screen.getByRole("button",{name:"Select an element"}))
   fireEvent.click(screen.getByRole("button",{name:"Pick typed element"}))
-  fireEvent.change(screen.getByLabelText("Comment"),{target:{value:"Typed feedback"}})
+  await waitFor(()=>expect(screen.getByLabelText("Comment")).not.toBeDisabled()); fireEvent.change(screen.getByLabelText("Comment"),{target:{value:"Typed feedback"}})
   fireEvent.click(screen.getByRole("button",{name:"Post comment"}))
   expect(state.comment.mock.calls[0][0]).toMatchObject({version:1,selector:"#typed",send_to_agent:false})
  } finally { state.data=previous; vi.unstubAllEnvs() }
@@ -183,7 +189,7 @@ it.each(["user","workspace","slug","revoke","new-input"])("ignores an old commen
   sharedCommenter()
   const view=render(<ArtifactProject workspaceId="w" slug="demo" />)
   selectAnchor()
-  fireEvent.change(screen.getByLabelText("Comment"),{target:{value:"Submitted feedback"}})
+  await waitFor(()=>expect(screen.getByLabelText("Comment")).not.toBeDisabled()); fireEvent.change(screen.getByLabelText("Comment"),{target:{value:"Submitted feedback"}})
   fireEvent.click(screen.getByRole("button",{name:"Post comment"}))
   const success=state.comment.mock.calls[0][1].onSuccess
   if(change==="user")state.user="new-user"
@@ -193,7 +199,7 @@ it.each(["user","workspace","slug","revoke","new-input"])("ignores an old commen
    state.data={...state.data,can_comment:true}
   }
   view.rerender(<ArtifactProject workspaceId={change==="workspace"?"next":"w"} slug={change==="slug"?"next":"demo"} />)
-  fireEvent.change(screen.getByLabelText("Comment"),{target:{value:"Newer feedback"}})
+  await waitFor(()=>expect(screen.getByLabelText("Comment")).not.toBeDisabled()); fireEvent.change(screen.getByLabelText("Comment"),{target:{value:"Newer feedback"}})
   await act(async()=>{await success({id:"old",version:1})})
   expect(screen.getByLabelText("Comment")).toHaveValue("Newer feedback")
   if(change==="new-input")expect(screen.getByRole("button",{name:"Post comment"})).toBeEnabled()
@@ -206,12 +212,12 @@ it("retires an owner submission before its success can dispatch after downgrade 
   state.data=Object.assign({},state.data,{origin:{chat_id:"owner-chat",agent_id:"owner-agent"}})
   const view=render(<ArtifactProject workspaceId="w" slug="demo" />)
   selectAnchor()
-  fireEvent.change(screen.getByLabelText("Comment for agent"),{target:{value:"Owner feedback"}})
+  await waitFor(()=>expect(screen.getByLabelText("Comment for agent")).not.toBeDisabled()); fireEvent.change(screen.getByLabelText("Comment for agent"),{target:{value:"Owner feedback"}})
   fireEvent.click(screen.getByRole("button",{name:"Send to agent"}))
   const success=state.comment.mock.calls[0][1].onSuccess
   sharedCommenter()
   view.rerender(<ArtifactProject workspaceId="w" slug="demo" />)
-  fireEvent.change(screen.getByLabelText("Comment"),{target:{value:"Commenter feedback"}})
+  await waitFor(()=>expect(screen.getByLabelText("Comment")).not.toBeDisabled()); fireEvent.change(screen.getByLabelText("Comment"),{target:{value:"Commenter feedback"}})
   await act(async()=>{await success({id:"owner-old",version:2})})
   expect(state.dispatch).not.toHaveBeenCalled()
   expect(screen.getByLabelText("Comment")).toHaveValue("Commenter feedback")
@@ -354,6 +360,7 @@ it("keeps the durable copy of source edits typed after a save was submitted",asy
 it("never deletes a stored comment draft when reading it fails",async()=>{
  disk.set(row("owner","artifact-comment"),"Unsent private comment")
  setArtifactDraftStore({
+  capture: async () => [], removeCaptured: async rows => { for(const row of rows) disk.delete(JSON.stringify(row.row)) },
   get: async () => { throw new Error("IndexedDB open timed out") },
   put: async (key, text) => { disk.set(JSON.stringify(key), text) },
   delete: async key => { disk.delete(JSON.stringify(key)) },

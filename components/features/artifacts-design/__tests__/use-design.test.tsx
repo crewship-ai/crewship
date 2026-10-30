@@ -4,6 +4,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { tryRefresh } from "@/lib/api-fetch"
 import { useDesign } from "../use-design"
 import { designNodes, upsertDesignNode } from "../design-document"
+vi.mock("@/lib/artifact-drafts", () => ({
+ artifactDraftKey: (_kind: string, human: string, workspace: string, page: string) => page ? `crewship-design:v2:${human}:${workspace}:${page}` : null,
+ loadArtifactDraft: async (key: string) => drafts.get(key) ?? "",
+ writeArtifactDraft: async (key: string, value: string) => { drafts.set(key, value) },
+ admittedArtifactDraftCapture: (key: string) => async (value:string) => { drafts.set(key,value) },
+ captureLocalDraftPage: async () => ({}),
+ purgeLocalDraftPage: async () => { drafts.clear() },
+}))
+vi.mock("@/lib/local-draft-seal", () => {
+ class LocalDraftReadRevoked extends Error {}
+ return { LocalDraftReadRevoked, createLocalDraftCipher: async () => {
+  if (server.status === 403 || server.status === 404) throw new LocalDraftReadRevoked()
+  return { close() {} }
+ } }
+})
 const server = vi.hoisted(() => ({ status: 200, post401: false, actorId: "same-user", bearer: false, pageId: "old-private-page", authorityRevision: "1", canEdit: true, providers: [] as { admittedEdit: boolean; editable: boolean; destroyed: boolean; deny: () => void; connect: () => void; prepare?: () => Promise<string> }[], urls: [] as string[], calls: [] as { url: string; method: string; skipRefresh?: boolean }[] }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "same-user", name: "Owner" } } }) }))
 vi.mock("@/lib/server-base", () => ({ resolveWsBase: () => "ws://localhost", getAuthMode: () => server.bearer ? "bearer" : "cookie" }))

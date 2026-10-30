@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
+// Lane/storage tests use an identity cipher; actual cryptography and admission
+// are exercised in local-draft-seal and the real-browser retention tests.
+vi.mock("./local-draft-seal", () => ({
+ createLocalDraftCipher: async () => ({ seal: async (text: string) => text, open: async (text: string) => text, close() {} }),
+ forgetLocalDraftPage() {}, isSealedLocalDraft: () => true,
+ LocalDraftReadRevoked: class extends Error {},
+}))
 type Drafts = typeof import("./artifact-drafts")
 type Row = [string, string, string, string]
 
@@ -9,6 +16,8 @@ function durableStore() {
   const pending: (() => void)[] = []
   const store = {
     disk,
+    capture: vi.fn(async () => []),
+    removeCaptured: vi.fn(async () => {}),
     auto: true,
     puts: [] as string[],
     flush() { for (const done of pending.splice(0)) done() },
@@ -196,28 +205,29 @@ it("rejects a failed durable read instead of reporting an empty draft, and keeps
   await expect(drafts.loadArtifactDraft(key)).resolves.toBe("Unsent comment")
 })
 
-it("retires writers on sign-out so a late or queued write cannot recreate a purged draft", async () => {
+it("drains accepted queued writes on expiry and refuses later writes while retaining recovery rows", async () => {
   const store = durableStore(); store.auto = false
   const drafts = await load(); drafts.setArtifactDraftStore(store)
   const key = drafts.artifactDraftKey("artifact-source", "alice", "w", "demo")!
   const first = drafts.writeArtifactDraft(key, "a")
   await vi.waitFor(() => expect(store.put).toHaveBeenCalledTimes(1))
   // Queued behind the running write when sign-out starts.
-  const queued = drafts.writeArtifactDraft(key, "ab").catch(() => "refused")
-  const purged = drafts.purgeOtherArtifactDrafts(null)
-  store.flush(); await first; await purged
-  await expect(queued).resolves.toBe("refused")
-  expect(store.puts).toEqual(["a"])
+  const queued = drafts.writeArtifactDraft(key, "ab")
+  const purged = drafts.suspendOtherArtifactDrafts(null)
+  store.flush(); await first
+  await vi.waitFor(() => expect(store.put).toHaveBeenCalledTimes(2))
+  store.flush(); await queued; await purged
+  expect(store.puts).toEqual(["a", "ab"])
   // A keystroke that arrives after sign-out (another tab, a stale effect).
   await expect(drafts.writeArtifactDraft(key, "late")).rejects.toThrow()
-  expect(store.disk.size).toBe(0)
+  expect([...store.disk.values()]).toEqual(["ab"])
   await expect(drafts.loadArtifactDraft(key)).resolves.toBe("")
   // The next person to sign in writes normally; the previous one stays retired.
-  await drafts.purgeOtherArtifactDrafts("bob")
+  await drafts.suspendOtherArtifactDrafts("bob")
   store.auto = true
   await drafts.writeArtifactDraft(drafts.artifactDraftKey("artifact-source", "bob", "w", "demo")!, "Bob")
   await expect(drafts.writeArtifactDraft(key, "Alice again")).rejects.toThrow()
-  expect([...store.disk.values()]).toEqual(["Bob"])
+  expect([...store.disk.values()]).toEqual(["ab", "Bob"])
 })
 
 it("serialises identity purges so an older sign-out cannot delete the next person's draft", async () => {

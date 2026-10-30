@@ -5,6 +5,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { buildSync } from "esbuild"
 import { chromium } from "@playwright/test"
+import { installLocalDraftKeyFixture, type DraftKeyFixtureStore } from "./local-draft-seal.test-support"
 import { expect, it } from "vitest"
 
 const executable = chromium.executablePath()
@@ -25,11 +26,12 @@ async function launch(profile: string): Promise<{ child: ChildProcess; endpoint:
   return { child, endpoint }
 }
 
-async function open(endpoint: string) {
+async function open(endpoint: string, envelopes: DraftKeyFixtureStore) {
   const browser = await chromium.connectOverCDP(endpoint)
   const context = browser.contexts()[0]
   await context.route("http://localhost/**", route => route.fulfill({ body: "<!doctype html><title>Artifact drafts</title>", contentType: "text/html" }))
   const page = await context.newPage()
+  await installLocalDraftKeyFixture(page, { envelopes, human: () => "alice" })
   await page.goto("http://localhost/artifact-drafts")
   const code = buildSync({ entryPoints: [`${process.cwd()}/lib/artifact-drafts.ts`], bundle: true, write: false, format: "iife", globalName: "artifactDrafts", platform: "browser" }).outputFiles[0].text
   await page.addScriptTag({ content: code })
@@ -37,10 +39,11 @@ async function open(endpoint: string) {
 }
 
 it.skipIf(!existsSync(executable))("keeps an awaited draft when the whole browser is killed right after typing", async () => {
+  const envelopes: DraftKeyFixtureStore = new Map()
   const profile = mkdtempSync(join(tmpdir(), "artifact-drafts-"))
   try {
     const first = await launch(profile)
-    const { page } = await open(first.endpoint)
+    const { page } = await open(first.endpoint, envelopes)
     await page.evaluate(async () => {
       const api = (window as unknown as { artifactDrafts: typeof import("./artifact-drafts") }).artifactDrafts
       await api.writeArtifactDraft(api.artifactDraftKey("artifact-source", "alice", "w", "demo")!, "Typed just before the crash")
@@ -52,7 +55,7 @@ it.skipIf(!existsSync(executable))("keeps an awaited draft when the whole browse
 
     const second = await launch(profile)
     try {
-      const { browser, page: reopened } = await open(second.endpoint)
+      const { browser, page: reopened } = await open(second.endpoint, envelopes)
       const result = await reopened.evaluate(async () => {
         const api = (window as unknown as { artifactDrafts: typeof import("./artifact-drafts") }).artifactDrafts
         return {
@@ -61,12 +64,12 @@ it.skipIf(!existsSync(executable))("keeps an awaited draft when the whole browse
         }
       })
       expect(result).toEqual({ owner: "Typed just before the crash", other: "" })
-      const afterSignOut = await reopened.evaluate(async () => {
+      const afterExpiry = await reopened.evaluate(async () => {
         const api = (window as unknown as { artifactDrafts: typeof import("./artifact-drafts") }).artifactDrafts
-        await api.purgeOtherArtifactDrafts(null)
+        await api.suspendOtherArtifactDrafts(null)
         return api.readArtifactDraft(api.artifactDraftKey("artifact-source", "alice", "w", "demo")!)
       })
-      expect(afterSignOut).toBe("")
+      expect(afterExpiry).toBe("")
       await browser.close()
     } finally { second.child.kill("SIGKILL") }
   } finally { rmSync(profile, { recursive: true, force: true }) }

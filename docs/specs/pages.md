@@ -1424,6 +1424,27 @@ unclassified folder entries before matching, preventing title confirmation.
 Canonical backup/recovery data retains its existing OWNER/instance-admin gates;
 this does not introduce Page folder ACL mutation auditing or change its atomicity.
 
+### Private browser draft recovery
+
+Native documents, text documents, Project source/comments and Design drafts use
+an immutable Page ID and human identity as their recovery scope. New durable
+payloads are encrypted in the browser. Recovery obtains a key envelope through
+a fresh authenticated Page-read check; an expired session retains the copy and
+does not authorize releasing it to another identity. Bound legacy records are
+migrated before entering an editor. Unbound slug records are never replayed.
+
+A positively verified loss of current Page read erases reachable local drafts;
+a network failure, expired cookie, or loss of Edit alone does not prove that
+loss. Offline clients cannot promise immediate deletion. Deferred deletion
+compares the captured revision, preserving a later replacement.
+
+Before an authentication transition unmounts an editor, admitted local writes
+must drain. Failed capture, unavailable storage, and an over-limit Design draft
+keep the live model mounted behind recovery UI and block navigation. Explicit
+sign-out warns before deleting persistent recovery copies and deletes only the
+revisions covered by that confirmation. Later writes remain for recovery.
+Recovering a draft never automatically replays a server mutation.
+
 ### Design canvases (opt-in)
 
 Design uses the same Page identity, grants and retained artifact versions. The

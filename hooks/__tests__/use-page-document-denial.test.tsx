@@ -1,3 +1,15 @@
+vi.mock("@/lib/protected-document-drafts", () => ({ openProtectedDocumentDrafts: async (...args: Parameters<typeof import("@/lib/document-queue").openDocumentDrafts>) => (await import("@/lib/document-queue")).openDocumentDrafts(...args) }))
+// Persistence mechanics are tested here; protected-store authorization and
+// encryption are exercised by the real-browser and protected-document tests.
+vi.mock("@/lib/local-draft-seal", () => {
+ class LocalDraftReadRevoked extends Error {}
+ return { LocalDraftReadRevoked, LocalDraftProtectionError: class extends Error {},
+ createLocalDraftCipher: async () => {
+  if (journal.readStatus === 403 || journal.readStatus === 404) throw new LocalDraftReadRevoked()
+  return { close() {} }
+ } }
+})
+
 import { createElement, type ReactNode } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, renderHook as baseRenderHook, waitFor } from "@testing-library/react"
@@ -8,15 +20,17 @@ import { DocumentStorageError, purgeOtherDocumentDrafts } from "@/lib/document-q
 import { usePageDocument } from "../use-page-document"
 
 const fetchMock = vi.hoisted(() => vi.fn())
-const journal = vi.hoisted(() => ({ purge: vi.fn(), exclusive: true, rows: [] as unknown[], put: vi.fn(), remove: vi.fn() }))
+const journal = vi.hoisted(() => ({ removeCaptured: vi.fn(), readStatus: 200, purge: vi.fn(), exclusive: true, rows: [] as unknown[], put: vi.fn(), remove: vi.fn() }))
 vi.mock("@/lib/document-queue", async importOriginal => ({
   ...await importOriginal<typeof import("@/lib/document-queue")>(),
   purgeDocumentDrafts: journal.purge,
+  captureDocumentDrafts: async () => [{key:[JSON.stringify(["human","w","page"]),"d1"],revision:"observed"}],
+  removeCapturedDocumentDrafts: journal.removeCaptured,
   openDocumentDrafts: async () => ({ load: async () => journal.rows, put: journal.put, remove: journal.remove, close: () => {}, exclusive: journal.exclusive }),
 }))
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: fetchMock }))
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: async (url: string, init?: RequestInit) => { const response = await fetchMock(url, init); if (!init?.method || init.method === "GET") journal.readStatus = response.status; return response } }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "human" } } }) }))
-beforeEach(() => { journal.purge.mockReset().mockResolvedValue(undefined); journal.exclusive = true; journal.rows = []; journal.put.mockReset().mockResolvedValue(undefined); journal.remove.mockReset().mockResolvedValue(undefined) })
+beforeEach(() => { journal.removeCaptured.mockReset().mockResolvedValue(undefined); journal.readStatus = 200; journal.purge.mockReset().mockResolvedValue(undefined); journal.exclusive = true; journal.rows = []; journal.put.mockReset().mockResolvedValue(undefined); journal.remove.mockReset().mockResolvedValue(undefined) })
 afterEach(() => { vi.restoreAllMocks(); fetchMock.mockReset() })
 
 const renderHook: typeof baseRenderHook = (callback, options) => {
@@ -28,7 +42,7 @@ const text = (doc: Y.Doc) => { const node = documentSchema.textNode(doc, "paragr
 const response = (value: unknown, status = 200) => Promise.resolve({ ok: status < 400, status, json: async () => value })
 const head = (doc: Y.Doc) => ({ page_id: "page", schema: 3, rev: 4, epoch: "epoch", generation: 1, incarnation: "i", snapshot: documentSchema.snapshot(doc), snapshotRev: 4, updates: [], blocks: [], content: { type: "doc" }, outline: [], can_write: true, can_comment: false, can_resolve: false })
 
-it.each([401, 403, 404])("a %i from a read already in flight wins over a journal failure", async status => {
+it.each([403, 404])("a %i from a read already in flight wins over a journal failure", async status => {
   const server = model()
   let hold = false, started = false
   let resolveRead: (() => void) | undefined
@@ -143,7 +157,7 @@ it("a 200 while blocked neither resumes editing nor journals nor sends", async (
   } finally { unmount(); server.destroy() }
 })
 
-it.each([401, 403, 404])("a %i deletes this Page's journal rows from storage, not only from memory", async status => {
+it.each([403, 404])("a %i deletes this Page's journal rows from storage, not only from memory", async status => {
   const server = model()
   let deny = false
   fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({}, 500) : deny ? response({ error: "gone" }, status) : response(head(server)))
@@ -157,14 +171,15 @@ it.each([401, 403, 404])("a %i deletes this Page's journal rows from storage, no
   } finally { unmount(); server.destroy() }
 })
 
-it("an external deny() purges the journal too", async () => {
+it("a refused restore hides the editor but retains the journal while current Read is allowed", async () => {
   const server = model()
   fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({}, 500) : response(head(server)))
   const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
   try {
     await waitFor(() => expect(result.current.editable).toBe(true))
     act(() => result.current.deny())
-    await waitFor(() => expect(journal.purge).toHaveBeenCalledWith("human", "w", "page"))
+    await new Promise(resolve=>setTimeout(resolve,50))
+    expect(journal.purge).not.toHaveBeenCalled()
   } finally { unmount(); server.destroy() }
 })
 
@@ -180,7 +195,7 @@ it("rows exposed as recovered or staged are purged on denial, and a write in fli
     deny = true
     await waitFor(() => expect(result.current.denied).toBe(true))
     expect(result.current.unverifiedDrafts).toHaveLength(0)
-    await waitFor(() => expect(journal.purge).toHaveBeenCalledWith("human", "w", "page"))
+    await waitFor(() => expect(journal.removeCaptured).toHaveBeenCalledWith([{key:[JSON.stringify(["human","w","page"]),"d1"],revision:"observed"}]))
   } finally { unmount(); server.destroy() }
 })
 
@@ -217,7 +232,7 @@ it("the purge waits for a journal write already in flight and no write follows t
   } finally { unmount(); server.destroy() }
 })
 
-it("a refused write says the latest edits were not saved and keeps no copy of them", async () => {
+it("retains private recovery after a write refusal while current read is still allowed", async () => {
   const server = model()
   fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({ error: "forbidden" }, 403) : response(head(server)))
   const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
@@ -225,14 +240,14 @@ it("a refused write says the latest edits were not saved and keeps no copy of th
     await waitFor(() => expect(result.current.editable).toBe(true))
     act(() => text(result.current.doc).insert(7, " quoted"))
     await waitFor(() => expect(result.current.denied).toBe(true), { timeout: 3000 })
-    expect(result.current.status).toBe("Your latest edits were not saved: access to this document was removed.")
+    expect(result.current.status).toBe("Sign in again or reopen to verify access. Your private draft is retained.")
     expect(result.current.state).toBeUndefined()
     expect(result.current.recoveredDrafts).toHaveLength(0)
-    await waitFor(() => expect(journal.purge).toHaveBeenCalledWith("human", "w", "page"))
+    expect(journal.purge).not.toHaveBeenCalled()
   } finally { unmount(); server.destroy() }
 })
 
-it("a denial with nothing unsent keeps the plain access message", async () => {
+it("a refused restore with nothing unsent keeps access unverified without deleting recovery", async () => {
   const server = model()
   fetchMock.mockImplementation((_u: string, init?: RequestInit) => init?.method === "POST" ? response({}, 500) : response(head(server)))
   const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
@@ -240,7 +255,7 @@ it("a denial with nothing unsent keeps the plain access message", async () => {
     await waitFor(() => expect(result.current.editable).toBe(true))
     act(() => result.current.deny())
     await waitFor(() => expect(result.current.denied).toBe(true))
-    expect(result.current.status).toBe("Document access is unavailable.")
+    expect(result.current.status).toBe("Sign in again or reopen to verify access. Your private draft is retained.")
   } finally { unmount(); server.destroy() }
 })
 
