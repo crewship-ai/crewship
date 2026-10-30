@@ -31,6 +31,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **An unsent artifact comment survives a crash.** The chat and library artifact viewer keeps the comment text in this browser for the same person and Page, and offers it again after reopening; the place has to be selected again.
 
+- **Artifact comments reach agents as fenced data.** `artifact_comments` and `artifact_versions` now wrap comment text, the quoted element label and every reply in the same nonce-delimited `<untrusted source="artifact_comment">` block used for issue text, so a reader with only a Comment grant cannot write instructions into the owner's run. Selectors and code file content stay exact for anchoring and republishing.
+
 - **Home-installed agent CLIs remain visible during startup checks.** Offline qualification uses a separate temporary home while preserving read-only executable paths from the immutable image.
 
 - **Design artifacts gain an opt-in collaborative canvas.** People and agents can edit frames, shapes, text and images through Yjs, with live presence and normal artifact version history. Agents can address their selected canvas by its immutable ID. Disabled by default. Long-running cookie sessions renew only their collaborative transport after fresh authority checks, retaining unsaved work. Restoring saved canvases preserves prototype-named node IDs and their original contents.
