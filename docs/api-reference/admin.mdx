@@ -1177,6 +1177,12 @@ always kept, routine and agent webhook receipts, delivered work bodies, page
 project history, orphaned attachment files, unattributed credential reads and
 the pre-upgrade database snapshots.
 
+No window covers [Artifacts](/guides/artifacts/operations#retention). Artifact
+versions, Design canvases, Dashboard data and native Word and Sheet history
+are kept until the artifact itself is deleted, within the per-artifact storage
+limits. "Page project history" in `housekeeping` is the build history of Pages
+applications, not artifact versions.
+
 | Status | Condition |
 |--------|-----------|
 | `200` | Every chosen workspace, by name. |

@@ -43,7 +43,19 @@
           {
             "group": "Get Started",
             "icon": "rocket",
-            "pages": ["index", "quickstart", "guides/task-index", "guides/first-projects", "concepts", "guides/use-cases", "guides/writing-good-tasks", "guides/when-not-to-use", "philosophy", "production-checklist", "architecture"]
+            "pages": [
+              "index",
+              "quickstart",
+              "guides/task-index",
+              "guides/first-projects",
+              "concepts",
+              "guides/use-cases",
+              "guides/writing-good-tasks",
+              "guides/when-not-to-use",
+              "philosophy",
+              "production-checklist",
+              "architecture"
+            ]
           },
           {
             "group": "Guides",
@@ -178,6 +190,22 @@
               "guides/hooks",
               "guides/automations",
               "guides/pages",
+              {
+                "group": "Artifacts",
+                "icon": "layers",
+                "pages": [
+                  "guides/artifacts",
+                  "guides/artifacts/library",
+                  "guides/artifacts/sharing-and-access",
+                  "guides/artifacts/project",
+                  "guides/artifacts/design",
+                  "guides/artifacts/dashboard",
+                  "guides/artifacts/slides",
+                  "guides/artifacts/word-and-sheet",
+                  "guides/artifacts/chat",
+                  "guides/artifacts/operations"
+                ]
+              },
               "guides/pages-apps-operations",
               "guides/quartermaster",
               "guides/watch-roster",
@@ -217,6 +245,7 @@
             "icon": "settings",
             "pages": [
               "configuration/environment",
+              "configuration/artifacts",
               "configuration/yaml-config",
               "configuration/providers",
               "configuration/apple-containers",
@@ -263,7 +292,7 @@
             "pages": [
               "cli/overview",
               "cli/commands",
-                "cli/api",
+              "cli/api",
               "cli/ai",
               "cli/start",
               "cli/onboarding",
@@ -315,8 +344,8 @@
               "cli/history",
               "cli/recall",
               "cli/recap",
-              "cli/inspect"
-              ,"cli/model",
+              "cli/inspect",
+              "cli/model",
               "cli/provider",
               "cli/rehire"
             ]
@@ -342,11 +371,13 @@
               "cli/mission",
               "cli/routine",
               "cli/page",
+              "cli/artifacts",
               "cli/doc",
               "cli/slides",
               "cli/workbook",
               "cli/mooring",
               "cli/craft",
+              "cli/artifacts-design-craft",
               "cli/pipeline",
               "cli/webhook",
               "cli/waitpoint",
@@ -462,8 +493,8 @@
               "cli/credential",
               "cli/oauth",
               "cli/seed",
-              "cli/nuke"
-              ,"cli/db"
+              "cli/nuke",
+              "cli/db"
             ]
           },
           {
@@ -518,6 +549,7 @@
               "api-reference/recurring-issues",
               "api-reference/saved-views",
               "api-reference/pages",
+              "api-reference/artifacts",
               "api-reference/mooring",
               "api-reference/triage",
               "api-reference/workflow-templates",

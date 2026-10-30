@@ -1,11 +1,25 @@
 ---
 title: Mooring applications
+description: "Experimental API for personal documents edited by installed Mooring applications, stored as private artifacts."
 stability: experimental
 tag: Experimental
 ---
 
-The experimental personal-document API uses the existing workspace context and
-human credentials. Its JSON profile is documented in the
+<Note>
+These routes are off by default. The first six routes below (`/api/v1/mooring/apps`
+through the mandate routes) exist only when the server runs with
+`CREWSHIP_GRIDCRAFT_ENABLED=true`. Provenance and the command session exist only
+with `CREWSHIP_MOORING_ENABLED=true`; the command session also needs
+`CREWSHIP_MOORING_COMMANDS_ENABLED=true`. Without `CREWSHIP_GRIDCRAFT_ENABLED`
+or `CREWSHIP_MOORING_ENABLED` the routes are not registered and return `404`.
+With Mooring on but `CREWSHIP_MOORING_COMMANDS_ENABLED` off, the command
+session is still registered and returns `503` "native command editing is
+disabled".
+</Note>
+
+Each Mooring document is a private [artifact](/api-reference/artifacts) owned by
+the person who created it. The experimental personal-document API uses the
+existing workspace context and human credentials. Its JSON profile is documented in the
 [pilot contract](/specs/mooring-pilot). All errors use JSON `{error}`. Shared
 DIRECT agent changes are refused. Native GridCraft retains its existing routes.
 
@@ -17,8 +31,10 @@ command JSON Schemas. **Statuses:** 200, 401, 403, 404.
 
 ## `POST /api/v1/mooring/documents`
 
-**Auth:** current human workspace credential and Page creation permission.
-**Request:** `{app_id,slug,name}`. The JSON profile creates a personal private Page;
+**Auth:** current human workspace credential and permission to create artifacts
+(`OWNER`, `ADMIN`, `MANAGER`, or the `page.create` capability).
+**Request:** `{app_id,slug,name}`. The JSON profile creates a private artifact
+owned by the caller;
 native GridCraft uses its existing creation/import protocol.
 **Response:** `{page_id,slug,name,app_id}`. The slug is the creation retry key.
 **Statuses:** 201 created, 200 exact retry, 400 invalid declaration, 401 revoked
@@ -26,7 +42,7 @@ credential, 403 denied, 404 unavailable, 409 conflict, 500 persistence failure.
 
 ## `GET /api/v1/pages/{slug}/mooring`
 
-**Auth:** current private Page owner and human workspace credential.
+**Auth:** owner of the private artifact, with a current human workspace credential.
 **Request:** `slug` path parameter, also accepting `@ID`.
 **Response:** `{app_id,manifest,state,editor}` with state
 `{rev,generation,snapshot}`. Editor availability includes pinned URL and digest.
@@ -35,7 +51,7 @@ credential, 403 denied, 404 unavailable, 409 conflict, 500 persistence failure.
 
 ## `POST /api/v1/pages/{slug}/mooring/commands`
 
-**Auth:** current private Page owner and human workspace credential.
+**Auth:** owner of the private artifact, with a current human workspace credential.
 **Request:** `{mutation_id,base_rev,generation,command,arguments}`; arguments must
 validate against the compiled manifest schema. Full-state replacement requires
 an exact base revision and generation.
@@ -47,7 +63,7 @@ durability and visibility. Identical retries return the original receipt.
 
 ## `POST /api/v1/pages/{slug}/mooring/mandates`
 
-**Auth:** current private Page owner and human workspace credential.
+**Auth:** owner of the private artifact, with a current human workspace credential.
 **Request:** `{mandate_id,run_id,base_rev,generation,command}`. The run must retain
 that human's live host-dispatched chat authority and current workspace policy.
 **Response:** retained mandate packet. Identity and scope cannot be widened.
@@ -57,7 +73,7 @@ credential, 404 unavailable or unauthorized, 409 changed preconditions,
 
 ## `DELETE /api/v1/pages/{slug}/mooring/mandates/{mandate}`
 
-**Auth:** current private Page owner and human workspace credential.
+**Auth:** owner of the private artifact, with a current human workspace credential.
 **Request:** slug and mandate path parameters; no body.
 **Response:** `{status: revoked}`. Revocation is terminal and exact retries are safe.
 **Statuses:** 200, 401 invalid credential, 404 unavailable or unauthorized,
@@ -73,7 +89,7 @@ and retained mandate before issuing its receipt.
 
 Authentication: current original human session or CLI credential with `pages:read`.
 The native route is default-off with Mooring sessions. Request: path `slug` or
-`@PageID`, query `workspace_id`; no request body. Current Page/native read access
+`@PageID`, query `workspace_id`; no request body. Current read access to the artifact
 and each source chat audience are checked independently. References grant no rights.
 
 Response: JSON `{artifacts:[{page_id,title,application_id,provenance,chat_id,message_id,agent_slug,last_revision,edited_at}],artifacts_partial:true}`.
@@ -85,7 +101,7 @@ Headers: `Cache-Control: no-store`. The original credential expiry or three-seco
 request-send horizon, whichever is earlier, bounds physical delivery.
 
 Statuses: 200 (bounded authorized metadata), 401 (no original human), 403 (current
-credential/read scope refused), 404 (Page/native read unavailable), 503 (current
+credential/read scope refused), 404 (artifact or native read unavailable), 503 (current
 metadata/transport verification unavailable). Errors are JSON `{error}`.
 
 The existing `GET /api/v1/chats/{chatId}/document-access` response also carries
@@ -95,15 +111,15 @@ current checks; these fields do not change document-grant or live-task authority
 
 ## `POST /api/v1/pages/{slug}/mooring/command-session`
 
-**Auth:** normal current human authentication, workspace membership, current Page
-read/write rights, the original identity fence and exact same-origin `Origin`.
+**Auth:** normal current human authentication, workspace membership, current
+read/write rights on the artifact, the original identity fence and exact same-origin `Origin`.
 The native command test profile is separately disabled by default. Verified
 runtime assets and explicit operator activation are required.
 
 **Request:** path `slug` or `@ID`, workspace query `workspace_id` or header
 `X-Workspace-ID`, and the closed `MooringCommandSessionRequest` JSON body.
 `open` accepts optional `create` and `write` booleans. Creation initializes only
-an empty new Page as `wordcraft-c1-v2`; existing documents are never converted.
+an empty new artifact as `wordcraft-c1-v2`; existing documents are never converted.
 `read`, `submit` and `outcome` require the returned `view`. Submit/outcome also
 require `raw`, the exact original command string. Unknown keys, duplicate keys,
 case aliases, null fields and oversized bodies are refused. A view is an identity
@@ -118,7 +134,7 @@ blind replay. The generated server catalog rejects unqualified/global commands;
 engine fixture qualification alone does not establish browser acceptance.
 
 **Statuses:** 200 confirmed read or original durable outcome, 400 malformed input,
-401 invalid authentication before admission, 403 denied identity/Page/profile or
+401 invalid authentication before admission, 403 denied identity/artifact/profile or
 unavailable open, 409 unconfirmed/conflicting operation, 413 oversized request,
 500 persistence failure, 503 disabled or unavailable bounded transport.
 
