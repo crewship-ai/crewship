@@ -43,6 +43,13 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 	schemas := map[string]any{"NativeCraftSnapshotRequest": snapshot, "NativeCraftReconcileRequest": reconcile, "NativeCraftRestoreRequest": restore, "NativeCraftSnapshotReceipt": obj(receipt, receiptRequired...), "NativeCraftDocumentQuota": quota, "NativeCraftDocument": document, "NativeCraftRestoreReceipt": obj(map[string]any{"version": version(false), "durability": receipt["durability"], "issuedBy": receipt["issuedBy"], "phase": receipt["phase"]}, "version", "durability", "issuedBy", "phase")}
 	schemas["NativeCraftInitializeRequest"] = obj(map[string]any{"application_id": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}}, "bytes": bytes()}, "application_id", "bytes")
 	schemas["NativeCraftInitializeReceipt"] = obj(map[string]any{"session_token": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$", "description": "Private process-local human admission, issued only after atomic initialization. Never send to the editor iframe or local journal."}, "session_id": str(), "application_id": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}}, "page_id": str(), "generation": version(false), "version": map[string]any{"type": "string", "enum": []string{"1"}}}, "session_token", "session_id", "application_id", "page_id", "generation", "version")
+	integer := func() map[string]any { return map[string]any{"type": "integer", "format": "int64"} }
+	proposalState := map[string]any{"type": "string", "enum": []string{"open", "accepted", "rejected", "stale"}}
+	schemas["NativeCraftProposal"] = obj(map[string]any{"id": map[string]any{"type": "string", "pattern": "^ncp_[a-f0-9]{24}$"}, "author": ref("NativeCraftHolder"), "base_version": integer(), "summary": map[string]any{"type": "string", "maxLength": 500}, "created_at": str(), "state": proposalState, "result_version": integer()}, "id", "author", "base_version", "summary", "created_at", "state")
+	schemas["NativeCraftProposalList"] = obj(map[string]any{"proposals": map[string]any{"type": "array", "maxItems": 16, "items": ref("NativeCraftProposal")}}, "proposals")
+	schemas["NativeCraftProposalDocument"] = obj(map[string]any{"proposal": ref("NativeCraftProposal"), "bytes": bytes(), "content_hash": hash(), "engine_pin": pin()}, "proposal", "bytes", "content_hash", "engine_pin")
+	schemas["NativeCraftProposalAcceptRequest"] = obj(map[string]any{"sessionId": str(), "generation": version(false)}, "sessionId", "generation")
+	schemas["NativeCraftProposalAcceptReceipt"] = obj(map[string]any{"proposal": ref("NativeCraftProposal"), "receipt": ref("NativeCraftSnapshotReceipt")}, "proposal", "receipt")
 	routes := map[string]DomainSchema{}
 	routes["POST /api/v1/pages/{slug}/craft/initialize"] = DomainSchema{Request: ref("NativeCraftInitializeRequest"), Response: ref("NativeCraftInitializeReceipt"), RequestRequired: true, SuccessStatuses: []string{"201"}}
 	add := func(method, path, req, res string) {
@@ -58,5 +65,11 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 	add("POST", "/import", "NativeCraftSnapshotRequest", "NativeCraftSnapshotReceipt")
 	add("POST", "/reconcile", "NativeCraftReconcileRequest", "NativeCraftSnapshotReceipt")
 	add("POST", "/restore", "NativeCraftRestoreRequest", "NativeCraftRestoreReceipt")
+	session := map[string]any{"name": "X-Craft-Session", "in": "header", "required": true, "schema": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}, "description": "Private original-human admission for this exact Page."}
+	proposals := "/api/v1/pages/{slug}/craft/proposals"
+	routes["GET "+proposals] = DomainSchema{NoRequest: true, Response: ref("NativeCraftProposalList"), SuccessStatuses: []string{"200"}, Parameters: []map[string]any{session}}
+	routes["GET "+proposals+"/{proposalID}"] = DomainSchema{NoRequest: true, Response: ref("NativeCraftProposalDocument"), SuccessStatuses: []string{"200"}, Parameters: []map[string]any{session}}
+	routes["POST "+proposals+"/{proposalID}/accept"] = DomainSchema{Request: ref("NativeCraftProposalAcceptRequest"), RequestRequired: true, Response: ref("NativeCraftProposalAcceptReceipt"), SuccessStatuses: []string{"200"}, Parameters: []map[string]any{session}}
+	routes["POST "+proposals+"/{proposalID}/reject"] = DomainSchema{Request: ref("NativeCraftEmptyRequest"), Response: ref("NativeCraftProposal"), SuccessStatuses: []string{"200"}, Parameters: []map[string]any{session}}
 	return routes, schemas
 }

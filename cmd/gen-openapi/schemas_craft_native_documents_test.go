@@ -55,3 +55,23 @@ func TestCraftNativeInitializeHasOwnerNativeTypedAdmission(t *testing.T) {
 		t.Fatal("initializer does not list its supported native applications")
 	}
 }
+
+func TestCraftNativeProposalsHaveConcreteSchemas(t *testing.T) {
+	base := "/api/v1/pages/{slug}/craft/proposals"
+	doc := buildDocument([]route{{method: "GET", path: base}, {method: "GET", path: base + "/{proposalID}"}, {method: "POST", path: base + "/{proposalID}/accept"}, {method: "POST", path: base + "/{proposalID}/reject"}})
+	paths := doc["paths"].(map[string]any)
+	for path, want := range map[string]string{base: "NativeCraftProposalList", base + "/{proposalID}": "NativeCraftProposalDocument"} {
+		if responseSchemaFromOperation(t, paths[path].(map[string]any)["get"].(map[string]any))["$ref"] != "#/components/schemas/"+want {
+			t.Fatalf("%s has no concrete response", path)
+		}
+	}
+	for suffix, want := range map[string]string{"/accept": "NativeCraftProposalAcceptReceipt", "/reject": "NativeCraftProposal"} {
+		if responseSchemaFromOperation(t, paths[base+"/{proposalID}"+suffix].(map[string]any)["post"].(map[string]any))["$ref"] != "#/components/schemas/"+want {
+			t.Fatalf("%s has no concrete response", suffix)
+		}
+	}
+	accept := doc["components"].(map[string]any)["schemas"].(map[string]any)["NativeCraftProposalAcceptRequest"].(map[string]any)
+	if accept["additionalProperties"] != false || accept["properties"].(map[string]any)["generation"].(map[string]any)["type"] != "string" {
+		t.Fatal("accept request must be closed and keep the generation as a string")
+	}
+}
