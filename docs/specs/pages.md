@@ -1507,14 +1507,16 @@ Read/Comment audiences still receive only the shared snapshot.
 Access to a foreign Design is recorded as `design.workspace_admin_accessed` in
 the existing audit log, bound to the Page, workspace, original human, actor and
 custodian. The compliance row and configured keyed journal share one identity
-and the content transaction; permission probes verify the original native
-journal receipt rather than appending duplicates. Notifications follow commit.
-Both receipts and current authority are checked after the final content write.
-The operation records authorized read/write access, not a replacement
-for a saved-version receipt. One HTTP request or websocket admission has one
-read audit identity; permission probes and heartbeats do not create duplicate
-events. Incoming websocket writes receive their own audit identity. The audit
-and persisted edit share the existing writer transaction; an unacknowledged or
-corrupted audit refuses access and preserves confirmed content. Manager edits
+and commit together under the writer fence. Permission probes verify the
+original native journal receipt rather than appending duplicates; notifications
+follow commit. One HTTP request or websocket admission has one audit identity,
+and incoming websocket writes receive their own identity.
+
+This records authorized read/write access, not a saved-version receipt. REST
+versioned changes can commit a preflight access receipt before publication;
+that receipt remains when later publication is refused. The publication
+transaction rechecks both receipts and current authority after the final
+content write. Unacknowledged or corrupted receipts refuse access and preserve
+confirmed content. Manager edits
 use the existing room lock, revision checks and VersionStore. This policy is
 local to Design and does not alter other Page families' audience rules.
