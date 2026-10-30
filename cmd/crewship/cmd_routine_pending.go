@@ -116,8 +116,15 @@ var routinePendingCancelCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
+			resp.Body.Close()
+			return err
+		}
+		raw, err := readServerDocument(resp)
+		if err != nil {
+			return err
+		}
+		if handled, err := machineMutationResult(cmd, raw, map[string]any{"ok": true, "cancelled": args[0]}); handled {
 			return err
 		}
 		fmt.Printf("Cancelled pending trigger %s.\n", args[0])

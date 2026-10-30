@@ -343,7 +343,10 @@ var agentDeleteCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		defer resp.Body.Close()
+		raw, err := readServerDocument(resp)
+		if err != nil {
+			return err
+		}
 		var deleted struct {
 			Runs *struct {
 				State   string `json:"state" yaml:"state"`
@@ -351,7 +354,13 @@ var agentDeleteCmd = &cobra.Command{
 				Pending int    `json:"pending" yaml:"pending"`
 			} `json:"runs" yaml:"runs"`
 		}
-		_ = json.NewDecoder(resp.Body).Decode(&deleted)
+		_ = json.Unmarshal(raw, &deleted)
+		// -f json gets the server's document: runs.state/stopped/pending say
+		// whether the agent's work actually stopped, which is the question a
+		// script deleting an agent has to answer next.
+		if handled, err := machineMutationResult(cmd, raw, map[string]any{"deleted": true, "agent_id": agentID}); handled {
+			return err
+		}
 
 		cli.PrintSuccess("Agent deleted.")
 		if r := deleted.Runs; r != nil {
