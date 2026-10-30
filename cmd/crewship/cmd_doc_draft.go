@@ -24,7 +24,9 @@ func newDocDraftCommand() *cobra.Command { return newDocDraftCommandWithTranspor
 
 // Transport injection is available to Go tests only, never command flags.
 func newDocDraftCommandWithTransport(transport http.RoundTripper) *cobra.Command {
-	root := &cobra.Command{Use: "draft", Short: "Checkpoint this live run's explicitly admitted Document draft", Long: "Use view, then prepare once and retain the immutable packet. prepare is unsaved. apply commits text then pins it; a failed pin does not undo committed text. Retry the exact packet, never regenerate its preconditions. Only this run’s admitted new or existing Document; no other Page or human-profile fallback.", PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+	root := &cobra.Command{Use: "draft", Short: "Save guarded drafts of the document this live run was admitted to write", Example: `  crewship doc draft view
+  crewship doc draft prepare --file input.json > packet.json
+  crewship doc draft apply --file packet.json`, Long: "Use view, then prepare once and retain the immutable packet. prepare is unsaved. apply commits text then pins it; a failed pin does not undo committed text. Retry the exact packet, never regenerate its preconditions. Only this run’s admitted new or existing document; no other artifact or human-profile fallback.", PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 		for _, key := range []string{"config", "server", "profile", "workspace", "server-allow-mismatch"} {
 			if cmd.Flags().Changed(key) || cmd.InheritedFlags().Changed(key) {
 				return errors.New("protected Docs drafting does not accept config/server/profile/workspace overrides")
@@ -32,9 +34,15 @@ func newDocDraftCommandWithTransport(transport http.RoundTripper) *cobra.Command
 		}
 		return nil
 	}}
+	shorts := map[string]string{
+		"view":       "Read headings, paragraphs, block hashes, revision and epoch of the admitted document",
+		"prepare":    "Build an immutable edit and checkpoint packet locally without saving",
+		"apply":      "Apply a prepared packet and checkpoint the confirmed revision",
+		"checkpoint": "Retry only the checkpoint of a packet whose text edit is already saved",
+	}
 	for _, op := range []string{"view", "prepare", "apply", "checkpoint"} {
 		op := op
-		command := &cobra.Command{Use: op, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		command := &cobra.Command{Use: op, Short: shorts[op], Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			token := os.Getenv("CREWSHIP_AGENT_TOKEN")
 			if !strings.HasPrefix(token, "agtv2.") || len(token) > 2048 || strings.ContainsAny(token, " \t\r\n") {
 				return errors.New("original CREWSHIP_AGENT_TOKEN run capability required; no human profile fallback")

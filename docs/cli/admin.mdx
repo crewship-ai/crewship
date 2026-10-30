@@ -1178,6 +1178,11 @@ attention, the last 14 nights and the space backups use and need.
 | `--scope` | no | `instance` (the default) or `workspaces`. |
 | `--ws` | no | Workspace slugs or ids, comma-separated. All by default. |
 
+Workspaces that hold no crew (every sign-up gets one of its own) are not
+listed one by one: the human view ends with
+`+ N workspace(s) with no crew, not listed`, and `--format json` carries the
+count as `crewless_workspaces`.
+
 ---
 
 ### backups vault-keys

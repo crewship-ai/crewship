@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"time"
+	"unicode/utf8"
 )
 
 // maxShellPayloadBytes caps CREWSHIP_PAYLOAD env var size. ARG_MAX on
@@ -196,9 +197,17 @@ func shellHandler(ctx context.Context, h Hook, ec EventContext) (Result, error) 
 	}, nil
 }
 
+// truncate caps s at max bytes, backing off to a rune boundary so the
+// kept prefix stays valid UTF-8.
 func truncate(s string, max int) string {
 	if len(s) <= max {
 		return s
+	}
+	if max < 0 {
+		max = 0
+	}
+	for max > 0 && !utf8.RuneStart(s[max]) {
+		max--
 	}
 	return s[:max] + "...[truncated]"
 }

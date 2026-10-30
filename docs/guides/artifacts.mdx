@@ -1,0 +1,169 @@
+---
+title: Artifacts
+description: "Versioned multi-file artifact projects: the library, versions, sharing, comments and storage limits."
+stability: experimental
+tag: Experimental
+---
+
+An artifact project is a private Page that holds a complete set of files (an
+`entrypoint` such as `index.html` plus its other files) as numbered,
+immutable versions. Every save is a whole new version; nothing is edited in
+place, and restoring an old version creates a new one. People read one
+version that the owner chose to share, while the owner keeps working on the
+latest one.
+
+<Warning>
+Artifact projects are **off by default**. They need the `artifact_projects`
+feature flag for the workspace (`crewship feature-flag enable artifact_projects`)
+or `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` on the server. While they are
+off, the create, version and comment routes answer `404`.
+`crewship page artifact availability` reports `{"enabled": true}` or
+`{"enabled": false}` for the current workspace.
+</Warning>
+
+## The Artifacts library
+
+The `/artifacts` library is a browser view over the Pages the caller can
+read. `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` at build time opens this library
+and makes the **Artifacts** sidebar entry lead there. The Design build flag
+`NEXT_PUBLIC_ARTIFACTS_DESIGN=true` also opens `/artifacts`, but without the
+library flag the sidebar still leads to `/pages`; open `/artifacts` directly.
+When both flags are off, `/artifacts` sends the browser to `/pages`. `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS=true`
+additionally sends the Pages overview to the library; it has no effect unless
+the library flag is also on.
+
+The library lists each Page with its kind: Project, Dashboard, Page, Word,
+Sheet, Slides or Design. The kind comes from the server's `artifact_kind` or
+from the Page's stored content, never from its name. For a versioned item it
+shows the shared version, or marks the item as not shared yet.
+
+| View | What it holds |
+|---|---|
+| Home, All artifacts | Every item except empty, test and archived ones |
+| Needs attention | Versioned items that were made but never shared |
+| Recently opened, Favorites | Your own history and stars, kept as your user preference for this workspace |
+| Mine | Items you own |
+| Clean up, Test items, Empty, Archive | Repeated series, items created as tests, items with nothing in them, and archived items |
+
+Archived, test and empty items appear only in their own views; nothing is
+deleted by hiding it. The search box accepts free text plus `kind:`, `is:`
+and `owner:` operators, for example `kind:word is:private owner:you budget`.
+`is:` takes `private`, `shared`, `unshared` (or `draft`) and `empty`.
+
+## Versions
+
+Save this complete example as `manifest.json`:
+
+```json
+{"entrypoint":"index.html","files":[{"path":"index.html","content":"<h1 id=\"artifact-heading\">Current title</h1>","media_type":"text/html"}],"message":"First version"}
+```
+
+Create version 1, publish version 2 against the exact latest version you read,
+then restore version 1 as a new version 3:
+
+```bash
+crewship page artifact create demo --name "Demo" --file manifest.json
+crewship page artifact get demo
+crewship page artifact publish demo --base-version 1 --file manifest.json
+crewship page artifact versions demo
+crewship page artifact restore demo --base-version 2 --version 1
+```
+
+Every file is listed every time: a file
+left out of the manifest is absent from the new version. If someone else
+saved first, the server answers `409` with code `artifact_version_conflict`
+and stores nothing; the CLI does not retry. Read the latest version, compare,
+and publish again.
+
+## Sharing
+
+A new project is private to its owner. `share` pins one retained version as
+the version everyone else reads:
+
+```bash
+crewship page artifact share demo --base-version 3 --version 2
+```
+
+Only the human owner can share. Sharing also ends the Page's private
+audience, so from then on the ordinary [Page permission
+model](/guides/pages#permission-model) decides who opens it: the owner, a
+workspace ADMIN or OWNER, grantees and folder access. Grant levels decide what
+each of them may do with the project:
+
+| Who | Reads | May also |
+|---|---|---|
+| Owner | Every retained version, history and storage usage | Publish, restore, share, reply to comments, send comments to the agent |
+| `write` grant or folder write | Only the latest version, once the Page is no longer private | Publish a new version under their own name, comment on the latest version |
+| `comment` grant, workspace ADMIN or OWNER | Only the shared version | Comment on the shared version |
+| `read` or `produce` grant | Only the shared version | Nothing else |
+
+The project response tells a client which of these apply through
+`can_write`, `can_comment`, `can_share`, `can_restore` and
+`can_send_to_agent`. Issue grants with `crewship page grant` (also available
+as `crewship page share`), for example
+`crewship page grant demo --user ada@example.com --level comment`; see
+[Page commands](/cli/page).
+
+## Comments
+
+A comment is bound to one version, one file and one element:
+
+```bash
+crewship page artifact comment demo --version 3 --path index.html \
+  --selector '#artifact-heading' --quote 'Current title' \
+  --text 'Make this title shorter'
+crewship page artifact comments demo
+```
+
+Replace `COMMENT_ID` below with the comment response’s `id`. Change the
+heading text in `manifest.json` while keeping its `artifact-heading` ID, then
+publish that complete manifest as version 4 before replying:
+
+```bash
+crewship page artifact publish demo --base-version 3 --file manifest.json
+crewship page artifact reply demo COMMENT_ID --version 4 --text "Shortened the title"
+```
+
+The selector is a single `#id` that matches exactly one element in that file,
+and `--quote` must still match the element's text. Give elements stable
+`artifact-` prefixed IDs so they stay selectable across versions. A comment on
+an outdated version returns `409` (`artifact_version_conflict`); a selection
+that no longer matches returns `409` (`artifact_anchor_mismatch`). Neither
+stores anything.
+
+For an agent-created project with a source chat, add `--send-to-agent` to
+queue a task bound to that version. The CLI-created project above has no
+source chat; this flag does not connect one. A queued task is not
+proof that an agent received it. A comment from a Comment grantee is stored
+with a task, but it never starts the owner's agent. A reply normally names a
+newer version that made the change; `--needs-clarification` replies on the
+original version and asks for a new selection.
+
+## Storage limits
+
+| Limit | Value |
+|---|---|
+| Files per version | 1 to 256 |
+| File content per version | 32 MiB |
+| History per project | 256 MiB, every version kept |
+| File path | 512 bytes |
+| Version message | 4096 bytes |
+| Project name | 200 bytes |
+| Request body | 36 MiB; the CLI reads a manifest of at most 9 MiB |
+| Comment text | 10000 bytes; selector and quote 2000 each |
+| Pages per workspace | 100, including artifact projects |
+
+Identical file contents are stored once per project. The owner's project
+response carries `quota` with `used_bytes`, `limit_bytes` and `warning`, which
+turns true at 80 % of the limit. A save that would exceed the history limit
+returns `413` with code `artifact_history_quota` and keeps every existing
+version; keep your local draft. A direct creation at the 100-Page workspace
+limit also returns `413 artifact_history_quota`; that refusal need not mean
+an existing project’s history is full. Other readers see a `quota` that names only
+their retention (`latest-version-only` or `shared-version-only`).
+
+## Related
+
+- [Pages API: artifact projects](/api-reference/pages#artifact-project-creation)
+- [Page commands](/cli/page)
+- [Pages guide](/guides/pages)

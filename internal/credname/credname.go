@@ -98,12 +98,3 @@ func Canonical(name string) (string, bool) {
 	}
 	return string(out), true
 }
-
-// Deliverable reports whether a name can reach a container under some variable.
-// The writer-side gate: an endpoint that accepts a slot or an env_var_name
-// rejects what this refuses, so the refusal lands on the request that chose the
-// name instead of on a run days later.
-func Deliverable(name string) bool {
-	_, ok := Canonical(name)
-	return ok
-}

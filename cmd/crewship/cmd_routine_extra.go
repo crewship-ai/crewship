@@ -31,6 +31,8 @@ type pipelineVersionRow struct {
 	AuthorID       string `json:"author_id" yaml:"author_id"`
 	ChangeSummary  string `json:"change_summary,omitempty" yaml:"change_summary,omitempty"`
 	CreatedAt      string `json:"created_at" yaml:"created_at"`
+	// TestResult is the latest Test run of this version's exact definition.
+	TestResult *routineTestResultJSON `json:"test_result,omitempty" yaml:"test_result,omitempty"`
 }
 
 var routineVersionsCmd = &cobra.Command{
@@ -54,21 +56,35 @@ var routineVersionsCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		var rows []pipelineVersionRow
-		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
-			return fmt.Errorf("decode response: %w", err)
+		raw, err := readServerDocument(resp)
+		if err != nil {
+			return err
 		}
 		// The machine rows are the server's, untouched: the human table
 		// truncates the definition hash and the author id to 12 characters
 		// and the change summary to 50, and a truncated hash is not a hash.
+		// Untouched means the server's bytes — re-encoding this struct is how
+		// the per-version test_result went missing (#4508).
+		f := resolvedFormatter(cmd)
+		if !f.RoutesToHuman() {
+			docs, err := serverRows(raw)
+			if err != nil {
+				return err
+			}
+			return f.Machine(docs)
+		}
+		var rows []pipelineVersionRow
+		if err := json.Unmarshal(raw, &rows); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
 		var flush tabFlush
-		if err := resolvedFormatter(cmd).AutoHuman(rows, func() {
+		if err := f.AutoHuman(rows, func() {
 			if len(rows) == 0 {
 				fmt.Println("No version history yet.")
 				return
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "VERSION\tHEAD\tPARENT\tHASH\tAUTHOR\tCREATED\tSUMMARY")
+			fmt.Fprintln(w, "VERSION\tHEAD\tPARENT\tHASH\tAUTHOR\tTESTED\tCREATED\tSUMMARY")
 			// HEAD comes from the server's is_head (pipelines.head_version) —
 			// after a rollback it sits on an OLDER row, so guessing rows[0]
 			// (max version) shows a stale HEAD (#996). Servers predating the
@@ -98,9 +114,9 @@ var routineVersionsCmd = &cobra.Command{
 				if len(summary) > 50 {
 					summary = summary[:47] + "..."
 				}
-				fmt.Fprintf(w, "v%d\t%s\t%s\t%s\t%s/%s\t%s\t%s\n",
+				fmt.Fprintf(w, "v%d\t%s\t%s\t%s\t%s/%s\t%s\t%s\t%s\n",
 					v.Version, isHead, parent, truncIDForCLI(v.DefinitionHash, 12),
-					v.AuthorType, truncIDForCLI(v.AuthorID, 12), v.CreatedAt, summary)
+					v.AuthorType, truncIDForCLI(v.AuthorID, 12), routineTestedLabel(v.TestResult), v.CreatedAt, summary)
 			}
 			flush.of(w)
 		}); err != nil {

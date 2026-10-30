@@ -54,9 +54,18 @@ public contract here. Superseded a spec? Move it to
 - [Private issue preflight](private-issue-preflight.md): atomic claims,
   budget/capacity checks, deduplication and recovery.
 
+## Artifacts
+
+- [Artifact version store](artifacts-version-store.md): immutable versions with
+  `base_version` compare-and-swap, durability, quotas, retention, restore and share.
+- [Design Yjs authority](artifacts-design-yjs.md): server-held live Yjs canvas,
+  websocket sync, operations versus snapshots, conflicts and limits.
+- [Native Craft human sessions and edit leases](craft-native.md): separate default-off whole-native profile admission, named holders and requested handoff.
+
 ## Pages and project files
 
-- [Native Craft human sessions and edit leases](craft-native.md): separate default-off whole-native profile admission, named holders and requested handoff.
+- [Craft lease generations](craft-lease-generation.md): session-bound handoff,
+  generation fencing, expiry and restart boundaries.
 - [Mooring session transport](mooring-session-transport.md): default-off Rust session HTTP/WS contracts and current qualification limits.
 - [Mooring pilot JSON profile](mooring-pilot.md): manifest-driven personal documents, typed commands, durable receipts and isolated editors.
 - [Pages](pages.md): panel schemas, freshness, permissions, data model and

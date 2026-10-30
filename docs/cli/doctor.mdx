@@ -101,6 +101,38 @@ is why this check exists
 ([#1672](https://github.com/crewship-ai/crewship/issues/1672)).
 </Note>
 
+### Pages apps
+
+Reports whether [Pages Apps](/cli/page#crewship-page-enable) are turned on for
+this crewship version: whether `<CREWSHIP_PAGE_PROJECTS_PATH>/pages-build-image.json`
+records a compiler image for this binary's build context fingerprint, and that
+image still has the recorded ID, the exact tag `crewship-pages-build:<prefix>`
+and the label. An image that only carries the label is not reported as enabled.
+Pages Apps are optional, so a host that never enabled them is healthy. The check
+reads the record and inspects one image; it never builds or starts a container.
+
+- **INFO** — `not enabled (optional)`: nothing recorded. Run
+  `crewship page enable` to turn Pages Apps on. Also INFO when Docker is not
+  reachable (the *container runtime* row owns that finding).
+- **WARN** — `not enabled: the recorded compiler image does not verify (…)`: the
+  record names an image that is gone, retagged or relabelled, or the record
+  file is unusable (not a regular file, writable by group or others). The server
+  fails closed with `page_apps_not_enabled`; run `crewship page enable` as the
+  server's account.
+- **WARN** — `outdated`: only images of other versions are recorded (the binary
+  was upgraded). The server refuses builds with `page_apps_not_enabled` until
+  `crewship page enable` records the image for this version; the old one is
+  kept for rollback.
+- **WARN** — enabled, but `page project storage is not configured` (set
+  `CREWSHIP_PAGE_PROJECTS_PATH` to an absolute directory outside
+  `storage.base_path`) or `no Page runtime origin` (set
+  `CREWSHIP_PAGE_RUNTIME_ORIGIN` to a separate site; derived automatically only
+  when Studio is served on `http://localhost`). Doctor reads these from the
+  environment, not from a YAML server configuration.
+- **PASS** — enabled, with the short image ID and the effective runtime origin.
+  When `CREWSHIP_PAGE_BUILD_IMAGE` is set the row names that explicit image
+  instead, since the server uses it in preference to the labelled one.
+
 ### Port binding
 
 Confirms the HTTP port (default `8080` or `CREWSHIP_PORT`) is free.
