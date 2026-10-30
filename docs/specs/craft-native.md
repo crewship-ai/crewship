@@ -365,9 +365,10 @@ When a person holds the lease, an agent never waits for, steals or retries it.
 exact `base_version` the agent read and stores the complete candidate in
 `craft_native_proposals`; the document, its versions and the lease are
 unchanged. At most 16 proposals per document may be open. Before counting, a
-new proposal marks every open proposal over an older version `stale` (decided
-by `system:superseded`; rows are kept), because such a proposal can no longer
-be accepted. The same agent `request_id` returns the original proposal.
+new proposal marks every open proposal whose base content differs from the
+current head `stale` (decided by `system:superseded`; rows are kept), because
+such a proposal can no longer be accepted. A proposal over an older version with
+identical content stays open, since accept still applies it on the head. The same agent `request_id` returns the original proposal.
 
 A person with an admitted session reviews them (`GET .../craft/proposals`,
 candidate bytes at `GET .../craft/proposals/{id}`) and decides once. Accept is

@@ -103,10 +103,11 @@ func (s *NativeStore) Propose(ctx context.Context, k EditLeaseScope, base int64,
 		if latest != base {
 			return "", artifacts.ErrVersionConflict
 		}
-		// Open proposals over an older version can never be accepted; record
-		// them as stale so they stop holding places under the cap. Rows are
-		// kept for review and history.
-		if _, err = tx.ExecContext(ctx, `UPDATE craft_native_proposals SET state='stale',decided_by=?,decided_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE page_id=? AND workspace_id=? AND state='open' AND base_version<?`, nativeProposalSuperseded, k.ArtifactID, k.WorkspaceID, latest); err != nil {
+		// Open proposals over older content can never be accepted; record them
+		// as stale so they stop holding places under the cap. A base whose
+		// manifest equals the head's still applies (see proposalBase), so it
+		// stays open. Rows are kept for review and history.
+		if _, err = tx.ExecContext(ctx, `UPDATE craft_native_proposals SET state='stale',decided_by=?,decided_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE page_id=? AND workspace_id=? AND state='open' AND base_version<? AND (SELECT b.manifest_json FROM artifact_versions b WHERE b.workspace_id=craft_native_proposals.workspace_id AND b.page_id=craft_native_proposals.page_id AND b.version=craft_native_proposals.base_version) IS NOT (SELECT h.manifest_json FROM artifact_versions h WHERE h.workspace_id=? AND h.page_id=? AND h.version=?)`, nativeProposalSuperseded, k.ArtifactID, k.WorkspaceID, latest, k.WorkspaceID, k.ArtifactID, latest); err != nil {
 			return "", err
 		}
 		var open int
