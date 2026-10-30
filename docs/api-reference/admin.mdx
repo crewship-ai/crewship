@@ -1615,6 +1615,7 @@ encrypted. Written to the instance audit log in the same transaction.
 | `400` | Invalid JSON, an unknown workspace or category, a bad timezone, cron or time, `keep_min` below 1, or no recipients. |
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
+| `413` | The request body is over 1 MiB (`"code": "body_too_large"`). |
 | `500` | The write failed; nothing changed. |
 
 ## `POST /api/v1/admin/instance/backups/plans/preview-contents`
@@ -1684,6 +1685,7 @@ transaction.
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
 | `404` | No plan with that id. |
+| `413` | The request body is over 1 MiB (`"code": "body_too_large"`). |
 | `500` | The write failed; nothing changed. |
 
 ## `DELETE /api/v1/admin/instance/backups/plans/{id}`
@@ -2393,6 +2395,7 @@ Answers with the whole settings object.
 | `400` | A limit out of range, a heartbeat URL that is not public https, an unknown drill reminder, a channel being added that is unknown or cannot carry backup alerts, or a body that is not JSON. |
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
+| `413` | The request body is over 1 MiB (`"code": "body_too_large"`). |
 | `500` | The write failed; nothing changed. |
 
 ## `POST /api/v1/admin/instance/backups/settings/test-alert`
