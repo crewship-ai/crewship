@@ -27,8 +27,17 @@ it.each([
   const { documentSchema } = await import("@/lib/documents/schema")
   const saved = documentSchema.create({ type: "doc", content: [{ type: "paragraph", attrs: { id: "private" }, content: [{ type: "text", text: "Private server text" }] }] }, 3)
   let revoked = false
+  const keys = new Map<string, string>()
   request.mockImplementation(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? "GET"
+    // The private draft store asks the server for its key; after revocation the
+    // server refuses that fresh read admission, which confirms the loss of Read.
+    if (url.includes("/draft-key")) {
+      if (revoked) return { ok: false, status: 403, json: async () => ({ code: "draft_read_revoked" }) }
+      const body = JSON.parse(String(init?.body))
+      if (body.operation === "wrap") { const envelope = `v1:test-${keys.size}`; keys.set(envelope, body.key); return { ok: true, status: 200, json: async () => ({ envelope }) } }
+      return { ok: true, status: 200, json: async () => ({ key: keys.get(body.envelope) }) }
+    }
     if (revoked && method === deniedMethod) return { ok: false, status: 403, json: async () => ({ error: "forbidden" }) }
     if (method !== "GET") return { ok: false, status: 503, json: async () => ({ error: "unavailable" }) }
     return { ok: true, json: async () => url.includes("/comments") ? { comments: [], can_comment: false } : url.includes("/requests") ? { requests: [], can_dispatch: false, eligible_chats: [] } : { page_id: "page", schema: 3, rev: 1, epoch: "epoch", can_write: true, snapshot: documentSchema.snapshot(saved) } }

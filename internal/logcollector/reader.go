@@ -67,17 +67,6 @@ func validatePathSegment(s string) error {
 	return nil
 }
 
-// ReadSessionMessages reads all log entries for a specific session from a JSONL file.
-// sessionID is validated as a single path segment (no separators, no ".."),
-// matching ReadAgentLogs, to prevent path traversal out of basePath.
-func (r *Reader) ReadSessionMessages(basePath, sessionID string) ([]LogEntry, error) {
-	if err := validatePathSegment(sessionID); err != nil {
-		return nil, fmt.Errorf("invalid session ID: %w", err)
-	}
-	path := filepath.Join(basePath, sessionID+".jsonl")
-	return readJSONL(path, 0, 0)
-}
-
 func readJSONL(path string, offset, limit int) ([]LogEntry, error) {
 	f, err := os.Open(path)
 	if err != nil {

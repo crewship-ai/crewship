@@ -49,7 +49,10 @@ func (h *PageHandler) DesignTool(w http.ResponseWriter, r *http.Request) {
 		reference = "@" + bound.String
 	}
 	forward.SetPathValue("slug", reference)
-	k, ok := h.designKey(w, forward)
+	if p.Operation == "design_get" || p.Operation == "design_versions" {
+		forward.Method = http.MethodGet
+	}
+	k, forward, ok := h.designKey(w, forward)
 	if !ok {
 		return
 	}

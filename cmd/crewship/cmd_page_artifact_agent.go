@@ -129,7 +129,7 @@ func artifactCLIRequestWithResultTransport(cmd *cobra.Command, method, path stri
 		}
 	}
 	if operation == "" {
-		return errors.New("artifact operation unavailable to an agent run")
+		return errors.New("artifact or Design operation unavailable to an agent run")
 	}
 	if version := parsed.Query().Get("version"); version != "" {
 		number, e := strconv.ParseInt(version, 10, 64)

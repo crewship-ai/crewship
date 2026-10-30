@@ -17,6 +17,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 
@@ -123,8 +125,8 @@ var workflowListCmd = &cobra.Command{
 }
 
 var workflowGetCmd = &cobra.Command{
-	Use:   "get <slug>",
-	Short: "Show one workflow template by slug (matches against name)",
+	Use:   "get <id|slug>",
+	Short: "Show one workflow template by id, or by slug (matches against name)",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -135,7 +137,7 @@ var workflowGetCmd = &cobra.Command{
 		}
 
 		client := newAPIClient()
-		t, err := findWorkflowTemplateBySlug(client, args[0])
+		t, err := getWorkflowTemplate(client, args[0])
 		if err != nil {
 			return err
 		}
@@ -309,6 +311,33 @@ var workflowDeleteCmd = &cobra.Command{
 		cli.PrintSuccess(fmt.Sprintf("Workflow template %s deleted.", t.Name))
 		return nil
 	},
+}
+
+// getWorkflowTemplate resolves <ref> as a template id first
+// (GET /api/v1/workflow-templates/{id}); only a 404 falls back to the
+// name/slug lookup over the list, so an id costs one request and a slug
+// keeps working. Any other failure (401/403/5xx) is surfaced as-is.
+func getWorkflowTemplate(client *cli.Client, ref string) (*workflowTemplateItem, error) {
+	if ref == "" || ref == "." || ref == ".." {
+		// Not an id: as a path segment it would name the collection itself.
+		return findWorkflowTemplateBySlug(client, ref)
+	}
+	resp, err := client.Get("/api/v1/workflow-templates/" + url.PathEscape(ref))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return findWorkflowTemplateBySlug(client, ref)
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return nil, err
+	}
+	var t workflowTemplateItem
+	if err := cli.ReadJSON(resp, &t); err != nil {
+		return nil, err
+	}
+	return &t, nil
 }
 
 // findWorkflowTemplateBySlug resolves a CLI <slug> argument to the matching

@@ -28,6 +28,10 @@ type craftNativeAgentTaskStatus struct {
 	TimelineDurability   string                      `json:"timeline_durability"`
 	Events               []craftNativeAgentToolEvent `json:"events"`
 	LastCommittedReceipt *mooring.NativeSaveReceipt  `json:"last_committed_receipt,omitempty"`
+	// Outcome is "saved" once this run has a committed receipt, or
+	// "proposal" when it recorded a proposal for the human to review.
+	Outcome    string `json:"outcome,omitempty"`
+	ProposalID string `json:"proposal_id,omitempty"`
 }
 
 type nativeAgentStatusWriter struct {
@@ -121,6 +125,10 @@ func (m *craftNativeAgentManager) taskStatus(w http.ResponseWriter, r *http.Requ
 			if e.tool.lastReceipt != nil {
 				receipt := *e.tool.lastReceipt
 				result.LastCommittedReceipt = &receipt
+				result.Outcome = craftNativeAgentOutcomeSaved
+			} else if e.tool.proposal != nil {
+				result.Outcome = craftNativeAgentOutcomeProposal
+				result.ProposalID = e.tool.proposal.ID
 			}
 		}
 		e.callMu.Unlock()

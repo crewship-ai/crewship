@@ -1,3 +1,9 @@
+// UI lifecycle tests use a cipher seam (as in artifact-project.test.tsx);
+// real-browser tests cover draft encryption and server admission.
+vi.mock("@/lib/local-draft-seal", () => ({
+ createLocalDraftCipher: async () => ({ seal: async (text: string) => text, open: async (text: string) => text, close() {} }),
+ forgetLocalDraftPage() {}, isSealedLocalDraft: () => true, LocalDraftReadRevoked: class extends Error {},
+}))
 import React from 'react'
 import {QueryClient,QueryClientProvider} from '@tanstack/react-query'
 import {cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react'

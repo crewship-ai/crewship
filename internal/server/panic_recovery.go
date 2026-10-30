@@ -41,17 +41,25 @@ func panicRecoveryMiddleware(logger *slog.Logger, next http.Handler) http.Handle
 				panic(rec)
 			}
 			stack := debug.Stack()
-			err := fmt.Errorf("panic in HTTP handler %s %s: %v", r.Method, r.URL.Path, rec)
+			// The matched pattern is server-owned; URL paths and panic values
+			// can contain bearer capabilities or other request secrets. An
+			// unmatched request has no safe route identity to report.
+			route := r.Pattern
+			if route == "" {
+				route = "unmatched"
+			}
+			panicType := fmt.Sprintf("%T", rec)
+			err := fmt.Errorf("panic in HTTP handler %s %s (panic type %s)", r.Method, route, panicType)
 			logger.Error("HTTP handler panic recovered",
 				"method", r.Method,
-				"path", r.URL.Path,
-				"panic", rec,
+				"path", route,
+				"panic", panicType,
 				"stack", string(stack),
 			)
 			crashreport.Capture(err, map[string]string{
 				"surface": "http_handler",
 				"method":  r.Method,
-				"path":    r.URL.Path,
+				"path":    route,
 			})
 			if isWebSocketUpgrade(r) {
 				return

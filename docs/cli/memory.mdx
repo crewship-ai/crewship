@@ -8,7 +8,7 @@ tag: Experimental
 
 # crewship memory
 
-Access memory FTS5 indexes on the local filesystem without a running server — useful for development, debugging, and scripting — plus the server-side reads that work from any machine: [`inventory`](#inventory-server-api), [`health`](#health), [`hybrid`](#hybrid) and [`versions`](#versions-server-api).
+Access memory FTS5 indexes on the local filesystem without a running server — useful for development, debugging, and scripting — plus the server-side reads that work from any machine: [`inventory`](#inventory-server-api), [`health`](#health), [`hybrid`](#hybrid) and [`versions`](#versions-server-api). [`initialize`](#initialize) provisions a crew's or agent's first memory files through the server.
 
 ## Subcommands
 
@@ -434,6 +434,25 @@ crewship memory import --from ./nanoclaw --group telegram_dev-team --crew eng --
 `--apply` requires OWNER/ADMIN, the same as `export` — it writes into the context an agent reasons from.
 
 Imported documents pass through the same guards an agent's own writes do: a closed allowlist of paths, per-file size ceilings, secret and prompt-injection scanning, and symlink-safe confinement. Refusals are listed per document and the command exits non-zero; a failed document does not stop the rest. Full mapping table and limits: [Memory Portability](/guides/memory-portability).
+
+### initialize
+
+Write a crew's or an agent's first memory files — the administrative first write. A file that already exists is left exactly as it is and counted as existing, so running the same command twice changes nothing. Backed by `POST /api/v1/memory/initialize`; OWNER/ADMIN only.
+
+```bash
+crewship memory initialize --crew engineering --doc CREW.md=@./crew.md
+crewship memory initialize --crew engineering --agent alex \
+  --doc AGENT.md=@./alex.md --doc pins.md=@./pins.md
+crewship memory initialize --crew engineering --doc learned.md=@learned.md --format json   # {"written": 1, "existing": 0}
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--crew` | — | Crew slug or id. Required. |
+| `--agent` | — | Agent slug. Omit for the crew-shared tier. |
+| `--doc` | — | `PATH=@FILE` (body read from `FILE`) or `PATH=TEXT`. Repeatable, 1–8 per call. |
+
+Accepted paths: for the crew tier `CREW.md` (4 KiB) and `learned.md` (8 KiB); for an agent `AGENT.md` (4 KiB), `PERSONA.md` (1.5 KiB), `pins.md` (8 KiB) and `daily/YYYY-MM-DD.md` (32 KiB). The server validates the whole batch — names, sizes, the memory content policy and the credential scrubber — before it writes anything, so one rejected document rejects the call.
 
 ## Scope and Path Resolution
 

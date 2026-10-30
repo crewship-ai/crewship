@@ -26,6 +26,7 @@ available to its owner in that user's preference matrix.
 |---|---|
 | `list` | List notification channels in the workspace. |
 | `add` | Create an email, webhook, or chat/push channel. |
+| `update <id>` | Change enabled state, categories, priority floor or events. |
 | `test <id>` | Send a synthetic notification to a saved channel. |
 | `test-draft` | Test channel settings without saving a channel. |
 | `rm <id>` | Delete a channel; aliases: `delete`, `remove`. |
@@ -66,6 +67,22 @@ crewship notifychannel add --type chat --provider ntfy \
 For chat channels, `--provider` and either one or more `--field` arguments or
 an advanced pre-composed `--url` are required. A created webhook secret or
 chat service URL is shown once, so save it when the command prints it.
+
+## `crewship notifychannel update <id>`
+
+`PATCH /api/v1/notification-channels/{id}`. Only the flags you pass are sent; at least one is required. Workspace channels need `ADMIN` or `OWNER`; a personal channel is updated by its owner.
+
+```bash
+crewship notifychannel update nch_abc123 --enabled=false
+crewship notifychannel update nch_abc123 --min-priority high --categories chat.replies,security.alerts
+```
+
+| Flag | Type | Description |
+|---|---|---|
+| `--enabled` | `bool` | Enable the channel (`--enabled`) or disable it (`--enabled=false`). |
+| `--categories` | `string list` | Replace the admin category allowlist. An empty value (`--categories ""`) restores "every category". |
+| `--min-priority` | `string` | Priority floor: `low`, `medium`, `high` or `urgent`. |
+| `--events` | `string list` | Replace the subscribed run outcomes (`failed`, `completed`, `all`) on the legacy path. |
 
 ## `crewship notifychannel providers`
 

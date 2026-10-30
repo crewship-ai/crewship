@@ -100,5 +100,14 @@ func (r *Router) registerCraftNativeRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/document/restore", roleSelf, d.restoreSnapshot)
 	// openapi: responses 200,400,401,403,409,422,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/document/reconcile", roleSelf, d.reconcileSnapshot)
+	// Agent proposals prepared while a human holds the lease (#4480).
+	// openapi: responses 200,401,403,409,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/craft/proposals", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(d.listProposals)))))
+	// openapi: responses 200,401,403,404,409,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/craft/proposals/{proposalID}", authed(wsCtx(r.providerAccountPolicy(http.HandlerFunc(d.proposalDocument)))))
+	// openapi: responses 200,400,401,403,404,409,413,422,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/craft/proposals/{proposalID}/accept", roleSelf, d.acceptProposal)
+	// openapi: responses 200,400,401,403,404,409,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/craft/proposals/{proposalID}/reject", roleSelf, d.rejectProposal)
 
 }

@@ -107,7 +107,12 @@ func newRemapCUID() string {
 // and add the real FK in a migration when one becomes possible — this map is a
 // bridge over a schema gap, not a substitute for the schema.
 var virtualForeignKeys = map[string][]foreignKeyEdge{
-	"agent_user_preferences":            {{column: "chat_id", refTable: "chats", refColumn: "id"}, {column: "feedback_id", refTable: "message_feedback", refColumn: "id"}},
+	"agent_user_preferences": {{column: "chat_id", refTable: "chats", refColumn: "id"}, {column: "feedback_id", refTable: "message_feedback", refColumn: "id"}},
+	// artifact_project_comments.task_id (20261027175100) is a bare TEXT
+	// back-reference to the send-to-agent task. Pass 1 remints the task's id
+	// on a fork; every hand-off reader and the dispatch UPDATE join
+	// t.id=c.task_id, so a stale value hides the pending feedback for good.
+	"artifact_project_comments":         {{column: "task_id", refTable: "artifact_project_comment_tasks", refColumn: "id"}},
 	"execution_origins":                 {{column: "chat_id", refTable: "chats", refColumn: "id"}},           // historical TEXT; follow an extant chat on fork
 	"issue_mutation_outbox":             {{column: "mission_id", refTable: "missions", refColumn: "id"}},     // historical audit target; an absent issue is valid
 	"pending_runs":                      {{column: "workspace_id", refTable: "workspaces", refColumn: "id"}}, // legacy bare TEXT; queued provenance must follow its fork
@@ -382,6 +387,15 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 				continue
 			}
 			newID := newRemapCUID()
+			if table == "craft_native_proposals" {
+				// Proposal routes and clients require ncp_<24 lowercase hex>.
+				// A generic CUID would leave a restored candidate unreachable.
+				var random [12]byte
+				if _, err := rand.Read(random[:]); err != nil {
+					return fmt.Errorf("backup: remint native proposal: %w", err)
+				}
+				newID = "ncp_" + hex.EncodeToString(random[:])
+			}
 			if idMap[table] == nil {
 				idMap[table] = map[string]string{}
 			}
@@ -412,6 +426,15 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 						row[edge.column] = newVal
 					}
 				}
+			}
+		}
+	}
+	// The profile's primary key is page_id, so the generic id map has no
+	// craft_native_documents entry. Follow its Page anchor explicitly.
+	for _, row := range dump.Tables["craft_native_proposals"] {
+		if old, ok := row["page_id"].(string); ok {
+			if mapped := idMap["pages"][old]; mapped != "" {
+				row["page_id"] = mapped
 			}
 		}
 	}

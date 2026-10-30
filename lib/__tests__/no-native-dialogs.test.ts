@@ -17,6 +17,7 @@ const ALLOWED: Record<string, string> = {
   // Documented fallback when no <ConfirmHost /> is mounted (a standalone
   // component root or a unit test). Inside the app shell it uses askConfirm.
   "hooks/use-unsaved-navigation-guard.ts": "fallback without ConfirmHost",
+  "hooks/use-auth.tsx": "sign-out draft warning fallback without ConfirmHost",
 }
 
 function walk(dir: string, out: string[]) {

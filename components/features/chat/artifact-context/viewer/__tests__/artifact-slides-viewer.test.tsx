@@ -1,4 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+// UI lifecycle tests use a cipher seam (as in artifact-viewer-panel.test.tsx);
+// real-browser tests cover draft encryption and server admission.
+vi.mock("@/lib/local-draft-seal", () => ({
+ createLocalDraftCipher: async () => ({ seal: async (text: string) => text, open: async (text: string) => text, close() {} }),
+ forgetLocalDraftPage() {}, isSealedLocalDraft: () => true, LocalDraftReadRevoked: class extends Error {},
+}))
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, expect, it, vi } from "vitest"
 import fixture from "@/testdata/artifact-slides-projection.json"
@@ -13,6 +19,12 @@ vi.mock("../../projects/use-artifact-project-data", () => ({
 }))
 import { ArtifactViewerProvider } from "../../projects/artifact-viewer-context"
 import { ArtifactViewerPanel } from "../artifact-viewer-panel"
+// The composer opens once the private local draft has loaded.
+async function typeComment(value: string) {
+  const box = screen.getByRole("textbox", { name: "Comment" })
+  await waitFor(() => expect(box).not.toBeDisabled())
+  fireEvent.change(box, { target: { value } })
+}
 afterEach(() => vi.unstubAllEnvs())
 
 it("starts at deck order rather than manifest order and posts the first authored anchor without a thumbnail click", async () => {
@@ -38,7 +50,7 @@ it("starts at deck order rather than manifest order and posts the first authored
   await screen.findByText("Slide 1 / 2")
   fireEvent.click(screen.getByRole("button", { name: "Select" }))
   fireEvent.pointerDown(screen.getByRole("button", { name: "text 1" }))
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Improve this title" } })
+  await typeComment("Improve this title")
   fireEvent.click(screen.getByRole("button", { name: "Save comment" }))
   expect(mock.comment).toHaveBeenCalledWith({ version: 2, path: "slides/alpha.html", selector: "#title", quote: "Revenue", text: "Improve this title", send_to_agent: false }, expect.anything())
 })
