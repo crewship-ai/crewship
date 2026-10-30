@@ -40,7 +40,8 @@ and JSON bodies still rely on server authorization; this is not a general
 workspace isolation guarantee. Ask for missing credentials rather than
 printing tokens or copying them into instructions or generated client configs.
 
-CLI mutations require `--yes`; MCP mutations require the operator's startup
+Some CLI mutations require `--yes`; consult the command help. Generic MCP
+mutations require the operator’s startup
 `--allow-write` and per-call `confirm_write=true`. These switches acknowledge a
 mutation by the model, not approval by a human. Existing authorization carries forward; do not
 ask for the same permission again. Server permissions and approval gates still
@@ -124,8 +125,10 @@ screen you cannot confirm; the slug and version always identify the work.
 ### Who may write
 
 With a human profile, these commands act as that person under their own
-rights. `page` and `craft` commands do not take `--yes` and write as soon as
-they run, so run a write only for a change the user asked for.
+rights. Artifact, Design and Craft mutations write as soon as they run;
+they do not have a general confirmation step. Run a write only for a change
+the user asked for. Some other Page commands, such as `page delete`, do
+accept `--yes`; check the individual command help.
 
 In a live agent run (`CREWSHIP_AGENT_TOKEN` is set), `page artifact` and
 `page design` send the operation to the run's scoped tools and refuse
@@ -190,8 +193,10 @@ a retained snapshot). `apply <slug> --file changes.json` takes
 `node` (id, type `frame|rect|text|image`, name, x, y, width, height, fill,
 optional parentId, text, src), `delete` an `id`, or `reorder` with `order`.
 Changes land on the live canvas people are editing, so keep existing node IDs
-and touch only the nodes you mean to change. Finish with `snapshot <slug>
---message "..."` to save a version; `versions` and `restore --version <n>`
+and touch only the nodes you mean to change. Every successful `apply` already
+saves a retained version; do not add a snapshot afterwards. Use `snapshot
+<slug> --message "..."` only to retain the current live canvas separately,
+for example after human browser edits. `versions` and `restore --version <n>`
 work as for Projects. When a person sent a Design comment to your run, the
 `apply` that changes the node records the answer on the version it creates; a
 `snapshot` does not answer it. Creating a Design, `share`, `comment` and `agent`
