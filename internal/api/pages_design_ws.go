@@ -31,6 +31,9 @@ const (
 var (
 	errDesignProtocol    = errors.New("invalid Design protocol message")
 	errDesignRateLimited = errors.New("Design sync requests are rate limited")
+	// Another person's live connection holds this awareness client ID. The
+	// frame is dropped; the connection and its document sync stay open.
+	errDesignAwarenessHeld = errors.New("awareness identity held by another actor")
 )
 
 // Sync step 1 requests are a token bucket per connection: a burst of
@@ -80,6 +83,7 @@ type designClient struct {
 	awareness       []byte
 	clientID, clock uint64
 	hasID           bool
+	retired         bool // replaced by the same actor's newer connection
 	syncTokens      float64
 	syncChecked     time.Time
 }
@@ -195,9 +199,22 @@ func designAwareness(raw []byte, client *designClient, room *designRoom) ([]byte
 	if client.hasID && client.clientID != id {
 		return nil, errors.New("awareness identity changed")
 	}
+	// A client ID is bound to the actor holding it. Another actor claiming it
+	// is ignored rather than closing anybody, so a reader who learned an
+	// editor's ID from presence cannot lock that editor out. The same actor
+	// claiming it is a reconnect while the server still holds the old socket:
+	// the old connection is retired without announcing the shared ID as gone.
 	for c := range room.clients {
-		if c != client && c.hasID && c.clientID == id {
-			return nil, errors.New("awareness identity already connected")
+		if c == client || !c.hasID || c.clientID != id {
+			continue
+		}
+		if c.actor != client.actor {
+			return nil, errDesignAwarenessHeld
+		}
+		c.hasID, c.retired = false, true
+		delete(room.clients, c)
+		if c.conn != nil {
+			_ = c.conn.Close()
 		}
 	}
 	var value map[string]any
@@ -410,14 +427,21 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			room.mu.Lock()
+			if client.retired {
+				room.mu.Unlock()
+				return
+			}
 			if kind == 1 {
 				e = h.designTx(r, k, false, func(_ context.Context, _ *sql.Tx, _ string) error { return nil })
 				if e == nil {
 					var sanitized []byte
 					sanitized, e = designAwareness(frame, client, room)
-					if e == nil {
+					switch {
+					case e == nil:
 						room.broadcast(sanitized, client)
-					} else {
+					case errors.Is(e, errDesignAwarenessHeld):
+						e = nil
+					default:
 						e = fmt.Errorf("%w: %v", errDesignProtocol, e)
 					}
 				}

@@ -17,6 +17,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **An agent runtime is no longer held busy by another crew's interrupted run.** A run recovered without a container but recorded for a different crew no longer blocks refreshing this crew's runtime; a run with an unknown crew still blocks it (#4486).
 
+- **A Read-only Design viewer can no longer stall every database write or lock an editor out.** Answering a Design websocket sync request no longer runs the Yjs engine while holding the server-wide writer lock, and a flood of sync requests closes the socket (4429). An update the engine refuses now closes with 4400 "Design update rejected" instead of 1008 "permissions changed", which sent the browser into an endless re-admission loop; 1008 is used only for changed authority. Another person claiming an editor's presence ID is ignored instead of closing the editor, and the same person reconnecting replaces their stale connection.
+
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.
 
 - **Shared artifact commenters can post feedback in the preview.** Comments stay anchored to the shared version without granting editing or agent execution rights; changing accounts, workspace or permissions retires an unfinished selection.

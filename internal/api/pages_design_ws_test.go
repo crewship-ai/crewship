@@ -15,12 +15,60 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+func designTestAwarenessFrame(id, clock uint64, state string) []byte {
+	payload := designAppendUint(nil, 1)
+	payload = designAppendUint(payload, id)
+	payload = designAppendUint(payload, clock)
+	payload = designAppendUint(payload, uint64(len(state)))
+	payload = append(payload, state...)
+	frame := designAppendUint(nil, 1)
+	frame = designAppendUint(frame, uint64(len(payload)))
+	return append(frame, payload...)
+}
+
 func (f *designAuthorityFixture) reader(t *testing.T, user string) {
 	t.Helper()
 	f.addUser(t, user)
 	if w := f.grant(t, user, "read"); w.Code != 200 {
 		t.Fatalf("read grant %d %s", w.Code, w.Body)
 	}
+}
+
+// awarenessHolder reports the actor whose live connection currently holds the
+// awareness client ID in this Design room, or "" when none does.
+func (f *designAuthorityFixture) awarenessHolder(id uint64) string {
+	room := f.h.designRoom(artifacts.VersionKey{WorkspaceID: f.workspace, PageID: f.page})
+	room.mu.Lock()
+	defer room.mu.Unlock()
+	for c := range room.clients {
+		if c.hasID && c.clientID == id {
+			return c.actor
+		}
+	}
+	return ""
+}
+
+func (f *designAuthorityFixture) waitAwarenessHolder(t *testing.T, id uint64, actor string) {
+	t.Helper()
+	deadline := time.Now().Add(8 * time.Second)
+	for f.awarenessHolder(id) != actor {
+		if time.Now().After(deadline) {
+			t.Fatalf("awareness %d held by %q, want %q", id, f.awarenessHolder(id), actor)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (f *designAuthorityFixture) waitRevisionAbove(t *testing.T, before int64) bool {
+	t.Helper()
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if f.revision(t) > before {
+			return true
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return false
 }
 
 func designTestUpdate(t *testing.T, id string) design.Result {
@@ -173,5 +221,79 @@ func TestDesignWebsocketCloseCodes(t *testing.T) {
 				t.Fatalf("close code %d, want %d", code, tc.code)
 			}
 		})
+	}
+}
+
+// A Read-only viewer that claims an editor's awareness client ID must not lock
+// that editor out of the live session.
+func TestDesignWebsocketReaderCannotSquatEditorAwareness(t *testing.T) {
+	f := newDesignAuthorityFixture(t)
+	reader := "design-ws-squatter"
+	f.reader(t, reader)
+	const id = 4242
+	first := f.dial(t, f.owner)
+	if err := first.WriteMessage(websocket.BinaryMessage, designTestAwarenessFrame(id, 1, `{"cursor":null}`)); err != nil {
+		t.Fatal(err)
+	}
+	f.waitAwarenessHolder(t, id, f.owner)
+	_ = first.Close()
+	f.waitAwarenessHolder(t, id, "")
+	squatter := f.dial(t, reader)
+	if err := squatter.WriteMessage(websocket.BinaryMessage, designTestAwarenessFrame(id, 1, `{"cursor":null}`)); err != nil {
+		t.Fatal(err)
+	}
+	f.waitAwarenessHolder(t, id, reader)
+	editor := f.dial(t, f.owner)
+	if err := editor.WriteMessage(websocket.BinaryMessage, designTestAwarenessFrame(id, 2, `{"cursor":null}`)); err != nil {
+		t.Fatal(err)
+	}
+	before := f.revision(t)
+	if err := editor.WriteMessage(websocket.BinaryMessage, designTestUpdate(t, "after-squat").Frame); err != nil {
+		t.Fatal(err)
+	}
+	if !f.waitRevisionAbove(t, before) {
+		t.Fatal("editor update was not persisted after a reader squatted its awareness ID")
+	}
+	_ = editor.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
+	for {
+		_, _, err := editor.ReadMessage()
+		if err == nil {
+			continue
+		}
+		if websocket.IsCloseError(err, websocket.ClosePolicyViolation) {
+			t.Fatalf("editor was closed as a permission change: %v", err)
+		}
+		break
+	}
+}
+
+// The same person reconnecting while the server still holds the old socket
+// (a dropped network) replaces that connection instead of being refused.
+func TestDesignWebsocketSameActorReclaimsAwareness(t *testing.T) {
+	f := newDesignAuthorityFixture(t)
+	const id = 77
+	zombie := f.dial(t, f.owner)
+	if err := zombie.WriteMessage(websocket.BinaryMessage, designTestAwarenessFrame(id, 1, `{"cursor":null}`)); err != nil {
+		t.Fatal(err)
+	}
+	f.waitAwarenessHolder(t, id, f.owner)
+	editor := f.dial(t, f.owner)
+	if err := editor.WriteMessage(websocket.BinaryMessage, designTestAwarenessFrame(id, 2, `{"cursor":null}`)); err != nil {
+		t.Fatal(err)
+	}
+	if code := designCloseCodeOf(t, zombie); code == websocket.ClosePolicyViolation {
+		t.Fatal("replaced connection was reported as a permission change")
+	}
+	before := f.revision(t)
+	if err := editor.WriteMessage(websocket.BinaryMessage, designTestUpdate(t, "after-reclaim").Frame); err != nil {
+		t.Fatal(err)
+	}
+	if !f.waitRevisionAbove(t, before) {
+		t.Fatal("reconnected editor could not write after reclaiming its awareness ID")
+	}
+	// The retired connection must not announce the shared ID as gone.
+	time.Sleep(200 * time.Millisecond)
+	if holder := f.awarenessHolder(id); holder != f.owner {
+		t.Fatalf("awareness %d holder %q after reclaim", id, holder)
 	}
 }
