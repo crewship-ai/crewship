@@ -17,7 +17,13 @@ var routineMetadataCmd = &cobra.Command{
 	Use:   "metadata <run_id>",
 	Short: "Mutate a run's metadata scratchpad (set / increment / append)",
 	Long: `Applies set/increment/append ops to a run's metadata, readable from
-later steps as {{ run.metadata.x }}. Each flag takes a JSON object.`,
+later steps as {{ run.metadata.x }}. Each flag takes a JSON object; pass at
+least one. Prints the merged metadata document. Requires MANAGER or above.
+
+Examples:
+  crewship routine metadata run_abc123 --set '{"stage":"done"}'
+  crewship routine metadata run_abc123 --increment '{"count":1}' --append '{"errors":"oops"}'
+  crewship routine metadata run_abc123 --set '{"stage":"done"}' -f json | jq .metadata`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -74,7 +80,14 @@ later steps as {{ run.metadata.x }}. Each flag takes a JSON object.`,
 var routineTreeCmd = &cobra.Command{
 	Use:   "tree <run_id>",
 	Short: "Show a run and its child runs (call_pipeline / deferred / replay)",
-	Args:  cobra.ExactArgs(1),
+	Long: `Lists a run and every run it spawned (call_pipeline steps, deferred
+dispatch, replay) as a flat, parent-linked list. The table shows "(root)"
+for the top run; machine output keeps parent_id "" for it.
+
+Examples:
+  crewship routine tree run_abc123
+  crewship routine tree run_abc123 -f json | jq '.[] | select(.status=="failed")'`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -137,7 +150,17 @@ type runTreeNode struct {
 var routineSignalCmd = &cobra.Command{
 	Use:   "signal <run_id>",
 	Short: "Deliver a payload to a running run's wait:event step (input-stream injection)",
-	Args:  cobra.ExactArgs(1),
+	Long: `Delivers a payload to a run parked on a wait:event step; the payload
+becomes that step's output and the run resumes. Fails with 404 when the run
+is not waiting on that event_type. Requires MANAGER or above.
+
+To wake every run waiting on an event without knowing the run ids, use
+'crewship signal send --event-type <type>' instead.
+
+Examples:
+  crewship routine signal run_abc123 --event approve
+  crewship routine signal run_abc123 --event deploy.finished --payload "v1.4.2"`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
