@@ -134,8 +134,31 @@ crewship doc status -f json
 
 ## `crewship doc initialize <page-slug>`
 
-Populate an empty human-owned artifact with its first document. Create the
-artifact with `crewship page create --file page.yaml --allow-empty`, then supply a JSON request
+Populate an empty artifact that you own personally with its first document.
+The artifact must not be owned by a crew and must hold no other output. Create
+one with [`crewship page create`](/cli/page) and `--allow-empty`. This command
+needs a credential with the `workspace:admin` CLI scope. A minimal definition
+is enough:
+
+```yaml
+apiVersion: crewship/v1
+kind: Page
+metadata:
+  slug: launch-plan
+  name: Launch plan
+spec: {}
+```
+
+```bash
+crewship page create --file page.yaml --allow-empty
+```
+
+This artifact is owned by you and shared with the workspace in the usual way;
+document initialization does not require a private artifact. (Native Slides
+does require one, so the same artifact is not a valid
+[`slides initialize`](/cli/slides) target.)
+
+Then supply a JSON request
 containing an operation `id`, explicit `schema` (2 or 3), and a `body` document
 tree. Schema 3 also requires the original `page_id`. Headings and paragraphs use
 schema 2; initialization does not silently upgrade an existing document.
@@ -154,10 +177,10 @@ crewship doc initialize @<artifact-id> --file initialize.json
 
 The first response is the initial state, with `schema`, `rev: 0`, a numeric
 `epoch`, `generation`, `blocks` (block `id` and `hash`) and the stored snapshot.
-An exact retry returns the receipt instead:
+An exact retry returns the original receipt with `duplicate: true` instead:
 
 ```json
-{"actor":"user:<user-id>","epoch":0,"found":true,"id":"init-1","kind":"init","rev":0}
+{"actor":"user:<user-id>","duplicate":true,"epoch":0,"found":true,"id":"init-1","kind":"init","rev":0}
 ```
 
 The native editor's **History** button opens a separate read-only view of retained
@@ -223,25 +246,41 @@ edit. Read after initialization to obtain the editing epoch.
 crewship doc read @<artifact-id> -f json
 ```
 
+The response also carries the stored editor state (`generation`,
+`incarnation`, `snapshot`, `snapshotRev`, `updates` and `blocks`). This
+abbreviated example leaves those values out:
+
 ```json
 {
+  "blocks": [ … ],
   "can_comment": false,
   "can_resolve": false,
   "can_write": true,
   "content": {"type": "doc", "content": [ … ]},
   "epoch": "<opaque-epoch>",
-  "outline": [{"hash": "11afc865…", "id": "intro", "text": "Original selected text"}],
+  "generation": 0,
+  "incarnation": "…",
+  "outline": [{"hash": "11afc865…", "id": "intro", "parent": null, "text": "Original selected text", "type": "paragraph"}],
   "page_id": "<artifact-id>",
   "rev": 0,
-  "schema": 2
+  "schema": 2,
+  "snapshot": "…",
+  "snapshotRev": 0,
+  "updates": [ … ]
 }
 ```
 
-An artifact without a document returns `404 document not found`.
+Each `outline` entry has the block `id`, its node `type`, the `parent` block ID
+(`null` at the top level), its `hash` and its plain `text`.
+
+An empty artifact with no document yet returns `404 document not found`. An
+artifact that holds a different output, such as a typed version, Slides deck,
+board, workbook, panels or a Project, returns `403 document access denied`.
 
 ## `crewship doc outline <page-slug>`
 
-Print a JSON array of current block IDs, text and hashes. This command
+Print a JSON array of the current blocks, each with `id`, `type`, `parent`,
+`hash` and `text`. This command
 reads the same confirmed document as `read`; it does not mutate it. It always
 prints JSON, whatever `--format` you pass.
 
@@ -250,7 +289,7 @@ crewship doc outline @<artifact-id>
 ```
 
 ```json
-[{"hash":"11afc865…","id":"intro","text":"Original selected text"}]
+[{"hash":"11afc865…","id":"intro","parent":null,"text":"Original selected text","type":"paragraph"}]
 ```
 
 ## `crewship doc patch <page-slug>`
@@ -279,7 +318,8 @@ crewship doc patch @<artifact-id> --file patch.json
 {"actor":"user:<user-id>","epoch":"<opaque-epoch>","id":"patch-1","kind":"human","rev":1}
 ```
 
-An exact retry returns the same receipt with `found: true`.
+An exact retry returns the original receipt with `found: true` and
+`duplicate: true`, plus the request's `schema` and the current `epoch`.
 
 ## Errors
 
@@ -290,11 +330,14 @@ With `-f json`, errors are printed as an `error` object with `message`,
 | Situation | Status | Message | Exit |
 |---|---|---|---|
 | Document service off | 503 | `Docs are not enabled on this server` | 7 |
-| Artifact has no document | 404 | `document not found` | 3 |
-| No such artifact for `patch` | 404 | `document page not found` | 3 |
+| Empty artifact with no document yet | 404 | `document not found` | 3 |
+| No such artifact (`read`, `outline`, `initialize`, `patch`, `checkpoints`, `checkpoint`, `restore`) | 404 | `document page not found` | 3 |
+| Artifact holds another output, belongs to a crew (`initialize`), or you lack access | 403 | `document access denied` | 4 |
 | No retained history | 404 | `document history unavailable` | 3 |
 | Token without `pages:write` edits | 403 | `Forbidden` | 4 |
-| Stale `ifRev`, `ifHash` or `epoch` | 409 | `document revision conflict` | 5 |
+| Stale `epoch` | 409 | `old epoch; reload document` | 5 |
+| Stale `ifRev` or `ifHash`, or unknown `target` | 409 | `semantic precondition conflict` | 5 |
+| Another write committed at the same time | 409 | `document revision conflict` | 5 |
 | Malformed restore packet | 400 | `original bounded Document restore packet required` | 2 |
 | Unknown chat for `chat-results` | 404 | `chat not found` | 3 |
 | Missing `--file`, file over the size limit, not one JSON object | — | Local message | 1 |

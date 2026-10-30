@@ -92,10 +92,18 @@ schema fixture. The CLI validates the request before sending it. Unknown or
 wrongly cased fields fail locally with
 `Slides object contains unknown or incorrectly cased fields`.
 
-The target must be a private, human-owned artifact that you own, with no other
+The target must be a private artifact that you own personally, with no other
 content: no document, typed version, Project, board, workbook, panels or live
-project. `crewship page create` makes a shared record, which this command
-refuses with `404`.
+project. A private artifact is visible only to its owner and, after an audit,
+to the workspace OWNER.
+
+The current release has no CLI command or UI control that creates such an
+empty private artifact for a deck. `crewship page create`, with or without
+`--allow-empty`, creates an artifact that is shared with the workspace in the
+usual way. That artifact is a valid target for
+[`crewship doc initialize`](/cli/doc), which does not require a private
+artifact, but this command refuses it with `404 Slides not found`. Without such
+a target, use `slides read` and `slides at-rev` on decks that already exist.
 
 ```bash
 crewship slides initialize @<artifact-id> --file initialize.json -f json

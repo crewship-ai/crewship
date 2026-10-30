@@ -29,19 +29,24 @@ create and draft are for an admitted agent run only.`, Example: `  crewship doc 
 and the caller's can_write, can_comment and can_resolve. Use epoch, rev and a
 block hash from this output when preparing a patch.`, `  crewship doc read @<artifact-id>
   crewship doc read <slug> -f yaml`},
-		"outline": {"Print the current block IDs, text and hashes as JSON", `Print a JSON array of {id, text, hash} for the confirmed blocks. Reads the same
-state as read and never changes the document.`, `  crewship doc outline @<artifact-id>`},
+		"outline": {"Print the current block IDs, types, hashes and text as JSON", `Print a JSON array of {id, type, parent, hash, text} for the confirmed blocks;
+parent is null at the top level. Reads the same state as read and never
+changes the document.`, `  crewship doc outline @<artifact-id>`},
 		"patch": {"Apply a guarded text replacement to one block", `Send one JSON object (at most 2 MiB) with id, schema, epoch, target, text, ifRev
 and ifHash; schema 3 also needs page_id. A changed revision, hash or epoch
-returns 409 and nothing is saved. Resend the exact request with the same id
-after a lost confirmation; the original receipt comes back with found: true.`, `  crewship doc patch @<artifact-id> --file patch.json
+refuses the edit and nothing is saved. Resend the exact request with the same id
+after a lost confirmation; the original receipt comes back with found: true
+and duplicate: true. A stale epoch, revision or hash returns 409.`, `  crewship doc patch @<artifact-id> --file patch.json
   cat patch.json | crewship doc patch @<artifact-id> --file -`},
 		"status": {"Show whether native documents are enabled on this server", `Print enabled, wordcraft_native and gridcraft_native for the selected server.
 enabled is false unless the server starts with CREWSHIP_DOCUMENTS_ENABLED=true.`, `  crewship doc status
   crewship doc status -f yaml`},
 		"initialize": {"Write the first content of an empty artifact as a document", `Send one JSON object (at most 2 MiB) with an operation id, schema (2 or 3) and
 a body document tree; schema 3 also needs page_id. Resend the exact request
-after a lost confirmation. Read the document afterwards to obtain its epoch.`, `  crewship doc initialize @<artifact-id> --file initialize.json`},
+after a lost confirmation; the original receipt comes back with duplicate: true.
+The artifact must be empty and owned by you, not by a crew (for example one made
+with crewship page create --allow-empty). Read the document afterwards to obtain
+its epoch.`, `  crewship doc initialize @<artifact-id> --file initialize.json`},
 	}
 	for _, operation := range []string{"read", "outline", "patch", "status", "initialize"} {
 		operation := operation
