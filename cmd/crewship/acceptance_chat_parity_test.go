@@ -756,7 +756,7 @@ func sendCancelAccepted(conn *websocket.Conn, request cli.WSMessage) {
 
 // An older server answers a stop with the run's done only. The CLI neither
 // calls that a confirmed stop nor waits out --timeout: it degrades to the
-// documented "ended, not confirmed" outcome (exit 9) shortly after the done.
+// documented "ended, not confirmed" outcome (exit 10) shortly after the done.
 func TestAcceptance_ChatStop_OlderServerDegradesExplicitly(t *testing.T) {
 	s := newChatParityStub(t)
 	s.onFrame = func(conn *websocket.Conn, f cli.WSMessage) bool {
@@ -798,7 +798,7 @@ func TestAcceptance_ChatStop_AcknowledgedRequestIgnoresUnrelatedDone(t *testing.
 }
 
 // A signal-driven stop of `run` against an older server: the output is kept,
-// the run is reported ended-but-unconfirmed with exit 9, not [cancelled].
+// the run is reported ended-but-unconfirmed with exit 10, not [cancelled].
 func TestAcceptance_Run_StopAgainstOlderServerDegradesExplicitly(t *testing.T) {
 	s := newChatParityStub(t)
 	s.onFrame = func(conn *websocket.Conn, f cli.WSMessage) bool {

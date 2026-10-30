@@ -303,16 +303,16 @@ missing run cannot confirm a stop.
 older server the stop still works, but nothing confirms it: when the run's
 `done` arrives and the server has not acknowledged the request within a few
 seconds, the command reports `run ended; cancellation not confirmed by server
-(server too old?)` and exits **9**. `crewship run` stopped with Ctrl-C or
+(server too old?)` and exits **10**. `crewship run` stopped with Ctrl-C or
 SIGTERM degrades the same way: it keeps the output, prints
-`[ended — stop not confirmed]` and exits 9.
+`[ended — stop not confirmed]` and exits 10.
 
 | Outcome | Exit | `--format json` |
 | --- | --- | --- |
 | Stop confirmed | `0` | `{"chat_id": …, "status": "stopped"}` |
 | Sent without `--wait` | `0` | `{"chat_id": …, "status": "requested"}` |
 | Server answered `cancelled:false`, or no answer within `--timeout` | `1` | error envelope |
-| Run ended, server did not confirm (older server) | `9` | error envelope |
+| Run ended, server did not confirm (older server) | `10` | error envelope |
 
 ```bash
 crewship chat stop c_abc123

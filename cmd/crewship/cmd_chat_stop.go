@@ -42,7 +42,7 @@ active, or it belongs to someone else).
 Confirmation needs a server with cancel confirmation (cancel_accepted /
 cancel_result). Against an older server, once the run's done arrives without
 an acknowledgement the command reports "run ended; cancellation not confirmed
-by server" and exits 9.
+by server" and exits 10.
 
 Examples:
   crewship chat stop c_abc123
@@ -121,7 +121,9 @@ var errStopEndedUnconfirmed = errors.New("run ended; cancellation not confirmed 
 // exitStopEndedUnconfirmed is the exit code of errStopEndedUnconfirmed, for
 // `chat stop --wait` and a signal-stopped `run`. Command-specific, like
 // `crewship wait`'s run-outcome codes; documented in docs/cli/chat.mdx.
-const exitStopEndedUnconfirmed = 9
+// Not 9: that is cli.ExitBusy ("nothing was delivered, retry"), and a script
+// retrying a run whose stop was merely unconfirmed would send it twice.
+const exitStopEndedUnconfirmed = 10
 
 func stopEndedUnconfirmedError() error {
 	return cli.WithExitCode(errStopEndedUnconfirmed, exitStopEndedUnconfirmed)
