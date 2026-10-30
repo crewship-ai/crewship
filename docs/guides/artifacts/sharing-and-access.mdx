@@ -251,12 +251,15 @@ in the preview are changed.
 </Step>
 </Steps>
 
+If every artifact was changed, the dialog closes. If some were not, it stays
+open with a total such as *2 shared, 1 not* and the reason for each artifact
+that was not changed.
+
 The preview does not check whether an artifact is private. A private artifact
-is listed as *will be shared*, but the share then fails and the dialog closes
-without a message. Before you share several at once, check that none of them
-shows the **Private** or **Not shared** pill, and share a version of each one
-that does. You can act on at most 200
-artifacts at a time. Archiving hides an artifact
+is listed as *will be shared*, and its share is then refused and reported in
+that list. Before you share several at once, check that none of them shows the
+**Private** or **Not shared** pill, and share a version of each one that does.
+You can act on at most 200 artifacts at a time. Archiving hides an artifact
 and never deletes it. Restore it from the **Archive** view.
 
 ## Agents
