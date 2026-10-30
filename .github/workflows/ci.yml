@@ -2401,7 +2401,7 @@ jobs:
   # shipped without `go test` ever running on macOS (the post-release smoke
   # test only runs `crewship version`), and no arm64 runtime coverage
   # existed at all (goreleaser cross-BUILDS linux/darwin arm64, but nothing
-  # executed the code). macos-14 and ubuntu-24.04-arm are both arm64, so
+  # executed the code). macos-15 and ubuntu-24.04-arm are both arm64, so
   # together with the amd64 job all four released GOOS/GOARCH combos get
   # compile coverage and three get runtime coverage. Docker-dependent tests
   # skip themselves when no daemon is present (macOS runners have none).
@@ -2429,7 +2429,7 @@ jobs:
       matrix:
         include:
           - name: macos-arm64
-            runner: macos-14
+            runner: macos-15
           - name: linux-arm64
             runner: ubuntu-24.04-arm
     steps:

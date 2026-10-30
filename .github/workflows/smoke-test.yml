@@ -43,7 +43,7 @@ jobs:
     # Post-release only: needs a published release to download. Skip on PRs (the
     # pull_request trigger is for the pre-merge package-smoke job below).
     if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success'
-    # Pinning the macOS arm64 runner to macos-14 explicitly: macos-latest still
+    # Pinning the macOS arm64 runner to macos-15 explicitly: macos-latest still
     # rotates between intel and arm64 hosts at the time of writing, and we want
     # the smoke test to actually exercise the darwin/arm64 archive — not silently
     # downgrade to x86 on whichever host the scheduler picks.
@@ -58,7 +58,7 @@ jobs:
             runs-on: ubuntu-latest
           - os: darwin
             arch: arm64
-            runs-on: macos-14
+            runs-on: macos-15
             # Windows is excluded for now — its UX is documented as
             # "experimental" in the README, the install script doesn't support
             # it, and the .zip layout differs (PowerShell unzip vs tar -xz).
