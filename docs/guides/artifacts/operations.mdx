@@ -34,6 +34,10 @@ UI when it is built.
 | Design | `artifacts_design` | `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true` | `NEXT_PUBLIC_ARTIFACTS_DESIGN` |
 | Live workbook editing | `gridcraft_editor` | `CREWSHIP_GRIDCRAFT_ENABLED` and `CREWSHIP_GRIDCRAFT_EDITOR_ENABLED` are both **required**, not an override | — |
 
+The library variable is needed for the library across kinds. Dashboard and
+Slides additionally need their own preview variable, and the chat viewer needs
+`NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
+
 Every workspace flag is seeded with its instance default off. Enable one for the
 current workspace, or check what a workspace resolves to:
 
@@ -45,8 +49,12 @@ crewship feature-flag inherit artifact_projects  # drop the override again
 
 `crewship feature-flag update <key> --enabled` changes the instance default for
 every workspace that has no override. Native Word and Sheet editing is an
-instance setting, `CREWSHIP_CRAFT_NATIVE_ENABLED`, not a workspace flag; it needs
-a restart. See [Environment variables](/configuration/environment) and
+instance setting, `CREWSHIP_CRAFT_NATIVE_ENABLED`, not a workspace flag. That
+switch alone does not enable editing: it needs a qualified engine revision,
+CLI executable and digest, editor bundle and URL, plus the native bundle
+directory. The operator must install and qualify these before restarting.
+Live workbooks also need their private service socket, service token file
+and qualified editor bundles. See [Environment variables](/configuration/environment) and
 [`crewship feature-flag`](/cli/feature-flag).
 
 <Note>
@@ -82,7 +90,7 @@ artifact:
 | Retained history | 256 MiB | `413` with code `artifact_history_quota` (Design: `413` "Design capacity is full") |
 | One version | 32 MiB of file content | `413`, same code as above |
 | Files in one version | 256 | `400` (invalid manifest) |
-| File path | 512 characters, relative, no `..` | `400` |
+| File path | 512 bytes, relative, no `..` | `400` |
 | Version message | 4096 bytes | `400` |
 
 History usage counts every file stored once per artifact (identical content is
@@ -145,9 +153,14 @@ each one's kind in `artifact_kind` (`project`, `dashboard`, `slides`, `design`,
 `word` or `sheet`):
 
 ```bash
-crewship page list -f json \
+crewship page list --archived include --test-items include --limit 500 -f json \
   | jq -r '.[] | select(.artifact_kind == "project" or .artifact_kind == "dashboard" or .artifact_kind == "slides") | .slug'
 ```
+
+Archived and test items still consume history and count toward the workspace
+Page limit. This list includes only items you may read: other people’s private
+items can count toward the limit without appearing here. It is not an
+instance-wide inventory. Archiving is reversible and does not free storage.
 
 For a Project, Dashboard or Slides artifact, the owner sees its usage in the
 `quota` object of the artifact read:
@@ -157,7 +170,8 @@ crewship page artifact get <slug> -f json | jq '.quota'
 # { "used_bytes": 388, "limit_bytes": 268435456, "warning": false, "retention": "keep-all" }
 ```
 
-Other readers do not see the numbers. A non-owner who can edit gets
+Other readers receive zero usage/limit values rather than the owner’s usage.
+A non-owner who can edit gets
 `"retention": "latest-version-only"`, and a reader of the shared version gets
 `"retention": "shared-version-only"`.
 
@@ -179,10 +193,12 @@ Artifact history is **keep-all**. Nothing ages versions out:
   version.
 - There is no command that prunes old versions of one artifact. The only way to
   free its history is to delete the artifact, which removes its versions, data
-  and comments with it.
+  and comments with it. Save any content you need first; deletion is permanent.
+  The owner can delete it with `crewship page delete <slug> --yes`.
+  `page archive` only hides it and does not free history.
 
 The instance retention windows (`crewship admin instance retention`, Admin ›
-Data retention) do not cover Artifacts. Their "page project history"
+Data retention) do not cover Artifacts. Their `page_project_history`
 housekeeping applies to the older Pages application builds, not to artifact
 versions. See [Admin API](/api-reference/admin#get-/api/v1/admin/instance/retention).
 
