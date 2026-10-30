@@ -41,7 +41,6 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/untrusted"
-	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // agentAttachmentTextBudget bounds how much text is inlined into an agent's
@@ -90,10 +89,6 @@ type InternalAttachmentHandler struct {
 func NewInternalAttachmentHandler(pub *AttachmentHandler) *InternalAttachmentHandler {
 	return &InternalAttachmentHandler{pub: pub, db: pub.db, logger: pub.logger}
 }
-
-// SetHub is here so the router can share the public handler's hub; the events
-// emitter reads it off pub.
-func (h *InternalAttachmentHandler) SetHub(hub *ws.Hub) { h.pub.hub = hub }
 
 // agentAttachment is one attachment as an AGENT sees it.
 //
