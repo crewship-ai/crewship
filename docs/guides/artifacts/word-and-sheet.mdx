@@ -44,7 +44,12 @@ quotes each label as shown, with its English meaning.
 **A Sheet can't be created from Artifacts in this release:** **Sheet** is
 listed under **Coming** in this dialog. **Word document** is offered only when
 the instance's document service is available; otherwise it is listed under
-**Coming** too.
+**Coming** too. Check `crewship doc status`: native Word requires
+`wordcraft_native: true`. If only the separate Docs service is available,
+this dialog creates a Docs document instead; follow
+[Document save state](/guides/document-drafts). A native profile alone does
+not make this library tile available in the current UI; use **New Doc** in
+the older view when that view is available.
 
 The older Pages view still has a **New Doc** button whose **Format** field
 offers **Word** and **Sheet**. It opens at `/pages` on your Crewship address
