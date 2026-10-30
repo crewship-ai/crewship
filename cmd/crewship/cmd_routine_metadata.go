@@ -187,7 +187,7 @@ Examples:
 			return err
 		}
 		var body struct {
-			Delivered bool `json:"delivered"`
+			Delivered bool `json:"delivered" yaml:"delivered"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			return fmt.Errorf("decode response: %w", err)
