@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **`crewship routine draft publish` accepts the file that `routine draft get` or `save` printed.** The CLI used to re-sort the definition's keys and HTML-escape its text when printing a draft, so publishing that file was refused with 422 "save_token invalid", which hit every draft saved in the browser. Draft envelopes are now printed byte-exact (only whitespace changes), and the draft GET/save API responses no longer HTML-escape `&`, `<` and `>`; JSON consumers read the same values. `routine approve`, `reject`, `disable` and `enable` honour `-f json|yaml|ndjson`, and a role refusal names the role the verb needs while keeping exit code 4.
+
 - **A Page opens with its content inside Artifacts.** Its application or panels show in the library detail with the same views Pages uses, read by the page's immutable ID; the detail no longer sends you to Pages.
 
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
