@@ -1,0 +1,166 @@
+---
+title: "Operate Artifacts"
+description: "Storage limits, history retention, backups and upgrade notes for administrators who run Artifacts."
+icon: "server"
+stability: experimental
+tag: Experimental
+---
+
+# Operate Artifacts
+
+This page is for the administrator of a Crewship instance. It covers how much an
+artifact may store, how long its history is kept, what a backup carries and what
+an upgrade changes. Everything an artifact holds lives in the instance database:
+there is no separate file store to size, mount or back up.
+
+<Warning>
+Artifacts are off by default. An upgrade adds the tables and the workspace
+feature flags, but switches nothing on. See [Turning Artifacts on](#turning-artifacts-on).
+</Warning>
+
+## Turning Artifacts on
+
+Three switches decide whether a kind of artifact is available. The server side
+is a workspace feature flag (or an instance-wide environment variable that
+overrides it for every workspace). The web UI additionally needs build-time
+`NEXT_PUBLIC_*` variables, because a default build hides these screens.
+
+| Artifact kind | Workspace flag | Instance switch | Build-time UI variables |
+|---|---|---|---|
+| Project (multi-screen HTML) | `artifact_projects` | `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` | `NEXT_PUBLIC_ARTIFACTS_LIBRARY`, `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` |
+| Dashboard data | `artifact_dashboard_data` (needs Project) | `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED=true` | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` |
+| Slides | `artifact_slides` (needs Project) | `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true` | `NEXT_PUBLIC_ARTIFACT_SLIDES` |
+| Design | `artifacts_design` | `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true` | `NEXT_PUBLIC_ARTIFACTS_DESIGN` |
+| Live workbook editing | `gridcraft_editor` | `CREWSHIP_GRIDCRAFT_ENABLED` and `CREWSHIP_GRIDCRAFT_EDITOR_ENABLED` are both **required**, not an override | — |
+
+Every workspace flag is seeded with its instance default off. Enable one for the
+current workspace, or check what a workspace resolves to:
+
+```bash
+crewship feature-flag list                       # DEFAULT, WORKSPACE override, EFFECTIVE
+crewship feature-flag enable artifact_projects   # this workspace only
+crewship feature-flag inherit artifact_projects  # drop the override again
+```
+
+`crewship feature-flag update <key> --enabled` changes the instance default for
+every workspace that has no override. Native Word and Sheet editing is an
+instance setting, `CREWSHIP_CRAFT_NATIVE_ENABLED`, not a workspace flag; it needs
+a restart. The build-time variables take `true` and are read when the web UI is
+built, so changing one means rebuilding the UI. See
+[Environment variables](/configuration/environment) and
+[`crewship feature-flag`](/cli/feature-flag).
+
+## Storage limits
+
+The limits below are compiled into the server. There is no setting or environment
+variable that raises them.
+
+### Versions of a Project, Dashboard, Slides or Design
+
+Each saved version is an immutable, complete set of files. Limits apply per
+artifact:
+
+| Limit | Value | When it is exceeded |
+|---|---|---|
+| Retained history | 256 MiB | `413` with code `artifact_history_quota` (Design: `413` "Design capacity is full") |
+| One version | 32 MiB of file content | `413`, same code as above |
+| Files in one version | 256 | `400` (invalid manifest) |
+| File path | 512 characters, relative, no `..` | `400` |
+| Version message | 4096 bytes | `400` |
+
+History usage counts every file stored once per artifact (identical content is
+deduplicated by hash across versions), plus each version's manifest, message and
+a small fixed overhead. At 80 % of the limit the `quota.warning` field turns
+`true`. The live, unsaved canvas of a Design is stored separately and does not
+count until you save it as a version.
+
+The CLI reads a manifest file of at most 9 MiB, so `crewship page artifact create`
+and `publish` cannot send a version as large as the server would accept.
+
+### Dashboard data
+
+Dashboard collections are mutable data next to the immutable code versions:
+
+| Limit | Value |
+|---|---|
+| Collections per artifact | 32 |
+| Documents per collection | 4096 |
+| Data per collection | 8 MiB |
+| One document | 256 KiB |
+| Writes in one batch | 50 |
+| One batch request | 1 MiB |
+
+Going over any of them returns `413` with code `artifact_data_quota`; the batch
+is rejected as a whole and existing data is kept. A stale `ifVersion` returns
+`409` with code `artifact_data_conflict` instead.
+
+### Word and Sheet documents
+
+A native Word or Sheet document keeps up to 16 GiB of version history. When it is
+full, saving returns `413` "native history quota reached; existing versions
+retained". The older document service has its own per-workspace document and
+operation limits, set with `CREWSHIP_DOCUMENTS_MAX_DOCUMENTS_PER_WORKSPACE`,
+`CREWSHIP_DOCUMENTS_MAX_OPERATIONS_PER_WINDOW` and
+`CREWSHIP_DOCUMENTS_OPERATION_WINDOW_SECONDS`
+(see [Environment variables](/configuration/environment)).
+
+### Artifacts per workspace
+
+An artifact is stored as a page record, so it counts toward the limit of 100
+pages per workspace. Creating a Project or Design in a full workspace returns
+`413` with the same code as a full history (`artifact_history_quota`, or
+"Design capacity is full").
+
+## Checking usage
+
+The owner of an artifact sees its usage in the `quota` object of the artifact
+read:
+
+```bash
+crewship page artifact get <slug> -f json | jq '.quota'
+# { "used_bytes": 388, "limit_bytes": 268435456, "warning": false, "retention": "keep-all" }
+```
+
+Other readers do not see the numbers. A non-owner who can edit gets
+`"retention": "latest-version-only"`, and a reader of the shared version gets
+`"retention": "shared-version-only"`. There is no instance-wide report of
+artifact storage; to see which artifacts are large, read each one as its owner.
+
+## Retention
+
+Artifact history is **keep-all**. Nothing ages versions out:
+
+- Saving appends a version. Restoring an older version appends a new version
+  with the old content; it does not rewrite history.
+- Sharing pins which version readers see. It never moves or removes the latest
+  version.
+- There is no command that prunes old versions of one artifact. The only way to
+  free its history is to delete the artifact, which removes its versions, data
+  and comments with it.
+
+The instance retention windows (`crewship admin instance retention`, Admin ›
+Data retention) do not cover Artifacts. Their "page project history"
+housekeeping applies to the older Pages application builds, not to artifact
+versions. See [Admin API](/api-reference/admin#get-api-v1-admin-instance-retention).
+
+## Backup and restore
+
+Workspace backups carry Artifacts in the `pages` content category: versions and
+their file blobs, Design documents, Dashboard data, comments, Word and Sheet
+documents and their history. A backup plan that leaves out `pages` leaves out
+every artifact. The workspace's artifact creation policy travels with the
+`agents` category.
+
+Live sessions do not travel. Editing leases, pending creation consents and
+chat-run permissions are excluded, so after a restore an editor must open the
+document again and an agent needs a fresh permission. See
+[Backup & Restore](/guides/backup#artifacts-in-a-backup).
+
+## Upgrades
+
+The Artifacts tables arrive through ordinary migrations that run on the next
+start after an upgrade, after the automatic pre-migration snapshot. They add
+empty tables and off-by-default flags; existing Pages are not converted. A
+rollback across them follows the usual snapshot procedure in
+[Upgrading & Downgrading](/guides/upgrades#rollback-/-downgrade). The individual
+migrations are listed in the [Migrations Catalog](/guides/migrations).
