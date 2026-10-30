@@ -973,6 +973,7 @@ type mentionDispatchRequest struct {
 	AuthorID      string
 	AuthorName    string
 	TargetAgentID string
+	DeliveryIDs   []string // internal exact pending digest identities; atomically attached at acceptance
 }
 
 // DispatchMention runs the mentioned agent, through the same machinery
@@ -998,7 +999,7 @@ type mentionDispatchRequest struct {
 //	caps       depth + fan-out, from delegation_limits.go.
 func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDispatchRequest) (string, error) {
 	if req.WorkspaceID == "" || req.MissionID == "" || req.TargetAgentID == "" {
-		return "", fmt.Errorf("dispatch mention: workspace_id, mission_id and target agent are required")
+		return "", permanentMention(fmt.Errorf("dispatch mention: workspace_id, mission_id and target agent are required"))
 	}
 
 	// Delayed deliveries recover the authority frozen with the original comment,
@@ -1033,7 +1034,7 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 		&target.CrewSlug, &targetCrewID, &target.Status)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", fmt.Errorf("dispatch mention: agent %s not found in workspace", req.TargetAgentID)
+			return "", permanentMention(fmt.Errorf("dispatch mention: agent %s not found in workspace", req.TargetAgentID))
 		}
 		return "", fmt.Errorf("dispatch mention: lookup target agent: %w", err)
 	}
@@ -1073,7 +1074,7 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 				// in this workspace. Refuse rather than silently demoting to
 				// the human path, which would drop the depth inheritance —
 				// the exact laundering shape Create refuses for /assign.
-				return "", fmt.Errorf("dispatch mention: comment author %s not found in workspace", req.AuthorID)
+				return "", permanentMention(fmt.Errorf("dispatch mention: comment author %s not found in workspace", req.AuthorID))
 			}
 			return "", fmt.Errorf("dispatch mention: lookup comment author: %w", err)
 		}
@@ -1089,8 +1090,8 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 			return "", fmt.Errorf("dispatch mention: check crew connection: %w", connErr)
 		}
 		if !connected {
-			return "", fmt.Errorf("dispatch mention: crews are not connected — %s cannot be given work from %s",
-				targetCrewID, assignerCrewID)
+			return "", permanentMention(fmt.Errorf("dispatch mention: crews are not connected — %s cannot be given work from %s",
+				targetCrewID, assignerCrewID))
 		}
 	}
 
@@ -1219,6 +1220,7 @@ func (h *AssignmentHandler) DispatchMention(ctx context.Context, req mentionDisp
 			CreatedByUserID:       createdByUserID,
 			ContextPackCompaction: pack.Compaction,
 			ContextPackTokens:     pack.TokensEstimate,
+			DeliveryIDs:           req.DeliveryIDs,
 		})
 	if err != nil {
 		var admitted *assignmentAlreadyAdmittedError

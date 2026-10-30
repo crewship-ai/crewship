@@ -77,6 +77,7 @@ type AssignmentHandler struct {
 	// waits on it; it exists so shutdown (and tests) can drain in-flight
 	// dispatches instead of leaving them racing the DB teardown.
 	dispatchWG sync.WaitGroup
+	workHint   func(string)
 
 	// agentRunLock is the cross-surface per-AGENT exclusivity lock shared
 	// with chatbridge.Bridge (SetAgentRunLock wires it to
@@ -518,8 +519,18 @@ func (h *AssignmentHandler) Get(w http.ResponseWriter, r *http.Request) {
 // remains true here is the depth: a mission task starts a fresh delegation
 // tree rather than continuing the authoring agent's.
 func (h *AssignmentHandler) DispatchAssignment(ctx context.Context, req orchestrator.DispatchRequest) error {
+	workID, err := assignmentWorkID(ctx, h.db, req.AssignmentID)
+	if err != nil {
+		return err
+	}
+	if workID != "" {
+		if h.workHint != nil {
+			h.workHint(workID)
+		}
+		return nil
+	}
 	var target targetAgentInfo
-	err := h.db.QueryRowContext(ctx, `
+	err = h.db.QueryRowContext(ctx, `
 		SELECT a.id, a.slug, a.name, COALESCE(a.role_title,''), COALESCE(a.system_prompt_legacy,''),
 		       a.cli_adapter, COALESCE(a.llm_model,''), a.tool_profile, a.timeout_seconds, a.memory_enabled, c.slug,
 		       COALESCE(a.status,'')
