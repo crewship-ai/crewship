@@ -92,6 +92,20 @@ func newArtifactSlidesCommands() []*cobra.Command {
 			}
 			return pageEmitMachine(resolvedFormatter(cmd), raw, "{}")
 		}}
+		command.Long = `Read the Slides projection of an exact artifact code version: the deck
+(slide order, positioned elements, theme) and the element anchors that
+comments can use. The version needs deck.json and one slides/<id>.html per
+slide; other content returns 422 artifact_slides_unsupported. Requires the
+artifact_projects and artifact_slides workspace feature flags. Owners can
+read any retained version; shared readers only the shared version.`
+		command.Example = "  crewship page artifact slides quarterly-deck --version 1 -f json"
+		if export {
+			command.Long = `Export the deck of an exact artifact code version to a local PDF file.
+The file is written atomically and standard output carries a JSON receipt
+(path, media_type, code_version, byte_length, sha256), never PDF bytes.
+--out - is rejected. Same feature flags and version access as slides.`
+			command.Example = "  crewship page artifact export-pdf quarterly-deck --version 1 --out deck.pdf"
+		}
 		command.Flags().Int64("version", 0, "Exact immutable code version (required)")
 		if export {
 			command.Flags().String("out", "", "Local PDF output path (required; never sent to the server)")

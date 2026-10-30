@@ -1,0 +1,644 @@
+---
+title: "Artifacts Commands"
+description: "Create, version, share, comment on and export Artifacts from the CLI, including dashboard data, Slides and the workspace artifact policy."
+icon: "app-window"
+stability: experimental
+tag: Experimental
+---
+
+# Artifacts from the CLI
+
+An artifact is a private, multi-file HTML project with an immutable version
+history. Every save stores a complete file manifest as a new numbered
+version; nothing is edited in place. You can pin one version as the shared
+version, attach comments to an element of an exact version, keep JSON data
+for a dashboard next to the code, and read or export a deck that follows the
+Slides profile.
+
+The commands live under `crewship page artifact`, because an artifact is
+stored on a Page record. The full flag reference stays on
+[Page Commands](/cli/page); this page is the task guide, with output recorded
+from a real workspace. Design canvases (`crewship page design`) and Craft
+documents (`crewship craft`) have their own commands and are not covered here.
+
+```bash
+crewship page artifact <subcommand> [flags]
+crewship workspace artifact-policy show|set [flags]
+```
+
+## Before you start
+
+Artifacts are off by default. Each group of commands needs a workspace
+feature flag, which an OWNER or ADMIN turns on with
+[`crewship feature-flag enable`](/cli/feature-flag), or an instance switch
+set to `true` in the server environment:
+
+| Commands | Workspace flag | Instance switch |
+|---|---|---|
+| All `page artifact` commands except `archive`/`unarchive` | `artifact_projects` | `CREWSHIP_ARTIFACT_PROJECTS_ENABLED` |
+| `page artifact data …` | `artifact_projects` and `artifact_dashboard_data` | `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED` |
+| `page artifact slides`, `page artifact export-pdf` | `artifact_projects` and `artifact_slides` | `CREWSHIP_ARTIFACT_SLIDES_ENABLED` |
+
+```bash
+crewship feature-flag enable artifact_projects
+crewship feature-flag enable artifact_dashboard_data
+crewship feature-flag enable artifact_slides
+```
+
+When a flag is off, `availability` returns `{"enabled": false}` and the other
+commands fail with `404` (`artifact projects are not enabled` or
+`dashboard data is disabled`). The CLI itself needs no web build-time
+variable; the `url` that commands return opens the artifact view in the web
+app.
+
+Credentials and roles:
+
+- A human CLI token with the `pages:read` scope can read; saving, commenting,
+  restoring, sharing and data writes need `pages:write`.
+- Creating an artifact needs the OWNER, ADMIN or MANAGER role, or a MEMBER
+  with the page-create capability.
+- Restore, share, retained history and archive belong to the artifact owner
+  (or an authorized workspace admin for archive).
+- `workspace artifact-policy` needs OWNER or ADMIN and a token with the
+  `workspace:admin` scope.
+- Someone who has no grant on a private artifact receives `404`, not `403`,
+  so the artifact's existence is not revealed.
+
+## Output and errors
+
+Artifact commands always print the server's JSON document. The default
+`table` format and `quiet` both print indented JSON; `-f yaml` and
+`-f ndjson` re-encode the same document. There is no separate `--json` flag.
+`archive` and `unarchive` are the exception: `table` prints the raw compact
+JSON line and `quiet` prints nothing.
+
+Errors go to standard error. With `-f json` the error is a JSON envelope
+whose `extensions.code` carries the machine-readable reason:
+
+```json
+{
+  "error": {
+    "message": "API error (409): This project changed. Read the current version and compare your changes before publishing again. Your draft has not been discarded.",
+    "status": 409,
+    "detail": "This project changed. …",
+    "exit_code": 5,
+    "extensions": {
+      "code": "artifact_version_conflict",
+      "error": "This project changed. …"
+    }
+  }
+}
+```
+
+| HTTP | Exit | `code` | When |
+|---|---|---|---|
+| 400 / 422 | 2 | `artifact_slides_unsupported` (422) | Invalid request; a version outside the Slides profile |
+| 401 / 403 | 4 | | Missing scope or role, for example a non-admin reading the policy |
+| 404 | 3 | | Unknown artifact, version, comment or undeclared collection, or a feature flag is off |
+| 409 | 5 | `artifact_version_conflict` | `--base-version` is no longer the latest version, or an owner comment targets an older version |
+| 409 | 5 | `artifact_slug_taken` | `create` with a slug that is already used |
+| 409 | 5 | `artifact_anchor_mismatch` | The comment quote does not match the selected element |
+| 409 | 5 | `artifact_data_conflict` | A document's `ifVersion` is stale |
+| 409 | 5 | `stale_policy` | `artifact-policy set` with an old `--base-version` |
+| 413 | 1 | `artifact_history_quota`, `artifact_data_quota` | Version history or dataset limits are full |
+
+A conflict or quota error never discards anything: earlier versions and data
+are kept, and the CLI never retries with a newer base. Keep your local file,
+read the current state and decide what to save. Validation that happens in the
+CLI before any request (a missing flag, a manifest over 9 MiB, a data batch
+over its limit) exits with `1` or `2` and prints the message only.
+
+## Create and save versions
+
+### `crewship page artifact availability`
+
+Read whether artifact projects are enabled in the current workspace.
+
+```bash
+crewship page artifact availability -f json
+```
+
+```json
+{"enabled": true}
+```
+
+### `crewship page artifact create <slug>`
+
+Create a new artifact and save its first version. `--file` is a JSON manifest
+with `entrypoint`, `files` and an optional `message`; each file has `path`,
+`media_type` and UTF-8 `content`. Use `--file -` to read standard input. The
+manifest is limited to 9 MiB, and other top-level keys are rejected.
+
+| Flag | Description |
+|---|---|
+| `--name <title>` | Artifact title (required). |
+| `--file <path>` | Complete manifest; `-` reads stdin (required). |
+| `--test-item` | Mark the new artifact as a test item. Human credentials only. |
+
+```json
+{"entrypoint":"index.html","message":"First version","files":[
+  {"path":"index.html","media_type":"text/html","content":"<h1 id=\"hero\">Quarterly review</h1><a href=\"details.html\">Details</a>"},
+  {"path":"details.html","media_type":"text/html","content":"<h1 id=\"details\">Details</h1><a href=\"index.html\">Home</a>"}]}
+```
+
+```bash
+crewship page artifact create quarterly-review --name "Quarterly review" --file manifest.json
+```
+
+```json
+{
+  "page_id": "<page-id>",
+  "slug": "quarterly-review",
+  "url": "/pages/quarterly-review?artifact=1&workspace_id=<workspace-id>",
+  "version": 1
+}
+```
+
+Creating the same slug again fails with `409 artifact_slug_taken`.
+
+### `crewship page artifact publish <slug>`
+
+Save a complete new manifest as the next version. `--base-version` must be the
+latest version you read; there is no partial update.
+
+| Flag | Description |
+|---|---|
+| `--base-version <n>` | Exact latest version read before editing (required, at least 1). |
+| `--file <path>` | Complete manifest; `-` reads stdin (required). |
+
+```bash
+crewship page artifact publish quarterly-review --base-version 1 --file manifest.json
+```
+
+```json
+{
+  "actor": "<user-id>",
+  "page_id": "<page-id>",
+  "slug": "quarterly-review",
+  "url": "/pages/quarterly-review?artifact=1&workspace_id=<workspace-id>",
+  "version": 2
+}
+```
+
+Running the same command again, still with `--base-version 1`, returns
+`409 artifact_version_conflict` and exit code `5`. A user with an explicit Edit
+grant can publish under their own identity; owner history stays private.
+
+### `crewship page artifact get <slug>`
+
+Read the artifact snapshot: the manifest of the latest version (or of
+`--version`), the version list, comments, your permissions and storage usage.
+
+| Flag | Description |
+|---|---|
+| `--version <n>` | Exact retained version; `0` (default) reads the latest. |
+
+```bash
+crewship page artifact get quarterly-review -f json
+```
+
+```json
+{
+  "can_comment": true, "can_restore": true, "can_send_to_agent": false,
+  "can_share": true, "can_write": true,
+  "comments": [],
+  "enabled": true,
+  "latest_version": 2,
+  "manifest": {
+    "created_at": "2026-10-30T00:21:29Z",
+    "entrypoint": "index.html",
+    "files": [{"path": "index.html", "media_type": "text/html", "content": "…"}],
+    "message": "Shorter title",
+    "restored_from": 0,
+    "version": 2
+  },
+  "name": "Quarterly review",
+  "origin": null,
+  "page_id": "<page-id>",
+  "quota": {"limit_bytes": 268435456, "retention": "keep-all", "used_bytes": 1139, "warning": false},
+  "shared_version": 0,
+  "slug": "quarterly-review",
+  "versions": [
+    {"actor": "<user-id>", "created_at": "…", "entrypoint": "index.html", "message": "Shorter title", "restored_from": 0, "version": 2},
+    {"actor": "<user-id>", "created_at": "…", "entrypoint": "index.html", "message": "First version", "restored_from": 0, "version": 1}
+  ]
+}
+```
+
+`quota` shows history usage. Every version is kept (`keep-all`); when
+`used_bytes` reaches `limit_bytes`, new versions fail with
+`413 artifact_history_quota` and existing versions stay. No CLI command changes
+the quota or prunes versions.
+
+Readers with a Read or Comment grant see only the shared version.
+
+### `crewship page artifact versions <slug>`
+
+Print the same snapshot as `get` for the latest version. Use the `versions`
+array in it; pass `get --version <n>` to read an older manifest.
+
+```bash
+crewship page artifact versions quarterly-review -f yaml
+```
+
+## Restore and share
+
+### `crewship page artifact restore <slug>`
+
+Copy a retained version into a new latest version. History is never rewritten.
+Owner only.
+
+| Flag | Description |
+|---|---|
+| `--base-version <n>` | Exact latest version (required). |
+| `--version <n>` | Retained version to restore (required). |
+
+```bash
+crewship page artifact restore quarterly-review --base-version 2 --version 1
+```
+
+```json
+{"actor": "<user-id>", "page_id": "<page-id>", "slug": "quarterly-review", "url": "…", "version": 3}
+```
+
+The new version has `"restored_from": 1` and the message `Restore version 1`.
+An unknown `--version` returns `404`.
+
+### `crewship page artifact share <slug>`
+
+Pin an existing version as the shared version. People with a Read or Comment
+grant see only this version; the latest version is unchanged. Owner only.
+
+| Flag | Description |
+|---|---|
+| `--base-version <n>` | Exact latest version (required). |
+| `--version <n>` | Version to share (required). |
+
+```bash
+crewship page artifact share quarterly-review --base-version 3 --version 2
+```
+
+```json
+{
+  "shared_version": 2,
+  "url": "/pages/quarterly-review?artifact=1&version=2&workspace_id=<workspace-id>"
+}
+```
+
+A stale `--base-version` returns `409 artifact_version_conflict`.
+
+## Comments
+
+### `crewship page artifact comment <slug>`
+
+Add a comment anchored to an element of an exact version. The owner comments
+on the latest version; a comment on an older version returns
+`409 artifact_version_conflict`. `--quote` must match the element's text, or
+the server returns `409 artifact_anchor_mismatch`.
+
+| Flag | Description |
+|---|---|
+| `--version <n>` | Version the comment refers to (required). |
+| `--path <file>` | File in the manifest, for example `index.html` (required). |
+| `--selector <css>` | Selector of the element, preferably an `id` (required). |
+| `--quote <text>` | Current text of the element (required). |
+| `--text <text>` | Comment text (required). |
+| `--send-to-agent` | Also queue the comment as a task for the agent. |
+
+```bash
+crewship page artifact comment quarterly-review --version 3 --path index.html \
+  --selector '#hero' --quote 'Quarterly review' --text 'Add the year to the title'
+```
+
+```json
+{
+  "author": "<user-id>", "author_kind": "human",
+  "created_at": "2026-10-30T00:21:50Z",
+  "delivery_retryable": false,
+  "id": "<comment-id>",
+  "path": "index.html", "quote": "Quarterly review", "selector": "#hero",
+  "replies": [], "status": "comment",
+  "text": "Add the year to the title",
+  "version": 3
+}
+```
+
+Queuing with `--send-to-agent` does not confirm that an agent received the
+task.
+
+### `crewship page artifact comments <slug>`
+
+Read comments with the artifact snapshot. The output has the same shape as
+`get`, with the comments of the selected version in `comments`.
+
+| Flag | Description |
+|---|---|
+| `--version <n>` | Version whose comments to read; `0` (default) reads the latest. |
+
+```bash
+crewship page artifact comments quarterly-review --version 3
+```
+
+### `crewship page artifact reply <slug> <comment-id>`
+
+Answer a comment. A normal reply describes a change, so `--version` must be a
+version newer than the comment's version. With `--needs-clarification` you
+ask the author to select the element again, and `--version` may be the
+comment's own version. Any other combination returns `404`.
+
+| Flag | Description |
+|---|---|
+| `--text <text>` | Reply text (required). |
+| `--version <n>` | Version the reply addresses (required). |
+| `--needs-clarification` | Ask for a fresh selection instead of claiming a change. |
+
+```bash
+crewship page artifact reply quarterly-review <comment-id> --version 3 \
+  --text "Which year format?" --needs-clarification
+crewship page artifact publish quarterly-review --base-version 3 --file manifest.json
+crewship page artifact reply quarterly-review <comment-id> --version 4 \
+  --text "Title now includes the year"
+```
+
+```json
+{"author": "<user-id>", "author_kind": "human", "created_at": "…", "text": "Title now includes the year", "version": 4}
+```
+
+## Dashboard data
+
+Requires `artifact_dashboard_data` as well as `artifact_projects`. A version
+declares its collections in a `dashboard.json` file in the manifest:
+
+```json
+{"schema_version":1,"collections":["sales"]}
+```
+
+Data is versioned per document, separately from code versions. Writing data
+does not create a code version, and restoring code does not rewind data.
+Every read names an exact code version, and only collections declared by that
+version are reachable. Shared readers can read the collections of the shared
+version and cannot write.
+
+Limits: 256 KiB per document, 50 writes and 1 MiB per batch, 4096 documents
+and 8 MiB per collection, 32 collections per artifact. Collection and document
+IDs are 1–128 ASCII letters, digits, `_` or `-`, starting with a letter or
+digit. Values are JSON objects.
+
+### `crewship page artifact data batch <slug> <collection>`
+
+Apply up to 50 document writes atomically. `ifVersion: 0` creates a document;
+an update gives the document's current version. `base_version` is the current
+code version.
+
+| Flag | Description |
+|---|---|
+| `--file <path>` | JSON batch `{base_version, documents:[{id, ifVersion, value}]}`; `-` reads stdin (required). |
+
+```json
+{"base_version":1,"documents":[{"id":"north","ifVersion":0,"value":{"revenue":1250}}]}
+```
+
+```bash
+crewship page artifact data batch sales-dashboard sales --file batch.json
+```
+
+```json
+{
+  "collection": "sales",
+  "code_version": 1,
+  "documents": [
+    {"id": "north", "version": 1, "value": {"revenue": 1250},
+     "updated_at": "2026-10-30T00:22:07Z", "source_label": "You", "source_kind": "human"}
+  ]
+}
+```
+
+Sending the same batch again returns `409 artifact_data_conflict` and nothing
+is written. A document over 256 KiB is refused by the CLI before sending
+(`artifact dataset quota exceeded`); the server returns
+`413 artifact_data_quota` for the same request.
+
+### `crewship page artifact data get <slug> <collection>`
+
+Read every document of one collection at an exact code version.
+
+| Flag | Description |
+|---|---|
+| `--version <n>` | Exact code version that declares the collection (required). |
+
+```bash
+crewship page artifact data get sales-dashboard sales --version 1
+```
+
+The output has the same shape as `batch`. A collection that the version does
+not declare returns `404`.
+
+### `crewship page artifact data collections <slug>`
+
+List the declared collections that already hold documents, with their size.
+A declared collection with no documents is not listed.
+
+| Flag | Description |
+|---|---|
+| `--version <n>` | Exact code version (required). |
+
+```bash
+crewship page artifact data collections sales-dashboard --version 1 -f ndjson
+```
+
+```json
+{"code_version":1,"collections":[{"name":"sales","documents":1,"bytes":16}]}
+```
+
+## Slides
+
+Requires `artifact_slides` as well as `artifact_projects`. A deck is an
+artifact version with a `deck.json` (`{"schema_version":1,"order":[…]}`) and
+one `slides/<id>.html` file per slide, each a `<section id="<id>">` with
+absolutely positioned elements. Content outside this profile returns
+`422 artifact_slides_unsupported`. Both commands need an exact `--version`
+(at most 9007199254740991); owners can read any retained version, Edit grants
+the latest version, and readers only the shared version.
+
+### `crewship page artifact slides <slug-or-id>`
+
+Read the projected deck and the anchors that comments can use. Use `@<id>` to
+select by Page ID.
+
+| Flag | Description |
+|---|---|
+| `--version <n>` | Exact code version (required). |
+
+```bash
+crewship page artifact slides quarterly-deck --version 1 -f json
+```
+
+```json
+{
+  "anchors": {
+    "intro-title": {"path": "slides/intro.html", "quote": "Q3 review", "selector": "#intro-title", "slide_id": "intro"}
+  },
+  "deck": {
+    "deck_id": "<page-id>", "schema_version": 1, "width": 1920, "height": 1080,
+    "slide_order": ["intro", "summary"],
+    "slides": [
+      {"id": "intro", "notes": "", "elements": [
+        {"id": "intro-title", "type": "text", "x": 80, "y": 80, "width": 1600, "height": 180,
+         "text": {"value": "Q3 review", "align": "left", "color": "#112233", "font_family": "Go Regular", "font_size": 48}}
+      ]}
+    ],
+    "theme": {"background": "#FFFFFF", "color": "#111111", "font_family": "Go Regular", "font_size": 32}
+  }
+}
+```
+
+### `crewship page artifact export-pdf <slug-or-id>`
+
+Export the deck of an exact version to a local PDF file. The file is written
+atomically and the command prints a receipt, not PDF bytes. `--out -` is
+rejected.
+
+| Flag | Description |
+|---|---|
+| `--version <n>` | Exact code version (required). |
+| `--out <file>` | Local PDF path (required); never sent to the server. |
+
+```bash
+crewship page artifact export-pdf quarterly-deck --version 1 --out deck.pdf
+```
+
+```json
+{
+  "byte_length": 7934,
+  "code_version": 1,
+  "media_type": "application/pdf",
+  "path": "deck.pdf",
+  "sha256": "<sha256>"
+}
+```
+
+The CLI checks the media type, the `%PDF-` header and an 8 MiB limit before
+writing.
+
+## Archive
+
+### `crewship page artifact archive <page>`
+
+Remove an artifact from default lists without deleting content or changing
+access. `page artifact archive` and `page artifact unarchive` are the same
+commands as [`page archive` and `page unarchive`](/cli/page). Run a dry run
+first, then confirm with the returned token.
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Preview only; returns a `review_token`. |
+| `--pages-version <n>` | Exact `pages_version` of the Page (required); see `crewship page get <page> -f json`. |
+| `--review-token <token>` | Token from the matching dry run. |
+| `--yes` | Confirm the reviewed change. |
+
+```bash
+crewship page artifact archive quarterly-review --dry-run --pages-version 0 -f json
+```
+
+```json
+{
+  "after": {"archived": true}, "before": {"archived": false},
+  "changed": false, "dry_run": true,
+  "impact": {"access_changed": false, "content_deleted": false, "removed_from_default_lists": true},
+  "page": "quarterly-review", "page_id": "<page-id>",
+  "pages_version": 0,
+  "review_token": "<review-token>"
+}
+```
+
+```bash
+crewship page artifact archive quarterly-review --yes --pages-version 0 --review-token <review-token>
+```
+
+The confirmation returns `"changed": true` and the new `pages_version`.
+Reusing the token afterwards returns `409 pages_version changed; preview again`.
+
+### `crewship page artifact unarchive <page>`
+
+Return an archived artifact to default lists. Flags and flow are the same as
+for `archive`.
+
+```bash
+crewship page artifact unarchive quarterly-review --dry-run --pages-version 1
+```
+
+## Agent publishing policy
+
+The workspace artifact policy is the administrative ceiling for agent work on
+artifacts: an agent can create or change an artifact on a person's behalf
+only when the policy is enabled and the agent's crew is on the allowlist.
+`--enabled=true` with an empty allowlist admits no crew. The policy does not
+limit what people do themselves.
+
+### `crewship workspace artifact-policy show`
+
+```bash
+crewship workspace artifact-policy show -f json
+```
+
+```json
+{"crew_ids": [], "enabled": false, "version": 0}
+```
+
+`version: 0` means no policy has been saved yet. A non-admin receives
+`403 active trusted workspace administrator required`.
+
+### `crewship workspace artifact-policy set`
+
+Replace the whole policy. Pass the `version` from `show` as `--base-version`.
+
+| Flag | Description |
+|---|---|
+| `--base-version <n>` | Version returned by `show` (required). |
+| `--enabled` | Pass `--enabled=true` or `--enabled=false` explicitly (required). |
+| `--crew-id <id>` | Complete allowlist; repeat or comma-separate. |
+| `--clear-crews` | Replace the allowlist with an empty list. |
+
+Use exactly one of `--crew-id` and `--clear-crews`.
+
+```bash
+crewship workspace artifact-policy set --base-version 0 --enabled=false --clear-crews -f json
+```
+
+```json
+{"crew_ids": [], "enabled": false, "version": 1}
+```
+
+A stale `--base-version` returns `409 stale_policy`; a crew from another
+workspace or a deleted crew returns `400`. Each change is recorded in the
+workspace audit log. See also [Workspace Commands](/cli/workspace).
+
+## Inside an agent run
+
+When `CREWSHIP_AGENT_TOKEN` holds a run capability (`agtv2.…`), the artifact
+commands do not use a saved profile. They call the run's scoped MCP tools
+instead, under the identity of the person who started the run:
+
+| Command | Agent tool |
+|---|---|
+| `create` | `artifact_create` |
+| `publish` | `artifact_publish` |
+| `get`, `versions` | `artifact_versions` |
+| `restore` | `artifact_restore` |
+| `comments` | `artifact_comments` |
+| `reply` | `artifact_reply` |
+| `data collections`, `data get`, `data batch` | `artifact_data_collections`, `artifact_data_read`, `artifact_data_batch` |
+| `slides`, `export-pdf` | `artifact_slides_read`, `artifact_export_pdf` |
+
+`share`, `comment`, `availability`, `archive` and `unarchive` are not
+available to an agent and fail with
+`artifact or Design operation unavailable to an agent run`. In this mode the
+`--config`, `--server`, `--profile`, `--workspace` and `--server-allow-mismatch`
+flags are rejected, and a token that is not a run capability fails with
+`original live run capability required; no human profile fallback`. A refused
+tool call prints `artifact tool refused: {…}`. If the outcome is unknown, the
+CLI prints `artifact outcome unavailable; preserve candidate and inspect before
+retrying`: keep your manifest and read the artifact before saving again.
+
+These tools also need the [agent publishing policy](#agent-publishing-policy)
+to be enabled with the agent's crew on the allowlist.

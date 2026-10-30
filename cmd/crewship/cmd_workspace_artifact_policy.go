@@ -63,6 +63,14 @@ func newWorkspaceArtifactPolicyCommand() *cobra.Command {
 	set.Flags().Bool("enabled", false, "Explicitly enable or disable agent artifact publication")
 	set.Flags().StringSlice("crew-id", nil, "Complete allowlist of crew IDs, comma-separated or repeated")
 	set.Flags().Bool("clear-crews", false, "Explicitly replace the allowlist with an empty list")
+	command.Long = `Read or replace the workspace ceiling for agent work on artifacts: whether
+agents may create or change artifacts on a person's behalf, and which crews
+may do so. Requires the OWNER or ADMIN role and a token with workspace:admin.`
+	show.Example = "  crewship workspace artifact-policy show -f json"
+	set.Long = `Replace the whole policy. Pass the version from show as --base-version;
+a newer saved policy returns 409 stale_policy. Give --enabled explicitly and
+exactly one of --crew-id (complete allowlist) or --clear-crews.`
+	set.Example = "  crewship workspace artifact-policy set --base-version 0 --enabled=true --crew-id <crew-id>\n  crewship workspace artifact-policy set --base-version 1 --enabled=false --clear-crews"
 	command.AddCommand(show, set)
 	return command
 }
