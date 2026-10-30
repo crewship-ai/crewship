@@ -100,6 +100,8 @@ func (m *craftNativeAgentManager) cancelTask(w http.ResponseWriter, r *http.Requ
 		replyError(w, 400, "native agent stop requires an empty object")
 		return
 	}
+	var retired *craftNativeAgentEntry
+	defer func() { m.clearClosedProposalCandidates(retired) }()
 	tx, err := m.writer(r.Context())
 	if err != nil {
 		craftNativeDocumentError(w, err)
@@ -128,6 +130,7 @@ func (m *craftNativeAgentManager) cancelTask(w http.ResponseWriter, r *http.Requ
 		replyError(w, 403, "only the original human may stop this native agent")
 		return
 	}
+	retired = e
 	proof := &craftNativeAgentCancelProof{manager: m, entry: e, source: source, tx: tx, lease: l, by: mooring.EditLeasePrincipal{ActorID: "user:" + source.UserID, SessionID: "native-agent-stop:" + e.workID}}
 	ctx = context.WithValue(ctx, craftNativeAgentCancelKey{}, proof)
 	if err = m.human.leases.Revoke(ctx, tx, scope, proof.by, l.Generation); err != nil {

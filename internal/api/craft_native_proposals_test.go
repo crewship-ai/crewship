@@ -64,8 +64,8 @@ func TestCraftNativeAgentProposalWhileHumanHoldsLeaseAcceptedByHuman(t *testing.
 	if proposed.Code != 201 || json.Unmarshal(proposed.Body.Bytes(), &created) != nil || created.ID == "" || created.Base != "1" || created.State != "open" {
 		t.Fatal("agent proposal", proposed.Code, proposed.Body)
 	}
-	if again := call(packet); again.Code != 201 || !strings.Contains(again.Body.String(), created.ID) || *calls != 2 {
-		t.Fatal("exact retry recorded another proposal", again.Code, again.Body, *calls)
+	if again := call(packet); again.Code != 201 || !strings.Contains(again.Body.String(), created.ID) || *calls != 1 {
+		t.Fatal("exact retry reran engine or recorded another proposal", again.Code, again.Body, *calls)
 	}
 	var head int64
 	if err := f.rig.db.QueryRow(`SELECT latest_version FROM artifact_version_heads WHERE page_id='native-agent-page'`).Scan(&head); err != nil || head != 1 {

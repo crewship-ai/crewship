@@ -373,7 +373,17 @@ unchanged. At most 16 proposals per document may be open. Before counting, a
 new proposal marks every open proposal whose base content differs from the
 current head `stale` (decided by `system:superseded`; rows are kept), because
 such a proposal can no longer be accepted. A proposal over an older version with
-identical content stays open, since accept still applies it on the head. The same agent `request_id` returns the original proposal.
+identical content stays open, since accept still applies it on the head. The stored idempotency key includes the authenticated run. A different run of
+the same agent has a separate request namespace and cannot adopt its earlier
+candidate; the display author remains the agent identity.
+
+Apply and propose requests share a limit of 64 admitted change attempts per
+run; reaching it returns 429 before another engine invocation. Exact retries
+consume no further slot and never rerun the engine, including after the document
+advances. Changing commands under the same request identifier conflicts. An
+unknown save or proposal commit blocks new changes with 503 until that exact
+request is reconciled. Only its pending candidate is retained for this purpose;
+completed or definitely refused candidates do not accumulate in memory.
 
 All retained proposal content, including rejected, stale and accepted rows,
 counts toward its own per-document proposal allowance (64 MiB by default,
@@ -395,9 +405,8 @@ separate storage requirement.
 A proposal is a successful task outcome: the work item and run succeed with
 `native_outcome: "proposal"` and `native_proposal_id`, and the task status shows
 `outcome: "proposal"` with `proposal_id`. Only a proposal recorded by this run's
-own session counts. Reusing another run's `request_id` returns that run's
-proposal but does not make it this task's outcome, so such a run still fails
-without a receipt.
+own session counts. A different run may reuse a client `request_id`; it records
+its own proposal instead of adopting an earlier run's candidate.
 
 A person with an admitted session reviews them (`GET .../craft/proposals`,
 candidate bytes at `GET .../craft/proposals/{id}`) and decides once. Accept is

@@ -86,7 +86,21 @@ func (s *NativeStore) Propose(ctx context.Context, k EditLeaseScope, base int64,
 		return NativeProposal{}, err
 	}
 	var out NativeProposal
-	authorize := s.authority(k, nil, "write")
+	var runSession string
+	authorize := func(ctx context.Context, tx *sql.Tx) (string, error) {
+		principal, err := s.config.Authorize(ctx, tx, k, "write")
+		if err != nil {
+			return "", err
+		}
+		if principal.SessionID == "" || runSession != "" && runSession != principal.SessionID {
+			return "", ErrEditLeaseDenied
+		}
+		runSession = principal.SessionID
+		if err := s.profile(ctx, tx, k); err != nil {
+			return "", err
+		}
+		return principal.ActorID, nil
+	}
 	recorded := false
 	// The store checks authority before and after the body; record once and
 	// let the second pass only re-check rights.
@@ -99,7 +113,12 @@ func (s *NativeStore) Propose(ctx context.Context, k EditLeaseScope, base int64,
 			return "", ErrEditLeaseDenied
 		}
 		recorded = true
-		prior, err := scanNativeProposal(tx.QueryRowContext(ctx, `SELECT `+nativeProposalColumns+` FROM craft_native_proposals WHERE page_id=? AND author_actor_id=? AND request_id=?`, k.ArtifactID, actor, requestID))
+		// The session comes from current host authorization, never a caller's
+		// request fields. Keep the display author stable and namespace only the
+		// internal idempotency key; no old rows or migrations are rewritten.
+		keyHash := sha256.Sum256([]byte(runSession + "\x00" + requestID))
+		requestKey := "run:" + hex.EncodeToString(keyHash[:])
+		prior, err := scanNativeProposal(tx.QueryRowContext(ctx, `SELECT `+nativeProposalColumns+` FROM craft_native_proposals WHERE page_id=? AND author_actor_id=? AND request_id=?`, k.ArtifactID, actor, requestKey))
 		if err == nil {
 			if prior.ContentHash != hash || prior.BaseVersion != base || prior.Summary != summary {
 				return "", artifacts.ErrVersionConflict
@@ -132,7 +151,7 @@ func (s *NativeStore) Propose(ctx context.Context, k EditLeaseScope, base int64,
 		if open >= MaxOpenNativeProposals {
 			return "", artifacts.ErrVersionQuota
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO craft_native_proposals(id,page_id,workspace_id,application_id,engine_pin,author_actor_id,request_id,base_version,summary,content_hash,content) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, k.ArtifactID, k.WorkspaceID, s.config.Application, s.EnginePin(), actor, requestID, base, summary, hash, b); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO craft_native_proposals(id,page_id,workspace_id,application_id,engine_pin,author_actor_id,request_id,base_version,summary,content_hash,content) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, k.ArtifactID, k.WorkspaceID, s.config.Application, s.EnginePin(), actor, requestKey, base, summary, hash, b); err != nil {
 			return "", err
 		}
 		used, err := nativeProposalBytes(ctx, tx, k)

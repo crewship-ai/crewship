@@ -53,11 +53,16 @@ func (m *craftNativeAgentManager) Close() {
 	}
 	m.cancel()
 	m.mu.Lock()
+	entries := make([]*craftNativeAgentEntry, 0, len(m.entries))
 	for _, e := range m.entries {
 		e.closed = true
+		entries = append(entries, e)
 	}
 	done := m.done
 	m.mu.Unlock()
+	for _, e := range entries {
+		m.clearClosedProposalCandidates(e)
+	}
 	if done != nil {
 		select {
 		case <-done:

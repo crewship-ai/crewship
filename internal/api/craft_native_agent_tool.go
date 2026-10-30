@@ -27,14 +27,23 @@ type craftNativeAgentToolRequest struct {
 	Summary     string          `json:"summary,omitempty"`
 }
 type craftNativeAgentToolAttempt struct {
-	input     [32]byte
-	lease     mooring.EditLease
-	base      int64
-	hash      string
-	revision  string
-	attempted bool
-	receipt   *mooring.NativeSaveReceipt
+	input             [32]byte
+	lease             mooring.EditLease
+	base              int64
+	hash              string
+	revision          string
+	attempted         bool
+	receipt           *mooring.NativeSaveReceipt
+	isProposal        bool
+	proposalID        string
+	proposalCandidate []byte // retained only while this proposal's commit is unknown
+	proposalErr       error
 }
+
+const maxNativeAgentChangeRequests = 64
+
+var errNativeAgentChangeRequestLimit = errors.New("native agent change request limit reached")
+
 type craftNativeAgentToolState struct {
 	events           []craftNativeAgentToolEvent
 	lastReceipt      *mooring.NativeSaveReceipt
@@ -43,9 +52,8 @@ type craftNativeAgentToolState struct {
 	currentAttempt   *craftNativeAgentToolAttempt
 	lease            mooring.EditLease
 	requests         map[string]*craftNativeAgentToolAttempt
-	// proposals maps this run's propose request IDs to the proposal each one
-	// recorded; proposal is the latest. A replay of another run's request ID
-	// is never entered here.
+	// Proposals share requests with applies. Stored proposal keys are bound to
+	// this authenticated run, including a replay after an uncertain commit.
 	proposals map[string]string
 	proposal  *craftNativeAgentProposalRecord
 }
@@ -69,15 +77,11 @@ func craftNativeAgentProposalOutcome(e *craftNativeAgentEntry) (*craftNativeAgen
 	return &copy, false
 }
 
-// rememberNativeAgentProposal records a proposal as this run's own only when
-// this call created it, or when it is this run's exact retry of a request it
-// already recorded. The store returns another run's proposal for a reused
-// request ID; that one must not become this task's outcome.
+// The store namespaces request keys by the authenticated run session. Both a
+// new result and its durable replay therefore belong to this run, including
+// recovery of an unknown proposal commit.
 func rememberNativeAgentProposal(e *craftNativeAgentEntry, requestID string, p mooring.NativeProposal) {
 	if p.ID == "" {
-		return
-	}
-	if p.Replayed && e.tool.proposals[requestID] != p.ID {
 		return
 	}
 	if e.tool.proposals == nil {
@@ -100,7 +104,7 @@ func craftNativeAgentCompletion(e *craftNativeAgentEntry) (*mooring.NativeSaveRe
 		return nil, false, mooring.EditLease{}
 	}
 	var receipt *mooring.NativeSaveReceipt
-	if e.tool.lastReceipt != nil && (e.tool.currentAttempt == nil || e.tool.currentAttempt.receipt != nil) {
+	if e.tool.lastReceipt != nil && (e.tool.currentAttempt == nil || e.tool.currentAttempt.receipt != nil || e.tool.currentAttempt.isProposal) {
 		copy := *e.tool.lastReceipt
 		receipt = &copy
 	}
@@ -190,7 +194,16 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	e.callMu.Lock()
-	defer e.callMu.Unlock()
+	defer func() {
+		// Close/retirement never waits behind an engine conversion. Release
+		// under mu so it cannot miss this final cleanup handoff.
+		m.mu.Lock()
+		if e.closed {
+			clearNativeProposalCandidatesLocked(e)
+		}
+		e.callMu.Unlock()
+		m.mu.Unlock()
+	}()
 	if e.tool == nil {
 		e.tool = &craftNativeAgentToolState{requests: make(map[string]*craftNativeAgentToolAttempt)}
 	}
@@ -202,7 +215,7 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 			// A panic or abandoned response is not a successful HTTP outcome.
 			// If publication began, preserve that exact unknown attempt until
 			// its original snapshot is reconciled; never permit a new edit.
-			if attempt := e.tool.currentAttempt; attempt != nil && attempt.attempted && attempt.receipt == nil {
+			if attempt := e.tool.currentAttempt; attempt != nil && attempt.attempted && attempt.receipt == nil && attempt.proposalID == "" {
 				e.tool.uncertain, e.tool.uncertainAttempt = true, attempt
 			}
 			return
@@ -271,6 +284,8 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 		if err != nil {
 			if e.tool.uncertain {
 				replyError(w, 503, "original native save outcome unconfirmed; reconcile the exact original request")
+			} else if errors.Is(err, errNativeAgentChangeRequestLimit) {
+				replyError(w, 429, "this run has reached its change request limit")
 			} else if errors.Is(err, ErrCraftNativeAgentEngine) {
 				replyError(w, 422, "original native engine operation refused")
 			} else {
@@ -282,7 +297,11 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 	case "propose":
 		proposal, err := m.proposeTool(bound.Context(), e, store, profile, input)
 		if err != nil {
-			if errors.Is(err, ErrCraftNativeAgentEngine) {
+			if e.tool.uncertain {
+				replyError(w, 503, "original native change outcome unconfirmed; reconcile the exact original request")
+			} else if errors.Is(err, errNativeAgentChangeRequestLimit) {
+				replyError(w, 429, "this run has reached its change request limit")
+			} else if errors.Is(err, ErrCraftNativeAgentEngine) {
 				replyError(w, 422, "original native engine operation refused")
 			} else {
 				craftNativeDocumentError(w, err)
@@ -373,8 +392,8 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	if e.tool.uncertain {
 		return zero, mooring.ErrNativeUnconfirmed
 	}
-	if len(e.tool.requests) >= 64 {
-		return zero, artifacts.ErrVersionQuota
+	if len(e.tool.requests) >= maxNativeAgentChangeRequests {
+		return zero, errNativeAgentChangeRequestLimit
 	}
 	state, err := store.Read(ctx, e.grant.Scope)
 	if err != nil {
@@ -444,7 +463,35 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 // touching the lease, so a human holder keeps editing. It is recorded once per
 // request ID; the engine output is never published as a version here.
 func (m *craftNativeAgentManager) proposeTool(ctx context.Context, e *craftNativeAgentEntry, store *mooring.NativeStore, profile CraftNativeDocumentProfile, input craftNativeAgentToolRequest) (mooring.NativeProposal, error) {
+	canonical, _ := json.Marshal(input)
+	fingerprint := sha256.Sum256(canonical)
 	base, _ := craftNativeVersion(input.BaseVersion)
+	if prior := e.tool.requests[input.RequestID]; prior != nil {
+		if prior.input != fingerprint {
+			return mooring.NativeProposal{}, artifacts.ErrVersionConflict
+		}
+		if prior.proposalErr != nil {
+			return mooring.NativeProposal{}, prior.proposalErr
+		}
+		candidate := prior.proposalCandidate
+		if prior.proposalID != "" {
+			p, err := store.ProposalContent(ctx, e.grant.Scope, prior.proposalID)
+			if err != nil {
+				return mooring.NativeProposal{}, err
+			}
+			candidate = p.Content
+		}
+		if !prior.attempted || len(candidate) == 0 {
+			return mooring.NativeProposal{}, ErrCraftNativeAgentEngine
+		}
+		return m.recordProposalAttempt(ctx, e, store, input, prior, candidate)
+	}
+	if e.tool.uncertain {
+		return mooring.NativeProposal{}, mooring.ErrNativeUnconfirmed
+	}
+	if len(e.tool.requests) >= maxNativeAgentChangeRequests {
+		return mooring.NativeProposal{}, errNativeAgentChangeRequestLimit
+	}
 	state, err := store.Read(ctx, e.grant.Scope)
 	if err != nil {
 		return mooring.NativeProposal{}, err
@@ -456,24 +503,46 @@ func (m *craftNativeAgentManager) proposeTool(ctx context.Context, e *craftNativ
 	if err != nil {
 		return mooring.NativeProposal{}, err
 	}
+	attempt := &craftNativeAgentToolAttempt{input: fingerprint, base: base, isProposal: true}
+	e.tool.requests[input.RequestID] = attempt
+	e.tool.currentAttempt = attempt
 	active, cancel := context.WithTimeout(ctx, 65*time.Second)
 	defer cancel()
 	candidate, err := m.config.AgentApply(active, profile, native, input.Commands)
 	if err != nil {
+		attempt.proposalErr = err
 		return mooring.NativeProposal{}, err
 	}
 	if len(candidate) == 0 || len(candidate) > 32<<20 {
+		attempt.proposalErr = ErrCraftNativeAgentEngine
 		return mooring.NativeProposal{}, ErrCraftNativeAgentEngine
 	}
 	// Run authority is checked again after the external engine call.
 	if err = m.toolAuthority(ctx, e); err != nil {
 		return mooring.NativeProposal{}, err
 	}
-	proposal, err := store.Propose(ctx, e.grant.Scope, base, input.RequestID, input.Summary, candidate)
+	attempt.proposalCandidate = append([]byte(nil), candidate...)
+	attempt.attempted = true
+	return m.recordProposalAttempt(ctx, e, store, input, attempt, attempt.proposalCandidate)
+}
+
+func (m *craftNativeAgentManager) recordProposalAttempt(ctx context.Context, e *craftNativeAgentEntry, store *mooring.NativeStore, input craftNativeAgentToolRequest, attempt *craftNativeAgentToolAttempt, candidate []byte) (mooring.NativeProposal, error) {
+	proposal, err := store.Propose(ctx, e.grant.Scope, attempt.base, input.RequestID, input.Summary, candidate)
 	if err != nil {
+		if attempt.proposalID == "" {
+			if !knownNativeAgentRefusal(err) {
+				e.tool.uncertain, e.tool.uncertainAttempt = true, attempt
+			} else if e.tool.uncertainAttempt != attempt {
+				attempt.proposalCandidate, attempt.proposalErr = nil, err
+			}
+		}
 		return mooring.NativeProposal{}, err
 	}
+	attempt.proposalID, attempt.proposalCandidate = proposal.ID, nil
 	rememberNativeAgentProposal(e, input.RequestID, proposal)
+	if e.tool.uncertainAttempt == attempt {
+		e.tool.uncertain, e.tool.uncertainAttempt = false, nil
+	}
 	return proposal, nil
 }
 
@@ -499,4 +568,29 @@ func rememberNativeAgentReceipt(state *craftNativeAgentToolState, receipt moorin
 	}
 	copy := receipt
 	state.lastReceipt = &copy
+}
+
+// Caller holds callMu. Keep receipts and uncertainty for truthful status, but
+// closed runs no longer need a potentially large candidate for reconciliation.
+func clearNativeProposalCandidatesLocked(e *craftNativeAgentEntry) {
+	if e.tool != nil {
+		for _, attempt := range e.tool.requests {
+			attempt.proposalCandidate = nil
+		}
+	}
+}
+
+// Invoke only outside mu and SQL writer transactions. An active call performs
+// the same cleanup when it releases callMu; retirement must never wait for it.
+func (m *craftNativeAgentManager) clearClosedProposalCandidates(e *craftNativeAgentEntry) {
+	if e == nil || !e.callMu.TryLock() {
+		return
+	}
+	defer e.callMu.Unlock()
+	m.mu.Lock()
+	closed := e.closed
+	m.mu.Unlock()
+	if closed {
+		clearNativeProposalCandidatesLocked(e)
+	}
 }
