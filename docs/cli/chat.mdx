@@ -35,8 +35,6 @@ The version 1 envelope identifies the workspace, source kind, source ID and orig
 | `chat create <agent-slug-or-id>` | Open an empty chat session on an agent without sending anything to it. Prints the new chat id on stdout. |
 | `chat list <agent-slug-or-id>` | List recent chats for an agent, ordered by last activity. Includes `KIND` (what wrote the chat) and `UNREAD` (replies you haven't seen). `--kind` narrows to one; `--search`/`-q` matches titles, `--chat`/`--routine` pin one chat or one routine's chats, `--with-source` attaches the work source to each row; `--limit` and `--offset` page (the server's default and ceiling are 100), and a cut page ends with `showing 1–10 of 19 · next page: --offset 10`. |
 | `chat refs <chat-id>` | Read one authorized page of durable Issue cards, with an opaque continuation cursor. |
-| `chat document-access <chat-id>` | Read the document grants and verified task permissions you can see in a chat. Read-only; it cannot grant access or start work. |
-| `chat run-preflight <chat-id>` | Read the current payer, budget balances and predicted gate for the chat's configured agent before you send work. Read-only. |
 | `chat read <chat-id>` | Mark a chat read for you: clears its unread count and the paired "agent replied" inbox notification. |
 | `chat rename <chat-id> <title>` | Give the session a name — what `chat list`, the sidebar and reply notifications call it. Alias: `title`. |
 | `chat attach <chat-id> <path>` | Upload a file into the chat (lands under `/output/<agent-slug>/attachments/<chat-id>/<attachment-id>/` in the container). |
@@ -80,8 +78,7 @@ crewship chat refs <chat-id> --cursor '<next_cursor>' --limit 25 --format yaml
 Calls `GET /api/v1/chats/{chatId}/entity-refs`. The response retains `refs`,
 `reset`, `next_cursor`, `snapshot_id`, `has_more` and `snapshot_complete`.
 Default output is JSON; global `--format yaml` and `--format ndjson` are also
-supported. The `--filter` flag of `crewship chat <chat-id>` is not accepted
-here; pipe `--format json` output to `jq` instead.
+supported. `--filter` applies a jq expression to the JSON response.
 
 A first page starts a replacement list (`reset: true`). Continue with its
 cursor while `has_more` is true; continuation pages share `snapshot_id`.
@@ -94,45 +91,6 @@ unreadable references are omitted rather than replaced with metadata stubs.
 This is a read-only API projection, not a command that creates cards or work.
 See [Chat entity references](/specs/chat-entity-references) for synchronization
 rules and [Operation](/cli/operation) for operation metadata.
-
-## `crewship chat document-access`
-
-```bash
-crewship chat document-access <chat-id>
-crewship chat document-access <chat-id> --format json | jq '.documents[] | {title, document_grant, task_status}'
-```
-
-Calls `GET /api/v1/chats/{chatId}/document-access`. The response is
-`{documents, artifacts, artifacts_partial}`. Each `documents` row carries
-`page_id`, `title`, `document_type`, `application_id`, `document_grant`
-(`read` or `write`), `policy_allows`, `task_status`, `tasks` and `provenance`.
-`task_status` is `unavailable` when the runtime task source cannot be verified.
-Chat membership alone never grants document access: each document is rechecked
-against your own Page read rights, and documents you cannot read are left out.
-An inaccessible chat answers `404` (exit `3`); unverifiable metadata answers
-`503` (exit `7`). See
-[Chat entity references](/specs/chat-entity-references#document-access-metadata-in-chat)
-for the full contract.
-
-## `crewship chat run-preflight`
-
-```bash
-crewship chat run-preflight <chat-id>
-crewship chat run-preflight <chat-id> --format yaml
-```
-
-Calls `GET /api/v1/chats/{chatId}/run-preflight`. It reports the payer the
-runtime would select for the chat agent's configured model, the Paymaster
-budget balances readable for the workspace, crew and agent, and the predicted
-gate mode. A remaining balance is neither a reservation nor permission to
-spend, and `estimate_state` stays `unknown`. A chat outside your current
-audience or workspace answers `404` (exit `3`); an unverifiable payer or
-policy answers `503` (exit `7`). See
-[Budget and gate before work](/guides/chat-sessions#budget-and-gate-before-work).
-
-Both commands take no command-specific flags. Their default output is JSON
-(`--format table` and `quiet` also print JSON); `--format yaml` and
-`--format ndjson` are honoured.
 
 ## Flags
 
