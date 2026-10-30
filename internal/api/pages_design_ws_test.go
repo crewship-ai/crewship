@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,6 +48,63 @@ func designCloseCodeOf(t *testing.T, conn *websocket.Conn) int {
 	}
 }
 
+// A Read-only socket answering sync step 1 must not run the Node Yjs engine
+// while holding the global SQLite writer fence: every other writer in every
+// workspace would wait for it.
+func TestDesignWebsocketReaderSyncRunsEngineOutsideWriterFence(t *testing.T) {
+	f := newDesignAuthorityFixture(t)
+	reader := "design-ws-fence-reader"
+	f.reader(t, reader)
+	var calls, blocked atomic.Int32
+	real := designWSRun
+	designWSRun = func(ctx context.Context, request design.Request) (design.Result, error) {
+		if len(request.Frame) > 1 && request.Frame[0] == 0 && request.Frame[1] == 0 {
+			calls.Add(1)
+			done := make(chan error, 1)
+			go func() {
+				_, err := f.h.db.ExecContext(context.Background(), `UPDATE document_writer_fence SET seq=seq WHERE id=1`)
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Errorf("unrelated write failed: %v", err)
+				}
+			case <-time.After(750 * time.Millisecond):
+				// Returning lets the fenced transaction finish so the waiting
+				// writer can complete; never wait for it here.
+				blocked.Add(1)
+			}
+		}
+		return real(ctx, request)
+	}
+	t.Cleanup(func() { designWSRun = real })
+	_ = f.dial(t, reader)
+	if calls.Load() == 0 {
+		t.Fatal("reader sync step 1 did not reach the Design engine")
+	}
+	if blocked.Load() != 0 {
+		t.Fatal("reader sync step 1 held the database writer fence while the Design engine ran")
+	}
+}
+
+// A burst of sync step 1 requests is answered; a flood is closed rather than
+// spawning one engine process per frame.
+func TestDesignWebsocketRejectsSyncStepOneFlood(t *testing.T) {
+	f := newDesignAuthorityFixture(t)
+	reader := "design-ws-flood-reader"
+	f.reader(t, reader)
+	conn := f.dial(t, reader)
+	for range 2 * designSyncBurst {
+		if err := conn.WriteMessage(websocket.BinaryMessage, []byte{0, 0, 1, 0}); err != nil {
+			break
+		}
+	}
+	if code := designCloseCodeOf(t, conn); code != designCloseRateLimited {
+		t.Fatalf("sync step 1 flood close code %d, want %d", code, designCloseRateLimited)
+	}
+}
+
 // An update the engine refuses is not a permission change: answering it with
 // 1008 sends the browser into its "denied" re-admission loop.
 func TestDesignWebsocketRejectedUpdateIsNotPermissionClose(t *testing.T) {
@@ -73,6 +132,25 @@ func TestDesignWebsocketRejectedUpdateIsNotPermissionClose(t *testing.T) {
 	}
 }
 
+func TestDesignSyncRequestBucket(t *testing.T) {
+	client := &designClient{}
+	now := time.Unix(1_000_000, 0)
+	for i := range designSyncBurst {
+		if !client.allowSyncRequest(now) {
+			t.Fatalf("burst request %d refused", i)
+		}
+	}
+	if client.allowSyncRequest(now) {
+		t.Fatal("request beyond the burst allowed")
+	}
+	if !client.allowSyncRequest(now.Add(designSyncRefill)) {
+		t.Fatal("refilled request refused")
+	}
+	if client.allowSyncRequest(now.Add(designSyncRefill)) {
+		t.Fatal("one refill allowed two requests")
+	}
+}
+
 func TestDesignWebsocketCloseCodes(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -86,6 +164,7 @@ func TestDesignWebsocketCloseCodes(t *testing.T) {
 		{"invalid update", fmt.Errorf("%w: src too long", design.ErrInvalid), designCloseRejected},
 		{"invalid version", artifacts.ErrVersionInvalid, designCloseRejected},
 		{"protocol", errDesignProtocol, websocket.CloseProtocolError},
+		{"rate", errDesignRateLimited, designCloseRateLimited},
 		{"engine unavailable", design.ErrUnavailable, websocket.CloseInternalServerErr},
 		{"database busy", errors.New("database is locked"), websocket.CloseInternalServerErr},
 	} {
