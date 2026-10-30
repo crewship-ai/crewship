@@ -56,6 +56,14 @@ var ErrDetachedExecStopped = errors.New("orchestrator: detached exec stopped aft
 // A cancelled observer context or a requested status update is insufficient.
 var ErrExecutionStopConfirmed = errors.New("run execution stop confirmed")
 
+// explicitStopCaused reports whether ctx ended because of the chat's explicit
+// stop request for this run, and not also because of an agent stop. Only then
+// may a cancellation be confirmed to the requester; a base-context shutdown
+// or an agent-initiated stop ends the run for a different reason.
+func (o *Orchestrator) explicitStopCaused(ctx context.Context, runID string) bool {
+	return errors.Is(context.Cause(ctx), ws.ErrExplicitStopRequested) && !o.agentStopRequested(runID)
+}
+
 // awaitExecTerminalWithLogger inspects an exec whose stream has ended and, when the
 // process is still alive, keeps inspecting until it terminates (#2626).
 //
@@ -1131,7 +1139,7 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// failure so the journal/UI shows "stuck in a loop" rather than a generic
 	// non-zero exit, and so cost triage can tell runaway loops apart from real
 	// crashes. Uses a fresh context because execCtx is now cancelled.
-	if req.HostOutputDir != "" && errors.Is(context.Cause(ctx), ws.ErrExplicitStopRequested) {
+	if req.HostOutputDir != "" && o.explicitStopCaused(ctx, req.RunID) {
 		stopCtx, stopCancel := context.WithTimeout(context.Background(), preflightExecTimeout)
 		protectedRun := runState
 		protectedRun.ExecID = result.ExecID
@@ -1212,7 +1220,14 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 				fmt.Sprintf("%s: CANCELLED (%dms)", req.AgentSlug, time.Since(execStart).Milliseconds()),
 				execStart, map[string]any{"cancelled": true})
 			o.markAgentOnline(cleanCtx, req, map[string]any{"reason": "cancelled"})
-			return fmt.Errorf("run cancelled: %w", errors.Join(ctx.Err(), ErrExecutionStopConfirmed))
+			// The run is cancelled either way, but only the chat's explicit
+			// stop request may receive a confirmation: a hub or server
+			// shutdown, or a concurrent agent stop, ended it for another
+			// reason.
+			if o.explicitStopCaused(ctx, req.RunID) {
+				return fmt.Errorf("run cancelled: %w", errors.Join(ctx.Err(), ErrExecutionStopConfirmed))
+			}
+			return fmt.Errorf("run cancelled: %w", ctx.Err())
 		}
 		// Exact termination is known, but its exit is not a stop signal.
 		// Continue the original success/failure/in-band classification; do
@@ -1430,8 +1445,10 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		status = "error"
 		execErr = inBandErr
 	} else if exitCode == 143 && o.agentStopRequested(req.RunID) {
+		// An agent stop is a separate request (POST /agents/{id}/stop); it
+		// never confirms a chat cancellation someone else asked for.
 		status = "cancelled"
-		execErr = errors.Join(ErrAgentStopped, ErrExecutionStopConfirmed)
+		execErr = ErrAgentStopped
 	} else if exitCode != 0 {
 		status = "error"
 		o.loggerForRun(req).Warn("agent exited with error", "agent_id", req.AgentID, "exit_code", exitCode)

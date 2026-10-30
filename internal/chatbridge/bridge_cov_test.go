@@ -551,13 +551,13 @@ func TestHandleChatMessageCancelMidRunPersistsPartial(t *testing.T) {
 	ctr := &scriptedContainer{agentOutput: claudeSuccessOutput(0), exitCode: 0}
 	b := testBridgeWithContainer(t, resolver, ctr)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
 
 	var errEvents []ws.ChatEvent
 	streamFn := func(e ws.ChatEvent) {
 		if e.Type == "text" {
-			cancel() // simulate stop button mid-stream
+			cancel(ws.ErrExplicitStopRequested) // simulate stop button mid-stream
 		}
 		if e.Type == "error" {
 			errEvents = append(errEvents, e)

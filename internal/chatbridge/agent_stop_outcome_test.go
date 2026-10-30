@@ -71,8 +71,11 @@ func TestAgentStop_ChatOutcomePreservesStopAndLateSuccess(t *testing.T) {
 			}
 			select {
 			case err := <-done:
-				if got := errors.Is(err, ws.ErrRunCancelled); got != (tc.want == "CANCELLED") {
-					t.Fatalf("cancellation confirmation=%v, outcome=%s err=%v", got, tc.want, err)
+				// An agent stop is its own request (POST /agents/{id}/stop):
+				// it is recorded CANCELLED but never confirms a chat
+				// cancellation a user may have asked for.
+				if errors.Is(err, ws.ErrRunCancelled) {
+					t.Fatalf("agent stop confirmed a chat cancellation: outcome=%s err=%v", tc.want, err)
 				}
 			case <-ctx.Done():
 				t.Fatal("chat never settled")

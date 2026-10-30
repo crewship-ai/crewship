@@ -33,7 +33,7 @@ type legacyOutcomeResolver struct {
 // projection instead of the requested CANCELLED state. HTTP200 alone is not a
 // cancellation receipt. Exercise the production IPC parser from the real Bridge.
 func TestHandleChatMessageCancellationRequiresAcknowledgedOutcome(t *testing.T) {
-	for _, scenario := range []string{"cancelled", "completed", "malformed", "wrong-id", "empty", "oversized", "legacy-resolver"} {
+	for _, scenario := range []string{"cancelled", "completed", "malformed", "wrong-id", "empty", "oversized", "legacy-resolver", "non-explicit-cause"} {
 		t.Run(scenario, func(t *testing.T) {
 			var received atomic.Bool
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -68,11 +68,18 @@ func TestHandleChatMessageCancellationRequiresAcknowledgedOutcome(t *testing.T) 
 			}
 			ctr := &scriptedContainer{agentOutput: claudeSuccessOutput(0), exitCode: 0}
 			bridge := testBridgeWithContainer(t, resolver, ctr)
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
+			// Only the hub's explicit stop cause may be confirmed; a run
+			// context ended by anything else (e.g. server shutdown) is
+			// recorded CANCELLED but never confirmed to a requester.
+			cause := ws.ErrExplicitStopRequested
+			if scenario == "non-explicit-cause" {
+				cause = errors.New("hub shutting down")
+			}
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(nil)
 			err := bridge.HandleChatMessage(ctx, "user-1", "cancel-receipt", "hi", func(e ws.ChatEvent) {
 				if e.Type == "text" {
-					cancel()
+					cancel(cause)
 				}
 			})
 			if got := errors.Is(err, ws.ErrRunCancelled); got != (scenario == "cancelled") {

@@ -147,3 +147,81 @@ func (c *confirmedCancellationFixture) ExecInspect(_ context.Context, id string)
 	}
 	return false, 0, nil
 }
+
+// The legacy (non-host-capture) cancellation branch records the stopped run
+// as cancelled whatever ended its context, but only the chat's explicit stop
+// request — not a hub/server shutdown, a plain cancel, or a concurrent agent
+// stop — may be confirmed to the requester.
+func TestRunAgentLegacyCancellationConfirmsOnlyExplicitStop(t *testing.T) {
+	shutdown := errors.New("hub shutting down")
+	for _, tc := range []struct {
+		name      string
+		cause     error
+		agentStop bool
+		confirmed bool
+	}{
+		{"explicit-stop", ws.ErrExplicitStopRequested, false, true},
+		{"plain-cancel", nil, false, false},
+		{"base-context-shutdown", shutdown, false, false},
+		{"explicit-stop-racing-agent-stop", ws.ErrExplicitStopRequested, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := covNewRunContainer(covRunOpts{stream: "{}\n", agentExit: 143, tmuxStopOut: "ABSENT"})
+			state := newMemState()
+			o := New(c, state, covQuietLogger())
+			req := covRunReq()
+			req.RunID = "legacy-cause-" + tc.name
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(nil)
+			req.OnExecStarted = func(string) {
+				if tc.agentStop {
+					v, ok := o.agentRuns.Load(req.RunID)
+					if !ok {
+						t.Error("run control not registered")
+					} else {
+						rc := v.(*agentRunControl)
+						rc.mu.Lock()
+						rc.stopped = true
+						rc.mu.Unlock()
+					}
+				}
+				cancel(tc.cause)
+			}
+			err := o.RunAgent(ctx, req, nil)
+			if got := errors.Is(err, ErrExecutionStopConfirmed); got != tc.confirmed {
+				t.Fatalf("confirmed=%v want %v err=%v", got, tc.confirmed, err)
+			}
+			if err == nil {
+				t.Fatal("cancellation not reported")
+			}
+			if got := covRunStatus(t, state, req.RunID); got != "cancelled" {
+				t.Fatalf("persisted %s want cancelled", got)
+			}
+		})
+	}
+}
+
+// An agent stop (exit 143 with the agent's stop flag) is recorded as
+// cancelled but is never a confirmation of a chat cancellation request.
+func TestRunAgentAgentStopIsNotChatCancellationConfirmation(t *testing.T) {
+	c := covNewRunContainer(covRunOpts{stream: "{}\n", agentExit: 143})
+	state := newMemState()
+	o := New(c, state, covQuietLogger())
+	req := covRunReq()
+	req.RunID = "agent-stop-not-chat-confirmation"
+	req.OnExecStarted = func(string) {
+		v, ok := o.agentRuns.Load(req.RunID)
+		if !ok {
+			t.Error("run control not registered")
+			return
+		}
+		rc := v.(*agentRunControl)
+		rc.mu.Lock()
+		rc.stopped = true
+		rc.mu.Unlock()
+	}
+	err := o.RunAgent(t.Context(), req, nil)
+	if !errors.Is(err, ErrAgentStopped) || errors.Is(err, ErrExecutionStopConfirmed) {
+		t.Fatalf("agent stop outcome misreported: %v", err)
+	}
+}
