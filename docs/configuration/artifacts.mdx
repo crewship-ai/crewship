@@ -1,0 +1,268 @@
+---
+title: "Artifacts configuration"
+description: "Turn on Artifacts surfaces: workspace feature flags, instance startup switches and build-time UI variables, with one matrix per screen."
+icon: "toggle-right"
+stability: experimental
+tag: Experimental
+---
+
+# Artifacts configuration
+
+Every Artifacts surface beyond the classic Page list is **off by default**. A
+surface appears only when each layer it depends on is switched on:
+
+| Layer | Where it is set | When it takes effect | Scope |
+|---|---|---|---|
+| Workspace feature flag | `crewship feature-flag enable <key>` | Immediately | One workspace (or the instance default) |
+| Server environment bypass | A `CREWSHIP_*_ENABLED` variable listed under [bypasses](#server-environment-bypasses) | Server restart | Every workspace on the instance |
+| Instance startup switch | YAML config or `CREWSHIP_*_ENABLED` | Server restart | The whole instance |
+| Build-time UI variable | `NEXT_PUBLIC_*` when the web UI is built | Rebuild and redeploy the UI | Every user of that build |
+
+The server layers decide whether an endpoint answers. The build-time layer
+decides whether the web UI shows the screen at all. A screen whose UI variable
+is off stays hidden even when the workspace flag is on, and a screen whose UI
+variable is on shows nothing until the server reports the feature available.
+
+## Which switches each screen needs
+
+| Screen | Build-time UI variable | Workspace flag | Instance switch |
+|---|---|---|---|
+| Artifacts library at `/artifacts` and the **Artifacts** sidebar link | `NEXT_PUBLIC_ARTIFACTS_LIBRARY` | — | — |
+| `/pages` overview opens the Artifacts library | `NEXT_PUBLIC_ARTIFACTS_LIBRARY` and `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` | — | — |
+| Artifact project cards and the side viewer in chat | `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` | `artifact_projects` | — |
+| Dashboard with live data | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` | `artifact_projects` and `artifact_dashboard_data` | — |
+| Slides artifact preview and PDF export | `NEXT_PUBLIC_ARTIFACT_SLIDES` | `artifact_projects` and `artifact_slides` | — |
+| Design canvas | `NEXT_PUBLIC_ARTIFACTS_DESIGN` | `artifacts_design` | — |
+| Craft edit lease bar and draft recovery in chat | `NEXT_PUBLIC_CHAT_CRAFT_LEASE` | — | `craft_native.enabled` with a Word or Sheet profile |
+| Native Craft Word and Sheet editors | — | — | `craft_native.enabled` with a Word or Sheet profile |
+| Creating a Word document (Docs) | — | — | `documents.enabled` |
+| Live workbook editing | — | `gridcraft_editor` | `gridcraft.enabled` and `gridcraft.editor_enabled` |
+| Native Slides editor on a Page | `NEXT_PUBLIC_SLIDES_EDITOR` | — | `slides.enabled` |
+
+`NEXT_PUBLIC_ARTIFACTS_DESIGN` alone also opens `/artifacts`, so a Design-only
+build can reach the canvas. Without either library variable, a saved
+`/artifacts` link falls back to `/pages`. Artifacts is the main place for this
+work; turn on `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` together with the library so
+the old overview leads there too.
+
+## Workspace feature flags
+
+These flags are stored in the database. Each one is created by a migration with
+its instance default **off**, so upgrading an existing instance never turns a
+surface on. A migration that runs again leaves a changed default alone.
+
+| Key | Instance default | Turns on | Also needs |
+|---|---|---|---|
+| `artifact_projects` | off | Multi-screen HTML artifact projects with immutable versions and anchored comments, their availability check, and the artifact project cards in chat | — |
+| `artifact_dashboard_data` | off | Dashboard datasets and reader-scoped data for Dashboard artifacts | `artifact_projects` |
+| `artifact_slides` | off | Read-only Slides projections of an artifact version and vector PDF export | `artifact_projects` |
+| `artifacts_design` | off | Collaborative Design artifacts | — |
+| `gridcraft_editor` | off | Live workbook editing: editor sessions, cell edits and the commits feed | Instance switches `gridcraft.enabled` and `gridcraft.editor_enabled` |
+
+A workspace override wins over the instance default. A key that does not exist
+reads as off. The flag check reads only the on/off value: the `percentage`
+column shown by `crewship feature-flag list` does not change the result for
+these keys.
+
+Turn a flag on for the current workspace (OWNER or ADMIN):
+
+```bash
+crewship feature-flag enable artifact_projects
+crewship feature-flag enable artifact_slides
+```
+
+Return the workspace to the instance default, or turn it off explicitly:
+
+```bash
+crewship feature-flag inherit artifact_slides
+crewship feature-flag disable artifact_slides
+```
+
+Change the instance default for every workspace without an override (instance
+administrator):
+
+```bash
+crewship feature-flag update artifacts_design --enabled
+```
+
+The same operations are available as `PUT` and `DELETE`
+`/api/v1/feature-flags/{key}/override` and `PATCH /api/v1/feature-flags/{key}`.
+See [`crewship feature-flag`](/cli/feature-flag) and the
+[Feature flags API](/api-reference/feature-flags).
+
+### Server environment bypasses
+
+Four flags have a server environment variable that turns the feature on for
+**every workspace** on the instance, whatever the database says. Use them for a
+single-tenant or demo instance. The value must be exactly `true`; `1` is not
+accepted.
+
+| Variable | Same effect as |
+|---|---|
+| `CREWSHIP_ARTIFACT_PROJECTS_ENABLED` | `artifact_projects` |
+| `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED` | `artifact_dashboard_data` |
+| `CREWSHIP_ARTIFACT_SLIDES_ENABLED` | `artifact_slides` |
+| `CREWSHIP_ARTIFACTS_DESIGN_ENABLED` | `artifacts_design` |
+
+The Dashboard data and Slides bypasses do not imply `artifact_projects`: that
+flag, or its bypass, must still be on for the workspace. `gridcraft_editor` has
+no bypass. A bypass cannot be turned off per workspace; remove the variable and
+restart the server instead.
+
+## Instance startup switches
+
+These switches are read once when the server starts. Set them in the
+[YAML configuration](/configuration/yaml-config) or as
+[environment variables](/configuration/environment); an environment variable
+overrides the YAML value. Boolean switches accept `true` or `1`. Change them
+only with a restart. A switch that is off removes or refuses its routes for
+every workspace.
+
+| YAML key | Environment variable | Default | What it starts |
+|---|---|---|---|
+| `craft_native.enabled` | `CREWSHIP_CRAFT_NATIVE_ENABLED` | off | Native Craft Word and Sheet editing. Active only with at least one qualified application profile. |
+| `craft_native.agents_enabled` | `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED` | off | Agent editing in native Craft documents |
+| `documents.enabled` | `CREWSHIP_DOCUMENTS_ENABLED` | off | The Docs (Word) document engine and document creation |
+| `gridcraft.enabled` | `CREWSHIP_GRIDCRAFT_ENABLED` | off | The workbook (Sheet) engine |
+| `gridcraft.editor_enabled` | `CREWSHIP_GRIDCRAFT_EDITOR_ENABLED` | off | The live workbook editor. Requires `gridcraft.enabled` and the `gridcraft_editor` workspace flag. |
+| `slides.enabled` | `CREWSHIP_SLIDES_ENABLED` | off | Native Slides read and initialize routes. See [Native Slides](/guides/slides-native). |
+| `mooring.enabled` | `CREWSHIP_MOORING_ENABLED` | off | Live collaborative editing transport. See [the Mooring spec](/specs/mooring-session-transport). |
+| `mooring.commands_enabled` | `CREWSHIP_MOORING_COMMANDS_ENABLED` | off | Command delivery over Mooring. Requires `mooring.enabled`. |
+
+### Native Craft profiles
+
+Native Craft runs only operator-qualified releases. Each application profile is
+pinned at startup; requests cannot override it. Set the profile per
+application, where `<APP>` is `WORD` (Word) or `GRID` (Sheet):
+
+| Variable | Meaning |
+|---|---|
+| `CREWSHIP_CRAFT_NATIVE_EDITOR_BUNDLE_DIR` | Clean absolute directory that holds the qualified editor bundles |
+| `CREWSHIP_CRAFT_NATIVE_<APP>_ENGINE_REVISION` | Engine revision of the qualified release |
+| `CREWSHIP_CRAFT_NATIVE_<APP>_CLI_PATH` | Path of the engine command-line tool |
+| `CREWSHIP_CRAFT_NATIVE_<APP>_CLI_SHA256` | SHA-256 of that tool |
+| `CREWSHIP_CRAFT_NATIVE_<APP>_EDITOR_BUNDLE` | SHA-256 digest of the editor bundle |
+| `CREWSHIP_CRAFT_NATIVE_<APP>_EDITOR_URL` | Server-owned editor URL for that bundle |
+
+The full names are `CREWSHIP_CRAFT_NATIVE_WORD_ENGINE_REVISION`,
+`CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH`, `CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256`,
+`CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_BUNDLE`, `CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL`,
+and the same five with `GRID` for Sheet. The server does not start when a
+native pin is invalid, and the native and legacy editor bundles together
+may name at most four pins. The qualification rules are in the
+[Craft native spec](/specs/craft-native).
+
+### Docs engine settings
+
+`documents.enabled` needs three clean absolute paths of at most 100 bytes each,
+all different from one another. The Docs engine needs Unix sockets, so it does
+not start on Windows.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `CREWSHIP_DOCUMENTS_AUTHORITY_SOCKET` | — | Socket of the private document authority |
+| `CREWSHIP_DOCUMENTS_SERVICE_SOCKET` | — | Socket of the document engine service |
+| `CREWSHIP_DOCUMENTS_SERVICE_TOKEN_FILE` | — | File with the service token |
+| `CREWSHIP_DOCUMENTS_MAX_DOCUMENTS_PER_WORKSPACE` | 128 | Documents allowed per workspace |
+| `CREWSHIP_DOCUMENTS_MAX_OPERATIONS_PER_WINDOW` | 10000 | Saved operations accepted per window |
+| `CREWSHIP_DOCUMENTS_OPERATION_WINDOW_SECONDS` | 600 | Length of that window, at most 86400 |
+
+A limit set to `0` uses the default. With `documents.enabled`, a negative or
+non-numeric limit stops the server from starting.
+
+The workbook engine and editor use `CREWSHIP_GRIDCRAFT_SERVICE_SOCKET`,
+`CREWSHIP_GRIDCRAFT_SERVICE_TOKEN_FILE`, `CREWSHIP_GRIDCRAFT_EDITOR_BUNDLE_DIR`,
+`CREWSHIP_GRIDCRAFT_EDITOR_BUNDLES` and `CREWSHIP_EDITOR_RUNTIME_ORIGIN`; see
+[Environment variables](/configuration/environment).
+
+## Build-time UI variables
+
+The web UI is a static export, so these variables are inlined when it is built.
+Export them before `pnpm build` (or `make build`, which runs it) and deploy the
+new build; changing them on a running server has no effect. Each one is on
+only when its value is exactly `true`.
+
+| Variable | Default | Shows |
+|---|---|---|
+| `NEXT_PUBLIC_ARTIFACTS_LIBRARY` | off | The Artifacts library at `/artifacts` and its sidebar link |
+| `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` | off | Sends the `/pages` overview to the library. Needs `NEXT_PUBLIC_ARTIFACTS_LIBRARY`. |
+| `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` | off (`false` in `.env.production`) | Artifact project cards and the side viewer in chat |
+| `NEXT_PUBLIC_CHAT_CRAFT_LEASE` | off (`false` in `.env.production`) | The Craft edit lease bar and local draft recovery in chat |
+| `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` | off | Live data previews in Dashboard artifacts. No data requests while off. |
+| `NEXT_PUBLIC_ARTIFACT_SLIDES` | off | Slides previews of artifact versions |
+| `NEXT_PUBLIC_ARTIFACTS_DESIGN` | off | The Design canvas |
+| `NEXT_PUBLIC_SLIDES_EDITOR` | off | The native Slides editor on a Page that has Slides. Edits stay a local draft. |
+| `NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS` | off | Document revert and proposal review. See [Document history](/guides/document-history-review). |
+| `NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT` | off | Development only. Leave off. |
+| `NEXT_PUBLIC_ARTIFACT_COPY_MOVE` | off | Development only. Leave off. |
+| `NEXT_PUBLIC_STATIC_APP_PREVIEW` | off | Development only. Leave off. |
+| `NEXT_PUBLIC_ARTIFACTS_SHARING_MOCK` | off | Development only: runs library sharing against an in-browser mock. Never enable in a deployment. |
+
+The repository's `.env.production` sets `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`
+and `NEXT_PUBLIC_CHAT_CRAFT_LEASE` to `false` explicitly, and none of the
+other variables. A default production build therefore hides every screen in the
+matrix above that needs a build-time variable. Values exported in the build
+environment take precedence over that file:
+
+```bash
+export NEXT_PUBLIC_ARTIFACTS_LIBRARY=true
+export NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS=true
+export NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true
+export NEXT_PUBLIC_ARTIFACT_DASHBOARDS=true
+export NEXT_PUBLIC_ARTIFACT_SLIDES=true
+export NEXT_PUBLIC_ARTIFACTS_DESIGN=true
+make build
+```
+
+## Check what is on
+
+List the workspace flags with their instance default, override and effective
+value (columns abridged):
+
+```bash
+crewship feature-flag list
+```
+
+```text
+KEY                      DEFAULT  WORKSPACE  EFFECTIVE
+artifact_dashboard_data  off      on         on
+artifact_projects        off      on         on
+artifact_slides          off      on         on
+artifacts_design         off      on         on
+gridcraft_editor         off      inherit    off
+```
+
+Ask the server whether artifact projects are available to the current
+workspace (`GET /api/v1/pages/artifacts/availability`). The answer includes the
+environment bypass:
+
+```bash
+crewship page artifact availability
+```
+
+```json
+{ "enabled": true }
+```
+
+Ask which document engines the instance serves (`GET /api/v1/documents/status`):
+
+```bash
+crewship doc status
+```
+
+```json
+{"enabled":false,"gridcraft_native":false,"wordcraft_native":false}
+```
+
+`enabled` is true when the Docs engine is running. `wordcraft_native` and
+`gridcraft_native` are true when native Craft is on with a qualified Word or
+Sheet profile. The web UI offers document creation only when this check
+succeeds.
+
+## Upgrades
+
+The flags on this page arrive through ordinary migrations and start off. After
+an upgrade, nothing changes for users until you enable the flags, set the
+startup switches and deploy a UI build with the matching variables. To roll a
+surface back, disable its flag or clear the override; stored artifacts stay in
+the database.
