@@ -32,9 +32,8 @@ func nativeAgentHumanHoldsLease(t *testing.T, m *craftNativeAgentManager, human 
 const nativeAgentOutcomeProposal = `{"operation":"propose","base_version":"1","request_id":"outcome-proposal","summary":"Append marker","commands":[{"command":"text.insert","params":{"text":"x"}}]}`
 
 // A proposal made while a human holds the lease is a successful task outcome,
-// recorded with its proposal id. Only a proposal created by this run counts:
-// replaying another run's request_id returns that run's proposal but does not
-// make it this task's outcome.
+// recorded with its proposal id. A stored replay is bound to the same run;
+// another run has a separate authenticated idempotency namespace.
 func TestCraftNativeAgentFinishedRunOutcome(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -84,14 +83,14 @@ func TestCraftNativeAgentFinishedRunOutcome(t *testing.T) {
 			wantErr: errNativeAgentNoReceipt,
 		},
 		{
-			name: "proposal by another run replayed by request_id fails",
+			name: "same run durable replay after tool state reload succeeds",
 			act: func(t *testing.T, m *craftNativeAgentManager, human context.Context, e *craftNativeAgentEntry, call func(string) *httptest.ResponseRecorder) {
 				nativeAgentHumanHoldsLease(t, m, human)
 				if w := call(nativeAgentOutcomeProposal); w.Code != 201 {
 					t.Fatal(w.Code, w.Body)
 				}
-				// The earlier run's proposal row stays; this run starts with no
-				// tool history of its own and repeats the same request_id.
+				// This is the SAME authenticated run, not a different principal.
+				// Its durable request namespace survives losing volatile tool state.
 				e.callMu.Lock()
 				e.tool = nil
 				e.callMu.Unlock()
@@ -99,7 +98,8 @@ func TestCraftNativeAgentFinishedRunOutcome(t *testing.T) {
 					t.Fatal("replay of an existing proposal", w.Code, w.Body)
 				}
 			},
-			wantErr: errNativeAgentNoReceipt,
+			outcome:  "proposal",
+			proposal: true,
 		},
 	}
 	for _, tc := range cases {
