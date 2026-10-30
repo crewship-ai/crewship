@@ -175,7 +175,7 @@ function ViewerBody({ workspaceId, target, onClose, className, variant }: BodyPr
       <Skeleton className="h-8 w-full" /><Skeleton className="min-h-40 flex-1" />
     </div>)
   }
-  const props = { data, target, setViewing, refetch: () => void snapshot.refetch(), workspaceId, shell, fullscreen, writeEnabled: !snapshot.error && data.can_write === true, readForRetry: async () => { const fresh = await snapshot.refetch(); return fresh && !fresh.error ? fresh.data : undefined } }
+  const props = { data, target, setViewing, refetch: () => void snapshot.refetch(), workspaceId, shell, fullscreen, writeEnabled: !snapshot.error && data.can_write === true, commentEnabled: !snapshot.error && (data.can_write === true || data.can_comment === true), readForRetry: async () => { const fresh = await snapshot.refetch(); return fresh && !fresh.error ? fresh.data : undefined } }
   return variant === "library"
     ? <LibraryLoadedViewer {...props} dispatchEnabled={props.writeEnabled && data.can_send_to_agent === true} />
     : <LoadedViewer {...props} />
@@ -191,6 +191,8 @@ interface LoadedProps {
   shell: Shell
   fullscreen: boolean
   writeEnabled: boolean
+  /** Edit, or a Comment grant on the shown version: feedback only, never agent tasks. */
+  commentEnabled: boolean
   library?: boolean
   sendToOrigin?: (request: { pageId: string; comment: ArtifactComment }) => Promise<boolean>
 }
@@ -207,15 +209,17 @@ function readCommentDraft(key: string | null): string {
   try { return localStorage.getItem(key) ?? "" } catch { return "" }
 }
 
-function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, shell, fullscreen, writeEnabled, library = false, sendToOrigin }: LoadedProps) {
+function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, shell, fullscreen, writeEnabled, commentEnabled, library = false, sendToOrigin }: LoadedProps) {
   const me = useSessionSafe()?.data?.user?.id
   const canWrite = writeEnabled && data.can_write === true
   const mayShare=canWrite && data.can_share === true
   const mayRestore=canWrite && data.can_restore === true
   const maySend=canWrite && data.can_send_to_agent === true
-  const scope = JSON.stringify([me, workspaceId, data.page_id, data.origin?.chat_id ?? null, data.origin?.agent_id ?? null,mayShare,mayRestore,maySend])
-  const permission = useRef({ scope, allowed: canWrite, epoch: 0 })
-  if (permission.current.scope !== scope || permission.current.allowed !== canWrite) permission.current = { scope, allowed: canWrite, epoch: permission.current.epoch + 1 }
+  // A Comment-level reader selects and saves plain feedback; Share, Restore and agent tasks stay Edit-only.
+  const canComment = canWrite || (commentEnabled && data.can_comment === true)
+  const scope = JSON.stringify([me, workspaceId, data.page_id, data.origin?.chat_id ?? null, data.origin?.agent_id ?? null,mayShare,mayRestore,maySend,canWrite])
+  const permission = useRef({ scope, allowed: canComment, epoch: 0 })
+  if (permission.current.scope !== scope || permission.current.allowed !== canComment) permission.current = { scope, allowed: canComment, epoch: permission.current.epoch + 1 }
   const epoch = permission.current.epoch
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
@@ -255,10 +259,10 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
   const [highlight, setHighlight] = useState<{ selector: string; seq: number } | null>(null)
   const [confirmShare, setConfirmShare] = useState(false)
   useEffect(() => {
-    if (!canWrite) { setSelectMode(false); setAnchor(null) }
+    if (!canComment) { setSelectMode(false); setAnchor(null) }
     if(!maySend)setUndispatched(null)
     if(!mayShare)setConfirmShare(false)
-  }, [canWrite,maySend,mayShare])
+  }, [canComment,maySend,mayShare])
   const historyRef = useRef<HTMLDivElement>(null)
   const queueRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLDivElement>(null)
@@ -504,7 +508,7 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
       </select>}
     </>}
     <div className="flex-1" />
-    {canWrite && slidesMode !== "unsupported" && !viewingOld && <Button type="button" size="sm" variant={selectMode ? "secondary" : "ghost"} className="h-7 gap-1.5" aria-pressed={selectMode}
+    {canComment && slidesMode !== "unsupported" && !viewingOld && <Button type="button" size="sm" variant={selectMode ? "secondary" : "ghost"} className="h-7 gap-1.5" aria-pressed={selectMode}
       onClick={() => { if (selectMode) setAnchor(null); else clearCommentNotice(); setSelectMode(on => !on) }}>
       <MousePointerClick className="size-3.5" aria-hidden />Select
     </Button>}
@@ -558,7 +562,7 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
   </div>
 
   const pinNumber = data.comments.length + 1
-  const pinCard = canWrite && (anchor || draft) && !viewingOld && <form aria-label="New comment" onSubmit={event => { event.preventDefault(); submit(maySend ? "send" : "save") }}
+  const pinCard = canComment && (anchor || draft) && !viewingOld && <form aria-label="New comment" onSubmit={event => { event.preventDefault(); submit(maySend ? "send" : "save") }}
     className="z-[2] mt-2.5 flex flex-wrap items-start gap-2 rounded-card border bg-card px-2.5 py-2 shadow-md @md:absolute @md:right-[18px] @md:top-[18px] @md:mt-0 @md:max-w-[min(320px,calc(100%-36px))]">
     <span aria-hidden className={cn(PIN, "size-6 bg-primary text-xs text-primary-foreground")}>{pinNumber}</span>
     <div className="grid min-w-0 flex-[1_1_160px] gap-1.5">
@@ -577,17 +581,17 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
   const canvas = <div ref={canvasRef} className="relative rounded-card bg-muted p-3.5">
     <div className={cn("overflow-hidden rounded-md border bg-white", fullscreen ? "h-[max(320px,calc(100dvh-14rem))]" : "h-[min(70vh,560px)] min-h-[320px]")}>
       {slidesMode === "unsupported" ? <p role="alert" className="p-4">This Slides format is unsupported.</p>
-        : slidesMode === "slides" ? <ArtifactSlidesPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} artifactKind={data.artifact_kind} path={screenPath ?? ""} title={`Preview of ${labelOf(screen)}`} selectMode={canWrite && selectMode && !viewingOld} onSelect={select} onNavigate={setScreenPath} />
+        : slidesMode === "slides" ? <ArtifactSlidesPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} artifactKind={data.artifact_kind} path={screenPath ?? ""} title={`Preview of ${labelOf(screen)}`} selectMode={canComment && selectMode && !viewingOld} onSelect={select} onNavigate={setScreenPath} />
         : artifactDashboards() && data.manifest.files.some(file => file.path === "dashboard.json")
-        ? <ArtifactDashboardPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} files={data.manifest.files} path={screen} selectMode={canWrite && selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`} onSelect={select} onNavigate={setScreenPath} />
-        : <ArtifactPreviewFrame html={html} files={data.manifest.files} screens={screens} path={screen} selectMode={canWrite && selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`}
+        ? <ArtifactDashboardPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} files={data.manifest.files} path={screen} selectMode={canComment && selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`} onSelect={select} onNavigate={setScreenPath} />
+        : <ArtifactPreviewFrame html={html} files={data.manifest.files} screens={screens} path={screen} selectMode={canComment && selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`}
           highlight={highlight} onSelect={select} onNavigate={setScreenPath} />}
     </div>
     {pinCard}
   </div>
 
   const queueItems = data.comments.length === 0
-    ? <p className="px-3 py-2.5 text-sm text-muted-foreground">{canWrite ? "No comments yet. Turn on Select and click a part of the screen." : "No comments yet."}</p>
+    ? <p className="px-3 py-2.5 text-sm text-muted-foreground">{canComment ? "No comments yet. Turn on Select and click a part of the screen." : "No comments yet."}</p>
     : <ul>{data.comments.map((c, index) => {
       const chip = commentQueueChip(c)
       return <li key={c.id} className="border-t first:border-t-0">
@@ -657,7 +661,7 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
           <p role="status" aria-live="polite" className="text-xs text-muted-foreground empty:hidden">{notice.text}</p>
           <div hidden={library && activeTab !== "versions"} {...(library ? { role: "tabpanel", id: "artifact-detail-panel-versions", "aria-labelledby": "artifact-detail-tab-versions" } : {})}>{history}</div>
           <div hidden={library && activeTab !== "preview"} {...(library ? { role: "tabpanel", id: "artifact-detail-panel-preview", "aria-labelledby": "artifact-detail-tab-preview" } : {})}>
-          {canWrite && selectMode && !anchor && !viewingOld && (anchorable
+          {canComment && selectMode && !anchor && !viewingOld && (anchorable
             ? <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><MousePointerClick className="size-3.5" aria-hidden />Click a part of the screen. The comment stays anchored to that element and version.</p>
             : <p role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground"><Info className="size-3.5" aria-hidden />Nothing on this screen can take a comment yet: comments anchor to parts with an id, and this screen has none. Ask the agent in chat to add them.</p>)}
           {canvas}
