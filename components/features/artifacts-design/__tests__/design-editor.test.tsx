@@ -24,10 +24,10 @@ vi.mock("../use-design", () => ({ useDesign: () => {
 beforeEach(() => { copying.real=false;copying.send.mockReset(); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true"); state.editable = true; state.pageId = "old-private-page"; state.user = false; state.saveError = null; state.restoreError = null; state.doc = new Y.Doc() })
 afterEach(() => { cleanup(); state.doc?.destroy(); vi.unstubAllEnvs();vi.unstubAllGlobals() })
 describe("Design editor controls", () => {
- it("clears private unsent feedback when the same slug resolves to a new Page", () => {
+ it("clears private unsent feedback when the same slug resolves to a new Page", async () => {
   state.user = true
   const view = render(<DesignEditor workspaceId="workspace" slug="same-slug" />)
-  fireEvent.change(screen.getByLabelText("Comment for agent"), { target: { value: "Private feedback about old Page" } })
+  await waitFor(()=>expect(screen.getByLabelText("Comment for agent")).not.toBeDisabled()); fireEvent.change(screen.getByLabelText("Comment for agent"), { target: { value: "Private feedback about old Page" } })
   expect(screen.getByLabelText("Comment for agent")).toHaveValue("Private feedback about old Page")
   state.pageId = "new-shared-page"
   view.rerender(<DesignEditor workspaceId="workspace" slug="same-slug" />)
@@ -59,7 +59,7 @@ it.each(["save", "restore"] as const)("offers an actual draft download after %s 
   expect(screen.getByRole("button", { name: "Download draft" })).toBeDisabled()
   fireEvent.click(screen.getByRole("button", { name: "Return to live canvas" }))
  }
- fireEvent.change(screen.getByLabelText("Comment for agent"), { target: { value: "Keep my pending feedback" } })
+ await waitFor(()=>expect(screen.getByLabelText("Comment for agent")).not.toBeDisabled()); fireEvent.change(screen.getByLabelText("Comment for agent"), { target: { value: "Keep my pending feedback" } })
  const originalCreate = Object.getOwnPropertyDescriptor(URL, "createObjectURL")
  const originalRevoke = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL")
  const create = vi.fn((_blob: Blob) => "blob:design-draft")
@@ -99,12 +99,12 @@ it.each(["save", "restore"] as const)("offers an actual draft download after %s 
  expect(screen.getByLabelText("Comment for agent")).toHaveValue("Keep my pending feedback")
 })
 
-it("offers continuation in a new Design without removing the current canvas or feedback",()=>{
+it("offers continuation in a new Design without removing the current canvas or feedback",async()=>{
  state.user=true
  state.saveError=Object.assign(new Error("History full"),{status:413})
  upsertDesignNode(state.doc!,{id:"local",type:"text",text:"Only local copy",x:0,y:0,width:100,height:30})
  render(<DesignEditor workspaceId="workspace" slug="shop" />)
- fireEvent.change(screen.getByLabelText("Comment for agent"),{target:{value:"Unsent feedback stays here"}})
+ await waitFor(()=>expect(screen.getByLabelText("Comment for agent")).not.toBeDisabled()); fireEvent.change(screen.getByLabelText("Comment for agent"),{target:{value:"Unsent feedback stays here"}})
  fireEvent.click(screen.getByRole("button",{name:"Continue in a new Design"}))
  expect(screen.getByRole("dialog",{name:"Continue in a new Design"})).toBeInTheDocument()
  expect(designNodes(state.doc!)).toMatchObject([{text:"Only local copy"}])
@@ -116,7 +116,7 @@ it("creates a confirmed copy in a new tab while retaining the original pending c
  upsertDesignNode(state.doc!,{id:"local",type:"text",text:"Only local copy",x:0,y:0,width:100,height:30})
  copying.send.mockResolvedValue(new Response(JSON.stringify({page_id:"new-copy",slug:"continued",version:1}),{status:201}))
  render(<DesignEditor workspaceId="workspace" slug="shop" />)
- fireEvent.change(screen.getByLabelText("Comment for agent"),{target:{value:"Unsent feedback stays here"}})
+ await waitFor(()=>expect(screen.getByLabelText("Comment for agent")).not.toBeDisabled()); fireEvent.change(screen.getByLabelText("Comment for agent"),{target:{value:"Unsent feedback stays here"}})
  fireEvent.click(screen.getByRole("button",{name:"Continue in a new Design"}))
  fireEvent.change(screen.getByLabelText("New Design name"),{target:{value:"My continued canvas"}})
  fireEvent.click(screen.getByRole("button",{name:"Create new Design"}))
@@ -139,7 +139,7 @@ it("keeps the original and feedback after an unconfirmed copy and does not repla
  upsertDesignNode(state.doc!,{id:"local",type:"text",text:"Only local copy",x:0,y:0,width:100,height:30})
  copying.send.mockRejectedValue(new TypeError("connection reset"))
  render(<DesignEditor workspaceId="workspace" slug="shop" />)
- fireEvent.change(screen.getByLabelText("Comment for agent"),{target:{value:"Unsent feedback stays here"}})
+ await waitFor(()=>expect(screen.getByLabelText("Comment for agent")).not.toBeDisabled()); fireEvent.change(screen.getByLabelText("Comment for agent"),{target:{value:"Unsent feedback stays here"}})
  fireEvent.click(screen.getByRole("button",{name:"Continue in a new Design"}))
  fireEvent.click(screen.getByRole("button",{name:"Create new Design"}))
  await waitFor(()=>expect(screen.getByRole("dialog")).toHaveTextContent("The new Design could not be created"))

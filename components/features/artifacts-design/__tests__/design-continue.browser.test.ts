@@ -38,11 +38,27 @@ it.skipIf(!existsSync(chromium.executablePath()))("continues a full-history canv
   for (const status of [401, 201]) {
    const context = await browser.newContext()
    let creates = 0, refreshes = 0, copiedState = ""
+   const envelopes = new Map<string, string>()
    await context.route("https://design-continue.test/**", async route => {
     const request = route.request()
     if (request.url().includes("/api/auth/token/refresh")) {
      refreshes++
      return route.fulfill({ json: {} })
+    }
+    // Supports the encrypted F4 prerequisite too: real browser encryption,
+    // with the same purpose-bound HTTP key seam as its custody browser tests.
+    if (new URL(request.url()).pathname.endsWith("/draft-key")) {
+     const body = request.postDataJSON(), url = new URL(request.url())
+     expect(body.human).toBe("alice")
+     expect(decodeURIComponent(url.pathname)).toBe("/api/v1/pages/@source/draft-key")
+     expect(url.searchParams.get("workspace_id")).toBe("ws")
+     if (body.operation === "wrap") {
+      const envelope = `v1:browser-fixture-${envelopes.size}`
+      envelopes.set(envelope, body.key)
+      return route.fulfill({ json: { envelope } })
+     }
+     const key = envelopes.get(body.envelope)
+     return route.fulfill({ status: key ? 200 : 400, json: key ? { key } : {} })
     }
     if (request.method() === "POST") {
      creates++
