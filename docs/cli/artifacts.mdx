@@ -50,8 +50,10 @@ crewship feature-flag enable artifact_dashboard_data
 crewship feature-flag enable artifact_slides
 ```
 
-When a flag is off, `availability` returns `{"enabled": false}` and the other
-commands fail with `404` (`artifact projects are not enabled` or
+When `artifact_projects` and its bypass are off, `availability` returns
+`{"enabled": false}`. It does not report the Dashboard or Slides sub-flags:
+it can still return true when those are off. A command whose required flag
+is off fails with `404` (`artifact projects are not enabled` or
 `dashboard data is disabled`). The CLI itself needs no web build-time
 variable; the `url` that commands return opens the artifact view in the web
 app.
@@ -62,7 +64,7 @@ Credentials and roles:
   restoring, sharing and data writes need `pages:write`.
 - Creating an artifact needs the OWNER, ADMIN or MANAGER role, or a MEMBER
   with the page-create capability.
-- Restore, share, retained history and archive belong to the artifact owner
+- Restore, share, replies, data writes, retained history and archive belong to the artifact owner
   (or an authorized workspace admin for archive).
 - `workspace artifact-policy` needs OWNER or ADMIN and a token with the
   `workspace:admin` scope.
@@ -105,7 +107,8 @@ whose `extensions.code` carries the machine-readable reason:
 | 409 | 5 | `artifact_anchor_mismatch` | The comment quote does not match the selected element |
 | 409 | 5 | `artifact_data_conflict` | A document's `ifVersion` is stale |
 | 409 | 5 | `stale_policy` | `artifact-policy set` with an old `--base-version` |
-| 413 | 1 | `artifact_history_quota`, `artifact_data_quota` | Version history or dataset limits are full |
+| 413 | 1 | `artifact_history_quota`, `artifact_data_quota`, `artifact_slides_limit` | Version history, dataset or Slides limits are full |
+| 422 | 2 | `artifact_slides_overflow` | Slide content does not fit its frame |
 
 A conflict or quota error never discards anything: earlier versions and data
 are kept, and the CLI never retries with a newer base. Keep your local file,
@@ -536,7 +539,8 @@ accepts only `Go Regular` or `sans-serif`. The canvas is 1920 × 1080.
 ### `crewship page artifact slides <slug-or-id>`
 
 Read the projected deck and the anchors that comments can use. Use `@<id>` to
-select by Page ID.
+select by Page ID. The example output below is abridged: it omits the intro
+shape, the summary slide and the summary table anchor.
 
 | Flag | Description |
 |---|---|
@@ -555,7 +559,7 @@ crewship page artifact slides quarterly-deck --version 1 -f json
     "deck_id": "<page-id>", "schema_version": 1, "width": 1920, "height": 1080,
     "slide_order": ["intro", "summary"],
     "slides": [
-      {"id": "intro", "notes": "", "elements": [
+      {"id": "intro", "notes": "Open with the headline number.", "elements": [
         {"id": "intro-title", "type": "text", "x": 80, "y": 80, "width": 1600, "height": 180,
          "text": {"value": "Q3 review", "align": "left", "color": "#112233", "font_family": "Go Regular", "font_size": 48}}
       ]}
@@ -690,7 +694,7 @@ workspace audit log. See also [Workspace Commands](/cli/workspace).
 
 When `CREWSHIP_AGENT_TOKEN` holds a run capability (`agtv2.…`), the artifact
 commands do not use a saved profile. They call the run's scoped MCP tools
-instead, under the identity of the person who started the run:
+instead, on behalf of the person who authorized the run:
 
 | Command | Agent tool |
 |---|---|

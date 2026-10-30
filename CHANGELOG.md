@@ -62,6 +62,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Opening a new conversation logged three 404s.** A draft session no longer requests its execution profile, messages or participants before the first send creates it.
 - **Project Edit grants could return 403 instead of allowing changes.** Human editors can read and save the latest complete project with version conflict checks and their own attribution. Read and Comment stay on the shared version; publishing a shared pin, restoring history and agent execution keep separate owner permissions.
 
+- **Artifacts CLI help now explains data, Slides, archive and creation policy commands.** The help includes required flags and examples, and agent refusal text names artifact and Design operations. Command behavior is unchanged.
+
 - **Artifact authoring clients support complete project versions.** Add pilot MCP tools and `page artifact` commands for atomic manifests, explicit version conflicts, restore and anchored feedback on servers that enable the artifact project backend.
 - Artifact project feedback exposes verified human/agent attribution, occupied addresses have a distinct error, and authoring tools require stable selection IDs.
 - Add default-off authored Slides projections and vector PDF export with explicit version pins and current Page/run authority rechecked after rendering. Existing artifact history and comments remain authoritative.

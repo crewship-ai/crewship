@@ -97,7 +97,7 @@ func newArtifactSlidesCommands() []*cobra.Command {
 comments can use. The version needs deck.json and one slides/<id>.html per
 slide; other content returns 422 artifact_slides_unsupported. Requires the
 artifact_projects and artifact_slides workspace feature flags. Owners can
-read any retained version; shared readers only the shared version.`
+read any retained version; editors read latest and other readers only the shared version.`
 		command.Example = "  crewship page artifact slides quarterly-deck --version 1 -f json"
 		if export {
 			command.Long = `Export the deck of an exact artifact code version to a local PDF file.
