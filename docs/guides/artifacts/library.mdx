@@ -176,13 +176,16 @@ change that.
   header. See [Versions](#versions).
 - **Design**: the design canvas.
 - **Page**: the Page's panels, shown in the detail view.
-- **Word**: a read-only preview of the saved version, with an
-  **Open in Pages** button in its header. When the Craft lease is
-  available, a bar shows who holds the lease and offers **Edit**, which
-  opens the editor in a new tab.
-- **Sheet**, and project kinds whose viewer is switched off: the name, kind
-  and state, with an **Open in Pages** button that opens the artifact on
-  its Page.
+- **Native Word and Sheet**, with both `NEXT_PUBLIC_ARTIFACTS_LIBRARY` and
+  `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` enabled: the Craft editor opens inside
+  the detail when the server confirms editing is available. Readers without
+  edit access get the shared preview. This mode has no **Open in Pages**
+  button; `/pages/<slug>` leads back to the artifact detail.
+- **Word** outside that mode: a read-only preview of the saved version, with
+  **Open in Pages** in its header. When the Craft lease bar is enabled, it
+  shows who holds the lease and offers **Edit** in a new tab.
+- **Sheet** outside that mode, and project kinds whose viewer is switched
+  off: the name, kind and state, with **Open in Pages**.
 
 If the artifact no longer exists, or you can't open it, the library shows
 **This artifact is not available.** or **This artifact isn't available**.
