@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Client is the HTTP client for the crewship API, used by the CLI.
@@ -606,9 +607,61 @@ func CheckError(resp *http.Response) error {
 		}
 	}
 
-	apiErr.Detail = string(data)
-	apiErr.message = fmt.Sprintf("API error (%d): %s", resp.StatusCode, string(data))
+	apiErr.Detail = summarizeErrorBody(resp.StatusCode, resp.Header.Get("Content-Type"), data)
+	apiErr.message = fmt.Sprintf("API error (%d): %s", resp.StatusCode, apiErr.Detail)
 	return apiErr
+}
+
+// maxErrorExcerpt bounds how much of a non-JSON error body is shown
+// verbatim. Short plain-text bodies (Go's http.Error, a terse reverse
+// proxy) are usually the most useful thing to print; anything longer is a
+// stack trace or a page and only adds noise to the terminal and to the
+// --format json "detail" field.
+const maxErrorExcerpt = 200
+
+// htmlBodyHint is appended to the status text when a proxy or the wrong
+// host answered with an HTML page instead of an API error body.
+const htmlBodyHint = "the server returned an HTML page instead of an API response; check the server URL and that the Crewship backend is running"
+
+// summarizeErrorBody renders the detail for an error response that did
+// not carry a JSON {"error"} / {"detail"} member. Valid JSON is passed
+// through unchanged (it is already structured and bounded by the 4 KB
+// read). Non-JSON bodies are reduced to the HTTP status text, plus the
+// body itself only when it is short, single-paragraph plain text.
+func summarizeErrorBody(status int, contentType string, data []byte) string {
+	text := strings.TrimSpace(string(data))
+	if text != "" && json.Valid(data) {
+		return string(data)
+	}
+
+	statusText := http.StatusText(status)
+	if statusText == "" {
+		statusText = fmt.Sprintf("HTTP %d", status)
+	}
+	if text == "" {
+		return statusText
+	}
+	if looksLikeHTML(contentType, text) {
+		return statusText + " (" + htmlBodyHint + ")"
+	}
+	if utf8.ValidString(text) && utf8.RuneCountInString(text) <= maxErrorExcerpt &&
+		!strings.ContainsAny(text, "\n\r") {
+		return text
+	}
+	return statusText + " (non-JSON response body omitted)"
+}
+
+// looksLikeHTML reports whether an error body is markup rather than text.
+// The Content-Type is checked first, but proxies often mislabel their
+// error pages, so a leading tag or an <html>/<body> element also counts.
+func looksLikeHTML(contentType, text string) bool {
+	ct := strings.ToLower(contentType)
+	if strings.Contains(ct, "html") || strings.Contains(ct, "xml") {
+		return true
+	}
+	lower := strings.ToLower(text)
+	return strings.HasPrefix(lower, "<") ||
+		strings.Contains(lower, "<html") || strings.Contains(lower, "<body")
 }
 
 // looksLikeCUID returns true if s looks like a CUID (starts with 'c', alphanumeric, length >= 20).
