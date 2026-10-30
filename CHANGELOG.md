@@ -72,6 +72,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Home-installed agent CLIs remain visible during startup checks.** Offline qualification uses a separate temporary home while preserving read-only executable paths from the immutable image.
 
+- **Mooring connect help now explains streaming and refusal conditions.** It documents output formats, the 256 KiB frame limit, agent-token refusal and rejected connections; the Design and Craft task reference covers versions, lease generations and uncertain saves.
+
 - **Design artifacts gain an opt-in collaborative canvas.** People and agents can edit frames, shapes, text and images through Yjs, with live presence and normal artifact version history. Agents can address their selected canvas by its immutable ID. Disabled by default. Long-running cookie sessions renew only their collaborative transport after fresh authority checks, retaining unsaved work. Restoring saved canvases preserves prototype-named node IDs and their original contents.
 
 - A shared dev release now switches one checked-in build profile (`CREWSHIP_BUILD_PROFILE` in `.env.production`); the flag tests and the phone browser contract verify the main and the release profile, and main must keep the main profile.

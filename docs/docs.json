@@ -356,6 +356,7 @@
               "cli/workbook",
               "cli/mooring",
               "cli/craft",
+              "cli/artifacts-design-craft",
               "cli/pipeline",
               "cli/webhook",
               "cli/waitpoint",
