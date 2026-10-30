@@ -272,8 +272,8 @@ A write that would exceed a stored limit fails as a whole with
 
 | Message | Meaning and what to do |
 |---|---|
-| *Dashboard preview is unavailable.* | The version you are viewing has a `dashboard.json` that is not valid. Ask the agent to fix it. (Without a `dashboard.json`, or with `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` off, the artifact shows a plain project preview instead.) |
-| *Dashboard data is unavailable. Reload to check access.* | Your access changed, a feature flag was turned off, or the version you are viewing no longer matches. The preview stops refreshing; reload the page. |
+| *Dashboard preview is unavailable.* | The manifest is invalid or this data scope is no longer active. HTTP 401/403/404/409 or an authentication change stops refreshing and removes the previous data. Reload to recheck access, flags and the version. Without a Dashboard manifest or its UI flag, the outer viewer uses the plain project preview. |
+| *Dashboard data is unavailable. Reload to check access.* | A network/server error or an invalid data response prevented loading. Previous values are hidden. The visible tab continues polling every five seconds; reload if the problem persists. |
 | *Dashboard exceeds the preview data limit* | The collections together exceed 16 MiB. Ask the agent to split or trim the data. |
 | *Dashboard exceeds the preview rendering limit* | Repeated rows would produce too many elements or too much text to render. Ask the agent to show fewer rows. |
 | `A document changed…` (HTTP 409, `artifact_data_conflict`) | A document was written since you read it. Read again and reconcile. |

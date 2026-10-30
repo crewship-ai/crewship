@@ -181,6 +181,7 @@
               "guides/pages-apps-operations",
               "guides/quartermaster",
               "guides/watch-roster",
+              "guides/artifacts/dashboard",
               {
                 "group": "Operations",
                 "icon": "wrench",
