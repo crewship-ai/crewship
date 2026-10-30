@@ -228,6 +228,15 @@ func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, w
 			if err := tx.QueryRowContext(ctx, `SELECT coalesce(p.owner_user_id,''),coalesce(p.owner_crew_id,'') FROM pages p JOIN artifact_design_documents d ON d.workspace_id=p.workspace_id AND d.page_id=p.id JOIN artifact_version_heads h ON h.workspace_id=p.workspace_id AND h.page_id=p.id AND h.content_type='design' WHERE p.workspace_id=? AND p.id=?`, k.WorkspaceID, k.PageID).Scan(&ownerUser, &ownerCrew); err != nil {
 				return "", err
 			}
+			// The manager role is this path's canonical check; only now may a
+			// fresh admission install its generation baselines.
+			if err := designCaptureGenerations(ctx, tx, k); err != nil {
+				return "", err
+			}
+			revision, err := designAuthorityRevision(ctx, tx, k.WorkspaceID)
+			if err != nil {
+				return "", err
+			}
 			actor := u.ID
 			if agent != nil {
 				actor = "agent:" + agent.AgentID + ":" + agent.RunID
