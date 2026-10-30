@@ -13,6 +13,12 @@ source "$HERE/lib.sh"
 
 preflight
 
+# shellcheck source=routine-fixtures.sh
+source "$HERE/routine-fixtures.sh"
+harness_fixture probe ops PROBE_ROUTINE
+SCHEDULE_ROUTINE="$PROBE_ROUTINE"
+harness_fixture approval ops APPROVAL_ROUTINE
+
 # ─────────────────────────────────────────────────────────────────────────────
 section "1. Scheduler: create a cron schedule and confirm it's listed + enabled"
 # ─────────────────────────────────────────────────────────────────────────────
@@ -23,41 +29,36 @@ section "1. Scheduler: create a cron schedule and confirm it's listed + enabled"
 # daily-status-digest — the last of which was never a real seeded routine
 # slug to begin with). It now self-provisions the schedule it needs, so the
 # assertion exercises the real scheduler instead of a demo-seed side effect.
-harness_sched_name="harness-orchestration-smoke"
-sched_create_out="$(mktemp -t cs-sched-create.XXXXXX)"
-cs routine schedules create --slug classify-ticket --name "$harness_sched_name" \
-  --cron "*/30 * * * *" >"$sched_create_out" 2>&1
-sched_out="$(cs routine schedules list 2>/dev/null)"
-if printf '%s' "$sched_out" | grep -qi "$harness_sched_name"; then
-  _pass "self-provisioned schedule for 'classify-ticket' is listed"
+harness_sched_name="$SCHEDULE_ROUTINE-schedule"
+sched_create_out="$_HARNESS_FIXTURE_DIR/schedule.json"
+if cs routine schedules create --slug "$SCHEDULE_ROUTINE" --name "$harness_sched_name" \
+  --cron "0 0 1 1 *" --format json >"$sched_create_out"; then
+  schedule_id="$(jq -er '.id | select(type == "string" and length > 0)' "$sched_create_out")" || { _fail "created schedule reports its full id"; finish; }
+  _HARNESS_FIXTURE_SCHEDULES+=("$schedule_id")
+  sched_out="$(cs routine schedules list --format json)"
+  if printf '%s' "$sched_out" | jq -e --arg id "$schedule_id" 'any(.[]; .id == $id and .enabled == true)' >/dev/null; then
+    _pass "owned schedule is listed and enabled"
+  else
+    _fail "owned schedule is listed and enabled"
+  fi
+  if cs routine schedules now "$schedule_id" >/dev/null; then
+    _pass "owned schedule can be force-fired through its full id"
+  else
+    _fail "owned schedule can be force-fired through its full id"
+  fi
 else
-  _fail "self-provisioned schedule for 'classify-ticket' is listed" "$(head -c 200 "$sched_create_out" | tr '\n' ' ')"
+  _fail "create owned schedule"
 fi
-rm -f "$sched_create_out"
-if printf '%s' "$sched_out" | grep -qiE 'yes'; then
-  _pass "at least one schedule is enabled"
-else
-  _fail "at least one schedule is enabled"
-fi
-# Force-fire is blocked by a CLI gap: `schedules list --format json` is ignored
-# (always prints a table) and the table truncates the psched_ id, so there's no
-# reliable way to pass a full id to `schedules now <id>`. Documented, SKIP.
-skip "schedules now <id> (force-fire)" "CLI gap: --format json ignored + id truncated in table → no full id to pass"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "2. Agentless wake-gate: token-zero (needs production CodeRunner)"
 # ─────────────────────────────────────────────────────────────────────────────
-# cost-spike-probe is agentless/token-zero — but it uses a type:code step, and
-# the production CodeRunner is NOT wired in this build. The run then FAILS with
-# a known, clearly-labelled limitation ("no CodeRunner wired … convert to
-# type: agent_run"), not a real defect. Detect that and xfail (SKIP); FAIL only
-# on an unexpected error. Once CodeRunner lands this becomes a live token-zero
-# assertion. (Live-confirmed on dev 2026-06-25.)
-cs routine run cost-spike-probe >/tmp/cs-probe.out 2>&1; probe_rc=$?
+# The explicit fixture uses the production expression CodeRunner, without tokens.
+cs routine run "$PROBE_ROUTINE" >"$_HARNESS_FIXTURE_DIR/cs-probe.out" 2>&1; probe_rc=$?
 if (( probe_rc == 0 )); then
-  _pass "agentless routine 'cost-spike-probe' ran"
+  _pass "owned agentless probe ran"
   if have jq; then
-    cost="$(cs routine records cost-spike-probe --json --limit 1 2>/dev/null | jq -r '.[0].cost_usd // 0')"
+    cost="$(cs routine records "$PROBE_ROUTINE" --json --limit 1 2>/dev/null | jq -r '.[0].cost_usd // 0')"
     if [[ "$cost" =~ ^0(\.0+)?$ ]]; then
       _pass "agentless run cost is exactly 0 (token-zero guarantee holds)"
     else
@@ -66,10 +67,9 @@ if (( probe_rc == 0 )); then
   else
     skip "token-zero cost assertion" "jq missing"
   fi
-elif grep -qi 'CodeRunner' /tmp/cs-probe.out; then
-  skip "agentless cost-spike-probe (token-zero)" "KNOWN GAP: type:code steps need the production CodeRunner (not wired in this build) — agentless probe cannot run until it lands"
+
 else
-  _fail "agentless routine 'cost-spike-probe' ran" "unexpected error: $(head -c 160 /tmp/cs-probe.out | tr '\n' ' ')"
+  _fail "owned agentless probe ran" "unexpected error: $(head -c 160 "$_HARNESS_FIXTURE_DIR/cs-probe.out" | tr '\n' ' ')"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -81,16 +81,12 @@ section "3. HITL approval gate: pause → approve → resume"
 # waitpoint" finding was a CLI gap — `waitpoints list --format json` printed the
 # human table, so jq never saw the token. Fixed alongside CRE-137/143.)
 info "Launching approval-gate-demo (pauses at the approval gate)…"
-( cs routine run approval-gate-demo >/tmp/cs-appr.out 2>&1 ) &
+( cs routine run "$APPROVAL_ROUTINE" >"$_HARNESS_FIXTURE_DIR/cs-appr.out" 2>&1 ) &
 run_pid=$!
 
 token=""; waited=0; wp_window="${WAITPOINT_TIMEOUT:-90}"
 while (( waited < wp_window )); do
-  if have jq; then
-    token="$(cs routine waitpoints list --format json 2>/dev/null | jq -r '.[0].token // .[0].id // empty' 2>/dev/null)"
-  else
-    token="$(cs routine waitpoints list 2>/dev/null | awk 'NR==2{print $1}')"
-  fi
+  token="$(cs routine waitpoints list --format json 2>/dev/null | jq -r --arg prompt "$APPROVAL_ROUTINE" '.[] | select(.prompt == $prompt) | .token' 2>/dev/null)"
   [[ -n "$token" && "$token" != "null" ]] && break
   sleep "$POLL_INTERVAL"; waited=$((waited+POLL_INTERVAL))
 done
@@ -104,11 +100,11 @@ if [[ -n "$token" && "$token" != "null" ]]; then
   fi
   wait "$run_pid" 2>/dev/null
   if have jq; then
-    st="$(cs routine records approval-gate-demo --json --limit 1 2>/dev/null | jq -r '.[0].status // empty')"
+    st="$(cs routine records "$APPROVAL_ROUTINE" --json --limit 1 2>/dev/null | jq -r '.[0].status // empty')"
     if [[ "$st" == "completed" ]]; then
       _pass "run resumed and completed after approval"
     else
-      skip "run completion after approval" "latest status=$st (may still be finishing)"
+      _fail "run completion after approval" "latest status=$st"
     fi
   fi
 else
@@ -143,7 +139,7 @@ section "5. Crew network policy defaults to restricted (#1366)"
 # egress), and the v148 backfill tightens legacy 'free' rows to match. We
 # create a throwaway crew, assert `crew get` reports restricted, then clean up.
 NM_SLUG="harness-netmode-$$"
-if cs crew create --name "Harness NetMode $$" --slug "$NM_SLUG" >/tmp/cs-nm.out 2>&1; then
+if cs crew create --name "Harness NetMode $$" --slug "$NM_SLUG" >"$_HARNESS_FIXTURE_DIR/cs-nm.out" 2>&1; then
   if cs crew get "$NM_SLUG" 2>/dev/null | grep -iq "network mode.*restricted"; then
     _pass "new crew defaults to network_mode=restricted"
   else
@@ -151,7 +147,7 @@ if cs crew create --name "Harness NetMode $$" --slug "$NM_SLUG" >/tmp/cs-nm.out 
   fi
   cs crew delete "$NM_SLUG" --yes >/dev/null 2>&1 || true
 else
-  skip "crew network-mode default" "crew create unavailable: $(head -c 160 /tmp/cs-nm.out | tr '\n' ' ')"
+  skip "crew network-mode default" "crew create unavailable: $(head -c 160 "$_HARNESS_FIXTURE_DIR/cs-nm.out" | tr '\n' ' ')"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────

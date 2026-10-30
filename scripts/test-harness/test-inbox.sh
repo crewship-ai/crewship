@@ -22,6 +22,11 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 
 preflight
 
+# shellcheck source=routine-fixtures.sh
+source "$_HARNESS_DIR/routine-fixtures.sh"
+harness_fixture approval ops APPROVAL_ROUTINE
+harness_fixture notify ops NOTIFY_FIXTURE
+
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 # inbox_json <state> — the inbox list as JSON, or "[]" when the CLI cannot.
@@ -80,7 +85,7 @@ section "A real decision: fire a routine that parks on an approval"
 # approval-gate-demo is the seeded routine whose middle step is a `wait`. It is
 # the only way to mint a genuine waitpoint — one with a token the approve
 # endpoint will accept — without hand-writing a row.
-RUN_OUT="$(cs routine run approval-gate-demo --inputs '{"action":"harness probe"}' 2>&1)"
+RUN_OUT="$(cs routine run "$APPROVAL_ROUTINE" --inputs '{"action":"harness probe"}' 2>&1)"
 
 if ! grep -qi "waiting\|approve" <<<"$RUN_OUT"; then
   skip "approval-gate-demo did not park on an approval — is it seeded? ($(head -1 <<<"$RUN_OUT"))"
@@ -140,13 +145,13 @@ section "Dismissal reaches the server, not just the screen"
 # this instance. Mint one instead, by running a routine whose notify step
 # addresses the caller, and dismiss only that.
 BEFORE_IDS="$(inbox_json active | jq -r '.[]? | select(.kind=="message") | .id' | sort)"
-cs routine run "${NOTIFY_ROUTINE:-demo-fetch-and-report}" >/dev/null 2>&1
+cs routine run "${NOTIFY_ROUTINE:-$NOTIFY_FIXTURE}" >/dev/null 2>&1
 sleep "$POLL_INTERVAL"
 MSG_ID="$(comm -13 <(printf '%s\n' "$BEFORE_IDS") \
   <(inbox_json active | jq -r '.[]? | select(.kind=="message") | .id' | sort) | head -1)"
 
 if [[ -z "$MSG_ID" ]]; then
-  skip "could not mint a message to dismiss (is ${NOTIFY_ROUTINE:-demo-fetch-and-report} seeded?)"
+  skip "could not mint a message to dismiss (is ${NOTIFY_ROUTINE:-$NOTIFY_FIXTURE} seeded?)"
 else
   info "dismissing only the row this run created: $MSG_ID"
   cs inbox resolve "$MSG_ID" --action dismissed >/dev/null 2>&1

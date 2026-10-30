@@ -15,18 +15,24 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$HERE/lib.sh"
 
-ROUTINE="${ROUTINE:-extract-contacts}"
+ROUTINE="${ROUTINE:-}"
 
 preflight
+
+# shellcheck source=routine-fixtures.sh
+source "$HERE/routine-fixtures.sh"
+[[ -n "$ROUTINE" ]] || harness_fixture contacts engineering ROUTINE
+FAILER="${FAILER:-}"
+[[ -n "$FAILER" ]] || harness_fixture failure quality FAILER
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "1. Routine run completes (exit code + records status)"
 # ─────────────────────────────────────────────────────────────────────────────
 info "Running routine '$ROUTINE' synchronously…"
-if cs routine run "$ROUTINE" >/tmp/cs-run.out 2>&1; then
+if cs routine run "$ROUTINE" >"$_HARNESS_FIXTURE_DIR/cs-run.out" 2>&1; then
   _pass "routine run '$ROUTINE' exits 0 (COMPLETED)"
 else
-  _fail "routine run '$ROUTINE' exits 0" "$(head -c 200 /tmp/cs-run.out | tr '\n' ' ')"
+  _fail "routine run '$ROUTINE' exits 0" "$(head -c 200 "$_HARNESS_FIXTURE_DIR/cs-run.out" | tr '\n' ' ')"
 fi
 
 # Cross-check the run record via the structured API.
@@ -46,15 +52,15 @@ section "2. Completion event observable on the activity rail (watch --once)"
 # exits after the first run completes — CI-friendly.
 info "Launching '$ROUTINE' and watching for pipeline.run.completed…"
 ( cs routine run "$ROUTINE" >/dev/null 2>&1 ) &
-if timeout "$POLL_TIMEOUT" "$CREWSHIP" --server "$SERVER" routine watch "$ROUTINE" \
-     --once --json >/tmp/cs-watch.jsonl 2>/dev/null; then
-  if grep -q 'pipeline.run.completed' /tmp/cs-watch.jsonl; then
+if timeout "$POLL_TIMEOUT" "$CREWSHIP" --server "$SERVER" ${_CS_ARGS[@]+"${_CS_ARGS[@]}"} routine watch "$ROUTINE" \
+     --once --json >"$_HARNESS_FIXTURE_DIR/cs-watch.jsonl" 2>/dev/null; then
+  if grep -q 'pipeline.run.completed' "$_HARNESS_FIXTURE_DIR/cs-watch.jsonl"; then
     _pass "watch observed a pipeline.run.completed event"
   else
-    _fail "watch observed completion" "no completed event in: $(head -c 200 /tmp/cs-watch.jsonl | tr '\n' ' ')"
+    _fail "watch observed completion" "no completed event in: $(head -c 200 "$_HARNESS_FIXTURE_DIR/cs-watch.jsonl" | tr '\n' ' ')"
   fi
 else
-  skip "routine watch --once" "watch timed out or unsupported"
+  _fail "routine watch --once" "watch timed out or failed"
 fi
 wait 2>/dev/null || true
 
@@ -80,10 +86,10 @@ section "4. Failed run is observable (records); failed_run inbox is scheduled-on
 # INBOX item is created only for SCHEDULED (unattended) runs
 # (internal/pipeline/schedules.go alertFailedScheduledRun) — NOT ad-hoc CLI
 # runs, by design, since a manual operator already sees the error inline.
-FAILER="${FAILER:-classify-ticket}"
+
 info "Inducing a failure on '$FAILER' with empty input…"
-if cs routine run "$FAILER" --inputs '{"ticket":""}' >/tmp/cs-fail.out 2>&1; then
-  skip "failed-run observability" "could not induce a failure (routine tolerated the input)"
+if cs routine run "$FAILER" --inputs '{"ticket":""}' >"$_HARNESS_FIXTURE_DIR/cs-fail.out" 2>&1; then
+  _fail "failed-run observability" "failure fixture unexpectedly completed"
 else
   if have jq; then
     st="$(cs routine records "$FAILER" --json --limit 1 2>/dev/null | jq -r '.[0].status // empty')"
@@ -104,18 +110,18 @@ section "5. Webhook egress honors the crew allowlist / SSRF guard (#1367)"
 # the observable contract here — we point a channel at a deliberately
 # non-allowlisted, unreachable host and assert the routine run still COMPLETES.
 BLOCKED_URL="${BLOCKED_URL:-https://blocked.egress.invalid/hook}"
-if have jq && "$CREWSHIP" --server "$SERVER" notifychannel add \
+if have jq && cs notifychannel add \
      --type webhook --url "$BLOCKED_URL" --events completed \
-     --format json >/tmp/cs-nch.json 2>/dev/null; then
-  NCH_ID="$(jq -r '.id // .channel.id // empty' /tmp/cs-nch.json 2>/dev/null)"
+     --format json >"$_HARNESS_FIXTURE_DIR/cs-nch.json" 2>/dev/null; then
+  NCH_ID="$(jq -r '.id // .channel.id // empty' "$_HARNESS_FIXTURE_DIR/cs-nch.json" 2>/dev/null)"
   info "Created webhook channel $NCH_ID → $BLOCKED_URL (non-allowlisted/unreachable)"
-  if cs routine run "$ROUTINE" >/tmp/cs-run-egress.out 2>&1; then
+  if cs routine run "$ROUTINE" >"$_HARNESS_FIXTURE_DIR/cs-run-egress.out" 2>&1; then
     _pass "routine run still COMPLETES despite a blocked/unreachable webhook (delivery is best-effort)"
   else
-    _fail "run survives blocked webhook" "$(head -c 200 /tmp/cs-run-egress.out | tr '\n' ' ')"
+    _fail "run survives blocked webhook" "$(head -c 200 "$_HARNESS_FIXTURE_DIR/cs-run-egress.out" | tr '\n' ' ')"
   fi
   # Cleanup so repeated harness runs don't accrue dead channels.
-  [ -n "$NCH_ID" ] && "$CREWSHIP" --server "$SERVER" notifychannel rm "$NCH_ID" --yes >/dev/null 2>&1 || true
+  [ -n "$NCH_ID" ] && cs notifychannel rm "$NCH_ID" --yes >/dev/null 2>&1 || true
 else
   skip "webhook egress allowlist probe" "notifychannel add unavailable or jq missing"
 fi
