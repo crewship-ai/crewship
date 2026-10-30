@@ -66,7 +66,8 @@ reads as off. The flag check reads only the on/off value: the `percentage`
 column shown by `crewship feature-flag list` does not change the result for
 these keys.
 
-Turn a flag on for the current workspace (OWNER or ADMIN):
+Turn a flag on for the current workspace (OWNER or ADMIN). Select the
+workspace with `--workspace <workspace-id>` or `CREWSHIP_WORKSPACE`:
 
 ```bash
 crewship feature-flag enable artifact_projects
@@ -126,9 +127,11 @@ variables; an environment variable overrides the YAML value. Boolean switches
 accept `true` or `1`. Change them only with a restart. A switch that is off
 removes or refuses its routes for every workspace.
 
-Each switch is a top-level YAML section. Every setting on this page also has a
-YAML key, so none of them is environment-only; the variable names are listed in
-the tables below:
+The startup settings below have YAML keys. Workspace flags and their server
+environment bypasses are separate mechanisms, and `NEXT_PUBLIC_*` variables
+are build inputs, not YAML settings. This template needs real qualified engine
+and bundle pins, installed bundles and running private services; it is not a
+self-contained deployment:
 
 ```yaml
 documents:
@@ -142,6 +145,11 @@ documents:
 gridcraft:
   enabled: true
   editor_enabled: true
+  service_socket: /run/crewship/gridcraft-service.sock
+  service_token_file: /etc/crewship/gridcraft-service.token
+  editor_bundle_dir: /opt/crewship/editor-bundles
+  editor_bundles:
+    - <bundle-sha256>
 slides:
   enabled: true
 mooring:
@@ -166,7 +174,7 @@ craft_native:
 | `craft_native.enabled` | `CREWSHIP_CRAFT_NATIVE_ENABLED` | off | The per-Page Craft session and edit lease API for Pages that already use the whole-native profile; existing Pages are never converted. A Word or Sheet editor, native New Doc and `wordcraft_native` / `gridcraft_native` in the document status need a qualified profile for that application. |
 | `craft_native.agents_enabled` | `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED` | off | Agent editing in native Craft documents |
 | `documents.enabled` | `CREWSHIP_DOCUMENTS_ENABLED` | off | The Docs (Word) document engine and document creation |
-| `gridcraft.enabled` | `CREWSHIP_GRIDCRAFT_ENABLED` | off | The workbook (Sheet) engine |
+| `gridcraft.enabled` | `CREWSHIP_GRIDCRAFT_ENABLED` | off | The workbook (Sheet) engine; requires `service_socket` and `service_token_file` |
 | `gridcraft.editor_enabled` | `CREWSHIP_GRIDCRAFT_EDITOR_ENABLED` | off | The live workbook editor. Requires `gridcraft.enabled` and the `gridcraft_editor` workspace flag. |
 | `slides.enabled` | `CREWSHIP_SLIDES_ENABLED` | off | Native Slides read and initialize routes. See [Native Slides](/guides/slides-native). |
 | `mooring.enabled` | `CREWSHIP_MOORING_ENABLED` | off | Live collaborative editing transport. See [the Mooring spec](/specs/mooring-session-transport). |
@@ -193,14 +201,20 @@ The full names are `CREWSHIP_CRAFT_NATIVE_WORD_ENGINE_REVISION`,
 `CREWSHIP_CRAFT_NATIVE_WORD_CLI_PATH`, `CREWSHIP_CRAFT_NATIVE_WORD_CLI_SHA256`,
 `CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_BUNDLE`, `CREWSHIP_CRAFT_NATIVE_WORD_EDITOR_URL`,
 and the same five with `GRID` for Sheet. The server does not start when a
-native pin is invalid, and the native and legacy editor bundles together
+native pin is invalid. When legacy GridCraft editing or Mooring is also enabled,
+`gridcraft.editor_bundle_dir` must explicitly equal
+`craft_native.editor_bundle_dir`, as in the template. GridCraft also requires
+its distinct clean absolute service socket and token-file paths (at most 100
+bytes each); enabling its two booleans alone fails validation. The native and
+legacy editor bundles together
 may name at most four pins. The qualification rules are in the
 [Craft native spec](/specs/craft-native).
 
 ### Docs engine settings
 
 `documents.enabled` needs three clean absolute paths of at most 100 bytes each,
-all different from one another. The Docs engine needs Unix sockets, so it does
+all different from one another. The service token must be a regular file with
+mode `0600`. The Docs engine needs Unix sockets, so it does
 not start on Windows.
 
 | YAML key (under `documents`) | Variable | Default | Meaning |
@@ -209,7 +223,7 @@ not start on Windows.
 | `service_socket` | `CREWSHIP_DOCUMENTS_SERVICE_SOCKET` | — | Socket of the document engine service |
 | `service_token_file` | `CREWSHIP_DOCUMENTS_SERVICE_TOKEN_FILE` | — | File with the service token |
 | `max_documents_per_workspace` | `CREWSHIP_DOCUMENTS_MAX_DOCUMENTS_PER_WORKSPACE` | 128 | Documents allowed per workspace |
-| `max_operations_per_window` | `CREWSHIP_DOCUMENTS_MAX_OPERATIONS_PER_WINDOW` | 10000 | Saved operations accepted per window |
+| `max_operations_per_window` | `CREWSHIP_DOCUMENTS_MAX_OPERATIONS_PER_WINDOW` | 10000 | Saved operations per document per window |
 | `operation_window_seconds` | `CREWSHIP_DOCUMENTS_OPERATION_WINDOW_SECONDS` | 600 | Length of that window, at most 86400 |
 
 A limit set to `0` uses the default. With `documents.enabled`, a negative or
@@ -226,7 +240,7 @@ The workbook engine and editor use `CREWSHIP_GRIDCRAFT_SERVICE_SOCKET`,
 
 The web UI is a static export, so these variables are inlined when it is built.
 Export them before `pnpm build` (or `make build`, which runs it) and deploy the
-new build; changing them on a running server has no effect. Each one is on
+new binary with its embedded UI; changing them on a running server has no effect. Each one is on
 only when its value is exactly `true`.
 
 | Variable | Default | Shows |
@@ -238,6 +252,7 @@ only when its value is exactly `true`.
 | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` | off | Live data previews in Dashboard artifacts, inside the library or the chat and Page viewer. No data requests while off. |
 | `NEXT_PUBLIC_ARTIFACT_SLIDES` | off | Slides previews of artifact versions, inside the library or the chat and Page viewer |
 | `NEXT_PUBLIC_ARTIFACTS_DESIGN` | off | The Design canvas |
+| `NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM` | off | Read-only Design System token preview in the artifact viewer |
 | `NEXT_PUBLIC_SLIDES_EDITOR` | off | The native Slides editor on a Page that has Slides. Edits stay a local draft. |
 | `NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS` | off | Development only. Leave off: the server does not serve the revert and proposal endpoints this client calls. |
 | `NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT` | off | Development only. Leave off. |
@@ -305,8 +320,12 @@ crewship doc status
 `gridcraft_native` are true when native Craft is on with a qualified Word or
 Sheet profile. A successful answer is not enough: the web UI offers **New Doc**
 only when at least one of `enabled`, `wordcraft_native` or `gridcraft_native`
-is `true` (or Mooring reports its optional Word fields). The response above,
+is `true` (or a separately qualified Mooring Word integration is available). The response above,
 with every value `false`, offers nothing.
+
+`gridcraft_native` reports the native Sheet profile, not the legacy live workbook
+editor. Check that editor by opening an existing workbook with its workspace
+flag enabled; `doc status` does not certify the legacy worker service.
 
 ## Upgrades
 

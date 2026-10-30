@@ -217,6 +217,7 @@
             "icon": "settings",
             "pages": [
               "configuration/environment",
+              "configuration/artifacts",
               "configuration/yaml-config",
               "configuration/providers",
               "configuration/apple-containers",
