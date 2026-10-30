@@ -348,6 +348,7 @@
               "cli/mission",
               "cli/routine",
               "cli/page",
+              "cli/artifacts",
               "cli/doc",
               "cli/slides",
               "cli/workbook",
