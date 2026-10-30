@@ -41,6 +41,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **`crewship feature-flag` help explains roles, outputs and the Artifacts flags.** Every subcommand now has a description and an example; the help lists the Artifacts workspace flags with their defaults, dependencies and the web build switches their screens need, says that creating, updating and deleting a flag needs an instance administrator, and notes that `update`, `delete`, `enable`, `disable` and `inherit` print only a confirmation line (`create` honours `-f json`). Command behaviour is unchanged.
 
+- **Deleting a workspace closes its public Page links.** Deletion revokes the links in the same transaction, and public reads also refuse previously deleted workspaces.
+
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.
 
 - **The built-in `crewship` agent skill now covers Artifacts.** The guide an agent reads through the CLI explains when to use artifact projects, Design canvases and native Craft documents, which flags and switches each needs, who may write, how to reply to comments and hold the Craft lease, and what to do on a version conflict (409), full storage (413) or an uncertain 503 without retrying blindly. Command behaviour is unchanged.
