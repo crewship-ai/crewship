@@ -71,6 +71,14 @@ type ChatHandler interface {
 // to a private, sender-only agent_busy frame instead.
 var ErrAgentBusy = errors.New("agent already has a live run")
 
+// ErrRunCancelled reports a confirmed execution stop with recorded terminal
+// cancellation. Ambient context cancellation or observer detachment is insufficient.
+var ErrRunCancelled = errors.New("agent run cancellation confirmed")
+
+// ErrExplicitStopRequested distinguishes a human stop from an observer ending.
+// Only the server cancellation registry supplies this cause.
+var ErrExplicitStopRequested = errors.New("explicit run stop requested")
+
 // ErrCrewProvisioning is returned (possibly wrapped) by
 // ChatHandler.HandleChatMessage when a message auto-triggered a devcontainer
 // build for a crew that isn't ready yet (chatbridge.Bridge.HandleChatMessage,
@@ -119,6 +127,7 @@ type Hub struct {
 	mu                  sync.RWMutex
 	connCount           atomic.Int64
 	cancelFns           map[string]context.CancelFunc // session_id -> cancel function for active runs
+	cancelDone          map[string]*cancelCompletion  // completion of the exact registered run
 	cancelMu            sync.Mutex
 	channelAuth         ChannelAuthorizer
 	streamAuthenticator func(context.Context, *auth.Claims) (context.Context, func(), error)
@@ -217,6 +226,13 @@ type ClientMessage struct {
 	Type    string          `json:"type"`
 	Channel string          `json:"channel,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
+}
+
+// cancelCompletion is published before cancellation and settled before done closes.
+type cancelCompletion struct {
+	origin    *Client // server-owned initiating socket, never supplied by a client
+	done      chan struct{}
+	cancelled bool
 }
 
 // ServerMessage is a JSON message sent from the server to WebSocket clients.
@@ -327,6 +343,7 @@ func NewHub(logger *slog.Logger, chatHandler ChatHandler, jwtValidator *auth.JWT
 		unregister:      make(chan *Client),
 		broadcast:       make(chan ChannelMessage, 256),
 		cancelFns:       make(map[string]context.CancelFunc),
+		cancelDone:      make(map[string]*cancelCompletion),
 		streams:         newSessionStreams(),
 		authReadTimeout: wsAuthReadTimeout,
 	}

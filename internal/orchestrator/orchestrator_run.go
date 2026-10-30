@@ -28,6 +28,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/scrubber"
 	"github.com/crewship-ai/crewship/internal/telemetry"
 	"github.com/crewship-ai/crewship/internal/tokenutil"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // preflightExecTimeout bounds each individual pre-flight setup exec (mkdir,
@@ -50,6 +51,18 @@ var ErrDetachedStillRunning = errors.New("orchestrator: exec detached and still 
 
 // ErrDetachedExecStopped is terminal: the process was stopped, but its exit result is unknown.
 var ErrDetachedExecStopped = errors.New("orchestrator: detached exec stopped after the monitoring budget")
+
+// ErrExecutionStopConfirmed requires run-scoped runtime termination evidence.
+// A cancelled observer context or a requested status update is insufficient.
+var ErrExecutionStopConfirmed = errors.New("run execution stop confirmed")
+
+// explicitStopCaused reports whether ctx ended because of the chat's explicit
+// stop request for this run, and not also because of an agent stop. Only then
+// may a cancellation be confirmed to the requester; a base-context shutdown
+// or an agent-initiated stop ends the run for a different reason.
+func (o *Orchestrator) explicitStopCaused(ctx context.Context, runID string) bool {
+	return errors.Is(context.Cause(ctx), ws.ErrExplicitStopRequested) && !o.agentStopRequested(runID)
+}
 
 // awaitExecTerminalWithLogger inspects an exec whose stream has ended and, when the
 // process is still alive, keeps inspecting until it terminates (#2626).
@@ -1126,6 +1139,28 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 	// failure so the journal/UI shows "stuck in a loop" rather than a generic
 	// non-zero exit, and so cost triage can tell runaway loops apart from real
 	// crashes. Uses a fresh context because execCtx is now cancelled.
+	if req.HostOutputDir != "" && o.explicitStopCaused(ctx, req.RunID) {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), preflightExecTimeout)
+		protectedRun := runState
+		protectedRun.ExecID = result.ExecID
+		snapshot, stopErr := o.confirmProtectedRunStop(stopCtx, RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID, Managed: req.managedLaunch != nil}, protectedRun)
+		stopCancel()
+		if stopErr == nil && (snapshot.Result.ExitCode == 143 || snapshot.Result.ExitCode == 137) {
+			if req.CapturedExit != nil {
+				req.CapturedExit(snapshot.Result.CompletedAt)
+			}
+			cleanCtx, cleanCancel := context.WithTimeout(context.Background(), preflightExecTimeout)
+			defer cleanCancel()
+			o.failRun(cleanCtx, req, runState.ID, "cancelled")
+			o.emitExecEnd(cleanCtx, req, result.ExecID, journalCmd, "warn", fmt.Sprintf("%s: explicit stop confirmed", req.AgentSlug), execStart, map[string]any{"cancelled": true, "exit_code": snapshot.Result.ExitCode})
+			o.markAgentOnline(cleanCtx, req, map[string]any{"reason": "explicit_stop_confirmed"})
+			return errors.Join(context.Canceled, ErrExecutionStopConfirmed)
+		}
+		// A late success, an unrelated failure or missing protected terminal
+		// evidence belongs to recovery; it is never a cancellation receipt.
+		transferHostHold(result.ExecID)
+		return fmt.Errorf("%w: explicit stop outcome requires recovery", ErrHostCaptureUnconfirmed)
+	}
 	if req.HostOutputDir != "" && (guard.Tripped() || ctx.Err() != nil || execCtx.Err() != nil) {
 		if guard.Tripped() {
 			stopCtx, stopCancel := context.WithTimeout(context.Background(), preflightExecTimeout)
@@ -1149,23 +1184,61 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		return fmt.Errorf("run aborted: agent repeated the same tool call %d times (stuck loop)", loopGuardThreshold)
 	}
 
-	// If context was cancelled (user pressed stop), clean up with a fresh
-	// context and return a cancellation error. The reader close in streamOutput
-	// sends SIGPIPE to the exec process, which should terminate it.
+	// A cancelled observer does not prove its execution stopped. Keep exact
+	// runtime ownership until both the run location and exec are confirmed gone.
 	if ctx.Err() != nil {
-		cleanCtx := context.Background()
-		o.failRun(cleanCtx, req, runState.ID, "cancelled")
-		o.loggerForRun(req).Info("run cancelled", "agent_id", req.AgentID, "exec_id", result.ExecID)
-		// Close the Crow's Nest exec.command block and flip the Watch
-		// Roster off busy on cancellation too — otherwise stopped
-		// runs leave the live terminal hanging and presence stuck on
-		// "busy" until the 5-min idle sweeper corrects it. Uses
-		// cleanCtx so journal writes complete even after ctx expired.
-		o.emitExecEnd(cleanCtx, req, result.ExecID, journalCmd, "warn",
-			fmt.Sprintf("%s: CANCELLED (%dms)", req.AgentSlug, time.Since(execStart).Milliseconds()),
-			execStart, map[string]any{"cancelled": true})
-		o.markAgentOnline(cleanCtx, req, map[string]any{"reason": "cancelled"})
-		return fmt.Errorf("run cancelled: %w", ctx.Err())
+		cleanCtx, cleanCancel := context.WithTimeout(context.Background(), preflightExecTimeout)
+		defer cleanCancel()
+		location := RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID, Managed: req.managedLaunch != nil}
+		stopped, stoppedExit, stopErr := o.confirmLegacyRunStop(cleanCtx, location, result.ExecID)
+		if stopErr != nil || !stopped {
+			agentExecStillRunning = true
+			o.updateRunStatusForRun(context.Background(), req, runState.ID, "running")
+			heldReq := req
+			hold := &detachedHold{runID: req.RunID, containerID: req.ContainerID, agentSlug: req.AgentSlug, execID: result.ExecID, req: heldReq, requireExecTerminal: true, release: releaseRunSlot, startedAt: execStart, finalize: func() {
+				releaseRunHome(req.ContainerID, req.AgentSlug, req.RunID)
+				o.cleanupRunHomeWithLogger(req.ContainerID, req.AgentSlug, req.RunID, runEndToken, o.loggerForRun(req))
+				if fileCreds && o.releaseAgentSecrets(req.ContainerID, req.AgentSlug, req.RunID) {
+					o.cleanupAgentSecretsWithLogger(req.ContainerID, req.AgentSlug, req.RunID, o.loggerForRun(req))
+				}
+			}}
+			if err := o.registerDetachedHold(hold, o.detachedPollInterval); err != nil {
+				o.loggerForRun(req).Error("cancel stop hold registration failed; retaining ownership", "run_id", req.RunID, "error", err)
+			}
+			slotTransferredToHold = true
+			return fmt.Errorf("%w: cancellation did not confirm exact execution stop: %v", ErrDetachedStillRunning, stopErr)
+		}
+		if stoppedExit == 143 || stoppedExit == 137 {
+			o.failRun(cleanCtx, req, runState.ID, "cancelled")
+			o.loggerForRun(req).Info("run cancelled", "agent_id", req.AgentID, "exec_id", result.ExecID)
+			// Close the Crow's Nest exec.command block and flip the Watch
+			// Roster off busy on cancellation too — otherwise stopped
+			// runs leave the live terminal hanging and presence stuck on
+			// "busy" until the 5-min idle sweeper corrects it. Uses
+			// cleanCtx so journal writes complete even after ctx expired.
+			o.emitExecEnd(cleanCtx, req, result.ExecID, journalCmd, "warn",
+				fmt.Sprintf("%s: CANCELLED (%dms)", req.AgentSlug, time.Since(execStart).Milliseconds()),
+				execStart, map[string]any{"cancelled": true})
+			o.markAgentOnline(cleanCtx, req, map[string]any{"reason": "cancelled"})
+			// The run is cancelled either way, but only the chat's explicit
+			// stop request may receive a confirmation: a hub or server
+			// shutdown, or a concurrent agent stop, ended it for another
+			// reason.
+			if o.explicitStopCaused(ctx, req.RunID) {
+				return fmt.Errorf("run cancelled: %w", errors.Join(ctx.Err(), ErrExecutionStopConfirmed))
+			}
+			return fmt.Errorf("run cancelled: %w", ctx.Err())
+		}
+		// Exact termination is known, but its exit is not a stop signal.
+		// Continue the original success/failure/in-band classification; do
+		// not overwrite a natural result merely because the observer ended.
+		if req.ObservedTerminalAfterStop != nil {
+			req.ObservedTerminalAfterStop()
+		}
+		terminalCtx, terminalCancel := context.WithTimeout(context.WithoutCancel(ctx), preflightExecTimeout)
+		defer terminalCancel()
+		ctx = terminalCtx
+
 	}
 
 	var running bool
@@ -1372,6 +1445,8 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		status = "error"
 		execErr = inBandErr
 	} else if exitCode == 143 && o.agentStopRequested(req.RunID) {
+		// An agent stop is a separate request (POST /agents/{id}/stop); it
+		// never confirms a chat cancellation someone else asked for.
 		status = "cancelled"
 		execErr = ErrAgentStopped
 	} else if exitCode != 0 {

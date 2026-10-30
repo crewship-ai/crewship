@@ -21,9 +21,9 @@ func TestChatCmd_TranscriptPretty(t *testing.T) {
 	covResetFlags(t, chatCmd)
 	stub.OnGet("/api/v1/chats/"+covChatID+"/messages",
 		clitest.JSONResponse(200, map[string]any{"messages": []map[string]any{
-			{"role": "user", "content": "hello there", "created_at": "2026-06-01T10:00:00Z"},
-			{"role": "assistant", "content": "## answer", "created_at": "2026-06-01T10:00:05Z"},
-			{"role": "system", "content": "sys note", "created_at": "2026-06-01T10:00:06Z"},
+			{"role": "user", "content": "hello there", "ts": "2026-06-01T10:00:00.123456789Z"},
+			{"role": "assistant", "content": "## answer", "ts": "2026-06-01T10:00:05Z"},
+			{"role": "system", "content": "sys note", "ts": "2026-06-01T10:00:06Z"},
 		}}))
 
 	out := covCaptureStdoutCli3(t, func() {
@@ -48,9 +48,9 @@ func TestChatCmd_SinceFilterAndJSON(t *testing.T) {
 	cliCfg.Format = "json"
 	stub.OnGet("/api/v1/chats/"+covChatID+"/messages",
 		clitest.JSONResponse(200, map[string]any{"messages": []map[string]any{
-			{"role": "user", "content": "ancient", "created_at": "2020-01-01T00:00:00Z"},
-			{"role": "user", "content": "unparseable-ts-kept", "created_at": "not-a-time"},
-			{"role": "assistant", "content": "recent", "created_at": "2099-01-01T00:00:00Z"},
+			{"role": "user", "content": "ancient", "ts": "2020-01-01T00:00:00Z"},
+			{"role": "user", "content": "unparseable-ts-kept", "ts": "not-a-time"},
+			{"role": "assistant", "content": "recent", "ts": "2099-01-01T00:00:00Z"},
 		}}))
 
 	if err := chatCmd.Flags().Set("since", "1h"); err != nil {

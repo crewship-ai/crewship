@@ -67,7 +67,7 @@ func TestChatCmd_FilterFlag(t *testing.T) {
 func TestPrintChatTranscript_MarkdownRenderer(t *testing.T) {
 	md := cli.NewMarkdownRenderer()
 	msgs := []map[string]any{
-		{"role": "assistant", "content": "plain words", "created_at": "2026-06-01T10:00:00Z"},
+		{"role": "assistant", "content": "plain words", "ts": "2026-06-01T10:00:00Z"},
 	}
 	out := covCaptureStdoutCli3(t, func() { printChatTranscript(msgs, md) })
 	if !strings.Contains(out, "plain words") {

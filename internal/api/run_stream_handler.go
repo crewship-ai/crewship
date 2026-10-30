@@ -540,11 +540,16 @@ func (s *runStreamWriter) writeHubFrame(data []byte) bool {
 		// are not run output and must not appear in a transcript.
 		return false
 	default:
-		// Anything else broadcast on the session channel (resume_reset, future
+		// Anything else broadcast on the session channel (resume_reset,
+		// assignment_*, escalation_*, peer_query_*, port_expose_created, future
 		// control types) is passed through under its own name rather than
 		// dropped — a caller that does not recognise it can ignore it, but a
-		// silent drop would hide a real event.
-		s.write(runStreamFrame{Type: msg.Type, Seq: msg.Seq})
+		// silent drop would hide a real event. Its payload rides as metadata:
+		// these frames reach WebSocket subscribers of the same channel with it,
+		// and without it a stream reader learned that a delegation or an
+		// escalation happened but not which one. write() applies the same cost
+		// redaction to it as to a chat event's metadata.
+		s.write(runStreamFrame{Type: msg.Type, Seq: msg.Seq, Metadata: msg.Payload})
 		return false
 	}
 }

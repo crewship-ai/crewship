@@ -37,6 +37,7 @@ func newChatRefsCommand() *cobra.Command {
 	}}
 	cmd.Flags().Int("limit", 100, "Maximum number of cards (1–100)")
 	cmd.Flags().String("cursor", "", "Opaque next_cursor from the preceding page")
+	addChatHintsWatch(cmd)
 	return cmd
 }
 func newOperationCommand() *cobra.Command {

@@ -75,6 +75,8 @@ git diff | crewship -p "review" --stdin        # --stdin appends piped context, 
 | `--plan` | `false` | Request a step-by-step plan through the prompt; tools remain available. |
 | `--effort <level>` | (unset) | Reasoning effort: `minimal|low|medium|high|xhigh`. |
 | `--show-thinking` | `false` | Print reasoning blocks to stdout (un-truncated). |
+| `--attach <file>` | (unset) | Upload a file into the new chat and name it in the message, as the web composer does. Repeatable. Not with `--agents`. |
+| `--page <slug>` | (unset) | Attach a Page as context; the server checks access for you and the agent and appends its snapshot. Not with `--agents`. |
 
 `--dry-run` and `--estimate` are mutually exclusive with the chat-creation path: nothing hits the server.
 
