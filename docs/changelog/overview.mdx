@@ -21,6 +21,118 @@ tag: Experimental
   user-visible pull request is required to add to it.
 </Note>
 
+<Update label="October 29, 2026" tags={["features", "updates", "fixes", "security"]}>
+
+## Artifacts is the home for what agents produce
+
+The sidebar, the command palette, the Dashboard strip and the Activity filter
+now say **Artifacts** where they said Pages; addresses, API routes and
+`crewship page` commands are unchanged. In the default build the **Artifacts**
+item still opens the Pages overview. A build made with
+`NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` gets the Artifacts library at
+`/artifacts`: one gallery or table of projects, Word, Sheet, Slides, Design
+and Dashboard items with their kind and shared version, views such as Home,
+Mine, Favorites, Test items and Archive, and a detail that opens the item
+itself. Every item has its own address, `/artifacts/<id>`, so a reload or a
+shared link opens it again. With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS=true` as
+well, `/pages` hands its overview to the library.
+
+The artifact kinds behind it are experimental and **off by default**. A
+workspace flag, turned on for the current workspace with
+[`crewship feature-flag enable <key>`](/cli/feature-flag), or the matching
+server switch for every workspace, turns a kind on for the API, the CLI and
+agents. The browser screens for it also need the build-time switches in the
+last column:
+
+| Kind | Workspace flag | Server switch | Build-time switches for the browser |
+|---|---|---|---|
+| Versioned projects: immutable versions, a shared version, restore, comments anchored to an element and sent to the agent | `artifact_projects` | `CREWSHIP_ARTIFACT_PROJECTS_ENABLED` | `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` for the project viewer in chat and in the library detail; `NEXT_PUBLIC_ARTIFACTS_LIBRARY` for the library itself |
+| Dashboard data: datasets written through the API, CLI or agent tools with version checks; every number shows its dataset, producer and update time | `artifact_dashboard_data` and `artifact_projects` | `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED` | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` |
+| Slides: authored decks with thumbnails, presentation, comments and PDF download | `artifact_slides` and `artifact_projects` | `CREWSHIP_ARTIFACT_SLIDES_ENABLED` | `NEXT_PUBLIC_ARTIFACT_SLIDES` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` |
+| Design: a collaborative canvas of frames, shapes, text and images for people and agents | `artifacts_design` | `CREWSHIP_ARTIFACTS_DESIGN_ENABLED`; the server also needs a `node` executable on its `PATH` | `NEXT_PUBLIC_ARTIFACTS_DESIGN` |
+
+Dashboard data and Slides answer only where versioned projects are on as well,
+through the workspace flag or the server switch. The web UI is built into the `crewship` binary, so the `NEXT_PUBLIC_*`
+switches are read only when the web UI is built. A running server cannot
+change them; published builds leave them off. For a source build, set the
+variables in the environment of `make build`, for example:
+
+```bash
+NEXT_PUBLIC_ARTIFACTS_LIBRARY=true NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true make build
+```
+
+See [installation](/quickstart#installation). Set a server bypass to exactly
+`true` and restart the server for it to take effect. Agents author projects
+with the `page artifact` commands and MCP tools on servers that enable them.
+
+## Documents with honest save status
+
+Documents need the private document engine, which is off by default; see
+[Private document engine](/configuration/environment#private-document-engine).
+Where it runs, people and agents can create a Document, edit it and reopen the
+confirmed saved content. The save status separates "saved locally" from
+"confirmed by server", unconfirmed edits survive a reload, the toolbar has
+Undo and Redo, and a page with edits the server has not accepted asks before a
+link leaves it. History compares any retained revision with the last saved
+one. See [Document drafts](/guides/document-drafts) and
+[Document history](/guides/document-history-review).
+
+## Harbor 2: one layout across the app
+
+Every page moved to the Harbor 2 layout: the rail keeps the workspace, Search,
+the Crewship sail and you on one axis; one status pill reports the worst state;
+Activity, Inbox, Issues, Routines, Crews, Skills, Integrations, the Vault,
+Settings and Admin share the same panels and filters. A new **Calendar** page
+shows scheduled work, Inbox search and filters run on the server, and chat
+gets a search dialog (Ctrl/Cmd+Shift+F) with `from:`, `in:`, `has:`, `after:`
+and `before:` filters. When a session ends the app shows a clear screen
+instead of a bare login form, and a short realtime drop is reported quietly
+while the app keeps reconnecting. Appearance gains theme packs (Afterglow),
+animated Voxel avatars and a **workspace default look** that members inherit
+until they choose their own. See [Top bar and account settings](/guides/account-and-top-bar),
+[Theme packs](/guides/theme-packs) and [Calendar](/guides/calendar).
+
+## Share one crew, routine or project with a Guest
+
+[Resource Access v1](/security/rbac#resource-access-v1) adds a Guest
+(restricted) mode and per-object sharing: crews with View, Use or trusted
+Manage presets, routines with View, Results, Run, Edit and Publish, and
+projects with their issues. Each share is previewed before it is confirmed,
+a Guest can see why they have access, and a refusal explains what is still
+available. `crewship routine unpublish` withdraws a Guest publication.
+
+## An audit trail that checks itself
+
+Access changes, agent creation and deletion, and agent updates now commit
+together with their hash-chained audit entry, so a failed audit rolls the
+change back. Agent MCP configuration values no longer reach the audit log;
+rotate any credential that was set in an agent's MCP configuration. The audit
+signing keyring is encrypted at rest and rotated with
+`crewship audit rotate-key`; the server verifies the chains at start and
+hourly, `crewship admin instance audit verify` checks the instance chain on
+demand, and instance admins get an inbox notice when a chain breaks. See
+[`crewship audit`](/cli/audit).
+
+<Warning>
+  **Behaviour changes on upgrade.**
+  A password reset, by e-mail link or `crewship admin reset-password`, now
+  revokes the account's CLI tokens: run `crewship login` again afterwards.
+  First-run Setup requires OWNER, ADMIN or MANAGER; a MEMBER gets `403`.
+  Notification channel URLs are checked more strictly when created or tested
+  and at send time (Gotify, Google Chat, Mattermost and ntfy).
+  Instance backup refuses an invalid `ENCRYPTION_KEY` instead of writing an
+  unusable recovery kit. Crew containers are recreated at their next idle
+  start when the sidecar changed, so new agent tools arrive without
+  `crewship crew restart-agents`.
+  **Downgrade boundary:** a build from before migration `20261022114610`
+  refuses to start on the upgraded data; roll back by restoring the
+  pre-upgrade snapshot, never by deleting migration records. Before
+  downgrading across the durable routine-start migration, stop triggers and
+  drain queued starts. See [Upgrades](/guides/upgrades).
+</Warning>
+
+</Update>
+
 <Update label="September 26, 2026" tags={["features", "updates", "fixes", "security"]}>
 
 ## Routines reads as an operator console

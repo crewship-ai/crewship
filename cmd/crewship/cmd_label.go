@@ -29,6 +29,8 @@ var labelCmd = &cobra.Command{
 var labelListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List workspace labels",
+	Example: `  crewship label list
+  crewship label list --format json | jq -r '.[].name'`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -66,6 +68,10 @@ var labelListCmd = &cobra.Command{
 var labelCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new label",
+	Long: `Create a workspace label. Requires the MANAGER role or higher.
+Label names are unique per workspace; a duplicate name is rejected with 409.`,
+	Example: `  crewship label create --name bug --color "#EF4444"
+  crewship label create --name backend --color "#3B82F6" --group area --format json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -114,7 +120,11 @@ var labelCreateCmd = &cobra.Command{
 var labelUpdateCmd = &cobra.Command{
 	Use:   "update <label-id>",
 	Short: "Update a label",
-	Args:  cobra.ExactArgs(1),
+	Long: `Update a label's name, color or group. Only the flags you pass are sent.
+Requires the ADMIN role or higher. Prints the updated label.`,
+	Example: `  crewship label update <label-id> --color "#10B981"
+  crewship label update <label-id> --name regression --format json`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -155,8 +165,13 @@ var labelUpdateCmd = &cobra.Command{
 			return err
 		}
 
-		cli.PrintSuccess("Label updated.")
-		return nil
+		var updated labelItem
+		if err := cli.ReadJSON(resp, &updated); err != nil {
+			return err
+		}
+		return resolvedFormatter(cmd).AutoHuman(updated, func() {
+			cli.PrintSuccess(fmt.Sprintf("Label updated: %s (%s)", updated.Name, updated.ID))
+		})
 	},
 }
 

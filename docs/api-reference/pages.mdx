@@ -563,7 +563,7 @@ still cannot widen who reaches it, not even to another agent in its own crew.
 |---|---|---|
 | `subject_type` | string | `user`, `crew`, `agent`, or `workspace` (every current human member of the workspace, never an agent). |
 | `subject` | string | The subject's slug or id. Omitted for `workspace`. |
-| `level` | string | `read`, `produce`, or `write`. The `workspace` subject carries `read` or `write` only; `produce` names a producer, and everyone is not one. |
+| `level` | string | `read`, `comment`, `produce`, or `write`. The `workspace` subject carries `read`, `comment` or `write`, never `produce`: `produce` names a producer, and everyone is not one. `comment` names people, never an agent. |
 | `panels` | string[] | Optional. Restricts a `produce` grant to named panels; omitted means every panel on the page. |
 
 ### What each level decides
@@ -571,10 +571,11 @@ still cannot widen who reaches it, not even to another agent in its own crew.
 | Level | Opens the page | Also |
 |---|---|---|
 | `read` | yes | nothing else |
+| `comment` | yes | may submit [artifact project feedback](#version-bound-artifact-project-feedback-pilot) on the current shared version; no content writes, restore, sharing or agent execution |
 | `produce` | yes | may push payloads into the panels it names |
 | `write` | yes | may add, remove and re-arrange panels, and read the page's version history |
 
-`read` is what the other two are built on: a principal who may rewrite a page
+`read` is what the other levels are built on: a principal who may rewrite a page
 has to be able to open it, so every level reaches the page and the levels differ
 only in what they add.
 
@@ -597,7 +598,7 @@ and by members of the crews that own its panels.
 | Status | Condition |
 |---|---|
 | 200 | Issued, or updated in place if the subject already held one. |
-| 400 | Unknown `subject_type` or `level`, missing subject, `produce` for the `workspace` subject, or `panels` naming a panel the page does not have. |
+| 400 | Unknown `subject_type` or `level`, missing subject, `produce` for the `workspace` subject, `comment` for an `agent` subject, or `panels` naming a panel the page does not have. |
 | 401 | No session. |
 | 403 | Not the owner and not an admin, or the caller is an agent rather than a human. Only for a caller who reaches the page. |
 | 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
@@ -2534,8 +2535,10 @@ The private-chat document composer shows the target personal space and its audie
 
 ## Artifact project creation
 
-The `artifact_projects` workspace feature is disabled by default. Page creation
-authority and existing workspace policy apply when it is enabled.
+The `artifact_projects` workspace feature is disabled by default. Setting
+`CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` on the server enables it for every
+workspace. Page creation authority and existing workspace policy apply when it
+is enabled.
 
 ### GET /api/v1/pages/artifacts/availability
 
@@ -2560,7 +2563,8 @@ element IDs for later precise selection; files are preserved as authored.
 complete version commits atomically. A failure does not acknowledge a version.
 **Statuses:** 201 created, 400 invalid manifest or request, 401 invalid
 authentication, 403 missing current authority, 404 disabled feature, 409 occupied
-address, 413 request/history limit, 500 internal failure, 503 unavailable durable
+address (`code: "artifact_slug_taken"`), 413 request/history limit or a workspace
+that already holds 100 Pages, 500 internal failure, 503 unavailable durable
 storage. Retain the candidate after a refusal. CLI:
 `crewship page artifact create demo --name "Demo" --file manifest.json`.
 
@@ -2573,22 +2577,44 @@ storage. Retain the candidate after a refusal. CLI:
 | POST | `/api/v1/pages/{slug}/artifact/versions` | Atomically publish a complete successor manifest |
 
 **Auth:** reads apply the current Page ACL and require CLI `pages:read` scope.
-Publication requires the human owner and current `pages:write` authority.
-A read-scoped owner can read history with `can_write: false`. Other authorized
-readers receive only the shared pin and no private history or quota usage.
+Publication requires current `pages:write` authority and either the human owner
+or a human with a live Edit entitlement: an explicit Page `write` grant or
+folder write access, on a Page that is no longer private. The version records
+the editor's own identity. An editor reads only the latest manifest: no
+retained history, no `version` other than the latest, and a `quota` with
+`retention: "latest-version-only"` and zero usage figures. A read-scoped owner
+can read history with `can_write: false`. Other authorized readers, including
+Comment grantees, receive only the shared pin, no private history, and a `quota`
+with `retention: "shared-version-only"` and zero usage figures.
 **Request:** reads take a Page slug or `@page_id`, workspace selection and an
 optional positive `version` query. Publication takes the exact positive latest
 `base_version`, `entrypoint`, complete `files` and optional `message`. Every file
 requires `path`, UTF-8 `content` and `media_type`; omitted files are absent from
 the successor. Existing versions remain retained.
 **Response:** reads return `page_id`, `name`, `slug`, `origin`, `enabled`,
-`can_write`, `latest_version`, `shared_version`, `manifest`, `versions`, `quota`
-and `comments`. Publication returns `{page_id,slug,version,url,actor}` and leaves
-the shared pin unchanged. It does not retry a conflicting candidate.
+`can_write`, `can_share`, `can_restore`, `can_send_to_agent`, `can_comment`,
+`latest_version`, `shared_version`, `manifest`, `versions`, `quota` and
+`comments`, plus `artifact_kind: "slides"` when the Slides backend is enabled
+and the selected manifest is a valid authored deck. `can_share`, `can_restore`
+and `can_send_to_agent` are owner capabilities; `can_write` alone never implies
+them. `origin` (`{chat_id,agent_id}` or null) is shown only to the owner.
+Publication returns `{page_id,slug,version,url,actor}` and leaves the shared pin
+unchanged. It does not retry a conflicting candidate.
 **Statuses:** 200 success; 400 invalid request or version; 401 invalid credential;
 403 missing current authority; 404 disabled, missing or inaccessible content;
-409 stale publication base; 413 publication quota/request limit; 500 internal
-failure; 503 unavailable durable storage. Keep a refused candidate locally.
+409 stale publication base (`code: "artifact_version_conflict"`); 413
+publication quota/request limit (`code: "artifact_history_quota"` for a full
+history); 500 internal failure; 503 unavailable durable storage. Keep a refused
+candidate locally.
+
+**Limits:** one version holds 1–256 files and at most 32 MiB of file content; a
+path is at most 512 bytes and a media type at most 255; the optional `message`
+is at most 4096 bytes and a create `name` at most 200. Each project keeps every
+version (`quota.retention: "keep-all"` for the owner) within 256 MiB of history.
+Identical file contents are stored once per project, and each version also
+counts its manifest, message and attribution. `quota.warning` turns true at
+80 % of `limit_bytes`. A request body over 36 MiB is refused with 413 before it
+is parsed. The CLI reads a manifest file of at most 9 MiB.
 
 CLI: `crewship page artifact get demo --version 1`,
 `crewship page artifact versions demo`, and
@@ -2598,8 +2624,12 @@ CLI: `crewship page artifact get demo --version 1`,
 
 Artifact projects are disabled by default; these workspace routes return `404`
 until enabled.
-The current human owner may mutate the project; an authorized reader sees
-only the shared pin and cannot mutate it, even with an ordinary Page write grant.
+Restore, share and reply are owner operations (the human owner, or that owner's
+admitted agent run for restore and reply). A human with a Page `write` grant can
+publish and comment on the latest version but cannot restore, share or reply.
+A Comment grantee, or a workspace ADMIN/OWNER without a grant, can comment on
+the current shared version only. A Read or Produce grantee sees only the shared
+pin and cannot comment or mutate.
 
 | Method | Path | Body / result |
 | --- | --- | --- |
@@ -2611,12 +2641,22 @@ only the shared pin and cannot mutate it, even with an ordinary Page write grant
 
 Restore and share require the exact latest `base_version`. A stale base returns
 `409`; keep the candidate and reconcile deliberately. Sharing an existing
-retained version does not grant an unrelated workspace member access.
+retained version does not grant an unrelated workspace member access. Sharing
+does end the project's private audience: from then on the ordinary
+[Page reach rules](#issue-a-grant) decide who opens the shared version (the
+owner, a workspace ADMIN/OWNER, grantees and folder access).
 
-Comments require the latest version and a unique stable ID selector whose
-quoted text still matches that file. A stale version or selection returns
-`409` and stores no comment. `send_to_agent:true` queues a version-bound task;
-it does not by itself prove agent delivery. A normal reply names a newer
+A comment names the version its author may see: the latest version for the
+owner or an editor, the current shared version for anyone else allowed to
+comment. The
+selector is one `#id` (no spaces or combinators) that matches exactly one
+element in that HTML file, and `quote` must still match that element's text.
+`text` is required, at most 10000 bytes; `selector` and `quote` at most 2000.
+A stale version or a path absent from that version returns `409`
+(`artifact_version_conflict`), a selection that no longer matches returns `409`
+(`artifact_anchor_mismatch`), and neither stores a comment.
+`send_to_agent:true` queues a version-bound task; it does not by itself prove
+agent delivery, and a Comment grantee's task never starts the owner's agent. A normal reply names a newer
 retained version; `needs_clarification:true` may address the original version
 without claiming an edit. Readers cannot inspect unpublished reply metadata
 or request another private version through the comments endpoint.
