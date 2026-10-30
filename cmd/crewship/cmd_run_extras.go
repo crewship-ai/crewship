@@ -190,7 +190,7 @@ func sendRunMessageWithExtras(ws *cli.WSClient, channel, chat, prompt string, ma
 	if len(runMessageExtras) == 0 {
 		return sendRunMessage(ws, channel, chat, prompt, maxTurns, targets...)
 	}
-	metadata := make(map[string]any, len(runMessageExtras)+1)
+	metadata := map[string]any{}
 	for k, v := range runMessageExtras {
 		metadata[k] = v
 	}
