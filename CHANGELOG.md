@@ -23,6 +23,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Test Design canvases can be identified in the library.** Human canvas creation now retains the explicit test-item marker for catalog filtering.
 
+- ⚠️ **Behaviour change: `journal priority` and `memory export` honour `--format`.** With `--format json` (or `yaml`/`ndjson`), `crewship journal priority` prints the server's answer as an object with `id`, `priority` and `previous`, and `crewship memory export` writes the bundle as before and then prints `out`, `documents` and `skipped` instead of the prose listing. With the default table or `quiet` output both keep their human-readable line. `memory export` help now states that it requires OWNER or ADMIN.
+
 - Add human Comment grants for shared artifact feedback without edit or agent execution rights, explicit QA item markers and catalog filters, and confirmed archive and folder-move previews with live access checks. Access reports include effective capabilities and their sources; existing content, history and grants remain intact.
 
 - **An unsent artifact comment survives a crash.** The chat and library artifact viewer keeps the comment text in this browser for the same person and Page, and offers it again after reopening; the place has to be selected again.
