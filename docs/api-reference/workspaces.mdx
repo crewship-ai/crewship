@@ -446,11 +446,15 @@ Removes a workspace member. **You cannot remove the workspace OWNER.**
 Removal is not just the membership row. Two other things happen, in this
 order:
 
-- **Pages the member owns in this workspace are transferred to a crew**
+- **Legacy Pages the member owns in this workspace are transferred to a crew**
   first, per `docs/specs/pages.md` §7.1 rule 1b: the crew owning the most
   panels on the page, else a crew the departing member belongs to. If any
   page resolves to neither, the **whole removal is refused with `409`**
-  and nothing changes — reassign those pages by hand and retry.
+  and nothing changes — reassign those pages by hand and retry. Artifacts
+  (projects, Designs, documents, Slides, workbooks and other human-owned
+  content) are never handed to a crew: they need a person as successor, chosen
+  through [human-owned content custody](#human-owned-content-custody), before
+  the removal can succeed.
 - **Every crew membership the user holds in this workspace is deleted**,
   in the same transaction as the `workspace_members` row: both or
   neither. Crew membership grants on its own (crew-owned pages, crew
@@ -473,7 +477,7 @@ Crews in **other** workspaces are untouched — the purge is scoped through
 |---|---|
 | `403` | Caller not `OWNER`/`ADMIN`, **or** target member is the `OWNER` |
 | `404` | `memberId` not found in this workspace |
-| `409` | The member owns a page that resolves to no crew (see above) |
+| `409` | The member owns a page that resolves to no crew, or artifacts that need a human successor (see above). When the caller is an `ADMIN` rather than the `OWNER` and the member owns private artifacts, the body carries `code: "page_ownership_transfer_required"`. |
 
 ---
 
@@ -531,7 +535,7 @@ The closed set of ten capabilities (`allCapabilities` in `internal/api/capabilit
 | `credential.rotate` | Rotate an existing credential's value |
 | `credentials:reveal` | Disclose a stored secret's plaintext to a human through [reveal](/api-reference/credentials#reveal). Spelled with a colon, as the security document names it. Necessary but not sufficient: the workspace switch, an interactive fresh sign-in, scope, classification and the audit write still gate every disclosure. |
 | `issue.create` | File issues |
-| `page.create` | Author a Page (`POST /api/v1/pages`); a MANAGER+ action by default, this lets a specific MEMBER do it. In no preset. |
+| `page.create` | Create a Page or an artifact (`POST /api/v1/pages`, `POST /api/v1/pages/artifacts`, `POST /api/v1/pages/design`, `POST /api/v1/mooring/documents`, `POST /api/v1/workbooks`); a MANAGER+ action by default, this lets a specific MEMBER do it. In no preset. |
 | `memory.write` | Write to agent / crew / workspace memory via `/remember` |
 
 **Presets** are named bundles for the common combinations:
@@ -2677,11 +2681,13 @@ Malformed consent returns400; changed membership/authority/resource/consequences
 ## Human-owned content custody
 
 `GET /api/v1/workspaces/{workspaceId}/page-ownership` lists human-owned
-content that requires explicit succession. Workspace owners and administrators
+content, such as private [artifacts](/api-reference/artifacts), that requires
+explicit succession. The route keeps its `page-ownership` name because
+artifacts are stored as Page rows; `{pageID}` is the artifact's ID. Workspace owners and administrators
 can review its current owner and eligible successors. The endpoint returns
 metadata and current readers, without document, HTML, or drawing source.
 Use `owner_user_id`, `limit` (1–100, default 25), and the returned `next_cursor`
-to review one owner's content across pages. Keep the owner filter unchanged
+to review one owner's content across result pages. Keep the owner filter unchanged
 when following the cursor. Responses use `Cache-Control: no-store`.
 
 `POST /api/v1/workspaces/{workspaceId}/page-ownership/{pageID}` accepts
@@ -2692,8 +2698,9 @@ transaction. An owner changed since review returns 409. The operation preserves
 content and grant records; each existing grant still requires its issuer's
 current authority. Transferring ownership does not reveal linked source content.
 
-Documents, Slides, Boards and static Artifacts retain human custody when their
-storage is present. Ordinary Pages retain their existing succession behavior.
+Artifacts, including Documents, Slides, Boards and static projects, retain
+human custody when their storage is present. Legacy Pages keep their existing
+crew succession behavior.
 An owner departure that would remove private content custody returns a conflict
 until the affected content has been transferred. Instance administration alone
 does not expose workspace-private names or successor contacts.

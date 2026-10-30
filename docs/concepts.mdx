@@ -23,6 +23,7 @@ Crewship separates the place where work lives from the people and automations th
 | **Pipeline alias** | A stable alternate name that resolves to a pipeline without copying its definition. | — / Yes / Yes / — | A **pipeline** contains the stages; an alias is only an indirection to one pipeline. |
 | **Memory tier** | One of the agent, crew-shared, or workspace scopes that controls who can recall stored memory. | Yes / Yes / Yes / — | A **workspace** or **crew** is an ownership boundary; the memory tier is the visibility scope of a memory item. |
 | **Project** | A grouping of related issues with delivery status, milestones, and rollups. | Yes / Yes / Yes / `Project` | A repository checkout is code on disk; a **workspace** is a tenant and a **crew** executes work. |
+| **Artifact** | A versioned piece of work, such as an HTML project, Dashboard, Slides, Design, or Word or Sheet document, that people and agents edit together. See [Artifacts](#artifacts). | Yes / Yes / Yes / — | A chat **Artifacts** panel file is an agent output file, not a versioned artifact; an artifact project is not an issue **project**. |
 | **Skill** | A reusable `SKILL.md` instruction bundle importable and assignable to agents. | Yes / Yes / Yes / `Skill` | A **recipe** is structured reusable procedure data; a **routine** can execute, while a skill only supplies instructions. |
 | **Recipe** | A reusable structured procedure that can be discovered and attached to agent work. | Yes / Yes / Yes / `Recipe` | A **skill** is a `SKILL.md` bundle; a **routine** is an executable saved workflow. |
 | **Connector** | A named external-service connection definition referenced by crew or agent integration bindings. | Yes / Yes / Yes / `Connector` | A credential holds secret material; an integration binds an endpoint and connector configuration to runtime use. |
@@ -38,6 +39,40 @@ Crewship separates the place where work lives from the people and automations th
 | **Hook** | A named outbound webhook configuration for delivering matching Crewship events. | — / Yes / Yes / `Hook` | A pipeline webhook can trigger execution; a hook delivers events outward and does not define pipeline stages. |
 
 The manifest also exposes supporting kinds such as `Issue`, `Label`, `Milestone`, `RecurringIssue`, `FeatureFlag`, `InstanceSetting`, and `Integration`. Their authoritative schemas live in the [manifest reference](/manifest/workspace); they do not introduce alternate meanings for the terms above.
+
+## Artifacts
+
+Artifacts replace Pages as the place where people and agents keep work they
+make together. Pages is being retired. The API still serves artifacts under
+`/api/v1/pages/...` with the `pages:read` and `pages:write` scopes, and the CLI
+under `crewship page artifact`, `crewship page design` and `crewship craft`.
+Every artifact family is off by default; the
+[Artifacts API reference](/api-reference/artifacts#feature-switches) lists the
+flags.
+
+| Term | Definition | Commonly confused with |
+|---|---|---|
+| **Artifact** | A versioned item in the workspace's Artifacts library, owned by one person and shared deliberately. | A file in the chat **Artifacts** panel (below). |
+| **Project** (artifact project) | A set of HTML, CSS, JS and asset files with one entry point, published as whole versions. New projects are private. | A **project** that groups issues. The two share a word and nothing else. |
+| **Dashboard** | A project whose version declares JSON data collections. Each data document has its own version, author and time, so every number shows where it came from. | A legacy Pages panel dashboard, which shows the last value a producer pushed. |
+| **Slides** | A read-only slide view of a project version, with PDF export. | Native Slides documents, which are a separate server feature (`CREWSHIP_SLIDES_ENABLED`). |
+| **Design** | A collaborative canvas held as a Yjs document on the server. Several people edit live; snapshots become versions. | A project, which is edited as files rather than live. |
+| **Craft** | The native editor for Word and Sheet documents. One editor at a time, enforced by a lease. | The Design canvas, which allows simultaneous editors. |
+| **Lease** | Craft's single-editor lock on one document. It lasts 15 seconds and is renewed while the editor stays connected. Others can request a handoff. | A permission. A lease says who is editing now, not who may edit. |
+| **Generation** | The number of the current lease. Each new holder gets a higher one; renewals and saves carry it, so an old tab or replaced agent cannot write. | A **version**, which numbers saved content. |
+| **Version** | One immutable saved state of an artifact, numbered from 1. Writes name the `base_version` they started from and fail with `409` if another write landed first. Restoring creates a new version. | A Git commit or a Pages version, which is a different history. |
+| **Shared version** | The one version that readers other than the owner and editors can see. Publishing a new version does not change it; only sharing does. Agents cannot share. | The **latest version**, which only the owner and editors see. |
+| **Share** | Granting another person or group access, or choosing the shared version. | A public link, which is a separate Pages feature. |
+
+### Artifacts that are not artifacts
+
+Two other surfaces use the same word:
+
+- The **Artifacts** panel in chat (`⌘1`) lists the agent's output files, such
+  as PDFs, images, HTML and CSV, from its output directory. These are files,
+  not versioned artifacts. See [Chat sessions](/guides/chat-sessions).
+- A routine run's artifacts (`crewship routine artifacts`) are files a
+  pipeline run produced.
 
 ## Deprecated terminology
 

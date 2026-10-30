@@ -207,7 +207,7 @@ when a route registered there is not classified by whose identity guards it.
 | **Missions** | `/mission/create`, `/mission/templates`, `/mission/{id}` (GET status, POST `/start`) |
 | **Issues** | `/issue/create`, `/issues` (GET), `/issue/{identifier}` (GET/PATCH, plus POST `/comment`, GET `/comments`, `/link`, `/work`, `/attachments`, `/attachments/{id}`) |
 | **Pipelines** | `/pipelines` (GET), `/pipelines/save`, `/pipelines/{slug}` (GET, POST `/run`, POST `/dry_run`) |
-| **Pages** | `/pages/{page}/{panel}` (PUT — the producer door, see [Pages](/guides/pages)), `/page-webhooks/{token}` (POST — forwarded to crewshipd's page webhook; also served by a crew-only sidecar) |
+| **Pages (legacy panels)** | `/pages/{page}/{panel}` (PUT — the producer door for Pages panels, see [Pages](/guides/pages)), `/page-webhooks/{token}` (POST — forwarded to crewshipd's page webhook; also served by a crew-only sidecar). Artifacts use MCP tools instead; see [Artifacts](#artifacts) |
 | **Connections** | `/connections`, `/connections/{id}` (`/message`, `/messages`, `/files`), `/crew-connections` |
 | **Keeper** | `/keeper/request`, `/keeper/request/{id}` (GET — the agent-facing poll), `/keeper/execute` |
 | **Credentials** | `/credentials` (GET), `/credentials/create`, `/credentials/{name}/rotate` |
@@ -396,6 +396,107 @@ Three background services run alongside the main HTTP server:
 | **CredentialMonitor** | Configurable | Validates provider credentials (e.g., Anthropic API key status) and detects status changes (active, expired, rate-limited) |
 
 The StatsCollector uses up to 10 concurrent workers with a 3-second timeout per container to avoid blocking the polling loop on unresponsive containers.
+
+## Artifacts
+
+Artifacts are the versioned things people and agents make together: HTML
+projects, Dashboards, Slides, Designs, and Word and Sheet documents. They
+replace Pages as the place where agent output lives. Pages is being retired;
+for compatibility, artifacts are stored as Page rows and their routes keep the
+`/api/v1/pages/...` prefix and the `pages:read` / `pages:write` scopes.
+
+```
+ Browser (library, editors)          Agent in a crew container
+   |  REST, Design WebSocket,          |  MCP tools: artifact_*, design_*,
+   |  Craft event stream               |  Craft tools
+   v                                   v
+ crewshipd ----------------------- sidecar --> internal IPC
+   |  checks the caller's current access in the same transaction
+   v
+ Version store (SQLite)        Design engine (Yjs)       Craft lease
+ immutable versions,           one bounded update        one editor at a time,
+ latest and shared heads       at a time, server-held    generation-fenced
+```
+
+### One version store
+
+Projects, Designs, and Word and Sheet documents keep their content in one
+version store inside the Crewship database. Every save is a new immutable
+version; files are stored once per artifact by content hash. Each artifact has
+two heads: the **latest version**, which the owner and editors work on, and
+the **shared version**, which is all that other readers can see. A write must
+name the `base_version` it started from. If another write landed first, the
+server answers `409` and keeps both the stored version and the client's draft
+intact. Authority is checked inside the write transaction and again just
+before commit, so a permission removed mid-request stops the save.
+
+Versions are not pruned. When an artifact reaches its history quota, existing
+versions stay and new saves are refused with `413`.
+
+### Artifact types
+
+| Type | What is stored | How it changes |
+|---|---|---|
+| **Project** | A set of HTML, CSS, JS and asset files with one entry point | Each publish is a new version; new projects start private |
+| **Dashboard** | A project whose version declares JSON collections | Collection documents are versioned one by one (`ifVersion`), separately from the project version |
+| **Slides** | A read-only projection of a project version | Rendered on request; a PDF is exported from the same version |
+| **Design** | A Yjs document of canvas nodes | Live edits update the server's Yjs state; snapshots become versions |
+| **Word and Sheet** | A native document edited through **Craft** | Saves under a lease become versions |
+
+### Design and Yjs
+
+The server holds the authoritative Yjs document for each Design. Browsers open
+a same-origin WebSocket and speak the standard Yjs sync protocol. The server
+applies every incoming update in a short-lived, memory-bounded Yjs engine,
+stores the new state, and relays the update to the other editors. A viewer
+without edit permission can watch but its updates are refused. Presence names
+come from the server's view of the user, not from the client. The server saves
+a snapshot to the version store on request and automatically once changes
+have been idle for about ten seconds.
+
+### Craft and the lease
+
+Craft is the native editor for Word and Sheet documents. Only one person or
+agent edits a document at a time. The holder of the **lease** gets a
+`generation` number; every new holder gets a higher one. Renew, release,
+handoff and every save must carry the current generation, so a stale tab or a
+replaced agent cannot write. The lease lasts 15 seconds and is kept alive by the
+editor's server-sent event stream, not by typing. Others can request a handoff.
+A save also carries the `base_version`, so it is checked against both the lease
+and the version store.
+
+### Agents
+
+Agents never call the public API with a person's credentials. Inside the crew
+container, the sidecar offers MCP tools (`artifact_*` and `design_*` on the
+routines MCP server, and Craft tools on `/mcp/craft-native`). The sidecar
+forwards each call over internal IPC to `/api/v1/internal/pages/artifact-tool`,
+`/api/v1/internal/pages/design-tool` or `/api/v1/internal/craft-native/task`.
+For every project and Design tool call the server rechecks that:
+
+- the feature is on for the workspace;
+- the crew is allowed by the workspace's
+  [artifact creation policy](/api-reference/workspaces#artifact-creation-policy);
+- the human who started the run consented and still has access;
+- the run is bound to that one artifact.
+
+An agent writes new versions with the same `base_version` rule as a person, and
+it cannot move the shared version. A Craft agent task is started by a person
+from the open document; the agent then holds the lease like any other editor,
+and the person can stop it. People hand work back to the agent through
+comments: a project or Design comment sent with `send_to_agent` becomes a task
+for the agent.
+
+### Switches
+
+Every artifact family is off by default. Workspace flags (`artifact_projects`,
+`artifact_dashboard_data`, `artifact_slides`, `artifacts_design`) are turned on
+with `crewship feature-flag enable <key>`. Craft needs the server switch
+`CREWSHIP_CRAFT_NATIVE_ENABLED`, and Craft agent tasks also need
+`CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED`. The web UI additionally needs
+build-time `NEXT_PUBLIC_*` variables, such as `NEXT_PUBLIC_ARTIFACTS_LIBRARY`
+for the library. The full list, with routes and error codes, is in the
+[Artifacts API reference](/api-reference/artifacts).
 
 ## Crew Journal Platform
 
