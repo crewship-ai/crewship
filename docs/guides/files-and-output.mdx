@@ -127,7 +127,7 @@ The request body contains the raw file content. The `path` query parameter speci
 
 ## Output Directory Convention
 
-Agents write their output to `/output/{agent-slug}/`. Per-run deliverables live under `/output/{agent-slug}/runs/{runID}/` and supported formats appear in Chat Artifacts. Hidden/internal directories and attachments remain excluded from artifact discovery; the existing file API still authorizes listing and reads. This directory is the primary location surfaced in the UI Files panel. When an agent produces artifacts (generated code, reports, images), they should be written to this directory.
+Agents write their output to `/output/{agent-slug}/`. Per-run deliverables live under `/output/{agent-slug}/runs/{runID}/` and supported formats appear in the **Artifacts** panel of the chat's right drawer. That panel lists output files only; it is not the versioned [Artifacts library](/guides/artifacts/library) (see [Artifacts in chat](/guides/artifacts/chat) for the difference). Hidden/internal directories and attachments remain excluded from that list; the existing file API still authorizes listing and reads. This directory is the primary location surfaced in the UI Files panel. When an agent produces artifacts (generated code, reports, images), they should be written to this directory.
 
 ```
 /output/

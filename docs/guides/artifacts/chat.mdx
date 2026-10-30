@@ -1,0 +1,195 @@
+---
+title: "Artifacts in chat"
+description: "Ask an agent for a Project from a chat, follow its versions on the artifact card, review and comment in the side viewer, and see who edits a document in the Craft lock bar."
+icon: "message-square"
+stability: experimental
+tag: Experimental
+---
+
+A chat with an agent is where most artifacts start. When the agent creates or
+publishes an artifact, the conversation shows a progress card for that step and
+an **artifact card** for the result. **Open** on the card shows the artifact in
+a **side viewer** next to the conversation, where you can switch versions,
+leave comments for the agent and share a version, without leaving the chat. For
+documents, a **Craft lock bar** in the chat tells you who is editing right now.
+
+The full catalogue of your artifacts lives in [Artifacts](/guides/artifacts/library).
+The chat shows the artifacts that this conversation produced.
+
+<Note>
+Everything on this page is off by default. Each surface needs these switches:
+
+| Surface | Needs |
+| --- | --- |
+| **Create artifact project** in the composer | Workspace flag `artifact_projects`: `crewship feature-flag enable artifact_projects`. An operator can turn it on for every workspace with `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true`. |
+| Progress cards, artifact cards and the side viewer | Build-time `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true`, plus the workspace flag `artifact_projects`. The default production build sets `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=false`. |
+| **Dashboard** and **Slides** on a card | Build-time `NEXT_PUBLIC_ARTIFACT_DASHBOARDS=true` or `NEXT_PUBLIC_ARTIFACT_SLIDES=true`; otherwise these show as **Project** or **Artifact**. |
+| **+** › **New artifact** in the composer | Build-time `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true` and native documents on the server. It offers **Word** only. |
+| An agent creating or publishing an artifact | The workspace artifact policy must be on and list the agent's crew: `crewship workspace artifact-policy show` and `crewship workspace artifact-policy set` (workspace owner or admin). |
+| The Craft lock bar | Build-time `NEXT_PUBLIC_CHAT_CRAFT_LEASE=true` (the default production build sets it to `false`) and native Craft on the instance (`CREWSHIP_CRAFT_NATIVE_ENABLED=true`). |
+
+A build-time variable is read when the web UI is built. Changing it on a
+running server has no effect until the UI is rebuilt and deployed. The
+build-time switch `NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT` belongs to an experiment
+whose server routes are not part of this release; leave it off.
+</Note>
+
+## Two things called "Artifacts"
+
+The word appears in two places in a chat, and they are not the same:
+
+| Where | What it lists |
+| --- | --- |
+| **Artifacts** in the left navigation, and the artifact cards in a conversation | Versioned artifacts: Projects, Dashboards, Slides, Designs, Word and Sheet documents. They have versions, a shared version and access rules. This page is about these. |
+| **Artifacts** panel in the chat's right drawer (`⌘1` / `Ctrl+1`) | The agent's **output files**: PDFs, images, HTML, CSV and spreadsheets that the agent wrote to its `/output/<agent-slug>/` folder. They have no versions or sharing. See [Right drawer](/guides/chat-sessions#right-drawer) and [Files and output](/guides/files-and-output). |
+
+When an agent writes a file to its output folder, it appears only in the right
+drawer. When an agent creates an artifact with its artifact tools, it appears
+as a card in the conversation and in the Artifacts library.
+
+## Ask an agent for a Project
+
+You give the agent permission to create one Project for one message. The
+permission is not a setting and does not carry over to later messages.
+
+1. Open a direct conversation with an agent from **Chat**. The button is not
+   offered in group conversations or channels.
+2. In the composer, click **Create artifact project**. The button stays
+   pressed and the composer shows **Private project · Sharing requires your
+   approval**.
+3. Describe what the screens should contain and send the message. The button
+   is released once the message is sent.
+
+Click **Create artifact project** again before sending to withdraw the
+permission. The agent creates a private Project owned by you. Nobody else sees
+it until you share a version; see [Sharing and access](/guides/artifacts/sharing-and-access).
+For the Project itself (screens, comments, the agent's tools) see
+[Projects](/guides/artifacts/project).
+
+If the agent's crew is not on the workspace artifact policy, the agent cannot
+create the Project, even when you allowed it.
+
+### Start a Word document from the composer
+
+When the server offers native documents, the composer also shows a **+**
+button (**New artifact**). It lists **Word** with starter prompts such as "A
+partner brief from this chat". Click a starter prompt: it goes into the
+composer in front of any text you already typed, and **Create document** turns
+on for that message. Edit the text and send it. See
+[Word and Sheet](/guides/artifacts/word-and-sheet).
+
+## Follow the agent's work
+
+When the agent calls one of its artifact tools, the step is shown as its own
+card. It is never folded into the collapsed **Worked · N steps** list.
+
+| State | What the card shows |
+| --- | --- |
+| Running | **Creating project…**, **Creating version N…** or **Restoring vN as a new version…**, a progress bar and the elapsed seconds. While a new version is being made: "You can keep working; vN stays as it is." |
+| Done | **vN ready**, the version message, and **Open**. If you may restore and this version is still the newest, **Restore vN-1** restores the previous version as a new version. |
+| Failed | **Couldn't save version** with the reason, and "Nothing was saved; vN is unchanged." There is no retry button: the agent retries on its own. |
+
+**Restore vN-1** never deletes anything. It saves the earlier content as a new
+version and says **Restored vN-1 as a new version · nothing deleted**. If
+someone saved a newer version in the meantime, the card says **Changed
+meanwhile** and offers **Reload**.
+
+## The artifact card
+
+When the step has finished, the artifact card appears below it. It always
+shows the artifact as it is now on the server, not what the agent wrote in the
+chat, and refreshes every five seconds while the page is visible.
+
+- The **kind tile** and badge: **Project**, **Dashboard** or **Slides**. A
+  version that the chat cannot display says **Artifact** and **Can't show this
+  version here**.
+- The **name** and the newest version, for example **v3**.
+- **Draft** when the newest version is not the shared one, **Shared v2** when a
+  version is shared, and **Agent working…** while the agent answers a comment.
+- **Comment** opens the side viewer on the comments; **Open** opens it on the
+  preview. The card that opened the viewer has a highlighted border.
+
+If you cannot read the artifact, the card says **Restricted item · you don't
+have access** and shows neither the name nor the kind. If the artifact could
+not be loaded, the card says **Couldn't load** and offers **Retry**.
+
+## Review an artifact in the side viewer
+
+1. On an artifact card, click **Open**. The viewer opens to the right of the
+   conversation. On a phone it fills the screen and has **Back to chat**.
+2. The header shows the name, the kind and **Shared** or **Draft**.
+3. Use the version switch to move between **Latest · vN** and
+   **Shared · vN**. **History** lists every version with **View** and, if you
+   may restore, **Restore as new version**. While you look at an older version
+   the viewer shows **Back to latest**.
+4. If the Project has more than one screen, pick the screen in the screen
+   switch above the preview.
+5. To close the viewer, click **×** (on a phone, **Back to chat**). Focus
+   returns to the card that opened it.
+
+The side pane shows one thing at a time. Opening a saved document in the same
+conversation replaces the artifact viewer, and the other way round.
+
+If you can edit the artifact, the toolbar also has **Edit source**, which opens
+the source editor, and **Share** when the version you look at is not the shared
+one. **Share** asks for confirmation: "People with access will see vN. Later
+versions stay private until you share them." Click **Share vN** to confirm.
+
+### Comment on a screen and send it to the agent
+
+1. In the viewer, click **Select** and click the part of the screen you want
+   changed. Comments anchor to elements that have an id. A screen without any
+   says so and suggests asking the agent to add them.
+2. Write the comment in the card that appears ("What should change here?").
+3. Click **Send to agent**. Crewship saves the comment and sends a message in
+   this conversation that starts the agent on it. The viewer says **Comment
+   sent to the agent**. Click **Save comment** instead to keep the comment
+   without starting the agent.
+
+**Send to agent** appears only on a Project that an agent created in your own
+chat; the viewer reminds you that "A comment starts the agent only when you
+choose Send to agent." The **Comments for agent** list shows each comment with
+its state: **Waiting**, **Sent to agent**, **Agent working**, **Done · vN** or
+**Needs a new selection**. The agent's replies appear under the comment. If the
+message to the agent did not go out, the viewer shows **The agent did not
+start** with **Retry**.
+
+The text you are writing is kept in this browser until you send or cancel it,
+so a reload does not lose it. The selected element has to be picked again.
+
+### When something gets in the way
+
+| Message | What happened | What to do |
+| --- | --- | --- |
+| **Changed meanwhile** | Someone saved a newer version while you were writing. Nothing was overwritten. | Click **Reload and reapply** to put your comment and selection on the newest version. |
+| **Saving is paused** | The artifact's history storage is full. | Click **Manage versions**, or **Copy my comment** to keep your text. |
+| **This project is close to its limit** | History storage is almost full. | Click **Review versions**. |
+| **You can't open this artifact** | The artifact exists, but you have no access. | Click **Request access** to copy a request to paste to the owner. |
+| **This artifact isn't available** | It was archived, or the link points to a private version. | Ask the owner. Crewship does not say which case applies. |
+
+## See who is editing a document
+
+A document that an agent saved for you in the conversation is listed under
+**Saved documents** in the chat. Click one to open it in the side pane. With the Craft
+lock bar enabled, a bar above the document shows who holds the edit lease, the
+right to edit the document. Only one person or agent holds it at a time.
+
+| Bar | Meaning | Action |
+| --- | --- | --- |
+| **Free** · nobody is editing | Nobody holds the lease. | **Edit** opens the editor in a new tab, where you take the lease. |
+| **Editing: you** · in the editor | You hold the lease in another tab. | **Open in new tab** returns to your editor. |
+| **Editing: Alice** · you see a read-only preview | Someone else holds the lease. An agent shows as **Editing: Name (agent)**. | **Request edit** asks the holder to hand it over. The bar then says **Request sent to Alice · they can hand over or decline**. |
+
+The chat never takes the lease itself. Releasing the lease and saving a version
+happen in the editor. If the request cannot be sent, the bar says **Could not
+request edit**. Without the Craft lock bar, the document panel shows **Edit
+here** and **Open full editor** instead.
+
+## Related
+
+- [Artifacts library](/guides/artifacts/library): all your artifacts in one place.
+- [Projects](/guides/artifacts/project): screens, comments and what the agent may do.
+- [Sharing and access](/guides/artifacts/sharing-and-access): shared versions and who sees what.
+- [Word and Sheet](/guides/artifacts/word-and-sheet): Craft documents and the edit lease.
+- [Chat & Sessions](/guides/chat-sessions): the chat itself, including the right drawer for output files.
+- [`crewship workspace artifact-policy`](/cli/workspace): which crews may create artifacts.
