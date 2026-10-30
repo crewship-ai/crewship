@@ -76,3 +76,25 @@ func machineMutationResult(cmd *cobra.Command, raw []byte, fallback any) (bool, 
 	}
 	return true, f.Machine(fallback)
 }
+
+// routineLegacyKeys preserves zero-valued fields emitted by the older CLI
+// while retaining every field in the server document, including unknown ones.
+func routineLegacyKeys(raw []byte) (cli.RawJSON, error) {
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, fmt.Errorf("decode routine: %w", err)
+	}
+	if doc == nil {
+		return nil, fmt.Errorf("decode routine: expected object")
+	}
+	for key, value := range map[string]json.RawMessage{
+		"description": json.RawMessage(`""`), "last_invocation_status": json.RawMessage(`""`),
+		"author_crew_id": json.RawMessage(`""`), "author_agent_id": json.RawMessage(`""`),
+		"author_user_id": json.RawMessage(`""`), "last_invoked_at": json.RawMessage(`null`),
+	} {
+		if _, exists := doc[key]; !exists {
+			doc[key] = value
+		}
+	}
+	return json.Marshal(doc)
+}

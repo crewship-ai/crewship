@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -32,9 +33,27 @@ func parseMemoryInitializeDoc(value string) (memoryInitializeDoc, error) {
 		return memoryInitializeDoc{}, fmt.Errorf("--doc %q: want PATH=@FILE or PATH=TEXT", value)
 	}
 	if file, isFile := strings.CutPrefix(body, "@"); isFile {
-		raw, err := os.ReadFile(file)
+		fh, err := os.Open(file)
 		if err != nil {
 			return memoryInitializeDoc{}, fmt.Errorf("--doc %s: %w", path, err)
+		}
+		defer fh.Close()
+		// Bound the actual read too: a file may grow after Stat, and pipes
+		// need not have a meaningful size. The server caps the whole body.
+		const maxBody = 128 << 10
+		info, err := fh.Stat()
+		if err != nil {
+			return memoryInitializeDoc{}, fmt.Errorf("--doc %s: %w", path, err)
+		}
+		if info.Size() > maxBody {
+			return memoryInitializeDoc{}, fmt.Errorf("--doc %s: file exceeds 128 KiB request limit", path)
+		}
+		raw, err := io.ReadAll(io.LimitReader(fh, maxBody+1))
+		if err != nil {
+			return memoryInitializeDoc{}, fmt.Errorf("--doc %s: %w", path, err)
+		}
+		if len(raw) > maxBody {
+			return memoryInitializeDoc{}, fmt.Errorf("--doc %s: file exceeds 128 KiB request limit", path)
 		}
 		body = string(raw)
 	}

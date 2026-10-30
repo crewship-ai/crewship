@@ -877,7 +877,13 @@ func setInboxFilterParams(cmd *cobra.Command, client *cli.Client, q url.Values, 
 	if crew, _ := cmd.Flags().GetString("crew"); strings.TrimSpace(crew) != "" {
 		id, err := resolveCrewID(client, crew)
 		if err != nil {
-			return err
+			// Historical inbox rows retain the ID after a crew is deleted.
+			// Only a not-found CUID may pass through; auth/network failures
+			// and unresolved slugs must remain errors.
+			if !looksLikeCUID(crew) || cli.ExitCodeFor(err) != cli.ExitNotFound {
+				return err
+			}
+			id = crew
 		}
 		q.Set("crew", id)
 	}

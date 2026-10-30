@@ -236,16 +236,20 @@ var pipelineListCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		// Machine formats pass the API rows through untouched — the human
-		// table below truncates descriptions and drops fields, so it must
-		// never be what -f json/yaml consumers get. Untouched means the
-		// server's bytes, not this struct re-encoded: the struct lagged the
-		// server and dropped the pending draft (#4508).
+		// Preserve server fields and the legacy CLI's explicit empty keys;
+		// the human table below truncates descriptions and drops fields.
+		// Re-encoding the typed struct would lose new server fields (#4508).
 		f := newFormatter()
 		if !f.RoutesToHuman() {
 			docs, err := serverRows(raw)
 			if err != nil {
 				return err
+			}
+			for i := range docs {
+				docs[i], err = routineLegacyKeys(docs[i])
+				if err != nil {
+					return err
+				}
 			}
 			return f.Machine(docs)
 		}
@@ -329,7 +333,11 @@ var pipelineGetCmd = &cobra.Command{
 		var flush tabFlush
 		// Machine formats get the server's document (draft, files, manifest,
 		// behavior and whatever comes next), not this struct (#4508).
-		if err := resolvedFormatter(cmd).AutoHuman(cli.RawJSON(raw), func() {
+		machineDoc, err := routineLegacyKeys(raw)
+		if err != nil {
+			return err
+		}
+		if err := resolvedFormatter(cmd).AutoHuman(machineDoc, func() {
 			// Same as `routine list`: the human rows name the crew and agent
 			// by slug, the machine document keeps the ids.
 			slugs := fetchWorkspaceSlugs(client)
