@@ -32,7 +32,7 @@ workspace instead with `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` and
 are read when the web app is built, so changing them needs a rebuild.
 
 When `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` is off, the app requests no data, and
-the library shows a Dashboard without its preview.
+a Dashboard shows as a plain project preview without its numbers.
 </Note>
 
 ## How a Dashboard is put together
@@ -110,8 +110,9 @@ collection", "show revenue as a meter").
 <Steps>
   <Step title="Find it in the library">
     Open **Artifacts**. Dashboards carry the **Dashboard** kind label, for
-    example *Dashboard · You · 2m ago*. To list them together, set **Group**
-    to **Kind**. Click a Dashboard to see a summary on the right, then click
+    example *Dashboard · You · 2m ago*. To list them together, open **All
+    artifacts** and set **Group** to **Kind** (the **Home** view has no
+    **Group** control). Click a Dashboard to see a summary on the right, then click
     **Open** (or press Enter).
   </Step>
   <Step title="Read the preview">
@@ -129,17 +130,18 @@ collection", "show revenue as a meter").
 
 ## See where a number came from
 
-Every Dashboard preview ends with a **Data sources** list. It has one line for
-each value on the screen:
+Hover over a value, or move keyboard focus to it, to see where it came from:
 
 ```text
-sales/north.revenue · Agent · 2026-10-30T08:15:02.418230511Z
+Source: sales/north.revenue · Agent · updated 2026-10-30 08:15 UTC
 ```
 
-The line reads as *collection/document.field · source · last update*. Hover
-over a value to see the same line as a tooltip. Screen readers announce it as
-the value's description. Values that come from the same document field share
-one line.
+The line reads as *Source: collection/document.field · who wrote it · updated
+date and time*. The time is the server's time of the last write, in UTC, to
+the minute. Screen readers announce the same line as the value's description.
+Below the screens, the preview also lists these lines, one for each distinct
+line (values from the same document field share one). The list has no visible
+heading; screen readers announce it as *Data sources*.
 
 The source label is deliberately coarse:
 
@@ -148,11 +150,17 @@ The source label is deliberately coarse:
 | **You** | You. |
 | **Agent** | An agent run. |
 | **Contributor** | Another person. |
-| **Former contributor** | Someone whose account details were erased, or an unknown writer. |
 
-Private account, run and chat identifiers never reach the browser. The owner
-and the people the Dashboard is shared with see the same labels. The time is the
-server's time of the write, in UTC.
+The labels are relative to the viewer: a write you made shows **You** to you
+and **Contributor** to everyone else. Private account, run and chat identifiers
+never reach the browser.
+
+When the writer is not known (for example, their account details were erased),
+the line reads `Source not stated · sales/north.revenue · updated 2026-10-30 08:15 UTC`
+and the value has a dashed instead of a dotted underline, so it does not look
+authoritative. The same happens when the document is not loaded; the line
+then ends with `not loaded`. In the CLI and API output, such a document has
+`source_label` **Former contributor** and `source_kind` `unknown`.
 
 Each document also has its own **version** number, which goes up by one on every
 write. The preview does not show it. Read it with the CLI:
@@ -166,6 +174,17 @@ The output lists each document with `version`, `value`, `updated_at`,
 `--version` is the artifact's code version, the one whose `dashboard.json`
 declares the collection.
 
+## Find the slug and the latest version
+
+The CLI commands below take the artifact's **slug**. Find it with
+`crewship page list`, in the **SLUG** column next to the Dashboard's name. The
+ID in the browser address (`/artifacts/<id>`) is not the slug; the CLI answers
+it with `artifact project or selected version not found`.
+
+The latest version is the number after **Latest** in the artifact's detail
+header, or `latest_version` in the output of
+`crewship page artifact versions <slug>`.
+
 ## Update the data
 
 Only the Dashboard's owner can change its data, either directly from the CLI or
@@ -175,8 +194,8 @@ publishes a new version of the layout.
 <Steps>
   <Step title="Read the current versions">
     Run `crewship page artifact data get <slug> <collection> --version <latest>`
-    and note each document's `version`. Use the artifact's **latest** version as
-    `--version`.
+    and note each document's `version`. Use the artifact's latest version (see
+    [above](#find-the-slug-and-the-latest-version)) as `--version`.
   </Step>
   <Step title="Write a batch file">
     List every document you change with the version you just read as
@@ -196,8 +215,8 @@ publishes a new version of the layout.
     ```
 
     The command prints the written documents with their new versions. Open
-    previews pick up the change within five seconds, and the **Data sources**
-    lines for those documents show the new time.
+    previews pick up the change within five seconds, and the source lines for
+    those documents show the new time.
   </Step>
 </Steps>
 
@@ -253,7 +272,7 @@ A write that would exceed a stored limit fails as a whole with
 
 | Message | Meaning and what to do |
 |---|---|
-| *Dashboard preview is unavailable.* | The web build has `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` off, or `dashboard.json` is missing or invalid in the version you are viewing. |
+| *Dashboard preview is unavailable.* | The version you are viewing has a `dashboard.json` that is not valid. Ask the agent to fix it. (Without a `dashboard.json`, or with `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` off, the artifact shows a plain project preview instead.) |
 | *Dashboard data is unavailable. Reload to check access.* | Your access changed, a feature flag was turned off, or the version you are viewing no longer matches. The preview stops refreshing; reload the page. |
 | *Dashboard exceeds the preview data limit* | The collections together exceed 16 MiB. Ask the agent to split or trim the data. |
 | *Dashboard exceeds the preview rendering limit* | Repeated rows would produce too many elements or too much text to render. Ask the agent to show fewer rows. |
