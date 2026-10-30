@@ -23,7 +23,7 @@ Most chat surface usage is self-evident — "talk to the agent" — but the dura
 - **Resume a multi-day conversation.** A session ID survives reloads and operator hand-off, so `/chat/<agent>?session=<chatId>` is the canonical "where we left off" URL. Bookmark it, paste it into Linear, share it on Slack — the recipient lands on the same transcript.
 - **Reroll a bad agent response without abandoning context.** Hover-edit the user message and the conversation truncates from that point; the new edit sends as a fresh turn. The transcript before the edit is preserved as a [chat branch](#sessions) so the alternate timeline isn't lost — useful when you discover the original direction was right after all.
 - **Triage what an agent has been doing.** `chats.origin` (`UI / CLI / WEBHOOK / CRON / AGENT`) records whether a conversation was started by a user, by automation, or by a peer agent. The open conversation reports its own origin as a chip in the chat header. The conversations column does not group or filter by it — to audit what an integration has been driving through your agents across many conversations, use `crewship chat list`, which carries the column.
-- **See what the agent made without opening the journal.** The **Artifacts** panel in the right drawer lists the agent's client-facing output files while the chat is open — PDF, images, sandboxed HTML, CSV/TSV — with internal agent/run files (scaffolding, `runs/`, `attachments/`, dotfolders) excluded from the list. Click one to preview it in place, follow live changes, or open it for editing; see [Right drawer](#right-drawer). Versioned artifacts (Projects, Dashboards, Slides, documents) are a different surface: they appear as cards in the conversation and in the Artifacts library; see [Artifacts in chat](/guides/artifacts/chat).
+- **See what the agent made without opening the journal.** The **Artifacts** panel in the right drawer lists the agent's client-facing output files while the chat is open — PDF, images, sandboxed HTML, CSV/TSV — including per-run deliverables under `runs/<runID>/`, with scaffolding files, `attachments/` and dotfolders excluded from the list. Click one to preview it in place, follow live changes, or open it for editing; see [Right drawer](#right-drawer). Versioned artifacts are a different surface: a Project, Dashboard or Slides appears as an artifact card in the conversation, and documents the agent saved appear under **Saved documents**; see [Artifacts in chat](/guides/artifacts/chat).
 - **Programmatic chat creation from CLI / webhook / cron.** `POST /api/v1/agents/{agentId}/chats` accepts an `origin` enum on the body, which the chat header renders as a coloured chip and `crewship chat list` prints as its `ORIGIN` column. Use `CLI` for `crewship run`-style invocations, `WEBHOOK` for trigger-handlers, `CRON` for scheduled routines, `AGENT` for peer-to-peer assignments — it is how an operator tells at a glance whether a conversation was driven by a person or by automation.
 
 For one-off "ask the agent a question" use, just open `/chat/<agent>` and start typing — the session row gets created automatically on first send.
@@ -114,7 +114,7 @@ user preserves it. Restricted accounts do not receive proposal cards.
 | **Model picker** | Per-turn override of the agent's `llm_model`. Lives next to the send button. The override applies only to the current send — the agent's default model is unchanged for subsequent turns. |
 | **Attachment** | A file uploaded into a chat — image, document, log, anything ≤25 MB. Written to the server's storage provider as a blob; the agent's container sees it under `/output/<agentSlug>/attachments/<chatId>/<attachmentId>/<filename>`. That tree belongs to the crew runtime (uid 1001) once the crew is provisioned, so the server writes the blob *through the running crew container* — attaching to a stopped crew returns `409` telling you to start it (#922). Since #1768 the upload also records a row in `attachments` (`owner_type = 'chat'`) with the size, SHA-256, content type and uploader; the dead `chat_attachments` table it was meant to use is gone. The row is written *before* the bytes and promoted after they land, so a `201` always means both exist. Each upload gets its own `<attachmentId>` directory, so two files of the same name never overwrite each other, and both listing and deletion exist (`crewship chat attachments list|delete`). There is still no download endpoint — the agent reads the file from its own filesystem. |
 | **Reaction** | A workspace-shared emoji vote on a single assistant message. Persisted in `message_reactions` (migration v57) with `UNIQUE(chat, message, emoji, user)` so POST is idempotent. Aggregated counts (`{emoji, count, mine}`) returned by List. |
-| **Right drawer** | The rail on the right edge of the chat — **Artifacts** (`⌘1` / `Ctrl+1`, the agent's output files, not the Artifacts library) and **Work** (`⌘2` / `Ctrl+2`), `⌘B` / `Ctrl+B` to open or close. In push mode the drawer opens beside the conversation (it starts open) and drags or arrow-keys between 280 and 520 px. Which panel is open is remembered per browser, not carried in the URL. |
+| **Right drawer** | The rail on the right edge of the chat — **Artifacts** (`⌘1` / `Ctrl+1`, documents edited in this chat and the agent's output files, not the Artifacts library) and **Work** (`⌘2` / `Ctrl+2`); click the active rail button to close the drawer. In push mode the drawer opens beside the conversation (it starts open) and drags or arrow-keys between 280 and 520 px. Which panel is open is remembered per browser, not carried in the URL. |
 | **Shallow router state** | Browser-only URL params written via `window.history.replaceState` (helper: `useShallowSearchParam`). Used for which message is being edited and slash-palette state — none of which justify a full Next.js navigation but all of which should appear in copy-pasted URLs. |
 | **`request_id`** | A client-generated UUID stamped on every send. The server idempotently dedupes by `request_id` so a retry after a WS reconnect never duplicates the user turn. Surfaced on outbound messages so clients can correlate sent-vs-acknowledged. |
 | **Presence chip** | The small status indicator in the composer footer — `online` / `thinking` / `blocked` / `offline`. Driven by the [Watch Roster](/guides/watch-roster); not a guess from idle timers. |
@@ -211,10 +211,10 @@ Type into the composer and hit **Enter**. The agent's response streams back via 
 
 While the agent is acting, open the right drawer — see [Right drawer](#right-drawer) for the two panels:
 
-- **Artifacts** (`⌘1`) — the agent's client-facing output files: PDF, images, sandboxed HTML and CSV/TSV preview in place (XLS/XLSX offer a download); internal agent/run files are excluded from the list. An artifact opens inline or expanded, can follow live changes every five seconds, and opens and saves through the agent's real file routes.
+- **Artifacts** (`⌘1`) — documents edited in this chat, the agent's document access, and the agent's client-facing output files: PDF, images, sandboxed HTML and CSV/TSV preview in place (XLS/XLSX offer a download); internal agent/run files are excluded from the list. An artifact opens inline or expanded, can follow live changes every five seconds, and opens and saves through the agent's real file routes.
 - **Work** (`⌘2`) — the issues assigned to and routines authored by this agent, and the exact issue/routine source of the open conversation when it has one, with links to the linked transcripts.
 
-`⌘B` toggles the drawer. What the agent is running lives in the [Crew Journal](/guides/crew-journal) and on the crew page, not in the chat.
+Click the active rail button to close the drawer. What the agent is running lives in the [Crew Journal](/guides/crew-journal) and on the crew page, not in the chat.
 
 </Step>
 
@@ -621,20 +621,21 @@ Reactions are surfaced to the agent on the next turn as part of the conversation
 
 ## Right drawer
 
-The right edge of the chat is a labelled rail; a button opens its panel in a drawer beside the conversation (`⌘B` toggles it, the shortcut number is the button's position). Which panel is open is remembered per browser — it is not part of the URL. In push mode the drawer opens beside the conversation rather than over it (it starts open), and its width drags — or arrow-keys — between 280 and 520 px, saved per user.
+The right edge of the chat is a labelled rail; a button opens its panel in a drawer beside the conversation, and clicking the active button again closes it (the shortcut number is the button's position). Which panel is open is remembered per browser — it is not part of the URL. In push mode the drawer opens beside the conversation rather than over it (it starts open), and its width drags — or arrow-keys — between 280 and 520 px, saved per user.
 
 | Panel | Shortcut | Purpose |
 |---|---|---|
-| **Artifacts** | `⌘1` | The agent's client-facing output files from `/output/<agent-slug>/`: PDF, images (PNG, JPEG, WebP), sandboxed HTML, CSV/TSV and XLS/XLSX. Internal files — scaffolding like `AGENTS.md`, `runs/`, `attachments/` and dotfolders — are excluded from the list, so it answers "what has this agent made for me". |
+| **Artifacts** | `⌘1` | Titled "Documents and outputs for *agent*": **Documents edited in this chat**, **Agent document access**, and **Output files** — the agent's client-facing files from `/output/<agent-slug>/`, including `runs/<runID>/`: PDF, images (PNG, JPEG, WebP), sandboxed HTML, CSV/TSV and XLS/XLSX. Scaffolding files like `AGENTS.md`, `attachments/` and dotfolders are excluded, so it answers "what has this agent made for me". |
 | **Work** | `⌘2` | The work connected to the agent: issues assigned to it (grouped by status), routines it authored, and — for a routine-step or issue conversation — the exact persisted source, with links to the linked transcripts. |
 
 ### Artifacts
 
 <Note>
-This panel lists files from the agent's output folder. It is not the
-[Artifacts library](/guides/artifacts/library): versioned artifacts such as
-Projects, Dashboards and Slides appear as cards in the conversation and open in
-a side viewer, described in [Artifacts in chat](/guides/artifacts/chat).
+This panel lists documents edited in this chat, the agent's document access
+and the files in the agent's output folder. It is not the
+[Artifacts library](/guides/artifacts/library): a Project, Dashboard or Slides
+appears as an artifact card in the conversation and opens in a side viewer,
+described in [Artifacts in chat](/guides/artifacts/chat).
 </Note>
 
 An output file previews inline in the drawer or expanded over the conversation. **Follow** re-reads the file every five seconds while the agent keeps writing (editing pauses the follow until saved or discarded); PDF pages through with zoom, images fit to the pane, HTML renders sandboxed, CSV/TSV render as a table, and XLS/XLSX offer a download instead of a preview. **Open** loads the file's real bytes through the agent file-download route (a response that is not a file stream is refused rather than rendered), and **Save** writes edits back through the file-save route — the pane never edits a directory listing.
