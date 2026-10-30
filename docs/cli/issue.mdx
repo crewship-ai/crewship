@@ -783,7 +783,7 @@ crewship issue bulk update --ids ms_a,ms_b --labels lbl_bug,lbl_p0
 | `--project` | string | | Project ID. Empty string unlinks the issue from its project. |
 | `--labels` | string | | Comma-separated label IDs. **REPLACES** the existing label set on each issue; empty string clears all labels. |
 
-At least one of `--status` / `--priority` / `--assignee` / `--project` / `--labels` must be supplied. Response surfaces as `Bulk update applied to <updated>/<requested> issue(s).` — the two counts differ when some IDs were 404 or 403.
+At least one of `--status` / `--priority` / `--assignee` / `--project` / `--labels` must be supplied. Requires the MANAGER role or higher (MEMBER and VIEWER get `API error (403)`). Response surfaces as `Bulk update applied to <updated>/<requested> issue(s).`; `--format json` prints `{"updated": N}`. The two counts differ when the server skipped an ID: not found in this workspace, an invalid status transition, or an assignee outside the workspace. Skipped IDs are not reported individually.
 
 ### `crewship issue deliveries failed`
 
