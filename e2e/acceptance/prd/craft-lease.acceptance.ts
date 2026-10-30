@@ -22,13 +22,31 @@ const REQ = {
 const PEER_NAME = "PRD Lease Peer"
 
 /**
+ * Whether the server under test has a native Word/Sheet editor profile,
+ * decided before and independently of initialize(), which is one of the calls
+ * A.craft.lease.fail-closed checks. PRD_CRAFT_NATIVE=on|off states it
+ * explicitly; full mode always requires the profile; otherwise quick mode reads
+ * the configuration-derived flag of GET /api/v1/documents/status.
+ */
+async function nativeProfile(prd: PrdScenario, owner: APIRequestContext, doc: NativePage): Promise<boolean> {
+  const declared = process.env.PRD_CRAFT_NATIVE?.trim().toLowerCase()
+  if (declared === "on") return true
+  if (declared === "off") return false
+  if (declared) throw new Error(`PRD_CRAFT_NATIVE must be "on" or "off", got ${JSON.stringify(declared)}`)
+  if (prd.mode === "full") return true
+  return doc.profileAdvertised(owner)
+}
+
+/**
  * Initializes the document as native. Skips (quick) or fails (full) when the
- * server has no native editor profile.
+ * server has no native editor profile; once a profile is known to exist,
+ * initialize must succeed.
  */
 async function requireNative(prd: PrdScenario, owner: APIRequestContext, doc: NativePage): Promise<void> {
-  const enabled = await doc.initialize(owner)
-  test.skip(!enabled && prd.mode === "quick", "server runs without a native Word/Sheet editor profile (CREWSHIP_CRAFT_NATIVE_*)")
-  expect(enabled, "full mode needs an origin with native Word/Sheet editors enabled").toBe(true)
+  const profile = await nativeProfile(prd, owner, doc)
+  test.skip(!profile && prd.mode === "quick", "server runs without a native Word/Sheet editor profile (CREWSHIP_CRAFT_NATIVE_*)")
+  expect(profile, "full mode needs an origin with native Word/Sheet editors enabled").toBe(true)
+  expect(await doc.initialize(owner), "initialize on a server with a native editor profile").toBe(true)
   const availability = await doc.availability(owner)
   expect(availability.enabled && availability.can_edit, "the owner may edit the new native document").toBe(true)
 }
@@ -254,14 +272,15 @@ test(
   async ({ prd, request }) => {
     const ws = await prd.qaWorkspace()
     const doc = await NativePage.create(request, ws.id, "wordcraft", "PRD lease disabled")
+    // Decide the skip before initialize: a server without a profile that
+    // still admits native documents must turn this test red, not skip it.
+    test.skip(await nativeProfile(prd, request, doc), "this server runs with native editors; covered by the lease tests")
     const init = await doc.initializeRaw(request)
     if (init.status() === 201) {
-      // Native editors are on: release the creation custody and leave the
-      // lease requirements to the tests above.
+      // Fail-closed regression: drop the creation custody, then fail below.
       const body = (await init.json()) as { session_token: string; generation: string }
-      await doc.leaseOp(request, { token: body.session_token, sessionId: "" }, "release", { generation: body.generation })
+      await doc.leaseOp(request, { token: body.session_token, sessionId: "" }, "release", { generation: body.generation }).catch(() => undefined)
     }
-    test.skip(init.status() === 201, "this server runs with native editors; covered by the lease tests")
     expect(init.status(), "initialize without a native profile").toBe(503)
     const availability = await doc.availability(request)
     expect(availability.enabled).toBe(false)

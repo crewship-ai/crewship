@@ -100,6 +100,20 @@ export class NativePage {
     return new NativePage(workspaceId, body.id, application)
   }
 
+  /**
+   * Whether the server advertises a native editor profile for this
+   * application (GET /api/v1/documents/status). It is derived from server
+   * configuration only, so it can be read before the page is initialized.
+   */
+  async profileAdvertised(api: APIRequestContext): Promise<boolean> {
+    const status = await json<{ wordcraft_native?: boolean; gridcraft_native?: boolean }>(
+      await api.get(`/api/v1/documents/status?${new URLSearchParams({ workspace_id: this.workspaceId })}`),
+      200,
+      "documents status",
+    )
+    return (this.application === "gridcraft" ? status.gridcraft_native : status.wordcraft_native) === true
+  }
+
   async availability(api: APIRequestContext): Promise<Availability> {
     return json<Availability>(await api.get(this.url("availability")), 200, "availability")
   }
