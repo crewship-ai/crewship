@@ -717,3 +717,22 @@ it("links the chat viewer to the artifact's own address in Artifacts only with t
     expect(screen.queryByRole("link", { name: /Open in Artifacts/ })).toBeNull()
   } finally { vi.unstubAllEnvs() }
 })
+
+it("offers an unsent comment back after the tab was lost, only to the same person", () => {
+  const storage = new Map<string,string>()
+  vi.mocked(localStorage.getItem).mockImplementation(key => storage.get(key) ?? null)
+  vi.mocked(localStorage.setItem).mockImplementation((key,value) => { storage.set(key,value) })
+  vi.mocked(localStorage.removeItem).mockImplementation(key => { storage.delete(key) })
+  const first = render(<ArtifactViewerPanel />)
+  selectHero()
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Typed before the crash" } })
+  first.unmount()
+  render(<ArtifactViewerPanel />)
+  selectHero()
+  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Typed before the crash")
+  cleanup()
+  state.userId = "someone-else"
+  render(<ArtifactViewerPanel />)
+  selectHero()
+  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("")
+})

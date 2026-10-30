@@ -29,6 +29,7 @@ func TestDispatchMention_SecondWake_ReceivesCheckpointAndDelta(t *testing.T) {
 
 	// First mention: opens the session.
 	f.comment(t, "please take a look "+mentionToken("lead", f.target))
+	drainMentionWork(t, f)
 	if n := f.assignments(t); n != 1 {
 		t.Fatalf("assignments after first mention = %d, want 1", n)
 	}
