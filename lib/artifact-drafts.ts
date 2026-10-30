@@ -11,6 +11,9 @@
  *
  * Drafts are private text: sign-out deletes all of them and an identity change
  * deletes everyone else's (see purgeOtherArtifactDrafts and hooks/use-auth).
+ * That purge also retires the writers of everyone it deleted, so a late
+ * keystroke or a write queued behind the purge cannot recreate the draft, and
+ * it sweeps the Design canvas and Design comment drafts kept in localStorage.
  */
 
 export type ArtifactDraftKind = "artifact-source" | "artifact-comment" | "artifact-viewer-comment"
@@ -132,7 +135,17 @@ interface Lane { next: string; scheduled?: Promise<void>; tail: Promise<void> }
 const lanes = new Map<string, Lane>()
 const writes = new Map<string, number>()
 
+// The person whose drafts may be written: undefined until the auth hook first
+// settles, null after sign-out. Set by purgeOtherArtifactDrafts.
+let owner: string | null | undefined
+const retired = (row: Row) => owner !== undefined && owner !== row[0]
+const retiredError = () => new Error("This browser is no longer signed in as the draft's owner.")
+let identityPurge: Promise<void> = Promise.resolve()
+
 async function persist(row: Row, text: string): Promise<void> {
+  // Checked when the write runs, not when it was queued: sign-out may have
+  // happened in between.
+  if (retired(row)) throw retiredError()
   const store = durable()
   if (store) {
     try {
@@ -154,13 +167,17 @@ async function persist(row: Row, text: string): Promise<void> {
 export function writeArtifactDraft(key: string, text: string): Promise<void> {
   const row = parse(key)
   if (!row) return Promise.reject(new Error("Invalid artifact draft key."))
+  if (retired(row)) return Promise.reject(retiredError())
   writes.set(key, (writes.get(key) ?? 0) + 1)
   let lane = lanes.get(key)
   if (!lane) { lane = { next: text, tail: Promise.resolve() }; lanes.set(key, lane) }
   lane.next = text
   if (lane.scheduled) return lane.scheduled
   const current = lane
-  const scheduled = current.tail.then(() => {
+  // A write also waits for an identity purge that began before it, so that
+  // purge cannot delete what the newly signed-in person types next.
+  const purging = identityPurge
+  const scheduled = Promise.all([current.tail, purging]).then(() => {
     current.scheduled = undefined
     return persist(row, current.next)
   })
@@ -169,39 +186,68 @@ export function writeArtifactDraft(key: string, text: string): Promise<void> {
   return scheduled
 }
 
-/** Reads the draft, moving an older localStorage copy into IndexedDB once. */
-export async function readArtifactDraft(key: string): Promise<string> {
+/**
+ * Reads the draft ("" when there is none), moving an older localStorage copy
+ * into IndexedDB once. Rejects when IndexedDB could not be read and no
+ * localStorage copy exists: the draft may still be on disk, so a caller must
+ * not treat the failure as "no draft" and write an empty or fresh value over it.
+ */
+export async function loadArtifactDraft(key: string): Promise<string> {
   const row = parse(key)
-  if (!row) return ""
+  if (!row || retired(row)) return ""
   await lanes.get(key)?.tail
   const seen = writes.get(key) ?? 0
   const store = durable()
   let stored: string | undefined
-  if (store) { try { stored = await store.get(row) } catch { /* Fall back to localStorage. */ } }
+  let failed = false
+  if (store) { try { stored = await store.get(row) } catch { failed = true } }
   // A localStorage copy is newer than IndexedDB: it is removed after every
   // durable write, so it exists only from an older build or a failed write.
   const legacy = legacyGet(row)
-  if (legacy === undefined) return stored ?? ""
+  if (legacy === undefined) {
+    if (failed) throw new Error("Artifact draft storage could not be read.")
+    return stored ?? ""
+  }
   // Migrate through the lane unless the person has typed since this read began.
   if (store && (writes.get(key) ?? 0) === seen) void writeArtifactDraft(key, legacy).catch(() => {})
   return legacy
 }
 
+/** Like loadArtifactDraft, but reports a failed read as "". Only for callers
+ * that never write back what they read. */
+export function readArtifactDraft(key: string): Promise<string> {
+  return loadArtifactDraft(key).catch(() => "")
+}
+
+// localStorage drafts swept with the artifact drafts. Each name continues with
+// the owner's id; versioned prefixes come before their legacy forms.
+const LOCAL_PREFIXES = [...KINDS.map(kind => `${kind}:`), "crewship-design:v2:", "design-comment:v2:", "crewship-design:", "design-comment:"]
+
 /**
  * Deletes every artifact draft not owned by `userId`, or all of them when
- * null (sign-out), in IndexedDB and in localStorage. Pending writes finish
- * first so a late write cannot recreate a purged draft. Best effort; never throws.
+ * null (sign-out), in IndexedDB and in localStorage, including the Design
+ * canvas and Design comment drafts. From the call on, writes for anyone but
+ * `userId` are refused (writer retirement); a write already running finishes
+ * first so it cannot recreate a purged draft. Purges run one after another,
+ * so an older sign-out never deletes the next person's drafts.
+ * Best effort; never throws.
  */
-export async function purgeOtherArtifactDrafts(userId: string | null): Promise<void> {
-  await Promise.all([...lanes.values()].map(lane => lane.tail))
-  const store = durable()
-  if (store) { try { await store.purge(userId) } catch { /* Storage the browser will not open holds nothing we can reach. */ } }
-  try {
-    for (const name of Object.keys(localStorage)) {
-      const kind = KINDS.find(prefix => name.startsWith(`${prefix}:`))
-      if (!kind) continue
-      const owner = name.slice(kind.length + 1).split(":")[0]
-      if (userId === null || owner !== userId) localStorage.removeItem(name)
-    }
-  } catch { /* Unavailable browser storage must not block signing out. */ }
+export function purgeOtherArtifactDrafts(userId: string | null): Promise<void> {
+  owner = userId
+  // Only writes queued before this call are awaited; later ones wait for the purge.
+  const pending = [...lanes.values()].map(lane => lane.tail)
+  identityPurge = identityPurge.then(async () => {
+    await Promise.all(pending)
+    const store = durable()
+    if (store) { try { await store.purge(userId) } catch { /* Storage the browser will not open holds nothing we can reach. */ } }
+    try {
+      for (const name of Object.keys(localStorage)) {
+        const prefix = LOCAL_PREFIXES.find(start => name.startsWith(start))
+        if (!prefix) continue
+        const holder = name.slice(prefix.length).split(":")[0]
+        if (userId === null || holder !== userId) localStorage.removeItem(name)
+      }
+    } catch { /* Unavailable browser storage must not block signing out. */ }
+  })
+  return identityPurge
 }

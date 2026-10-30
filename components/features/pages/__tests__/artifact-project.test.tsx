@@ -26,6 +26,11 @@ beforeEach(() => {
   purge: async () => { disk.clear() },
  })
 })
+// Edit source is enabled once the kept source draft has been read.
+async function editSource() {
+ await waitFor(() => expect(screen.getByRole("button",{name:"Edit source"})).toBeEnabled())
+ fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+}
 afterEach(() => { cleanup(); vi.clearAllMocks(); state.data.can_write = true; state.user = "owner"; localStorage.clear(); setArtifactDraftStore(undefined) })
 it("switches screens, restores with the latest base and shares only the selected version", () => {
  render(<ArtifactProject workspaceId="w" slug="demo" />)
@@ -213,13 +218,13 @@ it("retires an owner submission before its success can dispatch after downgrade 
  }finally{state.data=previous}
 })
 
-it("lets an editor save a whole manifest while withholding owner controls", () => {
+it("lets an editor save a whole manifest while withholding owner controls", async () => {
  const previous=state.data
  try {
   state.data={...state.data,can_share:false,can_restore:false,can_send_to_agent:false}
   render(<ArtifactProject workspaceId="w" slug="demo" />)
   expect(screen.queryByRole("button",{name:/Restore version|Share version|Send to agent/})).toBeNull()
-  fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+  await editSource()
   fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"<h1>Edited by human</h1>"}})
   fireEvent.click(screen.getByRole("button",{name:"Save project"}))
   expect(state.save).toHaveBeenCalledWith({base_version:2,entrypoint:"index.html",files:[{path:"index.html",media_type:"text/html",content:"<h1>Edited by human</h1>"},previous.manifest.files[1]]},expect.anything())
@@ -227,7 +232,7 @@ it("lets an editor save a whole manifest while withholding owner controls", () =
 })
 it("keeps a conflicting source draft and requires an explicit retry",async()=>{
  render(<ArtifactProject workspaceId="w" slug="demo" />)
- fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+ await editSource()
  fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"Private source draft"}})
  fireEvent.click(screen.getByRole("button",{name:"Save project"}))
  await act(async()=>state.save.mock.calls[0][1].onError(Object.assign(Error("Changed"),{status:409})))
@@ -236,23 +241,24 @@ it("keeps a conflicting source draft and requires an explicit retry",async()=>{
 })
 it("never carries source drafts across identities or accepts an old save after A to B to A",async()=>{
  const view=render(<ArtifactProject workspaceId="w" slug="demo" />)
- fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+ await editSource()
  fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"A private draft"}})
  fireEvent.click(screen.getByRole("button",{name:"Save project"}))
  const success=state.save.mock.calls[0][1].onSuccess
  state.user="B";view.rerender(<ArtifactProject workspaceId="w" slug="demo" />)
  expect(screen.queryByLabelText("Source file")).toBeNull()
  state.user="owner";view.rerender(<ArtifactProject workspaceId="w" slug="demo" />)
- fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+ // A's unsaved draft is kept in this browser and offered back, never edited over.
+ fireEvent.click(await screen.findByRole("button",{name:"Restore source draft"}))
  fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"New A draft"}})
  await act(async()=>success({version:3}))
  expect(screen.getByLabelText("Source file")).toHaveValue("New A draft")
 })
-it("keeps the original CAS base when a background refetch finds a newer manifest",()=>{
+it("keeps the original CAS base when a background refetch finds a newer manifest",async()=>{
  const previous=state.data
  try {
   const view=render(<ArtifactProject workspaceId="w" slug="demo" />)
-  fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+  await editSource()
   fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"Keep version two draft"}})
   state.data={...state.data,latest_version:3,manifest:{...state.data.manifest,version:3}}
   view.rerender(<ArtifactProject workspaceId="w" slug="demo" />)
@@ -263,7 +269,7 @@ it("keeps the original CAS base when a background refetch finds a newer manifest
 })
 it("removes the private iframe after a refused source save",async()=>{
  render(<ArtifactProject workspaceId="w" slug="demo" />)
- fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+ await editSource()
  fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"Private draft"}})
  fireEvent.click(screen.getByRole("button",{name:"Save project"}))
  await act(async()=>state.save.mock.calls[0][1].onError(Object.assign(Error("Revoked"),{status:403})))
@@ -274,7 +280,7 @@ it("removes the private iframe after a refused source save",async()=>{
 it("offers an unsaved source draft back after the browser was killed, once its strict write committed, and forgets it after save",async()=>{
  hold=true
  const first=render(<ArtifactProject workspaceId="w" slug="demo" />)
- fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+ await editSource()
  fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"Typed before the crash"}})
  await waitFor(() => expect(held.length).toBeGreaterThan(0))
  // Nothing is on disk until the durable commit completes; localStorage is not used.
@@ -300,4 +306,50 @@ it("offers a source draft kept in localStorage by an older build and moves it in
  await waitFor(() => expect(localStorage.removeItem).toHaveBeenCalledWith("artifact-source:owner:w:demo"))
  expect(JSON.parse(disk.get(row("owner","artifact-source"))!).body.files[0].content).toBe("Legacy draft")
  vi.mocked(localStorage.getItem).mockReset().mockReturnValue(null)
+})
+
+const keptSource=(content:string)=>JSON.stringify({path:"index.html",body:{base_version:2,entrypoint:"index.html",files:[{path:"index.html",media_type:"text/html",content}]}})
+it("never replaces a crash-recovery source draft when the person starts a fresh edit",async()=>{
+ disk.set(row("owner","artifact-source"),keptSource("Recovered after crash"))
+ render(<ArtifactProject workspaceId="w" slug="demo" />)
+ await screen.findByRole("button",{name:"Restore source draft"})
+ // Only Restore or Discard are offered while a kept draft waits; Edit source would overwrite it.
+ expect(screen.queryByRole("button",{name:"Edit source"})).toBeNull()
+ fireEvent.click(screen.getByRole("button",{name:"Discard it"}))
+ await editSource()
+ expect(screen.getByLabelText("Source file")).toHaveValue("<h1>Hello</h1>")
+})
+it("does not let Edit source write over a kept draft that is still being read",async()=>{
+ disk.set(row("owner","artifact-source"),keptSource("Recovered after crash"))
+ render(<ArtifactProject workspaceId="w" slug="demo" />)
+ const edit=screen.queryByRole("button",{name:"Edit source"})
+ if(edit)fireEvent.click(edit)
+ await screen.findByRole("button",{name:"Restore source draft"})
+ await act(async()=>{})
+ expect(JSON.parse(disk.get(row("owner","artifact-source"))!).body.files[0].content).toBe("Recovered after crash")
+})
+it("keeps the durable copy of source edits typed after a save was submitted",async()=>{
+ render(<ArtifactProject workspaceId="w" slug="demo" />)
+ await editSource()
+ fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"Submitted"}})
+ fireEvent.click(screen.getByRole("button",{name:"Save project"}))
+ fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"Submitted, then typed more"}})
+ await waitFor(()=>expect(disk.get(row("owner","artifact-source"))).toContain("then typed more"))
+ await act(async()=>state.save.mock.calls[0][1].onSuccess({version:3}))
+ await act(async()=>{})
+ expect(screen.getByLabelText("Source file")).toHaveValue("Submitted, then typed more")
+ expect(disk.get(row("owner","artifact-source"))).toContain("then typed more")
+})
+it("never deletes a stored comment draft when reading it fails",async()=>{
+ disk.set(row("owner","artifact-comment"),"Unsent private comment")
+ setArtifactDraftStore({
+  get: async () => { throw new Error("IndexedDB open timed out") },
+  put: async (key, text) => { disk.set(JSON.stringify(key), text) },
+  delete: async key => { disk.delete(JSON.stringify(key)) },
+  purge: async () => { disk.clear() },
+ })
+ render(<ArtifactProject workspaceId="w" slug="demo" />)
+ await screen.findByText("Browser storage unavailable. Copy your draft before leaving.")
+ await act(async()=>{})
+ expect(disk.get(row("owner","artifact-comment"))).toBe("Unsent private comment")
 })

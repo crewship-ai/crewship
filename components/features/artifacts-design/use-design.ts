@@ -72,6 +72,22 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const actorName = query.data?.actor?.name ?? session?.data?.user?.name ?? "Collaborator"
  const initialCanEdit = query.data?.can_edit === true
  const admittedActor = query.data?.actor?.id
+ // Private canvas and comment drafts never outlive access to their Page: a
+ // 403 or 404 for it deletes both from this browser. A dropped socket, a
+ // "denied" reconnect or a downgrade to reader is not access loss and keeps
+ // them (a reader's draft is never loaded). Sign-out and account switch sweep
+ // them in lib/artifact-drafts.
+ const lastPage = useRef<string | undefined>(undefined)
+ if (pageId) lastPage.current = pageId
+ const accessStatus = (query.error as { status?: number } | null)?.status
+ useEffect(() => {
+  const page = lastPage.current
+  if (!page || userId === "anonymous" || (accessStatus !== 403 && accessStatus !== 404)) return
+  try {
+   localStorage.removeItem(`crewship-design:v2:${userId}:${workspaceId}:${page}`)
+   localStorage.removeItem(`design-comment:v2:${userId}:${workspaceId}:${page}`)
+  } catch { /* Unavailable storage holds nothing to remove. */ }
+ }, [accessStatus, userId, workspaceId])
  useEffect(() => {
   if (!canConnect || !pageId) return
   let active = true

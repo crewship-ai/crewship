@@ -11,7 +11,7 @@ import { artifactDashboards } from "@/lib/feature-flags"
 import { ArtifactDashboardPreview } from "@/components/features/chat/artifact-context/viewer/artifact-dashboard-preview"
 import { artifactSlidesMode } from "@/lib/pages/artifact-slides"
 import { ArtifactSlidesPreview } from "@/components/features/chat/artifact-context/viewer/artifact-slides-preview"
-import { artifactDraftKey, readArtifactDraft, writeArtifactDraft } from "@/lib/artifact-drafts"
+import { artifactDraftKey, loadArtifactDraft, writeArtifactDraft } from "@/lib/artifact-drafts"
 
 export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspaceId: string; slug: string; initialVersion?: number }) {
  const session = useSessionSafe()
@@ -34,15 +34,22 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  // back, never saved over newer work automatically.
  const sourceKey=artifactDraftKey("artifact-source",sourceScope.human,workspaceId,slug)
  const [storedSource,setStoredSource]=useState<{key:string;draft:{body:ArtifactProjectSave;path:string}}>()
+ // Edit source starts a draft that is written to the same key, so it waits
+ // until the kept draft is known: a failed or pending read must not let a
+ // fresh edit overwrite it.
+ const [sourceRead,setSourceRead]=useState<{key:string;failed:boolean}>()
+ const [sourceReadAttempt,setSourceReadAttempt]=useState(0)
  useEffect(()=>{
   if(!sourceKey)return
   let live=true
-  void readArtifactDraft(sourceKey).then(raw=>{
+  loadArtifactDraft(sourceKey).then(raw=>{
    if(!live)return
    try{const parsed=raw?JSON.parse(raw):null;setStoredSource(parsed&&Array.isArray(parsed.body?.files)&&typeof parsed.path==="string"?{key:sourceKey,draft:parsed}:undefined)}catch{setStoredSource(undefined)}
-  })
+   setSourceRead({key:sourceKey,failed:false})
+  },()=>{if(live)setSourceRead({key:sourceKey,failed:true})})
   return()=>{live=false}
- },[sourceKey])
+ },[sourceKey,sourceReadAttempt])
+ const sourceReadDone=sourceRead?.key===sourceKey
  useEffect(()=>{
   if(!sourceKey||!activeSource)return
   writeArtifactDraft(sourceKey,JSON.stringify({body:activeSource.body,path:activeSource.path})).then(()=>setStorageError(false),()=>setStorageError(true))
@@ -71,8 +78,9 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  useEffect(() => {
   if (!draftKey) { setDraftState(null); return }
   let live = true
-  // Text typed while the stored draft loads wins over the stored copy.
-  void readArtifactDraft(draftKey).then(text => { if (live) setDraftState(previous => previous?.key === draftKey ? previous : {key:draftKey,text}) })
+  // Text typed while the stored draft loads wins over the stored copy. A failed
+  // read leaves the state empty, so nothing writes over the copy on disk.
+  loadArtifactDraft(draftKey).then(text => { if (live) setDraftState(previous => previous?.key === draftKey ? previous : {key:draftKey,text}) }, () => { if (live) setStorageError(true) })
   return () => { live = false }
  }, [draftKey])
  useEffect(() => {
@@ -102,7 +110,8 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
   save.mutate(submitted.body,{
    onSuccess:()=>{
     if(sourceCurrent.current.scope!==submitted.scope||!sourceCurrent.current.canWrite)return
-    setSourceDraft(previous=>previous===submitted?undefined:previous);forgetSource(sourceKey)
+    // Edits typed after the save was submitted are not saved yet: keep them and their durable copy.
+    if(sourceCurrent.current.draft===submitted){setSourceDraft(previous=>previous===submitted?undefined:previous);forgetSource(sourceKey)}
     setSourceError(undefined);setVersion(undefined)
    },
    onError:(error)=>{
@@ -138,7 +147,8 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
   {activeSource && !data.can_write && <SourceRecovery body={activeSource.body}/>}
   {data.can_write === true && manifest?.version === data.latest_version && <section aria-label="Project source" className="border-b p-3">
    {!activeSource&&storedSource?.key===sourceKey&&data.can_write&&<div role="status" className="space-y-1"><p>Unsaved source draft from version {storedSource.draft.body.base_version} was kept in this browser.{storedSource.draft.body.base_version!==data.latest_version?` The project is now at version ${data.latest_version}; saving it will report a conflict, and your draft stays.`:""}</p><Button variant="outline" onClick={()=>{setSourceError(undefined);setSourceDraft({scope:sourceScope,...storedSource.draft})}}>Restore source draft</Button><Button variant="ghost" onClick={()=>forgetSource(sourceKey)}>Discard it</Button></div>}
-   {!activeSource ? <Button variant="outline" onClick={()=>{setSourceError(undefined);setSourceDraft({scope:sourceScope,path:manifest!.entrypoint,body:{base_version:data.latest_version,entrypoint:manifest!.entrypoint,files:manifest!.files.map(file=>({...file}))}})}}>Edit source</Button> : <div className="space-y-2">
+   {!activeSource&&sourceReadDone&&sourceRead.failed&&<div role="alert" className="space-y-1"><p>This browser could not check for an unsaved source draft. Editing now may replace one kept here.</p><Button variant="outline" onClick={()=>setSourceReadAttempt(attempt=>attempt+1)}>Check again</Button></div>}
+   {!activeSource ? (storedSource?.key===sourceKey ? null : <Button variant="outline" disabled={!sourceReadDone} onClick={()=>{setSourceError(undefined);setSourceDraft({scope:sourceScope,path:manifest!.entrypoint,body:{base_version:data.latest_version,entrypoint:manifest!.entrypoint,files:manifest!.files.map(file=>({...file}))}})}}>Edit source</Button>) : <div className="space-y-2">
     <label>Source file path<select aria-label="Source file path" value={activeSource.path} onChange={event=>setSourceDraft({...activeSource,path:event.target.value})} className="ml-2 rounded border bg-background p-2 coarse:min-h-[44px]">{activeSource.body.files.map(file=><option key={file.path} value={file.path}>{file.path}</option>)}</select></label>
     <textarea aria-label="Source file" className="min-h-48 w-full rounded border bg-background p-2 font-mono text-sm" value={activeSource.body.files.find(file=>file.path===activeSource.path)?.content??""} onChange={event=>setSourceDraft({...activeSource,body:{...activeSource.body,files:activeSource.body.files.map(file=>file.path===activeSource.path?{...file,content:event.target.value}:file)}})} />
     <Button disabled={save.isPending} onClick={saveSource}>Save project</Button><Button variant="ghost" disabled={save.isPending} onClick={()=>{setSourceDraft(undefined);forgetSource(sourceKey)}}>Discard source draft</Button>

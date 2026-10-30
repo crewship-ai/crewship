@@ -274,6 +274,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       ++refreshGen.current
       purgeOtherE2Recovery(null)
       await purgeOtherDocumentDrafts(null)
+      await purgeOtherArtifactDrafts(null)
       const { pathname, search } = window.location
       const currentPath = pathname + search
       // no_credentials: the browser never had a session (or its cookies
@@ -300,6 +301,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       ++refreshGen.current
       purgeOtherE2Recovery(null)
       await purgeOtherDocumentDrafts(null)
+      await purgeOtherArtifactDrafts(null)
       window.location.replace(SIGNED_OUT_URL)
     }
 
