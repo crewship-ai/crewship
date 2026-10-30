@@ -54,7 +54,7 @@ it.each([401, 403, 404, 503])("removes private content and the editor action aft
   expect(screen.queryByText("Private saved title")).toBeNull()
   expect(screen.queryByText("Private saved body")).toBeNull()
   expect(screen.queryByRole("link", { name: "Open full editor" })).toBeNull()
-  await waitFor(() => expect(screen.getByRole(status === 503 ? "status" : "alert")).toHaveTextContent(status === 503 ? "Preview unavailable" : "Document access is unavailable"))
+  await waitFor(() => expect(screen.getByRole(status === 503 ? "status" : "alert")).toHaveTextContent(status === 503 ? "Preview isn’t available here right now" : "Document access is unavailable"))
   expect(screen.queryByText("Private error")).toBeNull()
 })
 it.each(["human", "workspace", "chat", "activation", "closed", "disabled"])("hides the editor and body immediately when %s changes", async kind => {
@@ -92,7 +92,7 @@ it("does not offer an editor link when the saved body is malformed", async () =>
   vi.mocked(apiFetch).mockResolvedValueOnce(response({ id: "page /&", name: "Private saved title", has_document: true }))
     .mockResolvedValueOnce(response({ page_id: "page /&", schema: 3, rev: 4, content: { type: "unknown" } }))
   render(<SavedDocumentPanel {...props()} />)
-  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Preview unavailable"))
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Preview isn’t available here right now"))
   expect(screen.queryByRole("link", { name: "Open full editor" })).toBeNull()
   expect(screen.queryByText("Private saved title")).toBeNull()
 })
@@ -102,4 +102,28 @@ it("tells the reader how to fill an empty saved document", async () => {
     : { id: "page /&", name: "Private saved title", has_document: true }))
   render(<SavedDocumentPanel {...props()} />)
   expect(await screen.findByText("This document is empty. Choose Edit here to start writing, or ask the agent in this chat to draft it.")).toBeInTheDocument()
+})
+it("offers Artifacts when the server cannot show the preview, and nothing on denial", async () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
+  try {
+    vi.mocked(apiFetch).mockImplementation(async url => String(url).includes("/document?") ? response({ error: "unavailable" }, 503)
+      : response({ id: "page /&", name: "Private saved title", has_document: true }))
+    render(<SavedDocumentPanel {...props()} />)
+    expect(await screen.findByText("Preview isn’t available here right now.")).toBeInTheDocument()
+    expect(screen.queryByText(/check access/)).toBeNull()
+    expect(screen.getByRole("link", { name: "Open in Artifacts" })).toHaveAttribute("href", "/artifacts/page%20%2F%26?workspace_id=ws+%2F%26")
+    cleanup()
+    vi.mocked(apiFetch).mockImplementation(async () => response({ error: "forbidden" }, 403))
+    render(<SavedDocumentPanel {...props()} />)
+    expect(await screen.findByText("Document access is unavailable.")).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Open in Artifacts" })).toBeNull()
+  } finally { vi.unstubAllEnvs() }
+})
+
+it("keeps the unavailable preview without a link while the library is off", async () => {
+  vi.mocked(apiFetch).mockImplementation(async url => String(url).includes("/document?") ? response({ error: "unavailable" }, 503)
+    : response({ id: "page /&", name: "Private saved title", has_document: true }))
+  render(<SavedDocumentPanel {...props()} />)
+  expect(await screen.findByText("Preview isn’t available here right now.")).toBeInTheDocument()
+  expect(screen.queryByRole("link", { name: "Open in Artifacts" })).toBeNull()
 })

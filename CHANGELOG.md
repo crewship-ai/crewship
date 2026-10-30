@@ -19,6 +19,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Chat starts a project from "+" › New artifact.** With chat artifact projects on, the composer's "+" menu offers Project next to Word. Picking a starter sets the same explicit creation consent as before, and the chosen kind shows as one removable chip ("New Project") in place of the two text buttons, so the toolbar fits on a phone.
 
+- **A saved document the server cannot preview is no longer a dead end in chat.** The side panel says the preview isn't available here instead of suggesting an access problem, and with the Artifacts library on it offers *Open in Artifacts*. A denied document still shows no link.
+
 - **A Page opens with its content inside Artifacts.** Its application or panels show in the library detail with the same views Pages uses, read by the page's immutable ID; the detail no longer sends you to Pages.
 
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.

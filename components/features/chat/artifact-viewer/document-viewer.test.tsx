@@ -25,7 +25,7 @@ it("never invokes body or leaks title when scope, workspace, Page or mode differ
     expect(screen.queryByText("Private saved title")).toBeNull()
     expect(screen.queryByText("Authorized document body")).toBeNull()
     expect(p.renderBody).not.toHaveBeenCalled()
-    expect(screen.getByRole("status")).toHaveTextContent("Preview unavailable")
+    expect(screen.getByRole("status")).toHaveTextContent("Preview isn’t available here right now")
     unmount()
   }
 })
