@@ -136,8 +136,9 @@ crewship doc status -f json
 
 Populate an empty artifact that you own personally with its first document.
 The artifact must not be owned by a crew and must hold no other output. Create
-one with [`crewship page create`](/cli/page) and `--allow-empty`. This command
-needs a credential with the `workspace:admin` CLI scope. A minimal definition
+one with [`crewship page create`](/cli/page) and `--allow-empty`. Page creation
+needs a credential with the `workspace:admin` CLI scope; document initialization
+uses `pages:write`. A minimal definition
 is enough:
 
 ```yaml
@@ -193,7 +194,9 @@ current editor and unsaved draft. Browsing does not restore or overwrite content
 checkpoint pins, ordered by revision and identity. Checkpoints are explicit saved
 pins, not every editor keystroke. Older pins remain retained and can be read by ID.
 Each entry in `checkpoints` has `id`, `rev`, `schema`, `actor` and `created_at`.
-A document without retained history returns `404 document history unavailable`.
+A valid document with no retained pins returns an empty `checkpoints` list.
+`404 document history unavailable` means the document state or selected
+checkpoint was not found, not simply that the list is empty.
 
 ```bash
 crewship doc checkpoints @<artifact-id> -f json
@@ -220,7 +223,8 @@ Document first and confirm the intended checkpoint. Keep the exact same packet
 for a retry after uncertain confirmation; never refresh its revision or epoch.
 The server checks current human write access. A successful restore increments
 the revision and generation and invalidates the previous writer epoch. The
-receipt has `page_id`, `id`, `rev`, `epoch`, `kind` and `schema`.
+receipt has `page_id`, `id`, `rev`, `epoch` and `kind`. The first commit may
+omit `schema`; a replay may include it and `duplicate`.
 
 ```bash
 crewship doc restore @<artifact-id> --file restore.json
@@ -248,7 +252,7 @@ crewship doc read @<artifact-id> -f json
 
 The response also carries the stored editor state (`generation`,
 `incarnation`, `snapshot`, `snapshotRev`, `updates` and `blocks`). This
-abbreviated example leaves those values out:
+abbreviated example uses placeholders for the binary snapshot and updates:
 
 ```json
 {
@@ -330,15 +334,17 @@ With `-f json`, errors are printed as an `error` object with `message`,
 | Situation | Status | Message | Exit |
 |---|---|---|---|
 | Document service off | 503 | `Docs are not enabled on this server` | 7 |
-| Empty artifact with no document yet | 404 | `document not found` | 3 |
+| Empty artifact with no document yet (`read`, `outline`, `initialize`, `patch`) | 404 | `document not found` | 3 |
 | No such artifact (`read`, `outline`, `initialize`, `patch`, `checkpoints`, `checkpoint`, `restore`) | 404 | `document page not found` | 3 |
-| Artifact holds another output, belongs to a crew (`initialize`), or you lack access | 403 | `document access denied` | 4 |
-| No retained history | 404 | `document history unavailable` | 3 |
+| `read`/`outline`/`initialize`/`patch`: another output, crew-owned initialization or missing access | 403 | `document access denied` | 4 |
+| History state or selected checkpoint not found | 404 | `document history unavailable` | 3 |
+| History service refuses access, version or rate check | 401/403/409/429 | `document history unavailable` | By status |
 | Token without `pages:write` edits | 403 | `Forbidden` | 4 |
-| Stale `epoch` | 409 | `old epoch; reload document` | 5 |
-| Stale `ifRev` or `ifHash`, or unknown `target` | 409 | `semantic precondition conflict` | 5 |
-| Another write committed at the same time | 409 | `document revision conflict` | 5 |
-| Malformed restore packet | 400 | `original bounded Document restore packet required` | 2 |
+| Stale `epoch` (`read`/`outline`/`initialize`/`patch` service operations) | 409 | `old epoch; reload document` | 5 |
+| Stale `ifRev` or `ifHash`, or unknown `target` (`patch`) | 409 | `semantic precondition conflict` | 5 |
+| Another write committed at the same time (`initialize`/`patch`) | 409 | `document revision conflict` | 5 |
+| Restore service refuses the packet, access, checkpoint or precondition | 400/401/403/404/409/413/422/429 | `Document restore refused; confirmed content preserved` | By status |
+| Restore HTTP packet shape or Page binding invalid | 400 | `closed Document restore packet required` or `original Page identity required` | 2 |
 | Unknown chat for `chat-results` | 404 | `chat not found` | 3 |
 | Missing `--file`, file over the size limit, not one JSON object | — | Local message | 1 |
 | `create` or `draft` without a run capability | — | `original CREWSHIP_AGENT_TOKEN run capability required; no human profile fallback` | 1 |
