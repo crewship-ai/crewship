@@ -48,10 +48,13 @@ switches are described in [Environment variables](/configuration/environment).
 format, `-f json` and `-f table` give the same JSON, and `-f yaml` prints YAML.
 `craft` commands print one JSON line per response (NDJSON) or YAML documents
 separated by `---` with `-f yaml`; `craft availability` prints a single object.
-Streams (`page design watch`, `craft connect … watch`, `mooring connect`)
-refuse `-f quiet`.
+`page design watch` and `mooring connect` refuse `-f quiet`; `craft` has no
+quiet mode and prints NDJSON under `-f quiet`, including the `watch` stream.
 
-Errors from `page design` use the standard CLI error envelope and exit code:
+Errors go to stderr. With the default format they are one line of text; with
+`-f json`, `-f ndjson` or `-f yaml` they use the standard CLI error envelope.
+For `page design` the envelope carries the HTTP status and server text, and the
+exit code follows the status:
 
 ```json
 {
@@ -74,10 +77,16 @@ Errors from `page design` use the standard CLI error envelope and exit code:
 | 413 | 1 | `Design capacity is full; existing work is retained` |
 | 503 | 7 | `Design engine is unavailable; changes are not acknowledged` |
 
-`craft` and `mooring connect` do not use this envelope. They exit with code 1
-and print only a short message such as `native HTTP 409` or
-`Mooring connection rejected`; the server's error text and a machine-readable
-code are not shown. Use the HTTP status in the message to decide what to do.
+`craft` and `mooring connect` use the same envelope, but it holds only
+`message` and `exit_code` (always `1`). There is no `status`, `detail` or
+`extensions` field and the server's error text is not shown; the message is
+short, such as `native HTTP 409` or `Mooring connection rejected`:
+
+```json
+{ "error": { "message": "native HTTP 503", "exit_code": 1 } }
+```
+
+Use the HTTP status inside the message to decide what to do.
 
 Argument checks run before any request and exit with code 1, for example
 `--name is required` or `--version must be a positive safe integer`.
@@ -139,8 +148,10 @@ crewship page design apply launch-hero --file hero.json -f json
 ```
 
 `apply` changes the live canvas that open browsers see immediately, and works
-even when no browser has it open. A change that alters the canvas is recorded
-as a new version. Use `--file -` to read stdin. An
+even when no browser has it open. Every `apply` that produces a canvas update
+records a new version. Re-applying the same file is not a no-op: upserting the
+same nodes again still updates the canvas state and records another version.
+Use `--file -` to read stdin. An
 unknown node type or malformed node returns `400 invalid Design update`.
 
 ### Read the canvas
@@ -170,12 +181,11 @@ crewship page design get launch-hero --version 1 -f json
 `version` and `latest_version` fields both report `N`; use
 `page design versions` for the real latest version.
 
-### Save, list and restore versions
+### Save and list versions
 
 ```sh
 crewship page design snapshot launch-hero --message "Hero draft" -f json
 crewship page design versions launch-hero -f json
-crewship page design restore launch-hero --version 1 -f json
 ```
 
 ```json
@@ -195,9 +205,8 @@ crewship page design restore launch-hero --version 1 -f json
 ```
 
 `snapshot` (alias `save`) records the live canvas as a new version even when it
-is unchanged since the last one. `restore` never rewrites history: it copies
-the selected version into the live canvas and records it as a new version
-(`{"actor":"<user-id>","version":4}`).
+is unchanged since the last one. Take `latest_version` from `versions` whenever
+a command below needs the latest version.
 
 ### Share a version
 
@@ -214,8 +223,10 @@ returns `404 design not found`.
 
 ### Comment on a node
 
+Use the latest version from `page design versions` (`3` in this walkthrough):
+
 ```sh
-crewship page design comment launch-hero --version 3 --node title-1 \
+crewship page design comment launch-hero --version <latest-version> --node title-1 \
   --quote "Quarterly review" --text "Make the title shorter" -f json
 crewship page design comments launch-hero -f json
 ```
@@ -244,6 +255,23 @@ server returns `409 Design changed; reload and reapply`. `comments` returns
 
 With `--send-to-agent`, the comment is queued for the agent connected through
 `page design agent` and its `status` is `pending`.
+
+### Restore a version
+
+```sh
+crewship page design restore launch-hero --version 1 -f json
+```
+
+```json
+{ "actor": "<user-id>", "version": 4 }
+```
+
+`restore` never rewrites history: it copies the selected version into the live
+canvas and records it as a new version. Version 1 is the empty canvas from
+`create`, so restoring it removes every node from the live canvas (`get` then
+returns `"nodes": []`) and makes it the latest version. Comments on `title-1`
+now fail with `409` because the node no longer exists. To continue, apply
+`hero.json` again (this records version 5) and use the new latest version.
 
 ### Connect an agent chat
 
@@ -309,28 +337,53 @@ content.
 
 `craft connect` opens one human session, prints its public `session_id`, then
 reads one JSON action per stdin line and prints one response per action. The
-private session token stays in the process.
+private session token stays in the process, and the session ends when the
+command exits.
+
+Several action fields come from earlier responses, so feed the actions one at a
+time: start the command in a terminal, type one line, read the response, then
+type the next line. A script does the same by keeping the command's stdin open
+(for example a shell coprocess or a named pipe) and writing each line only
+after it has read the previous response. A file written in advance works only
+for actions that need no response values, such as `status`.
 
 ```sh
-crewship craft connect <artifact-slug> < actions.ndjson
+crewship craft connect <artifact-slug>
 ```
 
-```json title="actions.ndjson"
-{"action":"acquire"}
-{"action":"read"}
-{"action":"save","snapshot":{"workspaceId":"<workspace-id>","pageId":"<page-id>","applicationId":"wordcraft","enginePin":"<engine-pin>","sessionId":"<session-id>","generation":"7","baseVersion":"3","editorRevision":"<editor-revision>","contentHash":"sha256:<hex>","bytes":"<base64>"}}
-{"action":"release","generation":"7"}
+```json
+{"session_id":"<session-id>"}
 ```
 
-1. `acquire` takes the lease and returns the lease view: `holder`, `mine`,
+1. Type `{"action":"acquire"}`. The lease view comes back: `holder`, `mine`,
    `generation`, `expires_at`, `can_edit`, `can_write` and any pending
-   `handoff_requested_by`.
-2. `read` returns `version`, `bytes` (base64), `applicationId`, `enginePin`,
-   editor bundle fields and `quota` (`usedBytes`, `limitBytes`, `warning`,
-   `retention`).
-3. `save` sends a full snapshot bound to this session, the lease `generation`
-   and the `baseVersion` you edited. Bytes are at most 32 MiB.
-4. `release` gives the lease back. End of input does not save or release.
+   `handoff_requested_by`. Note `generation`.
+2. Type `{"action":"read"}`. The response holds `version`, `bytes` (the
+   document, base64), `applicationId`, `enginePin`, editor bundle fields and
+   `quota` (`usedBytes`, `limitBytes`, `warning`, `retention`). Note
+   `version`, `applicationId` and `enginePin`.
+3. Edit the decoded document, then type one `save` line:
+
+   ```json
+   {"action":"save","snapshot":{"workspaceId":"<workspace-id>","pageId":"<page-id>","applicationId":"wordcraft","enginePin":"<engine-pin>","sessionId":"<session-id>","generation":"<generation>","baseVersion":"<version>","editorRevision":"<editor-revision>","contentHash":"sha256:<hex>","bytes":"<base64>"}}
+   ```
+
+4. Type `{"action":"release","generation":"<generation>"}` to give the lease
+   back. End of input does not save or release.
+
+Where each snapshot field comes from:
+
+| Field | Source |
+|---|---|
+| `workspaceId` | The workspace you selected with `--workspace` or `CREWSHIP_WORKSPACE`. |
+| `pageId` | The artifact's page ID, for example `id` in `crewship page get <artifact-slug> -f json`. |
+| `applicationId`, `enginePin` | The `read` response. |
+| `sessionId` | `session_id` printed when the command started. |
+| `generation` | The `acquire` (or `status`) response. |
+| `baseVersion` | `version` from the `read` you edited. |
+| `editorRevision` | A label you choose for this edit, 1 to 256 characters without NUL. It is stored in the version's audit message; the server does not interpret it. |
+| `contentHash` | `sha256:` followed by the lowercase hex SHA-256 of the exact document bytes you send (before base64 encoding). A mismatch is refused. |
+| `bytes` | The edited document, base64-encoded, at most 32 MiB. |
 
 Other actions: `status` (lease view), `acquire-explicit`, `renew` (needs
 `generation`), `import`, `restore` and `reconcile` (snapshot actions),
@@ -359,16 +412,19 @@ command line.
 ### Initialize an empty artifact as Word
 
 ```sh
-crewship craft initialize <artifact-slug> --file document.json < actions.ndjson
+crewship craft initialize <artifact-slug> --file document.json
 ```
 
 The artifact must exist, be empty and be owned by you, and you need
-`pages:write`. The file holds native Word bytes (1 byte to 32 MiB); only Word
+`pages:write`. `document.json` is not a `.docx` file: it is the Word editor's
+native document, a single JSON object (1 byte to 32 MiB) that the instance's
+Word profile validates; anything else is refused. Only Word
 (`wordcraft`) can be initialized. The command prints `session_id`,
 `application_id`, `page_id`, `generation` and `version` (`"1"`), holds the new
-lease, and then processes stdin actions exactly like `connect`. With
-`--file -` the document is read from stdin and no actions follow. An empty file
-fails before any request.
+lease, and then reads actions from stdin one line at a time exactly like
+`connect`; use the printed `generation`, `page_id` and `session_id` in them.
+With `--file -` the document is read from stdin and no actions follow. An empty
+file fails before any request.
 
 ### Start, check and stop an agent task
 
