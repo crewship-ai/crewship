@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Design canvas peer names are readable on every presence colour.** The green and orange collaborator colours behind the white initials and cursor name labels are darker, so all five meet WCAG AA contrast (4.5:1). A peer still on an older page keeps its previous colour until it reloads.
+- **Design canvas peer names are readable on every presence colour.** The canvas now darkens any collaborator colour behind the white initials and cursor name labels until the text meets WCAG AA contrast (4.5:1): the earlier green and orange show one shade darker, and colours from other clients are adjusted the same way when they are drawn.
 
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
 

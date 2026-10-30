@@ -9,6 +9,7 @@ import { artifactsDesign } from "@/lib/feature-flags"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useDesign } from "./use-design"
+import { readablePeerFill } from "./peer-colors"
 import { removeDesignNode, safeImageSource, upsertDesignNode, type DesignNode, type DesignNodeType } from "./design-document"
 
 const DesignAccessDialog = dynamic(() => import("./design-access-dialog").then(module => module.DesignAccessDialog), { ssr: false })
@@ -113,7 +114,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
    <h1 className="mr-auto truncate font-semibold">{slug} <span className="ml-2 text-xs font-normal text-muted-foreground">Design</span></h1>
    <span role="status" className="text-xs text-muted-foreground">{version ? `Version ${version}` : design.connection === "connected" ? design.dirty ? "Live · changes saved as you work" : "Live · up to date" : design.connection === "denied" ? "Access changed · reopen to continue" : design.connection === "connecting" ? "Connecting…" : "Offline · changes kept in this browser"}</span>
    {!design.editable && <span className="rounded bg-muted px-2 py-1 text-xs">{version ? "History" : "Read only"}</span>}
-   <div className="flex -space-x-1" aria-label="People on this canvas">{design.peers.map(peer => <span key={peer.clientId} title={peer.name} className="flex size-7 items-center justify-center rounded-full border-2 border-background text-xs font-medium text-white" style={{ backgroundColor: peer.color }}>{peer.name.slice(0, 2).toUpperCase()}</span>)}</div>
+   <div className="flex -space-x-1" aria-label="People on this canvas">{design.peers.map(peer => <span key={peer.clientId} title={peer.name} className="flex size-7 items-center justify-center rounded-full border-2 border-background text-xs font-medium text-white" style={{ backgroundColor: readablePeerFill(peer.color) }}>{peer.name.slice(0, 2).toUpperCase()}</span>)}</div>
    <Button variant="outline" onClick={() => setAccessOpen(true)}>Access</Button>
    <Button variant="outline" onClick={() => setPanel(panel === "history" ? "properties" : "history")}>History{viewedVersion ? ` · v${viewedVersion}` : ""}</Button>
    {design.editable && <Button disabled={design.save.isPending || design.connection !== "connected"} onClick={() => design.save.mutate("Saved from Design editor")}><Save className="size-4" /> Save version</Button>}
@@ -148,7 +149,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
         {selectedId === node.id && <rect width={w} height={h} fill="none" stroke="#2563eb" strokeWidth="2" pointerEvents="none" />}
        </g>
       })}
-      {design.peers.filter(peer => peer.cursor).map(peer => <g key={peer.clientId} transform={`translate(${peer.cursor!.x},${peer.cursor!.y})`} pointerEvents="none" aria-label={`${peer.name} cursor`}><path d="M0 0 L0 20 L5 15 L9 24 L13 22 L9 13 L17 13 Z" fill={peer.color} stroke="white" /><rect x="16" y="18" width={Math.min(160, peer.name.length * 7 + 16)} height="22" rx="4" fill={peer.color} /><text x="24" y="33" fontSize="12" fill="white">{peer.name.slice(0, 22)}</text></g>)}
+      {design.peers.filter(peer => peer.cursor).map(peer => <g key={peer.clientId} transform={`translate(${peer.cursor!.x},${peer.cursor!.y})`} pointerEvents="none" aria-label={`${peer.name} cursor`}><path d="M0 0 L0 20 L5 15 L9 24 L13 22 L9 13 L17 13 Z" fill={peer.color} stroke="white" /><rect x="16" y="18" width={Math.min(160, peer.name.length * 7 + 16)} height="22" rx="4" fill={readablePeerFill(peer.color)} /><text x="24" y="33" fontSize="12" fill="white">{peer.name.slice(0, 22)}</text></g>)}
      </svg>
     </div>
    </div>
