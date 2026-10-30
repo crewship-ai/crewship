@@ -26,6 +26,7 @@ All subcommands are destructive and **admin-only** (OWNER/ADMIN).
 | `nuke data` | DB entities only — issues, projects, labels, agents, credentials, integrations, pipeline webhooks/schedules/pipelines, crews | per-entity `DELETE` |
 | `nuke inbox` | Inbox items (`--kind` to scope) | `DELETE /api/v1/inbox` |
 | `nuke escalations` | Crew escalations (`--crew` to scope; default all crews) | `DELETE /api/v1/crews/{id}/escalations` |
+| `nuke keeper-requests` | Keeper decision history (intents, judge prompts) and its event ledger | `DELETE /api/v1/admin/keeper/requests` |
 | `nuke runtimes` | Each crew's docker container(s)+volumes (agent home, crew shared, sidecar) | `POST /api/v1/admin/prune-crew-runtimes` |
 
 <Note>
@@ -73,7 +74,7 @@ they print a blast-radius summary and require you to type the workspace **slug**
 exactly (or pass `--yes` for CI). A non-interactive session refuses to run
 without `--yes`.
 
-The narrower purges — `nuke inbox`, `nuke escalations`, `nuke runtimes` — use a
+The narrower purges — `nuke inbox`, `nuke escalations`, `nuke runtimes`, `nuke keeper-requests` — use a
 lighter gate: they require `--yes` and refuse to run non-interactively without
 it.
 
@@ -83,6 +84,7 @@ crewship nuke data               # entities only; prompts for the slug
 crewship nuke inbox --kind failed_run --yes   # drop failed-run spam, nothing else
 crewship nuke escalations --crew quality --yes
 crewship nuke runtimes --yes
+crewship nuke keeper-requests --yes
 ```
 
 <Warning>
@@ -98,6 +100,16 @@ crewship nuke runtimes --yes
 | `--yes` | all subcommands | Skip the confirmation prompt |
 | `--kind` | `nuke inbox` | Scope to one kind: `waitpoint`, `escalation`, `failed_run`, `message` |
 | `--crew` | `nuke escalations` | Crew slug or ID (default: every crew in the workspace) |
+
+## `nuke keeper-requests`
+
+Deletes the workspace's keeper requests and their append-only event ledger, and prints how many of each were removed. `nuke all` already includes this step; use the subcommand to clear the decision log alone. Requires `--yes` (see [Flags](#flags)).
+
+On a server that predates `DELETE /api/v1/admin/keeper/requests` (HTTP 404/405) nothing is deleted: the command warns and exits non-zero instead of claiming success. (`nuke all` keeps tolerating such a server so a full teardown still works.)
+
+```bash
+crewship nuke keeper-requests --yes
+```
 
 ## Relationship to `seed --nuke`
 
