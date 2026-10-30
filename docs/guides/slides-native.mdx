@@ -18,7 +18,10 @@ this page, *Page* means the underlying record that the API addresses by slug or
 audience and hold no panels, document, project or other content yet. Read its
 ID from the `id` field of `crewship page get <slug> -f json`. A Page created
 with `crewship page create --allow-empty` does not have a private audience, so
-this API refuses it with 404.
+this API refuses it with 404. The current app and CLI have no supported flow
+for creating this empty private prerequisite. Use the Artifacts Slides workflow
+for a new deck; the commands below apply only when a suitable private Page
+already exists.
 The routes are disabled by default. Enable `slides.enabled: true` in the server
 configuration or set `CREWSHIP_SLIDES_ENABLED=true` before starting the server.
 This switch does not require the separate Document engine and does not enable
