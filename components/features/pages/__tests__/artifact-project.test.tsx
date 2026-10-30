@@ -238,7 +238,7 @@ it("lets an editor save a whole manifest while withholding owner controls", asyn
 })
 it("keeps the preview and the source draft when history quota is full",async()=>{
  render(<ArtifactProject workspaceId="w" slug="demo" />)
- fireEvent.click(screen.getByRole("button",{name:"Edit source"}))
+ await editSource()
  fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"Work kept at full quota"}})
  fireEvent.click(screen.getByRole("button",{name:"Save project"}))
  await act(async()=>state.save.mock.calls[0][1].onError(Object.assign(Error("Project history quota is full."),{status:413})))
