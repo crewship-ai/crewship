@@ -1570,6 +1570,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Backup: five `BackupTables` entries no table backs (`agent_runs`, `hooks`, `routines`, `schedules`, `webhooks`) are removed — each was a silent no-op on every restore — and a schema guard now checks the list in both directions. (#2274, partial)
 - OpenAPI preserves the incoming webhook signature profile in the final create request and endpoint list schemas, so generated clients can configure and recognize GitHub endpoints.
 - Approval or signal delivery arriving while a routine is parking waits for the original execution to release its slot before resuming, preventing a decided run from remaining stuck in waiting.
+
+- **Routine signals support machine output.** `routine signal -f json` and YAML output now return the run ID, event type and delivery result instead of a human sentence.
+
 - Incoming webhooks use the shared Integrations explorer, overview and endpoint detail on desktop and phones. Creation opens from Add integration, target links survive reload, and Refresh reloads endpoints and receipts. Agent catalogs report whether a signing key is configured without exposing it; paged catalogs are fully read before counting endpoints.
 - **Manifest:** a standalone `Project` can name a workspace agent as lead, `Project.status` uses the API vocabulary (`backlog|planned|in_progress|paused|completed|cancelled`; a bad value is a 400 naming the field instead of a 500), re-applying a `Label` is idempotent, and `Issue.status` is honoured on create — `POST …/issues` and `crewship issue create --status` accept a starting status. (#2426)
 - **Provisioning:** a cache hit is confirmed against the Docker daemon before it is reported, a container start on a missing image invalidates the memoised image list, and a message deferred to a rebuild backs off and stops after three consecutive rebuilds with a clear error — `docker rmi crewship-cache:*` no longer triggers 80+ provisions a second and a dead chat. (#2431)
@@ -7247,7 +7250,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Add optional artifact project previews, versioned element comments, shared-version navigation and explicit chat creation intent behind backend availability.
 
-- **Routine signals support machine output.** `routine signal -f json` and YAML output now return the run ID, event type and delivery result instead of a human sentence.
 
 ## [1.0.0-rc.1] — 2026-07-12
 
