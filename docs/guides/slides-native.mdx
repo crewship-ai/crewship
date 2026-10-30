@@ -11,11 +11,14 @@ To read, present, comment on or export slide decks in the Artifacts library, see
 Slides API with its own server switch.
 </Note>
 
-The schema-1 native Slides adapter can initialize a populated presentation and
-read its saved head or an exact revision. It writes into an empty private
-artifact record that you own. The API addresses that record by its slug or
-`@PAGE_ID` under `/api/v1/pages/`; the record must not yet hold panels, a
-document, a project or other content.
+The schema-1 native Slides adapter can initialize a populated presentation on an
+existing empty private Page and read its saved head or an exact revision. On
+this page, *Page* means the underlying record that the API addresses by slug or
+`@PAGE_ID` under `/api/v1/pages/`. It must be owned by you, have a private
+audience and hold no panels, document, project or other content yet. Read its
+ID from the `id` field of `crewship page get <slug> -f json`. A Page created
+with `crewship page create --allow-empty` does not have a private audience, so
+this API refuses it with 404.
 The routes are disabled by default. Enable `slides.enabled: true` in the server
 configuration or set `CREWSHIP_SLIDES_ENABLED=true` before starting the server.
 This switch does not require the separate Document engine and does not enable
