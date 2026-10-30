@@ -15,7 +15,10 @@ import (
 // 2. Resets the task to PENDING (or the loop_back_to task)
 // 3. Injects failure context from the progress log so the agent learns from mistakes
 type LoopController struct {
-	db     *sql.DB
+	db interface {
+		QueryRowContext(context.Context, string, ...any) *sql.Row
+		ExecContext(context.Context, string, ...any) (sql.Result, error)
+	}
 	pw     *ProgressWriter
 	logger *slog.Logger
 }
@@ -114,13 +117,12 @@ func (lc *LoopController) RetryLoopBack(ctx context.Context, failedTaskID, missi
 	for _, depID := range deps {
 		retried, err := lc.ShouldRetry(ctx, depID, missionID)
 		if err != nil {
-			lc.logger.Error("loop-back retry failed", "dep_id", depID, "error", err)
-			continue
+			return false, fmt.Errorf("loop-back retry %s: %w", depID, err)
 		}
 		if retried {
 			// Also reset the failed task to BLOCKED (it will be unblocked when dep completes)
 			now := time.Now().UTC().Format(time.RFC3339)
-			lc.db.ExecContext(ctx, `
+			_, err = lc.db.ExecContext(ctx, `
 				UPDATE mission_tasks SET
 					status = 'BLOCKED',
 					assignment_id = NULL,
@@ -131,6 +133,9 @@ func (lc *LoopController) RetryLoopBack(ctx context.Context, failedTaskID, missi
 					updated_at = ?
 				WHERE id = ? AND mission_id = ?`,
 				now, failedTaskID, missionID)
+			if err != nil {
+				return false, fmt.Errorf("block failed task %s: %w", failedTaskID, err)
+			}
 			return true, nil
 		}
 	}
