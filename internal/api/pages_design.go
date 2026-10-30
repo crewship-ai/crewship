@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -283,8 +284,11 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 		Slug          string `json:"slug"`
 		Name          string `json:"name"`
 		CreatedByTest bool   `json:"created_by_test"`
+		SourcePageID  string `json:"source_page_id,omitempty"`
+		ExpectedHuman string `json:"expected_human,omitempty"`
+		InitialState  string `json:"initial_state,omitempty"`
 	}
-	if !designDecode(w, r, &p, 8192) {
+	if !designDecode(w, r, &p, 6<<20) {
 		return
 	}
 	spec := pages.Document{APIVersion: pages.DocumentAPIVersion, Kind: pages.DocumentKind, Metadata: pages.Metadata{Slug: p.Slug, Name: p.Name}}
@@ -301,7 +305,26 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 		designError(w, errDesignAccess)
 		return
 	} // creation is deliberate human action
-	result, err := design.Run(r.Context(), design.Request{})
+	var initial []byte
+	continuing := p.InitialState != "" || p.SourcePageID != "" || p.ExpectedHuman != ""
+	if continuing {
+		if p.ExpectedHuman != user.ID {
+			designError(w, errDesignAccess)
+			return
+		}
+		if !immutablePageReferenceID.MatchString(p.SourcePageID) || len(p.InitialState) == 0 || len(p.InitialState) > base64.StdEncoding.EncodedLen(4<<20) {
+			designError(w, artifacts.ErrVersionInvalid)
+			return
+		}
+		var err error
+		initial, err = base64.StdEncoding.Strict().DecodeString(p.InitialState)
+		if err != nil || len(initial) == 0 || len(initial) > 4<<20 {
+			designError(w, artifacts.ErrVersionInvalid)
+			return
+		}
+		r = ensureDesignAdminAuditRequest(r, true)
+	}
+	result, err := design.Run(r.Context(), design.Request{State: initial})
 	if err != nil {
 		designError(w, err)
 		return
@@ -309,7 +332,7 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 	k := artifacts.VersionKey{WorkspaceID: WorkspaceIDFromContext(r.Context()), PageID: generateCUID()}
 	raw, _ := json.Marshal(spec)
 	staged := false
-	auth := func(ctx context.Context, tx *sql.Tx) (string, error) {
+	currentCreateAuthority := func(ctx context.Context, tx *sql.Tx) (string, error) {
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
 		if !h.designEnabled(ctx) || validateContentHumanCredential(r.WithContext(ctx), tx, "pages:write") != nil {
 			return "", errDesignAccess
@@ -325,17 +348,43 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 		if !canRole(role, "create") && !HasCapability(resolveCapabilitiesFromRow(caps, role), CapabilityPageCreate) {
 			return "", errDesignAccess
 		}
+		if continuing {
+			if UserFromContext(ctx) == nil || UserFromContext(ctx).ID != p.ExpectedHuman {
+				return "", errDesignAccess
+			}
+			source := artifacts.VersionKey{WorkspaceID: k.WorkspaceID, PageID: p.SourcePageID}
+			// Fresh proof on each pass: creating this new Page legitimately
+			// advances the workspace epoch, while the source stays untouched.
+			if _, err := h.designAuthority(r, source, true)(ctx, tx); err != nil {
+				return "", err
+			}
+		}
+		return user.ID, nil
+	}
+	auth := func(ctx context.Context, tx *sql.Tx) (string, error) {
+		if _, err := currentCreateAuthority(ctx, tx); err != nil {
+			return "", err
+		}
 		if staged {
+			stamp := tsformat.Format(time.Now())
+			if _, err := tx.ExecContext(ctx, `INSERT INTO artifact_design_documents(workspace_id,page_id,state,updated_by,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(workspace_id,page_id) DO NOTHING`, k.WorkspaceID, k.PageID, result.State, user.ID, stamp); err != nil {
+				return "", err
+			}
+			// The final document write can run triggers. Recheck creation and
+			// source authority before acknowledging the exact new Page/document.
+			if _, err := currentCreateAuthority(ctx, tx); err != nil {
+				return "", err
+			}
 			var unchanged bool
-			if e = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages WHERE id=? AND workspace_id=? AND owner_user_id=? AND owner_crew_id IS NULL AND folder_id IS NULL AND slug=? AND name=? AND spec_json=? AND created_by_test=?)`, k.PageID, k.WorkspaceID, user.ID, p.Slug, p.Name, string(raw), p.CreatedByTest).Scan(&unchanged); e != nil {
-				return "", e
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages p JOIN artifact_design_documents d ON d.page_id=p.id AND d.workspace_id=p.workspace_id WHERE p.id=? AND p.workspace_id=? AND p.owner_user_id=? AND p.owner_crew_id IS NULL AND p.folder_id IS NULL AND p.slug=? AND p.name=? AND p.spec_json=? AND p.created_by_test=? AND d.state=? AND d.updated_by=? AND d.updated_at=? AND d.revision=0 AND d.saved_revision=0)`, k.PageID, k.WorkspaceID, user.ID, p.Slug, p.Name, string(raw), p.CreatedByTest, result.State, user.ID, stamp).Scan(&unchanged); err != nil {
+				return "", err
 			}
 			if !unchanged {
 				return "", errDesignAccess
 			}
-			_, e = tx.ExecContext(ctx, `INSERT INTO artifact_design_documents(workspace_id,page_id,state,updated_by,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(workspace_id,page_id) DO NOTHING`, k.WorkspaceID, k.PageID, result.State, user.ID, tsformat.Format(time.Now()))
-			return user.ID, e
+			return user.ID, nil
 		}
+		var e error
 		var n int
 		if e = tx.QueryRowContext(ctx, `SELECT count(*) FROM pages WHERE workspace_id=?`, k.WorkspaceID).Scan(&n); e != nil {
 			return "", e
