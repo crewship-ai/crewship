@@ -10,6 +10,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 ## [Unreleased]
 
 - **Agent peer-card errors no longer expose server internals.** When reading or deleting an agent's peer cards fails inside the server, the API now answers `Internal server error` and logs the cause, instead of returning database driver text or a host file path.
+- **Artifact MCP tools advertise the inputs they accept.** Tool descriptions now name the Slides/data flag dependencies and explain mandate, version conflict and quota behavior; version schemas require the positive values already enforced by the host.
 
 - ⚠️ **Behaviour change: workspace webhook destinations are visible only to channel administrators.** Channel lists omit a workspace webhook URL for roles below ADMIN/OWNER while retaining its metadata and personal destinations owned by the caller. Delivery configuration and signing secrets are unchanged.
 
