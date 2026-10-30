@@ -61,7 +61,7 @@ flags.
 | **Lease** | Craft's single-editor lock on one document. It lasts 15 seconds and is renewed while the editor stays connected. Others can request a handoff. | A permission. A lease says who is editing now, not who may edit. |
 | **Generation** | The number of the current lease. Each new holder gets a higher one; renewals and saves carry it, so an old tab or replaced agent cannot write. | A **version**, which numbers saved content. |
 | **Version** | One immutable saved state of an artifact, numbered from 1. A project write names the `base_version` it started from and a Craft save its `baseVersion`; either fails with `409` if another write landed first. Design changes merge into a live document and have no base. Restoring creates a new version. | A Git commit or a Pages version, which is a different history. |
-| **Shared version** | The one version that readers other than the owner and editors can see. Publishing a new version does not change it; only sharing does. Agents cannot share. | The **latest version**, which only the owner and editors see. |
+| **Shared version** | For Projects, Dashboard and Slides, the version that readers other than the owner and editors can see. Design has a separate live canvas: an authorized REST read without a version parameter returns that live state. Publishing a new version does not change it; only sharing does. Agents cannot share. | The **latest version**, which only the owner and editors see. |
 | **Share** | Granting another person or group access, or choosing the shared version. | A public link, which is a separate Pages feature. |
 
 ### Artifacts that are not artifacts

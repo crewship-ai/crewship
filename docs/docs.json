@@ -518,6 +518,7 @@
               "api-reference/recurring-issues",
               "api-reference/saved-views",
               "api-reference/pages",
+              "api-reference/artifacts",
               "api-reference/mooring",
               "api-reference/triage",
               "api-reference/workflow-templates",

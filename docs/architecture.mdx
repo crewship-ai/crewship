@@ -424,7 +424,11 @@ Projects, Designs, and Word and Sheet documents keep their content in one
 version store inside the Crewship database. Every save is a new immutable
 version; files are stored once per artifact by content hash. Each artifact has
 two heads: the **latest version**, which the owner and editors work on, and
-the **shared version**, which is all that other readers can see. How a write
+the **shared version**. For Projects (including Dashboard and Slides),
+readers other than the owner and editors see only the shared version. Design
+REST reads without a version parameter expose the live canvas to authorized
+readers; its explicit version reads restrict non-editors to the shared version.
+How a write
 is guarded depends on the type. A project write (and a Dashboard data batch)
 must name the `base_version` it started from; a Craft save names its lease
 `generation` and its `baseVersion`. A Design write has no base: it is merged

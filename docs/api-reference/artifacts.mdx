@@ -68,9 +68,11 @@ All routes need a signed-in human session or a CLI credential, plus a workspace
 not enough: each handler checks the caller's current access to that one
 artifact inside the same transaction that reads or writes it.
 
-In the table, "owner" also covers an agent run started by the owner and bound
-to that artifact. "Write access" means an edit grant; a `comment` grant only
-allows comments.
+For supported Project tool operations, an admitted agent run acts on the
+owner’s behalf and remains bound to that artifact. Design tools act under the
+connected human’s current edit authority. These mandates never permit sharing
+a version. "Write access" means an edit grant; a `comment` grant only allows
+comments.
 
 | Family | Operation | Who | CLI scope |
 |---|---|---|---|
@@ -83,7 +85,7 @@ allows comments.
 | Project | Add a comment | The owner, someone with write access, or a person with a `comment` grant | `pages:write` |
 | Project | Reply to a comment | The owner only | `pages:write` |
 | Dashboard | Write data | The owner only | `pages:write` |
-| Design | Read and version history | Anyone the Design is shared with reads it; everyone with write access also gets the full version history, other readers only the shared version | `pages:read` |
+| Design | Read and version history | Anyone the Design is shared with reads it; everyone with write access also gets the full version history. REST reads without `version` return the live canvas; explicit version reads by non-editors are restricted to the shared version | `pages:read` |
 | Design | Apply changes, save a snapshot, restore | The owner, or someone with write access | `pages:write` |
 | Design | Add a comment | The owner, someone with write access, or a person with a `comment` grant | `pages:write` |
 | Design | Share a version | The owner only | `pages:write` |
@@ -108,7 +110,11 @@ nothing in history is deleted. Each family guards its writes differently.
   `base_version` it last read; if the latest version has moved, the server
   returns `409 artifact_version_conflict`.
 - **Shared version.** The latest version and the shared version are separate.
-  Readers other than the owner only ever see the shared version.
+  For Project, Dashboard and Slides, the owner and editors read latest; other
+  readers get the shared version. Design’s REST `get` without a `version`
+  parameter returns the live canvas to an authorized reader; explicitly
+  selecting a retained version restricts a non-editor to the shared version.
+  Its WebSocket read-only connection also receives the shared snapshot.
 - **Dashboard data** is versioned per JSON document. Each write in a batch
   carries `ifVersion` (`0` creates the document), and the batch names the
   project's current `base_version`. One stale `ifVersion` fails the whole batch
@@ -156,9 +162,9 @@ new request against the new version. Never retry blindly with a newer base.
 
 When history is full, every existing version is kept and only new saves are
 refused. Read responses include a `quota` object with `used_bytes`,
-`limit_bytes`, `warning` (at 80% use) and `retention`. Retention is `keep-all`;
-a reader limited to the shared version gets `shared-version-only` and no
-usage numbers.
+`limit_bytes`, `warning` (at 80% use) and `retention`. Owner retention is `keep-all`; a non-owner editor gets `latest-version-only`,
+and a reader limited to the shared version gets `shared-version-only`.
+Non-owners receive zero usage/limit values.
 
 ## Route families
 
@@ -184,7 +190,7 @@ A Dashboard is a project whose version declares JSON collections.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/v1/pages/{slug}/artifact/data` | List the declared collections |
-| GET | `/api/v1/pages/{slug}/artifact/data/{collection}` | Read a collection's documents with `version`, `updated_by`, `updated_at` |
+| GET | `/api/v1/pages/{slug}/artifact/data/{collection}` | Read a collection's documents with `version`, `updated_at`, `source_label` and `source_kind` |
 | POST | `/api/v1/pages/{slug}/artifact/data/{collection}` | Write a batch of documents with `ifVersion` |
 
 ### Slides
@@ -268,7 +274,7 @@ status for those.
 | Status | `code` | Meaning |
 |---|---|---|
 | 400 | — | Invalid body, unsafe file path, or missing entry point |
-| 403 | — | No current read or write access, or the CLI token lacks the scope |
+| 403 | — | Missing write authority or CLI scope; an artifact without read access is hidden with 404 |
 | 404 | — | Feature off, artifact not found, or not visible to the caller |
 | 409 | `artifact_version_conflict` | `base_version` is not the latest version |
 | 409 | `artifact_slug_taken` | The slug is already used in this workspace |

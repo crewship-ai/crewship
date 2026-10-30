@@ -477,7 +477,7 @@ Crews in **other** workspaces are untouched — the purge is scoped through
 |---|---|
 | `403` | Caller not `OWNER`/`ADMIN`, **or** target member is the `OWNER` |
 | `404` | `memberId` not found in this workspace |
-| `409` | The member owns a page that resolves to no crew, or artifacts that need a human successor (see above). When the caller is an `ADMIN` rather than the `OWNER` and the member owns private artifacts, the body carries `code: "page_ownership_transfer_required"`. |
+| `409` | The member owns a page that resolves to no crew, or artifacts that need a human successor (see above). Every ownership-conflict response carries `code: "page_ownership_transfer_required"`; caller role and private audience affect which details may be shown. |
 
 ---
 
