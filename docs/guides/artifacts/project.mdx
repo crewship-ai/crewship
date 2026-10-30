@@ -1,0 +1,249 @@
+---
+title: "Projects: screens, comments and agent work"
+description: "Move between the screens of a Project artifact, pin comments to exact elements, send them to the agent, and see what the agent may do."
+icon: "app-window"
+stability: experimental
+tag: Experimental
+---
+
+A **Project** is an artifact made of linked HTML screens, for example an order
+list, an order detail and a settings screen. An agent writes it from a chat. You
+review it in **Artifacts**, click the part you want changed, and the agent
+publishes a new version and answers your comment. Every save is a numbered
+version; nothing in the history is deleted automatically.
+
+<Note>
+Projects are off by default. Each surface on this page needs these switches:
+
+| Surface | Needs |
+| --- | --- |
+| Projects at all (create, view, comment, agent tools) | Workspace flag `artifact_projects`: `crewship feature-flag enable artifact_projects`. An operator can turn it on for every workspace with `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true`. |
+| **New artifact** › **Project** and the Project preview in **Artifacts** | Build-time `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true`. The default production build sets `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=false`. |
+| Project cards and the side viewer in chat | Build-time `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true` |
+| **Create artifact project** in a chat | Workspace flag `artifact_projects` only |
+| An agent creating or publishing | The workspace artifact policy must be on and list the agent's crew: `crewship workspace artifact-policy show` and `crewship workspace artifact-policy set` (workspace owner or admin) |
+
+Dashboards and Slides are Projects with extra files and have their own flags
+(`artifact_dashboard_data`, `artifact_slides`).
+</Note>
+
+## Create a Project
+
+Only an agent writes a Project, and only after you allow it for one message.
+
+1. Open **Artifacts** and click **New artifact**.
+2. **Project** ("Screens that link together") is selected. Under **Start with**
+   choose **Describe it** and write what the screens should contain, or choose
+   **From template** (Pricing site, Sign-up flow, Landing page, Status page).
+3. Click **Continue in chat**. The chat opens with your description as an
+   unsent draft. Open a direct conversation with the agent who should build it;
+   the draft goes into that conversation's composer.
+4. Turn on **Create artifact project** under the composer. It reads
+   "Private project · Sharing requires your approval".
+5. Send the message.
+
+You can also skip the dialog: in any direct chat with an agent, turn on
+**Create artifact project** and describe the screens yourself.
+
+The agent saves all files in one step as version 1. The new Project is private
+to you until you share a version. The agent cannot share it, choose an owner or
+pick an audience.
+
+## Switch between screens
+
+Open the Project from **Artifacts**. The detail has three tabs: **Preview**,
+**History** and **Comments**.
+
+On **Preview**, the bar above the canvas lists every HTML file of the Project as
+a screen. The entry file comes first, then the others in file-name order.
+
+- A screen is named after its `<title>` when every screen has a different title
+  of at most 24 characters. Otherwise it is named after the file, so
+  `detail.html` shows as **Detail** and `faq.html` as **FAQ**.
+- Up to four screens show as buttons. With more, a narrow window shows a
+  **Screen** drop-down instead.
+- Links between screens work inside the preview. Clicking
+  `<a href="settings.html">` on one screen opens the **Settings** screen.
+  Links to anything outside the Project do nothing.
+
+The preview runs in an isolated frame. Its scripts cannot read your session or
+leave the frame, so a screen that loads data from the internet shows without it.
+
+### Example: three screens
+
+A Project with these files shows **Orders**, **Order detail** and
+**Settings** as screens:
+
+```html
+<!-- index.html -->
+<title>Orders</title>
+<link rel="stylesheet" href="style.css">
+<nav id="artifact-nav"><a href="index.html">Orders</a> <a href="detail.html">Order detail</a> <a href="settings.html">Settings</a></nav>
+<h1 id="artifact-orders-heading">Orders</h1>
+<ul id="artifact-orders-list"><li><a href="detail.html">Order 1042</a></li></ul>
+
+<!-- detail.html -->
+<title>Order detail</title>
+<h1 id="artifact-detail-heading">Order 1042</h1>
+<div id="artifact-detail-summary">Total: 120 EUR. Status: shipped.</div>
+
+<!-- settings.html -->
+<title>Settings</title>
+<h1 id="artifact-settings-heading">Settings</h1>
+<p id="artifact-settings-email">Email me when an order ships.</p>
+```
+
+`style.css` is a fourth file. It is applied to every screen that links it and
+is not a screen itself.
+
+## Pin a comment to an element
+
+You comment on an exact element of an exact version, so the agent knows what to
+change.
+
+1. On **Preview**, open the screen and make sure **Latest** is selected in the
+   version switch. Older versions take no comments.
+2. Click **Select**. Elements that can take a comment get a dashed outline;
+   everything else shows a not-allowed cursor.
+3. Click the element. A numbered card opens on the canvas, titled with the
+   element and version, for example
+   "On #artifact-settings-email · "Email me when an order ships." · v1".
+4. Type the change under **What should change here?**.
+5. Save it (see the next section for which buttons you get).
+
+Only elements with an `id` can be selected; clicking inside one selects the
+nearest element with an `id`. Very long blocks of text cannot be selected;
+pick a smaller part. If the
+screen has none, you see "Nothing on this screen can take a comment yet:
+comments anchor to parts with an id, and this screen has none. Ask the agent in
+chat to add them." Agents are asked to give headings, cards, sections and
+buttons stable IDs that start with `artifact-`.
+
+Clicking a comment in the list switches to its screen and briefly outlines the
+element.
+
+### Your unsent comment is kept
+
+While you type, the comment is saved in this browser for you, this workspace
+and this Project. If the tab closes or the browser crashes, open the Project
+again: the text is back in the comment card. Click **Select** and pick the
+element again, because the selection is not kept.
+
+The draft is cleared when the comment is saved. If the browser blocks storage,
+nothing is kept; copy long comments before you leave.
+
+## Send a comment to the agent
+
+What the comment card offers depends on who you are and where the Project came
+from:
+
+| You | Buttons |
+| --- | --- |
+| Owner, Project created by an agent in your chat | **Cancel**, **Add to queue**, **Send to agent** |
+| Owner, Project without a source chat | **Cancel**, **Save comment** |
+| Someone else who can edit it | **Cancel**, **Save comment** |
+
+- **Send to agent** saves the comment as a task and immediately posts a request
+  in the chat where the Project was created. That message starts the agent on
+  this one comment.
+- **Add to queue** saves the task without starting the agent ("Added to the
+  queue. The agent starts when you send it."). When you are ready, open
+  **Comments** and click **Send N to agent**. Waiting tasks go out one by one;
+  the first that does not start stops the rest.
+- **Save comment** only records the comment. It never starts an agent.
+
+A comment starts the agent only when you send it. The request needs the source
+chat to be connected and the agent to be idle. If it does not go out, the
+comment stays saved and the viewer shows "The agent did not start" with
+**Retry**. Sending the same comment again never creates a second task.
+
+### Follow the agent's answer
+
+Each comment in **Comments** shows its state:
+
+| Label | Meaning |
+| --- | --- |
+| **Waiting** | Saved for the agent, not started yet |
+| **Agent working** | The agent's run has picked it up |
+| **Done · v2** | The agent published version 2 and replied |
+| **Needs a new selection** | The agent could not find the element and asked you to select it again |
+
+The agent's replies appear under the comment with the version they refer to,
+for example "v2: Added the shipping date". When you see **Needs a new
+selection**, read the reply, select the element on the latest version and send
+a new comment.
+
+The **Comments** tab count shows comments still waiting. On a wide window the
+same list also sits beside the preview.
+
+### When something changed meanwhile
+
+- **Changed meanwhile**: someone saved a newer version while you were
+  commenting. Nothing was overwritten. Click **Reload and reapply** to put your
+  comment and selection on the newest version.
+- **This element changed. Select it again.**: the element is gone or no longer
+  matches its text. Your text stays; select the element again.
+- **Saving is paused**: the Project's history storage is full. Your comment
+  stays in the card; use **Copy my comment** and **Manage versions**.
+
+## Edit the source yourself
+
+People who can edit a Project see **Edit source** above the preview. It opens
+the full project view:
+
+1. Click **Edit source**, choose a file under **Source file path** and edit it.
+2. Click **Save project**. The save becomes a new version.
+3. **Discard source draft** throws your changes away.
+
+Your unsaved source draft is kept in this browser. When you come back you see
+"Unsaved source draft from version N was kept in this browser" with **Restore
+source draft** and **Discard it**. If the Project moved on in the meantime,
+saving the old draft reports a conflict and keeps your draft.
+
+## What the agent can do
+
+Agents work on Projects through these tools:
+
+| Tool | What it does |
+| --- | --- |
+| `artifact_create` | Creates one private Project with all its files in one step |
+| `artifact_publish` | Saves a complete new set of files as the next version |
+| `artifact_versions` | Reads the current files, retained versions and storage use |
+| `artifact_restore` | Restores an older version as a new version |
+| `artifact_comments` | Reads the comments, each anchored to a version, file, element and quote |
+| `artifact_reply` | Replies to a comment with the version that changed, or asks for a new selection |
+
+Rules the server enforces:
+
+- **One run, one permission.** An agent may create a Project only in the run
+  started by your message with **Create artifact project** on. It may change a
+  Project only in a run started by **Send to agent** on that Project, and only
+  in a private chat that you started. The permission ends with the run.
+- **Crew policy.** The workspace artifact policy must be on and include the
+  agent's crew. The policy is a ceiling and never replaces your permission for
+  the run.
+- **Exact base version.** Every publish names the version the agent read. If
+  the Project moved on, the server refuses with a conflict and keeps the
+  current version. The agent must keep its changes, explain the conflict and
+  reconcile on purpose. It never retries blindly against a newer version.
+- **No sharing.** Agents cannot share a version or grant access. Sharing is
+  always your step.
+- **Stable IDs.** Agents must write `artifact-` IDs on meaningful elements and
+  keep IDs of unchanged elements, so existing comments stay anchored.
+- **Answer the comment.** After publishing, the agent replies with the new
+  version and what changed. If the anchor no longer identifies the element, it
+  asks for a fresh selection instead of guessing.
+
+Limits per Project: up to 256 files and 32 MiB per version, and 256 MiB of
+history in total. The viewer warns before the history is full.
+
+## Who sees what
+
+| Role | Sees | Can |
+| --- | --- | --- |
+| Owner | Every version, all comments | Comment, send to the agent, edit source, restore, share |
+| Editor (write access) | The latest version | Comment (saved only), edit source |
+| Reader of a shared version | Only the shared version | View |
+
+A Project is private until the owner shares a version. Later versions stay
+private until they are shared too.
