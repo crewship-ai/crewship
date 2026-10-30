@@ -72,6 +72,7 @@ type PageHandler struct {
 	builds                           *pageBuildCoordinator
 	pageArtifacts                    *pagebuild.Store
 	pageRuntimeOrigin                string
+	pageRuntimeDerived               bool // derived for a localhost Studio; see runtimeOriginFor
 	pageRuntimeDevelopmentSameOrigin bool
 	pageStudioOrigin                 string
 	db                               *sql.DB

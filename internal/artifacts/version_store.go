@@ -77,6 +77,10 @@ type VersionQuota struct {
 	LimitBytes int64  `json:"limit_bytes"`
 	Warning    bool   `json:"warning"`
 	Retention  string `json:"retention"`
+
+	// Level is none, near, critical or full (see quotaLevel); omitted when the
+	// quota is withheld. Warning stays true from near upwards for older clients.
+	Level string `json:"level,omitempty"`
 }
 type VersionState struct {
 	LatestVersion int64           `json:"latest_version"`
@@ -180,7 +184,8 @@ func (s *VersionStore) quota(ctx context.Context, tx *sql.Tx, k VersionKey) (q V
 	q.LimitBytes = s.opts.MaxHistoryBytes
 	q.Retention = "keep-all"
 	err = tx.QueryRowContext(ctx, `SELECT coalesce((SELECT sum(length(content)) FROM artifact_version_blobs WHERE workspace_id=? AND page_id=?),0)+coalesce((SELECT sum(length(CAST(manifest_json AS BLOB))+length(CAST(message AS BLOB))+length(CAST(actor AS BLOB))+length(created_at)+128) FROM artifact_versions WHERE workspace_id=? AND page_id=?),0)`, k.WorkspaceID, k.PageID, k.WorkspaceID, k.PageID).Scan(&q.UsedBytes)
-	q.Warning = q.UsedBytes*100 >= q.LimitBytes*int64(s.opts.WarningPercent)
+	q.Level = quotaLevel(q.UsedBytes, q.LimitBytes, s.opts.WarningPercent)
+	q.Warning = q.Level != "" && q.Level != QuotaLevelNone
 	return
 }
 func (s *VersionStore) Read(ctx context.Context, k VersionKey, a VersionAuthorize) (out VersionState, err error) {
@@ -405,6 +410,9 @@ type VersionViewAuthorize func(context.Context, *sql.Tx) (string, VersionSelecti
 type VersionView struct {
 	State    VersionState
 	Versions []VersionInfo
+	// Retention is a dry-run preview of DefaultRetentionPolicy, present only
+	// with full owner history. Nothing it lists has been or will be deleted here.
+	Retention *RetentionPreview
 }
 
 // View releases one consistent authorized snapshot: manifest, shared/latest
@@ -464,6 +472,11 @@ func (s *VersionStore) View(ctx context.Context, k VersionKey, a VersionViewAuth
 		out.Versions = []VersionInfo{{Version: out.State.Manifest.Version, EntryPoint: out.State.Manifest.EntryPoint, Message: out.State.Manifest.Message, Actor: out.State.Manifest.Actor, CreatedAt: out.State.Manifest.CreatedAt, RestoredFrom: out.State.Manifest.RestoredFrom}}
 		if selection.IncludeHistory && !selection.SharedOnly {
 			out.Versions, e = listVersions(ctx, tx, k)
+			if e != nil {
+				return e
+			}
+			preview := PlanRetention(out.Versions, out.State.LatestVersion, out.State.SharedVersion, time.Now(), DefaultRetentionPolicy)
+			out.Retention = &preview
 		}
 		return e
 	})

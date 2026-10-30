@@ -35,7 +35,7 @@ func (m *craftNativeHTTP) renewAdmission(r *http.Request) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if proof.application != entry.application || proof.workspaceEpoch != entry.workspaceEpoch || proof.memberID != entry.memberID || proof.memberRevision != entry.memberRevision {
+	if proof.application != entry.application || proof.memberID != entry.memberID || proof.memberRevision != entry.memberRevision {
 		return false, errCraftNativeAccess
 	}
 	boot, start, err := m.clock.Now()

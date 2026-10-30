@@ -188,9 +188,6 @@ func WithPartSize(n int64) S3Option { return func(s *S3) { s.partSize = n } }
 // WithRetryPolicy replaces DefaultRetryPolicy.
 func WithRetryPolicy(p RetryPolicy) S3Option { return func(s *S3) { s.retry = p } }
 
-// WithClock sets the clock used for request signing and retry sleeps.
-func WithClock(c Clock) S3Option { return func(s *S3) { s.clock = c } }
-
 // S3 is a Destination backed by the S3 REST API, signed with SigV4.
 type S3 struct {
 	cfg      S3Config

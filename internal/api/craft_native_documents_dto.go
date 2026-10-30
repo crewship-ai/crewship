@@ -4,6 +4,7 @@ type craftNativeDocumentQuotaResponse struct {
 	UsedBytes  string `json:"usedBytes"`
 	LimitBytes string `json:"limitBytes"`
 	Warning    bool   `json:"warning"`
+	Level      string `json:"level,omitempty"`
 	Retention  string `json:"retention"`
 }
 type craftNativeDocumentResponse struct {

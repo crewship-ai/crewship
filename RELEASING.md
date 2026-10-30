@@ -69,6 +69,20 @@ web-origin recurring templates pause at their next firing until reviewed and
 saved/re-enabled in a fresh full authenticated session; see
 [restore authorization](docs/guides/backup.mdx#restore).
 
+## Shared dev release build profile
+
+`.env.production` is the single build profile and starts with
+`CREWSHIP_BUILD_PROFILE`. On main it is `main`: every experimental artifact
+surface is off and the Artifacts nav opens `/pages`. A shared dev release
+(a `demo/release-*` branch with a draft PR for CI) changes only this file: set
+`CREWSHIP_BUILD_PROFILE=release` and turn on the flags listed in
+`RELEASE_FLAGS` in `e2e/build-profile.ts`; the sharing mock stays off.
+
+The feature-flag unit tests and the phone browser contract read the profile and
+check either build, so CI of the exact release SHA is green without skipping
+tests. Anything bound for main (a push to main or a merge-queue ref) must carry
+the `main` profile; `lib/__tests__/feature-flags.test.ts` fails otherwise.
+
 ## Cutting the tag
 
 ```bash

@@ -43,6 +43,7 @@ vi.mock("@/components/features/chat/artifact-context/craft/craft-lock-bar", () =
   craftEditorHref: (ws: string, slug: string) => `/editor?${ws}&${slug}`,
 }))
 
+vi.mock("../page-content", () => ({ ArtifactPageContent: ({ pageId }: { pageId: string }) => <div data-testid="page-content" data-page={pageId} /> }))
 vi.mock("../sharing/share-dialog", () => ({ ShareDialog: ({ item }: { item: { name: string } }) => <div role="dialog" aria-label={`Share ${item.name}`} /> }))
 vi.mock("../sharing/access-tab", () => ({ AccessTab: ({ item }: { item: { name: string } }) => <section aria-label={`Access to ${item.name}`} /> }))
 vi.mock("../sharing/folder-settings-dialog", () => ({ FolderSettingsDialog: ({ folder }: { folder: { name: string } }) => <div role="dialog" aria-label={`Settings for ${folder.name}`} /> }))
@@ -274,11 +275,12 @@ it("other kinds do not read a document", () => {
   expect(state.reads.every(read => !read.enabled)).toBe(true)
 })
 
-it("a panel Page opens on its page", () => {
+it("a panel Page shows its content in the detail, never a way out to Pages", () => {
   state.item = "page-weekly"
   renderLibrary()
   expect(screen.queryByTestId("lock-bar")).toBeNull()
-  expect(screen.getByRole("link", { name: "Open page" }).getAttribute("href")).toBe("/pages/weekly?workspace_id=ws1")
+  expect(screen.getByTestId("page-content").dataset.page).toBe("page-weekly")
+  expect(screen.queryByRole("link", { name: /Open page|Open in Pages/ })).toBeNull()
 })
 
 it("an unknown or removed item falls back to the gallery", () => {

@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -676,6 +678,113 @@ func TestSeedPages_PanelPayloadsSurviveMissingAppStorage(t *testing.T) {
 	}
 	if pushes != wantPushes {
 		t.Errorf("panel payload pushes = %d, want %d — missing app storage must not cost the demo payloads", pushes, wantPushes)
+	}
+}
+
+// A server whose Pages Apps are off answers the first app with a coded 503
+// (#3108). The seed must recognise the code — not the sentence — stop trying
+// the remaining apps, say so ONCE naming `crewship page enable`, keep every
+// panel payload, and not count the skip as a failure.
+func TestSeedPages_AppsNotEnabledIsOneMessage(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		response clitest.Handler
+		want     string
+	}{
+		{
+			name:     "page_apps_not_enabled code",
+			response: clitest.JSONResponse(503, map[string]string{"error": "Pages Apps are off", "code": "page_apps_not_enabled"}),
+			want:     "crewship page enable",
+		},
+		{
+			name:     "page_runtime_origin_missing code",
+			response: clitest.JSONResponse(503, map[string]string{"error": "no runtime origin", "code": "page_runtime_origin_missing"}),
+			want:     "CREWSHIP_PAGE_RUNTIME_ORIGIN",
+		},
+		{
+			name:     "legacy storage sentence without a code",
+			response: clitest.ErrorResponse(503, "Page project storage is not configured"),
+			want:     "page project storage is not configured",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := clitest.NewStubServer()
+			defer s.Close()
+
+			const ws = covWorkspaceIDCli10
+			s.OnPost("/api/v1/pages", clitest.JSONResponse(201, map[string]any{"slug": "x"}))
+			apps, wantPushes := 0, 0
+			for _, page := range seeddata.Pages {
+				if page.Project != nil {
+					apps++
+					s.OnGet("/api/v1/pages/"+page.Slug+"/project/publications", tc.response)
+				}
+				for _, panel := range page.Panels {
+					if panel.Demo == nil {
+						continue
+					}
+					wantPushes++
+					s.OnPut("/api/v1/pages/"+page.Slug+"/panels/"+panel.ID+"/data",
+						clitest.JSONResponse(200, map[string]any{"accepted": true}))
+				}
+			}
+			for _, slug := range pageProducerRoutineSlugs(seeddata.Pages) {
+				s.OnPost("/api/v1/workspaces/"+ws+"/pipelines/"+slug+"/run",
+					clitest.JSONResponse(202, map[string]string{"run_id": "r1"}))
+			}
+			if apps < 2 {
+				t.Fatalf("catalogue has %d app page(s); the test needs two to prove the rest are skipped", apps)
+			}
+
+			client := cli.NewClient(s.URL(), "tok", ws)
+			stderr, err := captureStderrCov(t, func() error {
+				return seedPages(context.Background(), client, false)
+			})
+			if err != nil {
+				t.Fatalf("seedPages: %v — a host without Pages Apps is not a failed demo", err)
+			}
+			attempts, pushes := 0, 0
+			for _, page := range seeddata.Pages {
+				attempts += len(s.CallsFor("GET", "/api/v1/pages/"+page.Slug+"/project/publications"))
+				for _, panel := range page.Panels {
+					if panel.Demo != nil {
+						pushes += len(s.CallsFor("PUT", "/api/v1/pages/"+page.Slug+"/panels/"+panel.ID+"/data"))
+					}
+				}
+			}
+			if attempts != 1 {
+				t.Errorf("app attempts = %d, want 1 — the first refusal holds for every app", attempts)
+			}
+			if pushes != wantPushes {
+				t.Errorf("panel payload pushes = %d, want %d", pushes, wantPushes)
+			}
+			if n := strings.Count(stderr, tc.want); n != 1 {
+				t.Errorf("stderr names %q %d times, want once:\n%s", tc.want, n, stderr)
+			}
+			if strings.Contains(stderr, "failed") {
+				t.Errorf("the skip was reported as a failure:\n%s", stderr)
+			}
+		})
+	}
+}
+
+// Any other app error is that app's own failure: counted, and the next app is
+// still tried.
+func TestSeedPageAppSkip_OnlyServerWideRefusals(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		err  error
+		skip bool
+	}{
+		{&seedPageAPIError{Status: "503 Service Unavailable", Message: "x", Code: "page_apps_not_enabled"}, true},
+		{fmt.Errorf("wrapped: %w", &seedPageAPIError{Status: "503", Message: "x", Code: "page_runtime_origin_missing"}), true},
+		{&seedPageAPIError{Status: "503", Message: "Page project storage is not configured"}, true},
+		{&seedPageAPIError{Status: "409 Conflict", Message: "revision moved", Code: "conflict"}, false},
+		{errors.New("demo build is not ready for the expected source (failed)"), false},
+	} {
+		if _, got := seedPageAppSkip(tc.err); got != tc.skip {
+			t.Errorf("seedPageAppSkip(%v) = %v, want %v", tc.err, got, tc.skip)
+		}
 	}
 }
 

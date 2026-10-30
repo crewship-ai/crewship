@@ -17,6 +17,7 @@ const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOSt
 const row = (over: Record<string, unknown>) => ({ owner: "user/fixture-human", reach: ["owner"], panel_count: 0, panel_states: { fresh: 0, stale: 0, failed: 0, never_produced: 0 }, created_at: ago(9000), ...over })
 const LIST = [
   row({ id: "page-site", slug: "pricing-site", name: "Pricing site", artifact_kind: "project", artifact_shared_version: 1, updated_at: ago(12) }),
+  row({ id: "page-weekly", slug: "weekly-report", name: "Weekly report", panel_count: 1, panel_states: { fresh: 1, stale: 0, failed: 0, never_produced: 0 }, updated_at: ago(40) }),
   row({ id: "page-brief", slug: "partner-brief", name: "Partner brief", artifact_kind: "word", has_document: true, artifact_shared_version: 1, updated_at: ago(95) }),
 ]
 
@@ -33,6 +34,9 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   if (path === "/api/v1/me/preferences" && method === "GET") return json({})
   if (path.startsWith("/api/v1/me/preferences/") && method === "PUT") return json({ ok: true })
   if (path === "/api/v1/documents/status" && method === "GET") return json({ enabled: true })
+  // A panel Page, read by its immutable ID the way the detail asks for it.
+  if (path === "/api/v1/pages/%40page-weekly" && method === "GET") return json({ id: "page-weekly", slug: "weekly-report", name: "Weekly report", owner: "user/fixture-human",
+    panels: [{ id: "status", schema: "status.v1", title: "Service status", sla_seconds: 30, state: "fresh" }] })
   if (path === "/api/v1/pages/%40page-brief" && method === "GET") return json({ id: "page-brief", slug: "partner-brief", name: "Partner brief", has_document: true })
   if (path === "/api/v1/pages/%40page-brief/document" && method === "GET") return json({ page_id: "page-brief", schema: 3, rev: 2, content: {
     type: "doc", content: [{ type: "paragraph", attrs: { id: "p1" }, content: [{ type: "text", text: "Three partners, one launch date." }] }] } })

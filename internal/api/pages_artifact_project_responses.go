@@ -27,6 +27,9 @@ type artifactProjectSnapshotResponse struct {
 	Versions       []map[string]any         `json:"versions"`
 	Quota          artifacts.VersionQuota   `json:"quota"`
 	Comments       []artifactProjectComment `json:"comments"`
+
+	// RetentionPreview is owner-only and report-only: nothing it lists is deleted.
+	RetentionPreview *artifacts.RetentionPreview `json:"retention_preview,omitempty"`
 }
 
 type artifactProjectMutationResponse struct {
