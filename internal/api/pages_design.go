@@ -175,6 +175,12 @@ func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, w
 		if err != nil {
 			return "", sql.ErrNoRows
 		}
+		// Design has no implicit workspace-manager access. Ownership and
+		// explicit Page/folder grants still use the canonical ACLs below;
+		// this local role view does not change other Crewship surfaces.
+		if canRole(role, "manage") {
+			role = "MEMBER"
+		}
 		ctx = context.WithValue(ctx, ctxRole, role)
 		rec, err := h.loadPageForRead(ctx, k.WorkspaceID, "@"+k.PageID)
 		if err != nil {
@@ -366,6 +372,12 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 		canEdit = e == nil
 		_, commentErr := h.designCommentAuthority(r, k)(ctx, tx)
 		canComment = commentErr == nil
+		if !canEdit {
+			if shared < 1 || selected > 0 && selected != shared {
+				return artifacts.ErrVersionNotFound
+			}
+			selected = shared
+		}
 		if selected > 0 {
 			if !canEdit && selected != shared {
 				return artifacts.ErrVersionNotFound
@@ -403,6 +415,14 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, designSnapshotResponse{AuthorityRevision: authorityRevision, PageID: k.PageID, Origin: origin, CanComment: canComment, Nodes: result.Nodes, Order: result.Order, CanEdit: canEdit, Version: version, LatestVersion: version, SharedVersion: shared, Actor: designActorResponse{ID: actor, Name: displayName}})
+}
+
+// A reader synchronizes only the immutable shared snapshot. Live authority
+// remains separate even when the saved head or the Yjs document moves ahead.
+func designSharedState(ctx context.Context, tx *sql.Tx, k artifacts.VersionKey) ([]byte, error) {
+	var state []byte
+	err := tx.QueryRowContext(ctx, `SELECT b.content FROM artifact_version_heads h JOIN artifact_versions v ON v.workspace_id=h.workspace_id AND v.page_id=h.page_id AND v.version=h.shared_version JOIN artifact_version_blobs b ON b.workspace_id=v.workspace_id AND b.page_id=v.page_id AND b.hash=json_extract(v.manifest_json,'$.files."design.yjs".hash') WHERE h.workspace_id=? AND h.page_id=? AND h.shared_version>0`, k.WorkspaceID, k.PageID).Scan(&state)
+	return state, err
 }
 func (h *PageHandler) designApplyLocked(r *http.Request, k artifacts.VersionKey, input design.Request) (design.Result, error) {
 	var result design.Result

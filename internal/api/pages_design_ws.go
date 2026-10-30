@@ -40,6 +40,9 @@ func (client *designClient) enqueue(frame []byte) error {
 func (room *designRoom) broadcast(frame []byte, except *designClient) {
 	for client := range room.clients {
 		if client != except {
+			if len(frame) > 0 && frame[0] == 0 && !client.canEdit {
+				continue
+			}
 			_ = client.enqueue(frame)
 		}
 	}
@@ -376,10 +379,15 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 					var result design.Result
 					e = h.designTx(r, k, false, func(ctx context.Context, tx *sql.Tx, _ string) error {
 						var state []byte
-						if x := tx.QueryRowContext(ctx, `SELECT state FROM artifact_design_documents WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&state); x != nil {
+						var x error
+						if canEdit {
+							x = tx.QueryRowContext(ctx, `SELECT state FROM artifact_design_documents WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&state)
+						} else {
+							state, x = designSharedState(ctx, tx, k)
+						}
+						if x != nil {
 							return x
 						}
-						var x error
 						result, x = design.Run(ctx, design.Request{State: state, Frame: frame})
 						return x
 					})

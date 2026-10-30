@@ -145,9 +145,12 @@ func (h *PageHandler) CreateDesignComment(w http.ResponseWriter, r *http.Request
 	room.mu.Lock()
 	defer room.mu.Unlock()
 	err := h.designAuthorizedTx(r, k, h.designCommentAuthority(r, k), func(ctx context.Context, tx *sql.Tx, actor string) error {
-		var latest int64
-		if e := tx.QueryRowContext(ctx, `SELECT latest_version FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&latest); e != nil {
+		var latest, shared int64
+		if e := tx.QueryRowContext(ctx, `SELECT latest_version,shared_version FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&latest, &shared); e != nil {
 			return e
+		}
+		if _, err := h.designAuthority(r, k, true)(ctx, tx); err != nil {
+			latest = shared
 		}
 		if latest != p.Version {
 			return artifacts.ErrVersionConflict

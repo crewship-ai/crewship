@@ -1492,5 +1492,14 @@ crewship page design watch checkout --count 1
 `watch` exposes unchanged standard Yjs frames as base64 NDJSON and stops after
 `--count` binary frames (zero watches until interrupted). It uses the saved
 human credential with the normal server-host guard; agent runs use the bounded
-MCP read/apply tools. `get` returns the current canvas, while `versions` lists
-immutable retained snapshots. Sharing never grants a reader edit rights.
+MCP read/apply tools. `get` returns the live canvas for an editor. Read and
+Comment users receive only the shared immutable snapshot, including its version
+number; before a version is shared, content reads return 404. Their websocket
+can synchronize that shared snapshot and presence but receives no private live
+updates. Comment users anchor feedback on the shared version. `versions` also
+stays at that shared pin for readers. Sharing never grants edit rights.
+
+Design does not derive access from the workspace ADMIN or OWNER role alone.
+Page ownership and explicit Page/folder authority still apply through the normal
+ACL checks. This restriction is local to Design; other Crewship surfaces retain
+their existing role model.
