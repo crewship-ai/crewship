@@ -22,8 +22,9 @@ feature flags, but switches nothing on. See [Turning Artifacts on](#turning-arti
 
 Three switches decide whether a kind of artifact is available. The server side
 is a workspace feature flag (or an instance-wide environment variable that
-overrides it for every workspace). The web UI additionally needs build-time
-`NEXT_PUBLIC_*` variables, because a default build hides these screens.
+overrides it for every workspace). The Artifacts screens in the web UI also
+depend on build-time `NEXT_PUBLIC_*` variables, which are compiled into the web
+UI when it is built.
 
 | Artifact kind | Workspace flag | Instance switch | Build-time UI variables |
 |---|---|---|---|
@@ -45,10 +46,26 @@ crewship feature-flag inherit artifact_projects  # drop the override again
 `crewship feature-flag update <key> --enabled` changes the instance default for
 every workspace that has no override. Native Word and Sheet editing is an
 instance setting, `CREWSHIP_CRAFT_NATIVE_ENABLED`, not a workspace flag; it needs
-a restart. The build-time variables take `true` and are read when the web UI is
-built, so changing one means rebuilding the UI. See
-[Environment variables](/configuration/environment) and
+a restart. See [Environment variables](/configuration/environment) and
 [`crewship feature-flag`](/cli/feature-flag).
+
+<Note>
+Release builds (binaries, packages and Docker images) ship with the build-time
+variables off, so a release web UI does not show the Artifacts screens. Turning
+the workspace flags or instance switches on still makes Artifacts available
+through the server, the CLI (`crewship page artifact`, `crewship page design`)
+and the API. You cannot change a build-time variable on an installed release:
+the Docker image accepts no build argument for it. To show the screens, build
+Crewship from source (see the *From source* tab in the
+[Quickstart](/quickstart#installation)) with the variables set to `true` in the
+environment of the build, for example:
+
+```bash
+NEXT_PUBLIC_ARTIFACTS_LIBRARY=true NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true make build
+```
+
+Such a custom build is not a published release.
+</Note>
 
 ## Storage limits
 
@@ -90,9 +107,19 @@ Dashboard collections are mutable data next to the immutable code versions:
 | Writes in one batch | 50 |
 | One batch request | 1 MiB |
 
-Going over any of them returns `413` with code `artifact_data_quota`; the batch
-is rejected as a whole and existing data is kept. A stale `ifVersion` returns
-`409` with code `artifact_data_conflict` instead.
+What happens when a limit is exceeded depends on the limit:
+
+- **`413` with code `artifact_data_quota`**: a document over 256 KiB, a batch
+  request over 1 MiB, a collection that would hold more than 4096 documents or
+  8 MiB, and a write that would create a 33rd collection.
+- **`400` (invalid request)**: a batch with more than 50 writes.
+- **`400` on data reads and writes**: a `dashboard.json` that declares more than
+  32 collections is not a valid declaration. Publishing such a version is not
+  refused, but the version is not treated as a Dashboard and its data requests
+  fail.
+
+A rejected batch is rejected as a whole and existing data is kept. A stale
+`ifVersion` returns `409` with code `artifact_data_conflict` instead.
 
 ### Word and Sheet documents
 
@@ -113,8 +140,17 @@ pages per workspace. Creating a Project or Design in a full workspace returns
 
 ## Checking usage
 
-The owner of an artifact sees its usage in the `quota` object of the artifact
-read:
+List the artifacts you can see with `crewship page list`. Its JSON output names
+each one's kind in `artifact_kind` (`project`, `dashboard`, `slides`, `design`,
+`word` or `sheet`):
+
+```bash
+crewship page list -f json \
+  | jq -r '.[] | select(.artifact_kind == "project" or .artifact_kind == "dashboard" or .artifact_kind == "slides") | .slug'
+```
+
+For a Project, Dashboard or Slides artifact, the owner sees its usage in the
+`quota` object of the artifact read:
 
 ```bash
 crewship page artifact get <slug> -f json | jq '.quota'
@@ -123,8 +159,15 @@ crewship page artifact get <slug> -f json | jq '.quota'
 
 Other readers do not see the numbers. A non-owner who can edit gets
 `"retention": "latest-version-only"`, and a reader of the shared version gets
-`"retention": "shared-version-only"`. There is no instance-wide report of
-artifact storage; to see which artifacts are large, read each one as its owner.
+`"retention": "shared-version-only"`.
+
+A Design does not report its usage: `crewship page artifact get` does not read
+Design artifacts, and `crewship page design get` has no quota field. You learn
+that a Design is full only when saving a version returns `413` "Design capacity
+is full".
+
+There is no instance-wide report of artifact storage; to see which artifacts
+are large, read each one as its owner.
 
 ## Retention
 
@@ -141,7 +184,7 @@ Artifact history is **keep-all**. Nothing ages versions out:
 The instance retention windows (`crewship admin instance retention`, Admin ›
 Data retention) do not cover Artifacts. Their "page project history"
 housekeeping applies to the older Pages application builds, not to artifact
-versions. See [Admin API](/api-reference/admin#get-api-v1-admin-instance-retention).
+versions. See [Admin API](/api-reference/admin#get-/api/v1/admin/instance/retention).
 
 ## Backup and restore
 

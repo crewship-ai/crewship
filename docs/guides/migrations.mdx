@@ -727,26 +727,35 @@ the point at which `days * 24h` overflows an `int64` nanosecond
 rather than silently accepted and later turned into a cutoff in the future,
 which would delete every terminal row regardless of age.
 
-## 20261018074717 – 20261028202000 — Artifacts, Craft documents and workbooks
+## Artifacts, Craft documents and workbooks (October 2026)
 
-These migrations add the storage behind [Artifacts](/guides/artifacts/operations),
-Word and Sheet documents and workbooks. They create new, empty tables and add
-columns whose defaults keep current behaviour; no existing Page is converted, and none of the features turns
-on by itself. Every feature flag they seed is created with its instance default
-**off** (`enabled = 0`), and an existing flag of the same key is left as it is.
+The migrations listed below add the storage behind
+[Artifacts](/guides/artifacts/operations), Word and Sheet documents and
+workbooks. They run between `20261018074717` and `20261028202000`, but that
+range also holds unrelated migrations (routine folders and templates,
+credential audit and folders, the instance audit chain, audit signing keys,
+access presets and others) that this table does not list. Match a log line
+against the exact versions below.
+
+The listed migrations create new, empty tables and add columns whose defaults
+keep current behaviour; no existing Page is converted, and none of the features
+turns on by itself. Every feature flag they seed is created with its instance
+default **off** (`enabled = 0`), and an existing flag of the same key is left as
+it is.
 
 | Migration | Adds |
 |---|---|
 | `20261018074717_document_slides_foundation` | Document and slide storage: `documents`, `document_updates`, `document_receipts`, `document_checkpoints`, `slides_heads`, `slides_revisions`, `slides_receipts`, `slides_object_ids` and their single-writer fences. |
-| `20261018074719` – `20261018074723` | Chat-run principals for artifact creation, the per-workspace artifact creation policy, human creation consents and durable creation provenance. |
+| `20261018074718_document_receipt_rate_window` | An index on `document_receipts` for bounded receipt admission. |
+| `20261018074719_artifact_run_principals`, `20261018074720_artifact_creation_policy`, `20261018074721_document_creation_consents`, `20261018074722_document_creations`, `20261018074723_document_creation_drafting_scope` | Chat-run principals for artifact creation, the per-workspace artifact creation policy, human creation consents and durable creation provenance. |
 | `20261018173800_private_artifact_audience`, `20261019120100_private_artifact_conversation_context` | `pages.private_audience` and the privacy marker of the conversation an artifact came from. |
 | `20261020092200_document_iteration_intents` | Targeted human permission for an agent to keep editing a document. Never restored from a backup. |
-| `20261021211500` – `20261022152614` | Workbook storage (`gridcraft_*`), command history and result hashes, and live editor sessions. Seeds the `gridcraft_editor` flag. |
-| `20261023103000` – `20261026102159` | The generic document engine and its collaboration ledger (`mooring_*`): documents, receipts, collaboration tasks, changes, checkpoints and edit attribution. |
+| `20261021211500_gridcraft_candidate_storage`, `20261022050825_gridcraft_local_content_exclusion`, `20261022114700_gridcraft_command_history`, `20261022134124_gridcraft_head_update_guard`, `20261022144340_gridcraft_result_hash`, `20261022152614_gridcraft_editor_sessions` | Workbook storage (`gridcraft_*`), command history and result hashes, and live editor sessions. Seeds the `gridcraft_editor` flag. |
+| The thirteen `mooring_*` migrations from `20261023103000_mooring_json_documents` to `20261026102159_mooring_command_profile` (`20261026074904_host_hook_authorization` in between is not part of them) | The generic document engine and its collaboration ledger (`mooring_*`): documents, receipts, collaboration tasks, changes, checkpoints and edit attribution. |
 | `20261027100152_artifact_version_manifests` | Immutable artifact versions: `artifact_version_heads`, `artifact_versions`, `artifact_version_blobs`. |
 | `20261027175100_artifact_project_comments` | Version-bound comments with tasks and replies, and artifact origins. Seeds the `artifact_projects` flag. |
 | `20261027175101_artifact_project_run_consents` | A person's permission for one chat run to change an artifact. Never restored from a backup. |
-| `20261027202641`, `20261027202642` | Single-editor leases for Word and Sheet documents, and the per-workspace fence that keeps an old lease from coming back. |
+| `20261027202641_mooring_edit_leases`, `20261027202642_mooring_edit_lease_workspace_fences` | Single-editor leases for Word and Sheet documents, and the per-workspace fence that keeps an old lease from coming back. |
 | `20261027203946_craft_native_documents`, `20261027203947_native_collaboration_custody_fence` | Native Word and Sheet documents and the guard that keeps them separate from the collaboration engine. |
 | `20261028083115_artifact_dashboard_data`, `20261028085257_artifact_dashboard_data_flag` | Dashboard collections and documents. Seeds the `artifact_dashboard_data` flag. |
 | `20261028120500_artifact_slides_flag` | Seeds the `artifact_slides` flag. |
