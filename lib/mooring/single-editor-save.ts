@@ -51,7 +51,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   let active = true, writable = true, dirty = false, edits = 0, baseVersion = options.baseVersion
   let blocked: string | undefined, latest: Prepared | undefined, unconfirmed: Prepared | undefined
   let confirmed: { nativeState: string; contentHash: string; version: string } | undefined
-  let pending: { abort: AbortController; done: Promise<void> } | undefined
+  let pending: { attempt: Prepared; abort: AbortController; done: Promise<void> } | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
   let preparations = Promise.resolve(), draftWrites = Promise.resolve()
   let lastPersistedSequence = 0, manualCount = 0
