@@ -1,0 +1,287 @@
+---
+title: Dashboards
+description: "Keep the numbers in a Dashboard artifact current without publishing new versions, and see where every value came from."
+stability: experimental
+tag: Experimental
+---
+
+A Dashboard is an artifact whose layout and numbers are stored separately. The
+layout is ordinary versioned HTML, like any other project artifact. The
+numbers live in **data collections** next to it. An agent (or you, from the
+CLI) updates the numbers in place, so the dashboard stays current without a new
+version for every change. Every value on screen carries its source: who last
+wrote it and when.
+
+<Note>
+Dashboards are off by default. All of the following must be on:
+
+| Switch | Kind | What it does |
+|---|---|---|
+| `artifact_projects` | Workspace flag | Project artifacts, the base every Dashboard is built on. |
+| `artifact_dashboard_data` | Workspace flag | The data collections and the **Dashboard** kind in the library. |
+| `NEXT_PUBLIC_ARTIFACT_DASHBOARDS=true` | Web build variable | The live Dashboard preview in the browser. |
+| `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` | Web build variable | The Artifacts library at `/artifacts`, where you open a Dashboard. |
+| `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true` | Web build variable | Project previews in the library and the project kinds (including **Dashboard**) under **New artifact**. The default production build sets it to `false`. |
+
+A workspace owner or admin turns on the workspace flags with
+`crewship feature-flag enable artifact_projects` and
+`crewship feature-flag enable artifact_dashboard_data` (see
+[feature-flag](/cli/feature-flag)). An operator can switch them on for every
+workspace instead with `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` and
+`CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED=true`. The `NEXT_PUBLIC_*` variables
+are read when the web app is built, so changing them needs a rebuild.
+
+When `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` is off, the app requests no data, and
+a Dashboard shows as a plain project preview without its numbers.
+</Note>
+
+## How a Dashboard is put together
+
+A Dashboard is a project artifact with one extra file, `dashboard.json`, that
+lists its collections:
+
+```json
+{"schema_version":1,"collections":["sales"]}
+```
+
+A collection holds **documents**. Each document has an ID (for example
+`north`) and a JSON object value (for example
+`{"region":"North","revenue":1250}`). The HTML screens point at the data with
+three attributes instead of scripts:
+
+| Attribute | Meaning |
+|---|---|
+| `data-source="sales"` | Reads from the declared collection `sales`. |
+| `data-row="north"` | Reads the document with ID `north`. `data-row="*"` repeats the element once for every document, sorted by ID. |
+| `data-field="revenue"` | Shows that key of the document's value. On a `<meter>` element the number fills the bar. |
+
+```html
+<section data-source="sales">
+  <table>
+    <tr><th id="artifact-region">Region</th><th id="artifact-revenue">Revenue</th></tr>
+    <tr data-row="*"><td data-field="region"></td><td data-field="revenue"></td></tr>
+  </table>
+</section>
+<p>North total: <span data-source="sales" data-row="north" data-field="revenue"></span></p>
+```
+
+Text, numbers and true/false values appear as written, `null` appears as `—`,
+and a missing key or document shows **Unavailable**. The preview runs in a
+sandbox with no JavaScript from the artifact, and all bindings go through the
+three attributes above.
+
+An agent writes the layout and the data for you, so you rarely edit these files
+yourself. Knowing the structure helps you ask for changes ("add a `costs`
+collection", "show revenue as a meter").
+
+## Ask an agent for a Dashboard
+
+<Steps>
+  <Step title="Start a new artifact">
+    Open **Artifacts** in the sidebar and click **New artifact**. Pick
+    **Dashboard** ("Numbers and tables agents keep current"). The kind is
+    listed only when the switches above are on.
+  </Step>
+  <Step title="Describe it or pick a template">
+    Under **Start with**, choose **Describe it** and fill in *What should it
+    contain?*, or choose **From template** and pick *Sales pipeline*,
+    *Support SLA*, *Cash flow* or *Release health*. A **Name** is optional.
+    The dialog notes *Who can open: Only you until you share it*. Click
+    **Continue in chat**.
+  </Step>
+  <Step title="Review the draft and send it">
+    **Chat** opens. Pick an agent in the list on the left. The request is
+    waiting, unsent, in that conversation's composer, for example
+    `Create a dashboard from the Sales pipeline template`. Edit it if needed.
+    Press **Create artifact project** in the composer. The status then reads
+    *Private project · Sharing requires your approval*. That button is your
+    consent: an agent creates an artifact only for a message sent with it on.
+    It is offered in a direct chat with an agent. Send the message.
+  </Step>
+  <Step title="Open the result">
+    The agent saves version 1 with `dashboard.json`, then fills the collections.
+    The new Dashboard is private to you until you share it. Open it from the
+    library as described below.
+  </Step>
+</Steps>
+
+## Open a Dashboard and read its numbers
+
+<Steps>
+  <Step title="Find it in the library">
+    Open **Artifacts**. Dashboards carry the **Dashboard** kind label, for
+    example *Dashboard · You · 2m ago*. To list them together, open **All
+    artifacts** and set **Group** to **Kind** (the **Home** view has no
+    **Group** control). Click a Dashboard to see a summary on the right, then click
+    **Open** (or press Enter).
+  </Step>
+  <Step title="Read the preview">
+    The detail shows the artifact name with a **Dashboard** badge, the
+    **Latest** and **Shared** versions, and the **Preview**, **History** and
+    **Comments** tabs. **Preview** renders the screens filled with the current
+    data. While it says *Loading Dashboard data…* the values are being fetched.
+  </Step>
+  <Step title="Watch it update">
+    Leave the tab open. The preview checks for new data every five seconds
+    while the browser tab is visible and updates values in place. You do not
+    need to reload, and the version number does not change.
+  </Step>
+</Steps>
+
+## See where a number came from
+
+Hover over a value, or move keyboard focus to it, to see where it came from:
+
+```text
+Source: sales/north.revenue · Agent · updated 2026-10-30 08:15 UTC
+```
+
+The line reads as *Source: collection/document.field · who wrote it · updated
+date and time*. The time is the server's time of the last write, in UTC, to
+the minute. Screen readers announce the same line as the value's description.
+Below the screens, the preview also lists these lines, one for each distinct
+line (values from the same document field share one). The list has no visible
+heading; screen readers announce it as *Data sources*.
+
+The source label is deliberately coarse:
+
+| Label | Who last wrote the document |
+|---|---|
+| **You** | You. |
+| **Agent** | An agent run. |
+| **Contributor** | Another person. |
+
+The labels are relative to the viewer: a write you made shows **You** to you
+and **Contributor** to everyone else. Private account, run and chat identifiers
+never reach the browser.
+
+When the writer is not known (for example, their account details were erased),
+the line reads `Source not stated · sales/north.revenue · updated 2026-10-30 08:15 UTC`
+and the value has a dashed instead of a dotted underline, so it does not look
+authoritative. The same happens when the document is not loaded; the line
+then ends with `not loaded`. In the CLI and API output, such a document has
+`source_label` **Former contributor** and `source_kind` `unknown`.
+
+Each document also has its own **version** number, which goes up by one on every
+write. The preview does not show it. Read it with the CLI:
+
+```bash
+crewship page artifact data get <slug> sales --version 1
+```
+
+The output lists each document with `version`, `value`, `updated_at`,
+`source_label` and `source_kind` (`human`, `agent` or `unknown`). The
+`--version` is the artifact's code version, the one whose `dashboard.json`
+declares the collection.
+
+## Find the slug and the latest version
+
+The CLI commands below take the artifact's **slug**. Find it with
+`crewship page list`, in the **SLUG** column next to the Dashboard's name. The
+ID in the browser address (`/artifacts/<id>`) is not the slug; the CLI answers
+it with `artifact project or selected version not found`.
+
+The latest version is the number after **Latest** in the artifact's detail
+header, or `latest_version` in the output of
+`crewship page artifact versions <slug>`.
+
+## Update the data
+
+Only the Dashboard's owner can change its data, either directly from the CLI or
+through an agent run started on the owner's behalf. A data change never
+publishes a new version of the layout.
+
+<Steps>
+  <Step title="Read the current versions">
+    Run `crewship page artifact data get <slug> <collection> --version <latest>`
+    and note each document's `version`. Use the artifact's latest version (see
+    [above](#find-the-slug-and-the-latest-version)) as `--version`.
+  </Step>
+  <Step title="Write a batch file">
+    List every document you change with the version you just read as
+    `ifVersion`. Use `ifVersion: 0` for a new document. `base_version` is the
+    artifact's latest code version.
+
+    ```json
+    {"base_version":1,"documents":[
+      {"id":"north","ifVersion":1,"value":{"region":"North","revenue":1400}},
+      {"id":"west","ifVersion":0,"value":{"region":"West","revenue":610}}
+    ]}
+    ```
+  </Step>
+  <Step title="Apply it">
+    ```bash
+    crewship page artifact data batch <slug> sales --file batch.json
+    ```
+
+    The command prints the written documents with their new versions. Open
+    previews pick up the change within five seconds, and the source lines for
+    those documents show the new time.
+  </Step>
+</Steps>
+
+A batch is all or nothing. If any document's `ifVersion` no longer matches,
+nothing is written and the command fails with
+`A document changed. Read its version before retrying; nothing was overwritten.`
+Read the collection again, decide what the value should be, and send a new
+batch. Do not retry the same file. The CLI never retries on its own. Agents get
+the same rule through the `artifact_data_batch` tool. The full command
+reference is in [`crewship page`](/cli/page#dashboard-data-disabled-by-default).
+
+## Who sees which data
+
+| Person | Layout version shown | Collections they can read | Can write data |
+|---|---|---|---|
+| Owner | Latest | All declared by that version | Yes |
+| Someone with edit access | Latest | All declared by that version | No |
+| Everyone else with access | Shared version only | Only those declared by the shared version | No |
+
+Collections belong to the artifact, not to a version, so a value written once
+appears in every version that declares its collection. A collection that a
+newer layout no longer declares stays stored but is not shown. Restoring an
+older layout version does not roll the data back. Until you share a version,
+people other than the owner and editors see no data at all.
+
+To share, use **Share** on the artifact. Sharing a version and granting access
+work the same way as for any other artifact.
+
+## Comments on a Dashboard
+
+Press **Select** in the preview to comment on an element. Values filled from
+data, and elements that contain them, cannot be selected: their content
+changes with every update. Comment on a static title or label next to them
+instead. Agents that build Dashboards give those labels stable `artifact-` IDs
+for this purpose.
+
+## Limits
+
+| Limit | Value |
+|---|---|
+| One document's value | 256 KiB |
+| One batch | 50 documents and 1 MiB |
+| One collection | 4096 documents and 8 MiB of stored JSON |
+| Collections per Dashboard | 32 |
+| `dashboard.json` | 16 KiB |
+| Collection and document IDs | 1–128 letters, digits, `_` or `-`, starting with a letter or digit |
+| Data loaded by one preview | 16 MiB across all collections |
+
+The server rejects a write that exceeds a stored limit as a whole with
+`Dataset limit exceeded. Existing data was retained.` The CLI validates the
+batch before sending: an oversized document or batch can instead report
+`artifact dataset quota exceeded`; more than 50 writes or an invalid batch
+format reports `invalid artifact dataset request` (exit 1). In those cases
+nothing is sent or written. For example, use `ifVersion`, not `if_version`.
+
+## Messages you may see
+
+| Message | Meaning and what to do |
+|---|---|
+| *Dashboard preview is unavailable.* | The manifest is invalid or this data scope is no longer active. HTTP 401/403/404/409 or an authentication change stops refreshing and removes the previous data. Reload to recheck access, flags and the version. Without a Dashboard manifest or its UI flag, the outer viewer uses the plain project preview. |
+| *Dashboard data is unavailable. Reload to check access.* | A network/server error or an invalid data response prevented loading. Previous values are hidden. The visible tab continues polling every five seconds; reload if the problem persists. |
+| *Dashboard exceeds the preview data limit* | The collections together exceed 16 MiB. Ask the agent to split or trim the data. |
+| *Dashboard exceeds the preview rendering limit* | Repeated rows would produce too many elements or too much text to render. Ask the agent to show fewer rows. |
+| `A document changed…` (HTTP 409, `artifact_data_conflict`) | A document was written since you read it. Read again and reconcile. |
+| `This project changed…` (HTTP 409, `artifact_version_conflict`) | `base_version` is not the latest layout version. Read the artifact and use its latest version. |
+| `Dataset limit exceeded…` (HTTP 413, `artifact_data_quota`) | A limit from the table above was reached. Nothing was written. |
+| `dashboard data is disabled` (HTTP 404) | `artifact_projects` or `artifact_dashboard_data` is off for this workspace. |
+| `artifact project or selected version not found` (HTTP 404) | The slug or version does not exist, or the collection is not declared in that version's `dashboard.json`. |

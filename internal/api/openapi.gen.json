@@ -1948,6 +1948,16 @@
       "ArtifactProjectQuota": {
         "additionalProperties": false,
         "properties": {
+          "level": {
+            "description": "none below 80% of limit_bytes, near from 80%, critical from 95%, full when used_bytes reaches limit_bytes. Omitted when the quota is withheld (shared or editor views report limit_bytes 0).",
+            "enum": [
+              "none",
+              "near",
+              "critical",
+              "full"
+            ],
+            "type": "string"
+          },
           "limit_bytes": {
             "format": "int64",
             "minimum": 0,
@@ -1963,6 +1973,7 @@
             "type": "integer"
           },
           "warning": {
+            "description": "True from the near threshold upwards; prefer level.",
             "type": "boolean"
           }
         },
@@ -2031,6 +2042,58 @@
         "required": [
           "text",
           "version"
+        ],
+        "type": "object"
+      },
+      "ArtifactProjectRetentionPreview": {
+        "additionalProperties": false,
+        "description": "Owner-only dry run of the proposed history rule. Nothing listed in would_thin is deleted; retention stays keep-all.",
+        "properties": {
+          "dry_run": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "evaluated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "policy": {
+            "type": "string"
+          },
+          "recent_days": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "retained": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "would_thin": {
+            "items": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "policy",
+          "recent_days",
+          "dry_run",
+          "evaluated_at",
+          "total",
+          "retained",
+          "would_thin"
         ],
         "type": "object"
       },
@@ -2111,6 +2174,9 @@
           },
           "quota": {
             "$ref": "#/components/schemas/ArtifactProjectQuota"
+          },
+          "retention_preview": {
+            "$ref": "#/components/schemas/ArtifactProjectRetentionPreview"
           },
           "shared_version": {
             "format": "int64",
@@ -14186,6 +14252,15 @@
       "NativeCraftDocumentQuota": {
         "additionalProperties": false,
         "properties": {
+          "level": {
+            "enum": [
+              "none",
+              "near",
+              "critical",
+              "full"
+            ],
+            "type": "string"
+          },
           "limitBytes": {
             "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
             "maxLength": 19,

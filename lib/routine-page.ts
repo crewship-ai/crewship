@@ -202,8 +202,8 @@ export interface TriggerAutomationInput {
 }
 
 /** "last fire <time> · <outcome>", when the schedule has fired. */
-function lastFire(s: TriggerScheduleInput, lifecycle: "active" | "proposed" | "disabled", fmt: (iso: string, tz?: string) => string): string | null {
-  const label = scheduleLastStatusLabel(s, lifecycle)
+function lastFire(s: TriggerScheduleInput, fmt: (iso: string, tz?: string) => string): string | null {
+  const label = scheduleLastStatusLabel(s)
   return s.last_run_at && label ? `last fire ${fmt(s.last_run_at, s.timezone)} · ${label}` : null
 }
 
@@ -237,7 +237,7 @@ export function routineTriggerRows(input: {
       s.enabled && s.next_run_at ? `next ${fmt(s.next_run_at, s.timezone)}` : null,
       CATCHUP[s.catchup_policy ?? ""] ?? null,
       pinned ? `pinned to v${s.target_pipeline_version}` : "follows the published version",
-      lastFire(s, input.lifecycle, fmt),
+      lastFire(s, fmt),
     ].filter(Boolean)
     const status: StateBadge =
       s.activation === "draft"

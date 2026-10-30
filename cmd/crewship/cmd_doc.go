@@ -17,10 +17,40 @@ import (
 )
 
 func newDocCommand() *cobra.Command {
-	root := &cobra.Command{Use: "doc", Short: "Read and edit saved Page documents with semantic preconditions"}
+	root := &cobra.Command{Use: "doc", Short: "Read and edit native documents with revision and hash checks", Long: `Read and edit native documents (shown as Word in the Artifacts library).
+Address a document by its artifact slug or by @<artifact-id>. The server must
+start with CREWSHIP_DOCUMENTS_ENABLED=true; check with crewship doc status.
+Scoped tokens need pages:read to read and pages:read plus pages:write to edit.
+create and draft are for an admitted agent run only.`, Example: `  crewship doc status
+  crewship doc read @<artifact-id>
+  crewship doc patch @<artifact-id> --file patch.json`}
+	help := map[string][3]string{
+		"read": {"Read the confirmed document, outline, revision and epoch", `Print the confirmed content tree, block outline, rev, schema, epoch, page_id
+and the caller's can_write, can_comment and can_resolve. Use epoch, rev and a
+block hash from this output when preparing a patch.`, `  crewship doc read @<artifact-id>
+  crewship doc read <slug> -f yaml`},
+		"outline": {"Print the current block IDs, types, hashes and text as JSON", `Print a JSON array of {id, type, parent, hash, text} for the confirmed blocks;
+parent is null at the top level. Reads the same state as read and never
+changes the document.`, `  crewship doc outline @<artifact-id>`},
+		"patch": {"Apply a guarded text replacement to one block", `Send one JSON object (at most 2 MiB) with id, schema, epoch, target, text, ifRev
+and ifHash; schema 3 also needs page_id. A changed revision, hash or epoch
+refuses the edit and nothing is saved. Resend the exact request with the same id
+after a lost confirmation; the original receipt comes back with found: true
+and duplicate: true. A stale epoch, revision or hash returns 409.`, `  crewship doc patch @<artifact-id> --file patch.json
+  cat patch.json | crewship doc patch @<artifact-id> --file -`},
+		"status": {"Show whether native documents are enabled on this server", `Print enabled, wordcraft_native and gridcraft_native for the selected server.
+enabled is false unless the server starts with CREWSHIP_DOCUMENTS_ENABLED=true.`, `  crewship doc status
+  crewship doc status -f yaml`},
+		"initialize": {"Write the first content of an empty artifact as a document", `Send one JSON object (at most 2 MiB) with an operation id, schema (2 or 3) and
+a body document tree; schema 3 also needs page_id. Resend the exact request
+after a lost confirmation; the original receipt comes back with duplicate: true.
+The artifact must be empty and owned by you, not by a crew (for example one made
+with crewship page create --allow-empty). Read the document afterwards to obtain
+its epoch.`, `  crewship doc initialize @<artifact-id> --file initialize.json`},
+	}
 	for _, operation := range []string{"read", "outline", "patch", "status", "initialize"} {
 		operation := operation
-		cmd := &cobra.Command{Use: operation + " <page-slug>", Short: "Document " + operation, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		cmd := &cobra.Command{Use: operation + " <page-slug>", Short: help[operation][0], Long: help[operation][1], Example: help[operation][2], Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := pageClient()
 			if err != nil {
 				return err

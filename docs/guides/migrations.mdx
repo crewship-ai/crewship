@@ -8,7 +8,7 @@ tag: Experimental
 
 # Migrations Catalog
 
-Crewship runs Go-only migrations against SQLite. The full ordered list lives in `internal/database/migrate.go` (`var migrations`), and they apply in version order at startup, tracked in the `_migrations` table for idempotency.
+Crewship runs its own migrations against SQLite. After v169 each migration is one SQL file in `internal/database/migrations/`; the older ones and the few that need Go stay in the `legacyMigrations` slice in `internal/database/migrate.go` (see [Authoring a migration](#authoring-a-migration)). They apply in version order at startup, tracked in the `_migrations` table for idempotency.
 
 This page is a flat reference for the recent set — useful when reading server logs, restoring from a backup that pre-dates a feature, or auditing what shipped between two releases. For older migrations (v1–v49) read `migrate.go` directly; this catalog focuses on the Crew Journal era and onward.
 
@@ -726,6 +726,53 @@ the point at which `days * 24h` overflows an `int64` nanosecond
 `time.Duration` and wraps negative) is rejected with `400 Bad Request`
 rather than silently accepted and later turned into a cutoff in the future,
 which would delete every terminal row regardless of age.
+
+## Artifacts, Craft documents and workbooks (October 2026)
+
+The migrations listed below add the storage behind
+[Artifacts](/guides/artifacts/operations), Word and Sheet documents and
+workbooks. They run between `20261018074717` and `20261028202000`, but that
+range also holds unrelated migrations (routine folders and templates,
+credential audit and folders, the instance audit chain, audit signing keys,
+access presets and others) that this table does not list. Match a log line
+against the exact versions below.
+
+The listed migrations create new, empty tables and add columns whose defaults
+keep current behaviour; no existing Page is converted, and none of the features
+turns on by itself. Every feature flag they seed is created with its instance
+default **off** (`enabled = 0`), and an existing flag of the same key is left as
+it is.
+
+| Migration | Adds |
+|---|---|
+| `20261018074717_document_slides_foundation` | Document and slide storage: `documents`, `document_updates`, `document_receipts`, `document_checkpoints`, `slides_heads`, `slides_revisions`, `slides_receipts`, `slides_object_ids` and their single-writer fences. |
+| `20261018074718_document_receipt_rate_window` | An index on `document_receipts` for bounded receipt admission. |
+| `20261018074719_artifact_run_principals`, `20261018074720_artifact_creation_policy`, `20261018074721_document_creation_consents`, `20261018074722_document_creations`, `20261018074723_document_creation_drafting_scope` | Chat-run principals for artifact creation, the per-workspace artifact creation policy, human creation consents and durable creation provenance. |
+| `20261018173800_private_artifact_audience`, `20261019120100_private_artifact_conversation_context` | `pages.private_audience` and the privacy marker of the conversation an artifact came from. |
+| `20261020092200_document_iteration_intents` | Targeted human permission for an agent to keep editing a document. Never restored from a backup. |
+| `20261021211500_gridcraft_candidate_storage`, `20261022050825_gridcraft_local_content_exclusion`, `20261022114700_gridcraft_command_history`, `20261022134124_gridcraft_head_update_guard`, `20261022144340_gridcraft_result_hash`, `20261022152614_gridcraft_editor_sessions` | Workbook storage (`gridcraft_*`), command history and result hashes, and live editor sessions. Seeds the `gridcraft_editor` flag. |
+| The thirteen `mooring_*` migrations from `20261023103000_mooring_json_documents` to `20261026102159_mooring_command_profile` (`20261026074904_host_hook_authorization` in between is not part of them) | The generic document engine and its collaboration ledger (`mooring_*`): documents, receipts, collaboration tasks, changes, checkpoints and edit attribution. |
+| `20261027100152_artifact_version_manifests` | Immutable artifact versions: `artifact_version_heads`, `artifact_versions`, `artifact_version_blobs`. |
+| `20261027175100_artifact_project_comments` | Version-bound comments with tasks and replies, and artifact origins. Seeds the `artifact_projects` flag. |
+| `20261027175101_artifact_project_run_consents` | A person's permission for one chat run to change an artifact. Never restored from a backup. |
+| `20261027202641_mooring_edit_leases`, `20261027202642_mooring_edit_lease_workspace_fences` | Single-editor leases for Word and Sheet documents, and the per-workspace fence that keeps an old lease from coming back. |
+| `20261027203946_craft_native_documents`, `20261027203947_native_collaboration_custody_fence` | Native Word and Sheet documents and the guard that keeps them separate from the collaboration engine. |
+| `20261028083115_artifact_dashboard_data`, `20261028085257_artifact_dashboard_data_flag` | Dashboard collections and documents. Seeds the `artifact_dashboard_data` flag. |
+| `20261028120500_artifact_slides_flag` | Seeds the `artifact_slides` flag. |
+| `20261028193410_page_comment_grants` | A `comment` level for page grants. Rebuilds `page_grants` inside the migration, keeping every grant. |
+| `20261028193411_page_catalog_management`, `20261028195659_artifact_project_test_origin` | `pages.archived_at` and the explicit test-item markers. Existing pages stay unarchived and unmarked. |
+| `20261028202000_artifact_design_yjs` | `artifact_design_documents` for the live Design canvas. Rebuilds `artifact_version_heads` and the Dashboard tables to admit the Design storage family, copying every row. Seeds the `artifacts_design` flag. |
+
+The four flags `artifact_projects`, `artifact_dashboard_data`, `artifact_slides`
+and `artifacts_design` stay off after the upgrade until an administrator enables
+them per workspace (`crewship feature-flag enable <key>`) or sets the matching
+instance switch; see [Operate Artifacts](/guides/artifacts/operations#turning-artifacts-on).
+
+Rolling back across these migrations means restoring the pre-migration snapshot,
+as for any other migration ([Upgrading & Downgrading](/guides/upgrades#rollback-/-downgrade)).
+An older build that boots against the newer schema is refused by the
+version-skew guard. Restoring the snapshot discards every change made after the
+upgrade, including every artifact created since.
 
 ## How to read this in operation
 

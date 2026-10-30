@@ -463,6 +463,14 @@ func WithPageBuildImage(image string) RouterOption {
 	return func(r *Router) { r.pageBuildImage = image }
 }
 
+// WithPageBuildImageLookup replaces how the server finds the image recorded by
+// `crewship page enable` when no explicit image is set. Tests use it so the
+// result does not depend on the images installed on the machine running them;
+// nil keeps the record lookup (pagebuild.RecordedCompilerImage).
+func WithPageBuildImageLookup(lookup func(context.Context) ([]string, error)) RouterOption {
+	return func(r *Router) { r.pageBuildImageLookup = lookup }
+}
+
 // WithPageRuntime configures the separate-site bootstrap and its allowed Studio parent.
 func WithPageRuntime(runtime, studio string, developmentSameOrigin ...bool) RouterOption {
 	return func(r *Router) {
@@ -470,6 +478,15 @@ func WithPageRuntime(runtime, studio string, developmentSameOrigin ...bool) Rout
 		r.pageStudioOrigin = studio
 		r.pageRuntimeDevelopmentSameOrigin = len(developmentSameOrigin) > 0 && developmentSameOrigin[0]
 	}
+}
+
+// WithDerivedPageRuntime marks the runtime origin given to WithPageRuntime as
+// derived for a localhost Studio rather than configured (#3108). Handlers then
+// use it only for requests that reached the server directly on a loopback
+// host (pagebuild.DerivedRuntimeApplies); a remote or proxied browser gets
+// page_runtime_origin_missing, as without derivation.
+func WithDerivedPageRuntime(derived bool) RouterOption {
+	return func(r *Router) { r.pageRuntimeDerived = derived }
 }
 
 // WithWorkbookEditor wires the embedded workbook editor's server-side state:

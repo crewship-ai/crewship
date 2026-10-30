@@ -35,3 +35,4 @@ rule's full text in both places.
 - [`house-rules-background.md`](house-rules-background.md) — the reasoning and incident history behind the house rules.
 - [`frontend-data-fetching.md`](frontend-data-fetching.md) — React Query conventions: keys, transport, realtime freshness, tests.
 - [`test-fixture-types.md`](test-fixture-types.md) — typing test mocks and fixtures so renames fail in `pnpm test:types`.
+- [`prd-acceptance.md`](prd-acceptance.md) — the PRD acceptance suite: `pnpm acceptance:prd`, quick and full modes, environment and how to add a scenario.
