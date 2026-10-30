@@ -38,6 +38,9 @@ func TestDesignRouterUsesPageWriteScopeAndRejectsReadWrites(t *testing.T) {
 	if w := request(writer, "POST", "/api/v1/pages/board/design/operations", body); w.Code != 200 {
 		t.Fatalf("write update %d %s", w.Code, w.Body)
 	}
+	if w := request(writer, "POST", "/api/v1/pages/board/design/share", `{"version":2}`); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
 	if w := request(reader, "GET", "/api/v1/pages/board/design", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"can_edit":false`) {
 		t.Fatalf("read get %d %s", w.Code, w.Body)
 	}

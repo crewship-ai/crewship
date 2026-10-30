@@ -137686,7 +137686,7 @@
             }
           },
           {
-            "description": "Historical checkpoint. Read-only callers may select only the shared pin; omit to follow the live canvas.",
+            "description": "Historical checkpoint. Ordinary Read/Comment audiences may select only the shared pin. Workspace ADMIN/OWNER retain full history with read-scoped credentials; omit for the latest authorized canvas.",
             "in": "query",
             "name": "version",
             "required": false,

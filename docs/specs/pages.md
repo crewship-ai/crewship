@@ -1492,5 +1492,31 @@ crewship page design watch checkout --count 1
 `watch` exposes unchanged standard Yjs frames as base64 NDJSON and stops after
 `--count` binary frames (zero watches until interrupted). It uses the saved
 human credential with the normal server-host guard; agent runs use the bounded
-MCP read/apply tools. `get` returns the current canvas, while `versions` lists
-immutable retained snapshots. Sharing never grants a reader edit rights.
+MCP read/apply tools. `get` returns the live canvas for an editor. Read and
+Comment users receive only the shared immutable snapshot, including its version
+number; before a version is shared, content reads return 404. Their websocket
+can synchronize that shared snapshot and presence but receives no private live
+updates. Comment users anchor feedback on the shared version. `versions` also
+stays at that shared pin for readers. Sharing never grants edit rights.
+
+Workspace ADMIN and OWNER may read and edit every Design, including another
+human's unshared or private Design. A read-scoped credential keeps full manager
+read and history access but cannot mutate or send websocket updates. Normal
+Read/Comment audiences still receive only the shared snapshot.
+
+Access to a foreign Design is recorded as `design.workspace_admin_accessed` in
+the existing audit log, bound to the Page, workspace, original human, actor and
+custodian. The compliance row and configured keyed journal share one identity
+and commit together under the writer fence. Permission probes verify the
+original native journal receipt rather than appending duplicates; notifications
+follow commit. One HTTP request or websocket admission has one audit identity,
+and incoming websocket writes receive their own identity.
+
+This records authorized read/write access, not a saved-version receipt. REST
+versioned changes can commit a preflight access receipt before publication;
+that receipt remains when later publication is refused. The publication
+transaction rechecks both receipts and current authority after the final
+content write. Unacknowledged or corrupted receipts refuse access and preserve
+confirmed content. Manager edits
+use the existing room lock, revision checks and VersionStore. This policy is
+local to Design and does not alter other Page families' audience rules.
