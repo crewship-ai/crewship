@@ -97,7 +97,7 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	var req createCrewRequest
 	if err := readCrewConfigJSON(r, &req); err != nil {
-		replyError(w, http.StatusBadRequest, "Invalid JSON body")
+		replyJSONBodyError(w, err, "Invalid JSON body")
 		return
 	}
 

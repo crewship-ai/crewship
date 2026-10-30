@@ -246,6 +246,7 @@ func TestDocumentIterationManagedBridgeDraftSamePage(t *testing.T) {
 	binary := filepath.Join(dir, "crewship")
 	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./cmd/crewship")
 	build.Dir = root
+	build.Env = nestedGoBuildEnv(t)
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("CLI build: %s %v", output, err)
 	}

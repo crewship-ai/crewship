@@ -115,6 +115,17 @@ func (h *NotifyChannelHandler) List(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusInternalServerError, "list failed")
 		return
 	}
+	// A webhook destination may itself contain credentials. Reading the
+	// workspace catalog does not confer channel-management authority.
+	// Preserve an owner's personal destination and the admin repair view;
+	// dispatch continues to read the unmodified configuration from the store.
+	if !canRole(RoleFromContext(r.Context()), "manage") {
+		for i := range channels {
+			if channels[i].Type == notify.ChannelWebhook && channels[i].Scope != notify.ScopeUser {
+				channels[i].URL = ""
+			}
+		}
+	}
 	if channels == nil {
 		channels = []notify.Channel{}
 	}

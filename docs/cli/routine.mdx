@@ -102,7 +102,11 @@ crewship routine list --order name
 | `--tag` | (unset) | Filter routines by definition tag (cross-crew discovery) |
 | `--search` | (unset) | Words that must all appear in the name, slug, description or the text of a step (ids, names, agents, prompts, commands); case-insensitive |
 
-**Output columns:** SLUG, INVOC, LAST STATUS, AUTHOR CREW, DESCRIPTION
+**Output columns:** SLUG, STATUS, INVOC, LAST STATUS, AUTHOR CREW, DESCRIPTION
+
+`--format json|yaml|ndjson` prints the server's rows as sent — including
+`draft` (the pending unpublished revision, with its `test_result`) and every
+field the table leaves out. `ndjson` writes one row per line.
 
 ---
 
@@ -141,6 +145,9 @@ crewship routine templates use <template_id> --slug morning-digest --crew-id <cr
 crewship routine templates delete <template_id>
 ```
 
+`templates delete` answers `204`; with `--format json` it prints
+`{"deleted": true, "template_id": …}`.
+
 A template is a name and a routine definition the workspace keeps. `use`
 saves a **draft** (nothing is published): test it and publish it from the
 routine page. A definition that could not be saved as a routine is refused at
@@ -175,6 +182,9 @@ crewship routine folders update <folder_id> --parent ""         # back to the to
 crewship routine folders delete <folder_id>           # routines are kept, unfiled; subfolders move up
 ```
 
+`folders delete` answers `204`; with `--format json` it prints
+`{"deleted": true, "folder_id": …}`.
+
 `create` and `update` refuse a name another folder already has (ignoring case).
 `--icon` takes a name from the crew icon registry (the same set as page
 folders); any other is refused with the list's shape. Folders nest at most
@@ -203,8 +213,15 @@ crewship routine get summarize-text -f json | jq '.definition.steps'
 crewship routine get summarize-text -f yaml
 ```
 
-Output: human header (slug, name, author, invocations) + pretty-printed DSL JSON.
-`--format json|yaml|ndjson` returns the routine row exactly as the API sent it.
+Output: human header (slug, name, author, status, invocations) + pretty-printed
+DSL JSON. While an unpublished draft exists the header has a `Draft:` line —
+`DRAFT r2, updated <time> by <user> · TESTED PASSED at <time> (run uses the
+published version)` — naming its revision and the latest Test result of
+exactly the definition it holds (`untested` when none ran, `FAILED (<status>)`
+when it failed).
+`--format json|yaml|ndjson` returns the routine document exactly as the API
+sent it: `draft` with its `test_result`, `files`, `manifest`, `behavior` and
+`definition` included.
 
 <Note>
   This command previously owned a **local** `--format` flag accepting only
@@ -1309,7 +1326,11 @@ Ctrl-C / SIGTERM exit cleanly.
 crewship routine versions summarize-text
 ```
 
-**Output columns:** VERSION, HEAD, PARENT, HASH, AUTHOR, CREATED, SUMMARY. The `*` marker tags the current HEAD.
+**Output columns:** VERSION, HEAD, PARENT, HASH, AUTHOR, TESTED, CREATED, SUMMARY. The `*` marker tags the current HEAD.
+TESTED is the latest Test run of that version's exact definition: `PASSED`,
+`FAILED` (with how it ended, e.g. `FAILED (timeout)`) or `untested`.
+`--format json|yaml|ndjson` prints the server's rows untouched, each with its
+`test_result` object when one exists.
 
 ### `crewship routine versions show <slug> --version N`
 
@@ -1521,7 +1542,7 @@ object or array; `null` is rejected. Changed inputs must satisfy the selected
 routine version's input-form contract. Replay executes real work using the
 current operator's authority.
 
-Backed by `POST /api/v1/workspaces/{ws}/pipelines/runs/{run_id}/replay` (body: `{"pinned_version": N}` when `--version` is set). Output: `Replayed <run_id> → new run <new_id>: <status> ($cost)`, plus the run output if non-empty.
+Backed by `POST /api/v1/workspaces/{ws}/pipelines/runs/{run_id}/replay` (body: `{"pinned_version": N}` when `--version` is set). Output: `Replayed <run_id> → new run <new_id>: <status> ($cost)`, plus the run output if non-empty. `--format json|yaml|ndjson` prints the server's replay result instead (`run_id`, `status`, `output`, `cost_usd`, …).
 
 ---
 
@@ -1741,7 +1762,8 @@ crewship routine pending cancel pend_abc123
 
 Cancels a trigger before it fires. Requires the `update` capability (MANAGER+).
 Backed by `POST /api/v1/workspaces/{ws}/pipelines/pending/{pending_id}/cancel`,
-which returns `200 OK` with `{ "ok": true, "cancelled": "<pending_id>" }`.
+which returns `200 OK` with `{ "ok": true, "cancelled": "<pending_id>" }`;
+`--format json|yaml|ndjson` prints that document.
 Missing, expired, already-fired, or already-cancelled items return `404`;
 missing database wiring returns `503`.
 

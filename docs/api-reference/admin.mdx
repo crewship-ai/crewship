@@ -1177,6 +1177,12 @@ always kept, routine and agent webhook receipts, delivered work bodies, page
 project history, orphaned attachment files, unattributed credential reads and
 the pre-upgrade database snapshots.
 
+No window covers [Artifacts](/guides/artifacts/operations#retention). Artifact
+versions, Design canvases, Dashboard data and native Word and Sheet history
+are kept until the artifact itself is deleted, within the per-artifact storage
+limits. "Page project history" in `housekeeping` is the build history of Pages
+applications, not artifact versions.
+
 | Status | Condition |
 |--------|-----------|
 | `200` | Every chosen workspace, by name. |
@@ -1615,6 +1621,7 @@ encrypted. Written to the instance audit log in the same transaction.
 | `400` | Invalid JSON, an unknown workspace or category, a bad timezone, cron or time, `keep_min` below 1, or no recipients. |
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
+| `413` | The request body is over 1 MiB (`"code": "body_too_large"`); a declared length over 16 MiB returns Problem Details without `code`. |
 | `500` | The write failed; nothing changed. |
 
 ## `POST /api/v1/admin/instance/backups/plans/preview-contents`
@@ -1684,6 +1691,7 @@ transaction.
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
 | `404` | No plan with that id. |
+| `413` | The request body is over 1 MiB (`"code": "body_too_large"`); a declared length over 16 MiB returns Problem Details without `code`. |
 | `500` | The write failed; nothing changed. |
 
 ## `DELETE /api/v1/admin/instance/backups/plans/{id}`
@@ -2393,6 +2401,7 @@ Answers with the whole settings object.
 | `400` | A limit out of range, a heartbeat URL that is not public https, an unknown drill reminder, a channel being added that is unknown or cannot carry backup alerts, or a body that is not JSON. |
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
+| `413` | The request body is over 1 MiB (`"code": "body_too_large"`); a declared length over 16 MiB returns Problem Details without `code`. |
 | `500` | The write failed; nothing changed. |
 
 ## `POST /api/v1/admin/instance/backups/settings/test-alert`
