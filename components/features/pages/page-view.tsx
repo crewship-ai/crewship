@@ -256,6 +256,8 @@ export interface PageViewProps {
   error: string | null
   notFound: boolean
   onBack: () => void
+  /** The breadcrumb's way back; Pages by default, the library when Artifacts shows the page. */
+  backLabel?: string
   /** Injected clock — absolute ages are computed, so a test can pin `now`. */
   now?: Date
   /**
@@ -295,6 +297,7 @@ export function PageView({
   error,
   notFound,
   onBack,
+  backLabel = "Back to pages",
   now,
   workspaceId,
   mayEditAvatar,
@@ -346,7 +349,7 @@ export function PageView({
           className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           <ChevronLeft className="h-3.5 w-3.5" />
-          Back to pages
+          {backLabel}
         </button>
         <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground-soft" />
         <span className="truncate text-xs font-medium text-foreground/85" title={page?.name ?? slug}>
@@ -432,6 +435,8 @@ export function artifactReaderHref(slug: string, kind: string, workspaceId?: str
   const query = new URLSearchParams()
   if (workspaceId) query.set("workspace_id", workspaceId)
   if (artifactsLibrary()) {
+    // "@<id>" is the immutable ID address; a slug opens by slug and the library moves it to the ID.
+    if (slug.startsWith("@")) return `/artifacts/${encodeURIComponent(slug.slice(1))}${query.size ? `?${query}` : ""}`
     query.set("item", slug)
     return `/artifacts?${query}`
   }
@@ -466,7 +471,7 @@ function PageBody({
   tabs,
   activeTab,
   tabIdScope,
-}: Omit<PageViewProps, "onBack"> & {
+}: Omit<PageViewProps, "onBack" | "backLabel"> & {
   tabs: PageTabView[]
   activeTab: string
   tabIdScope: string
