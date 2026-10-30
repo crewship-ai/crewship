@@ -42,7 +42,7 @@ describe("composer + › New artifact", () => {
     fireEvent.click(await screen.findByRole("button", { name: /A partner brief from this chat/ }))
     const textarea = screen.getByRole("textbox")
     expect(textarea).toHaveValue("A partner brief from this chat")
-    expect(screen.getByRole("button", { name: "Create document" })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: "Remove New Word" })).toBeInTheDocument()
     fireEvent.submit(textarea.closest("form")!)
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
     expect(send.mock.calls[0][1]).toEqual({ document_creation_intent: { submission_id: expect.any(String), drafting: true } })
@@ -56,5 +56,35 @@ describe("composer + › New artifact", () => {
     fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
     fireEvent.click(await screen.findByRole("button", { name: /A partner brief from this chat/ }))
     expect(textarea).toHaveValue("A partner brief from this chat\n\nUse the Q3 numbers")
+  })
+
+  it.each(["desktop", "mobile"] as const)("starts a project with explicit consent and shows it as one chip on %s", async variant => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true")
+    render(<ChatComposer {...props} variant={variant} artifactCreationEnabled />)
+    // The menu replaces the toolbar's text toggles.
+    expect(screen.queryByRole("button", { name: "Create artifact project" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Create document" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
+    fireEvent.click(await screen.findByRole("button", { name: /A three-screen pricing site/ }))
+    expect(screen.getByRole("button", { name: "Remove New Project" })).toBeInTheDocument()
+    // On a phone the note has no room beside the chip; screen readers still get it.
+    expect(screen.getByText("Private project · Sharing requires your approval")).toHaveClass("max-sm:sr-only")
+    fireEvent.submit(screen.getByRole("textbox").closest("form")!)
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
+    expect(send.mock.calls[0][0]).toContain("A three-screen pricing site")
+    expect(send.mock.calls[0][1]).toEqual({ artifact_project_intent: { submission_id: expect.any(String) } })
+    // Consent covers one message: the chip is gone after sending.
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Remove New Project" })).toBeNull())
+  })
+
+  it("removing the chip withdraws consent", async () => {
+    vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true")
+    render(<ChatComposer {...props} artifactCreationEnabled />)
+    fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
+    fireEvent.click(await screen.findByRole("button", { name: /A three-screen pricing site/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Remove New Project" }))
+    fireEvent.submit(screen.getByRole("textbox").closest("form")!)
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
+    expect(send.mock.calls[0][1]).toBeUndefined()
   })
 })

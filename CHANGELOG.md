@@ -9,11 +9,17 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Chat fits a landscape tablet and a phone better.** The side viewer lies over the chat below 1180px wide (so also on a 1024px tablet), and the composer's *New Project* chip is readable in dark mode; on a phone its access note is left to screen readers instead of being cut to one letter.
+
 - **The chat's side viewer lies over the chat on a tablet.** With chat artifact projects on, below the large breakpoint an open artifact or saved document covers 78% of the chat from the right instead of squeezing the conversation into a narrow column. Wide screens keep the shared row; phones keep the full-screen viewer.
+
+- **Chat starts a project from "+" › New artifact.** With chat artifact projects on, the composer's "+" menu offers Project next to Word. Picking a starter sets the same explicit creation consent as before, and the chosen kind shows as one removable chip ("New Project") in place of the two text buttons, so the toolbar fits on a phone.
 
 - **A Page opens with its content inside Artifacts.** Its application or panels show in the library detail with the same views Pages uses, read by the page's immutable ID; the detail no longer sends you to Pages.
 
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
+
+- **Design System artifacts get an opt-in token preview.** An artifact project with a `design-system.json` file (colors, typography, spacing, radii and an optional component list) opens as a read-only sheet of swatches, type scale, spacing and radii when the web UI is built with `NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM=true`. Agents and the CLI create and version it through the existing `page artifact create/publish/restore` commands; no new endpoint or storage. Default off.
 
 - ⚠️ **Behaviour change: notification channel URLs are checked more strictly.** The delivery library (shoutrrr 0.22.1) rejects a channel URL that could never send when a channel is created from the provider form or tested, and at send time for raw URLs: Gotify needs a real application token (15 characters starting with `A`, or a Gotify 3 `gtfya.` token), Google Chat needs both `key` and `token`, Mattermost needs a host, and ntfy topics follow ntfy's naming rule. Saved channels are never checked at startup or when listed; a Google Chat channel saved without `key` or `token` now reports a delivery error. SQLite driver updated to modernc.org/sqlite 1.61.0.
 
