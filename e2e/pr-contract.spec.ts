@@ -1,6 +1,7 @@
 import { devices } from "@playwright/test"
 
 import { test, expect } from "./fixtures/auth"
+import { buildProfile } from "./build-profile"
 import { incomingWebhookFlow } from "./incoming-webhook-flow"
 
 // One browser context is intentional. NextAuth rotates the session cookie on
@@ -288,7 +289,8 @@ test.describe("PR browser contract subset — phone", () => {
       await expect(sheet.getByText(label, { exact: true })).toBeVisible()
     }
     await expect(sheet.getByText("Journal", { exact: true })).toHaveCount(0)
-    await expect(sheet.getByRole("link", { name: "Artifacts", exact: true })).toHaveAttribute("href", "/pages")
+    // The release build profile moves the Artifacts nav to the library.
+    await expect(sheet.getByRole("link", { name: "Artifacts", exact: true })).toHaveAttribute("href", buildProfile().name === "release" ? "/artifacts" : "/pages")
 
     // Back closes it in place rather than leaving the page underneath.
     const before = new URL(page.url()).pathname

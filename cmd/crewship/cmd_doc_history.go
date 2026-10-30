@@ -14,12 +14,14 @@ import (
 func newDocHistoryCommands() []*cobra.Command {
 	var commands []*cobra.Command
 	for _, selected := range []bool{false, true} {
-		name, use, count := "checkpoints", "checkpoints <page-slug>", 1
+		use, count := "checkpoints <page-slug>", 1
+		short, example := "List retained document checkpoints without changing the document", "  crewship doc checkpoints @<artifact-id>"
 		if selected {
-			name, use, count = "checkpoint", "checkpoint <page-slug> <checkpoint-id>", 2
+			use, count = "checkpoint <page-slug> <checkpoint-id>", 2
+			short, example = "Read the confirmed body of one retained checkpoint", "  crewship doc checkpoint @<artifact-id> <checkpoint-id>"
 		}
 		commands = append(commands, &cobra.Command{
-			Use: use, Short: "Read confirmed Document " + name + " without changing the current draft", Args: cobra.ExactArgs(count),
+			Use: use, Short: short, Example: example, Args: cobra.ExactArgs(count),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				path := "/api/v1/pages/" + pagePathEscape(args[0]) + "/document/checkpoints"
 				if selected {

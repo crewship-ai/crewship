@@ -34,7 +34,8 @@ crewship label <subcommand> [flags]
 crewship label list
 ```
 
-**Output columns:** ID, NAME, COLOR, GROUP.
+**Output columns:** ID, NAME, COLOR, GROUP. `--format json` prints the array of
+`{id, name, color, label_group}` objects. Any workspace member can list labels.
 
 ---
 
@@ -51,6 +52,11 @@ crewship label create --name "P0" --color "#DC2626" --group priority
 | `--color` | `string` | _(required)_ | Hex color, e.g. `#3B82F6` or `#abc`. Validated client-side. |
 | `--group` | `string` | | Optional label group (e.g. `priority`, `status`). |
 
+Requires the MANAGER role or higher; MEMBER and VIEWER get `API error (403)`.
+Label names are unique per workspace: a duplicate fails with
+`API error (409): A label named "Bug" already exists in this workspace`.
+`--format json` prints the created label.
+
 ---
 
 ## `crewship label update`
@@ -64,6 +70,12 @@ crewship label update <label-id> --name "Critical" --color "#B91C1C"
 | `--name` | `string` | | New label name. |
 | `--color` | `string` | | New hex color. |
 | `--group` | `string` | | New label group. Pass empty string to clear. |
+
+Only the flags you pass are sent; with none the CLI stops with
+`no fields to update`. Renaming or recoloring requires the ADMIN role or higher
+(MANAGER can create labels but gets `403` here). Prints
+`Label updated: <name> (<id>)`; `--format json` prints the updated label. An
+unknown id fails with `API error (404): Label not found`.
 
 ---
 

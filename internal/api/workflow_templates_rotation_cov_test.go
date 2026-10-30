@@ -11,9 +11,9 @@ package api
 // withWorkspaceUser, newTestLogger, setTestEncryptionKey, withUser,
 // withWorkspace) are reused.
 //
-// SKIPPED: the sidecar 401-fallback path described by the
-// TODO(sidecar-fallback) comment in credential_rotation.go is not wired
-// yet (no handler code), and the StartCredentialRotationExpiryWorker
+// SKIPPED: the server side of the sidecar 401 fallback (rotation grace
+// delivery, #1882) lives in credential_grace_delivery_test.go, and the
+// StartCredentialRotationExpiryWorker
 // background goroutine / ticker loop is timing-driven; ExpireGracedRotations
 // is exercised directly instead. There are no network credential-rotation
 // provider branches in this file to skip.

@@ -130,6 +130,10 @@ Sample output:
 ✓ Policy updated for crew crew-eng: trusted / warn
 ```
 
+With `--format json|yaml|ndjson` the command prints one document holding the
+server's answers instead: `policy` (the updated policy, when `--level` was
+given) and `crew` (the updated crew, when `--max-ephemeral` was given).
+
 ---
 
 ## `crewship policy list`

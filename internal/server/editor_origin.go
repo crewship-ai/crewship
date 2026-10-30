@@ -47,7 +47,7 @@ func newEditorOrigin(cfg *config.Config, logger *slog.Logger) *editororigin.Hand
 			return nil
 		}
 		h, err := editororigin.New(editororigin.Options{SameHost: true, StudioOrigin: cfg.Storage.PageStudioOrigin,
-			PageRuntimeOrigin: cfg.Storage.PageRuntimeOrigin, Scheme: goapi.RequestScheme, LoopbackServer: loopbackBind(cfg.Server.Host),
+			PageRuntimeOrigin: cfg.PageRuntimeOrigin(), Scheme: goapi.RequestScheme, LoopbackServer: loopbackBind(cfg.Server.Host),
 			BundleDir: g.EditorBundleDir, Bundles: g.EditorBundles, ApplicationPackages: applicationPackages})
 		if err != nil {
 			// The handler still owns the prefix; refused bundles are not served.
@@ -88,7 +88,7 @@ func loopbackBind(host string) bool {
 // editor is enabled: the dedicated origin, or the bundle path on the
 // request's Studio origin, never the bare Studio origin.
 func editorHeaderOptions(cfg *config.Config, editor *editororigin.Handler) securityHeaderOptions {
-	o := securityHeaderOptions{pageRuntimeOrigin: cfg.Storage.PageRuntimeOrigin}
+	o := securityHeaderOptions{pageRuntimeOrigin: cfg.PageRuntimeOrigin(), pageRuntimeLoopbackOnly: cfg.Storage.PageRuntimeOrigin == ""}
 	if ((cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled) || cfg.Mooring.Enabled || nativeCraftEditorEnabled(cfg)) && editor != nil {
 		o.editorFrameSrc = editor.FrameSourceFor
 		o.editorPerRequest = cfg.GridCraft.EditorOrigin == ""

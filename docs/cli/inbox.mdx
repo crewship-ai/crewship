@@ -48,8 +48,9 @@ Auth: every subcommand requires `crewship login` plus an active workspace. The i
 | `--space <enum>` | (unset) | `action`, `updates` or `history`. |
 | `--unread` | `false` | Only items unread for you. |
 | `--attention <enum>` | (unset) | Active items of one class: `decision`, `input`, `review`, `repair`. |
-| `--deadline <enum>` | (unset) | `hour`, `today`, `soon` or `none`. |
-| `--crew <id>` | (unset) | Items about one crew. |
+| `--deadline <enum>` | (unset) | `hour`, `today`, `soon` or `none`. `today` ends at the end of your local day, which the CLI sends as `day_end`. |
+| `--day-end <time>` | end of your local day | RFC 3339 end of "today" for `--deadline today`, e.g. `2026-10-29T23:59:59+01:00`. |
+| `--crew <ref>` | (unset) | Items about one crew (slug or id; a slug is resolved to the id the server filters on). |
 | `--agent <ref>` | (unset) | Items about one agent (id, slug or name). |
 
 ### `inbox counts`
@@ -61,7 +62,8 @@ the same rows as `inbox list`; this command does not mark items read.
 |---|---|---|
 | `--agent` | (unset) | Agent ID, slug or name. |
 | `--attention` | (unset) | Active attention class: `decision`, `input`, `review` or `repair`. |
-| `--crew` | (unset) | Crew ID. |
+| `--crew` | (unset) | Crew slug or ID. |
+| `--day-end` | end of your local day | RFC 3339 end of "today" for the `today` deadline bucket (always sent, since `by_deadline` counts it). |
 | `--deadline` | (unset) | `hour`, `today`, `soon` or `none`. |
 | `--kind` | (unset) | One inbox item kind. |
 | `-q, --query` | (unset) | Search title, body, sender, kind and crew/agent names. |

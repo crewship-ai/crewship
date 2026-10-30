@@ -53,10 +53,15 @@ func (m *craftNativeHTTP) checkEntry(ctx context.Context, tx *sql.Tx, entry *cra
 	if err != nil {
 		return proof, err
 	}
-	// No epoch rebinding after a revoke/regain cycle. This first dormant adapter
-	// conservatively retires reads for unclassified ACL epoch changes as well.
-	if proof.application != entry.application || proof.workspaceEpoch != entry.workspaceEpoch || proof.memberID != entry.memberID || proof.memberRevision != entry.memberRevision {
+	// No epoch rebinding after a revoke/regain cycle: the captured user and Page
+	// generations move for every change whose recipients include this user or
+	// this Page. The broad workspace delivery epoch is deliberately not compared;
+	// it also moves for other Pages, other grantees and new members (dev3 F1).
+	if proof.application != entry.application || proof.memberID != entry.memberID || proof.memberRevision != entry.memberRevision {
 		return proof, errCraftNativeAccess
+	}
+	if err = craftNativeGenerationsCurrent(ctx, tx, entry); err != nil {
+		return proof, err
 	}
 	boot, now, err := m.clock.Now()
 	if err != nil || boot != entry.boot || now < 0 || now >= entry.deadline {

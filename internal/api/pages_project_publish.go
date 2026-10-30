@@ -188,9 +188,43 @@ type checkedPageBuild struct {
 	authorizer pageDefinitionAuthorizer
 }
 
+// Refusals for a server that cannot serve a published application, each with
+// the code a client branches on (#3108). The runtime origin message names the
+// setting because, unlike a local install, nothing can derive it (§4.2).
+const (
+	pageArtifactsMissingMessage  = "Pages Apps are not enabled: Page project storage (CREWSHIP_PAGE_PROJECTS_PATH) is not configured, and `" + pagebuild.EnableCommand + "` installs the build image."
+	pageRuntimeOriginMissingText = "Page runtime origin is not configured. Set CREWSHIP_PAGE_RUNTIME_ORIGIN to a separate site."
+)
+
+// runtimeOriginFor is the runtime origin that serves the browser behind r. A
+// derived origin (http://127.0.0.1:<port> for a localhost Studio) applies only
+// to requests that reached the server on a loopback host without a proxy in
+// between (no Forwarded / X-Forwarded-* / X-Real-IP header): for any other
+// browser it would name the visitor's own machine, so it is treated as
+// unconfigured there.
+func (h *PageHandler) runtimeOriginFor(r *http.Request) string {
+	if h.pageRuntimeDerived && !pagebuild.DerivedRuntimeApplies(r) {
+		return ""
+	}
+	return h.pageRuntimeOrigin
+}
+
+// replyIfPublicationUnconfigured answers 503 when artifacts or the runtime
+// origin are missing and reports whether the caller may proceed.
+func (h *PageHandler) replyIfPublicationUnconfigured(w http.ResponseWriter, r *http.Request) bool {
+	switch {
+	case h.pageArtifacts == nil:
+		replyErrorCode(w, 503, pageArtifactsMissingMessage, pagebuild.CodeNotEnabled, "")
+	case h.runtimeOriginFor(r) == "":
+		replyErrorCode(w, 503, pageRuntimeOriginMissingText, pagebuild.CodeRuntimeOriginMissing, "")
+	default:
+		return true
+	}
+	return false
+}
+
 func (h *PageHandler) checkPageCandidate(w http.ResponseWriter, r *http.Request, rec *pageRecord, build string, revision int64) (*checkedPageBuild, bool) {
-	if h.pageArtifacts == nil || h.pageRuntimeOrigin == "" {
-		replyError(w, 503, "Page build worker and separate runtime origin must be configured")
+	if !h.replyIfPublicationUnconfigured(w, r) {
 		return nil, false
 	}
 	var row pagePublication
@@ -793,8 +827,7 @@ func (h *PageHandler) PageApplication(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"publication": nil, "publication_version": publication.Version, "can_publish": h.mayAdministerGrants(r.Context(), ws, user.ID, RoleFromContext(r.Context()), rec)})
 		return
 	}
-	if h.pageArtifacts == nil || h.pageRuntimeOrigin == "" {
-		replyError(w, 503, "Page runtime is not configured")
+	if !h.replyIfPublicationUnconfigured(w, r) {
 		return
 	}
 	scheme := "http://"

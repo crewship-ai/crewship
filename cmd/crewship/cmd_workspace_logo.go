@@ -58,8 +58,17 @@ var workspaceLogoSetCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
+			resp.Body.Close()
+			return err
+		}
+		raw, err := readServerDocument(resp)
+		if err != nil {
+			return err
+		}
+		// -f json: the updated workspace, whose logo_url is the new logo's
+		// address.
+		if handled, err := machineMutationResult(cmd, raw, map[string]any{"workspace_id": wsID, "logo_set": true}); handled {
 			return err
 		}
 		cli.PrintSuccess("Workspace logo updated.")
@@ -80,8 +89,17 @@ var workspaceLogoRemoveCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
+			resp.Body.Close()
+			return err
+		}
+		raw, err := readServerDocument(resp)
+		if err != nil {
+			return err
+		}
+		// The route answers with the updated workspace; an older server sent
+		// no body, and then the fallback says what happened.
+		if handled, err := machineMutationResult(cmd, raw, map[string]any{"workspace_id": wsID, "logo_url": nil}); handled {
 			return err
 		}
 		cli.PrintSuccess("Workspace logo removed — back to initials.")

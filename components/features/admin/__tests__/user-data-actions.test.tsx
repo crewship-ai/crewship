@@ -63,3 +63,49 @@ it("a successful DELETE closes the dialog and tells the roster", async () => {
   await waitFor(() => expect(onErased).toHaveBeenCalled())
   expect(screen.queryByTestId("confirm-dialog")).toBeNull()
 })
+
+// A refusal shows the server's sentence; a non-JSON failure (proxy 502 HTML
+// page) shows a plain fallback, never the raw body or a status code.
+const htmlRes = (status: number) => ({
+  ok: false, status, statusText: "Bad Gateway",
+  json: async () => { throw new SyntaxError("Unexpected token <") },
+  text: async () => "<html><body><h1>502 Bad Gateway</h1></body></html>",
+})
+const lastError = () => String(h.toast.error.mock.calls.at(-1)?.[0])
+
+it("a refused export shows the server's sentence", async () => {
+  h.apiFetch.mockResolvedValueOnce(res(false, { error: "Only workspace owners can export member data." }, 403))
+  render(<UserDataActions userId="u1" email={EMAIL} workspaceId="w1" />)
+  fireEvent.click(screen.getByRole("button", { name: /Export data/ }))
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalled())
+  expect(lastError()).toBe("Only workspace owners can export member data.")
+})
+
+it("an export that fails with an HTML page shows the plain fallback", async () => {
+  h.apiFetch.mockResolvedValueOnce(htmlRes(502))
+  render(<UserDataActions userId="u1" email={EMAIL} workspaceId="w1" />)
+  fireEvent.click(screen.getByRole("button", { name: /Export data/ }))
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalled())
+  expect(lastError()).toBe("Export failed. Nothing was downloaded.")
+})
+
+async function failErase(r: unknown) {
+  h.apiFetch.mockResolvedValueOnce(r)
+  const d = open()
+  fireEvent.change(within(d).getByLabelText(/Reason/), { target: { value: "request #1" } })
+  fireEvent.change(within(d).getByLabelText(/to confirm/), { target: { value: EMAIL } })
+  fireEvent.click(erase(d))
+  await waitFor(() => expect(h.toast.error).toHaveBeenCalled())
+}
+
+it("a refused erase shows the server's sentence", async () => {
+  await failErase(res(false, { error: "Only workspace owners can erase member data." }, 403))
+  expect(h.toast.error).toHaveBeenCalledTimes(1)
+  expect(lastError()).toBe("Only workspace owners can erase member data.")
+})
+
+it("an erase that fails with an HTML page shows the plain fallback", async () => {
+  await failErase(htmlRes(502))
+  expect(h.toast.error).toHaveBeenCalledTimes(1)
+  expect(lastError()).toBe("Erase failed. No data was removed.")
+})
