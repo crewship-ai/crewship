@@ -320,8 +320,9 @@ crewship craft availability <artifact-slug> -f json
 ```
 
 `availability` never fails for a missing artifact; it reports `false` values.
-Run it first: when `enabled` is `false`, the other commands return
-`native HTTP 503`.
+Run it first. `enabled` is `false` when the instance switch is off (the other
+commands then return `native HTTP 503`), and also when the artifact is not a
+native document or you cannot read it (then expect `native HTTP 403` or `404`).
 
 ### Read the shared preview
 
@@ -375,7 +376,7 @@ Where each snapshot field comes from:
 
 | Field | Source |
 |---|---|
-| `workspaceId` | The workspace you selected with `--workspace` or `CREWSHIP_WORKSPACE`. |
+| `workspaceId` | The workspace **ID**, not its slug (the server compares it with the workspace's ID). Read it with `crewship workspace list -f json`. |
 | `pageId` | The artifact's page ID, for example `id` in `crewship page get <artifact-slug> -f json`. |
 | `applicationId`, `enginePin` | The `read` response. |
 | `sessionId` | `session_id` printed when the command started. |
@@ -448,6 +449,7 @@ from a human holder.
 | Message | Meaning |
 |---|---|
 | `native HTTP 503`, `native session HTTP 503`, `native initialization HTTP 503` | Native Craft (or agent tasks) is switched off on this instance. |
+| `native HTTP 400` | The snapshot does not match the document, for example `workspaceId` holds a slug instead of the workspace ID, or another binding field differs from the session. |
 | `native HTTP 403` | No edit rights on the artifact, or the lease action is not allowed for you. |
 | `native HTTP 409` | The lease or document changed (busy, stale generation or newer version). Read the lease and document again; keep your local draft. |
 | `native HTTP 413` | The native history quota is full; existing versions are kept. |
