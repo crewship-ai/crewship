@@ -2024,8 +2024,20 @@ leaves the latest version unchanged; both require owner authority. Read and
 Comment grants reach only the current shared pin. Readers cannot publish,
 comment, restore or share; Comment permits feedback without content writes.
 Storage usage and the keep-all policy are returned with the owner snapshot.
+`quota.level` warns before saving fails: `none` below 80% of `limit_bytes`,
+`near` from 80%, `critical` from 95% and `full` once `used_bytes` reaches the
+limit (`warning` stays true from `near` upwards). Shared readers and Edit-only
+editors get a withheld quota with `limit_bytes` 0 and no level.
 Quota rejection retains every prior version; keep the candidate manifest file
 until publication is acknowledged.
+
+`page artifact versions` also prints the owner-only `retention_preview`: a dry
+run of the proposed rule "keep every version from the last `recent_days`
+(14) days, then the newest version of each older UTC day; always keep the
+latest, shared, named (non-empty message), restored and restore-source
+versions, and any version of unknown age". `would_thin` lists the versions
+that rule would remove; `dry_run` is always `true`. Nothing is deleted and
+`quota.retention` stays `keep-all`.
 
 For an agent, enable **Create artifact project** in the original private chat.
 The host binds that explicit request to the actual human credential and one
@@ -2112,12 +2124,60 @@ reads are required; shared readers can read only collections declared by the
 current shared pin, and cannot write. Responses include host update time and a
 reader-safe source label, without private run or account identifiers.
 
+In the Dashboard preview (`NEXT_PUBLIC_ARTIFACT_DASHBOARDS`), every value bound
+with `data-field` shows that provenance on mouse hover and keyboard focus, for
+example `Source: sales/north.revenue · Agent · updated 2026-10-28 08:00 UTC`.
+The same text is the value's accessible description (`aria-describedby`) and is
+listed under Data sources. A value whose producer is unknown (an erased
+contributor or a missing label) or whose document is not loaded reads
+`Source not stated` and has a dashed rather than dotted underline, so it does not
+look authoritative. Data is always read with the viewing reader's Page access.
+
 Agent tools `artifact_data_batch`, `artifact_data_read` and
 `artifact_data_collections` use these same fields (`slug`, `collection`,
 `base_version`/`version`, `documents`) under the original signed run and exact
 Page mandate. Protected CLI runs use that sidecar transport and cannot fall back
 to human credentials. Code restore/share/comments retain the existing artifact
 version and comment operations; restoring code does not rewind mutable data.
+
+### Design System tokens (preview disabled by default)
+
+A Design System is an ordinary artifact project whose manifest includes a
+`design-system.json` file. There is no separate endpoint or store: create,
+publish, restore, share and comment use the `page artifact` commands above, and
+each publish is a retained version. Build the web UI with
+`NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM=true` to open such an artifact as a
+read-only token sheet (color swatches, type scale, spacing and radii);
+otherwise it opens like any other project.
+
+```json
+{
+  "schema_version": 1,
+  "name": "Harbor",
+  "colors": {"primary": "#1d4ed8", "surface": "#ffffff"},
+  "typography": {"body": {"size": 16, "weight": 400, "line_height": 1.5, "font_family": "Inter, sans-serif"}},
+  "spacing": {"sm": 8, "md": 16},
+  "radii": {"sm": 4},
+  "components": [{"name": "Button", "description": "Primary action"}]
+}
+```
+
+```bash
+crewship page artifact create harbor --name "Harbor tokens" --file manifest.json
+crewship page artifact publish harbor --base-version 1 --file manifest.json
+crewship page artifact restore harbor --base-version 2 --version 1
+```
+
+`schema_version`, `colors`, `typography`, `spacing` and `radii` are required;
+groups may be empty. `name` (up to 80 characters) and `components` (up to 64
+entries of `name` and optional `description`) are optional. Token names are
+lowercase ASCII letters, digits and hyphens starting with a letter, at most 48
+bytes, and at most 128 per group. Colors are `#rrggbb`; spacing and radii are
+integer pixels from 0 to 4096; a type style needs an integer `size` (1–512) and
+may set `weight` (100–900 in steps of 100), `line_height` (0.5–4) and a plain
+`font_family` list. The file is at most 32 KiB. Unknown fields, duplicate keys,
+CSS expressions or URLs make the preview refuse the whole file; the server still
+stores it as a normal project file.
 
 ### `crewship page artifact slides <slug-or-id>`
 
