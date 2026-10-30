@@ -6,6 +6,9 @@ import * as Y from "yjs"
 import type { ArtifactOrigin } from "@/hooks/use-artifact-agent-dispatch"
 import type { ArtifactComment } from "@/hooks/use-artifact-project"
 import { useSessionSafe } from "@/hooks/use-auth"
+import { artifactDraftKey, loadArtifactDraft, writeArtifactDraft, admittedArtifactDraftCapture, purgeLocalDraftPage, captureLocalDraftPage } from "@/lib/artifact-drafts"
+import { createLocalDraftCipher, LocalDraftReadRevoked } from "@/lib/local-draft-seal"
+import { registerDocumentDraftWriter } from "@/lib/document-queue"
 import { apiFetch, tryRefresh } from "@/lib/api-fetch"
 import { getAuthMode, resolveWsBase } from "@/lib/server-base"
 import { DesignProvider, type DesignConnection, type DesignPeer } from "./design-provider"
@@ -63,42 +66,61 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const [peers, setPeers] = useState<DesignPeer[]>([])
  const [connection, setConnection] = useState<DesignConnection>("connecting")
  const [dirty, setDirty] = useState(false)
+ const [readRevokedPage, setReadRevokedPage] = useState<string>()
  const [draftError, setDraftError] = useState(false)
  const provider = useRef<DesignProvider | null>(null)
- const editable = Boolean(authorityRevision !== null && query.data?.can_edit && !query.isError && !selectedVersion && connection !== "denied" && connection !== "rejected")
+ const [draftReady, setDraftReady] = useState(false)
+ const editable = Boolean(readRevokedPage !== pageId && draftReady && authorityRevision !== null && query.data?.can_edit && !query.isError && !selectedVersion && connection !== "denied" && connection !== "rejected")
  const editableRef = useRef(editable)
  useEffect(() => { editableRef.current = editable; provider.current?.setEditable(editable) }, [editable])
  const canConnect = Boolean(pageId && authorityRevision !== null && !query.isError && !selectedVersion)
  const actorName = query.data?.actor?.name ?? session?.data?.user?.name ?? "Collaborator"
  const initialCanEdit = query.data?.can_edit === true
  const admittedActor = query.data?.actor?.id
+ // Only a fresh, same-person Page read refusal authorizes local deletion.
+ const lastPage = useRef<{ page: string; human: string; address: string } | undefined>(undefined)
+ if (pageId && !query.isError) lastPage.current = { page: pageId, human: userId, address: JSON.stringify([workspaceId, slug]) }
+ const accessStatus = (query.error as { status?: number } | null)?.status
+ useEffect(() => {
+  const previous = lastPage.current
+  if (!previous || previous.human !== userId || previous.address !== JSON.stringify([workspaceId, slug]) || (accessStatus !== 403 && accessStatus !== 404)) return
+  const scope = { human: userId, workspace: workspaceId, page: previous.page }
+  void captureLocalDraftPage(scope).then(captured => createLocalDraftCipher(scope).then(cipher => cipher.close(), async error => {
+   if (error instanceof LocalDraftReadRevoked) { setReadRevokedPage(scope.page); await purgeLocalDraftPage(scope, captured) }
+  })).catch(() => setDraftError(true))
+ }, [accessStatus, userId, workspaceId, slug])
  useEffect(() => {
   if (!canConnect || !pageId) return
   let active = true
   const document = new Y.Doc()
-  // A reused slug must never replay another Page’s private draft. Legacy
-  // slug-scoped records stay in browser storage and are never loaded here.
-  const storageKey = `crewship-design:v2:${userId}:${workspaceId}:${pageId}`
-  if (initialCanEdit && userId !== "anonymous") {
-   try {
-    const draft = localStorage.getItem(storageKey)
-    if (draft) Y.applyUpdate(document, Uint8Array.from(atob(draft), char => char.charCodeAt(0)))
-   } catch { setDraftError(true) }
+  setDraftReady(false)
+  const storageKey = artifactDraftKey("design-canvas", userId, workspaceId, pageId)!
+  let cleanup = () => { document.destroy() }
+  const initialize = async () => {
+  if (initialCanEdit) {
+   const draft = await loadArtifactDraft(storageKey)
+   if (!active) return
+   if (draft) Y.applyUpdate(document, Uint8Array.from(atob(draft), char => char.charCodeAt(0)))
+  }
+  if (!active) return
+  setDraftReady(true)
+  const capture = initialCanEdit ? admittedArtifactDraftCapture(storageKey) : undefined
+  let localDirty = false
+  const snapshot = () => {
+   const bytes = Y.encodeStateAsUpdate(document)
+   if (bytes.length > 2 * 1024 * 1024) throw new Error("Canvas exceeds the local draft limit. Keep this tab open.")
+   let value = ""
+   for (let index = 0; index < bytes.length; index += 8192) value += String.fromCharCode(...bytes.subarray(index, index + 8192))
+   return btoa(value)
   }
   setDoc(document)
   setNodes(designNodes(document))
   const update = (_update: Uint8Array, origin: unknown) => {
    setNodes(designNodes(document))
    if (origin === "editor" && initialCanEdit && userId !== "anonymous") {
-    try {
-     const bytes = Y.encodeStateAsUpdate(document)
-     // This bounded canvas draft survives browser crashes without coupling saving to close.
-     if (bytes.length <= 2 * 1024 * 1024) {
-      let value = ""
-      for (let index = 0; index < bytes.length; index += 8192) value += String.fromCharCode(...bytes.subarray(index, index + 8192))
-      localStorage.setItem(storageKey, btoa(value))
-     } else setDraftError(true)
-    } catch { setDraftError(true) }
+    localDirty = true
+    try { void writeArtifactDraft(storageKey, snapshot()).catch(() => setDraftError(true)) }
+    catch { setDraftError(true) }
    }
   }
   document.on("update", update)
@@ -133,16 +155,26 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
    return [{ clientId, name: String(state.user.name ?? "Collaborator"), color: String(state.user.color ?? "#2563eb"), cursor: state.cursor && Number.isFinite(state.cursor.x) && Number.isFinite(state.cursor.y) ? state.cursor : undefined }]
   }))
   live.awareness.on("change", awareness)
-  return () => {
-   active = false
-   provider.current = null
+  const stop = async () => { live.setEditable(false); live.destroy(); editableRef.current = false; setDraftReady(false) }
+  const unregister = registerDocumentDraftWriter(userId, stop, { suspend: async () => {
+   // Freeze transport first; a failed capture keeps this document mounted.
+   await stop()
+   if (localDirty && capture) await capture(snapshot())
+  } })
+  cleanup = () => {
+   unregister()
+   if (provider.current === live) provider.current = null
    live.awareness.off("change", awareness)
    live.destroy()
    document.off("update", update)
    document.destroy()
-   setDoc(null)
-   setNodes([])
-   setPeers([])
+  }
+  }
+  void initialize().catch(error => { if (active && error instanceof LocalDraftReadRevoked) setReadRevokedPage(pageId); if (active) { setDraftError(true); setDraftReady(false) } })
+  return () => {
+   active = false
+   cleanup()
+   setDoc(null); setNodes([]); setPeers([]); setDraftReady(false)
   }
  }, [canConnect, endpoint, workspaceId, slug, userId, pageId, authorityRevision, actorName, admittedActor, initialCanEdit, client, request])
  const invalidate = () => { void client.invalidateQueries({ queryKey: key }) }
@@ -162,5 +194,5 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const connectAgent = useMutation({ mutationFn: (chat_id: string) => pinnedRequest("/agent", { chat_id }), onSuccess: invalidate })
  const comment = useMutation({ mutationFn: (body: { version: number; path: string; selector: string; quote: string; text: string; send_to_agent: boolean }) => pinnedRequest<ArtifactComment>("/comments", body), onSuccess: invalidate })
  const share = useMutation({ mutationFn: (version: number) => pinnedRequest("/share", { version }), onSuccess: invalidate })
- return { query, versions, comments, doc, nodes: selectedVersion || query.data?.can_edit === false ? query.data?.nodes ?? [] : nodes, peers, connection, editable, dirty, draftError, save, restore, share, comment, connectAgent, setCursor: (cursor: { x: number; y: number } | null) => provider.current?.setCursor(cursor) }
+ return { readRevoked: readRevokedPage === pageId, query, versions, comments, doc, nodes: selectedVersion || query.data?.can_edit === false ? query.data?.nodes ?? [] : nodes, peers, connection, editable, dirty, draftError, save, restore, share, comment, connectAgent, setCursor: (cursor: { x: number; y: number } | null) => provider.current?.setCursor(cursor) }
 }

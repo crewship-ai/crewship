@@ -13,6 +13,8 @@ import type { StatusTone } from "@/lib/format-status"
 import { fmtSize } from "@/lib/file-format"
 import { timeAgo } from "@/lib/time"
 import { useSessionSafe } from "@/hooks/use-auth"
+import { LocalDraftReadRevoked } from "@/lib/local-draft-seal"
+import { artifactDraftKey, loadArtifactDraft, writeArtifactDraft, clearArtifactDraft, artifactDraftRevision } from "@/lib/artifact-drafts"
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { cn } from "@/lib/utils"
 import { artifactDashboards, artifactDesignSystem } from "@/lib/feature-flags"
@@ -206,11 +208,6 @@ function LibraryLoadedViewer(props: LoadedProps & { dispatchEnabled: boolean }) 
   return <LoadedViewer {...props} library sendToOrigin={data.origin && dispatchEnabled ? request => agent.dispatch(request.comment) : undefined} />
 }
 
-function readCommentDraft(key: string | null): string {
-  if (!key) return ""
-  try { return localStorage.getItem(key) ?? "" } catch { return "" }
-}
-
 function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, shell, fullscreen, writeEnabled, commentEnabled, library = false, sendToOrigin }: LoadedProps) {
   const me = useSessionSafe()?.data?.user?.id
   const canWrite = writeEnabled && data.can_write === true
@@ -246,14 +243,26 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
   const [screenPath, setScreenPath] = useState<string | null>(null)
   const [selectMode, setSelectMode] = useState(false)
   const [anchor, setAnchor] = useState<Anchor | null>(null)
-  // An unsent comment survives a crash or closed tab in this browser, per
-  // person, workspace and Page; the selected place must be picked again.
-  const draftKey = me ? `artifact-viewer-comment:${me}:${workspaceId}:${data.page_id}` : null
-  const [draftState, setDraftState] = useState<{ key: string | null; text: string }>(() => ({ key: draftKey, text: readCommentDraft(draftKey) }))
-  const draft = draftState.key === draftKey ? draftState.text : readCommentDraft(draftKey)
+  // An unsent comment survives a crash or closed tab in this browser
+  // (IndexedDB, strict durability: lib/artifact-drafts), per person,
+  // workspace and Page; the selected place must be picked again.
+  const draftKey = artifactDraftKey("artifact-viewer-comment", me, workspaceId, data.page_id)
+  const [draftReadError, setDraftReadError] = useState<{key:string; revoked:boolean}>()
+  const [draftState, setDraftState] = useState<{ key: string | null; text: string }>({ key: null, text: "" })
+  const draft = draftState.key === draftKey ? draftState.text : ""
+  const currentDraft = useRef({ key: draftKey, text: draft, anchor })
+  currentDraft.current = { key: draftKey, text: draft, anchor }
+  useEffect(() => {
+    if (!draftKey) return
+    let live = true
+    // Text typed while the stored draft loads wins over the stored copy.
+    void loadArtifactDraft(draftKey).then(text => { if (live) setDraftState(previous => previous.key === draftKey ? previous : { key: draftKey, text }) }, error => { if(live)setDraftReadError({key:draftKey,revoked:error instanceof LocalDraftReadRevoked}) })
+    return () => { live = false }
+  }, [draftKey])
   const setDraft = (text: string) => {
+    if (!draftKey || draftState.key !== draftKey) return
     setDraftState({ key: draftKey, text })
-    try { if (draftKey) { if (text) localStorage.setItem(draftKey, text); else localStorage.removeItem(draftKey) } } catch { /* the in-memory draft and Copy my comment remain */ }
+    if (draftKey) void writeArtifactDraft(draftKey, text).catch(() => { /* the in-memory draft and Copy my comment remain */ })
   }
   const [banner, setBanner] = useState<Banner | null>(null)
   // A comment notice belongs to the version it was sent on and to that selection; see below.
@@ -314,17 +323,27 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
     clearCommentNotice()
     if (banner === "anchor") setBanner(null)
   }
-  const resetComposer = () => { setAnchor(null); setDraft(""); setSelectMode(false) }
+  const resetComposer = () => {
+    if (!draftKey || draftState.key !== draftKey) return
+    if(draftKey)void clearArtifactDraft(draftKey,draft,artifactDraftRevision(draftKey)).catch(()=>{})
+    setDraftState({key:draftKey,text:""});setAnchor(null);setSelectMode(false)
+  }
   // The API admits an agent run only for a comment saved with send_to_agent. The library saves it as a
   // waiting task (Add to queue) and Send to agent starts the waiting ones; there is no batch route.
   // "queue" saves the agent's task without starting it (Waiting); Send to agent in the queue starts it.
   const submit = (mode: "send" | "queue" | "save") => {
     const send = mode !== "save"
-    if (!writeAllowed() || send && !maySend || viewingOld || !anchor || !draft.trim()) return
+    if (!draftKey || draftState.key !== draftKey || !writeAllowed() || send && !maySend || viewingOld || !anchor || !draft.trim()) return
+    const submitted = { ...currentDraft.current, revision: draftKey ? artifactDraftRevision(draftKey) : 0 }
     comment.mutate({ version: anchor.version, path: anchor.path, selector: anchor.selector, quote: anchor.quote, text: draft.trim(), send_to_agent: send }, {
       onSuccess: saved => {
         if (!writeAllowed()) return
-        resetComposer(); setBanner(null)
+        if(submitted.key&&currentDraft.current.key===submitted.key&&currentDraft.current.text===submitted.text&&currentDraft.current.anchor===submitted.anchor&&artifactDraftRevision(submitted.key)===submitted.revision){
+          void clearArtifactDraft(submitted.key,submitted.text,submitted.revision).catch(()=>{})
+          setDraftState(previous=>previous.key===submitted.key&&previous.text===submitted.text?{key:submitted.key,text:""}:previous)
+          setAnchor(null);setSelectMode(false)
+        }
+        setBanner(null)
         if (mode === "send" && sendToAgent) void dispatch(saved)
         else if (mode === "queue" && sendToAgent) setNotice({ text: "Added to the queue. The agent starts when you send it.", commentOn: anchor.version })
         // Without a chat to start it, a comment for the agent waits as its task.
@@ -570,7 +589,7 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
     <span aria-hidden className={cn(PIN, "size-6 bg-primary text-xs text-primary-foreground")}>{pinNumber}</span>
     <div className="grid min-w-0 flex-[1_1_160px] gap-1.5">
       <b className="truncate text-xs font-semibold">{anchor ? `On ${anchor.selector}${anchor.quote ? ` · ${elementLabel(anchor.selector, anchor.quote)}` : ""} · v${anchor.version}` : "Select an element to attach this comment"}</b>
-      <Textarea aria-label="Comment" value={draft} onChange={event => setDraft(event.target.value)} rows={3} placeholder="What should change here?" className="min-h-16 text-sm" />
+      <Textarea aria-label="Comment" disabled={!draftKey||draftState.key!==draftKey} value={draft} onChange={event => setDraft(event.target.value)} rows={3} placeholder="What should change here?" className="min-h-16 text-sm" />
     </div>
     <div className="flex w-full flex-wrap justify-end gap-1.5">
       <Button type="button" size="sm" variant="ghost" onClick={resetComposer}>Cancel</Button>
@@ -641,7 +660,9 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
   const waitingCount = data.comments.filter(c => c.status === "pending").length
   const tabCount = (n: number) => n > 0 && <span aria-hidden className="ml-1.5 font-mono text-micro text-muted-foreground">{n}</span>
 
+  if(draftReadError?.key===draftKey&&draftReadError.revoked)return shell(header,<p role="alert" className="p-6">Page read access was removed.</p>)
   return shell(header, <>
+    {draftReadError?.key===draftKey&&<p role="alert" className="p-3">Private draft could not be opened. Reconnect and reopen; the stored copy is retained.</p>}
     {library && <div role="tablist" aria-label="Artifact detail" className="flex gap-1 border-b px-3 py-2" onKeyDown={event => {
       const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'))
       const index = tabs.indexOf(event.target as HTMLButtonElement)

@@ -213,7 +213,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   reconcile.current=()=>{const r=current;if(r&&live(r)&&r.writable&&r.phase?.phase==='uncertain')void r.coordinator?.reconcile()}
   const windowMessage=(event:MessageEvent)=>{current?.port.handleWindowMessage(event)}
   window.addEventListener('message',windowMessage)
-  const unregisterPrivacy=registerDocumentDraftWriter(humanId,retirePrivacy)
+  const unregisterPrivacy=registerDocumentDraftWriter(humanId,retirePrivacy,{suspend:suspendForAuth,hasDraft:()=>Boolean(current?.phase?.dirty||current?.capture)})
   function wrapJournal(journal:NativeDraftJournal,r:Runtime):NativeDraftJournal{return {...journal,
    async persist(draft){await journal.persist(draft);if(live(r))r.capture={...draft,bytes:draft.bytes.slice()}},
    confirm:async(draft)=>{await journal.confirm(draft);if(r.capture?.editorRevision===draft.editorRevision)r.capture=undefined},
@@ -241,6 +241,25 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    r.retirementFinished=true;resumeViewing(r);display(r);return true
    })()
    r.retiring=retiring;return retiring
+  }
+  async function suspendForAuth(){
+   const r=current
+   if(r?.blocked&&r.journal&&r.ready&&!dead){
+    // Retry only a local recovery capture. The failed retirement never
+    // released its frame/journal, and no save or custody action is replayed.
+    freezeInput(r)
+    const snapshot=await r.port.snapshot(r.abort.signal)
+    const draft:NativeDraft={applicationId:sessionApplication!,enginePin:r.enginePin,sessionId,generation:r.generation,baseVersion:r.receiptVersion??r.version,editorRevision:snapshot.editorRevision,bytes:snapshot.bytes.slice()}
+    await r.port.validate(draft,r.abort.signal)
+    await r.journal.persist(draft)
+    r.capture=draft;r.blocked=false
+    if(!r.nativeReadOnly&&await r.port.setReadOnly(true,r.abort.signal)!==true)throw Error('native_read_only_unconfirmed')
+    r.nativeReadOnly=true
+    await r.coordinator?.close();if(!r.coordinator)await r.journal.close()
+    stop('Přihlášení skončilo · koncept zachován');return
+   }
+   await retireConnection('Přihlášení skončilo · koncept zachován')
+   if(!dead&&current?.blocked)throw Error('native_auth_draft_capture_unconfirmed')
   }
   async function retireConnection(message:string){
    if(dead||networkRetired)return

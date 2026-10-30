@@ -2,6 +2,7 @@
 import { existsSync } from "node:fs"
 import { buildSync } from "esbuild"
 import { chromium } from "@playwright/test"
+import { installLocalDraftKeyFixture } from "../local-draft-seal.test-support"
 import { expect, it } from "vitest"
 
 it.skipIf(!existsSync(chromium.executablePath()))("roundtrips a 5 MiB native recovery through real Chromium IndexedDB and excludes another tab", async () => {
@@ -11,7 +12,7 @@ it.skipIf(!existsSync(chromium.executablePath()))("roundtrips a 5 MiB native rec
     await context.route("http://localhost/**", route => route.fulfill({ body: "<!doctype html><title>Native recovery journal</title>", contentType: "text/html" }))
     const a = await context.newPage(), b = await context.newPage()
     const code = buildSync({ entryPoints: [`${process.cwd()}/lib/mooring/native-draft.ts`], bundle: true, write: false, format: "iife", globalName: "nativeDraft", platform: "browser" }).outputFiles[0].text
-    for (const page of [a, b]) { await page.goto("http://localhost/native-recovery"); await page.addScriptTag({ content: code }) }
+    for (const page of [a, b]) { await installLocalDraftKeyFixture(page, {human: () => "alice"}); await page.goto("http://localhost/native-recovery"); await page.addScriptTag({ content: code }) }
     await a.evaluate(async () => {
       const api = (window as unknown as { nativeDraft: typeof import("./native-draft") }).nativeDraft
       const journal = await api.openNativeDraftJournal({ human: "alice", workspace: "w", page: "p", applicationId: "wordcraft" })

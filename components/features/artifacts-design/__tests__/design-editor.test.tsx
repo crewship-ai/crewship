@@ -1,3 +1,8 @@
+// UI lifecycle tests use a cipher seam; real browser tests cover encryption/admission.
+vi.mock("@/lib/local-draft-seal", () => ({
+ createLocalDraftCipher: async () => ({ seal: async (text:string) => text, open: async (text:string) => text, close() {} }),
+ forgetLocalDraftPage() {}, isSealedLocalDraft: () => true, LocalDraftReadRevoked: class extends Error {},
+}))
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import * as Y from "yjs"
@@ -33,7 +38,7 @@ describe("Design editor controls", () => {
   view.rerender(<DesignEditor workspaceId="workspace" slug="same-slug" />)
   expect(screen.getByLabelText("Comment for agent")).toHaveValue("")
  })
- it("creates a screen and keeps awareness visible", () => {
+ it("creates a screen and keeps awareness visible", async () => {
   render(<DesignEditor workspaceId="workspace" slug="shop" />)
   fireEvent.click(screen.getByRole("button", { name: "Screen" }))
   expect(designNodes(state.doc!)).toMatchObject([{ type: "frame", name: "Screen 1", width: 360, height: 640 }])
@@ -45,7 +50,7 @@ describe("Design editor controls", () => {
   expect(screen.getByTitle("Marie")).toHaveStyle({ backgroundColor: "#047857" })
   expect(screen.getByLabelText("Marie cursor").querySelector("rect")).toHaveAttribute("fill", "#047857")
  })
- it("does not offer edit or save controls to readers", () => {
+ it("does not offer edit or save controls to readers", async () => {
   state.editable = false
   render(<DesignEditor workspaceId="workspace" slug="shop" />)
   expect(screen.getByText("Read only")).toBeInTheDocument()
