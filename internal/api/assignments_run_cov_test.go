@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -146,28 +145,12 @@ func TestAssignmentCreateCov_HappyPath_NoOrchestrator(t *testing.T) {
 		t.Errorf("by=%q to=%q", byID, toID)
 	}
 
-	// The spawned runAssignment goroutine has no orchestrator → the
-	// assignment must converge to FAILED. Poll briefly.
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if err := h.db.QueryRow(`SELECT status FROM assignments WHERE chat_id = ?`, chatID).Scan(&status); err != nil {
-			t.Fatalf("poll: %v", err)
-		}
-		if status == "FAILED" {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("assignment never failed (status=%s)", status)
-		}
-		time.Sleep(5 * time.Millisecond)
+	h.WaitDispatches()
+	var workState string
+	if err := h.db.QueryRow(`SELECT a.status,w.state FROM assignments a JOIN work_items w ON w.domain_id=a.id WHERE a.chat_id=?`, chatID).Scan(&status, &workState); err != nil || status != "PENDING" || workState != "queued" {
+		t.Fatalf("accepted assignment status=%s work=%s err=%v", status, workState, err)
 	}
-	var errMsg string
-	if err := h.db.QueryRow(`SELECT COALESCE(error_message,'') FROM assignments WHERE chat_id = ?`, chatID).Scan(&errMsg); err != nil {
-		t.Fatalf("query error_message: %v", err)
-	}
-	if !strings.Contains(errMsg, "orchestrator not available") {
-		t.Errorf("error_message = %q", errMsg)
-	}
+
 }
 
 func TestAssignmentCreateCov_MissionLinked_CommentAndAssignee(t *testing.T) {

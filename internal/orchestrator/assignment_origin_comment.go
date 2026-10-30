@@ -17,6 +17,19 @@ func WriteAssignmentResultComment(ctx context.Context, db *sql.DB, assignmentID,
 		return false, err
 	}
 	defer tx.Rollback()
+	written, err := WriteAssignmentResultCommentTx(ctx, tx, assignmentID, workspaceID, missionID, agentID, commentID, body, stamp)
+	if err != nil || !written {
+		return written, err
+	}
+	if err = tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// WriteAssignmentResultCommentTx preserves requester authorization when lifecycle
+// settlement and its deterministic comment share an existing transaction.
+func WriteAssignmentResultCommentTx(ctx context.Context, tx *sql.Tx, assignmentID, workspaceID, missionID, agentID, commentID, body, stamp string) (bool, error) {
 	if assignmentID != "" {
 		var wrongTarget bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM assignments WHERE id=? AND (workspace_id<>? OR mission_id IS NOT ?))`, assignmentID, workspaceID, missionID).Scan(&wrongTarget); err != nil {
@@ -27,7 +40,7 @@ func WriteAssignmentResultComment(ctx context.Context, db *sql.DB, assignmentID,
 		}
 	}
 	var originID, requesterID string
-	err = tx.QueryRowContext(ctx, `SELECT CASE WHEN a.id IS NOT NULL THEN COALESCE(a.chat_origin_id,'') ELSE COALESCE(m.chat_origin_id,'') END,COALESCE(a.created_by_user_id,'') FROM missions m LEFT JOIN assignments a ON a.id=? AND a.workspace_id=m.workspace_id AND a.mission_id=m.id WHERE m.id=? AND m.workspace_id=?`, assignmentID, missionID, workspaceID).Scan(&originID, &requesterID)
+	err := tx.QueryRowContext(ctx, `SELECT CASE WHEN a.id IS NOT NULL THEN COALESCE(a.chat_origin_id,'') ELSE COALESCE(m.chat_origin_id,'') END,COALESCE(a.created_by_user_id,'') FROM missions m LEFT JOIN assignments a ON a.id=? AND a.workspace_id=m.workspace_id AND a.mission_id=m.id WHERE m.id=? AND m.workspace_id=?`, assignmentID, missionID, workspaceID).Scan(&originID, &requesterID)
 	if err != nil {
 		return false, err
 	}
@@ -54,9 +67,6 @@ func WriteAssignmentResultComment(ctx context.Context, db *sql.DB, assignmentID,
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO mission_comments(id,mission_id,author_type,author_id,body,created_at,updated_at,chat_origin_id) VALUES(?,?,'agent',?,?,?,?,NULLIF(?,''))`, commentID, missionID, agentID, body, stamp, stamp, originID)
 	if err != nil {
-		return false, err
-	}
-	if err = tx.Commit(); err != nil {
 		return false, err
 	}
 	return true, nil

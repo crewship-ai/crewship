@@ -15,7 +15,7 @@ import { timeAgo } from "@/lib/time"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { cn } from "@/lib/utils"
-import { artifactDashboards, artifactsLibrary } from "@/lib/feature-flags"
+import { artifactDashboards, artifactDesignSystem, artifactsLibrary } from "@/lib/feature-flags"
 import { parseDashboardManifest } from "@/lib/pages/artifact-dashboard"
 import { artifactSlidesMode } from "@/lib/pages/artifact-slides"
 import { useArtifactViewer, type ArtifactViewerTarget } from "../projects/artifact-viewer-context"
@@ -24,6 +24,8 @@ import type { ArtifactComment, ArtifactProjectSnapshot } from "../projects/types
 import { ArtifactPreviewFrame, type PreviewSelection } from "./artifact-preview-frame"
 import { ArtifactDashboardPreview } from "./artifact-dashboard-preview"
 import { ArtifactSlidesPreview } from "./artifact-slides-preview"
+import { ArtifactDesignSystemPreview } from "@/components/features/artifacts/design-system/design-system-preview"
+import { hasDesignSystemFile } from "@/components/features/artifacts/design-system/manifest"
 import { isValidAnchorSelector, screenLabel, screenLabels } from "./element-select"
 import { artifactsItemHref } from "../artifacts-href"
 
@@ -203,6 +205,11 @@ function LibraryLoadedViewer(props: LoadedProps & { dispatchEnabled: boolean }) 
   return <LoadedViewer {...props} library sendToOrigin={data.origin && dispatchEnabled ? request => agent.dispatch(request.comment) : undefined} />
 }
 
+function readCommentDraft(key: string | null): string {
+  if (!key) return ""
+  try { return localStorage.getItem(key) ?? "" } catch { return "" }
+}
+
 function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, shell, fullscreen, writeEnabled, library = false, sendToOrigin }: LoadedProps) {
   const me = useSessionSafe()?.data?.user?.id
   const canWrite = writeEnabled && data.can_write === true
@@ -236,7 +243,15 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
   const [screenPath, setScreenPath] = useState<string | null>(null)
   const [selectMode, setSelectMode] = useState(false)
   const [anchor, setAnchor] = useState<Anchor | null>(null)
-  const [draft, setDraft] = useState("")
+  // An unsent comment survives a crash or closed tab in this browser, per
+  // person, workspace and Page; the selected place must be picked again.
+  const draftKey = me ? `artifact-viewer-comment:${me}:${workspaceId}:${data.page_id}` : null
+  const [draftState, setDraftState] = useState<{ key: string | null; text: string }>(() => ({ key: draftKey, text: readCommentDraft(draftKey) }))
+  const draft = draftState.key === draftKey ? draftState.text : readCommentDraft(draftKey)
+  const setDraft = (text: string) => {
+    setDraftState({ key: draftKey, text })
+    try { if (draftKey) { if (text) localStorage.setItem(draftKey, text); else localStorage.removeItem(draftKey) } } catch { /* the in-memory draft and Copy my comment remain */ }
+  }
   const [banner, setBanner] = useState<Banner | null>(null)
   // A comment notice belongs to the version it was sent on and to that selection; see below.
   const [notice, setNotice] = useState<{ text: string; commentOn?: number }>({ text: "" })
@@ -264,6 +279,7 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
   const viewingOld = shown !== latest
   const isShared = sharedVersion > 0 && sharedVersion === latest
   const slidesMode = artifactSlidesMode(data.artifact_kind, data.manifest.files)
+  const designSystem = !slidesMode && artifactDesignSystem() && hasDesignSystemFile(data.manifest.files)
   const labels = useMemo(() => slidesMode
     ? new Map(data.manifest.files.filter(file => file.media_type === "text/html").map(file => [file.path, screenLabel(file.path)]))
     : screenLabels(data.manifest), [data.manifest, slidesMode])
@@ -450,7 +466,7 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
 
   const header = <>
     <h2 className="min-w-0 truncate text-sm font-semibold">{data.name ?? data.slug ?? target.slug}</h2>
-    <Badge variant="outline" className="shrink-0">{slidesMode === "slides" ? "Slides" : slidesMode === "unsupported" ? "Artifact" : artifactDashboards() && parseDashboardManifest(data.manifest.files) ? "Dashboard" : "Project"}</Badge>
+    <Badge variant="outline" className="shrink-0">{slidesMode === "slides" ? "Slides" : slidesMode === "unsupported" ? "Artifact" : designSystem ? "Design System" : artifactDashboards() && parseDashboardManifest(data.manifest.files) ? "Dashboard" : "Project"}</Badge>
     <StatusPill tone={isShared ? "success" : "muted"} label={isShared ? "Shared" : "Draft"} />
     <div className="flex-1" />
     {library && librarySwitch}
@@ -570,6 +586,7 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
     <div className={cn("overflow-hidden rounded-md border bg-white", fullscreen ? "h-[max(320px,calc(100dvh-14rem))]" : "h-[min(70vh,560px)] min-h-[320px]")}>
       {slidesMode === "unsupported" ? <p role="alert" className="p-4">This Slides format is unsupported.</p>
         : slidesMode === "slides" ? <ArtifactSlidesPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} artifactKind={data.artifact_kind} path={screenPath ?? ""} title={`Preview of ${labelOf(screen)}`} selectMode={canWrite && selectMode && !viewingOld} onSelect={select} onNavigate={setScreenPath} />
+        : designSystem ? <ArtifactDesignSystemPreview files={data.manifest.files} title={`Preview of ${data.name ?? data.slug ?? target.slug}`} />
         : artifactDashboards() && data.manifest.files.some(file => file.path === "dashboard.json")
         ? <ArtifactDashboardPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} files={data.manifest.files} path={screen} selectMode={canWrite && selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`} onSelect={select} onNavigate={setScreenPath} />
         : <ArtifactPreviewFrame html={html} files={data.manifest.files} screens={screens} path={screen} selectMode={canWrite && selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`}

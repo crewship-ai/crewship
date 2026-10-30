@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { readFileSync } from "node:fs"
 import { parseEnv } from "node:util"
-import { artifactSlides, artifactsLibrary, chatArtifactProjects, chatCraftLease, crewsUnifiedUI, legacyMcpIntegrations, pagesOpenArtifacts } from "@/lib/feature-flags"
+import { artifactDesignSystem, artifactSlides, artifactsLibrary, chatArtifactProjects, chatCraftLease, crewsUnifiedUI, legacyMcpIntegrations, pagesOpenArtifacts } from "@/lib/feature-flags"
 
 describe.each([
   ["NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", chatArtifactProjects],
@@ -114,5 +114,21 @@ describe("artifactSlides", () => {
   it("keeps the tracked production build configuration default-off", () => {
     const production = readFileSync(".env.production", "utf8")
     expect(production.match(/^NEXT_PUBLIC_ARTIFACT_SLIDES\s*=\s*(.*?)\s*$/m)?.[1]).not.toBe("true")
+  })
+})
+
+describe("artifactDesignSystem", () => {
+  afterEach(() => vi.unstubAllEnvs())
+  it.each(["", "false", "1", "TRUE", "yes"])("defaults off for %s", value => {
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM", value)
+    expect(artifactDesignSystem()).toBe(false)
+  })
+  it("requires literal true at build time", () => {
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM", "true")
+    expect(artifactDesignSystem()).toBe(true)
+  })
+  it("keeps the tracked production build configuration default-off", () => {
+    const production = readFileSync(".env.production", "utf8")
+    expect(production.match(/^NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM\s*=\s*(.*?)\s*$/m)?.[1]).not.toBe("true")
   })
 })

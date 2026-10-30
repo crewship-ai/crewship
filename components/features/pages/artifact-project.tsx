@@ -28,6 +28,19 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  const [sourceDraft,setSourceDraft]=useState<{scope:object;body:ArtifactProjectSave;path:string}>()
  const [sourceError,setSourceError]=useState<{scope:object;message:string;hidePreview:boolean}>()
  const activeSource=sourceDraft?.scope===sourceScope?sourceDraft:undefined
+ // An unsaved source draft survives a crash or closed tab in this browser; it
+ // is only offered back, never saved over newer work automatically.
+ const sourceKey=sourceScope.human?`artifact-source:${sourceScope.human}:${workspaceId}:${slug}`:null
+ const [storedSource,setStoredSource]=useState<{key:string;draft:{body:ArtifactProjectSave;path:string}}>()
+ useEffect(()=>{
+  if(!sourceKey)return
+  try{const raw=localStorage.getItem(sourceKey);const parsed=raw?JSON.parse(raw):null;setStoredSource(parsed&&Array.isArray(parsed.body?.files)&&typeof parsed.path==="string"?{key:sourceKey,draft:parsed}:undefined)}catch{setStoredSource(undefined)}
+ },[sourceKey])
+ useEffect(()=>{
+  if(!sourceKey||!activeSource)return
+  try{localStorage.setItem(sourceKey,JSON.stringify({body:activeSource.body,path:activeSource.path}));setStorageError(false)}catch{setStorageError(true)}
+ },[sourceKey,activeSource])
+ const forgetSource=useCallback((key:string|null)=>{if(!key)return;try{localStorage.removeItem(key)}catch{};setStoredSource(undefined)},[])
  const sourceCurrent=useRef({scope:sourceScope,draft:activeSource,canWrite:false})
  const data = query.data
  sourceCurrent.current={scope:sourceScope,draft:activeSource,canWrite:data?.can_write===true&&!query.isError}
@@ -79,12 +92,12 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
   save.mutate(submitted.body,{
    onSuccess:()=>{
     if(sourceCurrent.current.scope!==submitted.scope||!sourceCurrent.current.canWrite)return
-    setSourceDraft(previous=>previous===submitted?undefined:previous)
+    setSourceDraft(previous=>previous===submitted?undefined:previous);forgetSource(sourceKey)
     setSourceError(undefined);setVersion(undefined)
    },
    onError:(error)=>{
     if(sourceCurrent.current.scope!==submitted.scope)return
-    setSourceError({scope:submitted.scope,message:error.message,hidePreview:(error as Error&{status?:number}).status!==409})
+    setSourceError({scope:submitted.scope,message:error.message,hidePreview:![409,413].includes((error as Error&{status?:number}).status??0)})
    },
   })
  }
@@ -99,7 +112,7 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
     setDelivery(previous => ({...previous,[posted.id]:"Sending to agent…"}))
     const accepted = await agent.dispatch(posted)
     if (current.current.submissionScope !== submitted.submissionScope || !current.current.canWrite) return
-    setDelivery(previous => ({...previous,[posted.id]:accepted ? "Sent to agent" : "Comment saved. Agent delivery could not be confirmed. Retry when the source chat is connected."}))
+    setDelivery(previous => ({...previous,[posted.id]:accepted ? "Sent to agent" : agent.refusal?.(posted.id) === "busy" ? "Comment saved. The agent is busy; retry when it finishes." : "Comment saved. Agent delivery could not be confirmed. Retry when the source chat is connected."}))
    }
   } })
  }
@@ -114,11 +127,12 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
   {data.can_write && <div className="border-b px-4 py-2 text-xs text-muted-foreground" role="status">Storage: {data.quota.used_bytes.toLocaleString()} / {data.quota.limit_bytes.toLocaleString()} bytes. All versions retained; history is never deleted automatically.{data.quota.warning && <strong className="ml-2 text-destructive">Storage is nearly full. Existing versions remain safe.</strong>}</div>}
   {activeSource && !data.can_write && <SourceRecovery body={activeSource.body}/>}
   {data.can_write === true && manifest?.version === data.latest_version && <section aria-label="Project source" className="border-b p-3">
+   {!activeSource&&storedSource?.key===sourceKey&&data.can_write&&<div role="status" className="space-y-1"><p>Unsaved source draft from version {storedSource.draft.body.base_version} was kept in this browser.{storedSource.draft.body.base_version!==data.latest_version?` The project is now at version ${data.latest_version}; saving it will report a conflict, and your draft stays.`:""}</p><Button variant="outline" onClick={()=>{setSourceError(undefined);setSourceDraft({scope:sourceScope,...storedSource.draft})}}>Restore source draft</Button><Button variant="ghost" onClick={()=>forgetSource(sourceKey)}>Discard it</Button></div>}
    {!activeSource ? <Button variant="outline" onClick={()=>{setSourceError(undefined);setSourceDraft({scope:sourceScope,path:manifest!.entrypoint,body:{base_version:data.latest_version,entrypoint:manifest!.entrypoint,files:manifest!.files.map(file=>({...file}))}})}}>Edit source</Button> : <div className="space-y-2">
     <label>Source file path<select aria-label="Source file path" value={activeSource.path} onChange={event=>setSourceDraft({...activeSource,path:event.target.value})} className="ml-2 rounded border bg-background p-2 coarse:min-h-[44px]">{activeSource.body.files.map(file=><option key={file.path} value={file.path}>{file.path}</option>)}</select></label>
     <textarea aria-label="Source file" className="min-h-48 w-full rounded border bg-background p-2 font-mono text-sm" value={activeSource.body.files.find(file=>file.path===activeSource.path)?.content??""} onChange={event=>setSourceDraft({...activeSource,body:{...activeSource.body,files:activeSource.body.files.map(file=>file.path===activeSource.path?{...file,content:event.target.value}:file)}})} />
-    <Button disabled={save.isPending} onClick={saveSource}>Save project</Button><Button variant="ghost" disabled={save.isPending} onClick={()=>setSourceDraft(undefined)}>Discard source draft</Button>
-    <p className="text-xs">Draft from version {activeSource.body.base_version}. Keep a copy before leaving this page.</p>
+    <Button disabled={save.isPending} onClick={saveSource}>Save project</Button><Button variant="ghost" disabled={save.isPending} onClick={()=>{setSourceDraft(undefined);forgetSource(sourceKey)}}>Discard source draft</Button>
+    <p className="text-xs">Draft from version {activeSource.body.base_version}. Kept in this browser until you save or discard it.</p>
    </div>}
    {sourceError?.scope===sourceScope&&<p role="alert">{sourceError.message}</p>}
   </section>}
