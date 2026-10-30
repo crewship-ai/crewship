@@ -8,7 +8,9 @@ tag: Experimental
 
 # crewship feature-flag
 
-Manage feature flags for the current workspace. The CLI surfaces the flag **definition** lifecycle (`create`/`update`/`delete`) plus the **override** layer (per-workspace on/off) and a `list` view that includes the instance default. Creating or renaming a flag definition can also be done via the web UI, direct API calls, or a [manifest `apply`](/manifest/feature_flag) — see [the API reference below](#api).
+Manage feature flags for the current workspace. The CLI surfaces the flag **definition** lifecycle (`create`/`update`/`delete`) plus the **override** layer (per-workspace on/off) and a `list` view that includes the instance default. The web app has no feature-flag screen; besides the CLI, definitions can be created through direct API calls or a [manifest `apply`](/manifest/feature_flag) — see [the API reference below](#api). A flag key cannot be renamed.
+
+Which keys the server actually reads, and what each one gates, is listed in [Flags the server checks](/api-reference/feature-flags#flags-the-server-checks).
 
 ```bash
 crewship feature-flag <subcommand> [flags]
@@ -21,8 +23,8 @@ The command accepts the alias `crewship flag`.
 | Command | Description |
 |---------|-------------|
 | `list` | Show every flag with its instance default, this workspace's override, and the effective value. |
-| `create` | Create a new flag **definition**, instance-wide. ADMIN-only. |
-| `update <key>` | Update one or more fields of an existing flag **definition**. ADMIN-only. |
+| `create` | Create a new flag **definition**, instance-wide. Instance administrator only. |
+| `update <key>` | Update one or more fields of an existing flag **definition**. Instance administrator only. |
 | `enable <key>` | Force the flag on for the current workspace (PUT override). |
 | `disable <key>` | Force the flag off for the current workspace (PUT override). |
 | `inherit <key>` | Drop the override and revert to the instance default. |
@@ -38,14 +40,14 @@ crewship feature-flag create --key provisioner-v2 \
   --enabled --percentage 25
 ```
 
-Creates a new instance-global flag definition — the row that `list`'s `DEFAULT` column reads and that `enable`/`disable`/`inherit` target with a per-workspace override. ADMIN-only (`canRole "manage"`) and instance-wide: the flag becomes visible to every workspace on the instance, not only the one the CLI is pointed at.
+Creates a new instance-global flag definition — the row that `list`'s `DEFAULT` column reads and that `enable`/`disable`/`inherit` target with a per-workspace override. Instance-wide: the flag becomes visible to every workspace on the instance, not only the one the CLI is pointed at. You must be an instance administrator **and** `OWNER` or `ADMIN` of the selected workspace (see [Who may change a definition](/api-reference/feature-flags#who-may-change-a-definition)).
 
 | Flag | Required | Description |
 |---|---|---|
 | `--key` | ✓ | Flag identifier. Must be unique on the instance — the server returns `409 Conflict` for a duplicate key. |
 | `--description` | no | Free-form text shown in `list`'s `DESCRIPTION` column. Omitted entirely (not sent as `""`) when the flag isn't passed. |
 | `--enabled` | no | Instance default value. Defaults to `false` — a workspace override still wins regardless of this setting. |
-| `--percentage` | no | Gradual-rollout percentage, `0`-`100`. Defaults to `0`. Bypassed entirely by any workspace override. |
+| `--percentage` | no | Recorded rollout percentage, `0`-`100`. Defaults to `0`. Stored and shown in `list`, but the server does not evaluate it: the effective value is the override, else `--enabled`. |
 
 ---
 
@@ -62,9 +64,9 @@ Updates one or more fields of an existing flag **definition** — the instance-w
 |---|---|
 | `--description` | New description. Pass `--description ""` to clear it. |
 | `--enabled` | New instance default value. |
-| `--percentage` | New gradual-rollout percentage, `0`-`100`. |
+| `--percentage` | New recorded rollout percentage, `0`-`100` (not evaluated by the server). |
 
-At least one of the three is required — running `update <key>` with no flags exits `2` (`ExitValidation`) without contacting the server. ADMIN-only; a `<key>` that doesn't exist returns `404`.
+At least one of the three is required — running `update <key>` with no flags exits `2` (`ExitValidation`) without contacting the server. Same permission as `create`; a `<key>` that doesn't exist returns `404`.
 
 ---
 
@@ -82,10 +84,10 @@ crewship feature-flag list
 | `DEFAULT` | The instance default — what every workspace sees when there's no override. |
 | `WORKSPACE` | This workspace's override: `on`, `off`, or `inherit` when no override is set. |
 | `EFFECTIVE` | What actually applies to this workspace right now — the override if set, otherwise `DEFAULT`. |
-| `PERCENT` | Gradual-rollout percentage (server-side); overrides bypass the percentage gate entirely. |
+| `PERCENT` | Recorded rollout percentage. Informational only: it does not change `EFFECTIVE`. |
 | `DESCRIPTION` | Free-form description from the flag definition; `-` when unset. |
 
-The global `--format` flag is honoured (`table`, `json`, `yaml`).
+The global `--format` flag is honoured (`table`, `json`, `yaml`, `ndjson`, `quiet`). Any workspace role can run `list`.
 
 ---
 
@@ -96,7 +98,7 @@ crewship feature-flag enable provisioner-v2
 crewship feature-flag disable noisy-experiment
 ```
 
-Writes a per-workspace override. Idempotent — repeating the command is a no-op. The override **always wins** over the instance default and the rollout percentage, so use these to opt a single workspace into or out of a flag regardless of the broader rollout state.
+Writes a per-workspace override. Idempotent — repeating the command is a no-op. The override **always wins** over the instance default, so use these to opt a single workspace into or out of a flag regardless of the instance-wide setting. Requires `OWNER` or `ADMIN` of the workspace.
 
 ---
 
@@ -106,7 +108,7 @@ Writes a per-workspace override. Idempotent — repeating the command is a no-op
 crewship feature-flag inherit provisioner-v2
 ```
 
-Removes the override. The next read of the flag reverts to the instance default + gradual-rollout percentage logic. Use this when you want a previously-pinned workspace to follow the instance default again.
+Removes the override. The next read of the flag reverts to the instance default. Use this when you want a previously-pinned workspace to follow the instance default again. Succeeds (no change) when the workspace had no override; requires `OWNER` or `ADMIN` of the workspace.
 
 ---
 
@@ -117,15 +119,15 @@ crewship feature-flag delete provisioner-v2
 crewship feature-flag delete provisioner-v2 --yes   # skip the confirmation prompt
 ```
 
-Deletes the flag **definition** itself, not just this workspace's override — the delete cascades to every workspace's override row for the key, instance-wide. This is a stronger operation than `inherit`; prefer `inherit` if you only want to stop overriding for the current workspace. Requires `OWNER` / `ADMIN` (`canRole "manage"`) and prompts for confirmation unless `--yes` / `-y` is passed.
+Deletes the flag **definition** itself, not just this workspace's override — the delete cascades to every workspace's override row for the key, instance-wide. This is a stronger operation than `inherit`; prefer `inherit` if you only want to stop overriding for the current workspace. Same permission as `create`; prompts for confirmation unless `--yes` / `-y` is passed.
 
 ---
 
 ## API
 
-The CLI is a thin wrapper over six endpoints. Each request uses the current
-authenticated workspace context; these routes do not take a `workspace_id`
-query parameter.
+The CLI is a thin wrapper over six endpoints. Each request carries the
+selected workspace (`--workspace` / `CREWSHIP_WORKSPACE` / `crewship workspace use`)
+as the `workspace_id` query parameter.
 
 | Verb | Path | Wrapped by |
 |------|------|------------|
@@ -136,14 +138,15 @@ query parameter.
 | `PUT` | `/api/v1/feature-flags/{key}/override` | `enable` / `disable` |
 | `DELETE` | `/api/v1/feature-flags/{key}/override` | `inherit` |
 
-Every route in the family now has a CLI wrapper. `create`/`update`/`delete` are ADMIN-only server-side (`canRole "manage"`) and instance-wide — a definition change is visible to every workspace, not only the one the CLI is currently pointed at.
+Every route in the family has a CLI wrapper. `create`/`update`/`delete` require an instance administrator who is also `OWNER`/`ADMIN` of the selected workspace, and they are instance-wide — a definition change is visible to every workspace, not only the one the CLI is currently pointed at.
 
 ## Common errors
 
 - **`API error (404): Feature flag not found`** — the `<key>` you passed doesn't exist on this instance. Run `crewship feature-flag list` to see the catalog.
 - **`API error (409): feature flag with this key already exists`** — `create` was given a `--key` already in use. Pick a different key, or `update` the existing one.
 - **`API error (401)`** — authenticate with `crewship login` (or configure a CLI token) and select a workspace.
-- **`API error (403): Forbidden`** — definition writes (`create`/`update`/`delete`) and override writes require `OWNER` / `ADMIN` (`canRole "manage"`). MEMBER and VIEWER roles can only `list`.
+- **`API error (403): Only an instance administrator can do this`** — `create`/`update`/`delete` were run by someone who is not an instance administrator.
+- **`API error (403): Forbidden`** — override writes (`enable`/`disable`/`inherit`) need `OWNER` / `ADMIN` of the workspace; definition writes need that role too, in addition to instance administration, and a CLI token restricted to scopes other than `instance:admin` is refused the same way. MEMBER and VIEWER roles can only `list`.
 - **`API error (400)`** — the override request is malformed or has no explicit boolean `enabled` value; `inherit` and `delete` also reject an empty key. `update` with no flags, or `create`/`update` with `--percentage` outside `0-100`, is rejected client-side before any request is sent (exit `2`).
 
 ## See also

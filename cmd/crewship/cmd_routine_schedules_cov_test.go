@@ -493,10 +493,19 @@ func TestScheduleNow_RunE(t *testing.T) {
 	defer stub.Close()
 	setStubCLI(t, stub.URL())
 
-	// 404 → dedicated capability-missing error (the stub's fallback 404s).
+	// Plain-text 404 (the mux's reply on a server without the /run route)
+	// → dedicated capability-missing error.
+	stub.OnPost(schedulesPath+"/sch1/run", clitest.TextResponse(404, "404 page not found\n"))
 	err := routineSchedulesNowCmd.RunE(routineSchedulesNowCmd, []string{"sch1"})
 	if err == nil || !strings.Contains(err.Error(), "force-fire endpoint unavailable") {
-		t.Errorf("404 path: got %v", err)
+		t.Errorf("route-less 404 path: got %v", err)
+	}
+
+	// JSON 404 is the handler's own answer and is relayed verbatim.
+	stub.OnPost(schedulesPath+"/sch1/run", clitest.ErrorResponse(404, "schedule not found"))
+	err = routineSchedulesNowCmd.RunE(routineSchedulesNowCmd, []string{"sch1"})
+	if err == nil || !strings.Contains(err.Error(), "API error (404): schedule not found") {
+		t.Errorf("handler 404 path: got %v", err)
 	}
 
 	stub.OnPost(schedulesPath+"/sch1/run", clitest.JSONResponse(200, map[string]string{"run_id": "r1"}))

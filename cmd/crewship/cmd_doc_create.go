@@ -25,7 +25,8 @@ func newDocCreateCommand() *cobra.Command { return newDocCreateCommandWithTransp
 
 // The optional transport is a Go-only test seam, never a user-controlled origin.
 func newDocCreateCommandWithTransport(transport http.RoundTripper) *cobra.Command {
-	command := &cobra.Command{Use: "create --file <authoring.json>", Short: "Create one private Docs for this chat run's explicit human request", Long: `Create a populated document for the human whose request admitted this run.
+	command := &cobra.Command{Use: "create --file <authoring.json>", Short: "Create one private document for the human request that admitted this run", Example: `  crewship doc create --file authoring.json
+  cat authoring.json | crewship doc create --file -`, Long: `Create a populated document for the human whose request admitted this run.
 The request is one JSON object with slug, name, mutation_id and blocks. For example:
 {"slug":"launch-plan","name":"Launch plan","mutation_id":"launch-one","blocks":[{"type":"heading","level":1,"text":"Launch plan"},{"type":"paragraph","text":"Start with one team."}]}
 Use --file - for stdin. Keep the original input and mutation_id when retrying

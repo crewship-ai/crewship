@@ -120,16 +120,20 @@ crewship project get mobile-launch
 ### Update
 
 ```bash
-# Bump the health and slip the target date.
-crewship project update mobile-launch --health at_risk --target-date 2026-08-15
+# Bump the health and slip the target date (update takes the project id).
+crewship project update <project-id> --health at_risk --target-date 2026-08-15
+crewship project update <project-id> --status in_progress --format json
 ```
+
+Prints `Project <id> updated.`; `--format json` prints the full updated project
+record returned by the server.
 
 You can clear a nullable field by passing an empty string explicitly — `--description ""` removes the description, while omitting the flag leaves it untouched.
 
 ### Breakdown stats
 
 ```bash
-crewship project stats mobile-launch
+crewship project stats <project-id>
 # Issues: 12 total / 4 completed (33%)
 #
 # By status:
@@ -153,8 +157,8 @@ crewship project stats mobile-launch
 ### Delete
 
 ```bash
-crewship project delete mobile-launch
-# Delete project "mobile-launch"? (issues will be unlinked, not deleted) [y/N]
+crewship project delete <project-id>
+# Delete project "<project-id>"? (issues will be unlinked, not deleted) [y/N]
 ```
 
 <Warning>
@@ -177,9 +181,10 @@ crewship project milestone create mobile-launch \
   --target-date 2026-06-15 \
   --status active
 
-# Update (any subset of fields)
+# Update (any subset of fields); prints the updated milestone
 crewship project milestone update mil_abc123 \
   --status completed --position 2
+crewship project milestone update mil_abc123 --name "Phase 1 shipped" --format json
 
 # Delete (prompts unless --yes)
 crewship project milestone delete mil_abc123 --yes
@@ -189,15 +194,24 @@ crewship project milestones rm mil_abc123 --yes      # alias on the group + verb
 | Verb | Flags | Notes |
 |---|---|---|
 | `create` | `--name` (required), `--description`, `--target-date` (ISO 8601), `--status` (default `active`) | Posts to `/projects/{id}/milestones`. |
-| `update` | `--name`, `--description`, `--target-date`, `--status`, `--position` | PATCH; only flags actually `Changed()` are forwarded. Reject with `no fields to update` when none are. |
+| `update` | `--name`, `--description`, `--target-date`, `--status` (`active`, `completed`, `cancelled`), `--position` | PATCH; only flags actually `Changed()` are forwarded. Reject with `no fields to update` when none are. Prints `Milestone updated: <name> (<id>)`, or the milestone with `--format json`. |
 | `delete` | `-y`, `--yes` | DELETE. Aliases: `remove`, `rm`. |
 
 `update`/`delete` take the **milestone id** (not the project id) because milestones are keyed independently once created.
+
+## Permissions
+
+Any workspace member can run `list`, `get`, `stats` and `milestone list`.
+`create`, `update`, `milestone create` and `milestone update` require the
+MANAGER role or higher; MEMBER and VIEWER get `API error (403)`. `delete` and
+`milestone delete` require ADMIN or higher.
 
 ## Common errors
 
 - **`--name is required`** — `create` was called without a name.
 - **`no fields to update — pass at least one of --name/--status/--priority/--health/--lead-id/--lead-type/--start-date/--target-date/--icon/--color/--description`** — `update` needs at least one field.
+- **`API error (409): A project with the slug "..." already exists in this workspace`** — `create` with a name whose derived slug is already used in this workspace.
+- **`API error (404): Project not found`** / **`Milestone not found`** — `update` with an unknown id (or one from another workspace).
 - **`workspace_id required`** — no active workspace; run `crewship workspace use <slug>` first.
 
 ## See also
