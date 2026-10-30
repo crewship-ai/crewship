@@ -65,40 +65,12 @@ const defaultFallbackTimeout = 30 * time.Second
 // Option configures an Extractor.
 type Option func(*Extractor)
 
-// WithLookback bounds how far back a transcript is read. Defaults to the
-// sweep's own 14-day window.
-func WithLookback(d time.Duration) Option {
-	return func(e *Extractor) {
-		if d > 0 {
-			e.lookback = d
-		}
-	}
-}
-
-// WithMaxTurns bounds one extraction's transcript length.
-func WithMaxTurns(n int) Option {
-	return func(e *Extractor) {
-		if n > 0 {
-			e.maxTurns = n
-		}
-	}
-}
-
 // WithFallbackCallTimeout sets the bound used when the resolver reports
 // no per-call budget. It never overrides a budget the slot did state.
 func WithFallbackCallTimeout(d time.Duration) Option {
 	return func(e *Extractor) {
 		if d > 0 {
 			e.fallbackTimeout = d
-		}
-	}
-}
-
-// WithClock injects a clock for tests.
-func WithClock(now func() time.Time) Option {
-	return func(e *Extractor) {
-		if now != nil {
-			e.now = now
 		}
 	}
 }

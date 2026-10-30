@@ -5,15 +5,74 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/design"
 	"github.com/gorilla/websocket"
 )
+
+// designWSRun is the Design engine entry used by the socket; tests observe it.
+var designWSRun = design.Run
+
+// Close codes. 1008 means only that this socket's authority is no longer
+// current; the browser re-admits on it, so a refused update or a protocol
+// condition must never use it, or the client loops forever as "denied".
+const (
+	designCloseRejected    = 4400 // the engine refused the update; resending it cannot succeed
+	designCloseRateLimited = 4429 // sync step 1 requests beyond the per-connection bucket
+)
+
+var (
+	errDesignProtocol    = errors.New("invalid Design protocol message")
+	errDesignRateLimited = errors.New("Design sync requests are rate limited")
+	// Another person's live connection holds this awareness client ID. The
+	// frame is dropped; the connection and its document sync stay open.
+	errDesignAwarenessHeld = errors.New("awareness identity held by another actor")
+)
+
+// Sync step 1 requests are a token bucket per connection: a burst of
+// designSyncBurst, then one per designSyncRefill. A standard client sends one
+// on open and occasionally a resync; a flood would spawn one engine process per
+// frame while holding the room lock, so it closes the socket instead.
+const (
+	designSyncBurst  = 5
+	designSyncRefill = time.Second
+)
+
+func (client *designClient) allowSyncRequest(now time.Time) bool {
+	if client.syncChecked.IsZero() {
+		client.syncTokens = designSyncBurst
+	} else {
+		client.syncTokens = min(designSyncBurst, client.syncTokens+now.Sub(client.syncChecked).Seconds()/designSyncRefill.Seconds())
+	}
+	client.syncChecked = now
+	if client.syncTokens < 1 {
+		return false
+	}
+	client.syncTokens--
+	return true
+}
+
+func designCloseFor(err error) (int, string) {
+	switch {
+	case errors.Is(err, errDesignAccess), errors.Is(err, artifacts.ErrVersionAuthority), errors.Is(err, sql.ErrNoRows), errors.Is(err, artifacts.ErrDisabled):
+		return websocket.ClosePolicyViolation, "Design permissions changed"
+	case errors.Is(err, design.ErrInvalid), errors.Is(err, artifacts.ErrVersionInvalid):
+		return designCloseRejected, "Design update rejected"
+	case errors.Is(err, errDesignProtocol):
+		return websocket.CloseProtocolError, "Invalid Design protocol message"
+	case errors.Is(err, errDesignRateLimited):
+		return designCloseRateLimited, "Design sync rate exceeded"
+	default:
+		return websocket.CloseInternalServerErr, "Design operation failed; changes are not acknowledged"
+	}
+}
 
 type designClient struct {
 	conn            *websocket.Conn
@@ -24,6 +83,9 @@ type designClient struct {
 	awareness       []byte
 	clientID, clock uint64
 	hasID           bool
+	retired         bool // replaced by the same actor's newer connection
+	syncTokens      float64
+	syncChecked     time.Time
 }
 
 func (client *designClient) enqueue(frame []byte) error {
@@ -137,9 +199,22 @@ func designAwareness(raw []byte, client *designClient, room *designRoom) ([]byte
 	if client.hasID && client.clientID != id {
 		return nil, errors.New("awareness identity changed")
 	}
+	// A client ID is bound to the actor holding it. Another actor claiming it
+	// is ignored rather than closing anybody, so a reader who learned an
+	// editor's ID from presence cannot lock that editor out. The same actor
+	// claiming it is a reconnect while the server still holds the old socket:
+	// the old connection is retired without announcing the shared ID as gone.
 	for c := range room.clients {
-		if c != client && c.hasID && c.clientID == id {
-			return nil, errors.New("awareness identity already connected")
+		if c == client || !c.hasID || c.clientID != id {
+			continue
+		}
+		if c.actor != client.actor {
+			return nil, errDesignAwarenessHeld
+		}
+		c.hasID, c.retired = false, true
+		delete(room.clients, c)
+		if c.conn != nil {
+			_ = c.conn.Close()
 		}
 	}
 	var value map[string]any
@@ -205,6 +280,7 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 	room.mu.Lock()
 	var actor, displayName, admittedRevision string
 	var initial design.Result
+	var initialState []byte
 	canEdit := false
 	err := h.designTx(r, k, false, func(ctx context.Context, tx *sql.Tx, a string) error {
 		actor = a
@@ -224,17 +300,18 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 		_, e := h.designAuthority(r, k, true)(ctx, tx)
 		canEdit = e == nil
 		if canEdit {
-			var state []byte
-			if e = tx.QueryRowContext(ctx, `SELECT state FROM artifact_design_documents WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&state); e != nil {
-				return e
-			}
-			initial, e = design.Run(ctx, design.Request{State: state})
-			if e != nil {
-				return e
-			}
+			return tx.QueryRowContext(ctx, `SELECT state FROM artifact_design_documents WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&initialState)
 		}
 		return nil
 	})
+	// The engine never runs under the database writer fence: the fence is
+	// global, and holding it for a Node process stalls every writer. The room
+	// lock keeps this state ordered with the room's updates, and every frame is
+	// delivered through the fenced send below, so a revocation in between still
+	// stops delivery.
+	if err == nil && canEdit {
+		initial, err = designWSRun(r.Context(), design.Request{State: initialState})
+	}
 	room.mu.Unlock()
 	if err != nil {
 		designError(w, err)
@@ -299,8 +376,9 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 	defer ticker.Stop()
 	ping := time.NewTicker(20 * time.Second)
 	defer ping.Stop()
-	closePolicy := func() {
-		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(1008, "Design permissions changed"), time.Now().Add(time.Second))
+	closeWith := func(err error) {
+		code, reason := designCloseFor(err)
+		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason), time.Now().Add(time.Second))
 	}
 	// Every content delivery is protected by the writer fence too: a committed
 	// revocation cannot leave a queued update readable on an old socket.
@@ -317,8 +395,8 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 		case <-done:
 			return
 		case frame := <-client.out:
-			if send(frame) != nil {
-				closePolicy()
+			if e := send(frame); e != nil {
+				closeWith(e)
 				return
 			}
 		case <-ping.C:
@@ -328,7 +406,7 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 		case <-ticker.C:
 			e := h.designTx(r, k, canEdit, func(_ context.Context, _ *sql.Tx, _ string) error { return nil })
 			if e != nil {
-				closePolicy()
+				closeWith(e)
 				return
 			}
 			if canEdit {
@@ -345,17 +423,26 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 		case frame := <-incoming:
 			kind, sub, e := designSyncKind(frame)
 			if e != nil {
-				closePolicy()
+				closeWith(fmt.Errorf("%w: %v", errDesignProtocol, e))
 				return
 			}
 			room.mu.Lock()
+			if client.retired {
+				room.mu.Unlock()
+				return
+			}
 			if kind == 1 {
 				e = h.designTx(r, k, false, func(_ context.Context, _ *sql.Tx, _ string) error { return nil })
 				if e == nil {
 					var sanitized []byte
 					sanitized, e = designAwareness(frame, client, room)
-					if e == nil {
+					switch {
+					case e == nil:
 						room.broadcast(sanitized, client)
+					case errors.Is(e, errDesignAwarenessHeld):
+						e = nil
+					default:
+						e = fmt.Errorf("%w: %v", errDesignProtocol, e)
 					}
 				}
 			} else if kind == 0 {
@@ -372,27 +459,29 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 							}
 						}
 					}
+				} else if !client.allowSyncRequest(time.Now()) {
+					e = errDesignRateLimited
 				} else {
-					var result design.Result
+					// Read the state under the fence, run the engine outside it,
+					// and deliver through the fenced send (see admission).
+					var state []byte
 					e = h.designTx(r, k, false, func(ctx context.Context, tx *sql.Tx, _ string) error {
-						var state []byte
-						if x := tx.QueryRowContext(ctx, `SELECT state FROM artifact_design_documents WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&state); x != nil {
-							return x
-						}
-						var x error
-						result, x = design.Run(ctx, design.Request{State: state, Frame: frame})
-						return x
+						return tx.QueryRowContext(ctx, `SELECT state FROM artifact_design_documents WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&state)
 					})
+					var result design.Result
+					if e == nil {
+						result, e = designWSRun(r.Context(), design.Request{State: state, Frame: frame})
+					}
 					if e == nil && len(result.Response) > 0 {
 						e = client.enqueue(result.Response)
 					}
 				}
 			} else {
-				e = errors.New("unsupported Design protocol message")
+				e = errDesignProtocol
 			}
 			room.mu.Unlock()
 			if e != nil {
-				closePolicy()
+				closeWith(e)
 				return
 			}
 		}

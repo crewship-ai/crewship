@@ -66,7 +66,7 @@ CRUD over templates. Built-in rows are server-controlled and surface first on Li
 
 ### `GET /api/v1/workflow-templates`
 
-List every template visible to the current workspace. Built-in rows surface first (`is_builtin DESC`), then user-created rows by `created_at ASC`.
+List every template visible to the current workspace. Built-in rows surface first (`is_builtin DESC`), then user-created rows by `created_at ASC`. The first List in a workspace creates the built-in templates (idempotently, as `GET /api/v1/templates` does); they are read-only, and their names are then taken in that workspace.
 
 **Request:** No request body or query parameters.
 
@@ -153,7 +153,7 @@ Partial update. Only the mutable subset (`name`, `description`, `template_json`,
 |---|---|
 | `400` | Malformed body, no fields supplied, or any stage rule violation. |
 | `401` | Not authenticated. |
-| `403` | Caller is below the `MANAGER` role. |
+| `403` | Caller is below the `MANAGER` role, or the template is built-in (built-ins are read-only). |
 | `404` | Template id does not exist in this workspace. |
 | `409` | New `name` collides with an existing template in the workspace. |
 
@@ -177,7 +177,7 @@ soft-delete it.
 | Status | Condition |
 |---|---|
 | `401` | Not authenticated. |
-| `403` | Caller is below the `MANAGER` role. |
+| `403` | Caller is below the `MANAGER` role, or the template is built-in (built-ins are read-only). |
 | `404` | Template id does not exist in this workspace. |
 
 Broadcasts `workflow_template.deleted` on the workspace WS channel with `{"id": "<id>"}`.

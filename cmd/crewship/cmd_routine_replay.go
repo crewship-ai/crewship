@@ -80,8 +80,11 @@ guarantee: this never changes head_version or which version is live).`,
 		if err != nil {
 			return err
 		}
-		defer resp.Body.Close()
 		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		raw, err := readServerDocument(resp)
+		if err != nil {
 			return err
 		}
 		var res struct {
@@ -90,14 +93,17 @@ guarantee: this never changes head_version or which version is live).`,
 			Output string  `json:"output" yaml:"output"`
 			Cost   float64 `json:"cost_usd" yaml:"cost_usd"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		if err := json.Unmarshal(raw, &res); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
-		fmt.Printf("Replayed %s → new run %s: %s ($%.4f)\n", args[0], res.RunID, res.Status, res.Cost)
-		if res.Output != "" {
-			fmt.Printf("Output: %s\n", res.Output)
-		}
-		return nil
+		// -f json is the server's replay result, not a sentence about it:
+		// a script replaying a run needs the new run_id to follow it.
+		return resolvedFormatter(cmd).AutoHuman(cli.RawJSON(raw), func() {
+			fmt.Printf("Replayed %s → new run %s: %s ($%.4f)\n", args[0], res.RunID, res.Status, res.Cost)
+			if res.Output != "" {
+				fmt.Printf("Output: %s\n", res.Output)
+			}
+		})
 	},
 }
 

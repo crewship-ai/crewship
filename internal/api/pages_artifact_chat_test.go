@@ -331,9 +331,7 @@ func TestArtifactProjectOwnerExplicitHandoffOfSharedComment(t *testing.T) {
 	if w := human(`{"base_version":1,"version":1}`, "task-project", f.pages.ShareArtifactProject); w.Code != 200 {
 		t.Fatalf("share %d %s", w.Code, w.Body)
 	}
-	if w := human(artifactProjectBody(1, "Private two"), "task-project", f.pages.PublishArtifactProject); w.Code != 200 {
-		t.Fatalf("publish private %d %s", w.Code, w.Body)
-	}
+	// A non-owner human with Edit leaves the feedback task.
 	commenter := "explicit-commenter"
 	mustExec(t, f.rig.db, `INSERT INTO users(id,email,full_name) VALUES(?, 'explicit-commenter@example.test','Commenter')`, commenter)
 	mustExec(t, f.rig.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, generateCUID(), f.a.WorkspaceID, commenter)
@@ -341,7 +339,7 @@ func TestArtifactProjectOwnerExplicitHandoffOfSharedComment(t *testing.T) {
 	if err := f.rig.db.QueryRow(`SELECT id FROM pages WHERE slug='task-project'`).Scan(&ownedPage); err != nil {
 		t.Fatal(err)
 	}
-	mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'user',?,'comment',?)`, ownedPage, commenter, f.a.HumanUserID)
+	mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'user',?,'write',?)`, ownedPage, commenter, f.a.HumanUserID)
 	commenterToken := mintTokenFor(t, f.rig.db, commenter, "explicit-commenter")
 	commenterRequest := pagesRequest(t, "POST", "/api/v1/pages/task-project/artifact/comments", f.a.WorkspaceID, commenter, "MEMBER", `{"version":1,"path":"index.html","selector":"#hero","quote":"First","text":"Feedback on shared content","send_to_agent":true}`)
 	commenterRequest = commenterRequest.WithContext(context.WithValue(commenterRequest.Context(), ctxAuthKind, AuthKindCLIToken))
@@ -351,6 +349,11 @@ func TestArtifactProjectOwnerExplicitHandoffOfSharedComment(t *testing.T) {
 	f.pages.CreateArtifactProjectComment(comment, commenterRequest)
 	if comment.Code != 201 {
 		t.Fatalf("comment %d %s", comment.Code, comment.Body)
+	}
+	// Queuing an agent task needs Edit; a Comment grant cannot. The owner then
+	// moves on privately, so the task keeps its shared base version.
+	if w := human(artifactProjectBody(1, "Private two"), "task-project", f.pages.PublishArtifactProject); w.Code != 200 {
+		t.Fatalf("publish private %d %s", w.Code, w.Body)
 	}
 	var c struct {
 		ID string `json:"id"`

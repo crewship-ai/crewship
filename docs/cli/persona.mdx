@@ -106,6 +106,21 @@ This is a **Phase-2 stub**. When an agent's [`POST /persona/suggest`](/api-refer
 
 ---
 
+## `crewship persona suggest`
+
+```bash
+crewship persona suggest <agent-slug> --content "<persona>" --rationale "<why>"
+```
+
+Proposes a PERSONA.md for the agent through `POST /api/v1/agents/{id}/persona/suggest`. The crew's autonomy policy and the agent's self-learning flag decide whether it is queued for approval or applied; the command prints the decision.
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--content` | string | | Proposed PERSONA.md content (required). |
+| `--rationale` | string | | Why the change is proposed. |
+
+---
+
 ## `crewship persona crew`
 
 ```bash

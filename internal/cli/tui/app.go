@@ -336,17 +336,20 @@ func (m *model) View() string {
 
 // ── helpers ──
 
+// truncate fits s into max columns, counting runes rather than bytes so
+// multibyte text is never torn and the ellipsis takes one column.
 func truncate(s string, max int) string {
 	if max <= 0 {
 		return ""
 	}
-	if len(s) <= max {
+	r := []rune(s)
+	if len(r) <= max {
 		return s
 	}
-	if max <= 1 {
-		return s[:max]
+	if max == 1 {
+		return string(r[:1])
 	}
-	return s[:max-1] + "…"
+	return string(r[:max-1]) + "…"
 }
 
 func toStr(v any) string {

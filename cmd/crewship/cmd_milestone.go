@@ -137,7 +137,11 @@ var projectMilestoneCreateCmd = &cobra.Command{
 var projectMilestoneUpdateCmd = &cobra.Command{
 	Use:   "update <milestone-id>",
 	Short: "Update a milestone",
-	Args:  cobra.ExactArgs(1),
+	Long: `Update a milestone. Only the flags you pass are sent. Requires the MANAGER
+role or higher. Prints the updated milestone.`,
+	Example: `  crewship project milestone update <milestone-id> --status completed
+  crewship project milestone update <milestone-id> --target-date 2026-12-01 --format json`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -183,8 +187,13 @@ var projectMilestoneUpdateCmd = &cobra.Command{
 			return err
 		}
 
-		cli.PrintSuccess("Milestone updated.")
-		return nil
+		var updated milestoneItem
+		if err := cli.ReadJSON(resp, &updated); err != nil {
+			return err
+		}
+		return resolvedFormatter(cmd).AutoHuman(updated, func() {
+			cli.PrintSuccess(fmt.Sprintf("Milestone updated: %s (%s)", updated.Name, updated.ID))
+		})
 	},
 }
 
@@ -223,12 +232,12 @@ func init() {
 	projectMilestoneCreateCmd.Flags().String("name", "", "Milestone name (required)")
 	projectMilestoneCreateCmd.Flags().String("description", "", "Description")
 	projectMilestoneCreateCmd.Flags().String("target-date", "", "Target date (ISO 8601)")
-	projectMilestoneCreateCmd.Flags().String("status", "", "Status (default: active)")
+	projectMilestoneCreateCmd.Flags().String("status", "", "Status: active, completed, cancelled (default: active)")
 
 	projectMilestoneUpdateCmd.Flags().String("name", "", "New name")
 	projectMilestoneUpdateCmd.Flags().String("description", "", "New description")
 	projectMilestoneUpdateCmd.Flags().String("target-date", "", "New target date (ISO 8601)")
-	projectMilestoneUpdateCmd.Flags().String("status", "", "New status")
+	projectMilestoneUpdateCmd.Flags().String("status", "", "New status: active, completed, cancelled")
 	projectMilestoneUpdateCmd.Flags().Int("position", 0, "New position")
 
 	projectMilestoneDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation")
