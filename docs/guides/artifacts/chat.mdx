@@ -44,8 +44,8 @@ The word appears in two places in a chat, and they are not the same:
 
 | Where | What it lists |
 | --- | --- |
-| Artifact cards in a conversation, and **Artifacts** in the left navigation | Versioned artifacts. A card shows a Project, Dashboard or Slides that the agent created, published or restored with its artifact tools. Word and Sheet documents the agent saved are listed under **Saved documents** in the conversation instead of as cards. Versioned artifacts have versions, a shared version and access rules. This page is about these. |
-| **Artifacts** panel in the chat's right drawer (`⌘1` / `Ctrl+1`), titled "Documents and outputs for *agent*" | **Documents edited in this chat**, **Agent document access** (which points you to a document's **Share** menu), and **Output files**: PDFs, images, HTML, CSV and spreadsheets that the agent wrote to its `/output/<agent-slug>/` folder. The output files have no versions or sharing. See [Right drawer](/guides/chat-sessions#right-drawer) and [Files and output](/guides/files-and-output). |
+| Artifact cards in a conversation, and **Artifacts** in the left navigation | Versioned artifacts. A card shows a Project, Dashboard or Slides that the agent created, published or restored with its artifact tools. Word documents the agent saved through the Docs backend are listed under **Saved documents** in the conversation instead of as cards. Versioned artifacts have versions, a shared version and access rules. This page is about these. |
+| **Artifacts** panel in the chat's right drawer (`⌘1` / `Ctrl+1`), headed **Artifacts**, with the subtitle "Documents and outputs for *agent*" | **Documents edited in this chat**, **Agent document access** (which points you to a document's **Share** menu), and **Output files**: PDFs, images, HTML, CSV and spreadsheets that the agent wrote to its `/output/<agent-slug>/` folder. The output files have no versions or sharing. See [Right drawer](/guides/chat-sessions#right-drawer) and [Files and output](/guides/files-and-output). |
 
 When an agent writes a file to its output folder, it appears only under
 **Output files** in the right drawer. When an agent creates a Project, Dashboard
@@ -138,9 +138,9 @@ not be loaded, the card says **Couldn't load** and offers **Retry**.
    conversation. On a phone it fills the screen and has **Back to chat**.
 2. The header shows the name, the kind and **Shared** or **Draft**.
 3. Use the version switch to move between **Latest · vN** and
-   **Shared · vN**. **History** lists every version with **View** and, if you
-   own the artifact, **Restore as new version**. While you look at an older version
-   the viewer shows **Back to latest**.
+   **Shared · vN**. Owners see retained versions in **History**, with **View**
+   and **Restore as new version**; non-owner editors do not get that history.
+   An older version that is not the shared version shows **Back to latest**.
 4. If the Project has more than one screen, pick the screen in the screen
    switch above the preview.
 5. To close the viewer, click **×** (on a phone, **Back to chat**). Focus
@@ -205,7 +205,10 @@ right to edit the document. Only one person or agent holds it at a time.
 The chat never takes the lease itself. Releasing the lease and saving a version
 happen in the editor. If the request cannot be sent, the bar says **Could not
 request edit**. Without the Craft lock bar, the document panel shows **Edit
-here** and **Open full editor** instead.
+here** instead. **Open full editor** remains available with or without the
+bar. A handoff belongs to the requesting admission session: opening a new
+editor afterwards does not transfer that session’s lease. Request handoff
+from an already-open editor when you intend to edit.
 
 ## Related
 
