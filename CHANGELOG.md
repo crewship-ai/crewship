@@ -9,21 +9,31 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
+
 - ⚠️ **Behaviour change: notification channel URLs are checked more strictly.** The delivery library (shoutrrr 0.22.1) rejects a channel URL that could never send when a channel is created from the provider form or tested, and at send time for raw URLs: Gotify needs a real application token (15 characters starting with `A`, or a Gotify 3 `gtfya.` token), Google Chat needs both `key` and `token`, Mattermost needs a host, and ntfy topics follow ntfy's naming rule. Saved channels are never checked at startup or when listed; a Google Chat channel saved without `key` or `token` now reports a delivery error. SQLite driver updated to modernc.org/sqlite 1.61.0.
 
 - **Agents prepare a proposal when a person is editing a Word or Sheet document.** Instead of a bare refusal, the agent's `craft_propose` records a complete candidate over the version it read; the document stays unchanged. The person holding the editor can compare it, accept it as their own save (rights, lease and current version are re-checked in one transaction; a proposal over an older version becomes stale) or reject it. Any co-editor with write rights can reject without holding the editor. Open proposals over a version the document has moved past are marked stale when the agent proposes again, so they no longer count toward the limit of 16 open proposals per document. Also available as `crewship craft connect` actions.
+
+- **An agent runtime is no longer held busy by another crew's interrupted run.** A run recovered without a container but recorded for a different crew no longer blocks refreshing this crew's runtime; a run with an unknown crew still blocks it (#4486).
 
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.
 
 - **Shared artifact commenters can post feedback in the preview.** Comments stay anchored to the shared version without granting editing or agent execution rights; changing accounts, workspace or permissions retires an unfinished selection.
 
+- **Project source edits survive a lost save reply and a closed tab.** If the save reply is lost, the editor confirms the exact next version instead of reporting a false conflict, and an unsaved source draft is kept in the browser and offered back until it is saved or discarded.
+
 - **Test Design canvases can be identified in the library.** Human canvas creation now retains the explicit test-item marker for catalog filtering.
 
 - Add human Comment grants for shared artifact feedback without edit or agent execution rights, explicit QA item markers and catalog filters, and confirmed archive and folder-move previews with live access checks. Access reports include effective capabilities and their sources; existing content, history and grants remain intact.
 
+- **An unsent artifact comment survives a crash.** The chat and library artifact viewer keeps the comment text in this browser for the same person and Page, and offers it again after reopening; the place has to be selected again.
+
 - **Home-installed agent CLIs remain visible during startup checks.** Offline qualification uses a separate temporary home while preserving read-only executable paths from the immutable image.
 
 - **Design artifacts gain an opt-in collaborative canvas.** People and agents can edit frames, shapes, text and images through Yjs, with live presence and normal artifact version history. Agents can address their selected canvas by its immutable ID. Disabled by default. Long-running cookie sessions renew only their collaborative transport after fresh authority checks, retaining unsaved work. Restoring saved canvases preserves prototype-named node IDs and their original contents.
+
+- **"Send to agent" on Design and Project comments reports delivery correctly.** A delivered comment no longer turns into "Retry when the source chat is connected" after 15 seconds, and a busy agent is reported at once instead of after a timeout.
 
 - **Native Craft editing can continue past access-token expiry.** The browser refreshes its cookie before admitting or renewing the same editing connection and replaces only its authenticated metadata stream. Unsaved work, the lease generation and in-flight saves remain in place; document mutations are never replayed.
 - **Read-only Craft viewers saw editing controls.** Native Craft previews now show edit actions only when the server confirms current edit access. Comment viewers can open an explicitly published native preview without acquiring an editor lock or reading private drafts. The CLI exposes the same shared preview and publication paths. ⚠️ **Behaviour change:** admitted native CLI actions and shared preview reads reject HTTP redirects.
@@ -822,6 +832,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Restricted navigation follows each member’s grants (#3072).** Chat, Routines and Pages appear only when the selected workspace membership can access their catalog; account security remains available. Switching workspaces no longer borrows another membership’s screens. A missing execution runtime does not hide otherwise authorized navigation. Open screens recheck changed access through the existing foreground polling interval.
 
 - ⚠️ **Behaviour change:** Manual schedule runs record the requesting operator and follow their current workspace execution authority (#3070).
+
+- **Assignments use durable work admission (#3057).** Ordinary assignments, mentions, channel requests and mission planning share fenced claims and run identities with scheduled and webhook work. Cancellation is durable before execution creation, results and mission completion retry safely after restart, and current assignment attempts can use run-bound memory. Legacy running assignments continue to hold capacity; an upgrade refuses ambiguous queued rows that still name an exec.
+
+- ⚠️ **Behaviour change: assignment concurrency now shares the server-wide work caps (#3057).** Assignments are admitted by the same dispatcher as scheduled and webhook work, so they count against its server-wide limits: 8 executions in total, at most 6 of them background, and one execution at a time per agent. Before, only the per-crew budget limited assignments. That crew budget (`max_concurrent_agents`, or else the crew container memory divided by `runtime.agent_min_memory_mb`, which is 2 for the default 4096 MB / 2048 MB) now applies to every work item that carries a crew, including scheduled routines, webhooks and chat-class Pages tasks. A setup that ran more than 8 assignments at once, or relied on routines and webhooks bypassing the crew budget, now queues the excess instead of starting it.
+- **Finished assignments always complete their projection (#3057).** A queued follow-up that can never be dispatched (target agent deleted, comment author removed, crews disconnected, the requester's authority no longer valid, or a gate declining) is recorded on the delivery as refused, and the human author gets an inbox notice. Agent-declared deliverables that are missing, escape the crew's shared directory, are not regular files or have a disallowed type are skipped and logged; escaping symlinks are still never read. Only host faults retry the projection, and a settled assignment awaiting projection no longer holds an execution slot.
 
 - **Local Linux Docker runs retain output across controller loss (#2845).** A private host helper keeps the actual CLI execution and redacted output independent of its reader. Recovery projects output and terminal results with durable acknowledgements, preserves work-generation ownership, and refuses duplicate launches. Capture has per-run and aggregate bounds and acknowledgement-based retention. Unsupported providers keep the existing transport; uncertain forced stops retain reconciliation rather than report completion.
 

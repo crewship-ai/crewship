@@ -48,7 +48,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | POST | `/api/v1/pages/{slug}/craft/document/restore` | Current binding and targetVersion. | New committed version and node durability, 200. |
 | GET | `/api/v1/pages/{slug}/craft/proposals` | Craft admission header; Page read. | `{proposals: [...]}` open and decided agent proposals, 200. |
 | GET | `/api/v1/pages/{slug}/craft/proposals/{proposalID}` | Craft admission header; `ncp_` id. | `{proposal, bytes, content_hash, engine_pin}` candidate, 200; 404 when absent. |
-| POST | `/api/v1/pages/{slug}/craft/proposals/{proposalID}/accept` | `{generation: "1"}` of this admission's lease; Page write. | `{proposal, receipt}` with the new committed version, 200; 409 `stale` when base is no longer latest. |
+| POST | `/api/v1/pages/{slug}/craft/proposals/{proposalID}/accept` | `{generation: "1"}` of this admission's lease; Page write. | `{proposal, receipt}` with the new committed version, 200; 409 `stale` when the content changed after base. |
 | POST | `/api/v1/pages/{slug}/craft/proposals/{proposalID}/reject` | `{}`; Page write, no lease. | Rejected proposal, 200; 409 when already decided. |
 
 Except availability, agent task controls, initialization and initial session creation, send `X-Craft-Session` as well
@@ -373,8 +373,11 @@ A person with an admitted session reviews them (`GET .../craft/proposals`,
 candidate bytes at `GET .../craft/proposals/{id}`) and decides once. Accept is
 the person's own fenced save: Page write rights, the immutable profile, this
 admission's lease generation, base == latest and the open state are checked and
-the version and decision commit in one transaction. If the document moved on,
-the proposal becomes `stale` and nothing is applied; it is never rebased.
+the version and decision commit in one transaction. The editor saves the
+holder's state before accepting; versions that only repeat the base bytes do not
+count as a change, and the proposal applies on the current head. If the document
+content moved on, the proposal becomes `stale` and nothing is applied; it is
+never rebased over changed content.
 Reject needs write rights but no lease: any co-editor with current Page write
 rights may reject a proposal while another person holds the lease, and the
 document is never changed. Reading the list and a candidate uses the same
