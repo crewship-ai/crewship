@@ -382,6 +382,15 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 				continue
 			}
 			newID := newRemapCUID()
+			if table == "craft_native_proposals" {
+				// Proposal routes and clients require ncp_<24 lowercase hex>.
+				// A generic CUID would leave a restored candidate unreachable.
+				var random [12]byte
+				if _, err := rand.Read(random[:]); err != nil {
+					return fmt.Errorf("backup: remint native proposal: %w", err)
+				}
+				newID = "ncp_" + hex.EncodeToString(random[:])
+			}
 			if idMap[table] == nil {
 				idMap[table] = map[string]string{}
 			}
@@ -412,6 +421,15 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 						row[edge.column] = newVal
 					}
 				}
+			}
+		}
+	}
+	// The profile's primary key is page_id, so the generic id map has no
+	// craft_native_documents entry. Follow its Page anchor explicitly.
+	for _, row := range dump.Tables["craft_native_proposals"] {
+		if old, ok := row["page_id"].(string); ok {
+			if mapped := idMap["pages"][old]; mapped != "" {
+				row["page_id"] = mapped
 			}
 		}
 	}

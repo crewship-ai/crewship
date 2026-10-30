@@ -13,7 +13,7 @@ func documentBinaryColumn(table, column string) bool {
 	switch table {
 	case "artifact_design_documents":
 		return column == "state"
-	case "artifact_version_blobs":
+	case "artifact_version_blobs", "craft_native_proposals":
 		return column == "content"
 	case "documents", "document_checkpoints":
 		return column == "snapshot" || column == "projection"

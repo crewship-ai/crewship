@@ -1389,6 +1389,14 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				}
 				val := row[k]
 				if documentBinaryColumn(table, k) {
+					// Early native-proposal bundles encoded this BLOB as TEXT.
+					// Preserve readable legacy candidates without weakening the
+					// strict tagged encoding of any other document column.
+					if table == "craft_native_proposals" && k == "content" {
+						if legacy, ok := val.(string); ok {
+							val = []byte(legacy)
+						}
+					}
 					val, err = restoreDocumentBinary(val)
 					if err != nil {
 						return stats, fmt.Errorf("backup: %s.%s: %w", table, k, err)
