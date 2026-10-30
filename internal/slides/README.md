@@ -12,12 +12,12 @@ versions, unknown fields and invalid structures fail validation.
 
 ## Typed operation contracts
 
-`DecodeInitialize`, `DecodePatch`, `DecodeReorder` and `DecodeRestore` strictly
-parse request identities, known fields and schema versions. Initialization
-binds the stable Page identity to the deck identity. Patch operations target
-existing slide/element IDs with hashes; structural edits require an explicit
-order precondition in the request. Schema 1 to 2 image attachment additionally
-requires an explicit target schema and original content hash.
+`DecodeInitialize` and `DecodePatch` strictly parse request identities, known
+fields and schema versions. Initialization binds the stable Page identity to the
+deck identity. Patch operations target existing slide/element IDs with hashes;
+structural edits require an explicit order precondition in the request. Schema 1
+to 2 image attachment additionally requires an explicit target schema and
+original content hash.
 
 `ApplyPatch` builds and validates an independent candidate from a decoded
 request. It retains existing IDs, checks operation target hashes in sequence,
@@ -32,7 +32,8 @@ Page identity, base revision and order version before committing. `ApplyPatch`
 does not enforce base revision or order-version CAS, receipt replay, historical
 ID tombstones, asset access/pins or retention. A future store must enforce those
 conditions and persist revision, receipt and identity changes atomically.
-Reorder and restore decoders do not themselves reorder or restore stored data.
+The package has no reorder or restore decoder and does not reorder or restore
+stored data.
 
 This extraction adds no schema, migration, format selection, agent tool, API,
 editor, Present or export path. The existing schema1/2 model and backup lineage
