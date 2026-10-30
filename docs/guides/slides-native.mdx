@@ -5,8 +5,17 @@ stability: experimental
 tag: Experimental
 ---
 
-The schema-1 native Slides adapter can initialize a populated presentation on an
-existing empty private Page and read its saved head or an exact revision.
+<Note>
+To read, present, comment on or export slide decks in the Artifacts library, see
+[Slides](/guides/artifacts/slides). This page covers a separate, lower-level
+Slides API with its own server switch.
+</Note>
+
+The schema-1 native Slides adapter can initialize a populated presentation and
+read its saved head or an exact revision. It writes into an empty private
+artifact record that you own. The API addresses that record by its slug or
+`@PAGE_ID` under `/api/v1/pages/`; the record must not yet hold panels, a
+document, a project or other content.
 The routes are disabled by default. Enable `slides.enabled: true` in the server
 configuration or set `CREWSHIP_SLIDES_ENABLED=true` before starting the server.
 This switch does not require the separate Document engine and does not enable
@@ -57,6 +66,12 @@ text, image metadata or hashes are returned. Retained stored data is preserved.
 Patch, reorder, restore, history, image upload, agent creation, editor, Present
 and export are outside this adapter. This delivery makes no canonical-format or
 Office/headless export qualification claim.
+
+The web app contains a browser mount for native Slides that is off by default.
+It is compiled in only when the web app is built with
+`NEXT_PUBLIC_SLIDES_EDITOR=true`, and it appears only for a record the server
+reports as holding native Slides. The server has no save route for it, so
+changes made there stay a local, unsaved draft.
 
 ## Read the confirmed deck
 
