@@ -22,7 +22,16 @@ import (
 func craftHTTPError(r *http.Response, secret string) error {
 	raw, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
 	if secret != "" {
+		// A bounded or interrupted read can end inside the token. Redact a
+		// trailing prefix as well as complete tokens, preserving the original
+		// byte boundary even when earlier replacements shorten the body.
 		raw = bytes.ReplaceAll(raw, []byte(secret), []byte("[redacted]"))
+		for n := min(len(secret)-1, len(raw)); n > 0; n-- {
+			if bytes.HasSuffix(raw, []byte(secret[:n])) {
+				raw = append(raw[:len(raw)-n], []byte("[redacted]")...)
+				break
+			}
+		}
 	}
 	err := cli.CheckError(&http.Response{StatusCode: r.StatusCode, Body: io.NopCloser(bytes.NewReader(raw))})
 	var api *cli.APIError

@@ -2121,9 +2121,8 @@ crewship page artifact comment demo --version 1 --path index.html --selector '#a
 
 If the agent already has a live run, nothing is sent or stored, the command exits
 `9` (busy) and prints the exact `--artifact-target` packet so you can retry with
-[`crewship run --artifact-target`](/cli/run) once the run ends. The CLI token
-needs `pages:write` when it is scoped; the source chat must be your private,
-trusted chat.
+[`crewship run --artifact-target`](/cli/run) once the run ends. Chat delivery requires a browser session or an unrestricted CLI token; the source
+chat must be your private, trusted chat.
 
 ### Dashboard data (disabled by default)
 

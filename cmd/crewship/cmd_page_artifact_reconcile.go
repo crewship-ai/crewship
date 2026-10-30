@@ -59,6 +59,9 @@ func artifactSameFiles(saved artifactManifestView, base int64, local map[string]
 	}
 	byPath := make(map[string]artifactManifestFile, len(saved.Files))
 	for _, f := range saved.Files {
+		if _, duplicate := byPath[f.Path]; duplicate {
+			return false
+		}
 		byPath[f.Path] = f
 	}
 	for _, f := range want.Files {
@@ -66,6 +69,7 @@ func artifactSameFiles(saved artifactManifestView, base int64, local map[string]
 		if !ok || other.Content != f.Content || other.MediaType != f.MediaType {
 			return false
 		}
+		delete(byPath, f.Path) // A duplicate local path cannot confirm a save.
 	}
 	return true
 }
@@ -117,15 +121,24 @@ func artifactPublishHuman(cmd *cobra.Command, slug string, base int64, body map[
 	if postErr == nil {
 		defer resp.Body.Close()
 		postErr = pageCheckError(resp)
+		// Keep received HTTP refusals definitive even when pageCheckError
+		// enriches them into a validation/rate-limit error without APIError.
+		if postErr != nil && resp.StatusCode != http.StatusConflict && resp.StatusCode < 500 {
+			return postErr
+		}
 		if postErr == nil {
 			raw, err := io.ReadAll(io.LimitReader(resp.Body, (9<<20)+1))
-			if err != nil {
-				return err
+			// Successful headers do not prove the acknowledgement arrived:
+			// the server may have committed before its body was interrupted.
+			// Keep this uncertain outcome on the same read-only reconcile path.
+			switch {
+			case err != nil:
+				postErr = fmt.Errorf("read publish acknowledgement: %w", err)
+			case len(raw) > 9<<20:
+				postErr = fmt.Errorf("project response exceeds limit")
+			default:
+				return pageEmitMachine(artifactCmdFormatter(cmd), raw, "{}")
 			}
-			if len(raw) > 9<<20 {
-				return fmt.Errorf("project response exceeds limit")
-			}
-			return pageEmitMachine(artifactCmdFormatter(cmd), raw, "{}")
 		}
 	}
 	if !artifactSaveOutcomeUncertain(postErr) {

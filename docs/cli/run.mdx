@@ -111,9 +111,9 @@ description ("Describe it"), send `{"submission_id":"<unique-id>"}` alone.
 crewship run ada --chat <source-chat-id> --artifact-target target.json "Apply the queued comment"
 ```
 
-The server binds the purpose to your stored message and current credential (a
-scoped CLI token needs `pages:write`) and refuses any other chat, page, version or
-comment. Unknown fields, a comment without a page, or a non-positive base are
+The server binds the purpose to your stored message and current credential. Chat
+delivery requires a browser session or an unrestricted CLI token. It refuses any
+other chat, page, version or comment. Unknown fields, a comment without a page, or a non-positive base are
 refused before anything is sent (exit `2`). Interactive, plan and restricted runs
 cannot use this flag. `page artifact comment --send-to-agent --wait` builds this
 packet for you.

@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Artifact saves are confirmed after an interrupted success response.** The CLI reads the exact successor version without repeating the publish request, preserves definitive refusals, and rejects duplicate-path matches. Craft errors redact session tokens before truncating their display.
+
 - **`crewship page artifact comment --send-to-agent` no longer leaves the task stuck at "pending".** The task only starts when the artifact's source chat receives a message carrying its purpose, which the viewer sends and the CLI never did. `--wait` on `page artifact comment` and `page design comment` now sends it, confirms the host saved it and waits for the agent's answer or clarification; `crewship run --chat <chat> --artifact-target <file>` sends the same purpose by hand, including a "Describe it" creation (#4505).
 
 - ⚠️ **Behaviour change: a busy agent exits `9`, a full artifact history exits `2`.** A message bounced because the agent already has a live run now exits `9` (was `1`) for `crewship run` and the new `--wait` commands; nothing was sent or stored. A full artifact version history (HTTP 413 `artifact_history_quota`) now exits `2` (was `1`) and says nothing was saved, your `--file` is unchanged and every version is retained (#4505).
