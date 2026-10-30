@@ -160,6 +160,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 	binary := filepath.Join(dir, "crewship-cli")
 	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./cmd/crewship")
 	build.Dir = root
+	build.Env = nestedGoBuildEnv(t)
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("actual CLI build: %v %s", err, output)
 	}
