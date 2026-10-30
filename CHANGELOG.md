@@ -57,6 +57,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Agents gain bundled Design and native Craft playbooks.** They explain scoped mandates, retained Design versions, session-bound leases and confirmed native saves. Design tool descriptions clarify version and conflict handling.
 
+- **`crewship slides` and `crewship doc` help describes the real commands.** The generic "Slides <op>" and "Document <op>" texts are replaced with descriptions and examples, the `doc draft` subcommands get a summary, and native decks and documents are no longer presented as living in Pages. Command behaviour is unchanged.
+
 - **Test Design canvases can be identified in the library.** Human canvas creation now retains the explicit test-item marker for catalog filtering.
 
 - ⚠️ **Behaviour change: `journal priority` and `memory export` honour `--format`.** With `--format json` (or `yaml`/`ndjson`), `crewship journal priority` prints the server's answer as an object with `id`, `priority` and `previous`, and `crewship memory export` writes the bundle as before and then prints `out`, `documents` and `skipped` instead of the prose listing. With the default table or `quiet` output both keep their human-readable line. `memory export` help now states that it requires OWNER or ADMIN.
