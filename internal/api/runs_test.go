@@ -161,8 +161,16 @@ func TestRunHandler_List_HappyPath(t *testing.T) {
 		return count
 	}
 	beforeToday, afterToday := countToday(beforeList), countToday(afterList)
-	if resp.Stats.Running != 1 || (resp.Stats.Today != beforeToday && resp.Stats.Today != afterToday) || resp.Stats.Failed != 1 {
-		t.Errorf("stats: %+v want running=1 today=%d (or %d across midnight) failed=1", resp.Stats, beforeToday, afterToday)
+	// Failed counts only today's failures too; run_b started two minutes ago.
+	failedToday := func(at time.Time) int {
+		if now.Add(-2 * time.Minute).Before(at.Truncate(24 * time.Hour)) {
+			return 0
+		}
+		return 1
+	}
+	beforeFailed, afterFailed := failedToday(beforeList), failedToday(afterList)
+	if resp.Stats.Running != 1 || (resp.Stats.Today != beforeToday && resp.Stats.Today != afterToday) || (resp.Stats.Failed != beforeFailed && resp.Stats.Failed != afterFailed) {
+		t.Errorf("stats: %+v want running=1 today=%d (or %d across midnight) failed=%d (or %d across midnight)", resp.Stats, beforeToday, afterToday, beforeFailed, afterFailed)
 	}
 	if resp.Pagination.Total != 3 {
 		t.Errorf("pagination.total=%d want 3", resp.Pagination.Total)
