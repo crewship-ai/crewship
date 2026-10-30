@@ -128,7 +128,9 @@ provide one.
 When telemetry is enabled:
 
 - Go **stack traces** and **error messages** (subject to scrubbing —
-  see below)
+  see below). Recovered HTTP panics identify the registered route pattern
+  (or `unmatched`) and panic type, without the raw URL path or panic value;
+  the local panic log uses the same safe fields.
 - Crewship **version**, commit SHA, OS, and architecture
 - The anonymous **install ID** (random 32-hex)
 - A **Sentry "environment"** tag derived from the version (`beta`,
