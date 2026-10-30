@@ -17,6 +17,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.
 
+- **The built-in `crewship` agent skill now covers Artifacts.** The guide an agent reads through the CLI explains when to use artifact projects, Design canvases and native Craft documents, which flags and switches each needs, who may write, how to reply to comments and hold the Craft lease, and what to do on a version conflict (409), full storage (413) or an uncertain 503 without retrying blindly. Command behaviour is unchanged.
+
 - **Shared artifact commenters can post feedback in the preview.** Comments stay anchored to the shared version without granting editing or agent execution rights; changing accounts, workspace or permissions retires an unfinished selection.
 
 - **Project source edits survive a lost save reply and a closed tab.** If the save reply is lost, the editor confirms the exact next version instead of reporting a false conflict, and an unsaved source draft is kept in the browser and offered back until it is saved or discarded.
