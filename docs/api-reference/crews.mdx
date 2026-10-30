@@ -289,7 +289,7 @@ additive — a client that ignores it sees an unchanged crew object.
 | `402` | Reserved for future license limits; currently unlimited |
 | `403` | Insufficient role |
 | `409` | Slug already taken in this workspace |
-| `413` | The request body is over 8 MiB (`"code": "body_too_large"`) |
+| `413` | The request body is over 8 MiB (`"code": "body_too_large"`); a declared length over 16 MiB returns Problem Details without `code` |
 
 ---
 
@@ -390,7 +390,7 @@ Both `PATCH` and `PUT` are supported and behave identically (partial update -- o
 | `403` | Insufficient role |
 | `404` | Crew not found |
 | `409` | Slug already taken; or `services_json` is submitted for a stored configuration that is redacted on read (`Private service settings cannot be replaced through crew updates`) |
-| `413` | The request body is over 8 MiB (`"code": "body_too_large"`) |
+| `413` | The request body is over 8 MiB (`"code": "body_too_large"`); a declared length over 16 MiB returns Problem Details without `code` |
 
 ---
 
