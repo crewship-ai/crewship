@@ -52,6 +52,14 @@ describe("Design standard sync provider", () => {
   expect(Socket.instances).toHaveLength(2)
   expect(Socket.instances[1].url).toBe(url)
  })
+ it("stops reconnecting when the server rejected the canvas update", () => {
+  vi.useFakeTimers()
+  const { socket, status } = setup(true)
+  socket.close(4400)
+  vi.advanceTimersByTime(10_000)
+  expect(Socket.instances).toHaveLength(1)
+  expect(status).toHaveBeenLastCalledWith("rejected")
+ })
  it("read-only clients receive updates and awareness without sending document writes", () => {
   const { doc, socket, dirty } = setup(false)
   const server = new Y.Doc(); server.getMap("nodes").set("hello", "world")

@@ -4,7 +4,7 @@ import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwareness
 import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
 
-export type DesignConnection = "connecting" | "connected" | "offline" | "denied"
+export type DesignConnection = "connecting" | "connected" | "offline" | "denied" | "rejected"
 export type DesignAdmission = "ready" | "denied" | "retry"
 export interface DesignPeer { clientId: number; name: string; color: string; cursor?: { x: number; y: number } }
 const REMOTE = "design-server"
@@ -164,6 +164,10 @@ export class DesignProvider {
     this.canEdit = false
     this.status("denied")
     if (this.prepare) this.connect(true)
+   } else if (event.code === 4400) {
+    // The engine refused this client's update; a reconnect would resend the
+    // same change in sync step 2 and be refused again, forever.
+    this.status("rejected")
    } else {
     this.status("offline")
     this.retry = setTimeout(() => this.connect(), 2000)
