@@ -1,0 +1,350 @@
+---
+title: "Artifacts library"
+description: "Find, preview and open your artifacts in one place, then use versions, restore and history for projects, dashboards, slides and designs."
+icon: "library"
+stability: experimental
+tag: Experimental
+---
+
+The Artifacts library at `/artifacts` lists everything people and agents made
+in a workspace: projects, dashboards, Pages with panels, Word documents,
+sheets, slide decks and designs. From the library you can search and filter
+artifacts, preview one without leaving the list, and open it to see its
+content, versions and history.
+
+<Note>
+The library is off by default. Each part of it is switched on separately:
+
+| What | Needs |
+|---|---|
+| The library at `/artifacts`, and the sidebar **Artifacts** link pointing to it | build-time `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` |
+| Projects: the project viewer, versions, history and restore | build-time `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true`, and the workspace flag `artifact_projects` (or the server switch `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true`) |
+| Dashboards in the viewer, and creating one | the project switches above, plus build-time `NEXT_PUBLIC_ARTIFACT_DASHBOARDS=true` |
+| Slide decks in the viewer, and creating one | the project switches above, plus build-time `NEXT_PUBLIC_ARTIFACT_SLIDES=true` |
+| Designs: listing, creating and the canvas | build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN=true`, and the workspace flag `artifacts_design` (or `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true`) |
+| The Word edit lock bar in the detail view | build-time `NEXT_PUBLIC_CHAT_CRAFT_LEASE=true` |
+| `/pages` opening the library instead of the Pages overview | build-time `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS=true` (only with the library on) |
+
+The default production build sets none of these to `true`. Enable a workspace
+flag with `crewship feature-flag enable <key>`; see
+[feature-flag](/cli/feature-flag). With `NEXT_PUBLIC_ARTIFACTS_LIBRARY`
+unset, `/artifacts` sends you to `/pages`. `NEXT_PUBLIC_ARTIFACTS_DESIGN=true`
+on its own also serves `/artifacts`.
+</Note>
+
+## Artifact kinds
+
+Each artifact holds one kind of content. The kind decides what opens it and
+whether it has versions.
+
+| Kind | What it is | Versions | Made by |
+|---|---|---|---|
+| Project | Screens that link together: a multi-file HTML project | Yes | An agent, from chat |
+| Dashboard | Numbers and tables agents keep current | Yes | An agent, from chat |
+| Page | A Page with panels: monitors and queues that crews fill. See [Pages](/guides/pages). | No | You, as an empty Page |
+| Word | A document that one person edits at a time | Yes (native documents) | You, or an agent from chat |
+| Sheet | A workbook with formulas | Yes (native workbooks) | Listed in the library. You can't create one here yet. |
+| Slides | A deck you can present | Yes | An agent, from chat |
+| Design | A shared canvas with screens | Yes | You, as a blank canvas |
+
+Each item in the library shows its version state:
+
+- **Shared vN**: people with access see version N.
+- **Not shared**: the artifact has versions, but none is shared yet.
+- No chip: the kind has no versions, such as a Page with panels.
+
+Other chips mark an item as **Private**, **Empty**, **Test** or **Archived**.
+
+## Open the library
+
+1. In the sidebar, under **Work**, click **Artifacts**.
+2. The library opens on **Home**:
+   - **Make something** lists the kinds you can create here.
+   - **Not shared yet** lists up to five artifacts that have versions but no
+     shared version.
+   - **Recently opened** shows what you opened last. Before you open
+     anything, this section is called **Recent** and shows what changed
+     most recently.
+3. On the left, the side panel has a search box, a **Filter** button, the
+   main lists (**Home**, **All artifacts**, **Needs attention**,
+   **Recently opened**), then **Views** and **Folders**.
+
+An empty workspace shows **No artifacts yet** with a **New artifact** button.
+
+## Find an artifact
+
+### Search
+
+Type in **Search artifacts…** at the top of the side panel. Text matches the
+name or the address (slug). You can also use these operators:
+
+| Operator | Matches |
+|---|---|
+| `kind:project`, `kind:word`, `kind:slides`, … | That kind; the plural form also works |
+| `is:shared` | Artifacts with a shared version |
+| `is:unshared` or `is:draft` | Artifacts with versions but no shared version |
+| `is:private` | Artifacts only their owner can open |
+| `is:empty` | Artifacts with nothing in them yet |
+| `owner:you` | Your own artifacts, or a crew name |
+
+For example, `kind:dashboard is:shared sales` finds shared dashboards whose
+name contains "sales". If you search from **Home**, the library switches to
+**All artifacts**.
+
+### Filter
+
+1. Click **Filter** next to the search box.
+2. Choose values under **Kind**, **Who can open** (**Everyone with access**
+   or **Private**), **Version** (**Shared version**, **Not shared yet**,
+   **No versions**) and **Owner**. The count next to each value is how many
+   items you would see if you picked it.
+3. Close the block. Chips under the main lists show the filters you set;
+   click a chip's remove button to drop that filter.
+
+### Views and folders
+
+**Views** in the side panel:
+
+- **Mine**: artifacts you own.
+- **Favorites**: artifacts you starred.
+- **Clean up**: names that repeat with a number or date, such as
+  "Smoke test 1", "Smoke test 2", "Smoke test 3". It only suggests what to
+  tidy up.
+- **Test items**: artifacts the server marks as made by tests or probes.
+- **Empty**: artifacts with nothing in them yet.
+- **Archive**: archived artifacts.
+
+Empty, test and archived items appear only in their own view, never in
+**All artifacts**, **Mine** or **Favorites**. **Clean up**, **Test items**,
+**Empty** and **Archive** appear in the panel only when they hold something.
+Nothing in these views is deleted.
+
+**Folders** lists your folders with their item counts, and **Unfiled** for
+artifacts in no folder. Click a folder to list only what it holds; click it
+again to leave it.
+
+### Sort, group and layout
+
+Above the list:
+
+- **Sort**: **Last edited** (the default), **Name** or **Kind**.
+- **Group**: **None**, **Kind** or **Folder**.
+- Layout: **List**, **Gallery** or **Table**. **Table** has the columns
+  **Name**, **Kind**, **Shared**, **Folder** and **Updated**.
+
+The view, search and filters are kept in the address (`view`, `q`, `kind`,
+`access`, `version`, `owner`, `folder`). A reload keeps them, and you can send
+the link to someone.
+
+## Preview and open an artifact
+
+On a desktop, a click previews an artifact without leaving the list:
+
+1. Click an artifact. A **Preview** panel opens on the right with its kind,
+   version, folder, who can open it, owner and when it was last edited. It
+   also has **Open** and **Share** buttons and a star.
+2. To open the artifact, click **Open**, click the same row again, or press
+   <kbd>Enter</kbd>.
+3. To close the preview, press <kbd>Esc</kbd> or click the close button.
+
+To move through the list from the keyboard, press <kbd>J</kbd> for the next
+item and <kbd>K</kbd> for the previous one; the preview follows. On a phone,
+a tap opens the artifact directly.
+
+An open artifact has its own address, `/artifacts/<id>`, where `<id>` is the
+artifact's permanent ID. Links in the older form `/artifacts?item=<slug>`
+still work and move to the ID address. To go back to the list, click
+**All artifacts** or press <kbd>Esc</kbd>.
+
+### What the detail view shows
+
+The top row has **All artifacts**, a **Content** / **Access** switch,
+**Share**, **Move to folder** and a star (**Add to favorites**). **Access**
+shows who can open the artifact and why. **Share** and **Move to folder**
+change that.
+
+**Content** depends on the kind:
+
+- **Project**, **Dashboard**, **Slides**: the artifact viewer, with the tabs
+  **Preview**, **History** and **Comments** and a version switch in its
+  header. See [Versions](#versions).
+- **Design**: the design canvas.
+- **Word**: a read-only preview of the saved version. When the Craft edit
+  lock is available, a lock bar shows who is editing and offers **Edit**,
+  which opens the editor in a new tab.
+- **Page**, **Sheet**, and project kinds whose viewer is switched off: the
+  name, kind and state, with an **Open page** or **Open in Pages** button
+  that opens the artifact on its Page.
+
+If the artifact no longer exists, or you can't open it, the library shows
+**This artifact is not available.** or **This artifact isn't available**.
+The message never says which: an archived artifact and a private one look the
+same.
+
+## Create an artifact
+
+1. Click **New artifact** in the top bar, or a kind under **Make something**
+   on Home.
+2. In **New artifact**, pick a kind. Kinds that this workspace can't create
+   are listed under **Coming**.
+3. Enter a **Name**. Pick a **Folder**, or leave it **Unfiled**. If an
+   artifact of the same kind and name is already in that folder, a warning
+   offers **Open it** instead.
+4. Under **Start with**, choose how to start:
+   - **Page with panels**: **Empty page**. Click **Create page**. Crews add
+     panels on their next run.
+   - **Design**: **Blank canvas**. Click **Create and edit**.
+   - **Word**: **Blank** to open an empty document with you holding the edit
+     lock, or **Describe it** to have an agent write the first draft.
+   - **Project**, **Dashboard**, **Slide deck**: **Describe it** or **From
+     template**. Click **Continue in chat**. Chat opens with your request as a
+     draft; read it and send it to an agent. The agent creates the artifact
+     unfiled; you can file it afterwards.
+
+A new artifact starts as **Only you until you share it**. If you picked a
+folder, it starts as **People with access to** that folder.
+
+Who can create: an Owner, Admin or Manager, or a member with the
+`page.create` capability. The server checks this on every create.
+
+<Warning>
+Known issues:
+
+- A member who can't create artifacts, such as a Viewer, may still see
+  **New artifact** with Project, Dashboard or Slide deck. The server refuses
+  the creation. See issue #4534.
+- After **Create page** or **Create and edit**, the library may show
+  **This artifact is not available.** The artifact was created. Open it from
+  **All artifacts**; a new empty Page is in the **Empty** view. See issue
+  #4535.
+</Warning>
+
+## Versions
+
+Projects, dashboards, slide decks and designs keep immutable, numbered
+versions (v1, v2, …), and so do native Word documents and sheets. Each save
+by an agent or a person adds a new version. Two versions matter most:
+
+- **Latest**: the newest version. Its owner, and people with edit access,
+  work on it.
+- **Shared**: the version other readers see. Until a version is shared, the
+  artifact is a **Draft** and readers see nothing.
+
+For projects, dashboards and slide decks, what you can see depends on your
+access:
+
+| Who | Sees |
+|---|---|
+| The owner | Every version and the full history, and can share and restore |
+| A person with edit access | The latest version |
+| Anyone else with access | Only the shared version |
+
+The steps below use the project viewer. Projects, dashboards and slide decks
+open in it.
+
+### View an older version
+
+1. Open the artifact. The viewer header shows the version switch:
+   **Latest v3** and **Shared v2**, for example. If nothing is shared,
+   **Shared** shows **—** and can't be selected.
+2. Click **Shared** to see the version readers get. A banner says
+   **You see the shared version v2, the one people with the link get.** and
+   names the latest version.
+3. For any other version, open the **History** tab and click **View** next
+   to it. A banner says **You are viewing v1. Latest is v3.**; click
+   **Back to latest** to return.
+
+You can't comment on an older version; comments go on the latest one.
+
+### Share a version
+
+1. Open the artifact and show the version you want to share. It is usually
+   **Latest**.
+2. In the toolbar under the tabs, click **Share** (the link icon, not the
+   **Share** button in the top row).
+3. The popover says **People with access will see v3. Later versions stay
+   private until you share them.** Click **Share v3**.
+4. **Shared v3** appears, and the header chip changes from **Draft** to
+   **Shared**.
+
+Only the owner can share a version. The top-row **Share** button controls
+who has access, not which version they see.
+
+### Restore an older version
+
+Restoring never rewrites history. It copies an older version into a new
+version on top.
+
+1. Open the artifact and click the **History** tab. The list says, for
+   example, **3 versions · restore makes a new version, nothing is
+   deleted**. Each row shows the version number, who saved it, its message
+   and when, with **Latest** and **Shared** marked.
+2. Next to the version you want back, click **Restore as new version**.
+3. A notice says **Restored v1 as v4 · nothing deleted**. The new version's
+   message is **Restore version 1**, and its row says **Restored from v1**.
+4. The shared version does not change. To show the restored content to
+   readers, share the new version.
+
+Only the owner can restore. If someone saved a newer version while you
+were looking, the restore is refused and a banner says
+**Someone saved a newer version while you were working. Nothing was
+overwritten.** Reload, then try again.
+
+## History and storage limits
+
+The history of each project, dashboard, slide deck and design has its own
+storage budget. The server configures history limits for native Word
+documents and sheets separately.
+
+| Limit | Value |
+|---|---|
+| History per artifact (all versions together) | 256 MiB |
+| One version | 32 MiB |
+| Files in one version | 256 |
+| Warning | at 80% of the history budget |
+
+Files with identical content are stored once per artifact. Restoring an
+older version therefore takes up almost no new space.
+
+The history is kept in full (`keep-all`): nothing is pruned or deleted
+automatically. A reader who only sees the shared version gets that one
+version (`shared-version-only`), never the older ones.
+
+When a project's history passes 80%, the owner and editors see a banner
+in the viewer,
+**This project is close to its limit**. It shows how much is used, for
+example **205 MB of 256 MB (80%)**, with a **Review versions** button
+that opens **History**.
+
+When a save would go over a limit, it is refused with HTTP 413, and the
+viewer shows **Saving is paused**: **History is full, so this was not
+saved.** Existing versions stay intact, and your draft comment stays in
+place. A version with more than 256 files is refused as invalid.
+
+## Favorites and recently opened
+
+- To star an artifact, click the star in the preview or in the detail view
+  (**Add to favorites**). Click it again to remove it.
+- **Favorites** lists your starred artifacts. **Recently opened** lists the
+  last ones you opened, newest first.
+
+Both lists are personal. They follow you to other devices and nobody else
+sees them. **Favorites** and **Recently opened** leave out empty, test and
+archived items.
+
+## Troubleshooting
+
+| You see | Why | What to do |
+|---|---|---|
+| **Artifacts** in the sidebar opens `/pages` | The build was made without `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` | Rebuild the web app with the flag |
+| A project shows only its name and **Open in Pages** | The project viewer is off: `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` is not `true`, or the server reports projects unavailable for this workspace | Set the build flag and enable `artifact_projects` |
+| **Make something** lacks a kind | That kind's build flag or workspace switch is off, or you can't create artifacts | See the table at the top of this page |
+| **This artifact isn't available** | The artifact was archived, or you are not allowed to see that version | Ask the owner to share it with you |
+| **Saving is paused** | The history or a single version reached its limit | Ask an agent to make the artifact smaller, or save a copy |
+
+## Related
+
+- [Pages](/guides/pages): panel Pages that crews keep filled
+- [Document history, revert and proposals](/guides/document-history-review):
+  history for native Word documents
+- [feature-flag](/cli/feature-flag): enable workspace flags
