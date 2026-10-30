@@ -37,21 +37,38 @@ message `Create Design`.
 
 ## How a change is applied
 
-Every change, whether it arrives over the websocket, through the REST API or
-from an agent tool, follows the same path on the server:
+Every change runs through a short-lived Yjs engine that has no database,
+network or credentials and runs for at most five seconds. The engine applies
+the change to the live state and validates the whole resulting document (see
+[Limits](#limits)). Every database transaction below starts behind the shared
+writer fence and checks the caller's current credentials, workspace membership
+and Page Edit permission at its start and again before it commits. There are
+two paths.
 
-1. Open a database transaction behind the shared writer fence.
-2. Check the caller's current credentials, workspace membership and Page Edit
-   permission.
-3. Read the live state and apply the change in a short-lived Yjs engine. The
-   engine has no database, network or credentials and runs for at most five
-   seconds.
-4. Validate the whole resulting document (see [Limits](#limits)).
-5. Check permissions again, write the new state, increase `revision` and commit.
-6. Send the resulting Yjs update to every connected browser.
+**Live sync** (websocket updates) uses one transaction:
 
-A change that fails validation or permission checks is not written and not
-broadcast. Connected browsers only ever receive committed state.
+1. Open the transaction and check permissions.
+2. Read the live state and run the engine inside the transaction.
+3. Write the new state and increase `revision`.
+4. Check permissions again and commit.
+
+**Versioned changes** (REST operations, restore, and the agent `design_apply`
+and `design_restore` tools, which reach the same handlers) use two
+transactions:
+
+1. Read the live state, its `revision` and the latest version in a first
+   transaction.
+2. Run the engine outside any transaction.
+3. In a second transaction of the [artifact version store](artifacts-version-store.md),
+   check permissions, check that `revision` has not changed, publish the new
+   version and write the live state with `revision` and `saved_revision`
+   increased. If `revision` changed in the meantime, the request answers `409`
+   and nothing is written.
+
+In both paths the server then sends the resulting Yjs update to every connected
+browser. A change that fails validation, permission or revision checks is not
+written and not broadcast. Connected browsers only ever receive committed
+state.
 
 ## Operations and snapshots
 
@@ -153,7 +170,8 @@ The CLI equivalents are the `crewship page design` commands; see the
 | Coordinates and sizes | finite, absolute value at most 1,000,000; sizes not negative | `400` |
 | `text` / `src` / `name` | 100,000 / 2,000,000 / 2000 characters | `400` |
 | Operations request body | 4 MiB | `413` |
-| Other request bodies | 8 KiB | `413` |
+| Comment request body (`POST .../design/comments`) | 20,000 bytes | `413` |
+| Create, snapshot, restore, share and agent request bodies | 8 KiB | `413` |
 | Version history | 256 MiB per Design | `413` "Design capacity is full; existing work is retained" |
 
 Validation errors answer `400` with "invalid Design update" and change nothing.
@@ -166,7 +184,7 @@ Page slug, or `@<page-id>`.
 | Route | Purpose |
 |---|---|
 | `POST /api/v1/pages/design` | Create (`slug`, `name`). `201`. |
-| `GET /api/v1/pages/{slug}/design` | Live nodes, order, `can_edit`, `can_comment`, versions and `authority_revision`. Optional `version`. |
+| `GET /api/v1/pages/{slug}/design` | Nodes, order, `can_edit`, `can_comment`, `version`, `latest_version`, `shared_version`, `actor` and `authority_revision`. Optional `version`. The version list is at `GET .../design/versions`. |
 | `GET /api/v1/pages/{slug}/design/versions` | Version list. |
 | `GET /api/v1/pages/{slug}/design/ws` | Live websocket. |
 | `POST /api/v1/pages/{slug}/design/operations` | Apply operations and publish a version. |
