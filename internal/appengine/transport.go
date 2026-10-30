@@ -203,13 +203,6 @@ func NewWorkerHandler(secret string, runner Runner, maxWorkers int) (http.Handle
 	}), nil
 }
 
-// OfflineRunner is service-only; the application uses WorkerClient instead.
-type OfflineRunner struct{ Binary, Scratch string }
-
-func (r OfflineRunner) Run(ctx context.Context, input []byte, c Command) (EngineResult, error) {
-	return RunGridCraftWorker(ctx, r.Binary, r.Scratch, input, c)
-}
-
 // Health verifies the same authenticated private transport without running a CLI.
 func (c *WorkerClient) Health(ctx context.Context) error {
 	secret, err := documents.ReadServiceSecret(c.tokenFile)
