@@ -89,7 +89,7 @@ func TestDesignSchemasValidateNodePatchesAndExactReceipts(t *testing.T) {
 	}
 	for _, fixture := range fixtures {
 		t.Run(fixture.schema, func(t *testing.T) {
-			schema := compileAt(t, raw, "/components/schemas/"+fixture.schema)
+			schema := compileOAS30At(t, raw, "/components/schemas/"+fixture.schema)
 			var good, bad any
 			if err = json.Unmarshal([]byte(fixture.good), &good); err != nil {
 				t.Fatal(err)
@@ -97,10 +97,10 @@ func TestDesignSchemasValidateNodePatchesAndExactReceipts(t *testing.T) {
 			if err = json.Unmarshal([]byte(fixture.bad), &bad); err != nil {
 				t.Fatal(err)
 			}
-			if err = schema.Validate(good); err != nil {
+			if err = schema.VisitJSON(good); err != nil {
 				t.Fatalf("valid wire shape refused: %v", err)
 			}
-			if schema.Validate(bad) == nil {
+			if schema.VisitJSON(bad) == nil {
 				t.Fatal("invalid wire shape accepted")
 			}
 		})
@@ -112,21 +112,21 @@ func TestDesignAuthorityRevisionIsRequiredOpaqueString(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := compileAt(t, raw, "/components/schemas/DesignSnapshot")
+	schema := compileOAS30At(t, raw, "/components/schemas/DesignSnapshot")
 	var body map[string]any
 	err = json.Unmarshal([]byte(`{"page_id":"page","authority_revision":"9007199254740993","origin":null,"can_edit":true,"can_comment":true,"nodes":[],"order":[],"version":1,"latest_version":1,"shared_version":0,"actor":{"id":"user","name":"Owner"}}`), &body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = schema.Validate(body); err != nil {
+	if err = schema.VisitJSON(body); err != nil {
 		t.Fatalf("opaque policy revision refused: %v", err)
 	}
 	delete(body, "authority_revision")
-	if schema.Validate(body) == nil {
+	if schema.VisitJSON(body) == nil {
 		t.Fatal("missing authority revision accepted")
 	}
 	body["authority_revision"] = float64(2)
-	if schema.Validate(body) == nil {
+	if schema.VisitJSON(body) == nil {
 		t.Fatal("numeric policy revision accepted")
 	}
 }

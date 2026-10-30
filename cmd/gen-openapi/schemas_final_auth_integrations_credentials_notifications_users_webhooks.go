@@ -48,16 +48,16 @@ func finalAuthIntegrationsCredentialsNotificationsUsersWebhooksSchemaCatalog() (
 			"description": "Arbitrary JSON payload forwarded to the webhook pipeline.",
 			"oneOf": []map[string]any{
 				{"type": "object", "additionalProperties": true},
-				{"type": "array", "items": map[string]any{}},
-				{"type": "string"}, {"type": "number"}, {"type": "boolean"}, {"type": "null"},
+				{"type": "array", "items": ref("FinalAuthWebhookPayload")},
+				{"type": "string"}, {"type": "number"}, {"type": "boolean"}, nullOnlySchema(),
 			},
 		},
 		"FinalAuthUserPreferenceValue": map[string]any{
 			"description": "Arbitrary JSON value stored for the authenticated user and preference key.",
 			"oneOf": []map[string]any{
 				{"type": "object", "additionalProperties": true},
-				{"type": "array", "items": map[string]any{}},
-				{"type": "string"}, {"type": "number"}, {"type": "boolean"}, {"type": "null"},
+				{"type": "array", "items": ref("FinalAuthUserPreferenceValue")},
+				{"type": "string"}, {"type": "number"}, {"type": "boolean"}, nullOnlySchema(),
 			},
 		},
 	}
