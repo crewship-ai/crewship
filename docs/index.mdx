@@ -55,7 +55,25 @@ Crewship is a **self-hosted runtime for AI coding agents**. Every crew gets its 
   <Card title="Activity" icon="activity" href="/guides/activity">
     Workspace-wide live trace of agent runs as a single canvas with inline approvals.
   </Card>
+  <Card title="Artifacts" icon="layer-group" href="/changelog/overview">
+    Where agent results live: dashboards, documents and versioned projects with shared versions and comments.
+  </Card>
 </CardGroup>
+
+<Note>
+  **Artifacts** in the sidebar opens the Artifacts library only in a web UI built with
+  `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true`; otherwise it opens the Pages overview. Versioned
+  projects, Dashboard data, Slides and Design are experimental and off by default. A
+  workspace flag (for example `crewship feature-flag enable artifact_projects`) or the
+  matching `CREWSHIP_*_ENABLED` server switch turns a kind on for the API, the CLI and
+  agents; Dashboard data and Slides also need `artifact_projects`, and Design needs `node`
+  on the server. The browser screens also need `NEXT_PUBLIC_*` switches, which are read
+  only when the web UI is built, so a running server cannot change them. For a
+  source build, use `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true make build`
+  and deploy the resulting binary with its embedded UI. Documents need
+  the [private document engine](/configuration/environment#private-document-engine). The
+  [October 29, 2026 changelog](/changelog/overview) lists every flag and switch.
+</Note>
 
 ## Key Features
 
@@ -70,6 +88,7 @@ Crewship is a **self-hosted runtime for AI coding agents**. Every crew gets its 
 | **4-tier memory with FTS5** | Agent, crew, workspace, and session memory with sub-ms SQLite FTS5 search — no embeddings, no vector DB |
 | **Devcontainer provisioning** | `devcontainer.json` + mise-based crew runtimes with shared cache images and 24 h registry-digest checks |
 | **Rate limiting & security headers** | Per-IP limits (10 req/min auth, 120 req/min API), standard response-header hardening, single-use OAuth state with 15 min expiry |
+| **Artifacts** | One library for what agents produce, with immutable versions, a shared version and anchored comments (experimental, off by default) |
 | **Backup & restore** | Portable AGE-encrypted `.tar.zst` bundles, workspace or crew scope, forward-compatible manifest, advisory locking, retention rotation |
 | **Multi-workspace** | Manage multiple organizations from a single instance |
 | **Self-hosted** | Run on your own infrastructure, keep your data |

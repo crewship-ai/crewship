@@ -79,9 +79,11 @@ servers, documentation, a remote host, a file share.
 Lead who delegates, approvals on risky actions, budgets, and an append-only
 record of every call — so a fleet of agents can be run the way a team is run.
 
-**Agents report where people look.** [Pages](docs/guides/pages.mdx) are dashboards
-an agent or routine pushes data into. The page holds no query and no credentials;
-the producer already runs next to the data.
+**Agents report where people look.** What an agent or routine produces lands in
+**Artifacts** ([what's new](docs/changelog/overview.mdx)): dashboards it pushes data into and, where
+switched on, documents and versioned projects people review and comment on. A
+dashboard holds no query and no credentials; the producer already runs next to
+the data.
 
 **Not just for engineers.** A company should not have to build its own chatbot.
 Anyone in the org can have an agent of their own — with their skills, doing their
@@ -314,9 +316,15 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
   shell: ⌘/Ctrl+↵ to submit, a discard guard on Esc, a rejected form's field
   errors listed as a worklist, and a bottom sheet rather than a squeezed card on
   a phone. [→ activity](docs/guides/activity.mdx)
-- 🟡 **Pages** — dashboards an agent or routine pushes data into, permissioned
-  per panel and honest about when a number goes stale. The page holds no query
-  and no credentials. [→ pages](docs/guides/pages.mdx)
+- 🟡 **Artifacts** — one home for what agents produce: dashboards an agent or
+  routine pushes data into, permissioned per panel and honest about when a number
+  goes stale. Documents, versioned projects with a shared version and anchored
+  comments, Design canvases, Slides and live Dashboard data are experimental and
+  off by default (server settings, workspace feature flags and `NEXT_PUBLIC_*`
+  switches read when the web UI is built).
+  [→ changelog](docs/changelog/overview.mdx) ·
+  [document drafts](docs/guides/document-drafts.mdx) ·
+  [panel dashboards](docs/guides/pages.mdx)
 - ✅ **Full CLI** — every workflow, scriptable and headless. [→ CLI overview](docs/cli/overview.mdx)
 - ✅ **Browsable API docs** — the running instance serves its own OpenAPI spec at
   `/openapi.json`, browsable without a third-party renderer.
@@ -345,7 +353,8 @@ crewship cost --workspace demo          # token + dollar ledger
 
 Full reference: [docs/cli/overview.mdx](docs/cli/overview.mdx) and
 [docs/api-reference/overview.mdx](docs/api-reference/overview.mdx). The docs are
-large — **85+ guides and 55+ API pages** under [`docs/`](docs/), rendered at
+large — **about 100 guides, 60 API pages and 135 CLI pages** under
+[`docs/`](docs/), rendered at
 [docs.crewship.ai](https://docs.crewship.ai) (coming soon).
 
 ---

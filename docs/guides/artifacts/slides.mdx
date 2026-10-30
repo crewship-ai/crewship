@@ -1,0 +1,236 @@
+---
+title: "Slides"
+description: "Open a Slides artifact, step through and present the deck, comment on slide text and download a PDF of an exact version."
+icon: "presentation"
+stability: experimental
+tag: Experimental
+---
+
+A **Slides** artifact is a slide deck that an agent writes and you read, present,
+comment on and export. Every save is an immutable **version**: the deck you see,
+the presentation you give and the PDF you download all come from one exact
+version, so what you send is what you reviewed.
+
+You change a deck by asking the agent, or, as the owner or an editor, by
+editing its source files with **Edit source**. Each change becomes a new
+version; earlier versions stay as they were.
+
+## Before you start
+
+Slides is off by default. It needs both switches below.
+
+**Server, per workspace.** A workspace owner or admin enables two workspace
+feature flags. `artifact_projects` is the base for every versioned artifact, and
+`artifact_slides` adds the deck view and PDF export:
+
+```bash
+crewship feature-flag enable artifact_projects
+crewship feature-flag enable artifact_slides
+```
+
+An operator can instead switch them on for every workspace on the instance with
+`CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` and
+`CREWSHIP_ARTIFACT_SLIDES_ENABLED=true` in the server environment. See
+[`crewship feature-flag`](/cli/feature-flag) for overrides and how to revert
+them.
+
+**Web app, at build time.** The browser screens are compiled in only when the web
+app is built with these variables set to `true`:
+
+| Variable | What it adds |
+|---|---|
+| `NEXT_PUBLIC_ARTIFACTS_LIBRARY` | The Artifacts library at `/artifacts`. Without it, `/artifacts` sends you to Pages. |
+| `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` | Versioned artifacts in the web app: the **Create artifact project** switch in chat and the version view in the library. The **Slide deck** kind and the deck view need it too. |
+| `NEXT_PUBLIC_ARTIFACT_SLIDES` | The **Slide deck** kind in **New artifact** and the deck view with **Present** and **Download PDF**. |
+
+A default build sets none of them. With the server flags on and the build variables
+off, the [CLI](#read-and-export-from-the-cli) still reads decks and exports PDFs.
+
+## Create a slide deck
+
+An agent writes the first version of a deck from your description. You need a
+direct chat with an agent in this workspace.
+
+1. Open **Artifacts** in the sidebar.
+2. Under **Make something**, click **Slide deck**, or click **New artifact** in the
+   top bar and pick **Slide deck**. The **New artifact** dialog opens.
+3. Under **Start with**, choose **Describe it** and write what the deck should
+   contain in **What should it contain?**, for example "A six-slide quarterly
+   review: results, risks, next steps". Or choose **From template** and pick
+   **Quarterly review**, **Project update** or **Pitch**.
+4. Optionally type a **Name**. The **Folder** stays **Unfiled**: the agent creates
+   the deck unfiled, and you can file it afterwards.
+5. Click **Continue in chat**. A new direct chat with an agent opens with your
+   request as an unsent draft in the message box.
+6. Turn on **Create artifact project** under the message box and send. The
+   status line reads "Private project · Sharing requires your approval".
+
+The draft stays only in the chat that opened. If that chat is with the wrong
+agent, open a direct chat with the right one, paste the request again and
+continue with step 6 there.
+
+When the agent has saved version 1, the deck appears in the library under
+**Not shared yet** with the **Slides** kind. Only you can open it until you
+share it.
+
+## Open and read a deck
+
+1. Open **Artifacts** and click the deck in the list.
+2. The detail view shows the deck name, a **Slides** badge and its state
+   (**Draft** unless the latest version is shared). On the right, **Latest** and
+   **Shared** show which version each one points at.
+3. The **Preview** tab shows the current slide with **Slide 1 / N** above it and
+   a row of thumbnails below it.
+4. Click a thumbnail to show that slide. The counter follows the slide you are
+   on.
+
+Use **History** to pick an earlier version; the deck view, **Present** and
+**Download PDF** then use that version.
+
+**Edit source**, shown to the owner and editors, opens the deck's files on a
+separate screen. There, **Edit source** shows a file in a text box and **Save
+project** saves your edit as a new version. The new version must still follow
+the [deck format](#deck-format), or it is not shown as Slides.
+
+<Note>
+Who sees which version: the owner can read any retained version. People with
+edit access read the latest version. Everyone else who can open the deck reads
+only the version that is currently shared. If nothing is shared yet, they see no
+deck.
+</Note>
+
+## Present a deck
+
+1. Open the deck and go to the slide you want to start from.
+2. Click **Present**. The slide fills the screen on a black background with
+   **Previous slide**, the position (for example **2 / 6**), **Next slide** and
+   **Close presentation** below it.
+3. Move with **Next slide** and **Previous slide**, or with the keyboard:
+   <kbd>→</kbd> or <kbd>Page Down</kbd> for the next slide, <kbd>←</kbd> or
+   <kbd>Page Up</kbd> for the previous one, <kbd>Home</kbd> and <kbd>End</kbd>
+   for the first and last slide.
+4. Press <kbd>Esc</kbd> or click **Close presentation** to return to the deck.
+
+Speaker notes are kept with each slide but are not shown in Present mode or in
+the PDF.
+
+## Comment on slide text
+
+You can attach a comment to a text block or a table on a slide. The comment
+keeps the exact version and the quoted text, so the agent knows what you mean.
+
+1. Open the deck and go to the slide.
+2. Click **Select** above the deck. **Select** appears only when you have write
+   access to the deck and are on the latest version, not an earlier one.
+3. Click a text block or a table. A box opens headed with the element, its quoted
+   text and the version, for example **On #results-title · "Results" · v1**.
+4. Type in **What should change here?**. Which buttons you see depends on who
+   you are:
+   - **The owner of a deck an agent made** sees **Add to queue** and **Send to
+     agent**. **Send to agent** saves the comment and starts the agent on it.
+     **Add to queue** saves it as a waiting task; **Send N to agent** under the
+     comment list later starts every waiting one.
+   - **Everyone else with write access** sees **Save comment**. The comment is
+     saved with the deck and does not start the agent.
+
+   **Cancel** discards the comment.
+
+The agent works on a comment only after it is sent: "A comment starts the agent
+only when you send it." Shapes cannot carry comments. Clicking one shows
+"Choose authored text or a table to comment on." Read comments and the agent’s replies in
+the **Comments** tab. It has no reply form; to ask for another change, select
+the relevant slide element and add a new comment.
+
+## Download a PDF
+
+1. Open the deck at the version you want.
+2. Click **Download PDF**. The button reads **Preparing PDF…** while the server
+   renders the deck.
+3. Your browser saves `slides-v<version>.pdf`, for example `slides-v3.pdf`.
+
+The PDF is a vector rendering of the same version you were viewing, one page per
+slide in deck order.
+
+If a text block does not fit its frame, the deck view shows "Some slide content
+overflows its frame. PDF export may be unavailable." The export then fails with
+"PDF download is unavailable. Reload to check access or slide overflow." Ask the
+agent to shorten the text or enlarge the frame, then export the new version.
+
+## Read and export from the CLI
+
+The same deck view and PDF are available to the `crewship` CLI. Pass the artifact
+slug or `@<artifact-id>` and an exact version:
+
+```bash
+# The deck as JSON: slide order, slides, elements and comment anchors
+crewship page artifact slides quarterly-review --version 3
+
+# The PDF, written to a local file
+crewship page artifact export-pdf quarterly-review --version 3 --out quarterly-review-v3.pdf
+```
+
+`--version` is required for both commands. `export-pdf` also requires `--out`,
+a local file path that is never sent to the server. It prints a receipt with the
+`path`, `media_type`, `code_version`, `byte_length` and `sha256` of the file it
+wrote. Agents use the equivalent `artifact_slides_read` and
+`artifact_export_pdf` tools.
+
+The HTTP endpoints are `GET /api/v1/pages/{slug}/artifact/slides?version=<n>`
+and `GET /api/v1/pages/{slug}/artifact/export.pdf?version=<n>`. The PDF response
+is `application/pdf` with the file name `artifact-<artifact-id>-v<n>.pdf`.
+
+## When a deck cannot be shown or exported
+
+In the browser, a version whose files do not follow the [deck format](#deck-format)
+is not recognised as Slides: it carries an **Artifact** badge instead of
+**Slides**, and the preview reads "This Slides format is unsupported." Other
+failures show "Slides preview is unavailable. Reload to check access." or, for
+the PDF, "PDF download is unavailable. Reload to check access or slide
+overflow."
+
+The HTTP endpoints return a specific status and code; the CLI prints the status
+and the message:
+
+| Status and code | Message | What to do |
+|---|---|---|
+| 422 `artifact_slides_unsupported` | "This content is outside the supported Slides profile." | The files are outside the deck format or exceed its source limits (size, slides, elements or notes). Ask the agent to save a new version that follows it. |
+| 422 `artifact_slides_overflow` | "Slide text does not fit its frame. Adjust the authored layout before exporting." | Returned by PDF export. Shorten the text or enlarge the frame in a new version. |
+| 413 `artifact_slides_limit` | "Slides export exceeds the bounded resource limit." | The output is too large: a PDF over 8 MiB, a deck view response over 16 MiB, or a deck beyond the PDF renderer's limits. Split the deck or reduce its content. |
+| 400 | Invalid request | Pass exactly one positive integer `version`. |
+| 404 | Not found | The deck is missing, the flags are off, or you cannot read that version. |
+
+## Deck format
+
+Agents write a deck as a fixed, closed format. You do not need it to read a deck,
+but it explains why a version is refused. A deck version contains:
+
+- `deck.json`: `{"schema_version":1,"order":["intro","results"]}`, the slide IDs in
+  order, at most 100 slides.
+- One `slides/<id>.html` file per listed slide and no other files.
+
+Each slide file is a single `<section id="<id>">` holding, in order, any number
+of these elements and at most one closing `<aside>` with plain-text speaker
+notes:
+
+- `<p>`: a text block with plain text only.
+- `<div data-shape="rectangle">` or `<div data-shape="ellipse">`: an empty shape.
+- `<table>` with one `<tbody>`, plain `<tr>` rows and plain-text `<td>` cells.
+
+Every element has an `id` and an inline `style` that sets `left`, `top`, `width`
+and `height` in whole pixels on a 1920 × 1080 slide. Text blocks also set
+`font-size`, `color` and `text-align`; shapes set `background-color`,
+`border-color` and `border-width`; tables set `font-size`, `color`,
+`background-color` and `border-color`. Colors are six-digit hex values such as
+`#F97316`. The only font is Go Regular. Scripts, images, links, comments,
+nested markup and other elements or styles are refused.
+
+Limits: at most 2 MiB of source in total, 256 KiB per slide file, 200 elements
+per slide, 1,000 elements per deck and 4,000 characters of notes per slide. A
+version beyond these limits is refused as unsupported (422). A PDF can be at
+most 8 MiB; a larger one is refused with 413.
+
+## Related
+
+- [Native Slides initialization and reads](/guides/slides-native): the separate
+  revision-based Slides API, switched on by server configuration.
+- [`crewship slides`](/cli/slides): CLI for that native Slides API.

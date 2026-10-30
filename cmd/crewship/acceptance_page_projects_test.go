@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http/httptest"
@@ -40,6 +41,9 @@ func TestAcceptance_PageProjectGitHistoryRestore(t *testing.T) {
 	image := os.Getenv("PAGES_TEST_BUILD_IMAGE")
 	if image != "" {
 		options = append(options, api.WithPageBuildImage(image), api.WithPageRuntime("https://pages.example.net", "https://studio.example.com"))
+	} else {
+		// Pin "not enabled" so an installed Pages image cannot start real builds.
+		options = append(options, api.WithPageBuildImageLookup(func(context.Context) ([]string, error) { return nil, nil }))
 	}
 	router, err := api.NewRouter(db, "this-is-a-32-char-test-secret-pad", slog.Default(), options...)
 	if err != nil {
@@ -316,13 +320,14 @@ func exercisePageReviewBeforeBuild(t *testing.T, run func(...string) (string, er
 	}
 	// Neither explicit: both halves come from the snapshot and are printed
 	// before the request. The server's refusal is then PAST the fence shape
-	// check (never a 400): 503 with no build worker configured, 404 for the
-	// unknown build when the pages-apps lane supplies an image.
+	// check (never a 400): 503 page_runtime_origin_missing without a runtime
+	// origin, 404 for the unknown build when the pages-apps lane supplies an
+	// image and an origin.
 	out, err = run("page", "project", "publish", "health", "--build", "b", "--revision", "2", "--expected-publication", "0", "--reviewed-code")
 	if err == nil || !strings.Contains(out, "Fencing this publication on definition sha256 "+snapshot.Baseline.DefinitionDigest) || !strings.Contains(out, "Fencing on routine health-check sha256 "+routine) {
 		t.Fatalf("auto-fence publish: %v %s", err, out)
 	}
-	if strings.Contains(out, `"status": 400`) || !(strings.Contains(out, "build worker") || strings.Contains(out, "Page build not found")) {
+	if strings.Contains(out, `"status": 400`) || !(strings.Contains(out, "Page runtime origin is not configured") || strings.Contains(out, "Page build not found")) {
 		t.Fatalf("auto-fence publish was refused before or beyond the fence: %s", out)
 	}
 	if strings.Contains(out, "acknowledge-unavailable-baseline") {

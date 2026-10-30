@@ -173,7 +173,7 @@ func TestCraftNativeHTTPBindingRejectsScopeAndPublicIDAsBearer(t *testing.T) {
 	}
 }
 func TestCraftNativeHTTPCredentialAndPolicyABACannotReviveSession(t *testing.T) {
-	for _, subject := range []string{"credential", "workspace epoch"} {
+	for _, subject := range []string{"credential", "page ownership"} {
 		t.Run(subject, func(t *testing.T) {
 			f, m, ctx := craftNativeHTTPFixture(t)
 			token, _ := craftNativeIssued(t, m, ctx)
@@ -181,7 +181,10 @@ func TestCraftNativeHTTPCredentialAndPolicyABACannotReviveSession(t *testing.T) 
 				mustExec(t, f.db, `UPDATE user_sessions SET revoked_at='2026-10-27T00:00:00Z' WHERE id='native-source'`)
 				mustExec(t, f.db, `UPDATE user_sessions SET revoked_at=NULL WHERE id='native-source'`)
 			} else {
-				mustExec(t, f.db, `UPDATE workspaces SET authority_revision=authority_revision+1 WHERE id=?`, f.wsID)
+				// A revoke/regain cycle on this Page moves its own generation.
+				// A bare workspace delivery-epoch bump no longer retires (dev3 F1).
+				mustExec(t, f.db, `UPDATE pages SET owner_user_id=? WHERE id='native-page'`, f.adminID)
+				mustExec(t, f.db, `UPDATE pages SET owner_user_id=? WHERE id='native-page'`, f.userID)
 			}
 			if w := craftNativeLeaseCall(m, ctx, token, "native-page", "acquire", `{}`); w.Code != 403 {
 				t.Fatal("old epoch regained authority", w.Code, w.Body)

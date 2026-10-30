@@ -1,8 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
+	"slices"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -210,17 +214,70 @@ func init() {
 	rootCmd.AddCommand(feedbackCmd)
 }
 
+// feedbackPreferenceCatalogueV1 is usermodel.FeedbackPreferenceOptionsV1's
+// keys, restated rather than imported: the CLI-side commands stay out of the
+// daemon packages, which the clionly build leaves out with cmd_start.go.
+// TestFeedbackPreferenceCatalogueMatchesServer pins the two together.
+var feedbackPreferenceCatalogueV1 = []string{
+	"Next time, keep answers concise.",
+	"Next time, start with the conclusion.",
+	"Příště piš stručněji.",
+	"Příště nejdřív ukaž závěr.",
+}
+
+// feedbackPreferenceOps are the three self-service preference commands over
+// the agent peers API, each with its own help.
+var feedbackPreferenceOps = []struct {
+	use, short string
+}{
+	{"preferences", "List your explicit preferences recorded for one agent"},
+	{"edit-preference", "Change the reason of one of your preferences (exact catalogue v1 text)"},
+	{"delete-preference", "Withdraw one of your preferences for an agent"},
+}
+
+// feedbackSubjectID is the caller's own user id: the {userId} the peers
+// routes only accept for their own subject.
+func feedbackSubjectID(client *cli.Client) (string, error) {
+	resp, err := client.Get("/api/v1/users/me/peer-consent")
+	if err != nil {
+		return "", err
+	}
+	if err = cli.CheckError(resp); err != nil {
+		return "", err
+	}
+	var subject struct {
+		UserID string `json:"user_id" yaml:"user_id"`
+	}
+	if err = cli.ReadJSON(resp, &subject); err != nil {
+		return "", err
+	}
+	if subject.UserID == "" {
+		return "", fmt.Errorf("server did not name the current user")
+	}
+	return subject.UserID, nil
+}
+
+// feedbackAgentFlag resolves --agent (slug or id) to the id the peers routes
+// key on: the route takes an id, and a slug used to go out verbatim and 404.
+func feedbackAgentFlag(cmd *cobra.Command, client *cli.Client) (string, error) {
+	agent, _ := cmd.Flags().GetString("agent")
+	if strings.TrimSpace(agent) == "" {
+		return "", fmt.Errorf("--agent is required")
+	}
+	return resolveAgentID(client, agent)
+}
+
 func init() {
-	for _, operation := range []string{"preferences", "edit-preference", "delete-preference"} {
-		op := operation
-		c := &cobra.Command{Use: op, Short: "Inspect or change your explicit agent preferences", RunE: func(cmd *cobra.Command, _ []string) error {
+	for _, operation := range feedbackPreferenceOps {
+		op := operation.use
+		c := &cobra.Command{Use: op, Short: operation.short, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 			client, err := requireAuthAndWorkspace()
 			if err != nil {
 				return err
 			}
-			agent, _ := cmd.Flags().GetString("agent")
-			if agent == "" {
-				return fmt.Errorf("--agent is required")
+			agent, err := feedbackAgentFlag(cmd, client)
+			if err != nil {
+				return err
 			}
 			path := "/api/v1/agents/" + url.PathEscape(agent) + "/peers"
 			if op == "preferences" {
@@ -240,54 +297,134 @@ func init() {
 				}
 				rows := [][]string{}
 				for _, p := range out.Preferences {
-					rows = append(rows, []string{fmt.Sprint(p["id"]), fmt.Sprint(p["revision"]), fmt.Sprint(p["status"]), fmt.Sprint(p["reason"])})
+					rows = append(rows, []string{fmt.Sprint(p["id"]), fmt.Sprint(p["revision"]), fmt.Sprint(p["status"]), fmt.Sprint(p["value"]), fmt.Sprint(p["reason"])})
 				}
-				return newFormatter().Auto(out.Preferences, []string{"ID", "REVISION", "STATUS", "REASON"}, rows)
+				return newFormatter().Auto(out.Preferences, []string{"ID", "REVISION", "STATUS", "VALUE", "REASON"}, rows)
 			}
 			entry, _ := cmd.Flags().GetString("entry")
 			revision, _ := cmd.Flags().GetInt("revision")
 			if entry == "" || revision < 1 {
 				return fmt.Errorf("--entry and --revision are required")
 			}
-			resp, err := client.Get("/api/v1/users/me/peer-consent")
+			reason, _ := cmd.Flags().GetString("reason")
+			if op == "edit-preference" && !slices.Contains(feedbackPreferenceCatalogueV1, reason) {
+				return fmt.Errorf("--reason must be one of the catalogue v1 preferences: %q", feedbackPreferenceCatalogueV1)
+			}
+			userID, err := feedbackSubjectID(client)
 			if err != nil {
 				return err
 			}
-			if err = cli.CheckError(resp); err != nil {
-				return err
-			}
-			var subject struct {
-				UserID string `json:"user_id" yaml:"user_id"`
-			}
-			if err = cli.ReadJSON(resp, &subject); err != nil {
-				return err
-			}
-			entryPath := "/api/v1/agents/" + url.PathEscape(agent) + "/peers/" + url.PathEscape(subject.UserID)
+			entryPath := path + "/" + url.PathEscape(userID)
+			var resp *http.Response
 			if op == "delete-preference" {
 				q := url.Values{"entry_id": {entry}, "revision": {fmt.Sprint(revision)}}
 				resp, err = client.Delete(entryPath + "?" + q.Encode())
 			} else {
-				reason, _ := cmd.Flags().GetString("reason")
 				resp, err = client.Patch(entryPath, map[string]any{"entry_id": entry, "revision": revision, "reason": reason})
 			}
 			if err != nil {
 				return err
 			}
-			defer resp.Body.Close()
 			if err = cli.CheckError(resp); err != nil {
 				return err
 			}
-			cli.PrintSuccess("Preference updated.")
+			raw, err := readServerDocument(resp)
+			if err != nil {
+				return err
+			}
+			// The route answers 204. A script asking for JSON gets what was
+			// asked of it; the new revision is the server's to assign, so it
+			// is read back with `feedback preferences`, not guessed here.
+			result := map[string]any{"agent_id": agent, "entry_id": entry, "revision": revision}
+			done := "Preference updated."
+			if op == "delete-preference" {
+				result["withdrawn"] = true
+				done = "Preference withdrawn."
+			} else {
+				result["updated"] = true
+				result["reason"] = reason
+			}
+			if handled, err := machineMutationResult(cmd, raw, result); handled {
+				return err
+			}
+			cli.PrintSuccess(done)
 			return nil
 		}}
-		c.Flags().String("agent", "", "agent id (required)")
+		c.Flags().String("agent", "", "agent slug or id (required)")
 		if op != "preferences" {
 			c.Flags().String("entry", "", "preference entry id (required)")
 			c.Flags().Int("revision", 0, "expected entry revision (required)")
 		}
 		if op == "edit-preference" {
-			c.Flags().String("reason", "", "exact explicit preference from catalogue v1")
+			c.Flags().String("reason", "", "exact catalogue v1 preference: "+strings.Join(quoteAll(feedbackPreferenceCatalogueV1), " | "))
 		}
 		feedbackCmd.AddCommand(c)
 	}
+	feedbackPeerCardCmd.Flags().String("agent", "", "agent slug or id (required)")
+	feedbackCmd.AddCommand(feedbackPeerCardCmd)
+}
+
+func quoteAll(values []string) []string {
+	out := make([]string, len(values))
+	for i, v := range values {
+		out[i] = fmt.Sprintf("%q", v)
+	}
+	return out
+}
+
+// feedbackPeerCardCmd reads the caller's own peer card on one agent: the
+// Markdown the agent keeps about them. Self-only and audited server-side —
+// every read lands in peer_card_audit.
+var feedbackPeerCardCmd = &cobra.Command{
+	Use:   "peer-card",
+	Short: "Show the full peer card an agent keeps about you",
+	Long: `Print the peer card one agent keeps about you: the Markdown it reads before
+working with you. Only your own card is readable, and the server records every
+read in the peer-card audit log.
+
+Backed by GET /api/v1/agents/{agentId}/peers/{userId}; your user id is looked
+up from the server. An agent with no card about you exits non-zero (404).
+
+Examples:
+  crewship feedback peer-card --agent alex
+  crewship feedback peer-card --agent alex --format json`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		client, err := requireAuthAndWorkspace()
+		if err != nil {
+			return err
+		}
+		agent, err := feedbackAgentFlag(cmd, client)
+		if err != nil {
+			return err
+		}
+		userID, err := feedbackSubjectID(client)
+		if err != nil {
+			return err
+		}
+		resp, err := client.Get("/api/v1/agents/" + url.PathEscape(agent) + "/peers/" + url.PathEscape(userID))
+		if err != nil {
+			return err
+		}
+		if err := cli.CheckError(resp); err != nil {
+			return err
+		}
+		raw, err := readServerDocument(resp)
+		if err != nil {
+			return err
+		}
+		var card struct {
+			Content string `json:"content" yaml:"content"`
+		}
+		if err := json.Unmarshal(raw, &card); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
+		return resolvedFormatter(cmd).AutoHuman(cli.RawJSON(raw), func() {
+			out := cmd.OutOrStdout()
+			fmt.Fprint(out, card.Content)
+			if !strings.HasSuffix(card.Content, "\n") {
+				fmt.Fprintln(out)
+			}
+		})
+	},
 }

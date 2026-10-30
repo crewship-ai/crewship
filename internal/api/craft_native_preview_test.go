@@ -160,8 +160,10 @@ func TestCraftNativeShareRequiresCurrentLeaseCASAndExistingVersion(t *testing.T)
 	if w := craftNativeShareCall(t, d, ctx, token, share); w.Code != 200 || pin() != 2 {
 		t.Fatalf("writer share: %d %s", w.Code, w.Body)
 	}
-	// Downgrade and ABA cannot keep the captured write admission alive.
-	mustExec(t, f.db, `UPDATE workspaces SET authority_revision=authority_revision+1 WHERE id=?`, f.wsID)
+	// Downgrade and ABA cannot keep the captured write admission alive: a
+	// revoke/regain cycle on this Page moves its own authority generation.
+	mustExec(t, f.db, `UPDATE pages SET owner_user_id=? WHERE id='native-page'`, f.adminID)
+	mustExec(t, f.db, `UPDATE pages SET owner_user_id=? WHERE id='native-page'`, f.userID)
 	if w := craftNativeShareCall(t, d, ctx, token, share); w.Code != 403 {
 		t.Fatalf("revoked admission shared: %d %s", w.Code, w.Body)
 	}

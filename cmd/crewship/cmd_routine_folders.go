@@ -153,6 +153,10 @@ var routineFoldersDeleteCmd = &cobra.Command{
 		if err := deleteJSON(client, fmt.Sprintf("/api/v1/workspaces/%s/pipeline-folders/%s", client.GetWorkspaceID(), url.PathEscape(args[0]))); err != nil {
 			return err
 		}
+		// The route answers 204; -f json still gets a document.
+		if handled, err := machineMutationResult(cmd, nil, map[string]any{"deleted": true, "folder_id": args[0]}); handled {
+			return err
+		}
 		// A receipt goes to stderr so `-f json | jq` stays clean (#2086).
 		cli.PrintSuccess(fmt.Sprintf("Deleted folder %s. Its routines are unfiled.", args[0]))
 		return nil

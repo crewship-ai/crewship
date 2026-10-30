@@ -125,6 +125,21 @@ describe("PagesStrip", () => {
     expect(screen.getByRole("link", { name: /Nightly close/ })).toHaveAttribute("href", "/pages/close")
   })
 
+  it("opens Artifacts, not Pages, with the library on", () => {
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
+    try {
+      const fresh = [{ id: "a", schema: "metric.v1", state: "fresh" as const, provenance: { produced_at: "2026-08-12T11:00:00Z" } }]
+      PAGES = [
+        page({ id: "0f9c2a1e-page", slug: "close", name: "Nightly close", panels: fresh }),
+        page({ id: "", slug: "legacy row", name: "Legacy row", panels: fresh }),
+      ]
+      renderStrip()
+      expect(screen.getByRole("link", { name: "All artifacts" })).toHaveAttribute("href", "/artifacts")
+      expect(screen.getByRole("link", { name: /Nightly close/ })).toHaveAttribute("href", "/artifacts/0f9c2a1e-page")
+      expect(screen.getByRole("link", { name: /Legacy row/ })).toHaveAttribute("href", "/artifacts?item=legacy+row")
+    } finally { vi.unstubAllEnvs() }
+  })
+
   it("never renders a blank card when the workspace has no pages — names the next action (§9b.3)", () => {
     PAGES = []
     renderStrip()
