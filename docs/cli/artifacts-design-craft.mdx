@@ -148,7 +148,7 @@ crewship page design apply launch-hero --file hero.json -f json
 ```
 
 `apply` changes the live canvas that open browsers see immediately, and works
-even when no browser has it open. Every `apply` that produces a canvas update
+even when no browser has it open. Every successful `apply`
 records a new version. Re-applying the same file is not a no-op: upserting the
 same nodes again still updates the canvas state and records another version.
 Use `--file -` to read stdin. An
@@ -322,7 +322,7 @@ crewship craft availability <artifact-slug> -f json
 `availability` never fails for a missing artifact; it reports `false` values.
 Run it first. `enabled` is `false` when the instance switch is off (the other
 commands then return `native HTTP 503`), and also when the artifact is not a
-native document or you cannot read it (then expect `native HTTP 403` or `404`).
+native document or you cannot read it (then expect a 403; `connect` reports `native session HTTP 403`).
 
 ### Read the shared preview
 
