@@ -9,7 +9,7 @@ import { useSessionSafe } from "@/hooks/use-auth"
 import { artifactDraftKey, loadArtifactDraft, writeArtifactDraft, clearArtifactDraft, artifactDraftRevision } from "@/lib/artifact-drafts"
 import { artifactsDesign } from "@/lib/feature-flags"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceField, CreateSurfaceFooter, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { apiFetch } from "@/lib/api-fetch"
 import { Input } from "@/components/ui/input"
 import { useDesign } from "./use-design"
@@ -273,7 +273,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
     </div>
    </aside>
   </div>
-  <Dialog open={continueOpen} onOpenChange={setContinueOpen}><DialogContent><DialogHeader><DialogTitle>Continue in a new Design</DialogTitle><DialogDescription>Create a copy of this canvas with fresh history. The original canvas and unsent feedback stay in this tab.</DialogDescription></DialogHeader><label htmlFor="continued-design-name">New Design name</label><Input id="continued-design-name" value={continueName} maxLength={200} onChange={event=>setContinueName(event.target.value)} />{continueError&&<p role="alert" className="text-destructive">{continueError}</p>}<DialogFooter><Button variant="outline" onClick={()=>setContinueOpen(false)}>Cancel</Button><Button disabled={continuing||!continueName.trim()} onClick={()=>{void continueDesign()}}>{continuing?"Creating…":"Create new Design"}</Button></DialogFooter></DialogContent></Dialog>
+  <CreateSurface open={continueOpen} onOpenChange={setContinueOpen} size="sm" onSubmit={()=>{if(!continuing&&continueName.trim())void continueDesign()}}><CreateSurfaceHeader title="Continue in a new Design" description="Create a copy of this canvas with fresh history. The original canvas and unsent feedback stay in this tab." onClose={()=>setContinueOpen(false)} /><CreateSurfaceBody><CreateSurfaceField label="New Design name" htmlFor="continued-design-name"><Input id="continued-design-name" value={continueName} maxLength={200} onChange={event=>setContinueName(event.target.value)} /></CreateSurfaceField>{continueError&&<p role="alert" className="text-destructive">{continueError}</p>}</CreateSurfaceBody><CreateSurfaceFooter onCancel={()=>setContinueOpen(false)} guardCancel={false} primaryLabel={continuing?"Creating…":"Create new Design"} onPrimary={()=>{void continueDesign()}} primaryDisabled={continuing||!continueName.trim()} /></CreateSurface>
   {accessOpen && <DesignAccessDialog workspaceId={workspaceId} slug={slug} onClose={() => setAccessOpen(false)} />}
  </section>
 }
