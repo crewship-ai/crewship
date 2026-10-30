@@ -7245,6 +7245,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Add optional artifact project previews, versioned element comments, shared-version navigation and explicit chat creation intent behind backend availability.
 
+- **`crewship routine schedules now` names an unknown schedule instead of a missing endpoint.** An id that is not a schedule in this workspace now prints the server's `API error (404): schedule not found` and exits 3 (not found); it used to print "force-fire endpoint unavailable on this server" and exit 1. The "endpoint unavailable" hint remains for a server that has no force-fire route. ⚠️ **Behaviour change:** scripts that matched the old message or exit code 1 for an unknown id need updating.
+
 ## [1.0.0-rc.1] — 2026-07-12
 
 ### Security
