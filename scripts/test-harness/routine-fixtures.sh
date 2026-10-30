@@ -62,7 +62,9 @@ harness_fixture() {
     _fail "save $kind fixture" "$(head -c 200 "$_HARNESS_FIXTURE_DIR/save.log")"
     finish
   fi
-  id="$(jq -er --arg slug "$slug" 'select(.slug == $slug) | .id | select(type == "string" and length > 0)' "$_HARNESS_FIXTURE_DIR/save.log")" || { _fail "saved fixture reports its identity"; finish; }
+  # Older CLIs print human text from save even with --format json. Read the
+  # saved identity through get, whose machine contract already exists.
+  id="$(cs routine get "$slug" --format json | jq -er --arg slug "$slug" 'select(.slug == $slug) | .id | select(type == "string" and length > 0)')" || { _fail "saved fixture reports its identity"; finish; }
   _HARNESS_FIXTURE_SLUGS+=("$slug")
   _HARNESS_FIXTURE_IDS+=("$id")
   printf -v "$variable" '%s' "$slug"
