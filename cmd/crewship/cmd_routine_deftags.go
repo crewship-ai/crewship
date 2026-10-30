@@ -66,7 +66,7 @@ Examples:
 				return err
 			}
 			var body struct {
-				Tags []string `json:"tags"`
+				Tags []string `json:"tags" yaml:"tags"`
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
 				return fmt.Errorf("decode response: %w", err)
