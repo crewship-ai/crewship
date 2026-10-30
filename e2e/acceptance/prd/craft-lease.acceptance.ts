@@ -1,0 +1,339 @@
+// PRD A: native Word and Sheet editor lease. Exactly one person edits at a
+// time; everyone sees who ("Upravuje X"); custody passes only by an explicit
+// request and handoff; and a write under a retired generation is refused (409)
+// without touching the document.
+//
+// Quick mode drives the lease protocol over the editor's own HTTP API when the
+// server runs with a native editor profile, and otherwise proves that the
+// endpoints fail closed. Full mode additionally drives two real browsers
+// through the editor's lease bar on a deployed instance with native bundles.
+import type { APIRequestContext, Page, Response } from "@playwright/test"
+import { apiAs, loginStorageState } from "./auth"
+import { APPLICATIONS, NativePage, sessionUserId, type Admission, type LeaseView } from "./craft-lease/native"
+import { expect, prdRequirement, test, type PrdScenario } from "./fixtures"
+
+const REQ = {
+  holder: prdRequirement("A.craft.lease.holder", "Word/Sheet: everyone sees who holds the editor (\"Upravuje X\"); a second person cannot take it"),
+  handoff: prdRequirement("A.craft.lease.handoff", "Word/Sheet: custody passes only through request and handoff; the new holder can save"),
+  stale: prdRequirement("A.craft.lease.stale-generation", "Word/Sheet: a write under a retired generation is refused (409) and the document stays unchanged"),
+  disabled: prdRequirement("A.craft.lease.fail-closed", "Without a native editor profile no lease or native document is ever granted"),
+}
+
+const PEER_NAME = "PRD Lease Peer"
+
+/**
+ * Whether the server under test has a native Word/Sheet editor profile,
+ * decided before and independently of initialize(), which is one of the calls
+ * A.craft.lease.fail-closed checks. PRD_CRAFT_NATIVE=on|off states it
+ * explicitly; full mode always requires the profile; otherwise quick mode reads
+ * the configuration-derived flag of GET /api/v1/documents/status.
+ */
+async function nativeProfile(prd: PrdScenario, owner: APIRequestContext, doc: NativePage): Promise<boolean> {
+  const declared = process.env.PRD_CRAFT_NATIVE?.trim().toLowerCase()
+  if (declared === "on") return true
+  if (declared === "off") return false
+  if (declared) throw new Error(`PRD_CRAFT_NATIVE must be "on" or "off", got ${JSON.stringify(declared)}`)
+  if (prd.mode === "full") return true
+  return doc.profileAdvertised(owner)
+}
+
+/**
+ * Initializes the document as native. Skips (quick) or fails (full) when the
+ * server has no native editor profile; once a profile is known to exist,
+ * initialize must succeed.
+ */
+async function requireNative(prd: PrdScenario, owner: APIRequestContext, doc: NativePage): Promise<void> {
+  const profile = await nativeProfile(prd, owner, doc)
+  test.skip(!profile && prd.mode === "quick", "server runs without a native Word/Sheet editor profile (CREWSHIP_CRAFT_NATIVE_*)")
+  expect(profile, "full mode needs an origin with native Word/Sheet editors enabled").toBe(true)
+  expect(await doc.initialize(owner), "initialize on a server with a native editor profile").toBe(true)
+  const availability = await doc.availability(owner)
+  expect(availability.enabled && availability.can_edit, "the owner may edit the new native document").toBe(true)
+}
+
+async function peerApi(prd: PrdScenario, cleanup: Array<() => Promise<void>>) {
+  const peer = await prd.provision("MEMBER", PEER_NAME)
+  const state = await loginStorageState(prd.origin, peer.account)
+  const api = await apiAs(prd.origin, state)
+  cleanup.push(() => api.dispose())
+  return { peer, state, api }
+}
+
+for (const { application, label } of APPLICATIONS) {
+  test.describe(`${label} lease`, () => {
+    test(
+      `${label}: holder, handoff and stale generation over the editor API`,
+      { annotation: [REQ.holder, REQ.handoff, REQ.stale] },
+      async ({ prd, request }) => {
+        const cleanup: Array<() => Promise<void>> = []
+        try {
+          const ws = await prd.qaWorkspace()
+          const doc = await NativePage.create(request, ws.id, application, `PRD lease ${label}`)
+          await requireNative(prd, request, doc)
+          // Membership and grants change the workspace epoch, which retires
+          // native admissions; settle them before anyone is admitted.
+          const { peer, api: peerCtx } = await peerApi(prd, cleanup)
+          await doc.grant(request, peer.userId, "write")
+          const ownerId = await sessionUserId(request)
+          const owner = await doc.session(request)
+          const other = await doc.session(peerCtx)
+          const log: Record<string, unknown> = { application, mode: prd.mode, appSha: prd.appSha, workspaceId: ws.id, pageId: doc.pageId }
+
+          // Free document; both may edit.
+          const free = await doc.lease(peerCtx, other)
+          expect(free.holder).toBeNull()
+          expect(free.can_edit).toBe(true)
+
+          // Owner takes custody. The peer sees who edits and cannot take it.
+          const acquired = (await (await doc.leaseOp(request, owner, "acquire")).json()) as LeaseView
+          expect(acquired.mine).toBe(true)
+          expect(acquired.can_write).toBe(true)
+          expect(acquired.holder?.actor_id).toBe(`user:${ownerId}`)
+          const gOwner = acquired.generation
+          expect(gOwner).toMatch(/^[1-9][0-9]*$/)
+          const seenByPeer = await doc.lease(peerCtx, other)
+          expect(seenByPeer.holder?.actor_id).toBe(`user:${ownerId}`)
+          expect(seenByPeer.holder?.kind).toBe("human")
+          expect(seenByPeer.holder?.display_name.trim()).not.toBe("")
+          expect(seenByPeer.mine).toBe(false)
+          expect(seenByPeer.can_write).toBe(false)
+          const peerAcquire = await doc.leaseOp(peerCtx, other, "acquire")
+          expect(peerAcquire.status(), "a second person cannot take a held lease").toBe(409)
+          log.holder = { shownToPeer: `Upravuje ${seenByPeer.holder?.display_name}`, peerAcquire: peerAcquire.status() }
+
+          // The holder saves; a non-holder save under the holder's generation is refused.
+          const v1 = await doc.document(request, owner)
+          const bytes = Buffer.from(v1.bytes, "base64")
+          const ownerSave = await doc.save(request, owner, { generation: gOwner!, baseVersion: v1.version, enginePin: v1.enginePin, bytes, editorRevision: `prd-owner-${Date.now()}` })
+          expect(ownerSave.status(), "the holder saves").toBe(200)
+          const v2 = (await ownerSave.json()) as { version: string; phase: string }
+          expect(v2.phase).toBe("committed")
+          expect(BigInt(v2.version)).toBeGreaterThan(BigInt(v1.version))
+          const intruder = await doc.save(peerCtx, other, { generation: gOwner!, baseVersion: v2.version, enginePin: v1.enginePin, bytes, editorRevision: `prd-intruder-${Date.now()}` })
+          expect(intruder.status(), "a non-holder cannot save under the holder's generation").toBe(409)
+          expect((await doc.document(peerCtx, other)).version).toBe(v2.version)
+
+          // Request and handoff.
+          const requested = await doc.leaseOp(peerCtx, other, "request-handoff")
+          expect(requested.status()).toBe(201)
+          const { request_id: requestId } = (await requested.json()) as { request_id: string }
+          const pending = await doc.lease(request, owner)
+          const entry = pending.handoff_requested_by.find((r) => r.request_id === requestId)
+          expect(entry, "the holder sees the handoff request").toBeTruthy()
+          expect(entry?.actor_id).toBe(`user:${peer.userId}`)
+          expect(entry?.display_name).toBe(PEER_NAME)
+          const handed = await doc.leaseOp(request, owner, "handoff", { generation: gOwner!, request_id: requestId })
+          expect(handed.status()).toBe(200)
+          const afterHandoff = (await handed.json()) as LeaseView
+          expect(afterHandoff.mine).toBe(false)
+          expect(afterHandoff.holder?.actor_id).toBe(`user:${peer.userId}`)
+          const peerView = await doc.lease(peerCtx, other)
+          expect(peerView.mine).toBe(true)
+          expect(peerView.can_write).toBe(true)
+          const gPeer = peerView.generation
+          expect(gPeer).toMatch(/^[1-9][0-9]*$/)
+          expect(gPeer).not.toBe(gOwner)
+          const ownerSees = await doc.lease(request, owner)
+          expect(ownerSees.holder?.display_name).toBe(PEER_NAME)
+          log.handoff = { requestSeenByHolder: true, from: gOwner, to: gPeer, shownToOwner: `Upravuje ${ownerSees.holder?.display_name}` }
+
+          // The retired generation is fenced: save, renew and release all 409, nothing changes.
+          const head = await doc.document(peerCtx, other)
+          const stale = await doc.save(request, owner, { generation: gOwner!, baseVersion: head.version, enginePin: head.enginePin, bytes, editorRevision: `prd-stale-${Date.now()}` })
+          expect(stale.status(), "stale-generation save").toBe(409)
+          const staleRenew = await doc.leaseOp(request, owner, "renew", { generation: gOwner! })
+          expect(staleRenew.status(), "stale-generation renew").toBe(409)
+          const staleRelease = await doc.leaseOp(request, owner, "release", { generation: gOwner! })
+          expect(staleRelease.status(), "stale-generation release").toBe(409)
+          const ownerReacquire = await doc.leaseOp(request, owner, "acquire")
+          expect(ownerReacquire.status(), "the former holder cannot take it back").toBe(409)
+          const unchanged = await doc.document(peerCtx, other)
+          expect(unchanged.version).toBe(head.version)
+          expect(unchanged.bytes).toBe(head.bytes)
+          log.stale = { save: stale.status(), renew: staleRenew.status(), release: staleRelease.status(), reacquire: ownerReacquire.status(), versionUnchanged: unchanged.version }
+
+          // The new holder saves and releases; the document is free again.
+          const peerSave = await doc.save(peerCtx, other, { generation: gPeer!, baseVersion: head.version, enginePin: head.enginePin, bytes, editorRevision: `prd-peer-${Date.now()}` })
+          expect(peerSave.status(), "the new holder saves").toBe(200)
+          const v3 = (await peerSave.json()) as { version: string }
+          expect(BigInt(v3.version)).toBeGreaterThan(BigInt(head.version))
+          const released = await doc.leaseOp(peerCtx, other, "release", { generation: gPeer! })
+          expect(released.status()).toBe(200)
+          expect(((await released.json()) as LeaseView).holder).toBeNull()
+          log.final = { peerSavedVersion: v3.version, releasedHolder: null }
+          await prd.evidence("result.json", log)
+        } finally {
+          for (const c of cleanup.reverse()) await c().catch(() => {})
+        }
+      },
+    )
+
+    test(
+      `${label}: two people hand the editor over in the browser`,
+      { annotation: [REQ.holder, REQ.handoff, REQ.stale] },
+      async ({ prd, request }) => {
+        prd.requireFull("needs the deployed native editor bundles")
+        const cleanup: Array<() => Promise<void>> = []
+        const trail: CraftCall[] = []
+        let passed = false
+        try {
+          const ws = await prd.qaWorkspace()
+          const doc = await NativePage.create(request, ws.id, application, `PRD lease UI ${label}`)
+          await requireNative(prd, request, doc)
+          const { peer, state, api: peerCtx } = await peerApi(prd, cleanup)
+          await doc.grant(request, peer.userId, "write")
+          const ownerId = await sessionUserId(request)
+
+          // A fresh owner login, not the shared storage state: an earlier
+          // browser test may have rotated that refresh family, and reusing it
+          // signs this browser out ("Signed out on this device").
+          const ownerAccount = prd.env.accounts.owner
+          expect(ownerAccount, "owner account").toBeTruthy()
+          const ownerContext = await prd.browserContext(await loginStorageState(prd.origin, ownerAccount!))
+          const page = await ownerContext.newPage()
+          page.setDefaultTimeout(60_000)
+          traceCraft(page, "owner", trail)
+          const ownerAdmission = captureAdmission(page)
+          await page.goto(doc.editorPath)
+          const peerContext = await prd.browserContext(state)
+          const peerPage = await peerContext.newPage()
+          peerPage.setDefaultTimeout(60_000)
+          traceCraft(peerPage, "peer", trail)
+          await peerPage.goto(doc.editorPath)
+          const ownerBar = page.getByRole("toolbar", { name: "Úpravy dokumentu" })
+          const peerBar = peerPage.getByRole("toolbar", { name: "Úpravy dokumentu" })
+          await expect(ownerBar).toContainText("Volné", { timeout: 60_000 })
+          await expect(peerBar).toContainText("Volné", { timeout: 60_000 })
+
+          // Owner takes the editor; the peer sees "Upravuje <owner>".
+          const acquiredRes = page.waitForResponse((r) => isCraft(r, "lease/acquire") && r.status() === 200)
+          await ownerBar.getByRole("button", { name: "Převzít úpravy", exact: true }).click()
+          const gOwner = ((await (await acquiredRes).json()) as LeaseView).generation
+          await expect(ownerBar.getByRole("button", { name: "Uvolnit úpravy", exact: true })).toBeVisible()
+          const observer = await doc.session(peerCtx)
+          const held = await doc.lease(peerCtx, observer)
+          expect(held.holder?.actor_id).toBe(`user:${ownerId}`)
+          await expect(peerBar).toContainText(`Upravuje ${held.holder?.display_name}`, { timeout: 30_000 })
+          await expect(peerBar.getByRole("button", { name: "Převzít úpravy", exact: true })).toHaveCount(0)
+          const shots: Record<string, Buffer> = { "peer-sees-owner.png": await peerPage.screenshot({ fullPage: true }) }
+
+          // Peer asks; owner hands over.
+          await peerBar.getByRole("button", { name: "Požádat o předání", exact: true }).click()
+          const handTo = ownerBar.getByRole("button", { name: `Předat uživateli ${PEER_NAME}`, exact: true })
+          await expect(handTo).toBeVisible({ timeout: 30_000 })
+          const handoffRes = page.waitForResponse((r) => isCraft(r, "lease/handoff"))
+          await handTo.click()
+          expect((await handoffRes).status()).toBe(200)
+          await expect(ownerBar).toContainText(`Upravuje ${PEER_NAME}`, { timeout: 30_000 })
+          await expect(peerBar.getByRole("button", { name: "Uvolnit úpravy", exact: true })).toBeVisible({ timeout: 30_000 })
+          shots["owner-sees-peer.png"] = await page.screenshot({ fullPage: true })
+
+          // The owner's browser admission under the retired generation is refused.
+          const admission = ownerAdmission.current()
+          expect(admission, "the owner's editor was admitted").toBeTruthy()
+          const head = await doc.document(peerCtx, observer)
+          // Sent from the owner's own browser session: an admission is bound to
+          // the login that obtained it, so another session would get 403.
+          const stale = await doc.save(ownerContext.request, admission!, { generation: gOwner!, baseVersion: head.version, enginePin: head.enginePin, bytes: Buffer.from(head.bytes, "base64"), editorRevision: `prd-ui-stale-${Date.now()}` })
+          expect(stale.status(), "stale-generation save from the former holder's editor").toBe(409)
+          const after = await doc.document(peerCtx, observer)
+          expect(after.version).toBe(head.version)
+          expect(after.bytes).toBe(head.bytes)
+
+          // Peer binds the editor and releases it; both see it free.
+          const bind = peerPage.getByRole("button", { name: "Převzít úpravy", exact: true })
+          if (await bind.isVisible()) await bind.click()
+          const releaseRes = peerPage.waitForResponse((r) => isCraft(r, "lease/release"))
+          await peerBar.getByRole("button", { name: "Uvolnit úpravy", exact: true }).click()
+          expect((await releaseRes).status()).toBe(200)
+          await expect(ownerBar).toContainText("Volné", { timeout: 30_000 })
+
+          await prd.evidence("result.json", {
+            application, mode: prd.mode, appSha: prd.appSha, workspaceId: ws.id, pageId: doc.pageId,
+            peerSaw: `Upravuje ${held.holder?.display_name}`, ownerSaw: `Upravuje ${PEER_NAME}`,
+            ownerGeneration: gOwner, staleSave: stale.status(), versionUnchanged: after.version, releasedByPeer: true,
+          })
+          for (const [name, png] of Object.entries(shots)) await prd.evidence(name, png)
+          passed = true
+        } finally {
+          // On failure the editor calls are the first evidence: which request
+          // ended the session is what a red row has to explain.
+          if (trail.length) await prd.evidence(passed ? "craft-calls.json" : "failure-craft-calls.json", trail).catch(() => {})
+          for (const c of cleanup.reverse()) await c().catch(() => {})
+        }
+      },
+    )
+  })
+}
+
+test(
+  "native editor off: lease and document endpoints fail closed",
+  { annotation: REQ.disabled },
+  async ({ prd, request }) => {
+    const ws = await prd.qaWorkspace()
+    const doc = await NativePage.create(request, ws.id, "wordcraft", "PRD lease disabled")
+    // Decide the skip before initialize: a server without a profile that
+    // still admits native documents must turn this test red, not skip it.
+    test.skip(await nativeProfile(prd, request, doc), "this server runs with native editors; covered by the lease tests")
+    const init = await doc.initializeRaw(request)
+    if (init.status() === 201) {
+      // Fail-closed regression: drop the creation custody, then fail below.
+      const body = (await init.json()) as { session_token: string; generation: string }
+      await doc.leaseOp(request, { token: body.session_token, sessionId: "" }, "release", { generation: body.generation }).catch(() => undefined)
+    }
+    expect(init.status(), "initialize without a native profile").toBe(503)
+    const availability = await doc.availability(request)
+    expect(availability.enabled).toBe(false)
+    expect(availability.can_edit).toBe(false)
+    const session = await doc.sessionRaw(request)
+    expect(session.status(), "admission without a native profile").toBe(503)
+    const fake: Admission = { token: "0".repeat(64), sessionId: "none" }
+    const acquire = await doc.leaseOp(request, fake, "acquire")
+    expect(acquire.status(), "acquire without a native profile").toBe(503)
+    const read = await doc.documentRaw(request, fake)
+    expect(read.status(), "document read without a native profile").toBe(503)
+    await prd.evidence("result.json", { mode: prd.mode, appSha: prd.appSha, availability, initialize: init.status(), session: session.status(), acquire: acquire.status(), document: read.status() })
+  },
+)
+
+interface CraftCall {
+  at: string
+  who: string
+  method: string
+  path: string
+  status: number | string
+}
+
+/** Records every native editor call of a page (method, path, status; no headers or bodies). */
+function traceCraft(page: Page, who: string, trail: CraftCall[]): void {
+  const path = (url: string) => new URL(url).pathname.replace(/^\/api\/v1\/pages\/[^/]+\/craft\//, "craft/")
+  const keep = (url: string) => new URL(url).pathname.includes("/craft/")
+  page.on("response", (r) => {
+    if (keep(r.url())) trail.push({ at: new Date().toISOString(), who, method: r.request().method(), path: path(r.url()), status: r.status() })
+  })
+  page.on("requestfailed", (r) => {
+    if (keep(r.url())) trail.push({ at: new Date().toISOString(), who, method: r.method(), path: path(r.url()), status: `failed: ${r.failure()?.errorText ?? "?"}` })
+  })
+  page.on("requestfinished", (r) => {
+    if (keep(r.url()) && path(r.url()) === "craft/events") trail.push({ at: new Date().toISOString(), who, method: r.method(), path: "craft/events", status: "stream ended" })
+  })
+}
+
+function isCraft(r: Response, path: string): boolean {
+  return r.request().method() === "POST" && new URL(r.url()).pathname.endsWith(`/craft/${path}`)
+}
+
+/** Remembers the latest native admission the editor in `page` received (memory only). */
+function captureAdmission(page: Page): { current(): Admission | null } {
+  let latest: Admission | null = null
+  page.on("response", (r) => {
+    if (!isCraft(r, "sessions") || r.status() !== 201) return
+    void r
+      .json()
+      .then((b: { session_token?: string; session_id?: string }) => {
+        if (b.session_token && b.session_id) latest = { token: b.session_token, sessionId: b.session_id }
+      })
+      .catch(() => {})
+  })
+  return { current: () => latest }
+}

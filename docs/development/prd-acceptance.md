@@ -49,6 +49,7 @@ repository names a real host or account.
 | `PRD_WORKSPACE_ID` | Optional existing QA workspace; scenarios then reuse it instead of creating one, and do not delete it |
 | `PRD_AGENT_SLUG`, `PRD_AGENT_WORKSPACE_ID` | Full mode: seeded agent and the workspace it belongs to |
 | `PRD_CLI` | Path of the `crewship` CLI binary for CLI-driven scenarios (`prd.requireCli()`) |
+| `PRD_CRAFT_NATIVE` | `on` or `off`: whether the origin has a native Word/Sheet editor profile. Unset, full mode assumes `on` and quick mode reads `GET /api/v1/documents/status`. The craft-lease scenarios decide from it, never from the initialize call they check |
 | `PRD_OUTPUT_DIR` | Results directory. The runner's `--output` sets it; default `test-results/prd-acceptance/<mode>-<timestamp>` |
 | `PRD_KEEP_WORKSPACES` | `1` keeps created QA workspaces for inspection |
 | `PRD_TRACE` | `1` keeps Playwright traces of failed tests. Off by default because traces contain request bodies, including logins |
