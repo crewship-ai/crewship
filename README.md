@@ -80,7 +80,7 @@ Lead who delegates, approvals on risky actions, budgets, and an append-only
 record of every call — so a fleet of agents can be run the way a team is run.
 
 **Agents report where people look.** What an agent or routine produces lands in
-[Artifacts](docs/guides/artifacts.mdx): dashboards it pushes data into and, where
+**Artifacts** ([what's new](docs/changelog/overview.mdx)): dashboards it pushes data into and, where
 switched on, documents and versioned projects people review and comment on. A
 dashboard holds no query and no credentials; the producer already runs next to
 the data.
@@ -320,8 +320,11 @@ Labels: ✅ **stable** · 🟡 **early** (works, contract may still shift) ·
   routine pushes data into, permissioned per panel and honest about when a number
   goes stale. Documents, versioned projects with a shared version and anchored
   comments, Design canvases, Slides and live Dashboard data are experimental and
-  off by default (server settings, workspace feature flags and build-time
-  `NEXT_PUBLIC_*` switches). [→ artifacts](docs/guides/artifacts.mdx)
+  off by default (server settings, workspace feature flags and `NEXT_PUBLIC_*`
+  switches read when the web UI is built).
+  [→ changelog](docs/changelog/overview.mdx) ·
+  [document drafts](docs/guides/document-drafts.mdx) ·
+  [panel dashboards](docs/guides/pages.mdx)
 - ✅ **Full CLI** — every workflow, scriptable and headless. [→ CLI overview](docs/cli/overview.mdx)
 - ✅ **Browsable API docs** — the running instance serves its own OpenAPI spec at
   `/openapi.json`, browsable without a third-party renderer.

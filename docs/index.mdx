@@ -55,18 +55,22 @@ Crewship is a **self-hosted runtime for AI coding agents**. Every crew gets its 
   <Card title="Activity" icon="activity" href="/guides/activity">
     Workspace-wide live trace of agent runs as a single canvas with inline approvals.
   </Card>
-  <Card title="Artifacts" icon="layer-group" href="/guides/artifacts">
+  <Card title="Artifacts" icon="layer-group" href="/changelog/overview">
     Where agent results live: dashboards, documents and versioned projects with shared versions and comments.
   </Card>
 </CardGroup>
 
 <Note>
-  **Artifacts** in the sidebar opens the Artifacts library only in a build made with
-  `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true`; otherwise it opens the Pages overview.
-  Versioned projects, Design canvases, Slides and Dashboard data are experimental and
-  off by default: each needs a workspace feature flag (for example
-  `crewship feature-flag enable artifact_projects`) and its own build-time switch. See
-  [Artifacts](/guides/artifacts).
+  **Artifacts** in the sidebar opens the Artifacts library only in a web UI built with
+  `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true`; otherwise it opens the Pages overview. Versioned
+  projects, Dashboard data, Slides and Design are experimental and off by default. A
+  workspace flag (for example `crewship feature-flag enable artifact_projects`) or the
+  matching `CREWSHIP_*_ENABLED` server switch turns a kind on for the API, the CLI and
+  agents; Dashboard data and Slides also need `artifact_projects`, and Design needs `node`
+  on the server. The browser screens also need `NEXT_PUBLIC_*` switches, which are read
+  only when the web UI is built, so a running server cannot change them. Documents need
+  the [private document engine](/configuration/environment#private-document-engine). The
+  [October 29, 2026 changelog](/changelog/overview) lists every flag and switch.
 </Note>
 
 ## Key Features

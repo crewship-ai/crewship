@@ -33,37 +33,41 @@ item still opens the Pages overview. A build made with
 `/artifacts`: one gallery or table of projects, Word, Sheet, Slides, Design
 and Dashboard items with their kind and shared version, views such as Home,
 Mine, Favorites, Test items and Archive, and a detail that opens the item
-itself; a project shows its version history and comments there. Every item has its own address, `/artifacts/<id>`, so a reload
-or a shared link opens it again. With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS=true`
-as well, `/pages` hands its overview to the library.
+itself. Every item has its own address, `/artifacts/<id>`, so a reload or a
+shared link opens it again. With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS=true` as
+well, `/pages` hands its overview to the library.
 
-The artifact kinds behind it are experimental and **off by default**. Each
-needs a workspace feature flag, turned on with
-`crewship feature-flag enable <key>`, and most also need a build-time switch:
+The artifact kinds behind it are experimental and **off by default**. A
+workspace flag, turned on for the current workspace with
+[`crewship feature-flag enable <key>`](/cli/feature-flag), or the matching
+server switch for every workspace, turns a kind on for the API, the CLI and
+agents. The browser screens for it also need the build-time switches in the
+last column:
 
-| Kind | Workspace flag | Build-time switch |
-|---|---|---|
-| Versioned projects: immutable versions, a shared version, restore, comments anchored to an element and sent to the agent | `artifact_projects` | `NEXT_PUBLIC_ARTIFACTS_LIBRARY`; in chat `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` |
-| Dashboard data: datasets written through the API, CLI or agent tools with version checks; every number shows its dataset, producer and update time | `artifact_dashboard_data` | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` |
-| Slides: authored decks with thumbnails, presentation, comments and PDF download | `artifact_slides` | `NEXT_PUBLIC_ARTIFACT_SLIDES` |
-| Design: a collaborative canvas of frames, shapes, text and images for people and agents | `artifacts_design` | `NEXT_PUBLIC_ARTIFACTS_DESIGN` |
+| Kind | Workspace flag | Server switch | Build-time switches for the browser |
+|---|---|---|---|
+| Versioned projects: immutable versions, a shared version, restore, comments anchored to an element and sent to the agent | `artifact_projects` | `CREWSHIP_ARTIFACT_PROJECTS_ENABLED` | `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` for the project viewer in chat and in the library detail; `NEXT_PUBLIC_ARTIFACTS_LIBRARY` for the library itself |
+| Dashboard data: datasets written through the API, CLI or agent tools with version checks; every number shows its dataset, producer and update time | `artifact_dashboard_data` and `artifact_projects` | `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED` | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` |
+| Slides: authored decks with thumbnails, presentation, comments and PDF download | `artifact_slides` and `artifact_projects` | `CREWSHIP_ARTIFACT_SLIDES_ENABLED` | `NEXT_PUBLIC_ARTIFACT_SLIDES` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` |
+| Design: a collaborative canvas of frames, shapes, text and images for people and agents | `artifacts_design` | `CREWSHIP_ARTIFACTS_DESIGN_ENABLED`; the server also needs a `node` executable on its `PATH` | `NEXT_PUBLIC_ARTIFACTS_DESIGN` |
 
-A server operator can switch the first four on for every workspace with
-`CREWSHIP_ARTIFACT_PROJECTS_ENABLED`, `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED`,
-`CREWSHIP_ARTIFACT_SLIDES_ENABLED` and `CREWSHIP_ARTIFACTS_DESIGN_ENABLED`.
-Agents author projects with the `page artifact` commands and MCP tools on
-servers that enable them. See [Artifacts](/guides/artifacts).
+Dashboard data and Slides answer only where versioned projects are on as well,
+through the workspace flag or the server switch. The web UI is built into the `crewship` binary, so the `NEXT_PUBLIC_*`
+switches are read only when the web UI is built (`pnpm build`) and a running
+server cannot change them; published builds leave them off. See
+[Environment variables](/configuration/environment). Agents author projects
+with the `page artifact` commands and MCP tools on servers that enable them.
 
 ## Documents with honest save status
 
-When the server enables documents (`CREWSHIP_DOCUMENTS_ENABLED`), people and
-agents can create a Document, edit it and reopen the confirmed saved content.
-The save status separates "saved locally" from "confirmed by server",
-unconfirmed edits survive a reload, the toolbar has Undo and Redo, and a page
-with edits the server has not accepted asks before a link leaves it. History
-compares any retained revision with the last saved one; reverting one change
-and reviewing agent proposals stay behind
-`NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS`. See [Document drafts](/guides/document-drafts) and
+Documents need the private document engine, which is off by default; see
+[Private document engine](/configuration/environment#private-document-engine).
+Where it runs, people and agents can create a Document, edit it and reopen the
+confirmed saved content. The save status separates "saved locally" from
+"confirmed by server", unconfirmed edits survive a reload, the toolbar has
+Undo and Redo, and a page with edits the server has not accepted asks before a
+link leaves it. History compares any retained revision with the last saved
+one. See [Document drafts](/guides/document-drafts) and
 [Document history](/guides/document-history-review).
 
 ## Harbor 2: one layout across the app
