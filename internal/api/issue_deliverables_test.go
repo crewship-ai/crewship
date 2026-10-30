@@ -33,8 +33,12 @@ func TestIssueDeliverables_PublishDeduplicatesAndConfinesReads(t *testing.T) {
 	att.SetStoragePath(root)
 	ah := &AssignmentHandler{db: h.db, logger: h.logger, attachments: att}
 	result := "---HANDOFF---\nsummary: verified\nconfidence: high\nartifacts: /crew/shared/report.md, /crew/shared/escape.md, /etc/passwd\noutcome: SUCCEEDED\n---END HANDOFF---"
+	// The escaping symlink and the non-crew path are rejected deliverables, not
+	// a projection failure: publishing still succeeds for the valid one.
 	for range 2 {
-		ah.publishIssueDeliverables(context.Background(), "deliverable-assignment", result)
+		if err := ah.publishIssueDeliverables(context.Background(), "deliverable-assignment", result); err != nil {
+			t.Fatalf("agent-declared paths must not fail publication: %v", err)
+		}
 	}
 	var count int
 	if err := h.db.QueryRow(`SELECT COUNT(*) FROM attachments WHERE mission_id=?`, id).Scan(&count); err != nil || count != 1 {

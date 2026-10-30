@@ -2112,6 +2112,15 @@ reads are required; shared readers can read only collections declared by the
 current shared pin, and cannot write. Responses include host update time and a
 reader-safe source label, without private run or account identifiers.
 
+In the Dashboard preview (`NEXT_PUBLIC_ARTIFACT_DASHBOARDS`), every value bound
+with `data-field` shows that provenance on mouse hover and keyboard focus, for
+example `Source: sales/north.revenue · Agent · updated 2026-10-28 08:00 UTC`.
+The same text is the value's accessible description (`aria-describedby`) and is
+listed under Data sources. A value whose producer is unknown (an erased
+contributor or a missing label) or whose document is not loaded reads
+`Source not stated` and has a dashed rather than dotted underline, so it does not
+look authoritative. Data is always read with the viewing reader's Page access.
+
 Agent tools `artifact_data_batch`, `artifact_data_read` and
 `artifact_data_collections` use these same fields (`slug`, `collection`,
 `base_version`/`version`, `documents`) under the original signed run and exact

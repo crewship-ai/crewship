@@ -1,5 +1,5 @@
 // Isolated browser test of opening artifacts inside Artifacts: a click in the library opens the
-// artifact at /artifacts/<id> with its content on screen, Back returns to the list, a reload of
+// artifact at /artifacts/<id> with its content on screen (a project, a Word, a panel Page), Back returns to the list, a reload of
 // that address opens it again, and a link from before IDs (/artifacts?item=<slug>) moves there.
 // The real route code runs over in-memory mocks; anything unmocked fails the run.
 // Run: crewship-heavy node e2e/artifacts-open-inside.browser.mjs
@@ -94,7 +94,18 @@ try {
   assert.equal(path(), "/artifacts/page-brief")
   step("reload and direct address")
 
-  // 4. A link from before IDs opens by slug and moves to the artifact's ID address; a slug is never an ID address.
+  // 4. A panel Page shows its panels inside Artifacts, with a way back to the library and none to Pages.
+  await page.goto(`${origin}/artifacts?view=all`)
+  await list.getByRole("button", { name: "Open Weekly report" }).click()
+  await page.getByRole("complementary", { name: "Preview" }).getByRole("button", { name: "Open", exact: true }).click()
+  await page.getByText("Service status").first().waitFor()
+  assert.equal(path(), "/artifacts/page-weekly")
+  assert.equal(await page.getByRole("link", { name: /Open page|Open in Pages/ }).count(), 0, "no way out to Pages")
+  assert.equal(await page.getByText("Back to pages").count(), 0)
+  assert.equal(await page.locator('a[href^="/pages"]').count(), 0, "no link into /pages")
+  step("panel page opened", { url: page.url() })
+
+  // 5. A link from before IDs opens by slug and moves to the artifact's ID address; a slug is never an ID address.
   await page.goto(`${origin}/artifacts?item=pricing-site`)
   await projectContent()
   await page.waitForURL(url => url.pathname === "/artifacts/page-site")
@@ -102,7 +113,7 @@ try {
   await page.getByText("This artifact is not available.").waitFor()
   step("legacy ?item= link")
 
-  // 5. Leaving the detail returns to the library at /artifacts.
+  // 6. Leaving the detail returns to the library at /artifacts.
   await page.getByRole("button", { name: "All artifacts" }).first().click()
   await list.waitFor()
   assert.equal(path(), "/artifacts")

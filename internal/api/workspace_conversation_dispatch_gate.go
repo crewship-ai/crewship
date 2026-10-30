@@ -21,6 +21,10 @@ func (h *AssignmentHandler) authorizeConversationAssignment(ctx context.Context,
 	if err != nil {
 		return false, err
 	}
+	ownedID, err := assignmentWorkID(ctx, h.db, assignmentID)
+	if err != nil {
+		return false, err
+	}
 	release, err := groupchat.AcquireWriteAdmission(ctx, h.db)
 	if err != nil {
 		return false, err
@@ -53,7 +57,7 @@ func (h *AssignmentHandler) authorizeConversationAssignment(ctx context.Context,
 		return false, err
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		if _, err = c.ExecContext(ctx, `UPDATE assignments SET status='CANCELLED',cancel_requested_at=COALESCE(cancel_requested_at,?),finished_at=COALESCE(finished_at,?) WHERE id=? AND status IN ('PENDING','QUEUED','RUNNING')`, isoMillisNow(), isoMillisNow(), assignmentID); err != nil {
+		if _, err = c.ExecContext(ctx, `UPDATE assignments SET status=CASE WHEN ?='' THEN 'CANCELLED' ELSE status END,cancel_requested_at=COALESCE(cancel_requested_at,?),finished_at=CASE WHEN ?='' THEN COALESCE(finished_at,?) ELSE finished_at END WHERE id=? AND status IN ('PENDING','QUEUED','RUNNING')`, ownedID, isoMillisNow(), ownedID, isoMillisNow(), assignmentID); err != nil {
 			return false, err
 		}
 		if _, err = c.ExecContext(ctx, `UPDATE workspace_conversation_agent_jobs SET state='failed',error='Conversation or agent access was revoked',updated_at=? WHERE id=? AND state IN ('pending','queued')`, isoMillisNow(), jobID); err != nil {
@@ -62,7 +66,7 @@ func (h *AssignmentHandler) authorizeConversationAssignment(ctx context.Context,
 		_, err = c.ExecContext(ctx, "COMMIT")
 		return false, err
 	}
-	if status == chatbridge.AgentStatusPendingReview {
+	if status == chatbridge.AgentStatusPendingReview && ownedID == "" {
 		if _, err = c.ExecContext(ctx, `UPDATE assignments SET status='QUEUED',queued_at=datetime('now','subsec'),queued_reason='agent_held' WHERE id=? AND status IN ('PENDING','RUNNING')`, assignmentID); err != nil {
 			return false, err
 		}
