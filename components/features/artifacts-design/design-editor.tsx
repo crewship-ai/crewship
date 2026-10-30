@@ -8,9 +8,19 @@ import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { artifactsDesign } from "@/lib/feature-flags"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { apiFetch } from "@/lib/api-fetch"
 import { Input } from "@/components/ui/input"
 import { useDesign } from "./use-design"
 import { removeDesignNode, safeImageSource, upsertDesignNode, type DesignNode, type DesignNodeType } from "./design-document"
+
+function encodedDesignState(doc: Y.Doc,maxBytes=Infinity) {
+ const state=Y.encodeStateAsUpdate(doc)
+ if(state.byteLength>maxBytes)throw new Error("Canvas exceeds the new Design size limit")
+ let binary=""
+ for(let index=0;index<state.length;index+=8192) binary+=String.fromCharCode(...state.subarray(index,index+8192))
+ return btoa(binary)
+}
 
 const DesignAccessDialog = dynamic(() => import("./design-access-dialog").then(module => module.DesignAccessDialog), { ssr: false })
 
@@ -25,6 +35,16 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
  const [delivery, setDelivery] = useState<Record<string, string>>({})
  const [commentError, setCommentError] = useState("")
  const [downloadError, setDownloadError] = useState("")
+ const [continueOpen,setContinueOpen]=useState(false)
+ const [continueName,setContinueName]=useState("")
+ const [continueSlug,setContinueSlug]=useState("")
+ const [continueError,setContinueError]=useState("")
+ const [continuing,setContinuing]=useState(false)
+ const [continued,setContinued]=useState<{scope:string;page:string}|null>(null)
+ const continueEpoch=useRef(0)
+ const human=session?.data?.user?.id
+ const continueScope=JSON.stringify([human,workspaceId,commentPageId])
+ useEffect(()=>{continueEpoch.current++;setContinueOpen(false);setContinuing(false);setContinued(null);setContinueError("");return()=>{continueEpoch.current++}},[continueScope])
  const agent = useArtifactAgentDispatch(workspaceId, design.query.data?.page_id, design.query.data?.origin, Boolean(design.query.data?.can_edit && !design.query.isError), "design")
  useEffect(() => { try { setDraft(commentKey ? localStorage.getItem(commentKey) ?? "" : "") } catch { /* Draft remains in the open editor. */ } }, [commentKey])
  const changeDraft = (value: string) => { setDraft(value); if (commentKey) { try { localStorage.setItem(commentKey, value) } catch { /* Draft remains in the open editor. */ } } }
@@ -101,10 +121,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
   setDownloadError("")
   let url: string | undefined
   try {
-   const state = Y.encodeStateAsUpdate(design.doc)
-   let binary = ""
-   for (let index = 0; index < state.length; index += 8192) binary += String.fromCharCode(...state.subarray(index, index + 8192))
-   const draftFile = { format: "crewship-design-draft-v1", workspace_id: workspaceId, page_id: data.page_id, base_version: viewedVersion, nodes: design.nodes, yjs_state: btoa(binary), feedback_draft: { text: draft, node_id: selectedId } }
+   const draftFile = { format: "crewship-design-draft-v1", workspace_id: workspaceId, page_id: data.page_id, base_version: viewedVersion, nodes: design.nodes, yjs_state: encodedDesignState(design.doc), feedback_draft: { text: draft, node_id: selectedId } }
    url = URL.createObjectURL(new Blob([JSON.stringify(draftFile)], { type: "application/json" }))
    const anchor = document.createElement("a")
    anchor.href = url
@@ -120,6 +137,20 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
     setTimeout(() => revoke(downloadedURL), 0)
    }
   }
+ }
+ const continueDesign=async()=>{
+  if(!human||!commentPageId||!design.doc||!data.can_edit||version||!continueName.trim()||continuing)return
+  const epoch=++continueEpoch.current
+  setContinuing(true);setContinueError("")
+  try{
+   const response=await apiFetch(`/api/v1/pages/design?workspace_id=${encodeURIComponent(workspaceId)}`,{method:"POST",skipRefresh:true,headers:{"Content-Type":"application/json"},body:JSON.stringify({name:continueName.trim(),slug:continueSlug,expected_human:human,source_page_id:commentPageId,initial_state:encodedDesignState(design.doc,4*1024*1024)})})
+   if(response.status!==201)throw new Error("copy refused")
+   const created:unknown=await response.json()
+   if(!created||typeof created!=="object"||!("page_id" in created)||typeof created.page_id!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(created.page_id)||!("version" in created)||created.version!==1)throw new Error("copy not confirmed")
+   if(continueEpoch.current!==epoch)return
+   setContinued({scope:continueScope,page:created.page_id});setContinueOpen(false)
+  }catch{if(continueEpoch.current===epoch)setContinueError("The new Design could not be created. Your canvas and unsent feedback remain here.")}
+  finally{if(continueEpoch.current===epoch)setContinuing(false)}
  }
  const sendComment = async () => {
   if (!selected || !draft.trim()) return
@@ -146,7 +177,8 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
    <Button variant="outline" onClick={() => setPanel(panel === "history" ? "properties" : "history")}>History{viewedVersion ? ` · v${viewedVersion}` : ""}</Button>
    {design.editable && <Button disabled={design.save.isPending || design.connection !== "connected"} onClick={() => design.save.mutate("Saved from Design editor")}><Save className="size-4" /> Save version</Button>}
   </header>
-  {historyFull && <div role="alert" className="space-y-2 border-b px-4 py-3 text-sm"><p><b>History capacity is full.</b> Another version could not be saved. Existing versions are retained and your pending work stays in this browser.</p><p>Download your local canvas and unsent feedback as a draft file to keep a copy. History is not deleted automatically.</p>{version && <Button variant="outline" onClick={() => setVersion(undefined)}>Return to live canvas</Button>}<Button variant="outline" disabled={!design.doc || Boolean(version)} onClick={downloadDraft}><Download className="size-4" />Download draft</Button>{downloadError && <p className="text-destructive">{downloadError}</p>}</div>}
+  {historyFull && <div role="alert" className="space-y-2 border-b px-4 py-3 text-sm"><p><b>History capacity is full.</b> Another version could not be saved. Existing versions are retained and your pending work stays in this browser.</p><p>Download your local canvas and unsent feedback as a draft file to keep a copy. History is not deleted automatically.</p>{version && <Button variant="outline" onClick={() => setVersion(undefined)}>Return to live canvas</Button>}<Button variant="outline" disabled={!design.doc || Boolean(version)} onClick={downloadDraft}><Download className="size-4" />Download draft</Button><Button variant="outline" disabled={!design.doc||Boolean(version)||!human||continuing} onClick={()=>{setContinueName(`${slug} (continued)`);setContinueSlug(`design-${crypto.randomUUID().replaceAll("-","").slice(0,24)}`);setContinueError("");setContinueOpen(true)}}>Continue in a new Design</Button>{downloadError && <p className="text-destructive">{downloadError}</p>}</div>}
+  {continued?.scope===continueScope&&<div role="status" className="border-b px-4 py-3 text-sm"><p>A new Design contains the copied canvas. This original canvas, its history and your unsent feedback remain here.</p><a className="underline" href={`/artifacts/${encodeURIComponent(continued.page)}?workspace_id=${encodeURIComponent(workspaceId)}`} target="_blank" rel="noopener noreferrer">Open new Design</a></div>}
   {failure && !historyFull && <p role="alert" className="border-b px-4 py-2 text-sm text-destructive">{failure.message}</p>}
   {design.draftError && <p role="alert" className="border-b px-4 py-2 text-sm">Browser draft storage is unavailable or full. Keep this window open until connected and save a version.</p>}
   <div className="flex min-h-0 flex-1 flex-col md:flex-row">
@@ -224,6 +256,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
     </div>
    </aside>
   </div>
+  <Dialog open={continueOpen} onOpenChange={setContinueOpen}><DialogContent><DialogHeader><DialogTitle>Continue in a new Design</DialogTitle><DialogDescription>Create a copy of this canvas with fresh history. The original canvas and unsent feedback stay in this tab.</DialogDescription></DialogHeader><label htmlFor="continued-design-name">New Design name</label><Input id="continued-design-name" value={continueName} maxLength={200} onChange={event=>setContinueName(event.target.value)} />{continueError&&<p role="alert" className="text-destructive">{continueError}</p>}<DialogFooter><Button variant="outline" onClick={()=>setContinueOpen(false)}>Cancel</Button><Button disabled={continuing||!continueName.trim()} onClick={()=>{void continueDesign()}}>{continuing?"Creating…":"Create new Design"}</Button></DialogFooter></DialogContent></Dialog>
   {accessOpen && <DesignAccessDialog workspaceId={workspaceId} slug={slug} onClose={() => setAccessOpen(false)} />}
  </section>
 }

@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Design keeps work visible when saved history is full.** A clear message replaces the saved status and offers a draft download containing the local canvas and unsent feedback. Downloading preserves the open editor and all retained versions.
+- **Design keeps work visible when saved history is full.** A clear message replaces the saved status and offers a draft download containing the local canvas and unsent feedback, or an explicit copy of the canvas into a new Design with fresh history. The original editor, unsent feedback and retained versions stay intact. Copy creation checks current source and create permissions atomically and is never automatically replayed.
 
 - ⚠️ **Design readers and commenters see only the shared version.** Private saved and live changes are withheld from REST and websocket readers, and comments target the displayed shared snapshot. Workspace administrators read and edit every Design, with foreign access recorded atomically in the audit log and keyed journal, and edits using the existing locks and versions.
 

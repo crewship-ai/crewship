@@ -1466,6 +1466,23 @@ Delete uses `{"op":"delete","id":"cart"}`; reorder uses
 text or geometry. A snapshot creates an ordinary retained artifact version;
 restore creates a new version and preserves history.
 
+When saved history is full, the editor shows the refused checkpoint and offers
+both a draft download (canvas and unsent feedback) and **Continue in a new
+Design**. Continuing copies the current canvas, including pending local changes,
+to a new Page with version 1. It does not prune or rewrite the original history.
+The original tab and unsent feedback remain open; the confirmed copy opens by
+an explicit link in a new tab. A failed or uncertain request keeps the original
+canvas and feedback and is not automatically replayed, including after login
+expiry. Creation is confirmed only by a 201 response and a version-1 receipt.
+
+The existing human Design-create API accepts `source_page_id`, `expected_human`
+and base64 `initial_state` together for this action. The decoded Yjs state is
+bounded to 4 MiB. Current source Edit authority, the expected identity and target
+Page-create authority are checked under the same writer transaction as the new
+Page and initial version. Failure rolls back the entire new Page and leaves the
+source unchanged. Copying does not transfer comments or their anchors. The
+normal empty-create and CLI behavior is unchanged.
+
 The corresponding agent tools are `design_get`, `design_apply`,
 `design_snapshot`, `design_versions` and `design_restore`. CLI invocations with a
 live agent token use those same tools through the sidecar. The original live
