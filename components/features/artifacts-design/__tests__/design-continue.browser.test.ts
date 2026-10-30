@@ -76,7 +76,7 @@ it.skipIf(!existsSync(chromium.executablePath()))("continues a full-history canv
    await page.getByRole("button", { name: "Continue in a new Design" }).click()
    await page.getByRole("button", { name: "Create new Design" }).click()
    if (status === 401) {
-    await page.getByRole("dialog").getByText("The new Design could not be created.", { exact: false }).waitFor()
+    await page.getByRole("dialog").getByText("The new Design could not be confirmed.", { exact: false }).waitFor()
     await page.getByRole("button", { name: "Cancel", exact: true }).click()
     expect(await page.getByRole("link", { name: "Open new Design" }).count()).toBe(0)
    } else {

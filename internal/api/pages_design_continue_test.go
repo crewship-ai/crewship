@@ -52,7 +52,7 @@ func TestDesignContinueCreatesOneAtomicVersionAndRetainsSource(t *testing.T) {
 }
 
 func TestDesignContinueRejectsIdentityPermissionAndInvalidStateWithoutOrphans(t *testing.T) {
-	for _, mode := range []string{"identity", "read-only-source", "invalid-state", "revoked-at-fence", "late-credential", "publication-failure", "invalid-yjs", "oversized-state"} {
+	for _, mode := range []string{"identity", "read-only-source", "invalid-state", "revoked-at-fence", "late-credential", "publication-failure", "invalid-yjs", "oversized-state", "document-ignored", "document-rewritten", "late-document-credential", "late-document-create-authority"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newDesignAuthorityFixture(t)
 			var source []byte
@@ -86,6 +86,18 @@ func TestDesignContinueRejectsIdentityPermissionAndInvalidStateWithoutOrphans(t 
 			}
 			if mode == "late-credential" {
 				mustExec(t, f.h.db, `CREATE TRIGGER revoke_after_continue_page AFTER INSERT ON pages WHEN NEW.slug='not-created' BEGIN UPDATE cli_tokens SET revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'); END`)
+			}
+			if mode == "document-ignored" {
+				mustExec(t, f.h.db, `CREATE TRIGGER ignore_continue_document BEFORE INSERT ON artifact_design_documents WHEN EXISTS(SELECT 1 FROM pages WHERE id=NEW.page_id AND slug='not-created') BEGIN SELECT RAISE(IGNORE); END`)
+			}
+			if mode == "document-rewritten" {
+				mustExec(t, f.h.db, `CREATE TRIGGER rewrite_continue_document AFTER INSERT ON artifact_design_documents WHEN EXISTS(SELECT 1 FROM pages WHERE id=NEW.page_id AND slug='not-created') BEGIN UPDATE artifact_design_documents SET state=x'ff' WHERE page_id=NEW.page_id; END`)
+			}
+			if mode == "late-document-credential" {
+				mustExec(t, f.h.db, `CREATE TRIGGER revoke_during_continue_document AFTER INSERT ON artifact_design_documents WHEN EXISTS(SELECT 1 FROM pages WHERE id=NEW.page_id AND slug='not-created') BEGIN UPDATE cli_tokens SET revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'); END`)
+			}
+			if mode == "late-document-create-authority" {
+				mustExec(t, f.h.db, `CREATE TRIGGER remove_create_during_continue_document AFTER INSERT ON artifact_design_documents WHEN EXISTS(SELECT 1 FROM pages WHERE id=NEW.page_id AND slug='not-created') BEGIN UPDATE workspace_members SET role='VIEWER', capabilities='[]' WHERE workspace_id=NEW.workspace_id; END`)
 			}
 			f.token(t, actor)
 			if mode == "revoked-at-fence" {

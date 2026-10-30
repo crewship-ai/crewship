@@ -332,7 +332,7 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 	k := artifacts.VersionKey{WorkspaceID: WorkspaceIDFromContext(r.Context()), PageID: generateCUID()}
 	raw, _ := json.Marshal(spec)
 	staged := false
-	auth := func(ctx context.Context, tx *sql.Tx) (string, error) {
+	currentCreateAuthority := func(ctx context.Context, tx *sql.Tx) (string, error) {
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
 		if !h.designEnabled(ctx) || validateContentHumanCredential(r.WithContext(ctx), tx, "pages:write") != nil {
 			return "", errDesignAccess
@@ -359,17 +359,32 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 				return "", err
 			}
 		}
+		return user.ID, nil
+	}
+	auth := func(ctx context.Context, tx *sql.Tx) (string, error) {
+		if _, err := currentCreateAuthority(ctx, tx); err != nil {
+			return "", err
+		}
 		if staged {
+			stamp := tsformat.Format(time.Now())
+			if _, err := tx.ExecContext(ctx, `INSERT INTO artifact_design_documents(workspace_id,page_id,state,updated_by,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(workspace_id,page_id) DO NOTHING`, k.WorkspaceID, k.PageID, result.State, user.ID, stamp); err != nil {
+				return "", err
+			}
+			// The final document write can run triggers. Recheck creation and
+			// source authority before acknowledging the exact new Page/document.
+			if _, err := currentCreateAuthority(ctx, tx); err != nil {
+				return "", err
+			}
 			var unchanged bool
-			if e = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages WHERE id=? AND workspace_id=? AND owner_user_id=? AND owner_crew_id IS NULL AND folder_id IS NULL AND slug=? AND name=? AND spec_json=? AND created_by_test=?)`, k.PageID, k.WorkspaceID, user.ID, p.Slug, p.Name, string(raw), p.CreatedByTest).Scan(&unchanged); e != nil {
-				return "", e
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages p JOIN artifact_design_documents d ON d.page_id=p.id AND d.workspace_id=p.workspace_id WHERE p.id=? AND p.workspace_id=? AND p.owner_user_id=? AND p.owner_crew_id IS NULL AND p.folder_id IS NULL AND p.slug=? AND p.name=? AND p.spec_json=? AND p.created_by_test=? AND d.state=? AND d.updated_by=? AND d.updated_at=? AND d.revision=0 AND d.saved_revision=0)`, k.PageID, k.WorkspaceID, user.ID, p.Slug, p.Name, string(raw), p.CreatedByTest, result.State, user.ID, stamp).Scan(&unchanged); err != nil {
+				return "", err
 			}
 			if !unchanged {
 				return "", errDesignAccess
 			}
-			_, e = tx.ExecContext(ctx, `INSERT INTO artifact_design_documents(workspace_id,page_id,state,updated_by,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(workspace_id,page_id) DO NOTHING`, k.WorkspaceID, k.PageID, result.State, user.ID, tsformat.Format(time.Now()))
-			return user.ID, e
+			return user.ID, nil
 		}
+		var e error
 		var n int
 		if e = tx.QueryRowContext(ctx, `SELECT count(*) FROM pages WHERE workspace_id=?`, k.WorkspaceID).Scan(&n); e != nil {
 			return "", e

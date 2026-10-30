@@ -149,7 +149,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
    if(!created||typeof created!=="object"||!("page_id" in created)||typeof created.page_id!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(created.page_id)||!("version" in created)||created.version!==1)throw new Error("copy not confirmed")
    if(continueEpoch.current!==epoch)return
    setContinued({scope:continueScope,page:created.page_id});setContinueOpen(false)
-  }catch{if(continueEpoch.current===epoch)setContinueError("The new Design could not be created. Your canvas and unsent feedback remain here.")}
+  }catch{if(continueEpoch.current===epoch)setContinueError("The new Design could not be confirmed. Your canvas and unsent feedback remain here.")}
   finally{if(continueEpoch.current===epoch)setContinuing(false)}
  }
  const sendComment = async () => {
