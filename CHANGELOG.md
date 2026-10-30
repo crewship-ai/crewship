@@ -70,6 +70,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **A preference no longer carries over to the next account signed in to the same browser.** The browser's copy of each preference (recently opened artifacts, favorites, panel sizes) now belongs to one signed-in user, so the next account no longer sees the previous account's values on first paint or uploads them, private artifact slugs included, into its own preferences. Nothing is read from the browser until the session is known, the older shared copy is dropped, and a change not yet saved for one account is sent only when that account signs in again.
 
+- **Chat opens saved items in Artifacts.** With the Artifacts library on, the chat viewer has *Open in Artifacts*, and saved-document cards, the document access panel and page provenance link to the item's own `/artifacts/<id>` address instead of Pages. Without the library flag the links stay as they were.
+
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.
 
 - **The built-in `crewship` agent skill now covers Artifacts.** The guide an agent reads through the CLI explains when to use artifact projects, Design canvases and native Craft documents, which flags and switches each needs, who may write, how to reply to comments and hold the Craft lease, and what to do on a version conflict (409), full storage (413) or an uncertain 503 without retrying blindly. Command behaviour is unchanged.
