@@ -8,9 +8,10 @@ import type { PipelineSchedule } from "@/hooks/use-pipeline-schedules"
 // occurrence that meets a full routine waits in the queue (QUEUED), and while
 // it waits every later occurrence is recorded as SKIPPED with
 // last_missed_count raised. After scheduler downtime a catch-up backlog also
-// lands in last_missed_count (catch-up `skip`, or an inactive routine with a
-// backlog), and nothing in the schedule tells that apart from a capacity skip
-// (#4490), so a counted SKIPPED names both causes.
+// lands in last_missed_count (catch-up `skip`, or an inactive routine or a
+// busy skip with a backlog), and nothing in the schedule tells that apart
+// from a capacity skip (#4490), so a counted SKIPPED names both causes;
+// "catch-up" covers every skip that carried a backlog.
 //
 // An uncounted SKIPPED is an inactive routine or, with
 // `concurrency_policy: skip`, a tick dropped because the previous run was

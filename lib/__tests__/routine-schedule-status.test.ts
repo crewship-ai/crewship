@@ -6,7 +6,7 @@ describe("scheduleLastStatusLabel", () => {
     ["QUEUED", undefined, "queued for capacity"],
     ["QUEUED", 2, "queued for capacity"],
     ["SKIPPED", 1, "skipped: capacity or catch-up"],
-    ["SKIPPED", 3, "skipped: capacity or catch-up"],
+    ["SKIPPED", 3, "skipped: capacity or catch-up"], // also a busy skip with a catch-up backlog
     ["SKIPPED", 0, "skipped: previous run busy or routine inactive"],
     ["SKIPPED", undefined, "skipped: previous run busy or routine inactive"],
     ["COMPLETED", undefined, "COMPLETED"],
