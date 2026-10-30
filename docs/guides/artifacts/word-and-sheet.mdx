@@ -39,15 +39,16 @@ quotes each label as shown, with its English meaning.
 3. Choose **Create and edit**. The new document opens in the Artifacts
    detail view.
 
-**Sheet** is listed under **Coming** in this dialog, and **Word document**
-appears only when the instance's document service is available. If you can't
-pick a kind there, use **New Doc** in the sidebar of the older Pages view and
-choose **Format: Word** or **Format: Sheet**. That dialog opens the new file
-straight in its editor.
+**A Sheet can't be created from Artifacts in this release:** **Sheet** is
+listed under **Coming** in this dialog. **Word document** appears there only
+when the instance's document service is available.
 
-From the CLI, `crewship craft initialize <page> --file <native.json>` turns an
-existing empty Page that you own into a Word document. See
-[Craft commands](/cli/craft).
+The older Pages view still has a **New Doc** button whose **Format** field
+offers **Word** and **Sheet**. It opens at `/pages` on your Crewship address
+(for example `https://crewship.example.com/pages`), but only on builds where
+`NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` is not `true`. When that build flag is
+`true`, `/pages` opens Artifacts instead, and there is no place in the app to
+create a Sheet.
 
 ## Open the editor
 
@@ -75,7 +76,7 @@ The bar at the top of the editor shows who holds the lease:
 | Bar text | Meaning |
 |---|---|
 | **Volné** | Free: nobody is editing. |
-| **Upravuje *name* · od 14:05** | *Name* has been editing since 14:05. An agent shows its name, or **Agent**. |
+| **Upravuje *name*** | *Name* is editing. An agent shows its name, or **Agent**. |
 | **Pouze čtení** | Read only: you can't edit here right now, for example after the connection ended. |
 
 1. When the bar says **Volné**, choose **Převzít úpravy** (Take over editing).
@@ -108,20 +109,22 @@ When someone else is editing:
 2. The editor of the person holding the lease shows a button
    **Předat uživateli *your name*** (Hand over to *your name*).
 3. When they choose it, their last change is saved and their editor becomes
-   read-only. The lease passes to you.
-4. In your editor, choose **Převzít úpravy** to start editing. The editor
-   loads the latest saved version first.
+   read-only. The lease is now yours: in your editor the bar changes to
+   **Upravuje *your name***, with **Uvolnit úpravy**, and a
+   **Převzít úpravy** button appears under the bar.
+4. Choose that **Převzít úpravy** to start typing. You don't wait for the bar
+   to show **Volné**; the lease is already yours. The editor loads the latest
+   saved version first.
 
 The holder doesn't get a decline button: if they never hand over, your
 request lapses when the lease changes hands or ends. A request made for one
 lease doesn't carry over to the next holder.
 
 <Tip>
-Ask from the editor itself when you want to edit right away. A request sent
-from the Artifacts detail view or from chat is tied to that view. After the
-handoff the bar there shows **Editing: you**; open the editor with
-**Open in new tab** and choose **Převzít úpravy** once the bar shows
-**Volné**.
+If you asked from the Artifacts detail view or from chat, the bar there
+changes to **Editing: you** after the handoff. Choose **Open in new tab**; the
+editor shows **Upravuje *your name*** and the **Převzít úpravy** button from
+step 4. Choose it to start typing.
 </Tip>
 
 ## Follow or stop an agent task
@@ -131,16 +134,27 @@ explicit whole-document consent. Agent tasks need
 `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true`, and you need edit rights on the
 document.
 
-1. Start the task from the CLI. It points at your own message in an agent chat:
+1. Collect three IDs:
+   - **Page ID.** Open the document's editor (**Edit** or **Open in Pages**).
+     Its address has the form
+     `https://crewship.example.com/pages/craft/editor?page_id=<page-id>&workspace_id=<workspace-id>`.
+     The `page_id` value is the page ID.
+   - **Chat ID.** In an agent chat, send your instruction for the document.
+     `crewship chat list <agent>` shows that chat's ID in the **ID** column.
+   - **Message ID.** `crewship chat source messages agent_session <chat-id> --format json`
+     lists the chat's messages with their original message IDs. Pick your
+     instruction message.
+2. Start the task from the CLI. Write the page ID with a leading `@`:
 
    ```bash
    crewship craft task start @<page-id> --chat-id <chat-id> --message-id <message-id> --whole-document
    ```
 
    The response contains a work ID. Accepted means queued, not done.
-2. To watch the task in the editor, open the editor with
-   `&craft_task_id=<work-id>` added to its address. A panel under the lease bar
-   shows the task state:
+3. To watch the task, open the editor address from step 1 with
+   `&craft_task_id=<work-id>` at the end:
+   `https://crewship.example.com/pages/craft/editor?page_id=<page-id>&workspace_id=<workspace-id>&craft_task_id=<work-id>`.
+   A panel under the lease bar shows the task state:
 
    | Panel text | Meaning |
    |---|---|
@@ -155,7 +169,7 @@ document.
    *Agent nepřevzal úpravy: dokument upravoval člověk* means the agent couldn't
    take the lease because a person was editing. *Poslední potvrzená verze N*
    names the last version the agent saved.
-3. While the agent holds the lease, the bar shows **Upravuje *agent name***
+4. While the agent holds the lease, the bar shows **Upravuje *agent name***
    and, if you may stop it, **Zastavit agenta** (Stop agent). Choose it to
    withdraw the agent's write access. The result is *Agent zastaven* (Agent
    stopped), or *Zápis agenta zastaven · ukončení běhu se ověřuje* (Agent
@@ -167,9 +181,7 @@ from a person and leaves saved versions in place.
 
 <Note>
 Agent proposals that wait for you to accept or reject them are not available
-for Word and Sheet in this release: an agent with a task saves versions
-directly. For the separate Docs editor, see
-[Document history, revert and proposals](/guides/document-history-review#proposals).
+in this release: an agent with a task saves versions directly.
 </Note>
 
 ## Publish a shared version
@@ -227,15 +239,25 @@ budget, 16 GiB by default. The status line shows how much is used, for example
 *blíží se limit* ("nearing the limit").
 
 When a save would go over the budget, the server refuses it and keeps every
-existing version. The editor stops saving and the status line stays on
-**Neuložený koncept**, without a separate message. Your draft is still kept
-in this browser:
+existing version. The status line stays on **Neuložený koncept**, and an alert
+appears under it: *Historie dokumentu je plná (X / Y B). Další verze se
+neuloží.* ("The document history is full. No further versions will be
+saved."). It adds that every earlier version is kept and that your unsaved
+changes are in this browser.
 
-1. To keep a file of it, close the editor, open it again, choose
-   **Převzít úpravy**, and choose **Kopie konceptu** on the
-   **Místní koncept** row.
-2. Ask a workspace administrator. Crewship doesn't delete old versions to make
-   room, and there is no in-app action to free history.
+The budget is fixed in this release. Crewship doesn't delete old versions, and
+the app offers no way to raise the budget or clear the history. To keep your
+work:
+
+1. Choose **Stáhnout koncept** (Download draft) in the alert. You get the
+   current content of the editor as a `wordcraft-recovery.json` or
+   `gridcraft-recovery.json` file. You can also export from the editor itself.
+2. Carry on in a new document: create one as described in
+   [Create a Word document or a Sheet](#create-a-word-document-or-a-sheet),
+   and carry over what you need from the downloaded file.
+
+The draft also stays in this browser. When you open the editor again, it is
+offered as a **Místní koncept** row, as after a crash.
 
 ## Related
 
