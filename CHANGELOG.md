@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Normal CLI chat turns can write their enabled memory again.** Each host-authorized turn now owns a fenced work-ledger attempt before execution, using the existing serial capacity limits and rechecking the original human authority at process creation. Ended or stale turns still cannot write; an unknown execution outcome keeps custody until protected exit evidence is recovered (#2762).
+
 - **Agent peer-card errors no longer expose server internals.** When reading or deleting an agent's peer cards fails inside the server, the API now answers `Internal server error` and logs the cause, instead of returning database driver text or a host file path.
 
 - ⚠️ **Behaviour change: workspace webhook destinations are visible only to channel administrators.** Channel lists omit a workspace webhook URL for roles below ADMIN/OWNER while retaining its metadata and personal destinations owned by the caller. Delivery configuration and signing secrets are unchanged.

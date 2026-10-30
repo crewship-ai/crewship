@@ -459,6 +459,10 @@ func (s *Store) admitsTx(ctx context.Context, tx *sql.Tx, it *Item, lim Limits, 
 // startAttemptTx bumps the generation, writes the attempt and moves the item to
 // starting. The generation bump is what makes every later transition fenceable.
 func (s *Store) startAttemptTx(ctx context.Context, tx *sql.Tx, it *Item, owner string, now time.Time) (*Claimed, error) {
+	return s.startAttemptWithRunIDTx(ctx, tx, it, owner, now, "")
+}
+
+func (s *Store) startAttemptWithRunIDTx(ctx context.Context, tx *sql.Tx, it *Item, owner string, now time.Time, runID string) (*Claimed, error) {
 	// Two different numbers, which used to be one.
 	//
 	// `spent` is the BUDGET: how many attempts have counted against MaxAttempts.
@@ -493,7 +497,9 @@ func (s *Store) startAttemptTx(ctx context.Context, tx *sql.Tx, it *Item, owner 
 	}
 
 	generation := it.Generation + 1
-	runID := s.idFn()
+	if runID == "" {
+		runID = s.idFn()
+	}
 	leaseUntil := now.Add(LeaseDuration)
 
 	res, err := tx.ExecContext(ctx, `
