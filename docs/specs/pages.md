@@ -1506,7 +1506,11 @@ Read/Comment audiences still receive only the shared snapshot.
 
 Access to a foreign Design is recorded as `design.workspace_admin_accessed` in
 the existing audit log, bound to the Page, workspace, original human, actor and
-custodian. The operation records authorized read/write access, not a replacement
+custodian. The compliance row and configured keyed journal share one identity
+and the content transaction; permission probes verify the original native
+journal receipt rather than appending duplicates. Notifications follow commit.
+Both receipts and current authority are checked after the final content write.
+The operation records authorized read/write access, not a replacement
 for a saved-version receipt. One HTTP request or websocket admission has one
 read audit identity; permission probes and heartbeats do not create duplicate
 events. Incoming websocket writes receive their own audit identity. The audit

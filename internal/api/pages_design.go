@@ -189,7 +189,7 @@ func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, w
 				actor = "agent:" + agent.AgentID + ":" + agent.RunID
 			}
 			if ownerUser != u.ID {
-				if err := recordDesignAdminAccess(ctx, tx, r, k, actor, ownerUser, ownerCrew); err != nil {
+				if err := h.recordDesignAdminAccess(ctx, tx, r, k, actor, ownerUser, ownerCrew); err != nil {
 					return "", err
 				}
 			}
@@ -237,6 +237,7 @@ func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, w
 	}
 }
 func (h *PageHandler) designTx(r *http.Request, k artifacts.VersionKey, write bool, fn func(context.Context, *sql.Tx, string) error) error {
+	r = ensureDesignAdminAuditRequest(r, write)
 	return h.designAuthorizedTx(r, k, h.designAuthority(r, k, write), fn)
 }
 func (h *PageHandler) designAuthorizedTx(r *http.Request, k artifacts.VersionKey, auth artifacts.VersionAuthorize, fn func(context.Context, *sql.Tx, string) error) error {
@@ -263,7 +264,11 @@ func (h *PageHandler) designAuthorizedTx(r *http.Request, k artifacts.VersionKey
 	if final != actor {
 		return artifacts.ErrVersionAuthority
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	notifyDesignAdminAudit(r)
+	return nil
 }
 func designVersionRequest(state []byte, base int64, message string) artifacts.VersionRequest {
 	return artifacts.VersionRequest{BaseVersion: base, EntryPoint: "design.yjs", Files: map[string]artifacts.VersionFile{"design.yjs": {Content: state, MediaType: "application/vnd.yjs-update"}}, Message: message}
@@ -356,6 +361,7 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 		designError(w, err)
 		return
 	}
+	notifyDesignAdminAudit(r)
 	writeJSON(w, 201, designCreateResponse{PageID: k.PageID, Slug: p.Slug, Version: receipt.Version})
 }
 func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
@@ -574,6 +580,7 @@ func (h *PageHandler) DesignVersions(w http.ResponseWriter, r *http.Request) {
 		designError(w, err)
 		return
 	}
+	notifyDesignAdminAudit(r)
 	writeJSON(w, 200, designVersionListResponse{Versions: view.Versions, LatestVersion: view.State.LatestVersion, SharedVersion: view.State.SharedVersion})
 }
 
@@ -645,6 +652,11 @@ func (h *PageHandler) designVersionedMutationLocked(r *http.Request, k artifacts
 		if calls == 2 {
 			_, e = tx.ExecContext(ctx, `UPDATE artifact_design_documents SET state=?,revision=revision+1,saved_revision=revision+1,updated_by=?,updated_at=? WHERE workspace_id=? AND page_id=? AND revision=?`, result.State, actor, tsformat.Format(time.Now()), k.WorkspaceID, k.PageID, revision)
 			if e != nil {
+				return "", e
+			}
+			// The last content write can run triggers too. Recheck the original
+			// credential, policy and both audit receipts after that write.
+			if _, e = editAuth(ctx, tx); e != nil {
 				return "", e
 			}
 		}
