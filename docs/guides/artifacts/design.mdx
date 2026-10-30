@@ -60,15 +60,26 @@ Design; they can only edit one that a person made.
    **Start with** offers only **Blank canvas**.
 5. Click **Create and edit**.
 
-A new Design is visible only to you until you share it. Crewship saves the empty
-canvas as version 1.
+Without a folder, a new Design is visible only to you until you share it. If you
+choose a **Folder**, the Design is added to that folder, and the dialog shows
+**People with access to** the folder: everyone who can open the folder can open
+the Design. Crewship saves the empty canvas as version 1.
+
+<Note>
+  After **Create and edit**, the library can show **This artifact is not
+  available.** instead of the editor. The Design was created. Click
+  **All artifacts**, select the new Design and click **Open**.
+</Note>
 
 To open a Design later, select it in the library and click **Open** in the side
 panel. The Design opens at its own address, `/artifacts/<id>`.
 
 ## The editor
 
-The editor has four areas:
+Above the editor, the artifact bar has **All artifacts**, the **Content** and
+**Access** tabs and a **Share** button; see [Give people access](#give-people-access).
+
+The editor itself has four areas:
 
 - **Header**: the connection status, the **Access**, **History** and
   **Save version** buttons, and the initials of the other people on the canvas.
@@ -83,8 +94,8 @@ The status in the header tells you where your changes are:
 | Status | Meaning |
 |---|---|
 | **Connecting…** | The editor is opening the live connection. |
-| **Live · up to date** | Connected, and nothing has changed since the last saved version. |
-| **Live · changes saved as you work** | Connected. Your changes have reached the server but are not yet in a numbered version. |
+| **Live · up to date** | Connected, and you have no unsaved changes. |
+| **Live · changes saved as you work** | Connected. You have changes since the last version you saved; they are sent as you work. |
 | **Offline · changes kept in this browser** | The connection dropped. Keep the window open; the editor reconnects and sends your changes. |
 | **Access changed · reopen to continue** | Your access or session changed. Reopen the Design. |
 
@@ -151,12 +162,27 @@ version that the owner has shared.
 1. Open **History**.
 2. Click **Share** under the version you want readers to see. Only the owner of
    the Design can share; an editor who is not the owner gets a permission error.
+   This **Share** is in the **History** panel; the **Share** button in the
+   artifact bar gives people access instead.
 3. The version is marked **Shared**, and the panel shows
    **Open shared version N**, which opens that version on its own page.
 
 Sharing another version replaces the previous one.
 
 ## Give people access
+
+There are two places to manage access, and both change the same access list of
+the Design:
+
+- **Access** in the editor header, next to **History**, opens the
+  **Design access** dialog with the **read** and **write** levels. The steps
+  below use it.
+- **Share** in the artifact bar above the editor opens the
+  **Share** dialog that every artifact uses, with the levels **Read**,
+  **Comment** and **Edit**. **Read** and **Edit** match **read** and **write**.
+  **Comment** lets a person open the Design and add comments without changing
+  the canvas, its versions or its sharing. The **Access** tab next to
+  **Content** lists who can open the Design.
 
 1. Click **Access** in the editor header. The **Design access** dialog opens.
 2. Choose the subject: a **user**, a **crew**, an **agent** or
@@ -201,9 +227,10 @@ draft stays in this browser if you close the Design.
 The owner can connect one of their private agent chats. Comments then go to
 that agent, which changes the canvas and answers in the comment.
 
-1. Open the private chat with the agent you want to use, and copy its ID from
-   the address: `/chat/<chat-id>`. The chat must be yours, private and bound to
-   an agent.
+1. Open the private chat with the agent you want to use. Its address has the
+   form `/chat/<agent>?session=<chat-id>`. Copy the value of the `session`
+   parameter, not the part after `/chat/`, which is the agent. The chat must be
+   yours, private and bound to an agent.
 2. In the Design, under **Comments**, paste the ID into **Chat ID** and click
    **Connect agent chat**. The section then shows **Open agent chat**.
 3. Select a layer, write the comment and click **Send to agent**.
