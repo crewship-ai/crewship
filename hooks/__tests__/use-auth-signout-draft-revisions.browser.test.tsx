@@ -43,3 +43,28 @@ it.skipIf(!existsSync(chromium.executablePath()))("asks before deleting the sole
   expect(rows).toHaveLength(1);expect(JSON.stringify(rows)).not.toContain("newer private copy")
  } finally {await browser.close()}
 },30_000)
+
+it.skipIf(!existsSync(chromium.executablePath()))("warns before deleting a sole legacy localStorage Design copy on signout", async () => {
+ const built=buildSync({stdin:{contents:fixture,loader:"tsx",resolveDir:process.cwd()},bundle:true,write:false,platform:"browser",format:"iife",define:{"process.env.NODE_ENV":'"test"'}})
+ const browser=await chromium.launch({headless:true})
+ try {
+  const page=await browser.newPage()
+  await page.route("https://signout-draft.test/**",route=>route.fulfill({body:'<div id="root"></div>',contentType:"text/html"}))
+  await installLocalDraftKeyFixture(page,{human:()=>"alice"})
+  await page.goto("https://signout-draft.test/pages/example");await page.addScriptTag({content:built.outputFiles[0].text})
+  await page.waitForFunction(()=>((window as unknown as {signoutDraftFixture:Fixture}).signoutDraftFixture.auth?.status)==="authenticated")
+  await page.evaluate(()=>localStorage.setItem("crewship-design:v2:alice:w:page","sole legacy canvas"))
+  // Observe either confirmation or a sign-out POST: missing confirmation
+  // must fail directly instead of waiting for a deliberately delayed ACK.
+  await page.evaluate(()=>{void (window as unknown as {signoutDraftFixture:Fixture}).signoutDraftFixture.leave()})
+  await page.waitForFunction(()=>{const f=(window as unknown as {signoutDraftFixture:Fixture}).signoutDraftFixture;return f.warning!==""||f.posts>0})
+  expect(await page.evaluate(()=>((window as unknown as {signoutDraftFixture:Fixture}).signoutDraftFixture.posts))).toBe(0)
+  expect(await page.evaluate(()=>localStorage.getItem("crewship-design:v2:alice:w:page"))).toBe("sole legacy canvas")
+  expect(await page.evaluate(()=>((window as unknown as {signoutDraftFixture:Fixture}).signoutDraftFixture.warning))).toMatch(/unsaved/i)
+  await page.evaluate(()=>{const f=(window as unknown as {signoutDraftFixture:Fixture}).signoutDraftFixture;f.allow=true;f.done=false;void f.leave()})
+  await page.waitForFunction(()=>((window as unknown as {signoutDraftFixture:Fixture}).signoutDraftFixture.started))
+  await page.evaluate(()=>((window as unknown as {signoutDraftFixture:Fixture}).signoutDraftFixture.release()))
+  await page.waitForFunction(()=>((window as unknown as {signoutDraftFixture:Fixture}).signoutDraftFixture.done))
+  expect(await page.evaluate(()=>localStorage.getItem("crewship-design:v2:alice:w:page"))).toBeNull()
+ } finally {await browser.close()}
+},30_000)

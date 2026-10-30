@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
 
 const purge = vi.hoisted(() => vi.fn())
-vi.mock("@/lib/artifact-drafts", () => ({ suspendOtherArtifactDrafts: purge, finishArtifactDraftIdentity: vi.fn(), captureArtifactDrafts: vi.fn(async () => []), removeCapturedArtifactDrafts: vi.fn(async () => {}) }))
+vi.mock("@/lib/artifact-drafts", () => ({ suspendOtherArtifactDrafts: purge, finishArtifactDraftIdentity: vi.fn(), captureArtifactDrafts: vi.fn(async () => []), removeCapturedArtifactDrafts: vi.fn(async () => {}), captureLegacyLocalDrafts: vi.fn(() => []), removeCapturedLegacyLocalDrafts: vi.fn() }))
 vi.mock("@/lib/document-queue", () => ({ suspendOtherDocumentDrafts: vi.fn(async () => {}), captureDocumentDrafts: vi.fn(async () => []), removeCapturedDocumentDrafts: vi.fn(async () => {}) }))
 import { AuthProvider, useAuth, sessionRetryPolicy } from "@/hooks/use-auth"
 import { AUTH_EVENT, AUTH_CHANNEL } from "@/lib/api-fetch"

@@ -31,9 +31,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Project source edits survive a lost save reply and a closed tab.** If the save reply is lost, the editor confirms the exact next version instead of reporting a false conflict, and an unsaved source draft is kept in the browser and offered back until it is saved or discarded.
 
-- **Private artifact and document drafts survive expired sign-in.** Recovery requires the same identity and a fresh Page-read check. Failed local capture keeps the editor open behind a recovery warning; explicit sign-out asks before removing persistent copies and preserves newer revisions. New local payloads are encrypted, and confirmed read revocation removes reachable copies (#4606).
+- **Private artifact and document drafts survive expired sign-in.** Recovery requires the same identity and a fresh Page-read check. Failed local capture keeps the editor open behind a recovery warning; explicit sign-out asks before removing persistent copies and preserves newer revisions. New local payloads are encrypted; legacy plaintext from other identities is removed before identity admission, and confirmed read revocation removes reachable copies (#4606).
 
-- **Artifact and Design drafts are no longer lost or left behind in the browser.** Edit source no longer overwrites a source draft kept after a crash, a successful save keeps edits typed after it was submitted, and a failed browser-storage read no longer deletes the stored comment draft. An expired session or a sign-out in another tab now deletes artifact drafts too, a late keystroke cannot recreate them after sign-out, and Design canvas and Design comment drafts are deleted on sign-out, account switch and when the Page answers 403 or 404.
+- **Artifact and Design drafts are no longer lost or left behind in the browser.** Edit source no longer overwrites a source draft kept after a crash, a successful save keeps edits typed after it was submitted, and a failed browser-storage read no longer deletes the stored comment draft.
 
 - **Test Design canvases can be identified in the library.** Human canvas creation now retains the explicit test-item marker for catalog filtering.
 

@@ -1,3 +1,5 @@
+import { isSealedLocalDraft } from "./local-draft-seal"
+
 /** Private, browser-local recovery journal. It never grants replay authority. */
 export interface DocumentDraft {
   id: string
@@ -260,6 +262,21 @@ export function suspendOtherDocumentDrafts(userId: string | null): Promise<void>
       for (let i = 0; i < closed.length; i++) if (closed[i].status === "rejected") draftWriters.set(...storage[i])
       const closeFailure = closed.find(result => result.status === "rejected")
       if (closeFailure?.status === "rejected") throw closeFailure.reason
+      // Old builds stored plaintext. Only encrypted rows qualify for expiry
+      // retention. Finish this strict transaction before exposing an identity.
+      if (typeof indexedDB !== "undefined") await withDraftRows<void>("readwrite", (store, done) => {
+        done(undefined)
+        const cursor = store.openCursor()
+        cursor.onsuccess = () => {
+          const row = cursor.result; if (!row) return
+          const value = row.value
+          let human: unknown
+          try { human = JSON.parse(value.key[0])[0] } catch { /* Unknown plaintext ownership is not retainable. */ }
+          const sealed = typeof value.draft?.snapshot === "string" && isSealedLocalDraft(value.draft.snapshot) && value.draft.update === "" && !value.draft.request
+          if ((!userId || human !== userId) && !sealed) row.delete()
+          row.continue()
+        }
+      })
     })
   }
   // Start the first retirement synchronously. Later transitions select again

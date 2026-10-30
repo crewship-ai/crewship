@@ -17,7 +17,7 @@ import { purgeOtherE2Recovery } from "@/lib/chat-e2-recovery"
 import { isKnownAppPath } from "@/lib/app-routes"
 import { SIGNED_OUT_URL, rememberSignedOut, signedOutKind } from "@/lib/signed-out"
 import { suspendOtherDocumentDrafts, captureDocumentDrafts, removeCapturedDocumentDrafts } from "@/lib/document-queue"
-import { suspendOtherArtifactDrafts, finishArtifactDraftIdentity, captureArtifactDrafts, removeCapturedArtifactDrafts } from "@/lib/artifact-drafts"
+import { suspendOtherArtifactDrafts, finishArtifactDraftIdentity, captureArtifactDrafts, removeCapturedArtifactDrafts, captureLegacyLocalDrafts, removeCapturedLegacyLocalDrafts } from "@/lib/artifact-drafts"
 
 import { beginLocalDraftIdentity, finishLocalDraftIdentity } from "@/lib/local-draft-seal"
 
@@ -425,9 +425,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const signingOutHuman = sessionRef.current?.user.id, startingGeneration = refreshGen.current
     let capturedDocuments: Awaited<ReturnType<typeof captureDocumentDrafts>> = []
     let capturedArtifacts: Awaited<ReturnType<typeof captureArtifactDrafts>> = []
+    let capturedLegacy: ReturnType<typeof captureLegacyLocalDrafts> = []
     try { if (signingOutHuman) [capturedDocuments, capturedArtifacts] = await Promise.all([captureDocumentDrafts(signingOutHuman), captureArtifactDrafts(signingOutHuman)]) }
     catch { /* No verified deletion snapshot: retain those encrypted copies. */ }
-    const discardDrafts = capturedDocuments.length + capturedArtifacts.length > 0
+    try { if (signingOutHuman) capturedLegacy = captureLegacyLocalDrafts(signingOutHuman) } catch { return false }
+    const discardDrafts = capturedDocuments.length + capturedArtifacts.length + capturedLegacy.length > 0
     if (discardDrafts && !window.confirm("Signing out can permanently delete local recovery copies of your unsaved artifact and document work. Download or copy any draft you need first. Continue? New changes arriving during sign-out are kept.")) return false
     if (sessionRef.current?.user.id !== signingOutHuman || refreshGen.current !== startingGeneration) return false
     let serverAcknowledged = false
@@ -457,7 +459,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       try {
         const admission = await preserveDraftsForIdentity(null)
         if (gen !== refreshGen.current) return false
-        if (discardDrafts) await Promise.all([removeCapturedDocumentDrafts(capturedDocuments), removeCapturedArtifactDrafts(capturedArtifacts)])
+        if (discardDrafts) {
+          await Promise.all([removeCapturedDocumentDrafts(capturedDocuments), removeCapturedArtifactDrafts(capturedArtifacts)])
+          removeCapturedLegacyLocalDrafts(capturedLegacy)
+        }
         if (gen !== refreshGen.current) return false
         sessionRef.current = null; statusRef.current = "unauthenticated"
         setSession(null); setStatus("unauthenticated"); setDraftAdmission(admission); setDraftRecovery(null)
@@ -481,7 +486,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (!controls.length) { event.preventDefault(); return }
         const index = controls.indexOf(document.activeElement as HTMLElement)
         event.preventDefault(); controls[(index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length].focus()
-      }} role="alertdialog" aria-modal="true" aria-labelledby="draft-recovery-title" className="fixed inset-0 z-[2147483647] flex items-center justify-center bg-background p-6"><div className="max-w-lg space-y-4"><h1 id="draft-recovery-title" className="text-xl font-semibold">Keep this tab open</h1><p>Your last unsaved changes could not yet be safely kept. This tab still holds the open copy. Retry before leaving or closing it.</p><p>You can sign in again in a new tab if needed.</p><div className="flex gap-4"><button type="button" disabled={draftRetrying} onClick={() => { setDraftRetrying(true); void draftRecovery.retry().catch(() => {}).finally(() => setDraftRetrying(false)) }}>{draftRetrying ? "Keeping changes…" : "Retry keeping my changes"}</button><a href="/login" target="_blank" rel="noopener noreferrer">Sign in in a new tab</a></div></div></section>}
+      }} role="alertdialog" aria-modal="true" aria-labelledby="draft-recovery-title" className="fixed inset-0 z-[2147483647] flex items-center justify-center bg-background p-6"><div className="max-w-lg space-y-4"><h1 id="draft-recovery-title" className="text-xl font-semibold">Keep this tab open</h1><p>A local recovery check could not finish. Keep this tab open and retry before leaving or changing accounts. Any open editor remains in this tab.</p><p>You can sign in again in a new tab if needed.</p><div className="flex gap-4"><button type="button" disabled={draftRetrying} onClick={() => { setDraftRetrying(true); void draftRecovery.retry().catch(() => {}).finally(() => setDraftRetrying(false)) }}>{draftRetrying ? "Keeping changes…" : "Retry keeping my changes"}</button><a href="/login" target="_blank" rel="noopener noreferrer">Sign in in a new tab</a></div></div></section>}
     </AuthContext>
   )
 }

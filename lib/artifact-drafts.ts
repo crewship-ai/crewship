@@ -32,6 +32,8 @@ export interface ArtifactDraftStore {
   delete(row: Row): Promise<void>
   /** Deletes every draft not owned by `keep` (all drafts when null). */
   purge(keep: string | null): Promise<void>
+  /** Privacy migration: retain only sealed rows belonging to other identities. */
+  purgeUnsealed?(keep: string | null): Promise<void>
   read?(row: Row): Promise<{ text: string; revision?: string } | undefined>
   capture(human: string, workspace?: string, page?: string): Promise<CapturedArtifactDraft[]>
   removeCaptured(rows: CapturedArtifactDraft[]): Promise<void>
@@ -134,6 +136,17 @@ const indexedDbStore: ArtifactDraftStore = {
   async removeCaptured(rows) {
     await transact("readwrite", store => {
       for (const row of rows) { const get = store.get(row.row); get.onsuccess = () => { if (row.revision !== null ? get.result?.revision === row.revision : get.result && !get.result.revision && get.result.text === row.text) store.delete(row.row) } }
+    })
+  },
+  async purgeUnsealed(keep) {
+    await transact("readwrite", store => {
+      const cursor = store.openCursor()
+      cursor.onsuccess = () => {
+        const row = cursor.result; if (!row) return
+        const value = row.value
+        if ((!keep || value.key?.[0] !== keep) && (typeof value.text !== "string" || !isSealedLocalDraft(value.text))) row.delete()
+        row.continue()
+      }
     })
   },
   async purge(keep) {
@@ -307,6 +320,23 @@ export function readArtifactDraft(key: string): Promise<string> {
 // the owner's id; versioned prefixes come before their legacy forms.
 const LOCAL_PREFIXES = ["crewship-design:v2:", "design-comment:v2:", ...KINDS.map(kind => `${kind}:`), "crewship-design:"]
 
+export interface CapturedLegacyLocalDraft { key: string; text: string }
+/** Old localStorage copies are included in sign-out's visible discard warning. */
+export function captureLegacyLocalDrafts(human?: string): CapturedLegacyLocalDraft[] {
+  if (typeof localStorage === "undefined") return []
+  const rows: CapturedLegacyLocalDraft[] = []
+  for (const key of Object.keys(localStorage)) {
+    const prefix = LOCAL_PREFIXES.find(start => key.startsWith(start))
+    if (!prefix || (human && key.slice(prefix.length).split(":")[0] !== human)) continue
+    const text = localStorage.getItem(key)
+    if (text !== null && !isSealedLocalDraft(text)) rows.push({key, text})
+  }
+  return rows
+}
+export function removeCapturedLegacyLocalDrafts(rows: CapturedLegacyLocalDraft[]): void {
+  for (const row of rows) if (localStorage.getItem(row.key) === row.text) localStorage.removeItem(row.key)
+}
+
 /**
  * Deletes every artifact draft not owned by `userId`, or all of them when
  * null (sign-out), in IndexedDB and in localStorage, including the Design
@@ -351,7 +381,13 @@ export function suspendOtherArtifactDrafts(userId: string | null): Promise<void>
       if (lanes.get(key) === lane) lanes.delete(key)
     }
     if (owner !== userId) return
-
+    // No new identity enters an editor while the previous one's reachable
+    // legacy plaintext remains. A failed cleanup keeps the auth curtain up.
+    await durable()?.purgeUnsealed?.(userId)
+    for (const row of captureLegacyLocalDrafts()) {
+      const prefix = LOCAL_PREFIXES.find(start => row.key.startsWith(start))!
+      if (userId === null || row.key.slice(prefix.length).split(":")[0] !== userId) removeCapturedLegacyLocalDrafts([row])
+    }
   })
   void identityPurge.catch(() => {})
   return identityPurge
