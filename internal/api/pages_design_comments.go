@@ -56,7 +56,7 @@ func (h *PageHandler) designCommentAuthority(r *http.Request, k artifacts.Versio
 	}
 }
 func (h *PageHandler) GetDesignComments(w http.ResponseWriter, r *http.Request) {
-	k, ok := h.designKey(w, r)
+	k, r, ok := h.designKey(w, r)
 	if !ok {
 		return
 	}
@@ -64,6 +64,13 @@ func (h *PageHandler) GetDesignComments(w http.ResponseWriter, r *http.Request) 
 	err := h.designTx(r, k, false, func(ctx context.Context, tx *sql.Tx, _ string) error {
 		_, writeErr := h.designAuthority(r, k, true)(ctx, tx)
 		sharedOnly := writeErr != nil
+		if sharedOnly {
+			manager, e := h.designManagerRead(ctx, tx, k)
+			if e != nil {
+				return e
+			}
+			sharedOnly = !manager
+		}
 		var shared int64
 		if sharedOnly {
 			if e := tx.QueryRowContext(ctx, `SELECT shared_version FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&shared); e != nil {
@@ -121,7 +128,7 @@ func (h *PageHandler) GetDesignComments(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, 200, designCommentsResponse{Comments: out})
 }
 func (h *PageHandler) CreateDesignComment(w http.ResponseWriter, r *http.Request) {
-	k, ok := h.designKey(w, r)
+	k, r, ok := h.designKey(w, r)
 	if !ok {
 		return
 	}
@@ -218,7 +225,7 @@ func (h *PageHandler) CreateDesignComment(w http.ResponseWriter, r *http.Request
 	writeJSON(w, 201, out)
 }
 func (h *PageHandler) ShareDesign(w http.ResponseWriter, r *http.Request) {
-	k, ok := h.designKey(w, r)
+	k, r, ok := h.designKey(w, r)
 	if !ok {
 		return
 	}
@@ -262,7 +269,7 @@ func (h *PageHandler) ShareDesign(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, designShareResponse{Version: p.Version, SharedVersion: p.Version})
 }
 func (h *PageHandler) ConnectDesignAgent(w http.ResponseWriter, r *http.Request) {
-	k, ok := h.designKey(w, r)
+	k, r, ok := h.designKey(w, r)
 	if !ok {
 		return
 	}

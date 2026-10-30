@@ -1499,7 +1499,18 @@ can synchronize that shared snapshot and presence but receives no private live
 updates. Comment users anchor feedback on the shared version. `versions` also
 stays at that shared pin for readers. Sharing never grants edit rights.
 
-Design does not derive access from the workspace ADMIN or OWNER role alone.
-Page ownership and explicit Page/folder authority still apply through the normal
-ACL checks. This restriction is local to Design; other Crewship surfaces retain
-their existing role model.
+Workspace ADMIN and OWNER may read and edit every Design, including another
+human's unshared or private Design. A read-scoped credential keeps full manager
+read and history access but cannot mutate or send websocket updates. Normal
+Read/Comment audiences still receive only the shared snapshot.
+
+Access to a foreign Design is recorded as `design.workspace_admin_accessed` in
+the existing audit log, bound to the Page, workspace, original human, actor and
+custodian. The operation records authorized read/write access, not a replacement
+for a saved-version receipt. One HTTP request or websocket admission has one
+read audit identity; permission probes and heartbeats do not create duplicate
+events. Incoming websocket writes receive their own audit identity. The audit
+and persisted edit share the existing writer transaction; an unacknowledged or
+corrupted audit refuses access and preserves confirmed content. Manager edits
+use the existing room lock, revision checks and VersionStore. This policy is
+local to Design and does not alter other Page families' audience rules.
