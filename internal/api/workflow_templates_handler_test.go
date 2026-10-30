@@ -178,17 +178,34 @@ func TestWorkflowTemplate_Create_RBAC(t *testing.T) {
 
 // ── List / Get ─────────────────────────────────────────────────────────────
 
-func TestWorkflowTemplate_List_EmptyReturnsEmptyArray(t *testing.T) {
+// A fresh workspace has no workflow_templates rows. The legacy
+// /api/v1/templates List lazily seeds the built-ins; this route must do the
+// same so `crewship workflow list` is not empty on a new workspace.
+func TestWorkflowTemplate_List_SeedsBuiltinsIdempotently(t *testing.T) {
 	h, userID, wsID := newWorkflowTemplateHandler(t)
-	req := httptest.NewRequest("GET", "/", nil)
-	req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "VIEWER"))
-	rr := httptest.NewRecorder()
-	h.List(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("list: %d body=%s", rr.Code, rr.Body.String())
+	list := func() []workflowTemplateResponse {
+		req := httptest.NewRequest("GET", "/", nil)
+		req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "VIEWER"))
+		rr := httptest.NewRecorder()
+		h.List(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("list: %d body=%s", rr.Code, rr.Body.String())
+		}
+		var out []workflowTemplateResponse
+		mustUnmarshal(t, rr, &out)
+		return out
 	}
-	if got := bytes.TrimSpace(rr.Body.Bytes()); string(got) != "[]" {
-		t.Errorf("empty list body = %q, want []", string(got))
+	first := list()
+	if len(first) == 0 {
+		t.Fatal("fresh workspace list is empty; built-in templates were not seeded")
+	}
+	for _, tpl := range first {
+		if !tpl.IsBuiltin {
+			t.Errorf("template %q is not marked built-in", tpl.Name)
+		}
+	}
+	if second := list(); len(second) != len(first) {
+		t.Errorf("second list has %d templates, want %d (seeding must be idempotent)", len(second), len(first))
 	}
 }
 
@@ -207,8 +224,14 @@ func TestWorkflowTemplate_List_VIEWER_CanRead(t *testing.T) {
 	}
 	var list []workflowTemplateResponse
 	mustUnmarshal(t, rr, &list)
-	if len(list) != 1 || list[0].ID != created.ID {
-		t.Fatalf("list mismatch: %+v", list)
+	found := false
+	for _, tpl := range list {
+		if tpl.ID == created.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("created template %s missing from list: %+v", created.ID, list)
 	}
 }
 
@@ -444,4 +467,59 @@ func mustCreateTemplate(t *testing.T, h *WorkflowTemplateHandler, userID, wsID, 
 func jsonQuote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
+}
+
+// List re-seeds the built-ins, so a built-in that Update or Delete could
+// change would come back on the next list: deleted, it reappears; renamed, it
+// is duplicated. Like the legacy /api/v1/templates routes, both refuse a
+// built-in with 403 and leave it as it was.
+func TestWorkflowTemplate_BuiltinsAreReadOnly(t *testing.T) {
+	h, userID, wsID := newWorkflowTemplateHandler(t)
+	ctx := func(req *http.Request) *http.Request {
+		return req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: userID}), wsID, "OWNER"))
+	}
+	list := func() []workflowTemplateResponse {
+		rr := httptest.NewRecorder()
+		h.List(rr, ctx(httptest.NewRequest("GET", "/", nil)))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("list: %d body=%s", rr.Code, rr.Body.String())
+		}
+		var out []workflowTemplateResponse
+		mustUnmarshal(t, rr, &out)
+		return out
+	}
+	before := list()
+	if len(before) == 0 || !before[0].IsBuiltin {
+		t.Fatalf("expected seeded built-ins, got %+v", before)
+	}
+	builtin := before[0]
+
+	tests := []struct {
+		name string
+		call http.HandlerFunc
+		req  *http.Request
+	}{
+		{"rename", h.Update, httptest.NewRequest("PATCH", "/", bytes.NewReader([]byte(`{"name":"my-flow"}`)))},
+		{"delete", h.Delete, httptest.NewRequest("DELETE", "/", nil)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.req.SetPathValue("id", builtin.ID)
+			rr := httptest.NewRecorder()
+			tt.call(rr, ctx(tt.req))
+			if rr.Code != http.StatusForbidden {
+				t.Fatalf("%s built-in: %d body=%s, want 403", tt.name, rr.Code, rr.Body.String())
+			}
+		})
+	}
+
+	after := list()
+	if len(after) != len(before) {
+		t.Fatalf("list has %d templates after refused writes, want %d", len(after), len(before))
+	}
+	for _, tpl := range after {
+		if tpl.ID == builtin.ID && tpl.Name != builtin.Name {
+			t.Fatalf("built-in renamed to %q", tpl.Name)
+		}
+	}
 }

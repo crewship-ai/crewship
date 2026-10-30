@@ -626,6 +626,21 @@ Remove a member from a crew.
 crewship crew member remove <crew-slug-or-id> <member-id>
 ```
 
+### `crewship crew member set-role`
+
+Set or clear a member's per-crew role override.
+
+```bash
+crewship crew member set-role <crew-slug-or-id> <member-id> <role>
+crewship crew member set-role <crew-slug-or-id> <member-id> --clear
+```
+
+`<role>` is one of `OWNER`, `ADMIN`, `MANAGER`, `MEMBER`, `VIEWER` and cannot exceed your own workspace role. Requires workspace ADMIN/OWNER. Backed by `PATCH /api/v1/crews/{crewId}/members/{memberId}`.
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--clear` | bool | `false` | Clear the override so the member inherits their workspace role again. Mutually exclusive with `<role>`; one of the two is required. |
+
 ---
 
 ## Crew Connections

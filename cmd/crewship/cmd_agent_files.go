@@ -56,6 +56,10 @@ Examples:
 			return err
 		}
 
+		if container, _ := cmd.Flags().GetBool("container"); container {
+			return listAgentContainerFiles(cmd, client, agentID)
+		}
+
 		download, _ := cmd.Flags().GetString("download")
 		if download != "" {
 			return downloadAgentFile(client, agentID, download, cmd)
@@ -96,6 +100,37 @@ Examples:
 			return printFilesTable(body)
 		}
 	},
+}
+
+// listAgentContainerFiles lists files inside the agent's running container
+// (GET /agents/{id}/container-files) instead of the workspace proxy view.
+func listAgentContainerFiles(cmd *cobra.Command, client *cli.Client, agentID string) error {
+	if d, _ := cmd.Flags().GetString("download"); d != "" {
+		return fmt.Errorf("--container cannot be combined with --download")
+	}
+	if r, _ := cmd.Flags().GetBool("recursive"); r {
+		return fmt.Errorf("--container cannot be combined with --recursive")
+	}
+	path := "/api/v1/agents/" + url.PathEscape(agentID) + "/container-files"
+	if subdir, _ := cmd.Flags().GetString("subdir"); subdir != "" {
+		path += "?" + url.Values{"subdir": {subdir}}.Encode()
+	}
+	var body any
+	if err := getJSON(client, path, &body); err != nil {
+		return err
+	}
+	if jq, _ := cmd.Flags().GetString("filter"); jq != "" {
+		return emitJSONFiltered(cmd, body)
+	}
+	f := newFormatter()
+	switch f.Format {
+	case "json":
+		return f.JSON(body)
+	case "yaml":
+		return f.YAML(body)
+	default:
+		return printFilesTable(body)
+	}
 }
 
 // downloadAgentFile streams the file body to disk (or stdout when --out=-).
@@ -433,7 +468,8 @@ func init() {
 	agentFilesCmd.Flags().String("download", "", "Download this specific file instead of listing")
 	agentFilesCmd.Flags().String("out", "", "Output path for --download (default: basename of file, '-' for stdout)")
 	agentFilesCmd.Flags().Bool("recursive", false, "List the whole tree under the agent's namespace instead of one level")
-	agentFilesCmd.Flags().String("subdir", "", "List this subdirectory of the agent's namespace instead of its root")
+	agentFilesCmd.Flags().String("subdir", "", "List this subdirectory of the agent's namespace instead of its root (with --container: of the container listing)")
+	agentFilesCmd.Flags().Bool("container", false, "List files inside the agent's running container instead of the workspace view")
 	jqExprFlag(agentFilesCmd)
 	jqExprFlag(agentInboxCmd)
 	jqExprFlag(agentGitLogCmd)
