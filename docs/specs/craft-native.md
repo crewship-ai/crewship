@@ -141,6 +141,15 @@ request still expires at its original JWT horizon. A short, bounded retry of a
 mutations and ambiguous outcomes are never replayed. Bearer credentials do not
 enter the cookie-refresh flow.
 
+A transport reset, clean SSE EOF or temporary HTTP failure reconnects only
+metadata after current same-admission reauthorization. At most eight recovery
+attempts back off from 100 ms to five seconds; a valid lease on a stream shorter
+than five seconds does not reset that budget. Invalid metadata, authorization
+refusal and explicit session retirement are terminal. Exhaustion uses the
+existing draft-retaining disconnection path. Closing the client cancels both
+the stream and a coalesced periodic/recovery authorization. No save, custody
+mutation or new admission is replayed by this recovery.
+
 ## Whole-document configuration and receipts
 
 `craft_native.editor_bundle_dir` names the operator-owned bundle directory.
