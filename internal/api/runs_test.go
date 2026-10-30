@@ -161,9 +161,10 @@ func TestRunHandler_List_HappyPath(t *testing.T) {
 		return count
 	}
 	beforeToday, afterToday := countToday(beforeList), countToday(afterList)
-	// Failed counts only today's failures too; run_b started two minutes ago.
+	// Failed counts failures recorded today; the fixture records run_b's
+	// failure one minute after its start, so one minute ago.
 	failedToday := func(at time.Time) int {
-		if now.Add(-2 * time.Minute).Before(at.Truncate(24 * time.Hour)) {
+		if now.Add(-time.Minute).Before(at.Truncate(24 * time.Hour)) {
 			return 0
 		}
 		return 1
