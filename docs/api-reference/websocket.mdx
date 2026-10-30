@@ -146,19 +146,41 @@ Cancel an in-progress agent chat response.
 }
 ```
 
-With optional `payload.request_id` (at most 128 bytes), the server sends a
-private control frame to the requesting socket after the exact caller-owned
-run finishes with cancellation:
+With optional `payload.request_id` (at most 128 bytes), the server answers
+privately on the requesting socket. When a run of the caller's is active on
+the chat it first acknowledges the request:
+
+```json
+{"type":"cancel_accepted","payload":{"session_id":"chat-id","request_id":"unique-request-id"}}
+```
+
+and, once that exact run has finished, sends its outcome:
 
 ```json
 {"type":"cancel_result","payload":{"session_id":"chat-id","request_id":"unique-request-id","cancelled":true}}
 ```
 
-`cancelled:false` means no cancellation was confirmed (including a missing run,
-a run owned by another user, natural completion, or another outstanding
-confirmation on this socket). Ordinary session `done` events do not confirm a
-cancel. Clients must match both request and session IDs. Omitting `request_id`
-retains the existing cancellation behavior without requesting a result.
+`cancelled:true` means this explicit stop request ended the run and the
+runtime confirmed the stop. A server or hub shutdown, an agent stop
+(`POST /agents/{id}/stop`) or a natural completion never confirms it.
+`cancelled:false` carries a `reason`:
+
+| `reason` | Meaning |
+| --- | --- |
+| `no_active_run` | No run of the caller's is active on this chat (none at all, or another user's). Sent without a `cancel_accepted`. |
+| `run_ended_without_cancellation` | The run ended, but not because of this stop (natural completion, unrelated failure, other cause). |
+| `confirmation_deadline_exceeded` | The run did not finish within the server's confirmation deadline (90 s). |
+| `too_many_pending_requests` | This socket already has 32 confirmations outstanding. |
+
+Several requests for the same run — repeated on one socket or sent from
+several sockets of the same user — all receive the same outcome when the run
+finishes. The run's frames (trailing text, its `done`) are queued to the
+requesting socket before its `cancel_result`, so a client that stops reading
+at the result has received the whole stream. Ordinary session `done` events
+do not confirm a cancel. Clients must match both request and session IDs.
+Omitting `request_id` retains the existing cancellation behavior without
+requesting a result. A server that predates this protocol sends neither
+frame; a client can recognise it by the missing `cancel_accepted`.
 A single-run client may also set `payload.origin_only:true`: cancellation then
 requires the active run to have originated on this exact WebSocket. This avoids
 stopping a replacement invocation that the same user started in another terminal;
@@ -191,7 +213,6 @@ when one terminates work it has in flight.
 ## Channels
 
 Channels follow the format `type:id`. Access is validated against database membership when subscribing.
-
 
 ### Channel Types
 

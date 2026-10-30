@@ -45,7 +45,10 @@ type Client struct {
 	sendClosed       bool
 	consecutiveDrops atomic.Uint32
 	disconnectFired  atomic.Bool
-	cancelWaiting    atomic.Bool // at most one completion waiter per socket
+	// cancelWaiters holds this socket's pending cancel confirmations, one
+	// waiter per registered run. Requests for the same run share it.
+	cancelWaitMu  sync.Mutex
+	cancelWaiters map[*cancelCompletion]*cancelWaiter
 	// writeWait overrides defaultWriteWait per connection; zero means use
 	// the default. Set at construction in the hub; only tests vary it.
 	writeWait time.Duration
@@ -487,23 +490,111 @@ func (c *Client) handleCancelMessage(msg ClientMessage) {
 	if payload.RequestID == "" {
 		return
 	}
-	reply := func(cancelled bool) {
-		data, _ := json.Marshal(ServerMessage{Type: "cancel_result", Payload: map[string]any{"session_id": payload.ChatID, "request_id": payload.RequestID, "cancelled": cancelled}})
-		c.safeSend(data)
-	}
-	if !ok || done == nil || !c.cancelWaiting.CompareAndSwap(false, true) {
-		reply(false)
+	if !ok || done == nil {
+		c.sendCancelResult(payload.ChatID, payload.RequestID, false, cancelReasonNoActiveRun)
 		return
 	}
+	c.awaitCancelResult(done, payload.ChatID, payload.RequestID)
+}
+
+// Reasons carried by a cancel_result that reports cancelled:false.
+const (
+	cancelReasonNoActiveRun     = "no_active_run"
+	cancelReasonNotCancelled    = "run_ended_without_cancellation"
+	cancelReasonDeadline        = "confirmation_deadline_exceeded"
+	cancelReasonTooManyRequests = "too_many_pending_requests"
+)
+
+// cancelResultDeadline bounds how long a socket waits for a run it asked to
+// cancel. A handler that never returns must not pin the waiter (or leave the
+// caller without an answer): past the deadline the request is answered
+// cancelled:false. A var so tests can shorten it.
+var cancelResultDeadline = 90 * time.Second
+
+// maxPendingCancelRequests caps the request IDs one socket may have waiting.
+const maxPendingCancelRequests = 32
+
+type cancelWaiter struct {
+	chatID     string
+	requestIDs []string
+}
+
+// awaitCancelResult registers requestID against the run's completion. A
+// second request for a run that already has a waiter on this socket joins it
+// and receives the same outcome, never an early denial.
+func (c *Client) awaitCancelResult(done *cancelCompletion, chatID, requestID string) {
+	c.cancelWaitMu.Lock()
+	pending := 0
+	for _, w := range c.cancelWaiters {
+		pending += len(w.requestIDs)
+	}
+	if pending >= maxPendingCancelRequests {
+		c.cancelWaitMu.Unlock()
+		c.sendCancelResult(chatID, requestID, false, cancelReasonTooManyRequests)
+		return
+	}
+	if c.cancelWaiters == nil {
+		c.cancelWaiters = make(map[*cancelCompletion]*cancelWaiter)
+	}
+	if w, exists := c.cancelWaiters[done]; exists {
+		w.requestIDs = append(w.requestIDs, requestID)
+		c.cancelWaitMu.Unlock()
+		c.sendCancelAccepted(chatID, requestID)
+		return
+	}
+	c.cancelWaiters[done] = &cancelWaiter{chatID: chatID, requestIDs: []string{requestID}}
+	c.cancelWaitMu.Unlock()
+	// The acknowledgement tells a client that this server will answer with a
+	// cancel_result; a client that never sees one is talking to a server that
+	// predates the protocol.
+	c.sendCancelAccepted(chatID, requestID)
 	go func() {
+		timer := time.NewTimer(cancelResultDeadline)
+		defer timer.Stop()
+		var cancelled bool
+		var reason string
 		select {
 		case <-done.done:
-			c.cancelWaiting.Store(false)
-			reply(done.cancelled)
+			cancelled = done.cancelled
+			if !cancelled {
+				reason = cancelReasonNotCancelled
+			}
+		case <-timer.C:
+			reason = cancelReasonDeadline
 		case <-c.ctx.Done():
-			c.cancelWaiting.Store(false)
+			c.takeCancelWaiter(done)
+			return
+		}
+		w := c.takeCancelWaiter(done)
+		if w == nil {
+			return
+		}
+		for _, id := range w.requestIDs {
+			c.sendCancelResult(w.chatID, id, cancelled, reason)
 		}
 	}()
+}
+
+func (c *Client) takeCancelWaiter(done *cancelCompletion) *cancelWaiter {
+	c.cancelWaitMu.Lock()
+	defer c.cancelWaitMu.Unlock()
+	w := c.cancelWaiters[done]
+	delete(c.cancelWaiters, done)
+	return w
+}
+
+func (c *Client) sendCancelAccepted(chatID, requestID string) {
+	data, _ := json.Marshal(ServerMessage{Type: "cancel_accepted", Payload: map[string]any{"session_id": chatID, "request_id": requestID}})
+	c.safeSend(data)
+}
+
+func (c *Client) sendCancelResult(chatID, requestID string, cancelled bool, reason string) {
+	payload := map[string]any{"session_id": chatID, "request_id": requestID, "cancelled": cancelled}
+	if reason != "" {
+		payload["reason"] = reason
+	}
+	data, _ := json.Marshal(ServerMessage{Type: "cancel_result", Payload: payload})
+	c.safeSend(data)
 }
 
 type resumePayload struct {
