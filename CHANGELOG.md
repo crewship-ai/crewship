@@ -9,7 +9,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Page rejections show their reason in the web app and CLI.** A 422 page rejection (for example a payload over the size cap) now also carries an `error` field with the same sentence as `message`, so the web app shows that sentence instead of "Request failed (HTTP 422)" and the CLI prints `API error (422): <sentence>` instead of the raw JSON body. The existing `rejected`, `kind`, `detail` and `message` fields are unchanged.
 - **A Page opens with its content inside Artifacts.** Its application or panels show in the library detail with the same views Pages uses, read by the page's immutable ID; the detail no longer sends you to Pages.
 
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
@@ -7253,6 +7252,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Bind artifact requests to explicit human chat intent and one signed run, preserving the original Page and version authority. Recheck live original authority and exact consent after the final chat or task write before committing admission.
 
 - Add optional artifact project previews, versioned element comments, shared-version navigation and explicit chat creation intent behind backend availability.
+
+- **Page rejections show their reason in the web app and CLI.** A 422 page rejection (for example a payload over the size cap) now also carries an `error` field with the same sentence as `message`, so the web app shows that sentence instead of "Request failed (HTTP 422)" and the CLI prints `API error (422): <sentence>` instead of the raw JSON body. The existing `rejected`, `kind`, `detail` and `message` fields are unchanged.
 
 ## [1.0.0-rc.1] — 2026-07-12
 
