@@ -48,7 +48,14 @@ func WriteBuildContext(dir string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			return err
+		}
+		// COPY keeps the mode and the image runs as an unprivileged USER, so
+		// the files must be world-readable whatever the caller's umask
+		// (WriteFile's mode is filtered by it; Chmod is not).
+		if err := os.Chmod(path, 0o644); err != nil {
 			return err
 		}
 	}
