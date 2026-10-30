@@ -40,6 +40,17 @@ var helperParsedQueryParameters = []struct {
 	helper       string
 	params       []string
 }{
+	// parsePagination (helpers.go) — only returned values used by the handler
+	// are effective parameters. Runs and audit derive offset from page;
+	// persona, checkpoints and eval discard offset entirely.
+	{"GET", "/api/v1/admin/keeper/requests", "parsePagination", []string{"limit", "offset"}},
+	{"GET", "/api/v1/missions/{missionId}/checkpoints", "parsePagination", []string{"limit"}},
+	{"GET", "/api/v1/approvals", "parsePagination", []string{"limit", "offset", "status"}},
+	{"GET", "/api/v1/eval/runs", "parsePagination", []string{"limit"}},
+	{"GET", "/api/v1/runs", "parsePagination", []string{"agent_id", "limit", "mission_id", "page", "status", "tag", "trigger"}},
+	{"GET", "/api/v1/audit", "parsePagination", []string{"action", "date_from", "date_to", "entity_id", "entity_type", "limit", "page", "search", "source", "user_id"}},
+	{"GET", "/api/v1/agents/{agentId}/persona/history", "parsePagination", []string{"limit"}},
+
 	// parseWindow (paymaster_handler.go) accepts ?since=&until= RFC3339 or
 	// ?range=1h|24h|7d|30d. Every caller passes the inbound request straight in.
 	{"GET", "/api/v1/paymaster/spend/by-crew", "parseWindow", []string{"range", "since", "until"}},
@@ -48,9 +59,9 @@ var helperParsedQueryParameters = []struct {
 	// TopSpenders calls parseWindow too, but discards the `until` half
 	// (`since, _ := parseWindow(r)`). ?until= is parsed and then thrown away, so
 	// it is accepted without having any effect — documenting it would advertise
-	// a filter that does not filter. `limit` is read inline, so it is inferred
-	// rather than annotated, and belongs in the exact set all the same.
-	{"GET", "/api/v1/paymaster/top-spenders", "parseWindow", []string{"limit", "range", "since"}},
+	// a filter that does not filter. parsePagination supplies limit, while
+	// its offset result is discarded; the annotation declares only limit.
+	{"GET", "/api/v1/paymaster/top-spenders", "parseWindow+parsePagination", []string{"limit", "range", "since"}},
 
 	// parseJournalQuery (journal_handler.go) is the whole filter grammar of the
 	// journal. GET /api/v1/journal documented none of it. run_id (2026-08-08)
@@ -103,7 +114,7 @@ var helperParsedQueryParameters = []struct {
 	{"GET", "/api/v1/agents/{agentId}/chats", "parsePagination", []string{"chat_id", "counts", "kind", "limit", "offset", "q", "routine_id", "source"}},
 
 	// parseInboxFilters (inbox_query.go), shared by the Inbox list and counts.
-	// The list also reads state/kind/limit/offset/cursor inline.
+	// The list reads state/kind/cursor inline and limit/offset via parsePagination.
 	{"GET", "/api/v1/inbox", "parseInboxFilters", []string{
 		"agent", "attention", "crew", "cursor", "day_end", "deadline", "kind", "limit", "now",
 		"offset", "q", "space", "state", "unread",
