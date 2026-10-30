@@ -10,6 +10,7 @@ vi.mock("../document-queue", async importOriginal => ({
   purgeDocumentDrafts: mock.purge,
   registerDocumentDraftWriter: (_human: string, retire: () => Promise<void>) => { mock.retire = retire; return () => {} },
 }))
+vi.mock("../protected-document-drafts", () => ({ openProtectedDocumentDrafts: mock.open }))
 const scope = { human: "h", workspace: "w", page: "p", applicationId: "wordcraft" }
 const draft = (): NativeDraft => ({ applicationId: "wordcraft", enginePin: "engine-1", sessionId: "tab-a", generation: "1", baseVersion: "1", editorRevision: "doc:1:0", bytes: new Uint8Array([1, 2, 255]) })
 const rows = new Map<string, DocumentDraft>()

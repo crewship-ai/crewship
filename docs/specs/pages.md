@@ -1424,6 +1424,29 @@ unclassified folder entries before matching, preventing title confirmation.
 Canonical backup/recovery data retains its existing OWNER/instance-admin gates;
 this does not introduce Page folder ACL mutation auditing or change its atomicity.
 
+### Private browser draft recovery
+
+Native documents, text documents, Project source/comments and Design drafts use
+an immutable Page ID and human identity as their recovery scope. New durable
+payloads are encrypted in the browser. Recovery obtains a key envelope through
+a fresh authenticated Page-read check; an expired session retains the copy and
+does not authorize releasing it to another identity. Bound legacy records are
+migrated before entering an editor. Unbound slug records are never replayed.
+
+A positively verified loss of current Page read erases reachable local drafts;
+a network failure, expired cookie, or loss of Edit alone does not prove that
+loss. Offline clients cannot promise immediate deletion. Deferred deletion
+compares the captured revision, preserving a later replacement.
+
+Before an authentication transition unmounts an editor, admitted local writes
+must drain. Failed capture, unavailable storage, and an over-limit Design draft
+keep the live model mounted behind recovery UI and block navigation. Explicit
+sign-out warns before deleting persistent recovery copies and deletes only the
+revisions covered by that confirmation. Later writes remain for recovery.
+Recovery does not replay native snapshot saves, custody operations or agent
+dispatch. Design resumes standard CRDT synchronization only after fresh
+same-person Edit admission; read-only viewers do not restore a writer canvas.
+
 ### Design canvases (opt-in)
 
 Design uses the same Page identity, grants and retained artifact versions. The
@@ -1581,3 +1604,23 @@ membership check: a current credential for the expected human with removed
 membership receives `403 draft_read_revoked`. ACL/storage faults return 5xx and
 retain drafts. Workspace administrators use the canonical Page read policy;
 the envelope still belongs to its original human and cannot cross identities.
+
+Legacy plaintext recovery copies do not qualify for encrypted retention. Before
+admitting a different identity (or completing expiry/sign-out), the browser drains
+mounted writers and removes reachable unsealed rows belonging to other identities
+from both IndexedDB journals and legacy Design/comment localStorage keys. Sealed
+rows remain. Cleanup uses strict IndexedDB transactions; a failed cleanup blocks
+identity admission behind the retry curtain. A legacy copy for the current human
+migrates durably before entering an editor. Explicit sign-out counts legacy
+localStorage copies in its discard warning; cancel leaves those copies intact.
+
+Rollout order for encrypted draft retention is mandatory: deploy the backend
+`draft-key` route first, including current membership and Design administrator
+checks, then the durable artifact-draft base, then the complete browser migration.
+The browser migration and all its writer/auth changes are one release unit.
+A binary that embeds the frontend may ship these prerequisites and the browser
+unit atomically; separate frontend upgrades must follow the backend.
+Deploying that browser unit against an older backend is unsupported and prevents
+editing; it must not be rolled out independently. Keep the backend route present
+when rolling back browser code. Release integration must exercise this order and
+fresh same-human recovery; unit/browser fixtures alone are not deployment proof.

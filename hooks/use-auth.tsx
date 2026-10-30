@@ -5,6 +5,7 @@ import {
   useContext,
   useState,
   useEffect,
+  useLayoutEffect,
   useCallback,
   useRef,
   type ReactNode,
@@ -15,7 +16,18 @@ import { serverFetch } from "@/lib/server-base"
 import { purgeOtherE2Recovery } from "@/lib/chat-e2-recovery"
 import { isKnownAppPath } from "@/lib/app-routes"
 import { SIGNED_OUT_URL, rememberSignedOut, signedOutKind } from "@/lib/signed-out"
-import { purgeOtherDocumentDrafts } from "@/lib/document-queue"
+import { suspendOtherDocumentDrafts, captureDocumentDrafts, removeCapturedDocumentDrafts } from "@/lib/document-queue"
+import { suspendOtherArtifactDrafts, finishArtifactDraftIdentity, captureArtifactDrafts, removeCapturedArtifactDrafts, captureLegacyLocalDrafts, removeCapturedLegacyLocalDrafts } from "@/lib/artifact-drafts"
+
+import { beginLocalDraftIdentity, finishLocalDraftIdentity } from "@/lib/local-draft-seal"
+
+async function preserveDraftsForIdentity(human: string | null) {
+  const generation = beginLocalDraftIdentity(human)
+  await Promise.all([suspendOtherDocumentDrafts(human), suspendOtherArtifactDrafts(human)])
+  finishArtifactDraftIdentity(human)
+  finishLocalDraftIdentity(human, generation)
+  return generation
+}
 
 const sessionSchema = z.object({
   user: z.object({
@@ -151,6 +163,10 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const [session, setSession] = useState<AuthSession | null>(null)
   const [status, setStatus] = useState<AuthStatus>("loading")
+  const [draftAdmission, setDraftAdmission] = useState(0)
+  const [draftRecovery, setDraftRecovery] = useState<{ retry: () => Promise<void> } | null>(null)
+  const [draftRetrying, setDraftRetrying] = useState(false)
+  const retryDraftTransition = useRef<() => Promise<void>>(async () => {})
   const [unreachable, setUnreachable] = useState<{ retryAt: number } | null>(null)
   // Mirrors for the redirect listener and the retry loop, which are created
   // once and would otherwise read the values of the render that made them.
@@ -170,9 +186,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     clearTimeout(unreachableTimer.current)
     unreachableTimer.current = undefined
     purgeOtherE2Recovery(next?.user.id ?? null)
-    await purgeOtherDocumentDrafts(next?.user.id ?? null)
+    let admission: number
+    try { admission = await preserveDraftsForIdentity(next?.user.id ?? null) }
+    catch { if (gen === refreshGen.current) setDraftRecovery({ retry: () => retryDraftTransition.current() }); return }
     if (gen !== refreshGen.current) return
+    setDraftAdmission(admission); setDraftRecovery(null)
     setUnreachable(null)
+    sessionRef.current = next
+    statusRef.current = next ? "authenticated" : "unauthenticated"
     setSession(next)
     setStatus(next ? "authenticated" : "unauthenticated")
   }, [])
@@ -233,6 +254,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
     unreachableTimer.current = setTimeout(() => { void probe(gen) }, ms)
   }, [settle, probe])
 
+  useEffect(() => { retryDraftTransition.current = refresh }, [refresh])
+
   const retryNow = useCallback(() => {
     if (!unreachableTimer.current) return
     void probe(refreshGen.current)
@@ -269,9 +292,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // page is not where an unknown link should lead.
       if (!isKnownAppPath(window.location.pathname)) return
       redirected = true
-      ++refreshGen.current
+      const gen = ++refreshGen.current
       purgeOtherE2Recovery(null)
-      await purgeOtherDocumentDrafts(null)
+      try { await preserveDraftsForIdentity(null) }
+      catch { setDraftRecovery({ retry: async () => { redirected = false; await goLoginExpired(reason) } }); return }
+      if (gen !== refreshGen.current) return
       const { pathname, search } = window.location
       const currentPath = pathname + search
       // no_credentials: the browser never had a session (or its cookies
@@ -292,12 +317,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       window.location.replace(`/login?${params.toString()}`)
     }
-    const goLoginSignedOutElsewhere = async () => {
+    const goLoginSignedOutElsewhere = async (human?: string) => {
       if (redirected) return
+      const currentHuman = sessionRef.current?.user.id
+      if (human && currentHuman && human !== currentHuman) return
       redirected = true
-      ++refreshGen.current
+      const gen = ++refreshGen.current
       purgeOtherE2Recovery(null)
-      await purgeOtherDocumentDrafts(null)
+      try { await preserveDraftsForIdentity(null) }
+      catch { setDraftRecovery({ retry: async () => { redirected = false; await goLoginSignedOutElsewhere(human) } }); return }
+      if (gen !== refreshGen.current) return
+      // The sender deletes only its captured revisions with CAS. A delayed
+      // message never authorizes deleting this tab's newer recovery rows.
+      const latest = await fetchSession()
+      if (gen !== refreshGen.current) return
+      if (latest.kind === "settled" && latest.session) { await settle(latest.session, gen); return }
       window.location.replace(SIGNED_OUT_URL)
     }
 
@@ -310,7 +344,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         channel = new BroadcastChannel(AUTH_CHANNEL)
         channel.onmessage = (ev) => {
           if (ev.data?.type === "session-expired") void goLoginExpired(ev.data?.reason)
-          else if (ev.data?.type === "signout") void goLoginSignedOutElsewhere()
+          else if (ev.data?.type === "signout") void goLoginSignedOutElsewhere(typeof ev.data.human === "string" ? ev.data.human : undefined)
         }
       } catch {
         channel = null
@@ -321,7 +355,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       window.removeEventListener(AUTH_EVENT, expiredHandler)
       channel?.close()
     }
-  }, [])
+  }, [settle])
 
   const signIn = useCallback(async (email: string, password: string) => {
     const csrfToken = await fetchCsrfToken()
@@ -358,6 +392,29 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   }, [refresh])
 
+  const recoveryElement = useRef<HTMLElement>(null)
+  useLayoutEffect(() => {
+    if (!draftRecovery || !recoveryElement.current) return
+    const mask = recoveryElement.current, hidden = new Set<HTMLElement>()
+    // Portals live outside the React wrapper. Hide those DOM siblings too,
+    // keeping their models mounted while capture is retried.
+    const contain = () => {
+      let current: HTMLElement = mask
+      while (current.parentElement) {
+        const parent = current.parentElement
+        for (const sibling of parent.children) {
+          if (sibling !== current && sibling instanceof HTMLElement && !sibling.inert) { sibling.inert = true; hidden.add(sibling) }
+        }
+        if (parent === document.body) break
+        current = parent
+      }
+    }
+    contain(); mask.focus({preventScroll:true})
+    const observer = new MutationObserver(contain)
+    observer.observe(document.body,{childList:true,subtree:true})
+    return () => { observer.disconnect(); for (const element of hidden) element.inert = false }
+  }, [draftRecovery])
+
   const signOut = useCallback(async (): Promise<boolean> => {
     // Gate the local reset on a successful (or already-expired) server
     // response. With revocation now enforced server-side, fanning out
@@ -365,6 +422,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // would leave every other tab thinking they're logged out while the
     // session keeps refreshing in the background. CodeRabbit flagged
     // this on PR #233.
+    const signingOutHuman = sessionRef.current?.user.id, startingGeneration = refreshGen.current
+    let capturedDocuments: Awaited<ReturnType<typeof captureDocumentDrafts>> = []
+    let capturedArtifacts: Awaited<ReturnType<typeof captureArtifactDrafts>> = []
+    let capturedLegacy: ReturnType<typeof captureLegacyLocalDrafts> = []
+    try { if (signingOutHuman) [capturedDocuments, capturedArtifacts] = await Promise.all([captureDocumentDrafts(signingOutHuman), captureArtifactDrafts(signingOutHuman)]) }
+    catch { /* No verified deletion snapshot: retain those encrypted copies. */ }
+    try { if (signingOutHuman) capturedLegacy = captureLegacyLocalDrafts(signingOutHuman) } catch { return false }
+    const discardDrafts = capturedDocuments.length + capturedArtifacts.length + capturedLegacy.length > 0
+    if (discardDrafts && !window.confirm("Signing out can permanently delete local recovery copies of your unsaved artifact and document work. Download or copy any draft you need first. Continue? New changes arriving during sign-out are kept.")) return false
+    if (sessionRef.current?.user.id !== signingOutHuman || refreshGen.current !== startingGeneration) return false
     let serverAcknowledged = false
     try {
        
@@ -385,20 +452,41 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (!serverAcknowledged) {
       return false
     }
-    ++refreshGen.current // An older session read must not revive a signed-out writer.
+    if (sessionRef.current?.user.id !== signingOutHuman || refreshGen.current !== startingGeneration) return false
+    const gen = ++refreshGen.current // An older session read must not revive a signed-out writer.
     purgeOtherE2Recovery(null)
-    // Awaited: callers navigate to /login right after, which could cut a fire-and-forget delete short.
-    await purgeOtherDocumentDrafts(null)
-    setSession(null)
-    setStatus("unauthenticated")
-    // Tell other tabs in this browser to drop their session UI too.
-    broadcastSignOut()
-    return true
+    const finalize = async (): Promise<boolean> => {
+      try {
+        const admission = await preserveDraftsForIdentity(null)
+        if (gen !== refreshGen.current) return false
+        if (discardDrafts) {
+          await Promise.all([removeCapturedDocumentDrafts(capturedDocuments), removeCapturedArtifactDrafts(capturedArtifacts)])
+          removeCapturedLegacyLocalDrafts(capturedLegacy)
+        }
+        if (gen !== refreshGen.current) return false
+        sessionRef.current = null; statusRef.current = "unauthenticated"
+        setSession(null); setStatus("unauthenticated"); setDraftAdmission(admission); setDraftRecovery(null)
+        broadcastSignOut(signingOutHuman)
+        return true
+      } catch {
+        setDraftRecovery({ retry: async () => { if (await finalize()) window.location.replace(SIGNED_OUT_URL) } })
+        return false
+      }
+    }
+    return finalize()
   }, [])
 
   return (
     <AuthContext value={{ session, status, signIn, signOut, refresh, unreachable, retryNow }}>
-      {children}
+      <div key={draftAdmission} inert={Boolean(draftRecovery)} aria-hidden={draftRecovery ? true : undefined} style={{ display: draftRecovery ? "none" : "contents" }}>{children}</div>
+      {draftRecovery && <section ref={recoveryElement} tabIndex={-1} onKeyDown={event => {
+        event.stopPropagation()
+        if (event.key !== "Tab") return
+        const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled),a[href]"))
+        if (!controls.length) { event.preventDefault(); return }
+        const index = controls.indexOf(document.activeElement as HTMLElement)
+        event.preventDefault(); controls[(index + (event.shiftKey ? -1 : 1) + controls.length) % controls.length].focus()
+      }} role="alertdialog" aria-modal="true" aria-labelledby="draft-recovery-title" className="fixed inset-0 z-[2147483647] flex items-center justify-center bg-background p-6"><div className="max-w-lg space-y-4"><h1 id="draft-recovery-title" className="text-xl font-semibold">Keep this tab open</h1><p>A local recovery check could not finish. Keep this tab open and retry before leaving or changing accounts. Any open editor remains in this tab.</p><p>You can sign in again in a new tab if needed.</p><div className="flex gap-4"><button type="button" disabled={draftRetrying} onClick={() => { setDraftRetrying(true); void draftRecovery.retry().catch(() => {}).finally(() => setDraftRetrying(false)) }}>{draftRetrying ? "Keeping changes…" : "Retry keeping my changes"}</button><a href="/login" target="_blank" rel="noopener noreferrer">Sign in in a new tab</a></div></div></section>}
     </AuthContext>
   )
 }

@@ -76,6 +76,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **`crewship slides` and `crewship doc` help describes the real commands.** The generic "Slides <op>" and "Document <op>" texts are replaced with descriptions and examples, the `doc draft` subcommands get a summary, and native decks and documents are no longer presented as living in Pages. Command behaviour is unchanged.
 
+- **Private artifact and document drafts survive expired sign-in.** Recovery requires the same identity and a fresh Page-read check. Failed local capture keeps the editor open behind a recovery warning; explicit sign-out asks before removing persistent copies and preserves newer revisions. New local payloads are encrypted; legacy plaintext from other identities is removed before identity admission, and confirmed read revocation removes reachable copies (#4606).
+
+- **Artifact and Design drafts are no longer lost or left behind in the browser.** Edit source no longer overwrites a source draft kept after a crash, a successful save keeps edits typed after it was submitted, and a failed browser-storage read no longer deletes the stored comment draft.
+
 - **Test Design canvases can be identified in the library.** Human canvas creation now retains the explicit test-item marker for catalog filtering.
 
 - ⚠️ **Behaviour change: `journal priority` and `memory export` honour `--format`.** With `--format json` (or `yaml`/`ndjson`), `crewship journal priority` prints the server's answer as an object with `id`, `priority` and `previous`, and `crewship memory export` writes the bundle as before and then prints `out`, `documents` and `skipped` instead of the prose listing. With the default table or `quiet` output both keep their human-readable line. `memory export` help now states that it requires OWNER or ADMIN.

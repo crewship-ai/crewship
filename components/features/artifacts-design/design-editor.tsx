@@ -6,6 +6,7 @@ import { Download, Frame, ImagePlus, MousePointer2, Plus, Save, Square, Trash2, 
 import * as Y from "yjs"
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { useSessionSafe } from "@/hooks/use-auth"
+import { artifactDraftKey, loadArtifactDraft, writeArtifactDraft, clearArtifactDraft, artifactDraftRevision } from "@/lib/artifact-drafts"
 import { artifactsDesign } from "@/lib/feature-flags"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
@@ -31,8 +32,10 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
  const design = useDesign(workspaceId, slug, version)
  const session = useSessionSafe()
  const commentPageId = design.query.data?.page_id
- const commentKey = session?.data?.user?.id && commentPageId ? `design-comment:v2:${session.data.user.id}:${workspaceId}:${commentPageId}` : null
- const [draft, setDraft] = useState("")
+ const commentKey = artifactDraftKey("design-comment", session?.data?.user?.id, workspaceId, !design.query.isError ? commentPageId : null)
+ const [draftState, setDraftState] = useState<{ key: string | null; text: string }>({ key: null, text: "" })
+ const draft = draftState.key === commentKey ? draftState.text : ""
+ const currentDraft = useRef({ key: commentKey, text: draft }); currentDraft.current = { key: commentKey, text: draft }
  const [delivery, setDelivery] = useState<Record<string, string>>({})
  const [commentError, setCommentError] = useState("")
  const [downloadError, setDownloadError] = useState("")
@@ -47,8 +50,16 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
  const continueScope=JSON.stringify([human,workspaceId,commentPageId])
  useEffect(()=>{continueEpoch.current++;setContinueOpen(false);setContinuing(false);setContinued(null);setContinueError("");return()=>{continueEpoch.current++}},[continueScope])
  const agent = useArtifactAgentDispatch(workspaceId, design.query.data?.page_id, design.query.data?.origin, Boolean(design.query.data?.can_edit && !design.query.isError), "design")
- useEffect(() => { try { setDraft(commentKey ? localStorage.getItem(commentKey) ?? "" : "") } catch { /* Draft remains in the open editor. */ } }, [commentKey])
- const changeDraft = (value: string) => { setDraft(value); if (commentKey) { try { localStorage.setItem(commentKey, value) } catch { /* Draft remains in the open editor. */ } } }
+ useEffect(() => {
+  let active = true
+  if (commentKey) void loadArtifactDraft(commentKey).then(text => { if (active) setDraftState({ key: commentKey, text }) }, () => { if (active) setCommentError("Private draft could not be opened. Your stored copy is retained; reconnect and reopen.") })
+  return () => { active = false }
+ }, [commentKey])
+ const changeDraft = (value: string) => {
+  if (!commentKey || draftState.key !== commentKey) return
+  setDraftState({ key: commentKey, text: value })
+  void writeArtifactDraft(commentKey, value).catch(() => setCommentError("Draft storage failed. Keep this tab open."))
+ }
  const [selectedId, setSelectedId] = useState<string | null>(null)
  const [agentChat, setAgentChat] = useState("")
  const [imageURL, setImageURL] = useState("")
@@ -109,6 +120,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
  }
  const endDrag = () => { drag.current = null }
  if (!artifactsDesign()) return <p className="p-6" role="status">Design is not enabled.</p>
+ if (design.readRevoked) return <p className="p-6" role="alert">Page read access was removed. The local draft has been deleted where this browser could reach it.</p>
  if (design.query.isError) return <p className="p-6 text-destructive" role="alert">{design.query.error.message}</p>
  if (!design.query.data) return <p className="p-6" role="status">Opening Design…</p>
  const width = Math.max(1200, ...design.nodes.map(node => position(node).x + (Number(node.width) || 0) + 100))
@@ -154,12 +166,16 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
   finally{if(continueEpoch.current===epoch)setContinuing(false)}
  }
  const sendComment = async () => {
-  if (!selected || !draft.trim()) return
+  if (!selected || !draft.trim() || !commentKey || draftState.key !== commentKey) return
+  const submitted = { key: commentKey, text: draft, revision: artifactDraftRevision(commentKey) }
   setCommentError("")
   try {
    const checkpoint = design.editable ? await design.save.mutateAsync("Checkpoint before feedback") : undefined
    const posted = await design.comment.mutateAsync({ version: checkpoint?.version ?? viewedVersion, path: "design.json", selector: selected.id, quote: String(selected.text ?? selected.name ?? "").length <= 2000 ? String(selected.text ?? selected.name ?? "") : "", text: draft.trim(), send_to_agent: Boolean(data?.origin && data?.can_edit) })
-   changeDraft("")
+   if (currentDraft.current.key === submitted.key && currentDraft.current.text === submitted.text && artifactDraftRevision(submitted.key) === submitted.revision) {
+    void clearArtifactDraft(submitted.key, submitted.text, submitted.revision).catch(() => setCommentError("Comment saved; local draft cleanup failed."))
+    setDraftState({ key: submitted.key, text: "" })
+   }
    if (data?.origin && data?.can_edit) {
     setDelivery(previous => ({ ...previous, [posted.id]: "Sending to agent…" }))
     const accepted = await agent.dispatch(posted)
@@ -244,7 +260,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
      {data.origin && <a className="mb-3 inline-block text-xs underline" href={`/chat/${encodeURIComponent(data.origin.chat_id)}?workspace_id=${encodeURIComponent(workspaceId)}`}>Open agent chat</a>}
      {data.can_comment !== false && (data.can_comment || data.can_edit) && <div className="mb-4 space-y-2">
       <p className="text-xs text-muted-foreground">{selected ? `On ${selected.name || selected.type}` : "Select a layer on the canvas to leave precise feedback."}</p>
-      <textarea aria-label="Comment for agent" className="min-h-20 w-full rounded border bg-background p-2 text-sm" placeholder="What should change?" value={draft} onChange={event => changeDraft(event.target.value)} />
+      <textarea disabled={!commentKey || draftState.key !== commentKey} aria-label="Comment for agent" className="min-h-20 w-full rounded border bg-background p-2 text-sm" placeholder="What should change?" value={draft} onChange={event => changeDraft(event.target.value)} />
       <Button size="sm" disabled={!selected || !draft.trim() || design.comment.isPending || design.save.isPending} onClick={() => { void sendComment() }}>{data.origin && data.can_edit ? "Send to agent" : "Save comment"}</Button>
       {commentError && <p role="alert" className="text-xs text-destructive">{commentError}</p>}
      </div>}
