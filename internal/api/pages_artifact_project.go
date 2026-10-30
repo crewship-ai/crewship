@@ -108,7 +108,7 @@ func artifactProjectError(w http.ResponseWriter, err error) {
 	case errors.Is(err, artifacts.ErrVersionConflict):
 		writeJSON(w, 409, map[string]any{"error": "This project changed. Read the current version and compare your changes before publishing again. Your draft has not been discarded.", "code": "artifact_version_conflict"})
 	case errors.Is(err, artifacts.ErrVersionQuota):
-		writeJSON(w, 413, map[string]any{"error": "Project history quota is full. Existing versions are retained. Keep your local draft and ask for more storage or save a copy.", "code": "artifact_history_quota"})
+		writeJSON(w, 413, map[string]any{"error": "Project history quota is full. Every existing version is retained and your draft stays in this browser. Copy your source files to keep them; saving more versions is not possible until history space is available.", "code": "artifact_history_quota"})
 	case errors.Is(err, artifacts.ErrVersionInvalid):
 		replyError(w, 400, err.Error())
 	default:
