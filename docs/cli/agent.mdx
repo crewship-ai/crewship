@@ -357,6 +357,9 @@ moment its process would start. The response reports the outcome as `runs`:
 
 The agent's memory, chats and attachments are kept.
 
+With `--format json|yaml|ndjson` the command prints the server's response —
+the `runs` outcome above included — instead of the `Agent deleted.` receipt.
+
 ---
 
 ## `crewship agent runs`
@@ -433,6 +436,9 @@ is in a non-terminal state. A stored `running` record — a run that outlived a
 restart — is stopped at its recorded container and session and reported as
 `stopped` once the runtime confirms it is gone.
 
+With `--format json|yaml|ndjson` the command prints the server's response,
+whose `outcome` (`already_stopped` for an idle agent) is what the two human
+lines above are written from.
 ---
 
 After a server restart, persisted runtime identities remain visible until their
@@ -748,12 +754,26 @@ crewship agent files viktor --filter '.[] | .name'      # piped through the jq b
 | `--download <name>` | string | | Download this file instead of listing. |
 | `--out <path>` | string | basename of file | Output path for `--download`. Pass `-` to stream the file body to stdout. |
 | `--recursive` | bool | `false` | List the whole tree under the agent's namespace instead of one level. |
-| `--subdir <path>` | string | | List this subdirectory of the agent's namespace instead of its root. |
+| `--subdir <path>` | string | | List this subdirectory of the agent's namespace instead of its root. With `--container`, a subdirectory of the container listing. |
+| `--container` | bool | `false` | List files inside the agent's running container (`GET /api/v1/agents/{id}/container-files`) instead of the workspace view. Cannot be combined with `--download` or `--recursive`. |
 | `--filter <expr>` | string | | jq filter applied before rendering (when not downloading). Piped through the external `jq` binary on `PATH`; if `jq` is absent the raw output is shown. |
 
 Downloads stream into a tempfile next to the target and `rename(2)` only on success — Ctrl-C or transport errors mid-copy do not clobber an existing good file with a truncated one.
 
 Backed by `GET /api/v1/agents/{id}/files` and `GET /api/v1/agents/{id}/files/download?path=…`.
+
+---
+
+## `crewship agent learning`
+
+Show the agent's self-learning flag and its audit trail (who changed it, when, and why).
+
+```bash
+crewship agent learning viktor
+crewship agent learning viktor --format json
+```
+
+Backed by `GET /api/v1/agents/{id}/learning`. To change the flag use [`crewship agent update`](#crewship-agent-update) with `--self-learning` and `--learning-reason`.
 
 ---
 

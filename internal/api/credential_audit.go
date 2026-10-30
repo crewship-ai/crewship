@@ -136,8 +136,8 @@ var validAuditEvents = map[CredentialAuditEvent]struct{}{
 // credentialAuditDropped counts audit events that a best-effort call
 // site failed to persist (see recordCredentialEventBestEffort). The
 // mutation the event describes already succeeded, so the row is gone
-// for good — this counter is the "lost compliance event" signal the
-// TODO at the Create call site asked for, exposed on /metrics as
+// for good — this counter is the "lost compliance event" signal for
+// those call sites, exposed on /metrics as
 // crewshipd_credential_audit_dropped_total.
 var credentialAuditDropped atomic.Int64
 

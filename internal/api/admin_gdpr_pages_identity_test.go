@@ -112,6 +112,7 @@ func (r *pagesIdentityRig) seedWorkspaceShapes(t *testing.T, wsID, tag string) {
 		VALUES (?,?,?, 'cron', ?)`, "pid-wh-"+tag, panel, "whhash-"+tag, r.userID)
 
 	r.seedIdentityShapes(t, wsID, tag, crew)
+	seedMooringErasureShapes(t, r, wsID, tag)
 }
 
 // identityShapes is every table eraseSubjectIdentity (#2308) reaches, with
@@ -123,6 +124,9 @@ var identityShapes = map[string]struct {
 	table string
 	rows  int
 }{
+	"mooring_intents_anonymised":               {"mooring_intents", 2},
+	"mooring_collab_artifact_edits_anonymised": {"mooring_collab_artifact_edits", 2},
+
 	"saved_views_removed":                    {"saved_views", 1},
 	"user_notification_prefs_removed":        {"user_notification_prefs", 1},
 	"notification_deliveries_removed":        {"notification_deliveries", 1},
@@ -415,8 +419,8 @@ func TestGDPRErasure_PageTablesNoLongerNameSubject(t *testing.T) {
 		t.Errorf("another user's authorship was cleared too: %d, want 1", otherAuthored)
 	}
 
-	// The pages themselves (the crew page and another member's workbook) are
-	// never deleted by this cascade (§7.1 rule 1b), and neither is the panel —
+	// The pages themselves (the crew page, another member's workbook and
+	// the two Mooring pages) are never deleted by this cascade (§7.1 rule 1b), and neither is the panel —
 	// the webhook goes, the panel stays.
 	var pages, panels int
 	if err := r.db.QueryRow(`SELECT COUNT(*) FROM pages WHERE workspace_id = ?`, pidWSA).Scan(&pages); err != nil {
@@ -426,8 +430,8 @@ func TestGDPRErasure_PageTablesNoLongerNameSubject(t *testing.T) {
 		WHERE p.workspace_id = ?`, pidWSA).Scan(&panels); err != nil {
 		t.Fatalf("count panels: %v", err)
 	}
-	if pages != 2 || panels != 1 {
-		t.Errorf("erasure removed page/panel rows: pages=%d panels=%d, want 2/1", pages, panels)
+	if pages != 4 || panels != 1 {
+		t.Errorf("erasure removed page/panel rows: pages=%d panels=%d, want 4/1", pages, panels)
 	}
 }
 

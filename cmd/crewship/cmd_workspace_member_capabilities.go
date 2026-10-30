@@ -7,7 +7,7 @@ package main
 // prefer the terminal. Four commands under
 // `crewship workspace member capabilities`:
 //
-//   capabilities list <user>            — show grants for a single member
+//   capabilities list [user]            — show grants for one member (or all)
 //   capabilities grant <user> <cap>...  — add capabilities incrementally
 //   capabilities revoke <user> <cap>... — remove capabilities incrementally
 //   capabilities preset <user> <bundle> — apply chat / power / admin
@@ -47,9 +47,14 @@ Bundles map to common combinations:
 }
 
 var workspaceMemberCapsListCmd = &cobra.Command{
-	Use:   "list <user-id>",
-	Short: "Show capabilities granted to one member",
-	Args:  cobra.ExactArgs(1),
+	Use:   "list [user-id]",
+	Short: "Show capabilities granted to one member, or to every member",
+	Long: `With a <user-id>, show that member's capabilities. Without one, list every
+member of the active workspace in a single request (ADMIN+ required).
+
+  crewship workspace member capabilities list
+  crewship workspace member capabilities list ludmila`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -59,7 +64,13 @@ var workspaceMemberCapsListCmd = &cobra.Command{
 		}
 		client := newAPIClient()
 		wsID := client.GetWorkspaceID()
-		userID := args[0]
+		if len(args) == 0 {
+			return listAllMemberCaps(client, wsID)
+		}
+		userID, err := guestCLIPathSegment(args[0])
+		if err != nil {
+			return err
+		}
 		resp, err := client.Get(
 			fmt.Sprintf("/api/v1/workspaces/%s/members/%s/capabilities", wsID, userID),
 		)
@@ -82,6 +93,32 @@ var workspaceMemberCapsListCmd = &cobra.Command{
 		rows := [][]string{{out.UserID, out.Role, strings.Join(out.Capabilities, ", ")}}
 		return f.Auto(out, headers, rows)
 	},
+}
+
+// listAllMemberCaps renders the bulk GET .../members/capabilities route.
+func listAllMemberCaps(client *cli.Client, wsID string) error {
+	resp, err := client.Get(fmt.Sprintf("/api/v1/workspaces/%s/members/capabilities", wsID))
+	if err != nil {
+		return err
+	}
+	if err := cli.CheckError(resp); err != nil {
+		return err
+	}
+	var out struct {
+		Members []struct {
+			UserID       string   `json:"user_id" yaml:"user_id"`
+			Role         string   `json:"role" yaml:"role"`
+			Capabilities []string `json:"capabilities" yaml:"capabilities"`
+		} `json:"members" yaml:"members"`
+	}
+	if err := cli.ReadJSON(resp, &out); err != nil {
+		return err
+	}
+	rows := make([][]string, 0, len(out.Members))
+	for _, m := range out.Members {
+		rows = append(rows, []string{m.UserID, m.Role, strings.Join(m.Capabilities, ", ")})
+	}
+	return newFormatter().Auto(out, []string{"USER", "ROLE", "CAPABILITIES"}, rows)
 }
 
 var workspaceMemberCapsGrantCmd = &cobra.Command{
@@ -173,7 +210,11 @@ func patchCapsRaw(userID string, bodyBytes []byte) error {
 	}
 	client := newAPIClient()
 	wsID := client.GetWorkspaceID()
-	path := fmt.Sprintf("/api/v1/workspaces/%s/members/%s/capabilities", wsID, userID)
+	member, err := guestCLIPathSegment(userID)
+	if err != nil {
+		return err
+	}
+	path := fmt.Sprintf("/api/v1/workspaces/%s/members/%s/capabilities", wsID, member)
 	resp, err := client.Patch(path, json.RawMessage(bodyBytes))
 	if err != nil {
 		return err

@@ -1373,12 +1373,14 @@
         "additionalProperties": false,
         "properties": {
           "base_version": {
+            "description": "Latest code version of the artifact. A different value returns 409 artifact_version_conflict and nothing is written.",
             "format": "int64",
             "maximum": 9007199254740991,
             "minimum": 1,
             "type": "integer"
           },
           "documents": {
+            "description": "1 to 50 documents with unique IDs; the whole request is limited to 1 MiB.",
             "items": {
               "$ref": "#/components/schemas/ArtifactDataWrite"
             },
@@ -1397,11 +1399,13 @@
         "additionalProperties": false,
         "properties": {
           "bytes": {
+            "description": "Stored JSON bytes; a collection holds at most 8 MiB.",
             "maximum": 8388608,
             "minimum": 0,
             "type": "integer"
           },
           "documents": {
+            "description": "Stored documents; a collection holds at most 4096.",
             "maximum": 4096,
             "minimum": 0,
             "type": "integer"
@@ -1428,6 +1432,7 @@
             "type": "integer"
           },
           "collections": {
+            "description": "Collections declared by dashboard.json in code_version; an artifact has at most 32.",
             "items": {
               "$ref": "#/components/schemas/ArtifactDataCollection"
             },
@@ -1457,6 +1462,7 @@
             "type": "string"
           },
           "source_label": {
+            "description": "Display attribution chosen by the server: You, Contributor, Agent or Former contributor. Account, agent and run identifiers are never returned.",
             "type": "string"
           },
           "updated_at": {
@@ -1469,6 +1475,7 @@
             "type": "object"
           },
           "version": {
+            "description": "Stored version of this document; 1 after the first write and incremented by every write.",
             "format": "int64",
             "maximum": 9007199254740991,
             "minimum": 1,
@@ -1489,6 +1496,7 @@
         "additionalProperties": false,
         "properties": {
           "code_version": {
+            "description": "Code version whose dashboard.json declared the visible collections.",
             "format": "int64",
             "maximum": 9007199254740991,
             "minimum": 1,
@@ -1521,6 +1529,7 @@
             "type": "string"
           },
           "ifVersion": {
+            "description": "Expected stored version of this document: 0 when it must not exist yet, otherwise its exact current version. Any mismatch rejects the whole batch with 409 artifact_data_conflict.",
             "format": "int64",
             "maximum": 9007199254740990,
             "minimum": 0,
@@ -1581,7 +1590,7 @@
             "type": "string"
           },
           "path": {
-            "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
+            "description": "Canonical relative project path, at most 512 UTF-8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
             "maxLength": 512,
             "minLength": 1,
             "type": "string"
@@ -1639,7 +1648,7 @@
         "additionalProperties": false,
         "properties": {
           "path": {
-            "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
+            "description": "Canonical relative project path, at most 512 UTF-8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
             "maxLength": 512,
             "minLength": 1,
             "type": "string"
@@ -1655,6 +1664,7 @@
             "type": "string"
           },
           "send_to_agent": {
+            "description": "Queue an agent task only when the owner has the required source-chat authority; delivery and run start are separate.",
             "type": "boolean"
           },
           "text": {
@@ -1663,6 +1673,7 @@
             "type": "string"
           },
           "version": {
+            "description": "Exact retained version visible to the commenter; owners and editors comment on latest, other commenters on the shared version.",
             "format": "int64",
             "minimum": 1,
             "type": "integer"
@@ -1681,6 +1692,7 @@
         "additionalProperties": false,
         "properties": {
           "base_version": {
+            "description": "Creation has no existing base; if supplied this must be 0.",
             "enum": [
               0
             ],
@@ -1690,13 +1702,13 @@
             "type": "boolean"
           },
           "entrypoint": {
-            "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
+            "description": "Canonical relative project path, at most 512 UTF-8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
             "maxLength": 512,
             "minLength": 1,
             "type": "string"
           },
           "files": {
-            "description": "Complete atomic file set; omitted files are not in the new version. Paths must be unique. The default server version limit is32MiB of content.",
+            "description": "Complete atomic file set; omitted files are not in the new version. Paths must be unique. The default server version limit is 32 MiB of content.",
             "items": {
               "$ref": "#/components/schemas/ArtifactProjectFileInput"
             },
@@ -1779,7 +1791,7 @@
             "type": "string"
           },
           "path": {
-            "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
+            "description": "Canonical relative project path, at most 512 UTF-8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
             "maxLength": 512,
             "minLength": 1,
             "type": "string"
@@ -1804,7 +1816,7 @@
             "type": "string"
           },
           "path": {
-            "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
+            "description": "Canonical relative project path, at most 512 UTF-8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
             "maxLength": 512,
             "minLength": 1,
             "type": "string"
@@ -1825,13 +1837,13 @@
             "type": "string"
           },
           "entrypoint": {
-            "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
+            "description": "Canonical relative project path, at most 512 UTF-8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
             "maxLength": 512,
             "minLength": 1,
             "type": "string"
           },
           "files": {
-            "description": "Complete atomic file set; omitted files are not in the new version. Paths must be unique. The default server version limit is32MiB of content.",
+            "description": "Complete atomic file set; omitted files are not in the new version. Paths must be unique. The default server version limit is 32 MiB of content.",
             "items": {
               "$ref": "#/components/schemas/ArtifactProjectFile"
             },
@@ -1913,18 +1925,19 @@
         "additionalProperties": false,
         "properties": {
           "base_version": {
+            "description": "Latest version the caller read; a stale value returns 409 artifact_version_conflict without writing.",
             "format": "int64",
             "minimum": 1,
             "type": "integer"
           },
           "entrypoint": {
-            "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
+            "description": "Canonical relative project path, at most 512 UTF-8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
             "maxLength": 512,
             "minLength": 1,
             "type": "string"
           },
           "files": {
-            "description": "Complete atomic file set; omitted files are not in the new version. Paths must be unique. The default server version limit is32MiB of content.",
+            "description": "Complete atomic file set; omitted files are not in the new version. Paths must be unique. The default server version limit is 32 MiB of content.",
             "items": {
               "$ref": "#/components/schemas/ArtifactProjectFileInput"
             },
@@ -1948,13 +1961,23 @@
       "ArtifactProjectQuota": {
         "additionalProperties": false,
         "properties": {
+          "level": {
+            "description": "none below 80% of limit_bytes, near from 80%, critical from 95%, full when used_bytes reaches limit_bytes. Omitted when the quota is withheld (shared or editor views report limit_bytes 0).",
+            "enum": [
+              "none",
+              "near",
+              "critical",
+              "full"
+            ],
+            "type": "string"
+          },
           "limit_bytes": {
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "retention": {
-            "description": "Visible keep-all policy; the server never silently deletes retained versions. Quota refusal preserves existing data.",
+            "description": "Owner views use keep-all with history usage; non-owner editors use latest-version-only and other readers shared-version-only, with zero usage/limit values. These visibility labels do not prune stored versions; quota refusal preserves existing data.",
             "type": "string"
           },
           "used_bytes": {
@@ -1963,6 +1986,7 @@
             "type": "integer"
           },
           "warning": {
+            "description": "True from the near threshold upwards; prefer level.",
             "type": "boolean"
           }
         },
@@ -2031,6 +2055,58 @@
         "required": [
           "text",
           "version"
+        ],
+        "type": "object"
+      },
+      "ArtifactProjectRetentionPreview": {
+        "additionalProperties": false,
+        "description": "Owner-only dry run of the proposed history rule. Nothing listed in would_thin is deleted; retention stays keep-all.",
+        "properties": {
+          "dry_run": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
+          "evaluated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "policy": {
+            "type": "string"
+          },
+          "recent_days": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "retained": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "would_thin": {
+            "items": {
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "policy",
+          "recent_days",
+          "dry_run",
+          "evaluated_at",
+          "total",
+          "retained",
+          "would_thin"
         ],
         "type": "object"
       },
@@ -2112,6 +2188,9 @@
           "quota": {
             "$ref": "#/components/schemas/ArtifactProjectQuota"
           },
+          "retention_preview": {
+            "$ref": "#/components/schemas/ArtifactProjectRetentionPreview"
+          },
           "shared_version": {
             "format": "int64",
             "minimum": 0,
@@ -2158,7 +2237,7 @@
             "type": "string"
           },
           "entrypoint": {
-            "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
+            "description": "Canonical relative project path, at most 512 UTF-8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused.",
             "maxLength": 512,
             "minLength": 1,
             "type": "string"
@@ -2191,11 +2270,13 @@
         "additionalProperties": false,
         "properties": {
           "base_version": {
+            "description": "Latest version for compare-and-swap; neither restore nor share may race a newer save.",
             "format": "int64",
             "minimum": 1,
             "type": "integer"
           },
           "version": {
+            "description": "Retained version to restore as a new version, or pin as the shared version.",
             "format": "int64",
             "minimum": 1,
             "type": "integer"
@@ -2243,7 +2324,7 @@
           },
           "deck": {
             "additionalProperties": true,
-            "description": "Existing Slides schema version1;1920×1080;fixed Go Regular font; bounded100slides/1000elements/2MiB canonical deck.",
+            "description": "Slides deck derived from deck.json and one file per slide: schema version 1, a 1920×1080 canvas and the Go Regular font, with at most 100 slides, 1000 elements and 2 MiB.",
             "type": "object"
           }
         },
@@ -7275,6 +7356,15 @@
           "created_by_test": {
             "type": "boolean"
           },
+          "expected_human": {
+            "type": "string"
+          },
+          "initial_state": {
+            "description": "Optional recovery copy, at most 4 MiB decoded Yjs. Requires source_page_id and expected_human together, fresh human source Edit and Page create authority.",
+            "format": "byte",
+            "maxLength": 5592408,
+            "type": "string"
+          },
           "name": {
             "maxLength": 200,
             "minLength": 1,
@@ -7282,6 +7372,10 @@
           },
           "slug": {
             "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+            "type": "string"
+          },
+          "source_page_id": {
+            "maxLength": 128,
             "type": "string"
           }
         },
@@ -7380,7 +7474,7 @@
       },
       "DesignNodePatch": {
         "additionalProperties": true,
-        "description": "Partial fields merge into an existing Y.Map. A new node also requires type, x, y, width and height. The server validates the complete resulting document; maximum2000 nodes and4MiB encoded Yjs state.",
+        "description": "Partial fields merge into an existing Y.Map. A new node also requires type, x, y, width and height. The server validates the complete resulting document: at most 2000 nodes and 4 MiB of encoded Yjs state.",
         "properties": {
           "fill": {
             "type": "string"
@@ -7619,6 +7713,7 @@
             "type": "string"
           },
           "shared_version": {
+            "description": "Version pinned by the owner for read-only callers; 0 while nothing is shared.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
@@ -7689,6 +7784,7 @@
             "type": "integer"
           },
           "shared_version": {
+            "description": "Version pinned by the owner for read-only callers; 0 while nothing is shared.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
@@ -12860,6 +12956,109 @@
         ],
         "type": "object"
       },
+      "LocalDraftKeyRequest": {
+        "description": "At most 4 KiB JSON; requires a current human credential and current read of the immutable Page.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "envelope": {
+                "enum": [
+                  ""
+                ],
+                "type": "string"
+              },
+              "human": {
+                "description": "Expected original human identity; must equal the current credential.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "key": {
+                "description": "Canonical base64 encoding of exactly 32 bytes.",
+                "pattern": "^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$",
+                "type": "string"
+              },
+              "operation": {
+                "enum": [
+                  "wrap"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "human",
+              "operation",
+              "key"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "envelope": {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              "human": {
+                "description": "Expected original human identity; must equal the current credential.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "key": {
+                "enum": [
+                  ""
+                ],
+                "type": "string"
+              },
+              "operation": {
+                "enum": [
+                  "unwrap"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "human",
+              "operation",
+              "envelope"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "LocalDraftKeyResponse": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "envelope": {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "envelope"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "description": "Canonical base64 encoding of exactly 32 bytes.",
+                "pattern": "^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]=$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "key"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "MCPServerError": {
         "properties": {
           "message": {
@@ -14040,6 +14239,16 @@
           "operation_inflight": {
             "type": "boolean"
           },
+          "outcome": {
+            "enum": [
+              "saved",
+              "proposal"
+            ],
+            "type": "string"
+          },
+          "proposal_id": {
+            "type": "string"
+          },
           "run_id": {
             "type": "string"
           },
@@ -14094,6 +14303,7 @@
               "acquire",
               "renew",
               "apply",
+              "propose",
               "release"
             ],
             "type": "string"
@@ -14186,6 +14396,15 @@
       "NativeCraftDocumentQuota": {
         "additionalProperties": false,
         "properties": {
+          "level": {
+            "enum": [
+              "none",
+              "near",
+              "critical",
+              "full"
+            ],
+            "type": "string"
+          },
           "limitBytes": {
             "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
             "maxLength": 19,
@@ -14474,6 +14693,131 @@
           "enginePin",
           "editorBundle",
           "editorURL"
+        ],
+        "type": "object"
+      },
+      "NativeCraftProposal": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/NativeCraftHolder"
+          },
+          "base_version": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^ncp_[a-f0-9]{24}$",
+            "type": "string"
+          },
+          "result_version": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "enum": [
+              "open",
+              "accepted",
+              "rejected",
+              "stale"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "maxLength": 500,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "author",
+          "base_version",
+          "summary",
+          "created_at",
+          "state"
+        ],
+        "type": "object"
+      },
+      "NativeCraftProposalAcceptReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "proposal": {
+            "$ref": "#/components/schemas/NativeCraftProposal"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/NativeCraftSnapshotReceipt"
+          }
+        },
+        "required": [
+          "proposal",
+          "receipt"
+        ],
+        "type": "object"
+      },
+      "NativeCraftProposalAcceptRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "generation": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "sessionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId",
+          "generation"
+        ],
+        "type": "object"
+      },
+      "NativeCraftProposalDocument": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "description": "Base64 of the complete native document, at most 32 MiB decoded; never an HTML export.",
+            "format": "byte",
+            "maxLength": 44739244,
+            "type": "string"
+          },
+          "content_hash": {
+            "pattern": "^sha256:[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "engine_pin": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "proposal": {
+            "$ref": "#/components/schemas/NativeCraftProposal"
+          }
+        },
+        "required": [
+          "proposal",
+          "bytes",
+          "content_hash",
+          "engine_pin"
+        ],
+        "type": "object"
+      },
+      "NativeCraftProposalList": {
+        "additionalProperties": false,
+        "properties": {
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/NativeCraftProposal"
+            },
+            "maxItems": 16,
+            "type": "array"
+          }
+        },
+        "required": [
+          "proposals"
         ],
         "type": "object"
       },
@@ -23846,11 +24190,13 @@
         "additionalProperties": false,
         "properties": {
           "base_version": {
+            "description": "Policy version the caller last read. A different current version returns 409 stale_policy.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
           },
           "crew_ids": {
+            "description": "Complete replacement allowlist; every ID must be an active crew of this workspace.",
             "items": {
               "maxLength": 128,
               "minLength": 1,
@@ -23875,6 +24221,7 @@
         "additionalProperties": false,
         "properties": {
           "crew_ids": {
+            "description": "Active crews of this workspace that may create artifacts.",
             "items": {
               "maxLength": 128,
               "minLength": 1,
@@ -23885,9 +24232,11 @@
             "uniqueItems": true
           },
           "enabled": {
+            "description": "Whether agents of the listed crews may create artifacts for their human.",
             "type": "boolean"
           },
           "version": {
+            "description": "Policy version; 0 until the policy is first saved. Send it back as base_version.",
             "format": "int64",
             "minimum": 0,
             "type": "integer"
@@ -127176,7 +127525,7 @@
     },
     "/api/v1/pages/artifacts": {
       "post": {
-        "description": "Create pages artifacts (POST /api/v1/pages/artifacts).",
+        "description": "Create an artifact and publish its first immutable version from `entrypoint`, `files` and an optional `message`. Requires a workspace OWNER, ADMIN or MANAGER (or the page-create capability) with a `pages:write` credential. A slug that is already used returns 409 `artifact_slug_taken`. Requires the `artifact_projects` feature flag or its instance bypass.",
         "operationId": "post_api_v1_pages_artifacts",
         "requestBody": {
           "content": {
@@ -127291,7 +127640,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Create pages artifacts",
+        "summary": "Create artifact",
         "tags": [
           "pages"
         ],
@@ -127300,7 +127649,7 @@
     },
     "/api/v1/pages/artifacts/availability": {
       "get": {
-        "description": "Get pages artifacts availability (GET /api/v1/pages/artifacts/availability).",
+        "description": "Report whether Artifacts are enabled for the selected workspace. Artifacts are off by default: enable the `artifact_projects` workspace feature flag, or set CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true for every workspace on the instance.",
         "operationId": "get_api_v1_pages_artifacts_availability",
         "parameters": [
           {
@@ -127376,7 +127725,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Get pages artifacts availability",
+        "summary": "Check Artifacts availability",
         "tags": [
           "pages"
         ],
@@ -127385,7 +127734,7 @@
     },
     "/api/v1/pages/design": {
       "post": {
-        "description": "Submit pages design (POST /api/v1/pages/design).",
+        "description": "Create a Design canvas and its first version. Requires a workspace OWNER, ADMIN or MANAGER (or the page-create capability) with a `pages:write` credential; agent runs cannot create one. Requires the `artifacts_design` feature flag.",
         "operationId": "post_api_v1_pages_design",
         "parameters": [
           {
@@ -127511,7 +127860,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Submit pages design",
+        "summary": "Create Design",
         "tags": [
           "pages"
         ],
@@ -131479,7 +131828,7 @@
     },
     "/api/v1/pages/{slug}/artifact": {
       "get": {
-        "description": "Get page artifact (GET /api/v1/pages/{slug}/artifact).",
+        "description": "Read one consistent artifact snapshot: the selected version's files, latest and shared version numbers, history quota, comments and the caller's capabilities. The owner reads any version (optional `version` query) and the full history; an editor reads the latest version; other readers see only the shared version. An artifact the caller may not see returns 404.",
         "operationId": "get_api_v1_pages_slug_artifact",
         "parameters": [
           {
@@ -131583,7 +131932,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Get page artifact",
+        "summary": "Get artifact",
         "tags": [
           "pages"
         ],
@@ -131592,7 +131941,7 @@
     },
     "/api/v1/pages/{slug}/artifact/comments": {
       "get": {
-        "description": "List page artifact comments (GET /api/v1/pages/{slug}/artifact/comments).",
+        "description": "Return the same authorized snapshot as Get artifact. The owner receives comments on every version; other callers receive only the comments on the version they may read.",
         "operationId": "get_api_v1_pages_slug_artifact_comments",
         "parameters": [
           {
@@ -131716,14 +132065,14 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "List page artifact comments",
+        "summary": "List artifact comments",
         "tags": [
           "pages"
         ],
         "x-crewship-read-only": true
       },
       "post": {
-        "description": "Create page artifact comments (POST /api/v1/pages/{slug}/artifact/comments).",
+        "description": "Anchor a comment to an element (`path`, `selector`, `quote`) of the version the caller currently sees. A stale version returns 409 `artifact_version_conflict`; an anchor that no longer matches returns 409 `artifact_anchor_mismatch`. Set `send_to_agent` to queue the comment for the artifact's agent.",
         "operationId": "post_api_v1_pages_slug_artifact_comments",
         "parameters": [
           {
@@ -131848,7 +132197,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Create page artifact comments",
+        "summary": "Comment on artifact",
         "tags": [
           "pages"
         ],
@@ -131857,7 +132206,7 @@
     },
     "/api/v1/pages/{slug}/artifact/comments/{commentId}/reply": {
       "post": {
-        "description": "Submit page artifact comment reply (POST /api/v1/pages/{slug}/artifact/comments/{commentId}/reply).",
+        "description": "Record a reply to a comment against a later `version`, or against the same version with `needs_clarification`. Owner only, or the agent run acting for the owner.",
         "operationId": "post_api_v1_pages_slug_artifact_comments_commentId_reply",
         "parameters": [
           {
@@ -131990,7 +132339,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Submit page artifact comment reply",
+        "summary": "Reply to artifact comment",
         "tags": [
           "pages"
         ],
@@ -131999,7 +132348,7 @@
     },
     "/api/v1/pages/{slug}/artifact/data": {
       "get": {
-        "description": "Get page artifact data (GET /api/v1/pages/{slug}/artifact/data).",
+        "description": "List the data collections declared by `dashboard.json` in code `version`, with their document counts and sizes. The owner may pass any version, an editor the latest version and other readers only the shared version. Requires the `artifact_projects` and `artifact_dashboard_data` feature flags.",
         "operationId": "get_api_v1_pages_slug_artifact_data",
         "parameters": [
           {
@@ -132131,7 +132480,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Get page artifact data",
+        "summary": "List Dashboard collections",
         "tags": [
           "pages"
         ],
@@ -132140,7 +132489,7 @@
     },
     "/api/v1/pages/{slug}/artifact/data/{collection}": {
       "get": {
-        "description": "Get page artifact data (GET /api/v1/pages/{slug}/artifact/data/{collection}).",
+        "description": "Read every document of one collection declared by code `version`. Data is shared by all versions of the artifact; the version only selects which collections are visible. Requires the `artifact_projects` and `artifact_dashboard_data` feature flags.",
         "operationId": "get_api_v1_pages_slug_artifact_data_collection",
         "parameters": [
           {
@@ -132280,14 +132629,14 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Get page artifact data",
+        "summary": "Read Dashboard collection",
         "tags": [
           "pages"
         ],
         "x-crewship-read-only": true
       },
       "post": {
-        "description": "Submit page artifact data (POST /api/v1/pages/{slug}/artifact/data/{collection}).",
+        "description": "Atomically upsert up to 50 documents. `base_version` must equal the latest code version and each document's `ifVersion` must equal its stored version (0 for a new document); any mismatch returns 409 and nothing is written. Owner only, or the agent run acting for the owner. Exceeding a dataset limit returns 413 `artifact_data_quota`.",
         "operationId": "post_api_v1_pages_slug_artifact_data_collection",
         "parameters": [
           {
@@ -132420,7 +132769,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Submit page artifact data",
+        "summary": "Write Dashboard documents",
         "tags": [
           "pages"
         ],
@@ -132429,7 +132778,7 @@
     },
     "/api/v1/pages/{slug}/artifact/export.pdf": {
       "get": {
-        "description": "Get page artifact export.pdf (GET /api/v1/pages/{slug}/artifact/export.pdf).",
+        "description": "Render the Slides projection of code `version` to PDF. Access rules match Read artifact Slides. Text that does not fit its frame returns 422 `artifact_slides_overflow`; an export over the size limit returns 413. Requires the `artifact_projects` and `artifact_slides` feature flags.",
         "operationId": "get_api_v1_pages_slug_artifact_export.pdf",
         "parameters": [
           {
@@ -132450,7 +132799,7 @@
             }
           },
           {
-            "description": "Exact selected immutable code version; required for both owner and current shared reader.",
+            "description": "Exact immutable code version to project; required for every caller. The owner may select any version, an editor only the latest version and other readers only the shared version.",
             "in": "query",
             "name": "version",
             "required": true,
@@ -132566,7 +132915,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Get page artifact export.pdf",
+        "summary": "Export artifact Slides as PDF",
         "tags": [
           "pages"
         ],
@@ -132575,7 +132924,7 @@
     },
     "/api/v1/pages/{slug}/artifact/restore": {
       "post": {
-        "description": "Restore page artifact (POST /api/v1/pages/{slug}/artifact/restore).",
+        "description": "Publish a copy of an earlier `version` as the new latest version. History is never rewritten. `base_version` must equal the current latest version, otherwise 409 `artifact_version_conflict`. Owner only, or the agent run acting for the owner.",
         "operationId": "post_api_v1_pages_slug_artifact_restore",
         "parameters": [
           {
@@ -132700,7 +133049,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Restore page artifact",
+        "summary": "Restore artifact version",
         "tags": [
           "pages"
         ],
@@ -132709,7 +133058,7 @@
     },
     "/api/v1/pages/{slug}/artifact/share": {
       "post": {
-        "description": "Submit page artifact share (POST /api/v1/pages/{slug}/artifact/share).",
+        "description": "Pin `version` as the shared version that workspace readers see and record an audit entry. `base_version` must equal the current latest version, otherwise 409 `artifact_version_conflict`. Owner only; an Edit grant or an agent run cannot change the shared version.",
         "operationId": "post_api_v1_pages_slug_artifact_share",
         "parameters": [
           {
@@ -132834,7 +133183,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Submit page artifact share",
+        "summary": "Share artifact version",
         "tags": [
           "pages"
         ],
@@ -132843,7 +133192,7 @@
     },
     "/api/v1/pages/{slug}/artifact/slides": {
       "get": {
-        "description": "List page artifact slides (GET /api/v1/pages/{slug}/artifact/slides).",
+        "description": "Return the Slides projection (deck and comment anchors) of an artifact whose code version contains `deck.json` and one file per slide. The `version` query is required: the owner may choose any version, an editor the latest and other readers only the shared version. Unsupported content returns 422. Requires the `artifact_projects` and `artifact_slides` feature flags.",
         "operationId": "get_api_v1_pages_slug_artifact_slides",
         "parameters": [
           {
@@ -132864,7 +133213,7 @@
             }
           },
           {
-            "description": "Exact selected immutable code version; required for both owner and current shared reader.",
+            "description": "Exact immutable code version to project; required for every caller. The owner may select any version, an editor only the latest version and other readers only the shared version.",
             "in": "query",
             "name": "version",
             "required": true,
@@ -132979,7 +133328,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "List page artifact slides",
+        "summary": "Read artifact Slides",
         "tags": [
           "pages"
         ],
@@ -132988,7 +133337,7 @@
     },
     "/api/v1/pages/{slug}/artifact/versions": {
       "get": {
-        "description": "List page artifact versions (GET /api/v1/pages/{slug}/artifact/versions).",
+        "description": "Return the same authorized snapshot as Get artifact. Only the owner receives the complete version history; other callers receive the single version they may read.",
         "operationId": "get_api_v1_pages_slug_artifact_versions",
         "parameters": [
           {
@@ -133092,14 +133441,14 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "List page artifact versions",
+        "summary": "List artifact versions",
         "tags": [
           "pages"
         ],
         "x-crewship-read-only": true
       },
       "post": {
-        "description": "Create page artifact versions (POST /api/v1/pages/{slug}/artifact/versions).",
+        "description": "Publish a new immutable version. `base_version` must equal the current latest version (compare-and-swap); otherwise the request fails with 409 `artifact_version_conflict` and nothing is written. Allowed for the owner and for users with an Edit grant. A version above 32 MiB or a history above 256 MiB returns 413 `artifact_history_quota`; existing versions are kept.",
         "operationId": "post_api_v1_pages_slug_artifact_versions",
         "parameters": [
           {
@@ -133224,7 +133573,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Create page artifact versions",
+        "summary": "Publish artifact version",
         "tags": [
           "pages"
         ],
@@ -135975,6 +136324,733 @@
         "x-crewship-read-only": true
       }
     },
+    "/api/v1/pages/{slug}/craft/proposals": {
+      "get": {
+        "description": "List page craft proposals (GET /api/v1/pages/{slug}/craft/proposals).",
+        "operationId": "get_api_v1_pages_slug_craft_proposals",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Private original-human admission for this exact Page.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftProposalList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List page craft proposals",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/craft/proposals/{proposalID}": {
+      "get": {
+        "description": "Get page craft proposal (GET /api/v1/pages/{slug}/craft/proposals/{proposalID}).",
+        "operationId": "get_api_v1_pages_slug_craft_proposals_proposalID",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposalID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Private original-human admission for this exact Page.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftProposalDocument"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get page craft proposal",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/craft/proposals/{proposalID}/accept": {
+      "post": {
+        "description": "Submit page craft proposal accept (POST /api/v1/pages/{slug}/craft/proposals/{proposalID}/accept).",
+        "operationId": "post_api_v1_pages_slug_craft_proposals_proposalID_accept",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposalID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Private original-human admission for this exact Page.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeCraftProposalAcceptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftProposalAcceptReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page craft proposal accept",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/craft/proposals/{proposalID}/reject": {
+      "post": {
+        "description": "Reject page craft proposal (POST /api/v1/pages/{slug}/craft/proposals/{proposalID}/reject).",
+        "operationId": "post_api_v1_pages_slug_craft_proposals_proposalID_reject",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposalID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Private original-human admission for this exact Page.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NativeCraftEmptyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftProposal"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Reject page craft proposal",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/pages/{slug}/craft/sessions": {
       "post": {
         "description": "Create page craft sessions (POST /api/v1/pages/{slug}/craft/sessions).",
@@ -136229,7 +137305,7 @@
     },
     "/api/v1/pages/{slug}/craft/tasks": {
       "post": {
-        "description": "Create page craft tasks (POST /api/v1/pages/{slug}/craft/tasks).",
+        "description": "Ask an agent to edit the whole Craft document on behalf of the calling human. The body is exactly `chat_id`, `message_id` and `whole_document: true`. Returns 202 with a `work_id` in state `queued`; poll Get Craft agent task for progress. Answers 503 unless native Craft and Craft agents are enabled on the instance.",
         "operationId": "post_api_v1_pages_slug_craft_tasks",
         "parameters": [
           {
@@ -136382,7 +137458,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Create page craft tasks",
+        "summary": "Start Craft agent task",
         "tags": [
           "pages"
         ],
@@ -136391,7 +137467,7 @@
     },
     "/api/v1/pages/{slug}/craft/tasks/cancel": {
       "post": {
-        "description": "Cancel page craft tasks (POST /api/v1/pages/{slug}/craft/tasks/cancel).",
+        "description": "Stop the agent that currently holds the Craft lease for this document, revoke its grant and request cancellation of its run. The body must be an empty object. Only the human who started the task may stop it. Returns 200 when the run stopped, or 202 while the stop is still pending.",
         "operationId": "post_api_v1_pages_slug_craft_tasks_cancel",
         "parameters": [
           {
@@ -136536,7 +137612,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Cancel page craft tasks",
+        "summary": "Stop Craft agent task",
         "tags": [
           "pages"
         ],
@@ -136545,7 +137621,7 @@
     },
     "/api/v1/pages/{slug}/craft/tasks/{workID}": {
       "get": {
-        "description": "Get page craft task (GET /api/v1/pages/{slug}/craft/tasks/{workID}).",
+        "description": "Read the state, recorded tool events and last committed save receipt of a Craft agent task. Only the human who started the task can read it; document content is never included.",
         "operationId": "get_api_v1_pages_slug_craft_tasks_workID",
         "parameters": [
           {
@@ -136687,7 +137763,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Get page craft task",
+        "summary": "Get Craft agent task",
         "tags": [
           "pages"
         ],
@@ -136696,7 +137772,7 @@
     },
     "/api/v1/pages/{slug}/design": {
       "get": {
-        "description": "Get page design (GET /api/v1/pages/{slug}/design).",
+        "description": "Read the live collaborative canvas, or the historical checkpoint chosen with `version`. Without `version`, authorized readers receive the live canvas too; a non-editor selecting a retained version is limited to the shared version. Requires the `artifacts_design` feature flag.",
         "operationId": "get_api_v1_pages_slug_design",
         "parameters": [
           {
@@ -136726,7 +137802,7 @@
             }
           },
           {
-            "description": "Historical checkpoint. Read-only callers may select only the shared pin; omit to follow the live canvas.",
+            "description": "Historical checkpoint. Ordinary Read/Comment audiences may select only the shared pin. Workspace ADMIN/OWNER retain full history with read-scoped credentials; omit for the latest authorized canvas.",
             "in": "query",
             "name": "version",
             "required": false,
@@ -136840,7 +137916,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Get page design",
+        "summary": "Get Design",
         "tags": [
           "pages"
         ],
@@ -136849,7 +137925,7 @@
     },
     "/api/v1/pages/{slug}/design/agent": {
       "post": {
-        "description": "Submit page design agent (POST /api/v1/pages/{slug}/design/agent).",
+        "description": "Link the Design to one of the owner's private agent chats (`chat_id`) so the owner can send it work. Owner only; this grants the agent no access by itself.",
         "operationId": "post_api_v1_pages_slug_design_agent",
         "parameters": [
           {
@@ -136983,7 +138059,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Submit page design agent",
+        "summary": "Connect Design agent",
         "tags": [
           "pages"
         ],
@@ -136992,7 +138068,7 @@
     },
     "/api/v1/pages/{slug}/design/comments": {
       "get": {
-        "description": "List page design comments (GET /api/v1/pages/{slug}/design/comments).",
+        "description": "List Design comments. Callers without edit rights receive only the comments on the shared version.",
         "operationId": "get_api_v1_pages_slug_design_comments",
         "parameters": [
           {
@@ -137125,14 +138201,14 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "List page design comments",
+        "summary": "List Design comments",
         "tags": [
           "pages"
         ],
         "x-crewship-read-only": true
       },
       "post": {
-        "description": "Create page design comments (POST /api/v1/pages/{slug}/design/comments).",
+        "description": "Anchor a comment to a node (`selector`) of an immutable Design `version`. Requires edit rights or a Comment grant.",
         "operationId": "post_api_v1_pages_slug_design_comments",
         "parameters": [
           {
@@ -137266,7 +138342,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Create page design comments",
+        "summary": "Comment on Design",
         "tags": [
           "pages"
         ],
@@ -137275,7 +138351,7 @@
     },
     "/api/v1/pages/{slug}/design/operations": {
       "post": {
-        "description": "Create page design operations (POST /api/v1/pages/{slug}/design/operations).",
+        "description": "Apply up to 500 typed operations (upsert, delete, reorder) to the live canvas and publish the result as a new version in one transaction. A concurrent change returns 409. Requires edit rights.",
         "operationId": "post_api_v1_pages_slug_design_operations",
         "parameters": [
           {
@@ -137409,7 +138485,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Create page design operations",
+        "summary": "Apply Design operations",
         "tags": [
           "pages"
         ],
@@ -137418,7 +138494,7 @@
     },
     "/api/v1/pages/{slug}/design/restore": {
       "post": {
-        "description": "Restore page design (POST /api/v1/pages/{slug}/design/restore).",
+        "description": "Replace the live canvas with an earlier `version` and publish it as a new version. Requires edit rights.",
         "operationId": "post_api_v1_pages_slug_design_restore",
         "parameters": [
           {
@@ -137552,7 +138628,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Restore page design",
+        "summary": "Restore Design version",
         "tags": [
           "pages"
         ],
@@ -137561,7 +138637,7 @@
     },
     "/api/v1/pages/{slug}/design/share": {
       "post": {
-        "description": "Submit page design share (POST /api/v1/pages/{slug}/design/share).",
+        "description": "Pin `version` as the shared version that read-only callers see. Owner only; an Edit grant does not allow sharing.",
         "operationId": "post_api_v1_pages_slug_design_share",
         "parameters": [
           {
@@ -137695,7 +138771,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Submit page design share",
+        "summary": "Share Design version",
         "tags": [
           "pages"
         ],
@@ -137704,7 +138780,7 @@
     },
     "/api/v1/pages/{slug}/design/snapshots": {
       "post": {
-        "description": "Create page design snapshots (POST /api/v1/pages/{slug}/design/snapshots).",
+        "description": "Publish the current live canvas as a new immutable version. Requires edit rights.",
         "operationId": "post_api_v1_pages_slug_design_snapshots",
         "parameters": [
           {
@@ -137838,7 +138914,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Create page design snapshots",
+        "summary": "Create Design checkpoint",
         "tags": [
           "pages"
         ],
@@ -137847,7 +138923,7 @@
     },
     "/api/v1/pages/{slug}/design/versions": {
       "get": {
-        "description": "List page design versions (GET /api/v1/pages/{slug}/design/versions).",
+        "description": "List Design versions. Editors receive the full history; read-only callers receive only the shared version.",
         "operationId": "get_api_v1_pages_slug_design_versions",
         "parameters": [
           {
@@ -137980,7 +139056,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "List page design versions",
+        "summary": "List Design versions",
         "tags": [
           "pages"
         ],
@@ -137989,7 +139065,7 @@
     },
     "/api/v1/pages/{slug}/design/ws": {
       "get": {
-        "description": "List page design ws (GET /api/v1/pages/{slug}/design/ws).",
+        "description": "Upgrade to a WebSocket that carries standard Yjs sync and awareness frames for the live canvas. Read-only callers receive updates but cannot write. Live edits change the canvas but do not publish a version; use Create Design checkpoint.",
         "operationId": "get_api_v1_pages_slug_design_ws",
         "parameters": [
           {
@@ -138114,7 +139190,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "List page design ws",
+        "summary": "Open Design collaboration socket",
         "tags": [
           "pages"
         ],
@@ -140769,6 +141845,131 @@
           }
         ],
         "summary": "Restore page document",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/draft-key": {
+      "post": {
+        "description": "Submit page draft key (POST /api/v1/pages/{slug}/draft-key).",
+        "operationId": "post_api_v1_pages_slug_draft-key",
+        "parameters": [
+          {
+            "description": "Explicit immutable @Page ID; slug aliases are rejected.",
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "pattern": "^@[A-Za-z0-9_-]{1,128}$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug; the workspace header is also accepted.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalDraftKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalDraftKeyResponse"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page draft key",
         "tags": [
           "pages"
         ],
@@ -169116,7 +170317,7 @@
     },
     "/api/v1/workspaces/{workspaceId}/artifact-creation-policy": {
       "get": {
-        "description": "Get workspace artifact creation policy (GET /api/v1/workspaces/{workspaceId}/artifact-creation-policy).",
+        "description": "Read the workspace ceiling for agent-created artifacts: whether it is enabled, which crews may create artifacts and the policy `version`. Workspace OWNER or ADMIN only.",
         "operationId": "get_api_v1_workspaces_workspaceId_artifact-creation-policy",
         "parameters": [
           {
@@ -169220,14 +170421,14 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Get workspace artifact creation policy",
+        "summary": "Get artifact creation policy",
         "tags": [
           "workspaces"
         ],
         "x-crewship-read-only": true
       },
       "put": {
-        "description": "Update workspace artifact creation policy (PUT /api/v1/workspaces/{workspaceId}/artifact-creation-policy).",
+        "description": "Replace the agent artifact-creation ceiling. `base_version` must equal the current policy version, otherwise 409 `stale_policy`. Every crew must be an active crew of this workspace. Workspace OWNER or ADMIN only; the change is audited.",
         "operationId": "put_api_v1_workspaces_workspaceId_artifact-creation-policy",
         "parameters": [
           {
@@ -169352,7 +170553,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Update workspace artifact creation policy",
+        "summary": "Update artifact creation policy",
         "tags": [
           "workspaces"
         ],

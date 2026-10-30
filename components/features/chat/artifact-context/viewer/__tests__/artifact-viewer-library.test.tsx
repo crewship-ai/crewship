@@ -1,3 +1,9 @@
+// UI lifecycle tests use a cipher seam (as in artifact-viewer-panel.test.tsx);
+// real-browser tests cover draft encryption and server admission.
+vi.mock("@/lib/local-draft-seal", () => ({
+ createLocalDraftCipher: async () => ({ seal: async (text: string) => text, open: async (text: string) => text, close() {} }),
+ forgetLocalDraftPage() {}, isSealedLocalDraft: () => true, LocalDraftReadRevoked: class extends Error {},
+}))
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import type { ArtifactComment, ArtifactProjectSnapshot } from "../../projects/types"
@@ -53,6 +59,12 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 
+// The composer opens once the private local draft has loaded.
+async function typeComment(value: string) {
+  const box = screen.getByRole("textbox", { name: "Comment" })
+  await waitFor(() => expect(box).not.toBeDisabled())
+  fireEvent.change(box, { target: { value } })
+}
 const renderLibrary = () => render(<ArtifactViewerPanel variant="library" />)
 const header = () => within(screen.getByRole("region", { name: "Artifact viewer" }).querySelector("header")!)
 function selectHero() {
@@ -101,10 +113,10 @@ it("shows the queue beside Preview with Waiting, Agent working and Done · vN", 
   expect(within(screen.getByRole("region", { name: "Comment queue" })).getByText("Done · v5")).toBeInTheDocument()
 })
 
-it("adds a comment to the queue without starting the agent", () => {
+it("adds a comment to the queue without starting the agent", async () => {
   renderLibrary()
   selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Shorter" } })
+  await typeComment("Shorter")
   fireEvent.click(screen.getByRole("button", { name: "Add to queue" }))
   expect(state.comment).toHaveBeenCalledWith({ version: 5, path: "home.html", selector: "#hero", quote: "Big idea", text: "Shorter", send_to_agent: true }, expect.anything())
   act(() => state.comment.mock.calls[0][1].onSuccess(waiting("n", "Shorter")))
@@ -161,7 +173,7 @@ it("404 does not say whether the artifact exists", () => {
 it("409 Reload and reapply puts the kept comment on the newest version", async () => {
   renderLibrary()
   selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Keep me" } })
+  await typeComment("Keep me")
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   act(() => state.comment.mock.calls[0][1].onError(err(409, "artifact_version_conflict")))
   expect(screen.getByText(/Your comment and selection are kept/)).toBeInTheDocument()
@@ -177,7 +189,7 @@ it("409 Reload and reapply puts the kept comment on the newest version", async (
 it("409 asks for a new selection when the element is gone from the newest version", async () => {
   renderLibrary()
   selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Keep me" } })
+  await typeComment("Keep me")
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   act(() => state.comment.mock.calls[0][1].onError(err(409, "artifact_version_conflict")))
   const fresh = snap({ latest_version: 6, manifest: { version: 6, entrypoint: "home.html", files: [{ path: "home.html", content: "<body><p id=other>x</p></body>", media_type: "text/html" }] } })
@@ -192,7 +204,7 @@ it("a full history offers choices and keeps the comment", async () => {
   Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
   renderLibrary()
   selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Keep me" } })
+  await typeComment("Keep me")
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   act(() => state.comment.mock.calls[0][1].onError(err(413, "artifact_history_quota")))
   expect(screen.getByText(/Saving is paused/)).toBeInTheDocument()
@@ -236,11 +248,11 @@ it("stops a waiting batch when send capability leaves and returns during the fir
  expect(state.dispatch).toHaveBeenCalledTimes(1)
  expect(state.comment).not.toHaveBeenCalled()
 })
-it("keeps source editing available to an Edit user without owner queue, sharing or restore controls",()=>{
+it("keeps source editing available to an Edit user without owner queue, sharing or restore controls",async()=>{
  state.snapshot.data=snap({can_share:false,can_restore:false,can_send_to_agent:false})
  renderLibrary()
  expect(screen.getByRole("link",{name:"Edit source"})).toHaveAttribute("href","/pages/launch?artifact=1&workspace_id=ws1")
- selectHero();fireEvent.change(screen.getByRole("textbox",{name:"Comment"}),{target:{value:"Local feedback"}})
+ selectHero();await typeComment("Local feedback")
  expect(screen.queryByRole("button",{name:"Add to queue"})).toBeNull()
  expect(screen.queryByRole("button",{name:"Send to agent"})).toBeNull()
  fireEvent.click(screen.getByRole("button",{name:"Save comment"}))

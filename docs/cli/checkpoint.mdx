@@ -19,6 +19,7 @@ crewship checkpoint <subcommand> [flags]
 | Command | Description |
 |---|---|
 | `list` | List checkpoints for a mission. |
+| `get <id>` | Show one checkpoint. |
 | `create` | Create a checkpoint at the current journal cursor. |
 | `restore <id>` | Show divergence since a checkpoint (advisory). |
 | `fork <id>` | Spawn a new mission from a checkpoint. |
@@ -45,6 +46,17 @@ Sample output:
 ID                        LABEL                         CURSOR                CREATED                  CREATED_BY
 chk_a1b2c3d4e5f60718      green build                   j_7f3e2a1b8c9d0e12    2026-04-17T10:23:41Z     user_123
 chk_b2c3d4e5f6071829      after migration               j_8a4f3b2c9d0e1234    2026-04-17T11:05:12Z     user_456
+```
+
+---
+
+## `crewship checkpoint get <id>`
+
+`GET /api/v1/checkpoints/{id}`. Shows one checkpoint: mission, label, journal cursor, creator, creation time and (for forks) the checkpoint it was forked from. A checkpoint outside the active workspace is a 404.
+
+```bash
+crewship checkpoint get chk_a1b2c3d4e5f60718
+crewship checkpoint get chk_a1b2c3d4e5f60718 --format json
 ```
 
 ---

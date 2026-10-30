@@ -243,3 +243,80 @@ func TestCraftCLIConnectYAMLIsSeparatedStreamWithoutBearer(t *testing.T) {
 		t.Fatalf("not a private YAML stream: %s", out)
 	}
 }
+
+func TestCraftCLIProposalActions(t *testing.T) {
+	const id = "ncp_0123456789abcdef01234567"
+	base := "/api/v1/pages/health/craft"
+	secret := strings.Repeat("d", 64)
+	for _, tc := range []struct {
+		name, line, method, path string
+		body                     map[string]string
+	}{
+		{"list", `{"action":"proposals"}`, "GET", base + "/proposals", nil},
+		{"read", `{"action":"proposal","proposal_id":"` + id + `"}`, "GET", base + "/proposals/" + id, nil},
+		{"accept", `{"action":"accept-proposal","proposal_id":"` + id + `","generation":"9007199254740993"}`, "POST", base + "/proposals/" + id + "/accept", map[string]string{"sessionId": "public-tab", "generation": "9007199254740993"}},
+		{"reject", `{"action":"reject-proposal","proposal_id":"` + id + `"}`, "POST", base + "/proposals/" + id + "/reject", map[string]string{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := pageStub(t)
+			stub.OnPost(base+"/sessions", func(*http.Request, []byte) (int, []byte, string) {
+				return 201, []byte(`{"session_token":"` + secret + `","session_id":"public-tab"}`), "application/json"
+			})
+			handler := func(r *http.Request, _ []byte) (int, []byte, string) {
+				if r.Header.Get("X-Craft-Session") != secret {
+					t.Error("missing session binding")
+				}
+				return 200, []byte(`{"proposal":{"id":"` + id + `"}}`), "application/json"
+			}
+			if tc.method == "GET" {
+				stub.OnGet(tc.path, handler)
+			} else {
+				stub.OnPost(tc.path, handler)
+			}
+			if _, err := runPageCLI(t, tc.line+"\n", "craft", "connect", "health"); err != nil {
+				t.Fatal(err)
+			}
+			calls := stub.CallsFor(tc.method, tc.path)
+			if len(calls) != 1 {
+				t.Fatalf("want one %s %s, got %d", tc.method, tc.path, len(calls))
+			}
+			if tc.body != nil {
+				var got map[string]string
+				if err := json.Unmarshal(calls[0].Body, &got); err != nil || len(got) != len(tc.body) {
+					t.Fatalf("body %s: %v", calls[0].Body, err)
+				}
+				for k, v := range tc.body {
+					if got[k] != v {
+						t.Fatalf("body %s: %s=%q, want %q", calls[0].Body, k, got[k], v)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestCraftCLIProposalActionsRejectBadInputBeforeRequest(t *testing.T) {
+	base := "/api/v1/pages/health/craft"
+	for _, line := range []string{
+		`{"action":"proposal","proposal_id":"../lease"}`,
+		`{"action":"proposal"}`,
+		`{"action":"accept-proposal","proposal_id":"ncp_0123456789abcdef0123456z","generation":"1"}`,
+		`{"action":"reject-proposal","proposal_id":"ncp_0123456789abcdef01234567/../../lease"}`,
+		`{"action":"accept-proposal","proposal_id":"ncp_0123456789abcdef01234567"}`,
+		`{"action":"accept-proposal","proposal_id":"ncp_0123456789abcdef01234567","generation":"01"}`,
+		`{"action":"proposals","proposal_id":"ncp_0123456789abcdef01234567"}`,
+	} {
+		stub := pageStub(t)
+		stub.OnPost(base+"/sessions", func(*http.Request, []byte) (int, []byte, string) {
+			return 201, []byte(`{"session_token":"` + strings.Repeat("e", 64) + `","session_id":"tab"}`), "application/json"
+		})
+		if _, err := runPageCLI(t, line+"\n", "craft", "connect", "health"); err == nil {
+			t.Fatalf("accepted %s", line)
+		}
+		for _, call := range stub.Calls() {
+			if strings.Contains(call.Path, "/proposals") || strings.Contains(call.Path, "/lease") {
+				t.Fatalf("%s reached the server: %s %s", line, call.Method, call.Path)
+			}
+		}
+	}
+}

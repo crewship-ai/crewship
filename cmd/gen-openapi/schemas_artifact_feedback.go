@@ -17,7 +17,11 @@ func artifactProjectFeedbackComponents() map[string]any {
 		return map[string]any{"type": "string", "maxLength": max, "description": "The server additionally enforces this bound in UTF-8 bytes."}
 	}
 	path := func() map[string]any {
-		return map[string]any{"type": "string", "minLength": 1, "maxLength": 512, "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused."}
+		return map[string]any{"type": "string", "minLength": 1, "maxLength": 512, "description": "Canonical relative project path, at most 512 UTF-8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused."}
+	}
+	described := func(schema map[string]any, description string) map[string]any {
+		schema["description"] = description
+		return schema
 	}
 	schemas := map[string]any{}
 	schemas["ArtifactProjectOrigin"] = object(map[string]any{"chat_id": str(), "agent_id": str()}, "chat_id", "agent_id")
@@ -35,9 +39,19 @@ func artifactProjectFeedbackComponents() map[string]any {
 		"page_id":       str(), "name": str(), "slug": str(), "origin": map[string]any{"oneOf": []any{ref("ArtifactProjectOrigin"), map[string]any{"type": "null"}}},
 		"enabled": boolean(), "can_write": boolean(), "can_share": boolean(), "can_restore": boolean(), "can_send_to_agent": boolean(), "can_comment": boolean(), "latest_version": integer(1), "shared_version": integer(0), "manifest": ref("ArtifactProjectManifest"),
 		"versions": array(ref("ArtifactProjectVersion")), "quota": ref("ArtifactProjectQuota"), "comments": array(ref("ArtifactProjectComment")),
+		"retention_preview": ref("ArtifactProjectRetentionPreview"),
 	}, "page_id", "name", "slug", "origin", "enabled", "can_write", "can_share", "can_restore", "can_send_to_agent", "can_comment", "latest_version", "shared_version", "manifest", "versions", "quota", "comments")
+	schemas["ArtifactProjectRetentionPreview"] = map[string]any{
+		"type": "object", "additionalProperties": false,
+		"description": "Owner-only dry run of the proposed history rule. Nothing listed in would_thin is deleted; retention stays keep-all.",
+		"required":    []string{"policy", "recent_days", "dry_run", "evaluated_at", "total", "retained", "would_thin"},
+		"properties": map[string]any{
+			"policy": str(), "recent_days": integer(1), "dry_run": map[string]any{"type": "boolean", "enum": []bool{true}}, "evaluated_at": stamp(),
+			"total": integer(0), "retained": integer(0), "would_thin": array(integer(1)),
+		},
+	}
 	schemas["ArtifactProjectCommentRequest"] = object(map[string]any{
-		"version": integer(1), "path": path(), "selector": text(2000), "quote": text(2000), "text": text(10000), "send_to_agent": boolean(),
+		"version": described(integer(1), "Exact retained version visible to the commenter; owners and editors comment on latest, other commenters on the shared version."), "path": path(), "selector": text(2000), "quote": text(2000), "text": text(10000), "send_to_agent": described(boolean(), "Queue an agent task only when the owner has the required source-chat authority; delivery and run start are separate."),
 	}, "version", "path", "selector", "quote", "text")
 	schemas["ArtifactProjectReplyRequest"] = object(map[string]any{"text": text(10000), "version": integer(1), "needs_clarification": boolean()}, "text", "version")
 	return schemas

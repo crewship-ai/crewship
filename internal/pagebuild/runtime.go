@@ -73,6 +73,46 @@ func ValidateRuntimeOriginForDevelopment(runtime, studio string, sameOriginDemo 
 	}
 	return nil
 }
+
+// LoopbackHost reports whether a request Host (with or without a port) names
+// this machine's loopback interface: localhost or a loopback IP. A derived
+// runtime origin (http://127.0.0.1:<port>, #3108) is meaningful only to a
+// browser that reached Studio this way; anywhere else it names the visitor's
+// own machine.
+func LoopbackHost(host string) bool {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.ToLower(strings.Trim(host, "[]"))
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// ProxiedRequest reports whether a reverse proxy forwarded r: it carries
+// Forwarded, any X-Forwarded-* or X-Real-IP header. A proxy may rewrite Host
+// to localhost (nginx `proxy_pass http://localhost:8080`) while serving remote
+// browsers, so a loopback Host alone does not place the browser on this
+// machine.
+func ProxiedRequest(h http.Header) bool {
+	for name := range h {
+		canonical := http.CanonicalHeaderKey(name)
+		if canonical == "Forwarded" || canonical == "X-Real-Ip" || strings.HasPrefix(canonical, "X-Forwarded-") {
+			return true
+		}
+	}
+	return false
+}
+
+// DerivedRuntimeApplies reports whether a runtime origin derived for a
+// localhost Studio may serve the browser behind r: it reached the server on a
+// loopback host directly, not through a proxy.
+func DerivedRuntimeApplies(r *http.Request) bool {
+	return LoopbackHost(r.Host) && !ProxiedRequest(r.Header)
+}
+
 func RuntimeMatchesHost(runtime, host string) bool {
 	u, err := url.Parse(runtime)
 	return err == nil && strings.EqualFold(u.Host, host)

@@ -111,6 +111,8 @@ var manifests = map[string]skillManifest{
 	// scripts/references folders) so no incompleteBundleNote.
 	"crewship/routine-author":     {category: "AUTOMATION", icon: "workflow"},
 	"crewship/crewship-artifacts": {category: "CODING", icon: "blocks"},
+	"crewship/crewship-design":    {category: "DESIGN", icon: "layers"},
+	"crewship/crewship-craft":     {category: "WRITING", icon: "pen"},
 }
 
 // Install upserts every embedded SKILL.md into the skills table. Idempotent:

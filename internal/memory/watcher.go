@@ -36,6 +36,33 @@ type WatchConfig struct {
 	UseFsnotify bool
 	// Logger receives warn/error lines. nil → slog.Default.
 	Logger *slog.Logger
+
+	// hooks is a test seam over the fsnotify calls that can fail on a
+	// real host (inotify instance or watch limits, permission errors).
+	// Zero value uses the real fsnotify implementation.
+	hooks fsnotifyHooks
+}
+
+// fsnotifyHooks lets tests inject fsnotify failures without global
+// state, so a leftover watcher goroutine from another test can never
+// observe a swapped function.
+type fsnotifyHooks struct {
+	newWatcher func() (*fsnotify.Watcher, error)
+	add        func(fw *fsnotify.Watcher, path string) error
+}
+
+func (h fsnotifyHooks) newFsnotify() (*fsnotify.Watcher, error) {
+	if h.newWatcher != nil {
+		return h.newWatcher()
+	}
+	return fsnotify.NewWatcher()
+}
+
+func (h fsnotifyHooks) addWatch(fw *fsnotify.Watcher, path string) error {
+	if h.add != nil {
+		return h.add(fw, path)
+	}
+	return fw.Add(path)
 }
 
 // WatchEvent carries the deduped set of paths that changed in a
@@ -74,8 +101,11 @@ type Watcher struct {
 // Returns immediately; events arrive on Events(). Stop() must be
 // called to release resources.
 //
-// Returns an error if `root` does not exist, or if fsnotify could not
-// be initialised when UseFsnotify is true. The poll-only mode does
+// Returns an error if `root` does not exist. When UseFsnotify is true
+// and fsnotify cannot start (or cannot watch root), the watcher logs a
+// warning and continues with the poll fallback when PollInterval > 0;
+// only an fsnotify-only watcher (PollInterval == 0) returns the error,
+// because nothing would be watching. The poll-only mode does
 // not require root to exist at construction — but the symmetry with
 // fsnotify (which does) keeps callers honest about provisioning the
 // directory upfront.
@@ -114,16 +144,21 @@ func StartWatcher(ctx context.Context, root string, cfg WatchConfig) (*Watcher, 
 	}
 
 	if cfg.UseFsnotify {
-		fw, err := fsnotify.NewWatcher()
-		if err != nil {
-			return nil, fmt.Errorf("fsnotify.NewWatcher: %w", err)
+		fw, err := startFsnotify(root, cfg)
+		switch {
+		case err == nil:
+			w.wg.Add(1)
+			go w.runFsnotify(fw)
+		case cfg.PollInterval > 0:
+			// fsnotify is the fast path, not the only one: inotify
+			// instance or watch limits must not take the poll
+			// fallback down with them.
+			cfg.Logger.Warn("memory watcher: fsnotify unavailable, continuing with poll fallback only",
+				"root", root, "poll_interval", cfg.PollInterval, "error", err)
+		default:
+			// Polling explicitly disabled: nothing would watch root.
+			return nil, err
 		}
-		if err := addRecursiveWatch(fw, root); err != nil {
-			_ = fw.Close()
-			return nil, fmt.Errorf("add recursive watch: %w", err)
-		}
-		w.wg.Add(1)
-		go w.runFsnotify(fw)
 	}
 
 	if cfg.PollInterval > 0 {
@@ -132,6 +167,22 @@ func StartWatcher(ctx context.Context, root string, cfg WatchConfig) (*Watcher, 
 	}
 
 	return w, nil
+}
+
+// startFsnotify creates the kernel watcher and registers root plus
+// every existing subdirectory. Creation and root-watch failures are returned.
+// Subdirectory failures are tolerated only when polling covers them;
+// otherwise the partial watcher is closed and the error is returned.
+func startFsnotify(root string, cfg WatchConfig) (*fsnotify.Watcher, error) {
+	fw, err := cfg.hooks.newFsnotify()
+	if err != nil {
+		return nil, fmt.Errorf("fsnotify.NewWatcher: %w", err)
+	}
+	if err := addRecursiveWatch(fw, root, cfg.hooks, cfg.Logger, cfg.PollInterval > 0); err != nil {
+		_ = fw.Close()
+		return nil, fmt.Errorf("add recursive watch: %w", err)
+	}
+	return fw, nil
 }
 
 // Events returns the channel events are emitted on. The channel is
@@ -192,7 +243,7 @@ func (w *Watcher) runFsnotify(fw *fsnotify.Watcher) {
 			// the new dir as soon as we see its Create event.
 			if ev.Op&fsnotify.Create != 0 {
 				if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
-					if addErr := fw.Add(ev.Name); addErr != nil {
+					if addErr := w.cfg.hooks.addWatch(fw, ev.Name); addErr != nil {
 						w.cfg.Logger.Warn("memory watcher: add new subdir",
 							"path", ev.Name, "error", addErr)
 					}
@@ -335,10 +386,18 @@ func isMarkdownEvent(ev fsnotify.Event) bool {
 // addRecursiveWatch registers `root` and every existing subdirectory
 // with the fsnotify watcher. fsnotify does not recurse by default —
 // missing this would mean writes into `.memory/daily/` go undetected.
-// Failures on individual subdirs are not fatal; logged via the
-// caller's error returned at the surface.
-func addRecursiveWatch(fw *fsnotify.Watcher, root string) error {
-	var firstErr error
+//
+// A failure to watch root itself is returned: the kernel watcher is
+// useless without it. Failures on individual subdirectories (EACCES,
+// ENOSPC from an exhausted fs.inotify.max_user_watches) are logged and
+// skipped only when the poll fallback covers those directories. Without
+// polling, incomplete coverage is an error and the caller closes the watcher.
+func addRecursiveWatch(fw *fsnotify.Watcher, root string, hooks fsnotifyHooks, logger *slog.Logger, pollFallback bool) error {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	var watchErr error
+	skipped := 0
 	walkErr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info == nil {
 			return nil
@@ -346,13 +405,28 @@ func addRecursiveWatch(fw *fsnotify.Watcher, root string) error {
 		if !info.IsDir() {
 			return nil
 		}
-		if addErr := fw.Add(path); addErr != nil && firstErr == nil {
-			firstErr = addErr
+		addErr := hooks.addWatch(fw, path)
+		if addErr == nil {
+			return nil
 		}
+		if path == root || !pollFallback {
+			watchErr = fmt.Errorf("watch %q: %w", path, addErr)
+			return filepath.SkipAll
+		}
+		skipped++
+		logger.Warn("memory watcher: cannot watch subdirectory, relying on poll fallback for it",
+			"path", path, "error", addErr)
 		return nil
 	})
+	if watchErr != nil {
+		return watchErr
+	}
 	if walkErr != nil {
 		return walkErr
 	}
-	return firstErr
+	if skipped > 0 {
+		logger.Warn("memory watcher: some subdirectories are not watched by fsnotify",
+			"root", root, "skipped", skipped)
+	}
+	return nil
 }

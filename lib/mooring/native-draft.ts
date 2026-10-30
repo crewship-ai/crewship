@@ -1,4 +1,5 @@
-import { DocumentStorageError, openDocumentDrafts, purgeDocumentDrafts, registerDocumentDraftWriter } from "../document-queue"
+import { openProtectedDocumentDrafts as openDocumentDrafts } from "../protected-document-drafts"
+import { DocumentStorageError, purgeDocumentDrafts, registerDocumentDraftWriter } from "../document-queue"
 
 export interface NativeDraft {
   applicationId: string
@@ -78,7 +79,7 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
     closing = true
     return retire().then(closeStore)
   }
-  unregister = registerDocumentDraftWriter(scope.human, close)
+  unregister = registerDocumentDraftWriter(scope.human, close, { storage: true, hasDraft: () => current !== undefined })
   try {
     if (!active) throw fail()
     opening = openDocumentDrafts(scope.human, scope.workspace, scope.page, { maxDraftBytes: MAX_ENCODED_BYTES, requireExclusive: true })
