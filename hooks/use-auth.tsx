@@ -20,6 +20,20 @@ import { suspendOtherDocumentDrafts, captureDocumentDrafts, removeCapturedDocume
 import { suspendOtherArtifactDrafts, finishArtifactDraftIdentity, captureArtifactDrafts, removeCapturedArtifactDrafts, captureLegacyLocalDrafts, removeCapturedLegacyLocalDrafts } from "@/lib/artifact-drafts"
 
 import { beginLocalDraftIdentity, finishLocalDraftIdentity } from "@/lib/local-draft-seal"
+import { askConfirm, confirmHostMounted } from "@/components/ui/confirm-host"
+
+const DRAFT_DISCARD_WARNING = "Signing out can permanently delete local recovery copies of your unsaved artifact and document work. Download or copy any draft you need first. Continue? New changes arriving during sign-out are kept."
+/** Sign-out's draft warning goes through the shell's ConfirmHost; a root without one (a unit test) falls back to the browser prompt. */
+function confirmDraftDiscard(): Promise<boolean> {
+  if (!confirmHostMounted()) return Promise.resolve(window.confirm(DRAFT_DISCARD_WARNING))
+  return askConfirm({
+    title: "Sign out and delete local recovery copies?",
+    description: "Signing out can permanently delete local recovery copies of your unsaved artifact and document work. Download or copy any draft you need first. New changes arriving during sign-out are kept.",
+    confirmLabel: "Sign out",
+    cancelLabel: "Keep my drafts",
+    destructive: true,
+  })
+}
 
 async function preserveDraftsForIdentity(human: string | null) {
   const generation = beginLocalDraftIdentity(human)
@@ -430,7 +444,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     catch { /* No verified deletion snapshot: retain those encrypted copies. */ }
     try { if (signingOutHuman) capturedLegacy = captureLegacyLocalDrafts(signingOutHuman) } catch { return false }
     const discardDrafts = capturedDocuments.length + capturedArtifacts.length + capturedLegacy.length > 0
-    if (discardDrafts && !window.confirm("Signing out can permanently delete local recovery copies of your unsaved artifact and document work. Download or copy any draft you need first. Continue? New changes arriving during sign-out are kept.")) return false
+    if (discardDrafts && !(await confirmDraftDiscard())) return false
     if (sessionRef.current?.user.id !== signingOutHuman || refreshGen.current !== startingGeneration) return false
     let serverAcknowledged = false
     try {
