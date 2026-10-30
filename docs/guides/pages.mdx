@@ -1042,18 +1042,19 @@ at the panel top right" has to mean the same thing to two people on a call.
 ### The three verbs
 
 A grant is not a single "can touch this page" bit. It is one of three
-independent verbs:
+independent verbs, plus a feedback-only `comment` level for people:
 
 | Verb | Means | Typical holder |
 |---|---|---|
 | `read` | Opens the page, and nothing more — the panels on it are still only the ones the grantee's own crew membership already permits | humans, crews, an agent that summarises the page |
+| `comment` | Opens the page, and may leave feedback on an artifact project's current shared version — no edits, restore, sharing or agent execution | people only; never issued to an agent |
 | `produce` | Opens the page, and may push payloads into named panels | the routine or script that owns those panels |
 | `write` | Opens the page, and may edit its spec — add, remove, and rearrange panels | the agent or human in charge of the page |
 
 `produce` can be scoped to specific panel ids, so an agent granted `produce`
 on one panel cannot overwrite another agent's panel on the same page.
 
-Every level opens the page, so `read` is the floor the other two are built on
+Every level opens the page, so `read` is the floor the others are built on
 rather than a separate thing you also have to issue. The alternative reads
 absurdly in both directions: a `write` grantee who may rewrite a page but
 cannot open it, or a `produce` grantee who must be told its panel ids out of
@@ -1184,7 +1185,7 @@ what a page owner needs to be told. Revoking asks first.
 "Inert" now means exactly one thing: the human who issued the grant no longer
 has the standing to issue it. It is not a comment on the level — `read`,
 `produce` and `write` all decide something for as long as their issuer stands
-behind them.
+behind them. `comment` behaves the same way.
 </Note>
 
 ### What a page is, and what changed it

@@ -17,7 +17,7 @@ import { useUserPreference } from "@/hooks/use-user-preference"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { DocumentReadonly } from "@/components/features/pages/document-readonly/document-readonly"
 import { formatRelativeShort } from "@/lib/time"
-import { artifactDashboards, artifactSlides, artifactsDesign } from "@/lib/feature-flags"
+import { artifactDashboards, artifactSlides, artifactsDesign, pagesOpenArtifacts } from "@/lib/feature-flags"
 import { cn } from "@/lib/utils"
 import { ArtifactViewerProvider } from "@/components/features/chat/artifact-context/projects/artifact-viewer-context"
 import { useArtifactProjectsAvailable } from "@/components/features/chat/artifact-context/projects/use-artifact-project-data"
@@ -30,6 +30,7 @@ import { KIND_ACCENT, KIND_ICON, ARTIFACT_KINDS, type ArtifactKindKey } from "@/
 import { useArtifactCapabilities } from "@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities"
 import { NewArtifactDialog } from "./new-artifact-dialog"
 import { ArtifactPageContent } from "./page-content"
+import { ArtifactNativeEditor } from "./native-editor"
 import { kindLabel, libraryItems, withLibraryState, type LibraryItem, type LibraryKind } from "./library-items"
 import { sharingKeys, useSharingApi } from "./sharing/sharing-api"
 import { ShareDialog } from "./sharing/share-dialog"
@@ -297,6 +298,14 @@ function RecoveredDraft({ userId, workspaceId, slug }: { userId: string; workspa
   </>
 }
 
+/** The Craft lock and an Edit that opens the full Craft editor in a new tab. */
+function WordLockBar({ workspaceId, pageId }: { workspaceId: string; pageId: string }) {
+  return <div className="overflow-hidden rounded-card border">
+    <CraftLockBar workspaceId={workspaceId} slug={"@" + pageId}
+      onEdit={() => window.open(craftEditorHref(workspaceId, "@" + pageId), "_blank", "noopener,noreferrer")} />
+  </div>
+}
+
 const DETAIL_HINT: Partial<Record<LibraryKind, string>> = {
   word: "This is the saved version. Edit it in its editor from Open in Pages.",
   sheet: "Read and edit it in its editor; Open in Pages shows the saved document.",
@@ -313,6 +322,10 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
   // A Page shows its own content here, with the views Pages draws; it names itself in its breadcrumb.
   const pageContent = item.kind === "page" && item.pageId
   const inline = projectPreview || pageContent
+  // Behind the single-home switch a native Word or Sheet is edited here, in the
+  // one Craft editor and its lease; /pages/<slug> sends it back here, so the
+  // detail no longer links out to Pages for it.
+  const nativeEditor = pagesOpenArtifacts() && item.native && (item.kind === "word" || item.kind === "sheet") && Boolean(item.pageId)
   const target = useMemo(() => ({ slug: item.slug, tab: "preview" as const }), [item.slug])
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
@@ -337,7 +350,7 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
         <h1 className="truncate text-xl font-semibold">{item.name}</h1>
         <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><KindBadge kind={item.kind} /><StateChips item={item} /><span>{meta(item)}</span></p>
       </div>
-      {item.kind !== "design" && <OpenInPages workspaceId={workspaceId} item={item} />}
+      {item.kind !== "design" && !nativeEditor && <OpenInPages workspaceId={workspaceId} item={item} />}
     </header>}
     {dialog === "share" && <ShareDialog workspaceId={workspaceId} item={item} open onOpenChange={open => { if (!open) setDialog(null) }} />}
     {dialog === "move" && <MoveToFolderDialog workspaceId={workspaceId} item={item} folders={folders} open
@@ -348,16 +361,16 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
         <div className="flex min-h-[520px] flex-1 overflow-hidden rounded-card border"><ArtifactViewerPanel variant="library" /></div>
       </ArtifactViewerProvider>
       : pageContent ? <ArtifactPageContent workspaceId={workspaceId} pageId={item.pageId!} onBack={onBack} />
-      : item.native && item.kind === "word" && item.pageId
-        ? <div className="overflow-hidden rounded-card border">
-          <CraftLockBar workspaceId={workspaceId} slug={"@" + item.pageId}
-            onEdit={() => window.open(craftEditorHref(workspaceId, "@" + item.pageId), "_blank", "noopener,noreferrer")} />
-        </div>
+      : nativeEditor ? <ArtifactNativeEditor workspaceId={workspaceId} pageId={item.pageId!} fallback={<>
+        {item.kind === "word" && <WordLockBar workspaceId={workspaceId} pageId={item.pageId!} />}
+        {item.kind === "word" && !item.empty && <WordPreview workspaceId={workspaceId} item={item} />}
+      </>} />
+      : item.native && item.kind === "word" && item.pageId ? <WordLockBar workspaceId={workspaceId} pageId={item.pageId} />
         : null}
     {!projectPreview && item.native && item.kind === "word" && item.pageId && <LockLostDraft workspaceId={workspaceId} slug={"@" + item.pageId} />}
-    {item.kind === "word" && !item.empty && item.pageId && <WordPreview workspaceId={workspaceId} item={item} />}
-    {/* An old-editor Word has nowhere to edit it; its notice says so on its own. */}
-    {!inline && item.kind !== "project" && item.kind !== "design" && !(item.kind === "word" && !item.native) && <p className="text-sm text-muted-foreground">
+    {!nativeEditor && item.kind === "word" && !item.empty && item.pageId && <WordPreview workspaceId={workspaceId} item={item} />}
+    {/* An old-editor Word has nowhere to edit it; its notice says so on its own. A native editor here needs no pointer to Pages. */}
+    {!inline && !nativeEditor && item.kind !== "project" && item.kind !== "design" && !(item.kind === "word" && !item.native) && <p className="text-sm text-muted-foreground">
       {DETAIL_HINT[item.kind] ?? "Open in Pages shows it with everything it contains."}
     </p>}
     </>}

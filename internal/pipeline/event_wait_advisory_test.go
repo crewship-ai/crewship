@@ -42,7 +42,12 @@ func TestEventWaitDeadline_AdvisorySiblingWake(t *testing.T) {
 			}
 			timeout := time.Hour
 			if outcome == "original_deadline" {
-				timeout = time.Second
+				// The setup below (two durable checks, a sibling delivery, its
+				// advisory wake and a 50ms quiet window) must finish before
+				// this row's deadline, or B legitimately times out early and
+				// the test misreports a stolen wake. One second left too little
+				// slack on a loaded runner (-race, single CPU, macOS).
+				timeout = 3 * time.Second
 			}
 			deadline, err := store.ArmWithTimeout(ctx, "ws", "run", "b", "event", timeout)
 			if err != nil {
@@ -109,8 +114,12 @@ func TestEventWaitDeadline_AdvisorySiblingWake(t *testing.T) {
 			limit := 2 * time.Second
 			if outcome == "original_deadline" {
 				// The executed step asks for an hour, but the already-armed row
-				// must keep its original one-second deadline after the wake.
-				limit = time.Until(deadline) + 500*time.Millisecond
+				// must keep its original three-second deadline after the wake.
+				// The not-before-deadline assertion below proves B honours that
+				// deadline; this bound only has to fail clearly long before the
+				// one-hour step timeout, so it no longer races the scheduler
+				// with a 500ms margin.
+				limit = 10 * time.Second
 			}
 			select {
 			case got := <-done:

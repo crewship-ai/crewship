@@ -552,25 +552,56 @@ func nukeInbox(ctx context.Context, client *cli.Client, kind string) error {
 // them. 115 rows survived a nuke on dev2 that way, each holding an agent-authored
 // intent and the conversation history the judge was shown.
 func nukeKeeperRequests(ctx context.Context, client *cli.Client) error {
+	_, err := purgeKeeperRequests(ctx, client)
+	if errors.Is(err, errKeeperPurgeCountsUnreadable) {
+		// The purge succeeded; nuke all reports no counts, so an unreadable
+		// body costs it nothing.
+		return nil
+	}
+	return err
+}
+
+// errKeeperPurgeCountsUnreadable marks a successful purge whose response did
+// not say how many rows went.
+var errKeeperPurgeCountsUnreadable = errors.New("keeper requests were purged but the response did not say how many")
+
+// keeperPurgeResult is the DELETE /api/v1/admin/keeper/requests answer.
+// Supported is false when the server predates the endpoint (404/405), so the
+// explicit `nuke keeper-requests` can say nothing was purged instead of
+// claiming success; nuke all keeps tolerating that.
+type keeperPurgeResult struct {
+	Supported       bool  `json:"-" yaml:"-"`
+	DeletedRequests int64 `json:"deleted_requests" yaml:"deleted_requests"`
+	DeletedEvents   int64 `json:"deleted_events" yaml:"deleted_events"`
+}
+
+func purgeKeeperRequests(ctx context.Context, client *cli.Client) (keeperPurgeResult, error) {
+	var res keeperPurgeResult
 	if err := ctx.Err(); err != nil {
-		return err
+		return res, err
 	}
 	const path = "/api/v1/admin/keeper/requests"
 	r, err := client.Delete(path)
 	if err != nil {
-		return err
+		return res, err
 	}
 	defer r.Body.Close()
 	// A server older than this endpoint answers 404/405. Tolerated the way
 	// nukeRuntimes tolerates a docker-less 503: the CLI must keep working against
 	// a server that predates it, and the alternative is failing every nuke.
 	if r.StatusCode == http.StatusNotFound || r.StatusCode == http.StatusMethodNotAllowed {
-		return nil
+		return res, nil
 	}
 	if r.StatusCode >= 300 {
-		return fmt.Errorf("DELETE %s: HTTP %d", path, r.StatusCode)
+		return res, fmt.Errorf("DELETE %s: HTTP %d", path, r.StatusCode)
 	}
-	return nil
+	res.Supported = true
+	if err := json.NewDecoder(r.Body).Decode(&res); err != nil {
+		// The rows are gone, but how many is unknown: say so rather than
+		// report "0 requests, 0 events".
+		return res, fmt.Errorf("DELETE %s succeeded but its response could not be read (%v): %w", path, err, errKeeperPurgeCountsUnreadable)
+	}
+	return res, nil
 }
 
 // nukeEscalations hard-deletes crew escalations. crewFilter == "" enumerates

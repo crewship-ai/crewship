@@ -125,7 +125,7 @@ func (h *PeerCardHandler) ListAgentPeers(w http.ResponseWriter, r *http.Request)
 			replyError(w, http.StatusNotFound, "agent not found")
 			return
 		}
-		replyError(w, http.StatusInternalServerError, err.Error())
+		replyInternalError(w, h.logger, "resolve agent for peer list", err)
 		return
 	}
 	rows, err := h.db.QueryContext(r.Context(), `
@@ -195,13 +195,13 @@ func (h *PeerCardHandler) GetAgentPeer(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusConflict, err.Error())
 			return
 		}
-		replyError(w, http.StatusInternalServerError, err.Error())
+		replyInternalError(w, h.logger, "resolve agent for peer card read", err)
 		return
 	}
 	paths := h.agentPeerDir(crewID, slug)
 	body, err := memory.LoadPeerCard(paths, targetUser, wsID)
 	if err != nil {
-		replyError(w, http.StatusInternalServerError, err.Error())
+		replyInternalError(w, h.logger, "load peer card", err)
 		return
 	}
 	if body == "" {
@@ -261,7 +261,7 @@ func (h *PeerCardHandler) DeleteAgentPeer(w http.ResponseWriter, r *http.Request
 			replyError(w, http.StatusNotFound, "agent not found")
 			return
 		}
-		replyError(w, http.StatusInternalServerError, err.Error())
+		replyInternalError(w, h.logger, "resolve agent for peer card delete", err)
 		return
 	}
 	crewless := errors.Is(err, errAgentHasNoCrew)
@@ -279,7 +279,7 @@ func (h *PeerCardHandler) DeleteAgentPeer(w http.ResponseWriter, r *http.Request
 	if !crewless {
 		paths := h.agentPeerDir(crewID, slug)
 		if err := memory.DeletePeerCard(paths, targetUser, wsID); err != nil {
-			replyError(w, http.StatusInternalServerError, err.Error())
+			replyInternalError(w, h.logger, "delete peer card", err)
 			return
 		}
 	}

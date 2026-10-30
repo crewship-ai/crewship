@@ -428,10 +428,3 @@ func newProposalID(now time.Time) string {
 	}
 	return now.UTC().Format("20060102150405") + "-" + hex.EncodeToString(r[:])
 }
-
-// ensureDB is a small helper that lets writeProposal pass an explicit
-// nil DB for tests without panicking; kept here so the Consolidator
-// struct definition stays single-purpose.
-func ensureDB(db *sql.DB) *sql.DB { return db }
-
-var _ = ensureDB // reserved for use when the approve endpoint lands

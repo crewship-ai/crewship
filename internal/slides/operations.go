@@ -247,34 +247,6 @@ func validateRequestSlide(raw json.RawMessage, schema int) error {
 	_, err := Decode(envelope)
 	return err
 }
-func DecodeReorder(raw []byte) (ReorderRequest, error) {
-	var r ReorderRequest
-	err := strictRequest(raw, &r, nil, []string{"page_id", "schema_version", "base_rev", "mutation_id", "if_order_version", "slide_order"}, nil)
-	if err != nil {
-		return r, err
-	}
-	if err = validMutation(r.SchemaVersion, r.BaseRev, r.MutationID, r.PageID); err != nil {
-		return r, err
-	}
-	if r.IfOrderVersion < 0 || r.SlideOrder == nil || len(r.SlideOrder) > MaxSlides {
-		return r, errors.New("invalid order precondition")
-	}
-	return r, nil
-}
-func DecodeRestore(raw []byte) (RestoreRequest, error) {
-	var r RestoreRequest
-	err := strictRequest(raw, &r, nil, []string{"page_id", "schema_version", "base_rev", "mutation_id", "if_order_version", "revision"}, nil)
-	if err != nil {
-		return r, err
-	}
-	if err = validMutation(r.SchemaVersion, r.BaseRev, r.MutationID, r.PageID); err != nil {
-		return r, err
-	}
-	if r.IfOrderVersion < 0 || r.Revision < 1 {
-		return r, errors.New("invalid restore precondition")
-	}
-	return r, nil
-}
 func SlideHash(slide Slide) (string, error) {
 	data, err := canonicalValue(slide)
 	if err != nil {
