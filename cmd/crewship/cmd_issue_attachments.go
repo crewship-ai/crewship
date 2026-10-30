@@ -119,6 +119,9 @@ Anything else is refused, and the refusal lists what is allowed.
 Attaching the same bytes twice is the same attachment, not a second one, so a
 retry is safe. Maximum 25 MB.
 
+With -f json the attachment record is printed on stdout (the same fields 'issue
+attachments' emits); its id is what 'issue attachment' and 'issue detach' take.
+
 Examples:
   crewship issue attach ENG-4 ./crash.log
   crewship issue attach ENG-4 ~/Desktop/screenshot.png
@@ -196,9 +199,12 @@ Examples:
 		if err := cli.ReadJSON(resp, &att); err != nil {
 			return err
 		}
-		cli.PrintSuccess(fmt.Sprintf("Attached %s (%s) to %s — id %s.",
-			sanitizeTerminal(att.Filename), binaryBytes(att.SizeBytes), identifier, att.ID))
-		return nil
+		// Under -f json the attachment record is the result: its id is what
+		// `issue attachment` and `issue detach` address it by.
+		return resolvedFormatter(cmd).AutoHuman(att, func() {
+			cli.PrintSuccess(fmt.Sprintf("Attached %s (%s) to %s — id %s.",
+				sanitizeTerminal(att.Filename), binaryBytes(att.SizeBytes), identifier, att.ID))
+		})
 	},
 }
 
