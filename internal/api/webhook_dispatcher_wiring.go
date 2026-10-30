@@ -17,10 +17,15 @@ import (
 // projection share one launch registry across sources.
 type agentWorkRuntime struct {
 	*WebhookRuntime
-	scheduled *ScheduledRuntime
+	scheduled  *ScheduledRuntime
+	assignment *AssignmentRuntime
 }
 
 func (rt *agentWorkRuntime) Run(ctx context.Context, a dispatch.Assignment, started func()) error {
+	if a.Item != nil && a.Item.Source == work.SourceAssignment && a.Item.DomainKind == work.DomainAssignment {
+		return rt.assignment.Run(ctx, a, started)
+	}
+
 	if a.Item != nil && a.Item.Source == work.SourceSchedule && a.Item.DomainKind == work.DomainAgentRun {
 		return rt.scheduled.Run(ctx, a, started)
 	}
@@ -28,11 +33,16 @@ func (rt *agentWorkRuntime) Run(ctx context.Context, a dispatch.Assignment, star
 }
 
 type agentWorkAuthorizer struct {
-	webhook   dispatch.Authorizer
-	scheduled dispatch.Authorizer
+	webhook    dispatch.Authorizer
+	scheduled  dispatch.Authorizer
+	assignment dispatch.Authorizer
 }
 
 func (a agentWorkAuthorizer) Authorize(ctx context.Context, assignment dispatch.Assignment) (dispatch.Decision, error) {
+	if assignment.Item != nil && assignment.Item.Source == work.SourceAssignment && assignment.Item.DomainKind == work.DomainAssignment {
+		return a.assignment.Authorize(ctx, assignment)
+	}
+
 	if assignment.Item != nil && assignment.Item.Source == work.SourceSchedule && assignment.Item.DomainKind == work.DomainAgentRun {
 		return a.scheduled.Authorize(ctx, assignment)
 	}
@@ -101,9 +111,10 @@ func (r *Router) startAgentWorkDispatcher(ctx context.Context, logger *slog.Logg
 	kinds := []work.Kind{{Source: work.SourceWebhook, DomainKind: work.DomainAgentRun}}
 	if scheduled {
 		executable = &agentWorkRuntime{WebhookRuntime: runtime,
-			scheduled: NewScheduledRuntime(runtime, conv, memoryMB, cpus)}
-		authz = agentWorkAuthorizer{webhook: authz, scheduled: scheduler.NewScheduledAuthorizer(r.db)}
-		kinds = append(kinds, work.Kind{Source: work.SourceSchedule, DomainKind: work.DomainAgentRun})
+			scheduled:  NewScheduledRuntime(runtime, conv, memoryMB, cpus),
+			assignment: &AssignmentRuntime{base: runtime, h: r.assignmentHandler}}
+		authz = agentWorkAuthorizer{webhook: authz, scheduled: scheduler.NewScheduledAuthorizer(r.db), assignment: assignmentWorkAuthorizer{h: r.assignmentHandler}}
+		kinds = append(kinds, work.Kind{Source: work.SourceSchedule, DomainKind: work.DomainAgentRun}, work.Kind{Source: work.SourceAssignment, DomainKind: work.DomainAssignment})
 	}
 
 	limits := work.SerialAgentLimits()
@@ -124,6 +135,9 @@ func (r *Router) startAgentWorkDispatcher(ctx context.Context, logger *slog.Logg
 	// deliberately never error-checked by the handler: acceptance must not be
 	// able to fail because a nudge did.
 	r.webhookHandler.dispatchHint = d.Hint
+	if scheduled && r.assignmentHandler != nil {
+		r.assignmentHandler.workHint = d.Hint
+	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})

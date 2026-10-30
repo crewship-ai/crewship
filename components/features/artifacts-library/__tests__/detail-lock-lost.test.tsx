@@ -50,7 +50,7 @@ beforeEach(() => {
 afterEach(cleanup)
 
 const client = () => new QueryClient()
-const tree = (queries: QueryClient) => <QueryClientProvider client={queries}><ArtifactsLibrary workspaceId="ws1" item="brief" onSelect={vi.fn()} /></QueryClientProvider>
+const tree = (queries: QueryClient) => <QueryClientProvider client={queries}><ArtifactsLibrary workspaceId="ws1" item="page-brief" onSelect={vi.fn()} /></QueryClientProvider>
 const open = () => render(tree(client()))
 
 it("offers a recovered local draft when the lock is held by someone else", () => {

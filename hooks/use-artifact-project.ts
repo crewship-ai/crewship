@@ -106,9 +106,26 @@ export function useArtifactProject(workspace: string, slug: string, version?: nu
  const invalidate = () => { if(valid())void client.invalidateQueries({ queryKey: key }) }
  const restore = useScopedProjectMutation<{version:number;base_version:number}>(scope,valid,body=>request("/restore",body),invalidate)
  const share = useScopedProjectMutation<{version:number;base_version:number}>(scope,valid,body=>request("/share",body),invalidate)
- const save = useScopedProjectMutation<ArtifactProjectSave,{version:number}>(scope,valid,body=>request("/versions",body),invalidate)
+ const save = useScopedProjectMutation<ArtifactProjectSave,{version:number;reconciled?:boolean}>(scope,valid,async body=>{
+  try { return await request<{version:number}>("/versions",body) }
+  catch(error) {
+   // A lost acknowledgement surfaces as a network error, a 5xx, or a 409 on
+   // retry. Confirm only the exact successor: same files at base_version+1.
+   const status=(error as Error&{status?:number}).status
+   if(status!==undefined&&status!==409&&status<500)throw error
+   const saved=await request<ArtifactProjectSnapshot>(`?version=${body.base_version+1}`).catch(()=>undefined)
+   if(saved&&sameProjectFiles(saved.manifest,body))return {version:saved.manifest.version,reconciled:true}
+   throw error
+  }
+ },invalidate)
  const comment = useScopedProjectMutation<ArtifactAnchor & {text:string;send_to_agent:boolean},ArtifactComment>(scope,valid,body=>request("/comments",body),invalidate)
  return { query:refusal?.scope===scope?{...query,isError:true,error:refusal.error}:query,restore,share,save,comment }
+}
+
+export function sameProjectFiles(saved:{version:number;entrypoint:string;files:ArtifactFile[]},body:ArtifactProjectSave):boolean{
+ if(saved.version!==body.base_version+1||saved.entrypoint!==body.entrypoint||saved.files.length!==body.files.length)return false
+ const byPath=new Map(saved.files.map(file=>[file.path,file]))
+ return body.files.every(file=>{const other=byPath.get(file.path);return other!==undefined&&other.content===file.content&&other.media_type===file.media_type})
 }
 
 /** Capture scope in variables before React Query schedules mutationFn. Observer
