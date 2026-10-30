@@ -5964,6 +5964,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
   never reach that refcount, so `crewship issue delete` runs a reclaim pass
   derived purely from the table.
 
+- **Issue attachment and forge-link writes support machine output.** `issue attach`, `issue link` and `issue relink` now print the stored record for JSON and YAML output, including its ID, without a human receipt on stderr.
+
 ### Changed
 
 - **Go toolchain moved 1.26.6 → 1.27.0, and every place that names it now
