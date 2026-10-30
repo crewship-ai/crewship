@@ -949,6 +949,9 @@ func pageCheckError(resp *http.Response) error {
 		}
 		resp.Body = io.NopCloser(bytes.NewReader(raw))
 	}
+	if err := artifactQuotaCheck(resp); err != nil {
+		return err
+	}
 	return cli.CheckError(resp)
 }
 

@@ -13,6 +13,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 // Design edits use the exact same authenticated API as the live canvas. A live
@@ -24,9 +26,15 @@ func newPageDesignCommand() *cobra.Command {
 		if name == "" {
 			return fmt.Errorf("--name is required")
 		}
-		return artifactCLIRequest(cmd, "POST", "/api/v1/pages/design", map[string]any{"slug": args[0], "name": name})
+		body := map[string]any{"slug": args[0], "name": name}
+		if cmd.Flags().Changed("test-item") {
+			value, _ := cmd.Flags().GetBool("test-item")
+			body["created_by_test"] = value
+		}
+		return artifactCLIRequest(cmd, "POST", "/api/v1/pages/design", body)
 	}}
 	create.Flags().String("name", "", "Design title")
+	create.Flags().Bool("test-item", false, "Explicitly mark this new human-created Design as a test item")
 	cmd.AddCommand(create)
 	for _, action := range []string{"get", "versions", "comments"} {
 		action := action
@@ -97,13 +105,25 @@ The API applies these edits even when no browser has the canvas open.`, RunE: fu
 		if version < 1 || version > 9007199254740991 || node == "" || text == "" {
 			return fmt.Errorf("positive --version, --node and --text are required")
 		}
-		return artifactCLIRequest(cmd, "POST", "/api/v1/pages/"+pagePathEscape(args[0])+"/design/comments", map[string]any{"version": version, "path": "design.json", "selector": node, "quote": quote, "text": text, "send_to_agent": dispatch})
+		body := map[string]any{"version": version, "path": "design.json", "selector": node, "quote": quote, "text": text, "send_to_agent": dispatch}
+		wait, timeout, err := artifactCommentWaitRequested(cmd, dispatch)
+		if err != nil {
+			return err
+		}
+		if wait {
+			return artifactCommentDispatch(cmd, "design", args[0], body, timeout)
+		}
+		if dispatch && os.Getenv("CREWSHIP_AGENT_TOKEN") == "" {
+			fmt.Fprintln(cmd.ErrOrStderr(), "task queued; it starts when the connected chat receives the task message — pass --wait to send it now, or use `crewship run --artifact-target`")
+		}
+		return artifactCLIRequest(cmd, "POST", "/api/v1/pages/"+pagePathEscape(args[0])+"/design/comments", body)
 	}}
 	comment.Flags().Int64("version", 0, "Exact retained version containing the node")
 	comment.Flags().String("node", "", "Stable node ID")
 	comment.Flags().String("text", "", "Comment text")
 	comment.Flags().String("quote", "", "Selected node name or text")
 	comment.Flags().Bool("send-to-agent", false, "Queue this comment for the selected agent")
+	addArtifactCommentWaitFlags(comment)
 	cmd.AddCommand(comment)
 	agent := &cobra.Command{Use: "agent <slug>", Args: cobra.ExactArgs(1), Short: "Connect an owned private chat for Design changes", RunE: func(cmd *cobra.Command, args []string) error {
 		chat, _ := cmd.Flags().GetString("chat-id")
@@ -184,7 +204,14 @@ func newPageDesignWatchCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		request, err := client.NewRequest(cmd.Context(), http.MethodGet, "/api/v1/pages/"+pagePathEscape(args[0])+"/design/ws", nil)
+		path := "/api/v1/pages/" + pagePathEscape(args[0]) + "/design/ws"
+		if revision, _ := cmd.Flags().GetString("authority-revision"); revision != "" {
+			if !designAuthorityRevisionValid(revision) {
+				return cli.WithExitCode(fmt.Errorf("--authority-revision must be the decimal authority_revision from page design get"), cli.ExitValidation)
+			}
+			path += "?authority_revision=" + revision
+		}
+		request, err := client.NewRequest(cmd.Context(), http.MethodGet, path, nil)
 		if err != nil {
 			return err
 		}
@@ -202,7 +229,7 @@ func newPageDesignWatchCommand() *cobra.Command {
 			if response != nil {
 				defer response.Body.Close()
 				if response.StatusCode != http.StatusSwitchingProtocols {
-					return fmt.Errorf("Design websocket refused (HTTP %d)", response.StatusCode)
+					return designWatchRefused(response)
 				}
 			}
 			return err
@@ -237,5 +264,33 @@ func newPageDesignWatchCommand() *cobra.Command {
 		return nil
 	}}
 	cmd.Flags().Int("count", 0, "Stop after N binary frames; 0 watches until interrupted")
+	cmd.Flags().String("authority-revision", "", "Admit the socket only if the workspace authority_revision still equals this value (from page design get)")
 	return cmd
+}
+
+// The server compares the query value with CAST(authority_revision AS TEXT),
+// a decimal integer. Anything else could only ever be refused.
+func designAuthorityRevisionValid(value string) bool {
+	if len(value) == 0 || len(value) > 20 {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// A refused upgrade carries an ordinary API error body; route it through the
+// same status → exit-code mapping as every other command.
+func designWatchRefused(response *http.Response) error {
+	if response.Body == nil {
+		response.Body = http.NoBody
+	}
+	err := pageCheckError(response)
+	if err == nil {
+		return fmt.Errorf("Design websocket refused (HTTP %d)", response.StatusCode)
+	}
+	return fmt.Errorf("Design websocket refused: %w", err)
 }

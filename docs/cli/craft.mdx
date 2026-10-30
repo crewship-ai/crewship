@@ -30,7 +30,21 @@ session token stays in process memory and is attached as `X-Craft-Session`.
 Responses default to escaped NDJSON. With `-f yaml`, each response is a YAML
 document separated by `---`; stdin actions remain NDJSON. Availability honors
 the same output format flag. Authentication and workspace selection use the
-normal CLI context. Server error bodies are not printed.
+normal CLI context.
+
+A refusal prints the server's error text with the private session token
+removed, and exits with the usual [classified code](/cli/overview):
+`5` for a `409`, `2` for `400`/`422`, `7` for a `5xx`, `8` when the request
+never got a response. Under `--format json` the error envelope carries the
+status and the redacted body under `error.extensions`. A `409` on a lease action
+(`acquire`, `renew`, `release`, `request-handoff`, `handoff`) is followed by one
+`status` read so the message names the current holder, for example
+`(lease held by human "Jana", generation 12)`; the lease document is added to
+`error.extensions.lease`. A refusal whose body carries a `proposal` adds its
+state, so a stale proposal reads `(proposal state: stale)` while an already
+decided one keeps the server's "already decided" text. The native agent `task`
+commands keep their status-only messages (`native HTTP 503`), because their
+refusal bodies can describe a private runtime, but exit with the same codes.
 
 | Action | Route |
 |---|---|

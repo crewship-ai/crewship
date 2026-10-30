@@ -93,6 +93,31 @@ packet when investigating an uncertain result; check the saved Document before
 starting another run. Reopen its Latest panel to see the saved revision. The
 browser composer’s targeted Update action is not enabled by this CLI slice.
 
+## Start one artifact task
+
+An artifact comment queued with **Send to agent** (or `page artifact comment
+--send-to-agent`) stays `pending` until the artifact's source chat receives a
+message carrying its explicit purpose. `--artifact-target` sends that message
+from the CLI. The file is a closed JSON object of at most 2048 bytes:
+
+```json
+{"submission_id":"artifact-comment-<comment-id>","page_id":"<page-id>","comment_id":"<comment-id>","base_version":3}
+```
+
+Add `"kind":"design"` for a Design comment. For a new artifact from a
+description ("Describe it"), send `{"submission_id":"<unique-id>"}` alone.
+
+```bash
+crewship run ada --chat <source-chat-id> --artifact-target target.json "Apply the queued comment"
+```
+
+The server binds the purpose to your stored message and current credential (a
+scoped CLI token needs `pages:write`) and refuses any other chat, page, version or
+comment. Unknown fields, a comment without a page, or a non-positive base are
+refused before anything is sent (exit `2`). Interactive, plan and restricted runs
+cannot use this flag. `page artifact comment --send-to-agent --wait` builds this
+packet for you.
+
 ## Flags
 
 | Flag | Default | Effect |
@@ -102,6 +127,7 @@ browser composer’s targeted Update action is not enabled by this CLI slice.
 | `--project-file-version <version-id>` | (unset) | Explicit immutable project input for a restricted native run; repeat up to 16 times. Trusted runs reject this selection. |
 | `--chat <chat-id>` | (unset) | Continue an existing chat instead of creating one. |
 | `--document-target <file>` | (unset) | Explicit original Document target for one trusted, non-interactive update in an existing private chat. |
+| `--artifact-target <file>` | (unset) | Explicit artifact purpose (`artifact_project_intent`) for one trusted, non-interactive message in the artifact's source chat. Mutually exclusive with `--document-target`. |
 | `--no-stream` | `false` | Wait for completion and print the final text only. |
 | `--wait` | `false` | Alias for `--no-stream` — same spelling as `crewship pipeline run --wait` / `crewship hire --wait` / `crewship mission start --wait`, for scripts that want one consistent "block until done" flag across commands. |
 | `--max-turns <n>` | `0` | Cap the agent loop at N turns for this run (`0` = adapter default, `50` interactive). |
@@ -245,7 +271,7 @@ scripting; the default is a human-readable table.
 | `tool_result` | stderr, `[result] …` | `--verbose` only |
 | `status` | stderr, `[status] …` | unless `--quiet` |
 | `error` | stderr, `[error] …`; exit non-zero | always |
-| `agent_busy` | stderr, `[busy] …`; exit non-zero | always |
+| `agent_busy` | stderr, `[busy] …`; exit `9` | always |
 | `crew_provisioning` | stderr, `[building] …`; keeps waiting | unless `--quiet` |
 | `done` | stderr, `[done]`; commit `--save` tempfile | unless `--quiet` |
 
@@ -274,7 +300,7 @@ A dropped WebSocket connection mid-run exits non-zero so wrapping scripts (`crew
 - **`prompt is required (provide as argument, --prompt flag, or use --interactive)`** — every path requires content unless you're starting a REPL.
 - **`ws read: ...`** — the WebSocket dropped before `done`. Most often a server restart.
 - **`agent error: <message>`** — the model or a tool returned a hard error event. The exit code is non-zero and the message is sanitised before display.
-- **`agent busy: <message>`** — the agent already had a live run, so this message was rejected and never reached it. Nothing ran and nothing was persisted; send it again once the agent is free.
+- **`agent busy: <message>`** — the agent already had a live run, so this message was rejected and never reached it. Nothing ran and nothing was persisted; send it again once the agent is free. Exits `9`, so a script can tell it from a failed run.
 - **`environment build failed to start: <message>`** — the crew needed a new environment image and the build could not be queued. Nothing ran; fix the cause shown and send again.
 - **`save commit: ...`** — `--save` tempfile couldn't be atomically renamed (disk full, permission denied). Reported separately from a stream error so neither one masks the other.
 
