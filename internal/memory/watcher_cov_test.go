@@ -84,7 +84,7 @@ func TestAddRecursiveWatch_RootAddFailure_ReturnsError(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = fw.Close() // every subsequent Add fails deterministically, root included
-	if err := addRecursiveWatch(fw, root, fsnotifyHooks{}, quietLogger()); err == nil {
+	if err := addRecursiveWatch(fw, root, fsnotifyHooks{}, quietLogger(), false); err == nil {
 		t.Fatal("expected the root Add error from a closed fsnotify watcher")
 	}
 }
@@ -250,7 +250,7 @@ func TestAddRecursiveWatch_SkipsFilesWatchesSubdirs(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer fw.Close()
-	if err := addRecursiveWatch(fw, root, fsnotifyHooks{}, quietLogger()); err != nil {
+	if err := addRecursiveWatch(fw, root, fsnotifyHooks{}, quietLogger(), false); err != nil {
 		t.Fatalf("addRecursiveWatch: %v", err)
 	}
 	watched := fw.WatchList()

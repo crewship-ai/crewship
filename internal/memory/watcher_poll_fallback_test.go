@@ -237,3 +237,78 @@ func TestAuditWatcher_FsnotifyFailure_PollStillRecordsVersion(t *testing.T) {
 		t.Errorf("audit must not be disabled when only fsnotify failed; log = %q", logs.String())
 	}
 }
+
+// A partial watch is safe only while a poll fallback actually runs. In the
+// fsnotify-only mode it must fail closed and release the kernel watcher.
+func TestStartWatcher_AddFailureModesAndCleanup(t *testing.T) {
+	for _, failRoot := range []bool{false, true} {
+		for _, polling := range []bool{false, true} {
+			name := "subdir"
+			if failRoot {
+				name = "root"
+			}
+			if polling {
+				name += "/poll"
+			} else {
+				name += "/fsnotify-only"
+			}
+			t.Run(name, func(t *testing.T) {
+				root := t.TempDir()
+				daily := filepath.Join(root, "daily")
+				if err := os.Mkdir(daily, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				var fw *fsnotify.Watcher
+				var logs lockedBuffer
+				cfg := WatchConfig{
+					UseFsnotify: true,
+					Debounce:    20 * time.Millisecond,
+					Logger:      slog.New(slog.NewTextHandler(&logs, nil)),
+					hooks: fsnotifyHooks{
+						newWatcher: func() (*fsnotify.Watcher, error) {
+							var err error
+							fw, err = fsnotify.NewWatcher()
+							return fw, err
+						},
+						add: func(w *fsnotify.Watcher, path string) error {
+							if failRoot || path == daily {
+								return errInjectedWatchLimit
+							}
+							return w.Add(path)
+						},
+					},
+				}
+				if polling {
+					cfg.PollInterval = 50 * time.Millisecond
+				}
+				w, err := StartWatcher(context.Background(), root, cfg)
+				if w != nil {
+					t.Cleanup(w.Stop)
+				}
+				if !polling {
+					if !errors.Is(err, errInjectedWatchLimit) || w != nil {
+						t.Fatalf("fsnotify-only must reject incomplete coverage: watcher=%v, err=%v", w, err)
+					}
+					if strings.Contains(logs.String(), "poll fallback") {
+						t.Fatalf("claimed polling when disabled: %s", logs.String())
+					}
+				} else {
+					if err != nil || w == nil {
+						t.Fatalf("poll fallback must survive Add failure: %v", err)
+					}
+					touchUntilEvent(t, w, filepath.Join(daily, "AGENT.md"))
+					if !strings.Contains(logs.String(), "poll fallback") {
+						t.Fatalf("missing fallback warning: %s", logs.String())
+					}
+					w.Stop()
+				}
+				if fw == nil {
+					t.Fatal("fsnotify creation unexpectedly failed")
+				}
+				if err := fw.Add(root); !errors.Is(err, fsnotify.ErrClosed) {
+					t.Fatalf("kernel watcher not closed: Add returned %v", err)
+				}
+			})
+		}
+	}
+}

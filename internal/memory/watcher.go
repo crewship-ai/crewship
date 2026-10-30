@@ -170,15 +170,15 @@ func StartWatcher(ctx context.Context, root string, cfg WatchConfig) (*Watcher, 
 }
 
 // startFsnotify creates the kernel watcher and registers root plus
-// every existing subdirectory. Only a failure to create the watcher
-// or to watch root itself is returned; per-subdirectory failures are
-// logged by addRecursiveWatch and leave the rest of the tree watched.
+// every existing subdirectory. Creation and root-watch failures are returned.
+// Subdirectory failures are tolerated only when polling covers them;
+// otherwise the partial watcher is closed and the error is returned.
 func startFsnotify(root string, cfg WatchConfig) (*fsnotify.Watcher, error) {
 	fw, err := cfg.hooks.newFsnotify()
 	if err != nil {
 		return nil, fmt.Errorf("fsnotify.NewWatcher: %w", err)
 	}
-	if err := addRecursiveWatch(fw, root, cfg.hooks, cfg.Logger); err != nil {
+	if err := addRecursiveWatch(fw, root, cfg.hooks, cfg.Logger, cfg.PollInterval > 0); err != nil {
 		_ = fw.Close()
 		return nil, fmt.Errorf("add recursive watch: %w", err)
 	}
@@ -390,13 +390,13 @@ func isMarkdownEvent(ev fsnotify.Event) bool {
 // A failure to watch root itself is returned: the kernel watcher is
 // useless without it. Failures on individual subdirectories (EACCES,
 // ENOSPC from an exhausted fs.inotify.max_user_watches) are logged and
-// skipped, so one bad directory never disables the watcher; the poll
-// fallback still covers those directories.
-func addRecursiveWatch(fw *fsnotify.Watcher, root string, hooks fsnotifyHooks, logger *slog.Logger) error {
+// skipped only when the poll fallback covers those directories. Without
+// polling, incomplete coverage is an error and the caller closes the watcher.
+func addRecursiveWatch(fw *fsnotify.Watcher, root string, hooks fsnotifyHooks, logger *slog.Logger, pollFallback bool) error {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	var rootErr error
+	var watchErr error
 	skipped := 0
 	walkErr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info == nil {
@@ -409,8 +409,8 @@ func addRecursiveWatch(fw *fsnotify.Watcher, root string, hooks fsnotifyHooks, l
 		if addErr == nil {
 			return nil
 		}
-		if path == root {
-			rootErr = addErr
+		if path == root || !pollFallback {
+			watchErr = fmt.Errorf("watch %q: %w", path, addErr)
 			return filepath.SkipAll
 		}
 		skipped++
@@ -418,8 +418,8 @@ func addRecursiveWatch(fw *fsnotify.Watcher, root string, hooks fsnotifyHooks, l
 			"path", path, "error", addErr)
 		return nil
 	})
-	if rootErr != nil {
-		return rootErr
+	if watchErr != nil {
+		return watchErr
 	}
 	if walkErr != nil {
 		return walkErr
