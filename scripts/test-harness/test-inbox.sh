@@ -88,7 +88,7 @@ section "A real decision: fire a routine that parks on an approval"
 RUN_OUT="$(cs routine run "$APPROVAL_ROUTINE" --inputs '{"action":"harness probe"}' 2>&1)"
 
 if ! grep -qi "waiting\|approve" <<<"$RUN_OUT"; then
-  skip "approval-gate-demo did not park on an approval — is it seeded? ($(head -1 <<<"$RUN_OUT"))"
+  _fail "owned approval fixture parks on an approval" "$(head -1 <<<"$RUN_OUT")"
 else
   _pass "routine parked on its approval step"
 
@@ -144,14 +144,17 @@ section "Dismissal reaches the server, not just the screen"
 # arbitrary one would close a real notification belonging to whoever is using
 # this instance. Mint one instead, by running a routine whose notify step
 # addresses the caller, and dismiss only that.
-BEFORE_IDS="$(inbox_json active | jq -r '.[]? | select(.kind=="message") | .id' | sort)"
-cs routine run "${NOTIFY_ROUTINE:-$NOTIFY_FIXTURE}" >/dev/null 2>&1
+notify_routine="${NOTIFY_ROUTINE:-$NOTIFY_FIXTURE}"
+if ! cs routine run "$notify_routine" >/dev/null 2>&1; then
+  _fail "run owned notification fixture"
+fi
+notify_run_id="$(cs routine records "$notify_routine" --json --limit 1 2>/dev/null | jq -er '.[0].id')"
+assert_nonempty "notification fixture records its run identity" "$notify_run_id"
 sleep "$POLL_INTERVAL"
-MSG_ID="$(comm -13 <(printf '%s\n' "$BEFORE_IDS") \
-  <(inbox_json active | jq -r '.[]? | select(.kind=="message") | .id' | sort) | head -1)"
+MSG_ID="$(inbox_json active | jq -r --arg run "$notify_run_id" '.[]? | select(.kind == "message" and .payload.pipeline_run_id == $run) | .id' | head -1)"
 
 if [[ -z "$MSG_ID" ]]; then
-  skip "could not mint a message to dismiss (is ${NOTIFY_ROUTINE:-$NOTIFY_FIXTURE} seeded?)"
+  _fail "owned notification run produced a message to dismiss"
 else
   info "dismissing only the row this run created: $MSG_ID"
   cs inbox resolve "$MSG_ID" --action dismissed >/dev/null 2>&1
