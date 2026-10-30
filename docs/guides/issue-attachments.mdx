@@ -23,6 +23,12 @@ crewship issue attachment BE-42 <attachment-id> -o ./local-copy.log
 crewship issue detach BE-42 <attachment-id>
 ```
 
+With `-f json`, `issue attach` prints the attachment record (`id`, `filename`,
+`content_type`, `size_bytes`, `sha256`, …) on stdout and keeps the human receipt
+on stderr, so `crewship issue attach BE-42 ./crash.log -f json | jq -r .id` gives
+the id that `issue attachment` and `issue detach` take. Attaching needs
+**MANAGER or above**; a VIEWER can list and download but gets `403 Forbidden`.
+
 The HTTP surface is documented in the
 [Issues API reference](/api-reference/issues#attachments).
 
