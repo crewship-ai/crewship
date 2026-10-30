@@ -37,7 +37,9 @@ The `artifacts_design` flag is independent of `artifact_projects`, the flag for
 Project artifacts. You can turn Design on without Projects.
 
 With `NEXT_PUBLIC_ARTIFACTS_DESIGN` on, `/artifacts` opens the Artifacts library
-even if `NEXT_PUBLIC_ARTIFACTS_LIBRARY` is off. Without it, Designs are hidden
+even if `NEXT_PUBLIC_ARTIFACTS_LIBRARY` is off. In that configuration the
+sidebar still leads to `/pages`; open `/artifacts` directly, or also enable
+`NEXT_PUBLIC_ARTIFACTS_LIBRARY`. Without the Design variable, Designs are hidden
 from the library, and a Design editor shows **Design is not enabled.**
 
 <Note>
@@ -52,7 +54,8 @@ from the library, and a Design editor shows **Design is not enabled.**
 You need permission to create pages in the workspace. Agents cannot create a
 Design; they can only edit one that a person made.
 
-1. Open **Artifacts** in the sidebar.
+1. Open **Artifacts** in the sidebar, or visit `/artifacts` directly if only
+   the Design UI flag is enabled.
 2. Click **New artifact**, or the **Design** tile under **Make something** on the
    library home.
 3. Select **Design** ("A shared canvas with screens").
@@ -243,7 +246,7 @@ The comment shows its delivery state:
 | **Sent to agent** | The chat accepted it. The agent reads the Design, applies the change and saves a new version. |
 | **Waiting for agent** | The comment is queued as a task for the agent. |
 | **Comment saved. The agent is busy; retry when it finishes.** | The agent was running. Click **Retry delivery** later. |
-| **Comment saved. Retry when the source chat is connected.** | The chat was not reachable. Click **Retry delivery** when it is. |
+| **Comment saved. Retry when the source chat is connected.** | Delivery was not confirmed within about 15 seconds. The message may already be in the chat, or the agent may not have started. Open the chat, check for the request and confirm that a model is set and the agent can run before retrying. |
 | **Done · vN** | The agent replied; its answer appears under the comment with the version it saved. |
 
 Delivery works only while the connected chat is open to realtime messages and
