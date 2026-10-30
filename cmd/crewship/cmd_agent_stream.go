@@ -127,6 +127,12 @@ func collectAgentStream(src chatEventSource, timeout time.Duration) collectResul
 				res.GotDone = true
 				res.Text = string(fullText)
 				return res
+			case "ask_submission_error":
+				// A refused ask form: sender-only, unsaved, and never followed
+				// by a done — terminal for this send exactly like agent_busy.
+				res.StreamErr = sanitizeTerminal("form refused: " + askSubmissionErrorText(event.Content, event.Metadata))
+				res.Text = string(fullText)
+				return res
 			case wsproto.AgentBusyEventType:
 				// A busy bounce is terminal FOR THIS SEND and the server
 				// deliberately sends no `done` after it (internal/ws/

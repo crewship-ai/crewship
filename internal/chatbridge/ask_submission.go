@@ -128,3 +128,14 @@ func askAttachmentInChat(chatID, id string) bool {
 	}
 	return true
 }
+
+// CheckAskSubmission runs the exact admission rule a send's ask_submission
+// envelope must pass, against a given stored form definition (the agent's
+// ask_forms JSON). It exists so a client that builds submissions outside the
+// browser — `crewship run --ask-form` — can be tested against the server's own
+// check rather than against a copy of it. nil means the server would accept
+// the submission as a form; it grants nothing at runtime.
+func CheckAskSubmission(askForms, chatID, content string, metadata map[string]any) error {
+	_, err := validateAskSubmission(&ChatInfo{AskForms: askForms}, chatID, content, metadata)
+	return err
+}

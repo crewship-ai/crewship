@@ -16,23 +16,23 @@ import (
 	"testing"
 )
 
-type parityCall struct {
+type methodParityCall struct {
 	Method, Path, Body string
 }
 
-type parityStub struct {
+type methodParityStub struct {
 	mu    sync.Mutex
-	calls []parityCall
+	calls []methodParityCall
 	// handler returns status+body for a request; unmatched = 404.
 	handler func(method, path string) (int, string)
 }
 
-func (p *parityStub) start(t *testing.T) *httptest.Server {
+func (p *methodParityStub) start(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
 		p.mu.Lock()
-		p.calls = append(p.calls, parityCall{r.Method, r.URL.Path, string(b)})
+		p.calls = append(p.calls, methodParityCall{r.Method, r.URL.Path, string(b)})
 		p.mu.Unlock()
 		status, body := p.handler(r.Method, r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
@@ -43,12 +43,12 @@ func (p *parityStub) start(t *testing.T) *httptest.Server {
 	return srv
 }
 
-func (p *parityStub) got() []parityCall {
+func (p *methodParityStub) got() []methodParityCall {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	// The CLI resolves the workspace slug with GET /api/v1/workspaces before
 	// the command's own call; that is transport noise, not the contract.
-	var out []parityCall
+	var out []methodParityCall
 	for _, c := range p.calls {
 		if c.Method == http.MethodGet && c.Path == "/api/v1/workspaces" {
 			continue
@@ -58,7 +58,7 @@ func (p *parityStub) got() []parityCall {
 	return out
 }
 
-func (p *parityStub) count(method, path string) int {
+func (p *methodParityStub) count(method, path string) int {
 	n := 0
 	for _, c := range p.got() {
 		if c.Method == method && c.Path == path {
@@ -69,7 +69,7 @@ func (p *parityStub) count(method, path string) int {
 }
 
 func TestAcceptance_CheckpointGet(t *testing.T) {
-	stub := &parityStub{handler: func(m, p string) (int, string) {
+	stub := &methodParityStub{handler: func(m, p string) (int, string) {
 		if m == "GET" && p == "/api/v1/checkpoints/chk_1" {
 			return 200, `{"id":"chk_1","mission_id":"MIS-42","label":"green build","journal_cursor":"j_7f","created_by":"user_1","created_at":"2026-04-17T10:23:41Z"}`
 		}
@@ -98,7 +98,7 @@ func TestAcceptance_CheckpointGet(t *testing.T) {
 
 func TestAcceptance_WorkflowGet_ByIDAndSlug(t *testing.T) {
 	const tpl = `{"id":"wft_1","name":"Engineering Standard","template_json":"[{\"name\":\"todo\"}]","is_builtin":false,"created_at":"c","updated_at":"u"}`
-	stub := &parityStub{handler: func(m, p string) (int, string) {
+	stub := &methodParityStub{handler: func(m, p string) (int, string) {
 		switch {
 		case m == "GET" && p == "/api/v1/workflow-templates/wft_1":
 			return 200, tpl
@@ -155,7 +155,7 @@ func TestAcceptance_NotifyChannelUpdate(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			stub := &parityStub{handler: func(m, p string) (int, string) {
+			stub := &methodParityStub{handler: func(m, p string) (int, string) {
 				if m == "PATCH" && p == "/api/v1/notification-channels/nch_1" {
 					return 200, `{"updated":"nch_1"}`
 				}
@@ -195,7 +195,7 @@ func TestAcceptance_NotifyChannelUpdate(t *testing.T) {
 func TestAcceptance_NukeKeeperRequests(t *testing.T) {
 	const path = "/api/v1/admin/keeper/requests"
 	t.Run("purges and reports counts", func(t *testing.T) {
-		stub := &parityStub{handler: func(m, p string) (int, string) {
+		stub := &methodParityStub{handler: func(m, p string) (int, string) {
 			if m == "DELETE" && p == path {
 				return 200, `{"deleted_requests":4,"deleted_events":9}`
 			}
@@ -211,7 +211,7 @@ func TestAcceptance_NukeKeeperRequests(t *testing.T) {
 		}
 	})
 	t.Run("refuses without --yes and sends nothing", func(t *testing.T) {
-		stub := &parityStub{handler: func(m, p string) (int, string) { return 200, `{}` }}
+		stub := &methodParityStub{handler: func(m, p string) (int, string) { return 200, `{}` }}
 		srv := stub.start(t)
 		out, err := runIssueStopCLI(t, srv.URL, "nuke", "keeper-requests")
 		if err == nil || len(stub.got()) != 0 || !strings.Contains(out, "--yes") {
@@ -220,7 +220,7 @@ func TestAcceptance_NukeKeeperRequests(t *testing.T) {
 	})
 	t.Run("old server is reported, not claimed as success", func(t *testing.T) {
 		for _, status := range []int{404, 405} {
-			stub := &parityStub{handler: func(m, p string) (int, string) { return status, `{}` }}
+			stub := &methodParityStub{handler: func(m, p string) (int, string) { return status, `{}` }}
 			srv := stub.start(t)
 			out, err := runIssueStopCLI(t, srv.URL, "nuke", "keeper-requests", "--yes")
 			if err == nil || !strings.Contains(out, "does not support") || strings.Contains(out, "purged (") {
@@ -229,7 +229,7 @@ func TestAcceptance_NukeKeeperRequests(t *testing.T) {
 		}
 	})
 	t.Run("server error fails", func(t *testing.T) {
-		stub := &parityStub{handler: func(m, p string) (int, string) { return 500, `{}` }}
+		stub := &methodParityStub{handler: func(m, p string) (int, string) { return 500, `{}` }}
 		srv := stub.start(t)
 		out, err := runIssueStopCLI(t, srv.URL, "nuke", "keeper-requests", "--yes")
 		if err == nil || !strings.Contains(out, "HTTP 500") {
@@ -239,7 +239,7 @@ func TestAcceptance_NukeKeeperRequests(t *testing.T) {
 }
 
 func TestAcceptance_WorkspaceMemberCapabilitiesList(t *testing.T) {
-	stub := &parityStub{handler: func(m, p string) (int, string) {
+	stub := &methodParityStub{handler: func(m, p string) (int, string) {
 		switch {
 		case m == "GET" && p == "/api/v1/workspaces/ws_test/members/capabilities":
 			return 200, `{"members":[{"user_id":"u_alice","role":"ADMIN","capabilities":["chat","routine.create"]},{"user_id":"u_bob","role":"MEMBER","capabilities":["chat"]}]}`
@@ -283,7 +283,7 @@ func TestAcceptance_CLIParityCommandsRejectDotSegments(t *testing.T) {
 		{"workspace", "member", "capabilities", "grant", "..", "chat"},
 	} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			stub := &parityStub{handler: func(m, p string) (int, string) { return 200, `{}` }}
+			stub := &methodParityStub{handler: func(m, p string) (int, string) { return 200, `{}` }}
 			srv := stub.start(t)
 			out, err := runIssueStopCLI(t, srv.URL, args...)
 			if err == nil || !strings.Contains(out, "invalid resource identifier") {
@@ -319,7 +319,7 @@ func TestAcceptance_CLIParityCommandsRejectDotSegments(t *testing.T) {
 // A 2xx whose body cannot be read leaves the counts unknown: the purge must
 // fail loudly instead of reporting "0 requests, 0 events".
 func TestAcceptance_NukeKeeperRequests_UnreadableBodyFails(t *testing.T) {
-	stub := &parityStub{handler: func(m, p string) (int, string) { return 200, `not json` }}
+	stub := &methodParityStub{handler: func(m, p string) (int, string) { return 200, `not json` }}
 	srv := stub.start(t)
 	out, err := runIssueStopCLI(t, srv.URL, "nuke", "keeper-requests", "--yes")
 	if err == nil || strings.Contains(out, "purged (") || !strings.Contains(out, "could not be read") {

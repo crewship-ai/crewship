@@ -209,7 +209,12 @@ var formatContractExempt = map[string]string{
 	// agent, delivered as it arrives — there is no document to close, and
 	// buffering the whole answer to wrap it would defeat the streaming this
 	// command exists to provide. Same class as `crewship ask`.
-	"crewship explain": "streams an agent's answer token by token; stdout is a live stream, not a document that can be closed and encoded",
+	"crewship explain":    "streams an agent's answer token by token; stdout is a live stream, not a document that can be closed and encoded",
+	"crewship chat retry": "resends a chat message and streams the agent's new answer token by token (runStream, as `crewship run --chat`); stdout is a live stream",
+	"crewship chat edit":  "sends replacement text and streams the agent's answer token by token (runStream, as `crewship run --chat`); stdout is a live stream",
+
+	// The export dialog's Markdown document; --output writes it to disk.
+	"crewship chat export": "prints the chat's Export-dialog Markdown (or writes it to --output); the document IS the output, the same class as the recovery sheet",
 }
 
 // ─── the walk ────────────────────────────────────────────────────────────

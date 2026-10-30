@@ -245,6 +245,13 @@ var crewPeerConvsCmd = &cobra.Command{
 
 		limit, _ := cmd.Flags().GetInt("limit")
 		path := fmt.Sprintf("/api/v1/crews/%s/peer-conversations?limit=%d", crewID, limit)
+		// The route pages with limit/offset (parsePagination) and always has;
+		// without --offset the CLI could only ever read the newest page.
+		if offset, _ := cmd.Flags().GetInt("offset"); offset > 0 {
+			path += fmt.Sprintf("&offset=%d", offset)
+		} else if offset < 0 {
+			return fmt.Errorf("--offset must be 0 or more")
+		}
 		// `agent_id` is matched on either side of the conversation and
 		// applied before the page is cut, so it is sent as a query parameter
 		// rather than filtered out of the rows that came back — a page of 50

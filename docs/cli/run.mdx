@@ -149,6 +149,11 @@ packet for you.
 | `--plan` | `false` | Request a step-by-step plan through the prompt; tools remain available. |
 | `--effort <level>` | (unset) | Reasoning effort: `minimal|low|medium|high|xhigh`. |
 | `--show-thinking` | `false` | Surface reasoning blocks on stdout (un-truncated). |
+| `--attach <file>` | (unset) | Upload a file into the chat and name it in the message, exactly as the web composer does. Repeatable. A message may consist of attachments alone. |
+| `--page <slug>` | (unset) | Attach a Page as context (`page_context`). The server checks that you and the agent can read it and appends its snapshot. Not with `--interactive` or `--create-document`. |
+| `--ask-form <form-id>` | (unset) | Submit one of the agent's ask forms into an existing `--chat`, answered with `--var`. The form's rendered message is the text; do not pass a prompt. |
+| `--var <name=value>` | (unset) | With `--ask-form`: answer one field. Repeat for more fields; repeat a name for a multi-value. A `file`/`photo` field takes a local path, which is uploaded. A money field `amount` takes its currency as `amount_currency`. |
+| `--create-document` | `false` | Ask the agent to create a new private Document from this message — the composer's "Create document" intent. The server accepts it only in a private chat with a trusted human sender and the feature enabled. |
 
 Stdin is read in exactly two cases. With no prompt argument and no `--prompt`, piped stdin is read to EOF and becomes the prompt (`echo hi | crewship run mia`). With a prompt given, stdin is appended as context only when you pass `--stdin` (`git diff | crewship run mia --stdin "review"`). Otherwise stdin is never touched, so a harness, CI step or cron job whose stdin is a pipe nobody closes cannot hang the command; when stdin is a pipe or a file the CLI prints a one-line `[stdin not read …]` hint on stderr.
 
@@ -199,9 +204,39 @@ Ctrl-C cancels the current turn (sends a `cancel` message over WS) without killi
 
 ```bash
 crewship run daniel "long-running task"
-# Ctrl-C → sends cancel, prints "[cancelled]", lets the server clean up
-# A second Ctrl-C exits the process immediately
+# Ctrl-C or SIGTERM → sends cancel and prints "[stopping…]"
+# "[cancelled]" appears only when the run's own terminal event confirms it
+# A second Ctrl-C/SIGTERM exits the process immediately
 ```
+
+SIGTERM is handled like Ctrl-C, so `timeout 10m crewship run …`, a CI runner
+or a supervisor stops the run server-side instead of orphaning it. A confirmed
+stop exits 0 with whatever output arrived. If no confirmation arrives within
+30 seconds the command exits non-zero. To stop a run from another terminal, use
+[`crewship chat stop`](/cli/chat).
+
+### Attach files, a Page or a form
+
+```bash
+# Files: uploaded into the chat, then named in the message
+crewship run daniel --chat c_abc123 --attach ./trace.log --attach ./screenshot.png "what broke?"
+
+# A Page as context (the server snapshots it)
+crewship run daniel --chat c_abc123 --page fleet "summarise this page"
+
+# An ask form, answered from the command line
+crewship run lucy --chat c_abc123 --ask-form receipt \
+  --var supplier=Vodafone --var amount=1249 --var amount_currency=CZK --var document=./IMG_4821.heic
+```
+
+Attachments use the web composer's exact wording — `I've attached a file to this
+message. The path is relative to your working directory:` followed by
+`- attachments/<chat-id>/<file>` lines. An ask form is rendered with the same
+renderer the server uses and carries the `ask_submission` envelope; the server
+re-renders it and refuses a submission whose text does not match. `run` prints
+`[form delivered]` when the server confirms it saved the submission, and exits
+non-zero with the refusal (`[form refused] …`) otherwise. Preview a form's
+message first with `crewship agent ask-preview`.
 
 ### Save the answer to disk
 
@@ -273,7 +308,11 @@ scripting; the default is a human-readable table.
 | `error` | stderr, `[error] …`; exit non-zero | always |
 | `agent_busy` | stderr, `[busy] …`; exit `9` | always |
 | `crew_provisioning` | stderr, `[building] …`; keeps waiting | unless `--quiet` |
-| `done` | stderr, `[done]`; commit `--save` tempfile | unless `--quiet` |
+| `result` | stderr, `[summary] $0.0123 · 1200 in / 340 out tokens · 2 turns` | unless `--quiet` |
+| `user_message` | stderr, `[form delivered]` when it confirms an `--ask-form` submission; otherwise not shown | unless `--quiet` |
+| `ask_submission_error` | stderr, `[form refused] …`; exit non-zero | always |
+| `assignment_*`, `escalation_*`, `peer_query_*`, `port_expose_created`, `system`, `image` | stderr, one line each (`[delegated] …`, `[escalation] …`) | unless `--quiet` |
+| `done` | stderr, `[done]` (or `[cancelled]` after a stop); commit `--save` tempfile | unless `--quiet` |
 
 An agent runs one message at a time. A send that arrives while the agent
 already has a live run is bounced with `agent_busy` and no `done` follows it —

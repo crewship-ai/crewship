@@ -1,18 +1,16 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/chatkind"
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
@@ -39,6 +37,8 @@ Examples:
   crewship chat c_abc123 --no-markdown    # plain text
   crewship chat c_abc123 --format json | jq '.[] | {role, content}'
   crewship chat c_abc123 --since 24h      # filter by time (client-side)
+  crewship chat c_abc123 --parts          # thinking and tool calls too
+  crewship chat export c_abc123 -o chat.md
   crewship chat room list
   crewship chat room direct <user-id>`,
 	Args: cobra.ExactArgs(1),
@@ -67,8 +67,7 @@ Examples:
 			}
 			filtered := body.Messages[:0]
 			for _, m := range body.Messages {
-				ts, _ := m["created_at"].(string)
-				if mt, err := time.Parse(time.RFC3339, ts); err != nil || mt.After(t) {
+				if mt, ok := chatMessageTime(m); !ok || mt.After(t) {
 					filtered = append(filtered, m)
 				}
 			}
@@ -90,14 +89,37 @@ Examples:
 		// Pretty path: use markdown renderer for assistant messages, plain
 		// for everything else, with role/timestamp headers.
 		md := resolveMarkdownFromCmd(cmd)
-		printChatTranscript(body.Messages, md)
+		withParts, _ := cmd.Flags().GetBool("parts")
+		printChatTranscriptParts(body.Messages, md, withParts)
 		return nil
 	},
+}
+
+// chatMessageTime reads a transcript message's timestamp. The wire field is
+// `ts` (conversation.Message.Timestamp, RFC 3339 with nanoseconds); this
+// command used to read `created_at`, which the messages endpoint never sends,
+// so --since filtered nothing and every header printed without a time.
+// `created_at` stays as a fallback only for hand-built fixtures and exports.
+func chatMessageTime(m map[string]any) (time.Time, bool) {
+	for _, key := range []string{"ts", "created_at"} {
+		if raw, ok := m[key].(string); ok && raw != "" {
+			t, err := time.Parse(time.RFC3339Nano, raw)
+			return t, err == nil
+		}
+	}
+	return time.Time{}, false
 }
 
 // printChatTranscript renders messages with role-aware styling. Assistant
 // messages go through the markdown renderer; user/system stay plain.
 func printChatTranscript(messages []map[string]any, md *cli.MarkdownRenderer) {
+	printChatTranscriptParts(messages, md, false)
+}
+
+// printChatTranscriptParts is printChatTranscript with --parts: each message's
+// thinking, tool calls, tool results and images instead of its flattened text.
+// A group chat's user line names its author either way.
+func printChatTranscriptParts(messages []map[string]any, md *cli.MarkdownRenderer, withParts bool) {
 	if len(messages) == 0 {
 		fmt.Printf("%sNo messages.%s\n", cli.Dim, cli.Reset)
 		return
@@ -105,8 +127,8 @@ func printChatTranscript(messages []map[string]any, md *cli.MarkdownRenderer) {
 	for i, m := range messages {
 		role, _ := m["role"].(string)
 		content, _ := m["content"].(string)
-		ts, _ := m["created_at"].(string)
-		if t, err := time.Parse(time.RFC3339, ts); err == nil {
+		ts := ""
+		if t, ok := chatMessageTime(m); ok {
 			ts = t.Format("2006-01-02 15:04:05")
 		}
 		if i > 0 {
@@ -122,9 +144,17 @@ func printChatTranscript(messages []map[string]any, md *cli.MarkdownRenderer) {
 		case "system":
 			color = cli.Dim
 		}
+		who := role
+		if author, _ := m["author_user_id"].(string); author != "" {
+			who = role + " (" + sanitizeTerminal(author) + ")"
+		}
 		fmt.Printf("%s═══ %s%s%s · %s %s═══%s\n",
-			color, cli.Bold, role, cli.Reset+color, ts, color, cli.Reset)
+			color, cli.Bold, who, cli.Reset+color, ts, color, cli.Reset)
 
+		if withParts {
+			printChatParts(m, md, role == "assistant" || role == "model")
+			continue
+		}
 		out := content
 		if md != nil && (role == "assistant" || role == "model") {
 			out = md.Render(content)
@@ -317,46 +347,8 @@ Examples:
 			return err
 		}
 
-		fh, err := os.Open(localPath)
+		result, err := uploadChatAttachment(cmd.Context(), client, agentID, chatID, localPath)
 		if err != nil {
-			return fmt.Errorf("open %s: %w", localPath, err)
-		}
-		defer fh.Close()
-
-		// Multipart body assembled in memory: 25 MB server-side cap means
-		// the bound is small. Streaming via io.Pipe + goroutine adds
-		// complexity for no real benefit at this size.
-		var buf bytes.Buffer
-		mw := multipart.NewWriter(&buf)
-		fw, err := mw.CreateFormFile("file", filepath.Base(localPath))
-		if err != nil {
-			return fmt.Errorf("multipart form: %w", err)
-		}
-		if _, err := io.Copy(fw, fh); err != nil {
-			return fmt.Errorf("multipart copy: %w", err)
-		}
-		if err := mw.Close(); err != nil {
-			return fmt.Errorf("multipart close: %w", err)
-		}
-
-		path := "/api/v1/agents/" + url.PathEscape(agentID) +
-			"/chats/" + url.PathEscape(chatID) + "/attachments"
-		resp, err := postMultipart(cmd.Context(), client, path, mw.FormDataContentType(), &buf)
-		if err != nil {
-			return err
-		}
-		defer resp.Body.Close()
-		if err := cli.CheckError(resp); err != nil {
-			return err
-		}
-
-		var result struct {
-			Filename  string `json:"filename" yaml:"filename"`
-			Size      int64  `json:"size" yaml:"size"`
-			Path      string `json:"path" yaml:"path"`
-			AgentPath string `json:"agent_path" yaml:"agent_path"`
-		}
-		if err := cli.ReadJSON(resp, &result); err != nil {
 			return err
 		}
 		f := newFormatter()
@@ -584,7 +576,12 @@ gains a SOURCE column; --output json gains a "source" object per row.
   crewship chat list casey --kind direct
   crewship chat list casey --kind routine --output json
   crewship chat list casey --search rollback
-  crewship chat list casey --routine pipe_abc123 --with-source`,
+  crewship chat list casey --routine pipe_abc123 --with-source
+  crewship chat list casey --counts          # + per-kind totals (sidebar tabs)
+
+--counts asks for the per-kind totals the sidebar's tabs show. They describe
+every chat of the agent you may see, not just this page, and print under the
+table; --output json wraps the page as {"chats": [...], "kind_counts": {...}}.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, err := requireAuthAndWorkspace()
@@ -635,6 +632,11 @@ gains a SOURCE column; --output json gains a "source" object per row.
 		if withSource, _ := cmd.Flags().GetBool("with-source"); withSource {
 			q.Set("source", "1")
 		}
+		// Same literal-"1" rule as source: the server compares against it.
+		withCounts, _ := cmd.Flags().GetBool("counts")
+		if withCounts {
+			q.Set("counts", "1")
+		}
 		limit, _ := cmd.Flags().GetInt("limit")
 		offset, _ := cmd.Flags().GetInt("offset")
 		setListPaging(q, limit, offset)
@@ -649,6 +651,7 @@ gains a SOURCE column; --output json gains a "source" object per row.
 			return err
 		}
 		meta := readListMeta(resp)
+		kindCounts := parseChatKindCounts(resp.Header.Get(chatkind.CountsHeader))
 		if err := cli.ReadJSON(resp, &chats); err != nil {
 			return err
 		}
@@ -707,10 +710,19 @@ gains a SOURCE column; --output json gains a "source" object per row.
 				unread, activity,
 			})
 		}
+		if withCounts && !f.RoutesToHuman() {
+			// The totals live in a response header, so a machine format would
+			// otherwise drop them; wrap the page instead of changing its shape
+			// for callers that did not ask.
+			return f.Machine(map[string]any{"chats": chats, "kind_counts": kindCounts})
+		}
 		if err := f.Auto(chats, headers, rows); err != nil {
 			return err
 		}
 		printListFooter(f, meta, len(chats))
+		if withCounts && f.Format != "quiet" {
+			fmt.Printf("%s%s%s\n", cli.Dim, formatChatKindCountsLine(kindCounts), cli.Reset)
+		}
 		return nil
 	},
 }
@@ -1202,6 +1214,7 @@ func init() {
 	chatCmd.Flags().String("since", "", "Only show messages newer than this (1h, 24h, RFC3339)")
 	chatCmd.Flags().Bool("markdown", false, "Force markdown ANSI styling")
 	chatCmd.Flags().Bool("no-markdown", false, "Disable markdown ANSI styling")
+	chatCmd.Flags().Bool("parts", false, "Show each message's thinking, tool calls, tool results and images")
 	jqExprFlag(chatCmd)
 
 	chatAttachCmd.Flags().String("agent", "", "Override the auto-resolved agent slug or ID")
@@ -1244,6 +1257,8 @@ func init() {
 		"Case-insensitive search over chat titles (server-side)")
 	chatListCmd.Flags().String("chat", "", "Only the chat with this id (server-side filter)")
 	chatListCmd.Flags().String("routine", "", "Only chats minted by this routine (pipeline) id (server-side filter)")
+	chatListCmd.Flags().Bool("counts", false,
+		"Also report how many chats the agent has of each kind (direct, routine, issue, agent) — the chat sidebar's tab totals")
 	chatListCmd.Flags().Bool("with-source", false,
 		"Attach each chat's work source — the routine (with run/step) or issue it belongs to — to every row")
 	addListPagingFlags(chatListCmd.Flags(), 0)
@@ -1265,4 +1280,37 @@ func init() {
 	chatStreamCmd.Flags().Int("idle", 0, "Give up after N seconds with no event (0 = server default, 300s)")
 	chatStreamCmd.Flags().Bool("quiet", false, "Suppress the stderr chatter; the run's text still goes to stdout")
 	chatCmd.AddCommand(chatStreamCmd)
+}
+
+// parseChatKindCounts reads the X-Chat-Kind-Counts header ("direct=3,routine=150,
+// issue=2,agent=0"). An absent or malformed header yields nil: the server
+// leaves it off when the count failed, and the list is still valid then.
+func parseChatKindCounts(raw string) map[string]int {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	out := map[string]int{}
+	for _, part := range strings.Split(raw, ",") {
+		k, v, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok {
+			return nil
+		}
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err != nil {
+			return nil
+		}
+		out[k] = n
+	}
+	return out
+}
+
+func formatChatKindCountsLine(counts map[string]int) string {
+	if counts == nil {
+		return "kind totals unavailable"
+	}
+	parts := make([]string, 0, len(chatkind.All))
+	for _, k := range chatkind.All {
+		parts = append(parts, fmt.Sprintf("%s %d", k, counts[string(k)]))
+	}
+	return "totals: " + strings.Join(parts, " · ")
 }

@@ -96,6 +96,7 @@ func newChatProposalCommand() *cobra.Command {
 		}}
 		if action == "list" {
 			cmd.Flags().String("cursor", "", "Opaque next_cursor from the preceding page")
+			addChatHintsWatch(cmd)
 		}
 		if action == "edit" || action == "confirm" || action == "discard" {
 			cmd.Flags().String("idempotency-key", "", "Stable operation key; retain after an unknown outcome")
