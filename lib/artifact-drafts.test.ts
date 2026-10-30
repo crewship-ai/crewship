@@ -113,8 +113,9 @@ it("waits for a pending write before purging so it cannot recreate the draft", a
   const drafts = await load(); drafts.setArtifactDraftStore(store)
   const key = drafts.artifactDraftKey("artifact-source", "alice", "w", "demo")!
   const written = drafts.writeArtifactDraft(key, "late")
-  const purged = drafts.purgeOtherArtifactDrafts(null)
   await vi.waitFor(() => expect(store.put).toHaveBeenCalled())
+  const purged = drafts.purgeOtherArtifactDrafts(null)
+  await Promise.resolve()
   expect(store.purge).not.toHaveBeenCalled()
   store.flush(); await written; await purged
   expect(store.disk.size).toBe(0)
@@ -182,4 +183,65 @@ it("uses strict-durability IndexedDB transactions and resolves only on their com
   write.complete(); await written
   expect(idb.rows.get(JSON.stringify(["alice", "artifact-source", "w", "demo"]))?.text).toBe("strict")
   expect(idb.factory.open).toHaveBeenCalledWith("crewship-artifact-drafts", 1)
+})
+
+it("rejects a failed durable read instead of reporting an empty draft, and keeps the stored copy", async () => {
+  const store = durableStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("artifact-comment", "alice", "w", "demo")!
+  await drafts.writeArtifactDraft(key, "Unsent comment")
+  store.get.mockRejectedValueOnce(new Error("open timed out"))
+  await expect(drafts.loadArtifactDraft(key)).rejects.toThrow()
+  expect(store.disk.get(JSON.stringify(["alice", "artifact-comment", "w", "demo"]))).toBe("Unsent comment")
+  await expect(drafts.loadArtifactDraft(key)).resolves.toBe("Unsent comment")
+})
+
+it("retires writers on sign-out so a late or queued write cannot recreate a purged draft", async () => {
+  const store = durableStore(); store.auto = false
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("artifact-source", "alice", "w", "demo")!
+  const first = drafts.writeArtifactDraft(key, "a")
+  await vi.waitFor(() => expect(store.put).toHaveBeenCalledTimes(1))
+  // Queued behind the running write when sign-out starts.
+  const queued = drafts.writeArtifactDraft(key, "ab").catch(() => "refused")
+  const purged = drafts.purgeOtherArtifactDrafts(null)
+  store.flush(); await first; await purged
+  await expect(queued).resolves.toBe("refused")
+  expect(store.puts).toEqual(["a"])
+  // A keystroke that arrives after sign-out (another tab, a stale effect).
+  await expect(drafts.writeArtifactDraft(key, "late")).rejects.toThrow()
+  expect(store.disk.size).toBe(0)
+  await expect(drafts.loadArtifactDraft(key)).resolves.toBe("")
+  // The next person to sign in writes normally; the previous one stays retired.
+  await drafts.purgeOtherArtifactDrafts("bob")
+  store.auto = true
+  await drafts.writeArtifactDraft(drafts.artifactDraftKey("artifact-source", "bob", "w", "demo")!, "Bob")
+  await expect(drafts.writeArtifactDraft(key, "Alice again")).rejects.toThrow()
+  expect([...store.disk.values()]).toEqual(["Bob"])
+})
+
+it("serialises identity purges so an older sign-out cannot delete the next person's draft", async () => {
+  const store = durableStore()
+  let finishClear!: () => void
+  const clearing = new Promise<void>(resolve => { finishClear = resolve })
+  store.purge.mockImplementationOnce(async () => { await clearing; store.disk.clear() })
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const signedOut = drafts.purgeOtherArtifactDrafts(null)
+  const signedIn = drafts.purgeOtherArtifactDrafts("bob")
+  const bob = drafts.artifactDraftKey("artifact-comment", "bob", "w", "demo")!
+  const written = drafts.writeArtifactDraft(bob, "Bob comment")
+  finishClear(); await signedOut; await signedIn; await written
+  await expect(drafts.loadArtifactDraft(bob)).resolves.toBe("Bob comment")
+})
+
+it("also deletes Design canvas and Design comment drafts from localStorage on sign-out and identity change", async () => {
+  const drafts = await load(); drafts.setArtifactDraftStore(durableStore())
+  for (const name of ["crewship-design:v2:alice:w:p", "design-comment:v2:alice:w:p", "crewship-design:alice:w:slug", "crewship-design:v2:bob:w:p", "design-comment:v2:bob:w:p", "unrelated"]) local.set(name, "x")
+  const localKeys = vi.spyOn(Object, "keys").mockImplementation(((target: object) => target === localStorage ? [...local.keys()] : Reflect.ownKeys(target).filter((k): k is string => typeof k === "string")) as typeof Object.keys)
+  try {
+    await drafts.purgeOtherArtifactDrafts("bob")
+    expect([...local.keys()].sort()).toEqual(["crewship-design:v2:bob:w:p", "design-comment:v2:bob:w:p", "unrelated"])
+    await drafts.purgeOtherArtifactDrafts(null)
+    expect([...local.keys()]).toEqual(["unrelated"])
+  } finally { localKeys.mockRestore() }
 })

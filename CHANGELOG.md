@@ -33,6 +33,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Artifact drafts survive a killed browser and are deleted on sign-out.** The unsaved Project source and unsent artifact comments are now kept in IndexedDB with strict durability instead of localStorage, so a draft typed moments before the whole browser was killed is still offered back; older localStorage drafts are moved over once. Signing out deletes every artifact draft in the browser and a different user signing in deletes everyone else's, so the next person on a shared browser cannot read them (#4499).
 
+- **Artifact and Design drafts are no longer lost or left behind in the browser.** Edit source no longer overwrites a source draft kept after a crash, a successful save keeps edits typed after it was submitted, and a failed browser-storage read no longer deletes the stored comment draft. An expired session or a sign-out in another tab now deletes artifact drafts too, a late keystroke cannot recreate them after sign-out, and Design canvas and Design comment drafts are deleted on sign-out, account switch and when the Page answers 403 or 404.
+
 - **Test Design canvases can be identified in the library.** Human canvas creation now retains the explicit test-item marker for catalog filtering.
 
 - Add human Comment grants for shared artifact feedback without edit or agent execution rights, explicit QA item markers and catalog filters, and confirmed archive and folder-move previews with live access checks. Access reports include effective capabilities and their sources; existing content, history and grants remain intact.
