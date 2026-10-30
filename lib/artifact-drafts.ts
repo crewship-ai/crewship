@@ -325,16 +325,20 @@ export interface CapturedLegacyLocalDraft { key: string; text: string }
 export function captureLegacyLocalDrafts(human?: string): CapturedLegacyLocalDraft[] {
   if (typeof localStorage === "undefined") return []
   const rows: CapturedLegacyLocalDraft[] = []
-  for (const key of Object.keys(localStorage)) {
-    const prefix = LOCAL_PREFIXES.find(start => key.startsWith(start))
-    if (!prefix || (human && key.slice(prefix.length).split(":")[0] !== human)) continue
-    const text = localStorage.getItem(key)
-    if (text !== null && !isSealedLocalDraft(text)) rows.push({key, text})
-  }
+  try {
+    for (const key of Object.keys(localStorage)) {
+      const prefix = LOCAL_PREFIXES.find(start => key.startsWith(start))
+      if (!prefix || (human && key.slice(prefix.length).split(":")[0] !== human)) continue
+      const text = localStorage.getItem(key)
+      if (text !== null && !isSealedLocalDraft(text)) rows.push({key, text})
+    }
+  } catch { /* Storage the browser will not let us read holds nothing we can protect or warn about. */ }
   return rows
 }
 export function removeCapturedLegacyLocalDrafts(rows: CapturedLegacyLocalDraft[]): void {
-  for (const row of rows) if (localStorage.getItem(row.key) === row.text) localStorage.removeItem(row.key)
+  try {
+    for (const row of rows) if (localStorage.getItem(row.key) === row.text) localStorage.removeItem(row.key)
+  } catch { /* Unavailable browser storage must not block signing out. */ }
 }
 
 /**

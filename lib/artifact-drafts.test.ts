@@ -255,3 +255,18 @@ it("also deletes Design canvas and Design comment drafts from localStorage on si
     expect([...local.keys()]).toEqual(["unrelated"])
   } finally { localKeys.mockRestore() }
 })
+
+it("tolerates unreachable localStorage: sign-out and settle still complete, capture reports nothing", async () => {
+  const store = durableStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const blocked = vi.spyOn(Object, "keys").mockImplementation(((target: object) => {
+    if (target === localStorage) throw new DOMException("blocked site storage", "SecurityError")
+    return Reflect.ownKeys(target).filter((k): k is string => typeof k === "string")
+  }) as typeof Object.keys)
+  try {
+    expect(drafts.captureLegacyLocalDrafts()).toEqual([])
+    await expect(drafts.suspendOtherArtifactDrafts(null)).resolves.toBeUndefined()
+    await expect(drafts.suspendOtherArtifactDrafts("bob")).resolves.toBeUndefined()
+    expect(() => drafts.removeCapturedLegacyLocalDrafts([{ key: "crewship-design:alice", text: "x" }])).not.toThrow()
+  } finally { blocked.mockRestore() }
+})
