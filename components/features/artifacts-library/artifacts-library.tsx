@@ -666,8 +666,9 @@ export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanoni
       </>}
     </div>
     {folderSettings && <FolderSettingsDialog workspaceId={workspaceId} folder={folderSettings} open onOpenChange={open => { if (!open) setFolderSettings(null) }} />}
+    {/* A just-created artifact is not in the list yet: it opens by slug and the route moves to its ID once it resolves. */}
     {newKind !== undefined && <NewArtifactDialog workspaceId={workspaceId} open onOpenChange={open => { if (!open) setNewKind(undefined) }}
       defaultKind={newKind ?? undefined} defaultFolderSlug={filters.folder || undefined}
-      onCreated={slug => { setNewKind(undefined); refresh(); if (slug) onSelect(slug) }} />}
+      onCreated={slug => { setNewKind(undefined); refresh(); if (slug) onSelect(null, slug) }} />}
   </div>
 }
