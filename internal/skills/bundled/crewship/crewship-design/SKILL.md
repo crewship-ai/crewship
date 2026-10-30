@@ -141,7 +141,10 @@ never change it. Only a person can share a version.
 You have no tool for posting comments. When a Design comment started your
 run, the comment names the node (its `id` in the selector) and the version
 the person looked at. Check with `design_get` that this node still exists and
-matches the quoted name or text. A successful `design_apply` in that run
+matches the requested change. The prompt supplies the node selector, version
+and comment text, but does not include the selected quote. You cannot retrieve
+Design comments with an agent tool; if that missing context is needed, ask
+the owner in chat before editing. A successful `design_apply` in that run
 marks the comment answered and adds the reply "Updated the selected Design
 element." with the new version. If the node is gone or the request is unclear,
 do not guess: ask the owner in chat which node they mean.
