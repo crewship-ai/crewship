@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState, type PointerEvent } from "react"
 import dynamic from "next/dynamic"
-import { Frame, ImagePlus, MousePointer2, Plus, Save, Square, Trash2, Type } from "lucide-react"
+import { Download, Frame, ImagePlus, MousePointer2, Plus, Save, Square, Trash2, Type } from "lucide-react"
+import * as Y from "yjs"
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { artifactsDesign } from "@/lib/feature-flags"
@@ -23,6 +24,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
  const [draft, setDraft] = useState("")
  const [delivery, setDelivery] = useState<Record<string, string>>({})
  const [commentError, setCommentError] = useState("")
+ const [downloadError, setDownloadError] = useState("")
  const agent = useArtifactAgentDispatch(workspaceId, design.query.data?.page_id, design.query.data?.origin, Boolean(design.query.data?.can_edit && !design.query.isError), "design")
  useEffect(() => { try { setDraft(commentKey ? localStorage.getItem(commentKey) ?? "" : "") } catch { /* Draft remains in the open editor. */ } }, [commentKey])
  const changeDraft = (value: string) => { setDraft(value); if (commentKey) { try { localStorage.setItem(commentKey, value) } catch { /* Draft remains in the open editor. */ } } }
@@ -93,6 +95,32 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
  const data = design.query.data
  const failure = design.save.error ?? design.restore.error ?? design.share.error ?? design.comment.error ?? design.connectAgent.error
  const viewedVersion = version ?? data.latest_version ?? data.version
+ const historyFull = Boolean(data.can_edit && [design.save.error, design.restore.error].some(error => (error as (Error & { status?: number }) | null)?.status === 413))
+ const downloadDraft = () => {
+  if (!design.doc || version) return
+  setDownloadError("")
+  let url: string | undefined
+  try {
+   const state = Y.encodeStateAsUpdate(design.doc)
+   let binary = ""
+   for (let index = 0; index < state.length; index += 8192) binary += String.fromCharCode(...state.subarray(index, index + 8192))
+   const draftFile = { format: "crewship-design-draft-v1", workspace_id: workspaceId, page_id: data.page_id, base_version: viewedVersion, nodes: design.nodes, yjs_state: btoa(binary), feedback_draft: { text: draft, node_id: selectedId } }
+   url = URL.createObjectURL(new Blob([JSON.stringify(draftFile)], { type: "application/json" }))
+   const anchor = document.createElement("a")
+   anchor.href = url
+   anchor.download = `design-${data.page_id}-draft.json`
+   document.body.appendChild(anchor)
+   try { anchor.click() } finally { anchor.remove() }
+  } catch {
+   setDownloadError("The draft download could not start. Your work remains in this editor.")
+  } finally {
+   if (url) {
+    const revoke = URL.revokeObjectURL.bind(URL)
+    const downloadedURL = url
+    setTimeout(() => revoke(downloadedURL), 0)
+   }
+  }
+ }
  const sendComment = async () => {
   if (!selected || !draft.trim()) return
   setCommentError("")
@@ -111,14 +139,15 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
   <header className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
    <Frame className="size-5" aria-hidden="true" />
    <h1 className="mr-auto truncate font-semibold">{slug} <span className="ml-2 text-xs font-normal text-muted-foreground">Design</span></h1>
-   <span role="status" className="text-xs text-muted-foreground">{version ? `Version ${version}` : design.connection === "connected" ? design.dirty ? "Live · changes saved as you work" : "Live · up to date" : design.connection === "denied" ? "Access changed · reopen to continue" : design.connection === "connecting" ? "Connecting…" : "Offline · changes kept in this browser"}</span>
+   <span role="status" className="text-xs text-muted-foreground">{version ? `Version ${version}` : historyFull ? "History full · changes kept in this browser" : design.connection === "connected" ? design.dirty ? "Live · changes saved as you work" : "Live · up to date" : design.connection === "denied" ? "Access changed · reopen to continue" : design.connection === "connecting" ? "Connecting…" : "Offline · changes kept in this browser"}</span>
    {!design.editable && <span className="rounded bg-muted px-2 py-1 text-xs">{version ? "History" : "Read only"}</span>}
    <div className="flex -space-x-1" aria-label="People on this canvas">{design.peers.map(peer => <span key={peer.clientId} title={peer.name} className="flex size-7 items-center justify-center rounded-full border-2 border-background text-xs font-medium text-white" style={{ backgroundColor: peer.color }}>{peer.name.slice(0, 2).toUpperCase()}</span>)}</div>
    <Button variant="outline" onClick={() => setAccessOpen(true)}>Access</Button>
    <Button variant="outline" onClick={() => setPanel(panel === "history" ? "properties" : "history")}>History{viewedVersion ? ` · v${viewedVersion}` : ""}</Button>
    {design.editable && <Button disabled={design.save.isPending || design.connection !== "connected"} onClick={() => design.save.mutate("Saved from Design editor")}><Save className="size-4" /> Save version</Button>}
   </header>
-  {failure && <p role="alert" className="border-b px-4 py-2 text-sm text-destructive">{failure.message}</p>}
+  {historyFull && <div role="alert" className="space-y-2 border-b px-4 py-3 text-sm"><p><b>History capacity is full.</b> Another version could not be saved. Existing versions are retained and your pending work stays in this browser.</p><p>Download your local canvas and unsent feedback as a draft file to keep a copy. History is not deleted automatically.</p>{version && <Button variant="outline" onClick={() => setVersion(undefined)}>Return to live canvas</Button>}<Button variant="outline" disabled={!design.doc || Boolean(version)} onClick={downloadDraft}><Download className="size-4" />Download draft</Button>{downloadError && <p className="text-destructive">{downloadError}</p>}</div>}
+  {failure && !historyFull && <p role="alert" className="border-b px-4 py-2 text-sm text-destructive">{failure.message}</p>}
   {design.draftError && <p role="alert" className="border-b px-4 py-2 text-sm">Browser draft storage is unavailable or full. Keep this window open until connected and save a version.</p>}
   <div className="flex min-h-0 flex-1 flex-col md:flex-row">
    <aside className="flex max-h-40 shrink-0 flex-col overflow-auto border-b md:max-h-none md:w-48 md:border-b-0 md:border-r" aria-label="Layers">
