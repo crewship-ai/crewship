@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 func init() { workspaceCmd.AddCommand(newWorkspaceArtifactPolicyCommand()) }
@@ -19,7 +21,11 @@ func newWorkspaceArtifactPolicyCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		response, err := client.Get("/api/v1/workspaces/" + pagePathEscape(client.WorkspaceID) + "/artifact-creation-policy")
+		path, err := workspaceArtifactPolicyPath(cmd, client)
+		if err != nil {
+			return err
+		}
+		response, err := client.Get(path)
 		if err != nil {
 			return err
 		}
@@ -36,8 +42,11 @@ func newWorkspaceArtifactPolicyCommand() *cobra.Command {
 		enabled, _ := cmd.Flags().GetBool("enabled")
 		crews, _ := cmd.Flags().GetStringSlice("crew-id")
 		clear, _ := cmd.Flags().GetBool("clear-crews")
-		if clear == cmd.Flags().Changed("crew-id") {
+		switch hasCrews := cmd.Flags().Changed("crew-id"); {
+		case clear && hasCrews:
 			return fmt.Errorf("provide --crew-id or --clear-crews, not both")
+		case !clear && !hasCrews:
+			return fmt.Errorf("--crew-id or --clear-crews is required: the allowlist is replaced, so name every crew or clear it explicitly")
 		}
 		if clear {
 			crews = []string{}
@@ -53,7 +62,11 @@ func newWorkspaceArtifactPolicyCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		response, err := client.Put("/api/v1/workspaces/"+pagePathEscape(client.WorkspaceID)+"/artifact-creation-policy", map[string]any{"enabled": enabled, "crew_ids": crews, "base_version": version})
+		path, err := workspaceArtifactPolicyPath(cmd, client)
+		if err != nil {
+			return err
+		}
+		response, err := client.Put(path, map[string]any{"enabled": enabled, "crew_ids": crews, "base_version": version})
 		if err != nil {
 			return err
 		}
@@ -65,4 +78,17 @@ func newWorkspaceArtifactPolicyCommand() *cobra.Command {
 	set.Flags().Bool("clear-crews", false, "Explicitly replace the allowlist with an empty list")
 	command.AddCommand(show, set)
 	return command
+}
+
+// workspaceArtifactPolicyPath resolves the selected workspace — an ID or a
+// slug, from --workspace, the environment or the config — to its ID before the
+// path is built. The raw slug in /workspaces/{id}/ is a 404, and this is a
+// policy boundary, so a slug that cannot be resolved fails instead of falling
+// back to the raw value.
+func workspaceArtifactPolicyPath(cmd *cobra.Command, client *cli.Client) (string, error) {
+	id, err := client.ResolveWorkspaceIDStrict(cmd.Context())
+	if err != nil {
+		return "", err
+	}
+	return "/api/v1/workspaces/" + pagePathEscape(id) + "/artifact-creation-policy", nil
 }
