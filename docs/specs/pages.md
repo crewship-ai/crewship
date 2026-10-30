@@ -1499,8 +1499,8 @@ immutable retained snapshots. Sharing never grants a reader edit rights.
 
 `POST /api/v1/pages/{slug}/draft-key` accepts only an explicit immutable
 `@<page-id>` reference, a current human credential with `pages:read`, and the
-current workspace. It uses the existing per-Page read model, including Design's
-local administrative restriction. Restricted members may use only the existing
+current workspace. It uses the canonical per-Page read model, including
+workspace administrators. Restricted members may use only the existing
 exact private-custodian boundary. No document bytes or server rows are created.
 
 `{"human":"<expected-human-id>","operation":"wrap","key":"<base64 32-byte data key>"}` returns
@@ -1525,3 +1525,14 @@ versions resolvable while those drafts may need recovery; a successful database
 re-encryption walk does not migrate browser envelopes or prove old versions safe
 to remove. See [encryption rotation](../security/encryption.mdx).
 
+The matching CLI is `crewship page draft-key @PAGE_ID --file -` (or a local
+JSON file). Input is `{human,operation:"wrap",key}` or
+`{human,operation:"unwrap",envelope}`. Key material belongs in stdin/a protected
+file, not shell arguments. Output contains sensitive key material. Agent runs
+cannot use a saved human profile for this command.
+
+For draft-key recovery only, workspace resolution does not pre-empt the fenced
+membership check: a current credential for the expected human with removed
+membership receives `403 draft_read_revoked`. ACL/storage faults return 5xx and
+retain drafts. Workspace administrators use the canonical Page read policy;
+the envelope still belongs to its original human and cannot cross identities.

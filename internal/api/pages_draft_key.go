@@ -166,12 +166,10 @@ func (h *PageHandler) localDraftRead(ctx context.Context, r *http.Request, key a
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	if family == "design" {
-		_, err = h.designAuthority(r, key, false)(ctx, tx)
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, errDesignAccess) {
-			return errLocalDraftReadDenied
-		}
-		return err
+	// Use the canonical Page ACL, without Design's outward-facing error
+	// masking. A failed lookup must never authorize browser data deletion.
+	if family == "design" && !h.designEnabled(ctx) {
+		return artifacts.ErrDisabled
 	}
 	human := UserFromContext(ctx)
 	viewer, err := h.livePrivatePageReader(ctx, key.WorkspaceID, human.ID)
@@ -181,12 +179,35 @@ func (h *PageHandler) localDraftRead(ctx context.Context, r *http.Request, key a
 	if viewer == nil {
 		return errLocalDraftReadDenied
 	}
+	// Owner decision is local to Design. livePrivatePageReader suppresses
+	// manager power for any restricted membership; other Page families keep
+	// their existing private-custody boundary.
+	if family == "design" && canRole(viewer.Role, "manage") {
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages WHERE workspace_id=? AND id=?)`, key.WorkspaceID, key.PageID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return errLocalDraftReadDenied
+		}
+		return nil
+	}
 	rec, err := h.loadPageForRead(ctx, key.WorkspaceID, "@"+key.PageID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return errLocalDraftReadDenied
 	}
 	if err != nil {
 		return err
+	}
+	var restricted bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workspace_members WHERE user_id=? AND access_mode='restricted')`, human.ID).Scan(&restricted); err != nil {
+		return err
+	}
+	if restricted {
+		if !rec.PrivateAudience || rec.OwnerUserID != human.ID {
+			return errLocalDraftReadDenied
+		}
+		return nil
 	}
 	fullViewer, err := h.loadViewer(ctx, key.WorkspaceID, human.ID)
 	if err != nil {
@@ -201,4 +222,36 @@ func (h *PageHandler) localDraftRead(ctx context.Context, r *http.Request, key a
 		return errLocalDraftReadDenied
 	}
 	return nil
+}
+
+// Resolve scope without deciding membership. Missing membership is checked
+// after expected identity and current credential validation, in the same SQL
+// transaction as Page read. Operational errors retain the browser draft.
+func (m *AuthMiddleware) localDraftWorkspace(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if UserFromContext(r.Context()) == nil {
+			writeAuthError(w, 401, reasonNoCredentials)
+			return
+		}
+		workspace := r.URL.Query().Get("workspace_id")
+		if workspace == "" {
+			workspace = r.Header.Get("X-Workspace-ID")
+		}
+		if workspace == "" {
+			replyError(w, 400, "workspace_id is required")
+			return
+		}
+		var canonical string
+		err := m.db.QueryRowContext(r.Context(), `SELECT id FROM workspaces WHERE (id=? OR slug=?) AND deleted_at IS NULL LIMIT 1`, workspace, workspace).Scan(&canonical)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			replyInternalError(w, m.logger, "resolve local draft workspace", err)
+			return
+		}
+		if canonical == "" {
+			canonical = workspace
+		}
+		ctx := context.WithValue(r.Context(), ctxWorkspaceID, canonical)
+		ctx = context.WithValue(ctx, ctxRole, "")
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }

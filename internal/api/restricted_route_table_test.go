@@ -123,7 +123,6 @@ var restrictedAgentCheckedPatterns = []string{
 var restrictedPrivateCustodyPatterns = []string{
 	"GET /api/v1/pages/{slug}/versions",
 	"GET /api/v1/pages/{slug}/export",
-	"POST /api/v1/pages/{slug}/draft-key",
 	"GET /api/v1/pages/{slug}/document",
 	"GET /api/v1/pages/{slug}/document/checkpoints",
 	"GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}",

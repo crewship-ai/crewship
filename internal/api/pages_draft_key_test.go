@@ -78,9 +78,14 @@ func TestLocalDraftKeyRecoveryRequiresSameHumanAndCurrentDesignRead(t *testing.T
 	if w := call("", f.page, body); w.Code != 401 {
 		t.Fatal("unauthenticated recovery", w.Code, w.Body)
 	}
-	if w := call("draft-admin", f.page, map[string]string{"operation": "wrap", "key": key}); w.Code != 403 {
-		t.Fatal("implicit admin acquired a private Design draft key", w.Code, w.Body)
+	if w := call("draft-admin", f.page, map[string]string{"operation": "wrap", "key": key}); w.Code != 200 {
+		t.Fatal("workspace admin could not protect their own Design draft", w.Code, w.Body)
 	}
+	mustExec(t, f.h.db, `UPDATE pages SET private_audience=1 WHERE id=?`, f.page)
+	if w := call("draft-admin", f.page, map[string]string{"operation": "wrap", "key": key}); w.Code != 200 {
+		t.Error("admin could not protect own draft of a private Design", w.Code, w.Body)
+	}
+	mustExec(t, f.h.db, `UPDATE pages SET private_audience=0 WHERE id=?`, f.page)
 	readerEnvelope := wrap("draft-reader")
 	mustExec(t, f.h.db, `DELETE FROM page_grants WHERE page_id=? AND subject_id='draft-reader'`, f.page)
 	if w := call("draft-reader", f.page, map[string]string{"operation": "unwrap", "envelope": readerEnvelope}); w.Code != 403 || !strings.Contains(w.Body.String(), "draft_read_revoked") || strings.Contains(w.Body.String(), key) {
@@ -183,4 +188,93 @@ func TestLocalDraftKeyPrivateCustodyAndImmutableScope(t *testing.T) {
 	if w := call("@"+page, map[string]string{"operation": "unwrap", "envelope": wrapped.Envelope}); w.Code != 401 || strings.Contains(w.Body.String(), key) {
 		t.Fatal("revoked credential released the key", w.Code, w.Body)
 	}
+}
+
+func TestLocalDraftKeyOperationalFailureNeverProvesRevocation(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", strings.Repeat("a", 64))
+	f := newDesignAuthorityFixture(t)
+	f.addUser(t, "recovery-reader")
+	if w := f.grant(t, "recovery-reader", "read"); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	router, err := NewRouter(f.h.db, "synthetic-draft-fault-router-secret-long-enough", newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer router.Shutdown()
+	call := func(human string) *httptest.ResponseRecorder {
+		raw, _ := json.Marshal(map[string]string{"human": human, "operation": "wrap", "key": base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))})
+		req := httptest.NewRequest("POST", "/api/v1/pages/@"+f.page+"/draft-key", strings.NewReader(string(raw)))
+		req.Header.Set("Authorization", "Bearer "+f.token(t, "recovery-reader"))
+		req.Header.Set("X-Workspace-ID", f.workspace)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+	if w := call("recovery-reader"); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	t.Run("ACL storage fault retains draft", func(t *testing.T) {
+		mustExec(t, f.h.db, `ALTER TABLE page_grants RENAME TO page_grants_broken`)
+		defer mustExec(t, f.h.db, `ALTER TABLE page_grants_broken RENAME TO page_grants`)
+		if w := call("recovery-reader"); w.Code < 500 || strings.Contains(w.Body.String(), "draft_read_revoked") {
+			t.Fatal("storage error authorized deleting the draft", w.Code, w.Body)
+		}
+	})
+	t.Run("membership removal proves revocation", func(t *testing.T) {
+		mustExec(t, f.h.db, `DELETE FROM workspace_members WHERE workspace_id=? AND user_id='recovery-reader'`, f.workspace)
+		if w := call("recovery-reader"); w.Code != 403 || !strings.Contains(w.Body.String(), "draft_read_revoked") {
+			t.Fatal("removed membership was not reported as proven read loss", w.Code, w.Body)
+		}
+		if w := call(f.owner); w.Code != 403 || !strings.Contains(w.Body.String(), "draft_identity_mismatch") {
+			t.Fatal("another identity could trigger draft deletion", w.Code, w.Body)
+		}
+	})
+}
+
+func TestLocalDraftKeyRestrictedCeilingAndMembershipRemoval(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", strings.Repeat("a", 64))
+	h, _, _, workspace, owner := newPagesFixture(t)
+	page := generateCUID()
+	mustExec(t, h.db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,private_audience) VALUES(?,?,'recovery-restricted','Recovery',?,'{}',0)`, page, workspace, owner)
+	mustExec(t, h.db, `UPDATE workspace_members SET role='MEMBER' WHERE workspace_id=? AND user_id=?`, workspace, owner)
+	token := mintTokenFor(t, h.db, owner, "draft-key-restricted")
+	router, err := NewRouter(h.db, "synthetic-draft-restricted-secret-long-enough", newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer router.Shutdown()
+	call := func() *httptest.ResponseRecorder {
+		raw, _ := json.Marshal(map[string]string{"human": owner, "operation": "wrap", "key": base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32)))})
+		req := httptest.NewRequest("POST", "/api/v1/pages/@"+page+"/draft-key", strings.NewReader(string(raw)))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-Workspace-ID", workspace)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w
+	}
+	if w := call(); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	t.Run("restricted ceiling is fresh under fence", func(t *testing.T) {
+		mustExec(t, h.db, `CREATE TRIGGER draft_restrict_after_fence AFTER UPDATE ON document_writer_fence BEGIN UPDATE workspace_members SET access_mode='restricted'; END`)
+		w := call()
+		mustExec(t, h.db, `DROP TRIGGER draft_restrict_after_fence`)
+		if w.Code != 403 || !strings.Contains(w.Body.String(), "draft_read_revoked") {
+			t.Error("restricted principal recovered ordinary Page key", w.Code, w.Body)
+		}
+	})
+	t.Run("mixed restricted membership still reports revoked target", func(t *testing.T) {
+		mustExec(t, h.db, `UPDATE pages SET private_audience=1 WHERE id=?`, page)
+		other := generateCUID()
+		mustExec(t, h.db, `INSERT INTO workspaces(id,name,slug) VALUES(?,'Other','draft-other')`, other)
+		mustExec(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES(?,?,?,'MEMBER','restricted')`, generateCUID(), other, owner)
+		if w := call(); w.Code != 200 {
+			t.Fatal("private custodian lost current recovery", w.Code, w.Body)
+		}
+		mustExec(t, h.db, `DELETE FROM workspace_members WHERE workspace_id=? AND user_id=?`, workspace, owner)
+		if w := call(); w.Code != 403 || !strings.Contains(w.Body.String(), "draft_read_revoked") {
+			t.Fatal("mixed membership hid proven revocation", w.Code, w.Body)
+		}
+	})
 }
