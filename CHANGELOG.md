@@ -9,18 +9,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Artifact saves are confirmed after an interrupted success response.** The CLI reads the exact successor version without repeating the publish request, preserves definitive refusals, and rejects duplicate-path matches. Craft errors redact session tokens before truncating their display.
-
-- **`crewship page artifact comment --send-to-agent` no longer leaves the task stuck at "pending".** The task only starts when the artifact's source chat receives a message carrying its purpose, which the viewer sends and the CLI never did. `--wait` on `page artifact comment` and `page design comment` now sends it, confirms the host saved it and waits for the agent's answer or clarification; `crewship run --chat <chat> --artifact-target <file>` sends the same purpose by hand, including a "Describe it" creation (#4505).
-
-- ⚠️ **Behaviour change: a busy agent exits `9`, a full artifact history exits `2`.** A message bounced because the agent already has a live run now exits `9` (was `1`) for `crewship run` and the new `--wait` commands; nothing was sent or stored. A full artifact version history (HTTP 413 `artifact_history_quota`) now exits `2` (was `1`) and says nothing was saved, your `--file` is unchanged and every version is retained (#4505).
-
-- **`crewship craft` shows why the server refused.** Refusals printed only `native HTTP 409` and exited `1`. They now carry the server's text with the session token removed, exit with the usual codes (`5` conflict, `2` validation, `7` server, `8` network) and fill the `--format json` error envelope; a lease conflict names who holds the lease, and a proposal refusal says whether it was stale. Agent `task` commands still print status only (#4505).
-
-- **`crewship page artifact publish` confirms a save whose reply was lost.** After a transport error, a 5xx or a 409, it reads version base+1 once and reports the save as done when that version holds exactly your manifest; otherwise the original error stands. `crewship page artifact reconcile` does the same check by hand (#4505).
-
-- **More Design and Mooring operations from the CLI.** `page design create --test-item`, `page design watch --authority-revision`, `mooring command-session` and `mooring session --reauthorize` (#4505).
-
 - **A Page opens with its content inside Artifacts.** Its application or panels show in the library detail with the same views Pages uses, read by the page's immutable ID; the detail no longer sends you to Pages.
 
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
@@ -42,6 +30,18 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add human Comment grants for shared artifact feedback without edit or agent execution rights, explicit QA item markers and catalog filters, and confirmed archive and folder-move previews with live access checks. Access reports include effective capabilities and their sources; existing content, history and grants remain intact.
 
 - **An unsent artifact comment survives a crash.** The chat and library artifact viewer keeps the comment text in this browser for the same person and Page, and offers it again after reopening; the place has to be selected again.
+
+- **Artifact saves are confirmed after an interrupted success response.** The CLI reads the exact successor version without repeating the publish request, preserves definitive refusals, and rejects duplicate-path matches. Craft errors redact session tokens before truncating their display.
+
+- **`crewship page artifact comment --send-to-agent` no longer leaves the task stuck at "pending".** The task only starts when the artifact's source chat receives a message carrying its purpose, which the viewer sends and the CLI never did. `--wait` on `page artifact comment` and `page design comment` now sends it, confirms the host saved it and waits for the agent's answer or clarification; `crewship run --chat <chat> --artifact-target <file>` sends the same purpose by hand, including a "Describe it" creation (#4505).
+
+- ⚠️ **Behaviour change: a busy agent exits `9`, a full artifact history exits `2`.** A message bounced because the agent already has a live run now exits `9` (was `1`) for `crewship run` and the new `--wait` commands; nothing was sent or stored. A full artifact version history (HTTP 413 `artifact_history_quota`) now exits `2` (was `1`) and says nothing was saved, your `--file` is unchanged and every version is retained (#4505).
+
+- **`crewship craft` shows why the server refused.** Refusals printed only `native HTTP 409` and exited `1`. They now carry the server's text with the session token removed, exit with the usual codes (`5` conflict, `2` validation, `7` server, `8` network) and fill the `--format json` error envelope; a lease conflict names who holds the lease, and a proposal refusal says whether it was stale. Agent `task` commands still print status only (#4505).
+
+- **`crewship page artifact publish` confirms a save whose reply was lost.** After a transport error, a 5xx or a 409, it reads version base+1 once and reports the save as done when that version holds exactly your manifest; otherwise the original error stands. `crewship page artifact reconcile` does the same check by hand (#4505).
+
+- **More Design and Mooring operations from the CLI.** `page design create --test-item`, `page design watch --authority-revision`, `mooring command-session` and `mooring session --reauthorize` (#4505).
 
 - **Home-installed agent CLIs remain visible during startup checks.** Offline qualification uses a separate temporary home while preserving read-only executable paths from the immutable image.
 
