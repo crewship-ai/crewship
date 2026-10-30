@@ -238,12 +238,12 @@ func TestArtifactProjectMCPDescriptionsStateRecoveryContract(t *testing.T) {
 		"artifact_create":      {"413", "artifact_slug_taken", "403", "artifact_projects", "One create per run"},
 		"artifact_publish":     {"409 artifact_version_conflict", "never retry", "413 artifact_history_quota", "tell the human", "complete manifest"},
 		"artifact_restore":     {"409 artifact_version_conflict", "413 artifact_history_quota", "owner"},
-		"artifact_data_batch":  {"409 artifact_data_conflict", "artifact_data_read", "413 artifact_data_quota", "never blind retry"},
+		"artifact_data_batch":  {"artifact_projects", "artifact_dashboard_data", "409 artifact_data_conflict", "artifact_data_read", "413 artifact_data_quota", "never blind retry"},
 		"artifact_versions":    {"page_id", "Omit version", "sharing, creating comments", "no agent tool", "403"},
 		"artifact_comments":    {"needs_clarification", "no agent tool"},
 		"artifact_reply":       {"needs_clarification", "newer than the comment", "404"},
-		"artifact_slides_read": {"@", "page_id", "artifact_slides"},
-		"artifact_export_pdf":  {"@", "413 artifact_slides_limit"},
+		"artifact_slides_read": {"@", "page_id", "artifact_projects", "artifact_slides"},
+		"artifact_export_pdf":  {"@", "artifact_projects", "artifact_slides", "413 artifact_slides_limit"},
 		"artifact_data_read":   {"artifact_dashboard_data", "ifVersion"},
 	} {
 		for _, text := range required {
