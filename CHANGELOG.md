@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Nullable API fields no longer publish unsupported null types in OpenAPI 3.0.** Artifact and Design origins and Page folders retain null values and their existing object constraints using OpenAPI 3.0 nullable alternatives. Arbitrary JSON payload and preference arrays also retain nested null values.
+
 - **Agent peer-card errors no longer expose server internals.** When reading or deleting an agent's peer cards fails inside the server, the API now answers `Internal server error` and logs the cause, instead of returning database driver text or a host file path.
 
 - ⚠️ **Behaviour change: workspace webhook destinations are visible only to channel administrators.** Channel lists omit a workspace webhook URL for roles below ADMIN/OWNER while retaining its metadata and personal destinations owned by the caller. Delivery configuration and signing secrets are unchanged.
