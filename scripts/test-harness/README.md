@@ -445,3 +445,22 @@ they aren't silently lost:
 | 4 | Synchronous `routine run` of an **approval gate** surfaces **no pollable waitpoint** | **FIXED** — the run parks as WAITING with a waitpoint token; the original symptom was a CLI gap (`waitpoints list --format json` printed the human table so jq never saw the token). The suite now FAILS (not skips) if no waitpoint appears. | `cmd/crewship/cmd_routine_waitpoints.go` |
 | 5 | **`account_label` is write-only from the CLI.** `credential create --account-label` exists (it is how a git link is matched to a self-hosted forge, #1758), but neither `credential list --format json` nor `credential get --format json` returns the field — so no operator or agent can answer "which credential will this `github.com` link resolve to?" from the CLI. Found while writing `test-gitlink-realworld.sh`, which therefore cannot verify its own precondition. | **OPEN** — the suite states the precondition instead, and its good-path failure message names it as the likely cause. | `internal/api/credentials.go` (the API response carries it) ↔ `cmd/crewship/cmd_credential.go` (the list/get structs drop it) |
 | 6 | **Cross-crew delegation over a live link** flaked: PASS at 14:01 and FAIL at 18:25 on 2026-08-07 against the identical sha, fail/fail/pass/pass/pass/fail across that week | **FIXED (2026-08-07)** — the bug was the *evidence*, not the verdict. §3 inferred success from morgan's **chat count**, a proxy two layers from the thing under test, so a delegation that landed as an assignment row counted as nothing. It now reads the artifact `/assign` actually writes — the `assignment.*` / `peer.conversation` entries `crewship activity` surfaces, matched on `to_slug` **and correlated to this delegation by the run's nonce** (the tag rides in the task text, which the journal carries as `payload.task` and echoes into `summary`) — with 3 attempts and an early exit as soon as one lands. The correlation matters: suites share a slot, so any other assignment to the same agent inside the window would otherwise mark this one green. It still **FAILs** when all three produce nothing: stage exists to decide whether a build works as a real application, and "a lead can hand work to a linked crew" is the feature this suite is named for, so a shrug here would certify nothing. If it still flakes on the new evidence, that is cross-crew delegation being unreliable — which is what a promotion gate should refuse to certify. (An interim commit made this a `skip`, matching `test-delegation.sh`; that traded a false red for a false green and was reverted before merge.) | `scripts/test-harness/test-crew-links.sh` |
+
+### Routine prerequisites owned by each integration suite
+
+The notifications, determinism, orchestration and inbox suites provision their
+own uniquely named routines from `fixtures/` using `routine-fixtures.sh`.
+They require `jq`; fixture setup and cleanup errors fail the suite. The ordinary
+demo seed does not supply these test recipes. Each suite removes its successful
+saves on exit, and orchestration removes its exact created schedule ID before
+removing the target routine. Existing workspace routines are not modified.
+`ROUTINE`, `FAILER` and `NOTIFY_ROUTINE` overrides remain caller-owned and are
+not deleted. Model-backed contacts/dates retain actual agent execution and
+canonical JSON output; the token-zero probe and approval/notify fixtures exercise
+the production code, waitpoint and notification steps without model prerequisites.
+
+Validate the fixture DSL with `go test ./internal/pipeline -run TestHarnessRoutineFixtures`
+and exercise cleanup refusal/failure paths with
+`python3 -m unittest discover -s scripts/test-harness -p test_routine_fixtures.py`.
+These local checks do not replace executing the integration suites against an
+explicitly authorized disposable or stage target.
