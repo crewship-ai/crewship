@@ -302,7 +302,7 @@ func TestPaymaster_TopSpenders_LimitClamping(t *testing.T) {
 		{"valid-max-100", "100", 100},
 		{"zero-falls-back-to-default", "0", 10},
 		{"negative-falls-back", "-3", 10},
-		{"too-high-falls-back", "101", 10},
+		{"too-high-clamps-to-max", "101", 100},
 		{"non-numeric-falls-back", "abc", 10},
 	}
 	for _, tc := range cases {

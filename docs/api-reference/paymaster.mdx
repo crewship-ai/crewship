@@ -180,7 +180,7 @@ GET /api/v1/paymaster/top-spenders?limit=10&range=7d
 
 | Param | Type | Default | Description |
 |---|---|---|---|
-| `limit` | integer | 10 | 1-100. |
+| `limit` | integer | 10 | 1-100. Values above 100 are clamped to 100; missing, malformed, zero, or negative values use the default. |
 | `range` / `since` | | 7d | Window **start**. |
 
 <Note>

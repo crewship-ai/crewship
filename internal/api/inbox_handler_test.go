@@ -179,7 +179,7 @@ func TestInboxHandler_List_VisibilityAndFilters(t *testing.T) {
 	if resp6b.Count != 2 || resp6b.Rows[0].ID == resp6.Rows[0].ID {
 		t.Errorf("offset page = %+v, want a distinct second page", resp6b.Rows)
 	}
-	// limit=99999 clamps silently to default (cap is 500, so bogus high values fall back to 100)
+	// limit=99999 clamps silently down to the 500 cap (not back to the default 100)
 	req7 := httptest.NewRequest("GET", "/api/v1/inbox?limit=99999", nil)
 	req7 = withWorkspaceUser(req7, userID, wsID, "OWNER")
 	rr7 := httptest.NewRecorder()

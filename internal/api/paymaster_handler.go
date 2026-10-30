@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/paymaster"
@@ -179,12 +178,7 @@ func (h *PaymasterHandler) TopSpenders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	since, _ := parseWindow(r)
-	limit := 10
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 100 {
-			limit = n
-		}
-	}
+	limit, _ := parsePagination(r, 10, 100)
 	rows, err := paymaster.TopSpenders(r.Context(), h.db, workspaceID, limit, since)
 	if err != nil {
 		h.logger.Error("paymaster top-spenders", "err", err)
