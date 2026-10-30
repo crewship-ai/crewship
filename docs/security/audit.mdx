@@ -638,7 +638,7 @@ claim and are unaffected.
   **Residual gaps (no overclaiming).** Two attacks are *not* fully covered:
   **tail truncation** — deleting the newest N entries leaves a shorter but
   internally-consistent chain (anchoring the tip with a signed high-water
-  checkpoint is the tracked follow-up, issue #1369); and **legacy plaintext
+  checkpoint is the tracked follow-up, issue #1486); and **legacy plaintext
   dev history** — old NULL-key rows written with an empty encryption seed use
   a reproducible key. While that known key is retained, a database writer can
   forge legacy-framed rows, including a downgrade to that framing. A random

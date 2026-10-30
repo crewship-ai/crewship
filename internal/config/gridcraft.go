@@ -70,12 +70,12 @@ func validateGridCraftEditor(c *Config, allowedOrigins string) error {
 		}
 		// Only an explicitly configured public Studio origin pins the editor;
 		// otherwise it follows each request's origin (zero-config default).
-		if err := editororigin.ValidateSameHost(c.Storage.PageStudioOrigin, c.Storage.PageRuntimeOrigin, allowed); err != nil {
+		if err := editororigin.ValidateSameHost(c.Storage.PageStudioOrigin, c.PageRuntimeOrigin(), allowed); err != nil {
 			return fmt.Errorf("gridcraft editor: %w", err)
 		}
 	}
 	if g.EditorOrigin != "" {
-		if err := editororigin.ValidateOrigin(g.EditorOrigin, c.PageStudioOrigin(), c.Storage.PageRuntimeOrigin, g.EditorDevelopmentSameSite, allowed); err != nil {
+		if err := editororigin.ValidateOrigin(g.EditorOrigin, c.PageStudioOrigin(), c.PageRuntimeOrigin(), g.EditorDevelopmentSameSite, allowed); err != nil {
 			return fmt.Errorf("gridcraft editor: %w", err)
 		}
 	}

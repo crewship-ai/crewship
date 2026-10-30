@@ -210,7 +210,9 @@ type Router struct {
 	attachmentHandler                *AttachmentHandler
 	pageProjectsPath                 string
 	pageBuildImage                   string
+	pageBuildImageLookup             func(context.Context) ([]string, error)
 	pageRuntimeOrigin                string
+	pageRuntimeDerived               bool
 	pageRuntimeDevelopmentSameOrigin bool
 	// workbookEditorDetail answers GET /api/v1/admin/instance/workbook-editor;
 	// nil while the embedded workbook editor is off.

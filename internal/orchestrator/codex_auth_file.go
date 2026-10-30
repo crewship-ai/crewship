@@ -16,11 +16,6 @@ func codexLoginCredential(req AgentRunRequest) (Credential, bool) {
 	return loginCredentialFor(req, oauthOpenAI)
 }
 
-// DeliverCodexLogin refreshes the derivative through the same path as run startup.
-func DeliverCodexLogin(ctx context.Context, container provider.ContainerProvider, containerID, agentSlug string, login Credential, logger *slog.Logger) error {
-	return DeliverProviderLogin(ctx, container, containerID, agentSlug, "CODEX_CLI", login, logger)
-}
-
 // DeliverProviderLogin re-renders a refreshed provider login into EVERY LIVE
 // RUN of agentSlug in this container.
 //
