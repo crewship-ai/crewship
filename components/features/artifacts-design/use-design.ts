@@ -27,7 +27,9 @@ interface DesignState {
 }
 export interface DesignVersion { version: number; message?: string; actor?: string; created_at?: string }
 interface DesignVersions { versions: DesignVersion[]; latest_version: number; shared_version: number }
-const COLORS = ["#2563eb", "#c026d3", "#059669", "#ea580c", "#9333ea"]
+// Peer avatars and cursor labels render white text on these fills, so every
+// entry must keep WCAG AA (4.5:1) contrast against #ffffff.
+export const DESIGN_PEER_COLORS = ["#2563eb", "#c026d3", "#047857", "#c2410c", "#9333ea"] as const
 
 export function useDesign(workspaceId: string, slug: string, selectedVersion?: number) {
  const session = useSessionSafe()
@@ -102,7 +104,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
    }
   }
   document.on("update", update)
-  const color = COLORS[Array.from(userId).reduce((sum, char) => sum + char.charCodeAt(0), 0) % COLORS.length]
+  const color = DESIGN_PEER_COLORS[Array.from(userId).reduce((sum, char) => sum + char.charCodeAt(0), 0) % DESIGN_PEER_COLORS.length]
   const live = new DesignProvider(document, `${resolveWsBase()}/api/v1/pages/@${encodeURIComponent(pageId)}/design/ws?workspace_id=${encodeURIComponent(workspaceId)}&authority_revision=${encodeURIComponent(authorityRevision!)}`, initialCanEdit, { name: actorName, color }, status => {
    setConnection(status)
    if (status === "denied") void client.invalidateQueries({ queryKey: ["artifact-design", workspaceId, slug, userId] })
