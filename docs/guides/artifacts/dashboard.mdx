@@ -265,8 +265,12 @@ for this purpose.
 | Collection and document IDs | 1–128 letters, digits, `_` or `-`, starting with a letter or digit |
 | Data loaded by one preview | 16 MiB across all collections |
 
-A write that would exceed a stored limit fails as a whole with
-`Dataset limit exceeded. Existing data was retained.`
+The server rejects a write that exceeds a stored limit as a whole with
+`Dataset limit exceeded. Existing data was retained.` The CLI validates the
+batch before sending: an oversized document or batch can instead report
+`artifact dataset quota exceeded`; more than 50 writes or an invalid batch
+format reports `invalid artifact dataset request` (exit 1). In those cases
+nothing is sent or written. For example, use `ifVersion`, not `if_version`.
 
 ## Messages you may see
 
