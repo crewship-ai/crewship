@@ -742,10 +742,11 @@ it("offers an unsent comment back after the browser was killed, only to the same
   } finally { setArtifactDraftStore(undefined) }
 })
 
-it.each([undefined, "library"] as const)("lets a Comment-level reader leave plain feedback on the shared version (variant %s)", variant => {
+it.each([undefined, "library"] as const)("lets a Comment-level reader leave plain feedback on the shared version (variant %s)", async variant => {
   state.snapshot.data = snap({ can_write: false, can_share: false, can_restore: false, can_send_to_agent: false, can_comment: true, latest_version: 2, shared_version: 2, manifest: { ...snap().manifest, version: 2 } })
   render(<ArtifactViewerPanel variant={variant} />)
   selectHero()
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Comment" })).not.toBeDisabled())
   fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Reader feedback" } })
   expect(screen.queryByRole("button", { name: "Send to agent" })).toBeNull()
   expect(screen.queryByRole("button", { name: "Add to queue" })).toBeNull()

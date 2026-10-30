@@ -32,6 +32,11 @@ func (f *designAuthorityFixture) reader(t *testing.T, user string) {
 	if w := f.grant(t, user, "read"); w.Code != 200 {
 		t.Fatalf("read grant %d %s", w.Code, w.Body)
 	}
+	// Readers synchronize only the shared pinned version (see
+	// designSharedState); without one their sync request is refused.
+	if w := f.call(t, f.owner, "share", `{"version":1}`); w.Code != 200 {
+		t.Fatalf("share %d %s", w.Code, w.Body)
+	}
 }
 
 // awarenessHolder reports the actor whose live connection currently holds the
