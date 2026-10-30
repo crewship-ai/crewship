@@ -9,8 +9,6 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **List requests above the pagination cap return the maximum allowed page.** Keeper logs, checkpoints, approvals, eval runs, inbox, top spenders, runs, audit logs and persona history now clamp an oversized limit to their existing ceiling instead of falling back to a smaller default. Their effective pagination parameters remain documented in OpenAPI.
-
 - **A Page opens with its content inside Artifacts.** Its application or panels show in the library detail with the same views Pages uses, read by the page's immutable ID; the detail no longer sends you to Pages.
 
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
@@ -7254,6 +7252,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Bind artifact requests to explicit human chat intent and one signed run, preserving the original Page and version authority. Recheck live original authority and exact consent after the final chat or task write before committing admission.
 
 - Add optional artifact project previews, versioned element comments, shared-version navigation and explicit chat creation intent behind backend availability.
+
+- **List requests above the pagination cap return the maximum allowed page.** Keeper logs, checkpoints, approvals, eval runs, inbox, top spenders, runs, audit logs and persona history now clamp an oversized limit to their existing ceiling instead of falling back to a smaller default. Their effective pagination parameters remain documented in OpenAPI.
 
 ## [1.0.0-rc.1] — 2026-07-12
 
