@@ -1,0 +1,298 @@
+---
+title: "Artifacts"
+description: "Overview of the Artifacts API: route families for projects, Dashboards, Slides, Designs and Craft documents, their feature switches, scopes, concurrency rules and error codes."
+icon: "layout-grid"
+stability: experimental
+tag: Experimental
+---
+
+Artifacts are the versioned things people and agents make together in a
+workspace: multi-screen HTML **projects**, **Dashboards** backed by JSON
+collections, **Slides** read from a project, collaborative **Designs**, and
+native Word and Sheet documents edited through **Craft**. This page is the map
+of that API. It lists every route family, the switch that turns it on, the
+credentials it needs, the concurrency rule a client must follow and the error
+codes it can return.
+
+Request and response bodies for each operation are in the
+[Pages API reference](/api-reference/pages) and in the generated
+[OpenAPI document](/api-reference/openapi) (tag `pages`).
+
+<Note>
+Every Artifacts route lives under `/api/v1/pages/...` and uses the `pages:read`
+and `pages:write` credential scopes. The path prefix is a compatibility name:
+an artifact is stored as a Page row, so `{slug}` is the artifact's slug, or
+`@<id>` for its ID. Pages as a product surface is being retired; Artifacts is
+the place to build on.
+</Note>
+
+## Feature switches
+
+Everything on this page is off by default. A route family answers only when
+its switch is on for the workspace (or for the whole server).
+
+| Family | Workspace flag | Server-wide switch | Behaviour when off |
+|---|---|---|---|
+| Projects (versions, sharing, comments) | `artifact_projects` | `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` | `404` "artifact projects are not enabled" |
+| Dashboard data | `artifact_dashboard_data`, plus `artifact_projects` | `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED=true` | `404` "dashboard data is disabled" |
+| Slides projection and PDF | `artifact_slides`, plus `artifact_projects` | `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true` | `404` |
+| Design | `artifacts_design` (independent of `artifact_projects`) | `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true` | `404` "design not found" |
+| Craft (native Word and Sheet) | none | `CREWSHIP_CRAFT_NATIVE_ENABLED=true` (YAML `craft_native.enabled`) | Mutations return `503` "native Craft unavailable" |
+| Craft agent tasks | none | `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true`, in addition to Craft | `503` "native Craft agents unavailable" |
+
+Turn a workspace flag on with
+`crewship feature-flag enable <key>`, which calls
+`PUT /api/v1/feature-flags/{key}/override` and needs a workspace `OWNER` or
+`ADMIN`. A server-wide switch is an environment variable read by the server; it
+turns the family on for every workspace. See [Feature flags](/api-reference/feature-flags).
+
+The web UI has its own build-time switches. They only decide what the browser
+shows; the server still enforces the flags above.
+
+| Build-time variable | What it shows |
+|---|---|
+| `NEXT_PUBLIC_ARTIFACTS_LIBRARY` | The Artifacts library at `/artifacts`. Without it, the **Artifacts** sidebar item opens `/pages`. |
+| `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` | Sends the `/pages` overview to the Artifacts library (needs `NEXT_PUBLIC_ARTIFACTS_LIBRARY`). |
+| `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` | Live Dashboard previews. |
+| `NEXT_PUBLIC_ARTIFACT_SLIDES` | Slides previews of a project. |
+| `NEXT_PUBLIC_ARTIFACTS_DESIGN` | The Design canvas. |
+| `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` | Artifact cards and the side viewer in chat. |
+| `NEXT_PUBLIC_CHAT_CRAFT_LEASE` | The Craft lease bar and local draft recovery in chat. |
+
+Each variable must equal `true` at build time.
+
+## Authentication and scopes
+
+All routes need a signed-in human session or a CLI credential, plus a workspace
+(`X-Workspace-ID` header or `workspace_id` query). Workspace membership alone is
+not enough: each handler checks the caller's current access to that one
+artifact inside the same transaction that reads or writes it.
+
+For supported Project tool operations, an admitted agent run acts on the
+owner’s behalf and remains bound to that artifact. Design tools act under the
+connected human’s current edit authority. These mandates never permit sharing
+a version. "Write access" means an edit grant; a `comment` grant only allows
+comments.
+
+| Family | Operation | Who | CLI scope |
+|---|---|---|---|
+| All | Create a project or Design | `OWNER`, `ADMIN`, `MANAGER`, or a member holding the `page.create` capability | `pages:write` |
+| Project, Dashboard, Slides | Read | Anyone the artifact is shared with. The owner and people with write access read the latest version; other readers only the shared version | `pages:read` |
+| Project | Version history | The owner only | `pages:read` |
+| Project | Publish a new version | The owner, or someone with write access | `pages:write` |
+| Project | Restore a version | The owner only | `pages:write` |
+| Project | Change the shared version | The owner only; an agent run can never share | `pages:write` |
+| Project | Add a comment | The owner, someone with write access, or a person with a `comment` grant | `pages:write` |
+| Project | Reply to a comment | The owner only | `pages:write` |
+| Dashboard | Write data | The owner only | `pages:write` |
+| Design | Read and version history | Anyone the Design is shared with reads it; everyone with write access also gets the full version history. REST reads without `version` return the live canvas; explicit version reads by non-editors are restricted to the shared version | `pages:read` |
+| Design | Apply changes, save a snapshot, restore | The owner, or someone with write access | `pages:write` |
+| Design | Add a comment | The owner, someone with write access, or a person with a `comment` grant | `pages:write` |
+| Design | Share a version | The owner only | `pages:write` |
+| Craft | Lease and document operations | The caller, for their own editing session; the handler checks Page rights and the original credential | `pages:read` to view, `pages:write` to edit |
+
+A scoped CLI token is refused with `403` when it lacks the scope; unscoped
+tokens and browser sessions are not limited by scope. Agents work through MCP
+tools inside their crew rather than these routes. For project and Design tools
+the server rechecks the human's consent, the
+[artifact creation policy](/api-reference/workspaces#artifact-creation-policy)
+and the run's binding to that one artifact on every call.
+
+## Versions and conflicts
+
+Artifacts never overwrite silently. A lost race returns `409` with the stored
+state unchanged. Projects, Designs and Craft documents keep their versions in
+one version store: every save creates a new immutable version, numbered from 1,
+and restoring an old version creates a new version with the same content;
+nothing in history is deleted. Each family guards its writes differently.
+
+- **Projects** use compare-and-swap. A publish, restore or share must send the
+  `base_version` it last read; if the latest version has moved, the server
+  returns `409 artifact_version_conflict`.
+- **Shared version.** The latest version and the shared version are separate.
+  For Project, Dashboard and Slides, the owner and editors read latest; other
+  readers get the shared version. Design’s REST `get` without a `version`
+  parameter returns the live canvas to an authorized reader; explicitly
+  selecting a retained version restricts a non-editor to the shared version.
+  Its read-only WebSocket clients can receive live updates but cannot write.
+- **Dashboard data** is versioned per JSON document. Each write in a batch
+  carries `ifVersion` (`0` creates the document), and the batch names the
+  project's current `base_version`. One stale `ifVersion` fails the whole batch
+  with `409 artifact_data_conflict`. Writing data never creates a new project
+  version.
+- **Design** has no base version. The server keeps one live Yjs document per
+  Design and merges every change into it. Browsers send standard Yjs updates
+  over `GET /api/v1/pages/{slug}/design/ws`; the server applies each update,
+  stores the result and relays it to the other editors. Operations, snapshots,
+  restore and share requests (and the agent's `design_apply` tool) carry no
+  `base_version`; they act on the current live state. Snapshots in the version
+  store are taken on request, and automatically once edits have been idle for
+  about ten seconds while an editor is connected. The server can still answer
+  `409` "Design changed; reload and reapply" when the stored state moved during
+  a request.
+- **Craft** allows one editor at a time through a **lease**. Acquiring a lease
+  returns a `generation`; renew, release and handoff must send that exact
+  generation. Every new holder gets a higher generation, so a request from a
+  previous holder fails with `409` "native editor lease changed". The lease lasts 15
+  seconds and is renewed by the editor's live event stream
+  (`GET /api/v1/pages/{slug}/craft/events`). Saves carry both the lease
+  `generation` and the `baseVersion` they started from (Craft request bodies
+  use camelCase field names).
+
+When you get a `409`, read the current state, decide what to keep, and send a
+new request against the new version. Never retry blindly with a newer base.
+
+## Quotas
+
+| Limit | Default | Error |
+|---|---|---|
+| Project history (all versions) | 256 MiB | `413 artifact_history_quota` |
+| One project version | 32 MiB | `413 artifact_history_quota` |
+| Files in one project version | 256 | `400` |
+| Design history (all versions) | 256 MiB | `413` "Design capacity is full", no `code` |
+| One Design version | 32 MiB | `413` "Design capacity is full", no `code` |
+| Craft document history (all versions) | 16 GiB | `413` "native history quota reached", no `code` |
+| One Craft document version | 32 MiB | `413` "native history quota reached", no `code` |
+| Dashboard document | 256 KiB | `413 artifact_data_quota` |
+| Dashboard batch | 50 writes | `400` |
+| Dashboard batch size | 1 MiB | `413 artifact_data_quota` |
+| Dashboard collection | 8 MiB | `413 artifact_data_quota` |
+| Collections per Dashboard | 32 | `413 artifact_data_quota` |
+| Documents per collection | 4096 | `413 artifact_data_quota` |
+
+When history is full, every existing version is kept and only new saves are
+refused. Read responses include a `quota` object with `used_bytes`,
+`limit_bytes`, `warning` (at 80% use) and `retention`. Owner retention is `keep-all`; a non-owner editor gets `latest-version-only`,
+and a reader limited to the shared version gets `shared-version-only`.
+Non-owners receive zero usage/limit values.
+
+## Route families
+
+### Projects
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/pages/artifacts/availability` | Whether projects are enabled for this workspace |
+| POST | `/api/v1/pages/artifacts` | Create a private project with its first version |
+| GET | `/api/v1/pages/{slug}/artifact` | Current version, files and quota |
+| GET | `/api/v1/pages/{slug}/artifact/versions` | Same view including version history |
+| POST | `/api/v1/pages/{slug}/artifact/versions` | Publish a new version against `base_version` |
+| POST | `/api/v1/pages/{slug}/artifact/restore` | Restore an old version as a new one |
+| POST | `/api/v1/pages/{slug}/artifact/share` | Move the shared version |
+| GET | `/api/v1/pages/{slug}/artifact/comments` | Comments anchored to versions |
+| POST | `/api/v1/pages/{slug}/artifact/comments` | Add an anchored comment; `send_to_agent` hands it to the agent |
+| POST | `/api/v1/pages/{slug}/artifact/comments/{commentId}/reply` | Reply in a thread |
+
+### Dashboard data
+
+A Dashboard is a project whose version declares JSON collections.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/pages/{slug}/artifact/data` | List the declared collections |
+| GET | `/api/v1/pages/{slug}/artifact/data/{collection}` | Read a collection's documents with `version`, `updated_at`, `source_label` and `source_kind` |
+| POST | `/api/v1/pages/{slug}/artifact/data/{collection}` | Write a batch of documents with `ifVersion` |
+
+### Slides
+
+Slides are read from a project version that follows the Slides profile.
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/pages/{slug}/artifact/slides` | The Slides projection of a version |
+| GET | `/api/v1/pages/{slug}/artifact/export.pdf` | A PDF of that version |
+
+### Design
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/v1/pages/design` | Create a Design |
+| GET | `/api/v1/pages/{slug}/design` | Current nodes, order, version and edit permission |
+| GET | `/api/v1/pages/{slug}/design/ws` | Live Yjs session (WebSocket, same origin only) |
+| POST | `/api/v1/pages/{slug}/design/operations` | Apply structured changes without a socket |
+| POST | `/api/v1/pages/{slug}/design/snapshots` | Save a version |
+| GET | `/api/v1/pages/{slug}/design/versions` | List saved versions |
+| POST | `/api/v1/pages/{slug}/design/restore` | Restore a saved version |
+| GET | `/api/v1/pages/{slug}/design/comments` | Comments |
+| POST | `/api/v1/pages/{slug}/design/comments` | Add a comment, optionally for the agent |
+| POST | `/api/v1/pages/{slug}/design/share` | Share a version |
+| POST | `/api/v1/pages/{slug}/design/agent` | Connect a chat agent to the Design |
+
+### Craft documents
+
+Craft is the native editor for Word and Sheet documents. The CLI side is
+documented in [`crewship craft`](/cli/craft).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/pages/{slug}/craft/availability` | Whether Craft, preview and agents are available for this artifact |
+| POST | `/api/v1/pages/{slug}/craft/sessions` | Open an editing session |
+| POST | `/api/v1/pages/{slug}/craft/sessions/reauthorize` | Refresh the session's credential |
+| GET | `/api/v1/pages/{slug}/craft/events` | Server-sent heartbeat that keeps the lease alive |
+| GET | `/api/v1/pages/{slug}/craft/lease` | Current holder, `generation` and expiry |
+| POST | `/api/v1/pages/{slug}/craft/lease` | Acquire the lease (same as `/acquire`) |
+| POST | `/api/v1/pages/{slug}/craft/lease/acquire` | Acquire the lease |
+| POST | `/api/v1/pages/{slug}/craft/lease/renew` | Renew with the current `generation` |
+| POST | `/api/v1/pages/{slug}/craft/lease/release` | Release with the current `generation` |
+| POST | `/api/v1/pages/{slug}/craft/lease/request-handoff` | Ask the holder to hand over |
+| POST | `/api/v1/pages/{slug}/craft/lease/handoff` | Hand the lease to the requester |
+| POST | `/api/v1/pages/{slug}/craft/initialize` | Create the first version of an empty document |
+| GET | `/api/v1/pages/{slug}/craft/preview` | Read-only preview of the shared version |
+| GET | `/api/v1/pages/{slug}/craft/document` | Document bytes, version and quota |
+| POST | `/api/v1/pages/{slug}/craft/document/save` | Save a new version |
+| POST | `/api/v1/pages/{slug}/craft/document/import` | Import a file as a new version |
+| POST | `/api/v1/pages/{slug}/craft/document/restore` | Restore an old version |
+| POST | `/api/v1/pages/{slug}/craft/document/share` | Share a version |
+| POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Confirm whether an earlier save was stored |
+| POST | `/api/v1/pages/{slug}/craft/tasks` | Start an agent task on the document |
+| GET | `/api/v1/pages/{slug}/craft/tasks/{workID}` | Agent task status |
+| POST | `/api/v1/pages/{slug}/craft/tasks/cancel` | Stop the agent task |
+
+There is no separate export route: `GET .../craft/document` returns the bytes.
+
+### Related families
+
+These routes are not specific to one artifact type. They are documented on
+their own pages.
+
+| Family | Where |
+|---|---|
+| Sharing, grants, effective access, folders and public links | [Pages API](/api-reference/pages) |
+| Docs documents (`/api/v1/pages/{slug}/document`), server switch `CREWSHIP_DOCUMENTS_ENABLED` | [Pages API](/api-reference/pages) |
+| Slides documents (`/api/v1/pages/{slug}/slides`), server switch `CREWSHIP_SLIDES_ENABLED` | [`crewship slides`](/cli/slides) |
+| Workbooks (`/api/v1/workbooks`), server switch `CREWSHIP_GRIDCRAFT_ENABLED` | [`crewship workbook`](/cli/workbook) |
+| Mooring applications | [Mooring applications](/api-reference/mooring) |
+| Ownership transfer and artifact creation policy | [Workspaces API](/api-reference/workspaces#human-owned-content-custody) |
+| Feature flags | [Feature flags](/api-reference/feature-flags) |
+
+## Error codes
+
+Projects, Dashboards and Slides return JSON `{error, code}` for the cases a
+client must handle. Design and Craft return `{error}` only; branch on the HTTP
+status for those.
+
+| Status | `code` | Meaning |
+|---|---|---|
+| 400 | — | Invalid body, unsafe file path, or missing entry point |
+| 403 | — | Missing write authority or CLI scope; an artifact without read access is hidden with 404 |
+| 404 | — | Feature off, artifact not found, or not visible to the caller |
+| 409 | `artifact_version_conflict` | `base_version` is not the latest version |
+| 409 | `artifact_slug_taken` | The slug is already used in this workspace |
+| 409 | `artifact_anchor_mismatch` | A comment anchor no longer matches the selected version |
+| 409 | `artifact_data_conflict` | A Dashboard document's `ifVersion` is stale |
+| 409 | — | Design: "Design changed; reload and reapply". Craft: "native editor lease changed" or "native document or lease changed; keep the local draft" |
+| 413 | `artifact_history_quota` | Project history or version size limit reached |
+| 413 | — | Design: "Design capacity is full". Craft: "native history quota reached" |
+| 413 | `artifact_data_quota` | A Dashboard limit was exceeded |
+| 413 | `artifact_slides_limit` | The Slides export is too large |
+| 422 | `artifact_slides_unsupported` | The version is outside the Slides profile |
+| 422 | `artifact_slides_overflow` | Slide text does not fit its frame |
+| 422 | — | Craft: invalid native document |
+| 503 | — | Storage, Design or Craft is unavailable; the write outcome may be unknown. Keep the candidate and original Craft request, inspect the latest state or reconcile the original save before retrying |
+
+## Related
+
+- [Architecture: Artifacts](/architecture#artifacts) — how the pieces fit together
+- [Concepts](/concepts#artifacts) — terms used on this page
+- [Pages API](/api-reference/pages) — request and response bodies
+- [Workspaces API](/api-reference/workspaces#artifact-creation-policy) — which crews may create artifacts

@@ -30,6 +30,21 @@ describe("apiErrorMessage", () => {
     )
   })
 
+  // The pages 422 rejection envelope (internal/api/pages_data.go) carries an
+  // object `detail`, which must be skipped, and the sentence in `error`.
+  it("reads a page rejection's error sentence past its object detail", () => {
+    const rejection = {
+      rejected: true,
+      kind: "cap",
+      detail: { bytes_attempted: 70000, bytes_limit: 65536 },
+      message: "payload exceeds the 64 KiB limit",
+      error: "payload exceeds the 64 KiB limit",
+    }
+    expect(apiErrorMessage(rejection, "Request failed (HTTP 422)")).toBe(
+      "payload exceeds the 64 KiB limit",
+    )
+  })
+
   it("falls back for bodies that carry no message", () => {
     for (const body of [null, undefined, {}, [], "a string", 42, { detail: 7 }]) {
       expect(apiErrorMessage(body, "fallback")).toBe("fallback")

@@ -579,7 +579,10 @@ func CheckError(resp *http.Response) error {
 		// Canonical {"error": "..."} shape.
 		Error string `json:"error"`
 		// RFC 7807 Problem Details (the routine run gate, among others).
-		Detail string `json:"detail"`
+		// Raw because some envelopes (the pages 422 rejection) carry an
+		// object here; a string field would fail the whole decode and the
+		// user would see raw JSON instead of the "error" sentence.
+		Detail json.RawMessage `json:"detail"`
 		// Extension member the integration gate sets so the user sees
 		// exactly which connectors to wire up.
 		MissingIntegrations []string `json:"missing_integrations"`
@@ -594,14 +597,16 @@ func CheckError(resp *http.Response) error {
 			apiErr.message = fmt.Sprintf("API error (%d): %s", resp.StatusCode, errBody.Error)
 			return apiErr
 		}
-		if errBody.Detail != "" {
-			apiErr.Detail = errBody.Detail
+		var detail string
+		_ = json.Unmarshal(errBody.Detail, &detail) // non-string detail stays ""
+		if detail != "" {
+			apiErr.Detail = detail
 			if len(errBody.MissingIntegrations) > 0 {
 				apiErr.message = fmt.Sprintf("API error (%d): %s [connect: %s]",
-					resp.StatusCode, errBody.Detail, strings.Join(errBody.MissingIntegrations, ", "))
+					resp.StatusCode, detail, strings.Join(errBody.MissingIntegrations, ", "))
 				return apiErr
 			}
-			apiErr.message = fmt.Sprintf("API error (%d): %s", resp.StatusCode, errBody.Detail)
+			apiErr.message = fmt.Sprintf("API error (%d): %s", resp.StatusCode, detail)
 			return apiErr
 		}
 	}

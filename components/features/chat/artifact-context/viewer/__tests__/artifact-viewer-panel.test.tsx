@@ -722,3 +722,28 @@ it("offers an unsent comment back after the tab was lost, only to the same perso
   selectHero()
   expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("")
 })
+
+it.each([undefined, "library"] as const)("lets a Comment-level reader leave plain feedback on the shared version (variant %s)", variant => {
+  state.snapshot.data = snap({ can_write: false, can_share: false, can_restore: false, can_send_to_agent: false, can_comment: true, latest_version: 2, shared_version: 2, manifest: { ...snap().manifest, version: 2 } })
+  render(<ArtifactViewerPanel variant={variant} />)
+  selectHero()
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Reader feedback" } })
+  expect(screen.queryByRole("button", { name: "Send to agent" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Add to queue" })).toBeNull()
+  expect(screen.queryByRole("link", { name: "Edit source" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Save comment" }))
+  expect(state.comment).toHaveBeenCalledWith(
+    { version: 2, path: "home.html", selector: "#hero", quote: "Big idea", text: "Reader feedback", send_to_agent: false },
+    expect.anything(),
+  )
+})
+
+it("retires a reader's selection when the Comment grant is lost", () => {
+  state.snapshot.data = snap({ can_write: false, can_send_to_agent: false, can_comment: true })
+  const view = render(<ArtifactViewerPanel />)
+  selectHero()
+  state.snapshot.data = snap({ can_write: false, can_send_to_agent: false, can_comment: false })
+  view.rerender(<ArtifactViewerPanel />)
+  expect(screen.queryByRole("button", { name: "Select" })).toBeNull()
+  expect(screen.queryByRole("form", { name: "New comment" })).toBeNull()
+})

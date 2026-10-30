@@ -11,7 +11,7 @@ func newPageArchiveCommands() []*cobra.Command {
 	commands := make([]*cobra.Command, 0, 2)
 	for _, operation := range []string{"archive", "unarchive"} {
 		operation := operation
-		cmd := &cobra.Command{Use: operation + " <page>", Args: cobra.ExactArgs(1), Short: "Review and confirm a catalog change; content and access are retained", RunE: func(cmd *cobra.Command, args []string) error {
+		cmd := &cobra.Command{Use: operation + " <page>", Args: cobra.ExactArgs(1), Short: "Remove a Page or artifact from default lists after a reviewed dry run; content and access are retained", RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := pageCatalogCLIReviewBody(cmd)
 			if err != nil {
 				return err
@@ -35,6 +35,16 @@ func newPageArchiveCommands() []*cobra.Command {
 			}
 			return pageCatalogCLIPrint(raw)
 		}}
+		if operation == "unarchive" {
+			cmd.Short = "Return an archived Page or artifact to default lists after a reviewed dry run"
+		}
+		cmd.Long = cmd.Short + `.
+
+Run --dry-run with the exact pages_version first; it returns a review_token.
+Then confirm with --yes, the same --pages-version and that --review-token.
+A changed Page returns 409 and needs a new dry run. The same command is
+available as "crewship page ` + operation + `" and "crewship page artifact ` + operation + `".`
+		cmd.Example = "  crewship page " + operation + " quarterly-review --dry-run --pages-version 0\n  crewship page " + operation + " quarterly-review --yes --pages-version 0 --review-token <review-token>"
 		addPageCatalogReviewFlags(cmd)
 		commands = append(commands, cmd)
 	}

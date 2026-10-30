@@ -38,6 +38,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -48,6 +49,7 @@ import (
 
 	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/pagebuild"
 	"github.com/crewship-ai/crewship/internal/pages"
 )
 
@@ -62,11 +64,12 @@ func seedPages(ctx context.Context, client *cli.Client, deferCrewTelemetry bool,
 
 	fmt.Fprintln(os.Stderr, "Creating pages...")
 	created, pushed, failed := 0, 0, 0
-	// Apps need page project storage; where it is not configured (a light
-	// dev or CI workspace without CREWSHIP_PAGE_PROJECTS_PATH) they are
-	// skipped once, as a whole, like Keeper and the eval scenarios are —
-	// not reported as failures of a demo the host chose not to support.
-	appStoreMissing := false
+	// Apps need Pages Apps turned on (`crewship page enable`) and page
+	// project storage; where either is missing (a light dev or CI workspace,
+	// or CREWSHIP_DEV_PAGES=0) they are skipped once, as a whole, like Keeper
+	// and the eval scenarios are — not reported as failures of a demo the
+	// host chose not to support. The first such refusal is the only message.
+	appsUnavailable := false
 
 	for _, page := range seeddata.Pages {
 		if err := ctx.Err(); err != nil {
@@ -84,11 +87,11 @@ func seedPages(ctx context.Context, client *cli.Client, deferCrewTelemetry bool,
 		// still fall through to the panel pushes below: every catalogue page
 		// carries a Project now, so a `continue` here would leave a workspace
 		// without CREWSHIP_PAGE_PROJECTS_PATH with no demo payloads at all.
-		if page.Project != nil && !appStoreMissing {
+		if page.Project != nil && !appsUnavailable {
 			if err := seedPageApp(ctx, client, page); err != nil {
-				if strings.Contains(err.Error(), "Page project storage is not configured") {
-					appStoreMissing = true
-					fmt.Fprintf(os.Stderr, "  app %s: skipped (page project storage is not configured; panel page retained)\n", page.Slug)
+				if reason, skip := seedPageAppSkip(err); skip {
+					appsUnavailable = true
+					fmt.Fprintf(os.Stderr, "  apps: skipped from %s on (%s; panel pages retained)\n", page.Slug, reason)
 				} else {
 					fmt.Fprintf(os.Stderr, "  app %s: %v (panel page retained)\n", page.Slug, err)
 					failed++
@@ -409,16 +412,51 @@ func seedPageError(resp *http.Response) error {
 	var body struct {
 		Error   string `json:"error" yaml:"error"`
 		Message string `json:"message" yaml:"message"`
+		Code    string `json:"code" yaml:"code"`
 	}
 	_ = json.Unmarshal(raw, &body)
+	out := &seedPageAPIError{Status: resp.Status, Code: body.Code}
 	switch {
 	case body.Error != "":
-		return fmt.Errorf("%s: %s", resp.Status, body.Error)
+		out.Message = body.Error
 	case body.Message != "":
-		return fmt.Errorf("%s: %s", resp.Status, body.Message)
+		out.Message = body.Message
 	default:
-		return fmt.Errorf("%s: %s", resp.Status, string(raw))
+		out.Message = string(raw)
 	}
+	return out
+}
+
+// seedPageAPIError keeps the server's machine-readable `code` next to its
+// sentence, so the seed branches on "Pages Apps are not enabled" without
+// matching prose (#3108). Error() is the historical "<status>: <message>".
+type seedPageAPIError struct {
+	Status  string
+	Message string
+	Code    string
+}
+
+func (e *seedPageAPIError) Error() string { return e.Status + ": " + e.Message }
+
+// seedPageAppSkip classifies an app failure that holds for every remaining
+// app on this server — so the seed says it once and stops trying — and
+// returns the reason to print. ok is false for a failure of this app alone.
+func seedPageAppSkip(err error) (reason string, ok bool) {
+	var apiErr *seedPageAPIError
+	code := ""
+	if errors.As(err, &apiErr) {
+		code = apiErr.Code
+	}
+	switch {
+	case code == pagebuild.CodeNotEnabled:
+		return "Pages Apps are not enabled on this server; run `" + pagebuild.EnableCommand + "` on the Docker host, then re-seed", true
+	case code == pagebuild.CodeRuntimeOriginMissing:
+		return "Pages Apps have no runtime origin; set CREWSHIP_PAGE_RUNTIME_ORIGIN on the server, restart it, then re-seed", true
+	// Servers from before the codes existed answer with the sentence only.
+	case strings.Contains(err.Error(), "Page project storage is not configured"):
+		return "page project storage is not configured", true
+	}
+	return "", false
 }
 
 // seedPageSLASeconds converts the authored `sla: 60s` to the integer the wire

@@ -58,14 +58,26 @@ func Run(ctx context.Context, r Request) (Result, error) {
 	cmd.Stdout = &output
 	cmd.Stderr = &stderr
 	if err = cmd.Run(); err != nil {
-		if errors.Is(err, exec.ErrNotFound) || ctx.Err() != nil {
+		if ctx.Err() != nil {
 			return Result{}, ErrUnavailable
 		}
-		return Result{}, fmt.Errorf("%w: %s", ErrInvalid, stderr.String())
+		return Result{}, runError(err, stderr.String())
 	}
 	var result Result
 	if err = json.Unmarshal(output.Bytes(), &result); err != nil {
 		return Result{}, ErrUnavailable
 	}
 	return result, nil
+}
+
+// runError treats only the engine's deliberate exit code 1 as a refused
+// update. A process that could not start, was killed or ran out of heap is a
+// transient failure the client may retry; calling it invalid would make the
+// client stop reconnecting.
+func runError(err error, stderr string) error {
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return fmt.Errorf("%w: %s", ErrInvalid, stderr)
+	}
+	return ErrUnavailable
 }

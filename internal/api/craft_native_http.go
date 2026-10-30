@@ -13,14 +13,16 @@ import (
 // Dormant native-only human session/lease HTTP adapter. Router wiring remains
 // explicit and disabled until native engine and rights lifecycle qualification.
 type craftNativeSession struct {
-	id                                    string
-	tokenHash                             [32]byte
-	source                                auth.OriginalCredential
-	scope                                 mooring.EditLeaseScope
-	application, workspaceEpoch, memberID string
-	memberRevision                        int64
-	boot                                  string
-	deadline                              time.Duration
+	id                    string
+	tokenHash             [32]byte
+	source                auth.OriginalCredential
+	scope                 mooring.EditLeaseScope
+	application, memberID string
+	memberRevision        int64
+	// Author-relevant user/Page generations, not the broad workspace epoch.
+	generations craftNativeGenerations
+	boot        string
+	deadline    time.Duration
 }
 type craftNativeRequest struct {
 	id, target string

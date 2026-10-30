@@ -41,8 +41,9 @@ import (
 // shared dev slot remains nuke+reseed, since any out-of-band row edits made
 // before this migration are frozen into the chain as "genuine".
 //
-// Deferred (see issue #1369): a signed high-water checkpoint anchoring the tip
-// so TAIL truncation is caught, and append-only keeper_requests.
+// Deferred (tracked in issue #1486): a signed high-water checkpoint anchoring
+// the tip so TAIL truncation is caught. Append-only keeper decisions shipped
+// separately in migration v166 (migrate_consts_v166_keeper_append_only.go).
 func migrationJournalHashChain(ctx context.Context, tx *sql.Tx, logger *slog.Logger) error {
 	for _, ddl := range []string{
 		`ALTER TABLE journal_entries ADD COLUMN seq INTEGER NOT NULL DEFAULT 0`,
