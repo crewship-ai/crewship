@@ -285,7 +285,12 @@ test.describe("onboarding wizard — first-run flow", () => {
     await expect(launch).toBeEnabled()
 
     const setupRespPromise = page.waitForResponse(
-      (r) => r.url().includes("/api/v1/onboarding/setup") && r.request().method() === "POST",
+      // Exact pathname, like the waits above: a substring match also accepts
+      // POST /api/v1/onboarding/setup-agent/... (the setup chat's own writes)
+      // and can resolve on that response instead of the launch.
+      (r) =>
+        new URL(r.url()).pathname === "/api/v1/onboarding/setup" &&
+        r.request().method() === "POST",
       { timeout: 30_000 },
     )
     await launch.click()

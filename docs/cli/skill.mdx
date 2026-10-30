@@ -111,11 +111,14 @@ crewship skill list [flags]
 | `--search` | Substring match on name / display_name / description. |
 | `--installed` | Only skills held by at least one agent of the current workspace. |
 | `--installed-for=<agent>` | Only skills assigned to a specific agent. |
+| `--lifecycle` | One of `active stale archived deprecated` — the keeper sweep's verdict. The server returns every state; the CLI keeps the matching rows, in the table and in `--format json` alike. |
 
 **Output columns:** SLUG, VENDOR, NAME, CATEGORY, MATURITY, SOURCE, SCAN,
-AGENTS (agents of this workspace holding it), USES 7D (this workspace's
-invocations in the last seven days), USES 30D (the last thirty). `--format json` carries `installed_on`
-and `usage` in full.
+LIFECYCLE, AGENTS (agents of this workspace holding it), USES 7D (this
+workspace's invocations in the last seven days), USES 30D (the last thirty).
+`--format json|yaml|ndjson` prints the server's rows as sent — `installed_on`
+(with each agent's `missing_credentials`), `usage`, `needs_credentials`,
+`lifecycle_state` and every other field.
 
 Examples:
 
@@ -123,6 +126,7 @@ Examples:
 crewship skill list --maturity OFFICIAL
 crewship skill list --vendor anthropic --category DESIGN
 crewship skill list --installed-for viktor
+crewship skill list --lifecycle stale
 crewship skill list --search pdf
 ```
 
@@ -130,7 +134,13 @@ crewship skill list --search pdf
 
 ## `crewship skill get`
 
-Show metadata for one skill — name, slug, category, version, source, author, tool count, created-at. The markdown `description` body renders below the metadata block via `glamour` for human formats; JSON / YAML / quiet outputs include it raw inside the serialized struct.
+Show metadata for one skill — name, slug, category, version, source, author,
+tool count, maturity, scan status, lifecycle state, the credentials it needs,
+this workspace's use (7 and 30 days, errors, total, last use), the agents
+holding it with any credentials each still lacks, and created-at. The markdown
+`description` body renders below the metadata block via `glamour` for human
+formats. `--format json|yaml|ndjson` prints the server's skill document as
+sent, description and content included.
 
 ```bash
 crewship skill get <slug-or-id>
@@ -258,6 +268,10 @@ crewship skill restore <slug-or-id>
 
 A restored skill is still judged by the keeper's sweep: with no agent holding
 it and no use, it is stale again after 30 days and archived after 90.
+
+With `--format json|yaml|ndjson` both print the server's answer,
+`{"skill_id": …, "lifecycle_state": …}` — the state the skill is in now, which
+for an already-archived skill is not a change this call made.
 
 ---
 

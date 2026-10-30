@@ -116,6 +116,63 @@ type pipelineRowJSON struct {
 	// routine — nil when the save didn't request one (a plain save, or a
 	// re-save of a routine whose trigger was created separately).
 	Trigger *pipelineTriggerJSON `json:"trigger,omitempty" yaml:"trigger,omitempty"`
+	// Draft is the unpublished revision pending for this slug (#3832), with
+	// the latest Test result of exactly its definition. Run never uses it.
+	Draft *pipelineDraftJSON `json:"draft,omitempty" yaml:"draft,omitempty"`
+	// Files and Manifest are detail-only server documents (what the routine
+	// runs, and its derived capability blast radius). Kept raw: this build
+	// renders neither, and the machine formats pass the server's response
+	// through untouched anyway (server_document.go).
+	Files    cli.RawJSON `json:"files,omitempty" yaml:"files,omitempty"`
+	Manifest cli.RawJSON `json:"manifest,omitempty" yaml:"manifest,omitempty"`
+}
+
+// pipelineDraftJSON mirrors internal/api's pipelineDraftRef.
+type pipelineDraftJSON struct {
+	ID         string                 `json:"id" yaml:"id"`
+	Revision   int                    `json:"revision" yaml:"revision"`
+	UpdatedAt  string                 `json:"updated_at" yaml:"updated_at"`
+	UpdatedBy  string                 `json:"updated_by" yaml:"updated_by"`
+	TestResult *routineTestResultJSON `json:"test_result,omitempty" yaml:"test_result,omitempty"`
+}
+
+// routineTestResultJSON mirrors pipeline.TestResult: the latest Test run of
+// one exact definition (by hash).
+type routineTestResultJSON struct {
+	Passed   bool   `json:"passed" yaml:"passed"`
+	Status   string `json:"status" yaml:"status"`
+	TestedAt string `json:"tested_at" yaml:"tested_at"`
+	TestedBy string `json:"tested_by,omitempty" yaml:"tested_by,omitempty"`
+}
+
+// routineTestedLabel is the TESTED cell / hint for one definition: PASSED,
+// FAILED (with how the run ended when that says more), or "untested".
+func routineTestedLabel(r *routineTestResultJSON) string {
+	if r == nil {
+		return "untested"
+	}
+	if r.Passed {
+		return "PASSED"
+	}
+	// A failed test says how it ended (failed, timeout, cancelled …).
+	if r.Status != "" && !strings.EqualFold(r.Status, "failed") {
+		return "FAILED (" + r.Status + ")"
+	}
+	return "FAILED"
+}
+
+// routineDraftLine is the human `Draft:` value of `routine get`.
+func routineDraftLine(d *pipelineDraftJSON) string {
+	line := fmt.Sprintf("DRAFT r%d, updated %s", d.Revision, d.UpdatedAt)
+	if d.UpdatedBy != "" {
+		line += " by " + d.UpdatedBy
+	}
+	if d.TestResult != nil {
+		line += " · TESTED " + routineTestedLabel(d.TestResult) + " at " + d.TestResult.TestedAt
+	} else {
+		line += " · untested"
+	}
+	return line + " (run uses the published version)"
 }
 
 // pipelineTriggerJSON mirrors internal/api's triggerResponse — the trigger
@@ -175,24 +232,30 @@ var pipelineListCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		var rows []pipelineRowJSON
-		if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
-			return fmt.Errorf("decode response: %w", err)
+		raw, err := readServerDocument(resp)
+		if err != nil {
+			return err
 		}
-		// Machine formats pass the API rows through untouched — the human
-		// table below truncates descriptions and drops fields, so it must
-		// never be what -f json/yaml consumers get.
+		// Preserve server fields and the legacy CLI's explicit empty keys;
+		// the human table below truncates descriptions and drops fields.
+		// Re-encoding the typed struct would lose new server fields (#4508).
 		f := newFormatter()
-		if rows == nil {
-			rows = []pipelineRowJSON{} // "[]", never "null"
+		if !f.RoutesToHuman() {
+			docs, err := serverRows(raw)
+			if err != nil {
+				return err
+			}
+			for i := range docs {
+				docs[i], err = routineLegacyKeys(docs[i])
+				if err != nil {
+					return err
+				}
+			}
+			return f.Machine(docs)
 		}
-		switch f.Format {
-		case "json":
-			return f.JSON(rows)
-		case "yaml":
-			return f.YAML(rows)
-		case "ndjson":
-			return f.NDJSON(rows)
+		var rows []pipelineRowJSON
+		if err := json.Unmarshal(raw, &rows); err != nil {
+			return fmt.Errorf("decode response: %w", err)
 		}
 		if len(rows) == 0 {
 			fmt.Println("No routines registered yet.")
@@ -251,8 +314,12 @@ var pipelineGetCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
+		raw, err := readServerDocument(resp)
+		if err != nil {
+			return err
+		}
 		var p pipelineRowJSON
-		if err := json.NewDecoder(resp.Body).Decode(&p); err != nil {
+		if err := json.Unmarshal(raw, &p); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}
 
@@ -264,7 +331,13 @@ var pipelineGetCmd = &cobra.Command{
 		// them; `--format human` still lands in AutoHuman's default branch, so
 		// the value the old flag documented keeps working.
 		var flush tabFlush
-		if err := resolvedFormatter(cmd).AutoHuman(p, func() {
+		// Machine formats get the server's document (draft, files, manifest,
+		// behavior and whatever comes next), not this struct (#4508).
+		machineDoc, err := routineLegacyKeys(raw)
+		if err != nil {
+			return err
+		}
+		if err := resolvedFormatter(cmd).AutoHuman(machineDoc, func() {
 			// Same as `routine list`: the human rows name the crew and agent
 			// by slug, the machine document keeps the ids.
 			slugs := fetchWorkspaceSlugs(client)
@@ -284,6 +357,9 @@ var pipelineGetCmd = &cobra.Command{
 				govStatus = "active"
 			}
 			fmt.Fprintf(w, "Status:\t%s\n", govStatus)
+			if p.Draft != nil {
+				fmt.Fprintf(w, "Draft:\t%s\n", routineDraftLine(p.Draft))
+			}
 			if len(p.IntegrationsRequired) > 0 {
 				// Enforced at run time: a run is blocked when the author crew
 				// hasn't connected one of these (422 + missing_integrations).

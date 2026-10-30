@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { artifactCopyMove, chatArtifactContext, chatArtifactProjects, chatCraftLease, documentReviewActions } from "@/lib/feature-flags"
+import { artifactCopyMove, chatArtifactContext, chatCraftLease, documentReviewActions } from "@/lib/feature-flags"
 import { execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import path from "node:path"
@@ -37,7 +37,6 @@ const KNOWN: Record<string, string> = {
   "/api/v1/admin/users/X/X": "person sessions pick the tail (sessions, revoke) at run time",
   "/api/v1/workspaces/X/X": "invite picks invitations or members/provision at run time",
   "/api/v1/hooks/X/X": "enable or disable chosen at run time",
-  "/api/v1/llm/models": "known defect #3766: the chat model picker calls a route nobody registers",
 }
 
 // Proposed clients may ship behind a default-off surface before their API.
@@ -45,9 +44,6 @@ const KNOWN: Record<string, string> = {
 // another component must still fail. These are not registered server routes.
 const DEFERRED_CLIENTS: Record<string, { file: string; flag: string; enabled: () => boolean }> = {
   "/api/v1/chats/X/X": { file: "components/features/chat/artifact-context/client.ts", flag: "NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", enabled: chatArtifactContext },
-  // Artifact project routes: pending backend, agent B follow-up to PR #4356.
-  "/api/v1/pages/artifacts/availability": { file: "components/features/chat/artifact-context/projects/client.ts", flag: "NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", enabled: chatArtifactProjects },
-  "/api/v1/pages/X/artifact": { file: "components/features/chat/artifact-context/projects/client.ts", flag: "NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", enabled: chatArtifactProjects },
   // Craft lease routes: pending backend, the EditLease HTTP proposal.
   "/api/v1/pages/X/craft": { file: "components/features/chat/artifact-context/craft/lease-client.ts", flag: "NEXT_PUBLIC_CHAT_CRAFT_LEASE", enabled: chatCraftLease },
   "/api/v1/pages/X/document/proposals": { file: "lib/documents/proposals.ts", flag: "NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS", enabled: documentReviewActions },

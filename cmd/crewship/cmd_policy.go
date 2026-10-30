@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -163,7 +165,11 @@ Examples:
   crewship policy set --crew engineering --level trusted --max-ephemeral 20
 
 At least one of --level / --max-ephemeral is required; --max-ephemeral
-(0-100) sets the per-crew hire quota independently of the autonomy policy.`,
+(0-100) sets the per-crew hire quota independently of the autonomy policy.
+
+With --format json|yaml|ndjson the command prints one document holding the
+server's answers: "policy" (the updated policy, when --level was given) and
+"crew" (the updated crew, when --max-ephemeral was given).`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
 			return err
@@ -243,6 +249,10 @@ At least one of --level / --max-ephemeral is required; --max-ephemeral
 			return err
 		}
 
+		// What -f json prints: the documents the server answered with, keyed
+		// by the request that produced each — `policy` for the PUT, `crew`
+		// for the --max-ephemeral PATCH. Only the requests made appear.
+		machine := map[string]any{}
 		if level != "" {
 			if wholeRunApprovalSet {
 				resp, err := client.Get("/api/v1/crews/" + url.PathEscape(crewID) + "/policy")
@@ -279,14 +289,21 @@ At least one of --level / --max-ephemeral is required; --max-ephemeral
 				return err
 			}
 
-			var updated policyUpdateWire
-			if err := cli.ReadJSON(resp, &updated); err != nil {
+			raw, err := readServerDocument(resp)
+			if err != nil {
 				return err
 			}
+			var updated policyUpdateWire
+			if err := json.Unmarshal(raw, &updated); err != nil {
+				return fmt.Errorf("decode response: %w", err)
+			}
+			machine["policy"] = cli.RawJSON(raw)
 			if wholeRunApprovalSet && (updated.WholeRunApproval == nil || *updated.WholeRunApproval != wholeRunApproval) {
 				return errors.New("server did not confirm the requested whole-run approval setting; read the current policy before retrying")
 			}
-			cli.PrintSuccess(fmt.Sprintf("Policy updated for crew %s: %s / %s", updated.CrewID, updated.AutonomyLevel, updated.BehaviorMode))
+			if resolvedFormatter(cmd).RoutesToHuman() {
+				cli.PrintSuccess(fmt.Sprintf("Policy updated for crew %s: %s / %s", updated.CrewID, updated.AutonomyLevel, updated.BehaviorMode))
+			}
 		}
 
 		// The ephemeral quota lives on the crew record, not the policy route,
@@ -300,8 +317,21 @@ At least one of --level / --max-ephemeral is required; --max-ephemeral
 			if err := cli.CheckError(resp); err != nil {
 				return err
 			}
-			resp.Body.Close()
-			cli.PrintSuccess(fmt.Sprintf("Max ephemeral agents set to %d for crew %s", maxEphemeral, crewID))
+			raw, err := readServerDocument(resp)
+			if err != nil {
+				return err
+			}
+			if len(bytes.TrimSpace(raw)) > 0 && json.Valid(raw) {
+				machine["crew"] = cli.RawJSON(raw)
+			} else {
+				machine["crew"] = map[string]any{"id": crewID, "max_ephemeral_agents": maxEphemeral}
+			}
+			if resolvedFormatter(cmd).RoutesToHuman() {
+				cli.PrintSuccess(fmt.Sprintf("Max ephemeral agents set to %d for crew %s", maxEphemeral, crewID))
+			}
+		}
+		if f := resolvedFormatter(cmd); !f.RoutesToHuman() {
+			return f.Machine(machine)
 		}
 		return nil
 	},

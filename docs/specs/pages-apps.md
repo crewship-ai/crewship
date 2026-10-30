@@ -57,6 +57,13 @@ Runtime uses a second **registrable site**, shared by all Pages in the installat
 not a domain per Page. Both browser-facing origins need reachable DNS and trusted
 TLS. The same Go service serves Studio and the restricted runtime bootstrap route.
 A sibling subdomain or another port does not meet the production separation rule.
+A local installation with Studio on `http://localhost:<port>` gets the runtime
+origin `http://127.0.0.1:<server port>` derived when none is configured
+(`internal/config/page_projects.go`); a literal loopback IP is a different site
+from `localhost`, so this is not the same-origin development exception. It is
+used only for requests that reached the server directly on a loopback host
+without proxy headers (`pagebuild.DerivedRuntimeApplies`); any other host gets `page_runtime_origin_missing`
+and no loopback `frame-src`.
 See [installation and operations](../guides/pages-apps-operations.mdx).
 
 ## Source, build and publication lifecycle
@@ -84,9 +91,19 @@ are reported as interrupted. Git compression excludes object writers without tak
 away the shared lease used by artifact readers and build completion.
 
 A new build requires a tools-image fingerprint matching the server's compiler,
-SDK and dependency manifests. A release upgrade installs a matching image before
-building; existing immutable publications do not rebuild automatically. Preserve
-old image digests and source backups for rollback. V1 SDK changes must preserve
+SDK and dependency manifests. The tools image is installed explicitly by
+`crewship page enable`, which builds it from the context embedded in the binary
+tags it `crewship-pages-build:<fingerprint prefix>`, labels it with that
+fingerprint and records its exact ID in
+`<page_projects_path>/pages-build-image.json`; the server uses an explicitly
+configured `CREWSHIP_PAGE_BUILD_IMAGE` when set, otherwise only the recorded image
+and only while its ID, exact tag and label still match
+(`internal/pagebuild/record.go`). The label alone is never trusted. Without either, the
+build worker is off and no Pages container is started
+([ADR](../decisions/ADR-PAGES-IMAGE-BY-LABEL-2026-10-14.md), accepted 2026-10-29). Builds
+always run from the immutable image ID and never pull. A release upgrade runs
+`crewship page enable` again before building; existing immutable publications do
+not rebuild automatically. Preserve old images and source backups for rollback. V1 SDK changes must preserve
 compatibility or introduce an explicit new profile/migration; a runtime identifier
 alone does not promise byte-identical rebuilds across releases.
 

@@ -180,6 +180,12 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 //
 // Cascade order: children first, join rows, then the workspace itself.
 func softDeleteWorkspaceTx(ctx context.Context, tx *sql.Tx, workspaceID, now string) ([]string, error) {
+	// A public Page link is a capability outside workspace membership. Revoke
+	// it in the same transaction so deletion cannot leave an orphan link.
+	if _, err := tx.ExecContext(ctx, `UPDATE page_public_tokens SET revoked_at = ?
+		WHERE revoked_at IS NULL AND page_id IN (SELECT id FROM pages WHERE workspace_id = ?)`, now, workspaceID); err != nil {
+		return nil, fmt.Errorf("revoke workspace public page links: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx,
 		"UPDATE agents SET deleted_at = ? WHERE workspace_id = ? AND deleted_at IS NULL", now, workspaceID); err != nil {
 		return nil, fmt.Errorf("cascade soft-delete agents: %w", err)

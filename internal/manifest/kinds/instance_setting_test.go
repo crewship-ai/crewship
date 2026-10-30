@@ -560,21 +560,6 @@ func TestInstanceSetting_Plan_HandlerMissing_GracefulPlan(t *testing.T) {
 // compile — surfacing the obligation immediately.
 var _ internalapi.Client = (*httptestClient)(nil)
 
-// ensure helper used to fail a test if a recorded body is missing.
-//
-//nolint:unused
-func bodyOrFail(t *testing.T, body string) map[string]any {
-	t.Helper()
-	if body == "" {
-		t.Fatal("expected non-empty body")
-	}
-	var m map[string]any
-	if err := json.Unmarshal([]byte(body), &m); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
-	return m
-}
-
 // ensure errors.Is is usable for typed assertions in the future.
 var _ = errors.Is
 var _ = fmt.Sprintf
