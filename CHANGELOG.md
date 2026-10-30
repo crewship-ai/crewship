@@ -1015,6 +1015,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Settings and Admin save through one floating bar (#2984).** Edits on any card add up in a bar at the bottom of the page ("3 unsaved changes · Discard · Save", ⌘S / Ctrl+S) instead of a Save button per card. Leaving the page or switching section with edits pending asks first, and a failed save is a toast in the bottom-right corner that keeps the edits and offers Retry. Switches still save at once; changes across several workspaces still go through their preview.
 - **Routine HTTP results now redact injected credentials, including JSON and URL-escaped values.** Redaction applies before response bodies and request errors reach step results, run history or broadcasts.
 - **Generated clients described incorrect crew provisioning responses.** OpenAPI now matches the status fields, managed tool/launch artifact metadata and optional build progress, documents provision/rebuild success as 202, and includes rebuild admission errors and conflict diagnostics. ⚠️ **Specification correction:** generated clients no longer expose `crew_id`, `phase`, `updated_at` or trigger `success`, which these handlers never returned; regenerate clients to adopt the corrected contract. HTTP behavior is unchanged (#2897).
+
+- **Page rejections show their reason in the web app and CLI.** A 422 page rejection (for example a payload over the size cap) now also carries an `error` field with the same sentence as `message`, so the web app shows that sentence instead of "Request failed (HTTP 422)" and the CLI prints `API error (422): <sentence>` instead of the raw JSON body. The existing `rejected`, `kind`, `detail` and `message` fields are unchanged.
+
 - ⚠️ **Behaviour change: routine authoring and validation now reject unsupported transform expressions, including skipped branches.** Existing definitions must be corrected before re-saving or draft testing; there is no automatic rewrite. Running an existing definition still skips inactive branches, while unsupported expressions reached at runtime fail. Use code for arithmetic or pipes. Whitespace around array indices remains supported.
 - **Approval waits now honor the documented `wait.timeout_sec` setting.** A positive step-level `timeout_seconds` takes precedence; parked waits keep their recorded deadlines.
 - **Webhook deliveries with invalid form inputs now return `400` before acceptance.** Malformed target definitions return `409`. Corrected retries can use the same delivery key. Signed, rate-limited validation failures count toward webhook delivery failure health and can alert managers. CLI help now describes literal additional inputs and the reserved `event`, `raw` and `headers` payload fields.
@@ -7303,6 +7306,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add optional artifact project previews, versioned element comments, shared-version navigation and explicit chat creation intent behind backend availability.
 
 - **Disclosure toggles and checkable menu rows meet the 44 px touch floor.** On touch screens a `<summary>` that opens a collapsed section and checkbox or radio items in menus are now at least 44 px tall, like buttons and plain menu items already were; mouse and trackpad layouts are unchanged.
+
 
 ## [1.0.0-rc.1] — 2026-07-12
 
