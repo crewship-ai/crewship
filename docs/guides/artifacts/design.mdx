@@ -244,6 +244,7 @@ The comment shows its delivery state:
 |---|---|
 | **Sending to agent…** | The message is going to the chat. |
 | **Sent to agent** | The chat accepted it. The agent reads the Design, applies the change and saves a new version. |
+| **Comment saved. Agent delivery could not be confirmed.** | A manual retry was not confirmed. Inspect the source chat before retrying again. |
 | **Waiting for agent** | The comment is queued as a task for the agent. |
 | **Comment saved. The agent is busy; retry when it finishes.** | The agent was running. Click **Retry delivery** later. |
 | **Comment saved. Retry when the source chat is connected.** | Delivery was not confirmed within about 15 seconds. The message may already be in the chat, or the agent may not have started. Open the chat, check for the request and confirm that a model is set and the agent can run before retrying. |
