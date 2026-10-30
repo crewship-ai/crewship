@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useId, useRef, useState } from "react"
-import { AlertTriangle, FilePlus2 } from "lucide-react"
+import { AlertTriangle, FilePlus2, X } from "lucide-react"
 import { NewArtifactMenu } from "../artifact-context/new-artifact/new-artifact-menu"
 import { availableArtifactKinds } from "../artifact-context/new-artifact/new-artifact-kinds"
 import { chatArtifactProjects } from "@/lib/feature-flags"
@@ -545,15 +545,29 @@ export function ChatComposer({
       {createArtifact && <span role="status" className="text-xs text-muted-foreground">Private project · Sharing requires your approval</span>}
     </>
   ) : null
-  // "+" › New artifact lists only kinds with a backend. Projects join once the
-  // composer carries the explicit project-creation intent; until then a project
-  // starter would reach an agent without consent to create it.
-  const newArtifactKinds = chatArtifactProjects() ? availableArtifactKinds({ projects: false, documents: canCreateDocument }) : []
+  // "+" › New artifact lists only kinds with a backend. Picking one sets the
+  // same explicit creation intent the toggle buttons set, so a starter never
+  // reaches an agent without consent to create it.
+  const newArtifactKinds = chatArtifactProjects() ? availableArtifactKinds({ projects: canCreateArtifact, documents: canCreateDocument }) : []
   const newArtifactMenu = <NewArtifactMenu kinds={newArtifactKinds} disabled={isStreaming || !canSend} onPick={(kind, prompt) => {
     if (kind === "word") { setCreationSelection(creationScope); creationPacket.current = null }
+    if (kind === "project") { setCreationSelection(artifactScope); creationPacket.current = null }
     // The starter goes in front; text the person already typed stays.
     updateInput(input.trim() ? `${prompt}\n\n${input}` : prompt)
   }} />
+  // With the menu, the picked kind shows as one removable chip instead of two
+  // text toggles that crowd the toolbar off a phone screen.
+  const pickedKind = createArtifact ? newArtifactKinds.find(k => k.id === "project") : createDocument ? newArtifactKinds.find(k => k.id === "word") : undefined
+  const pickedKindChip = pickedKind ? (
+    <span className="inline-flex min-w-0 items-center gap-1.5">
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full border bg-secondary py-0.5 pl-2 pr-0.5 text-xs font-medium">
+        <pickedKind.icon aria-hidden className="size-3" />New {pickedKind.name}
+        <Button type="button" size="icon" variant="ghost" aria-label={`Remove New ${pickedKind.name}`} className="size-5 rounded-full coarse:size-[44px]"
+          onClick={() => { setCreationSelection(null); creationPacket.current = null }}><X aria-hidden className="size-3" /></Button>
+      </span>
+      <span role="status" className="truncate text-xs text-muted-foreground">{createArtifact ? "Private project · Sharing requires your approval" : "My space · You and workspace OWNER (audited access)"}</span>
+    </span>
+  ) : null
   const creationControl = canCreateDocument ? (
     <>
     <Button
@@ -576,6 +590,7 @@ export function ChatComposer({
     {createDocument && <span role="status" className="text-xs text-muted-foreground">My space · You and workspace OWNER (audited access)</span>}
     </>
   ) : null
+  const creationControls = newArtifactKinds.length > 0 ? <>{newArtifactMenu}{pickedKindChip}</> : <>{creationControl}{artifactCreationControl}</>
 
   if (variant === "mobile") {
     // The mobile branch used to be a bare input: no attachments at all, so a
@@ -604,12 +619,10 @@ export function ChatComposer({
               className="min-h-[44px]"
             />
             <PromptInputFooter className="justify-between p-2 gap-2">
-              <div className="flex items-center gap-1">
+              <div className="flex min-w-0 items-center gap-1">
                 <CameraButton agentId={agentId} sessionId={sessionId} />
                 <AttachmentButton agentId={agentId} sessionId={sessionId} />
-                {newArtifactMenu}
-                {creationControl}
-              {artifactCreationControl}
+                {creationControls}
               </div>
               <PromptInputSubmit disabled={submitDisabled} {...submitBlockProps} status={chatStatus} stopping={stopping} onStop={stopGeneration} />
             </PromptInputFooter>
@@ -641,11 +654,9 @@ export function ChatComposer({
             className="min-h-[44px]"
           />
           <PromptInputFooter className="justify-between p-2 gap-2">
-            <div className="flex items-center gap-1">
+            <div className="flex min-w-0 items-center gap-1">
               <AttachmentButton agentId={agentId} sessionId={sessionId} />
-              {newArtifactMenu}
-              {creationControl}
-              {artifactCreationControl}
+              {creationControls}
             </div>
             <PromptInputSubmit disabled={submitDisabled} {...submitBlockProps} status={chatStatus} stopping={stopping} onStop={stopGeneration} />
           </PromptInputFooter>
