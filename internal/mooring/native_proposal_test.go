@@ -198,6 +198,51 @@ func TestNativeProposalRefusesOldBaseHumanAuthorAndFlood(t *testing.T) {
 	}
 }
 
+// #4500: open proposals over a version the document has moved past can never
+// be accepted, so they must not keep holding places under the cap. They stay
+// on record as stale.
+func TestNativeProposalSupersededOpenProposalsStopCountingTowardCap(t *testing.T) {
+	s, _, _, scope, acting, _ := nativeProposalFixture(t)
+	human := *acting
+	l, _, err := s.Initialize(t.Context(), scope, human, []byte(`{"v":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	*acting = nativeProposalAgent
+	for i := 0; i < MaxOpenNativeProposals; i++ {
+		if _, err = s.Propose(t.Context(), scope, 1, "old"+string(rune('a'+i)), "", []byte(`{}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	*acting = human
+	if _, err = s.SaveSnapshot(t.Context(), l, 1, "r1", nativeReceiptHash([]byte(`{"v":2}`)), []byte(`{"v":2}`)); err != nil {
+		t.Fatal(err)
+	}
+	*acting = nativeProposalAgent
+	fresh, err := s.Propose(t.Context(), scope, 2, "new", "", []byte(`{"v":"new"}`))
+	if err != nil || fresh.State != "open" {
+		t.Fatalf("superseded proposals still fill the cap: %+v %v", fresh, err)
+	}
+	*acting = human
+	list, err := s.Proposals(t.Context(), scope)
+	if err != nil || len(list) != MaxOpenNativeProposals+1 {
+		t.Fatalf("proposal rows lost: %d %v", len(list), err)
+	}
+	for _, p := range list {
+		want := "stale"
+		if p.ID == fresh.ID {
+			want = "open"
+		}
+		if p.State != want {
+			t.Fatalf("proposal %s over v%d is %q, want %q", p.ID, p.BaseVersion, p.State, want)
+		}
+	}
+	// A stale proposal is final: it can be neither accepted nor rejected.
+	if _, err = s.RejectProposal(t.Context(), scope, list[len(list)-1].ID); !errors.Is(err, ErrNativeProposalDecided) {
+		t.Fatal("stale proposal decided again", err)
+	}
+}
+
 // The editor saves its holder's state before accepting. When that save only
 // repeats the proposal's base bytes, the document did not change and the
 // proposal still applies on top of the new head (dev3 D1, #4491).
@@ -224,5 +269,35 @@ func TestNativeProposalAcceptAfterUnchangedSaveApplies(t *testing.T) {
 	state, _ := s.Read(t.Context(), scope)
 	if state.LatestVersion != 3 || string(state.Manifest.Files["document.json"].Content) != `{"v":"agent"}` {
 		t.Fatalf("accepted content missing: %+v", state)
+	}
+}
+
+// A save that only repeats the base bytes does not move the document, so a
+// later proposal must not retire an earlier one that accept would still apply
+// (review of #4511 against the identical-bytes rule).
+func TestNativeProposalSupersedingKeepsProposalsOverUnchangedContent(t *testing.T) {
+	s, _, _, scope, acting, _ := nativeProposalFixture(t)
+	human := *acting
+	l, _, err := s.Initialize(t.Context(), scope, human, []byte(`{"v":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	*acting = nativeProposalAgent
+	first, err := s.Propose(t.Context(), scope, 1, "p1", "", []byte(`{"v":"p1"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	*acting = human
+	if _, err = s.SaveSnapshot(t.Context(), l, 1, "flush", nativeReceiptHash([]byte(`{"v":1}`)), []byte(`{"v":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	*acting = nativeProposalAgent
+	if _, err = s.Propose(t.Context(), scope, 2, "p2", "", []byte(`{"v":"p2"}`)); err != nil {
+		t.Fatal(err)
+	}
+	*acting = human
+	accepted, _, err := s.AcceptProposal(t.Context(), l, first.ID)
+	if err != nil || accepted.State != "accepted" {
+		t.Fatalf("proposal over unchanged content was retired: %+v %v", accepted, err)
 	}
 }

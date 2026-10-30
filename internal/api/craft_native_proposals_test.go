@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -140,5 +139,4 @@ func TestCraftNativeAgentToolProposeGrammar(t *testing.T) {
 			t.Fatalf("invalid proposal accepted: %s", raw)
 		}
 	}
-	_ = http.MethodPost
 }
