@@ -67,7 +67,8 @@ describe("composer + › New artifact", () => {
     fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
     fireEvent.click(await screen.findByRole("button", { name: /A three-screen pricing site/ }))
     expect(screen.getByRole("button", { name: "Remove New Project" })).toBeInTheDocument()
-    expect(screen.getByText("Private project · Sharing requires your approval")).toBeInTheDocument()
+    // On a phone the note has no room beside the chip; screen readers still get it.
+    expect(screen.getByText("Private project · Sharing requires your approval")).toHaveClass("max-sm:sr-only")
     fireEvent.submit(screen.getByRole("textbox").closest("form")!)
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
     expect(send.mock.calls[0][0]).toContain("A three-screen pricing site")

@@ -560,12 +560,12 @@ export function ChatComposer({
   const pickedKind = createArtifact ? newArtifactKinds.find(k => k.id === "project") : createDocument ? newArtifactKinds.find(k => k.id === "word") : undefined
   const pickedKindChip = pickedKind ? (
     <span className="inline-flex min-w-0 items-center gap-1.5">
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full border bg-secondary py-0.5 pl-2 pr-0.5 text-xs font-medium">
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full border bg-muted py-0.5 pl-2 pr-0.5 text-xs font-medium text-foreground">
         <pickedKind.icon aria-hidden className="size-3" />New {pickedKind.name}
         <Button type="button" size="icon" variant="ghost" aria-label={`Remove New ${pickedKind.name}`} className="size-5 rounded-full coarse:size-[44px]"
           onClick={() => { setCreationSelection(null); creationPacket.current = null }}><X aria-hidden className="size-3" /></Button>
       </span>
-      <span role="status" className="truncate text-xs text-muted-foreground">{createArtifact ? "Private project · Sharing requires your approval" : "My space · You and workspace OWNER (audited access)"}</span>
+      <span role="status" className="truncate text-xs text-muted-foreground max-sm:sr-only">{createArtifact ? "Private project · Sharing requires your approval" : "My space · You and workspace OWNER (audited access)"}</span>
     </span>
   ) : null
   const creationControl = canCreateDocument ? (
