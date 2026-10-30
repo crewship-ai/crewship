@@ -55,6 +55,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Project source edits survive a lost save reply and a closed tab.** If the save reply is lost, the editor confirms the exact next version instead of reporting a false conflict, and an unsaved source draft is kept in the browser and offered back until it is saved or discarded.
 
+- **Agents gain bundled Design and native Craft playbooks.** They explain scoped mandates, retained Design versions, session-bound leases and confirmed native saves. Design tool descriptions clarify version and conflict handling.
+
 - **Test Design canvases can be identified in the library.** Human canvas creation now retains the explicit test-item marker for catalog filtering.
 
 - ⚠️ **Behaviour change: `journal priority` and `memory export` honour `--format`.** With `--format json` (or `yaml`/`ndjson`), `crewship journal priority` prints the server's answer as an object with `id`, `priority` and `previous`, and `crewship memory export` writes the bundle as before and then prints `out`, `documents` and `skipped` instead of the prose listing. With the default table or `quiet` output both keep their human-readable line. `memory export` help now states that it requires OWNER or ADMIN.
