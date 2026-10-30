@@ -1,20 +1,76 @@
 ---
 title: "Feature Flags"
-description: "Instance-global feature toggles with percentage rollout and per-workspace overrides."
+description: "Instance-global feature toggles with per-workspace overrides."
 icon: "toggle-right"
 stability: experimental
 tag: Experimental
 ---
 
-Feature flags are an instance-global toggle surface: an ADMIN defines a flag
-with a default `enabled` state and percentage rollout, then individual
+Feature flags are an instance-global toggle surface: an instance
+administrator defines a flag with a default `enabled` state, then individual
 workspaces may attach an override row that flips the flag for that workspace
 only.
 
 All endpoints require authentication and workspace context. Reads are open to
 any workspace role. Creating, updating and deleting a flag definition changes
-every workspace, so it requires an instance administrator; a per-workspace
+every workspace, so it requires an instance administrator who is also `OWNER`
+or `ADMIN` of the workspace the request is made in (see
+[Who may change a definition](#who-may-change-a-definition)); a per-workspace
 override requires `OWNER` or `ADMIN` of that workspace.
+
+These are the server-side flags. The web app also has build-time
+`NEXT_PUBLIC_*` switches; those are compiled into the frontend bundle and are
+not listed or changed through this API.
+
+## Effective value
+
+The server resolves a flag for a workspace in one step
+(`internal/featureflags/featureflags.go`):
+
+1. If the workspace has an override row, its `enabled` value wins.
+2. Otherwise the definition's `enabled` value applies.
+3. A key with no definition row is **off**.
+
+The `percentage` field is stored, validated (0-100) and returned, but no code
+in the server evaluates it today: a flag with `enabled: false` and
+`percentage: 50` is off for every workspace without an override, and a flag
+with `enabled: true` is on for all of them. Treat `percentage` as a recorded
+intent, not a rollout mechanism.
+
+## Flags the server checks
+
+These keys are read by server code on `main`. Keys not in this list can be
+created and toggled, but nothing in the server reacts to them.
+
+| Key | Seeded default | What it gates | Other conditions |
+|---|---|---|---|
+| `run_verdict_summaries` | on | LLM outcome verdict written after each pipeline run | none |
+| `issue_agent_sessions` | on | Resolving or creating an issue agent session when an `@mention` dispatches work | none |
+| `issue_deliveries` | on | Delivery claim and `issue.delivery.acked` bookkeeping on `@mention` dispatch | none |
+| `gridcraft_editor` | off | Live workbook editor sessions, cell edits and the commits feed | The server must also run GridCraft with its workbook editor (`CREWSHIP_GRIDCRAFT_ENABLED` and `CREWSHIP_GRIDCRAFT_EDITOR_ENABLED`); without both the flag has no effect |
+| `artifact_projects` | off | Multi-screen HTML artifact projects | `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` turns it on for every workspace regardless of the flag |
+| `artifact_dashboard_data` | off | Dashboard collection data API and its run tools | Requires `artifact_projects`; `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED=true` replaces the flag |
+| `artifact_slides` | off | Slides projections and vector PDF export | Requires `artifact_projects`; `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true` replaces the flag |
+| `artifacts_design` | off | Collaborative Design artifacts over Yjs | `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true` turns it on for every workspace regardless of the flag |
+
+"Seeded default" is the `enabled` value a migration inserts; an administrator
+may have changed it since. Run `crewship feature-flag list` for the live state.
+
+## Who may change a definition
+
+Definition writes (`POST`, `PATCH`, `DELETE /api/v1/feature-flags[/{key}]`)
+pass two checks:
+
+1. The route requires an instance administrator (`Only an instance
+   administrator can do this` otherwise). A CLI token also needs the
+   `instance:admin` scope, or no scope restriction (`Forbidden` otherwise).
+2. The handler then requires `OWNER` or `ADMIN` of the workspace the request
+   is made in.
+
+So a workspace `ADMIN` who is not an instance administrator gets `403`, and so
+does an instance administrator who is only `MEMBER` of the selected workspace
+or who sends no workspace at all. Select a workspace you own or administer
+before changing a definition.
 
 ---
 
@@ -56,7 +112,7 @@ exists for that flag.
 | `key` | string | Unique flag key |
 | `description` | string? | Human-readable description |
 | `enabled` | boolean | Instance-global default state |
-| `percentage` | integer | Rollout percentage (0-100) |
+| `percentage` | integer | Recorded rollout percentage (0-100); not evaluated |
 | `created_at` | string | ISO 8601 timestamp |
 | `updated_at` | string | ISO 8601 timestamp |
 | `override_enabled` | boolean? | Current workspace's override state; omitted when no override row exists (flag inherits the instance default) |
@@ -71,7 +127,7 @@ POST /api/v1/feature-flags
 
 Inserts a new instance-global flag definition.
 
-**Auth:** instance administrator — a flag definition applies to every workspace, so a workspace `OWNER` or `ADMIN` role is not enough
+**Auth:** instance administrator who is also `OWNER` or `ADMIN` of the current workspace ([details](#who-may-change-a-definition))
 
 **Request Body:**
 
@@ -80,7 +136,7 @@ Inserts a new instance-global flag definition.
 | `key` | string | Yes | -- | Unique flag key |
 | `description` | string | No | `null` | Human-readable description |
 | `enabled` | boolean | No | `false` | Default state |
-| `percentage` | integer | No | `0` | Rollout percentage (0-100) |
+| `percentage` | integer | No | `0` | Recorded rollout percentage (0-100); not evaluated, see [Effective value](#effective-value) |
 
 ```json
 {
@@ -96,7 +152,7 @@ Inserts a new instance-global flag definition.
 | Status | Condition |
 |---|---|
 | `400` | Missing `key`, invalid JSON, or `percentage` outside 0-100 |
-| `403` | Insufficient role |
+| `403` | Not an instance administrator, token lacks `instance:admin`, or not `OWNER`/`ADMIN` of the current workspace |
 | `409` | A flag with this key already exists |
 | `500` | Database failure |
 
@@ -112,7 +168,9 @@ PATCH /api/v1/feature-flags/{key}
 
 Partial update -- only provided fields are changed.
 
-**Auth:** instance administrator — a flag definition applies to every workspace, so a workspace `OWNER` or `ADMIN` role is not enough
+**Auth:** instance administrator who is also `OWNER` or `ADMIN` of the current workspace ([details](#who-may-change-a-definition))
+
+The key itself cannot be changed; delete and recreate the flag to rename it.
 
 | Path Parameter | Description |
 |---|---|
@@ -124,14 +182,14 @@ Partial update -- only provided fields are changed.
 |---|---|---|
 | `description` | string | Description; empty string clears it to `null` |
 | `enabled` | boolean | Default state |
-| `percentage` | integer | Rollout percentage (0-100) |
+| `percentage` | integer | Recorded rollout percentage (0-100) |
 
 **Response:** `200 OK` -- the updated flag object, including `override_enabled` for the current workspace (same shape as a List item).
 
 | Status | Condition |
 |---|---|
 | `400` | Invalid JSON, `percentage` outside 0-100, or no fields to update |
-| `403` | Insufficient role |
+| `403` | Not an instance administrator, token lacks `instance:admin`, or not `OWNER`/`ADMIN` of the current workspace |
 | `404` | Flag not found |
 | `500` | Database failure |
 
@@ -150,13 +208,13 @@ DELETE /api/v1/feature-flags/{key}
 Removes the flag definition. The `ON DELETE CASCADE` on the override table
 means all per-workspace override rows are removed too.
 
-**Auth:** instance administrator — a flag definition applies to every workspace, so a workspace `OWNER` or `ADMIN` role is not enough
+**Auth:** instance administrator who is also `OWNER` or `ADMIN` of the current workspace ([details](#who-may-change-a-definition))
 
 **Response:** `204 No Content`
 
 | Status | Condition |
 |---|---|
-| `403` | Insufficient role |
+| `403` | Not an instance administrator, token lacks `instance:admin`, or not `OWNER`/`ADMIN` of the current workspace |
 | `404` | Flag not found |
 | `500` | Database failure |
 
@@ -195,7 +253,7 @@ place (keyed on `UNIQUE(flag_id, workspace_id)`).
 | Status | Condition |
 |---|---|
 | `400` | Invalid JSON, missing workspace context, or missing explicit `enabled` field |
-| `403` | Insufficient role |
+| `403` | Not `OWNER`/`ADMIN` of the current workspace |
 | `404` | Flag not found |
 | `500` | Database failure |
 
@@ -220,15 +278,24 @@ not an override row existed (after this call, the override does not exist).
 | Status | Condition |
 |---|---|
 | `400` | Missing workspace context |
-| `403` | Insufficient role |
+| `403` | Not `OWNER`/`ADMIN` of the current workspace |
 | `404` | Flag not found |
 | `500` | Database failure |
 
 **WebSocket event:** `feature_flag.override_cleared` (only when a row was actually removed)
 
-All six operations require an authenticated request. The API resolves the
-current workspace from the authenticated workspace context; `workspace_id` is
-not a query parameter on these routes. `GET` requires a workspace member with
-the read permission. Every mutation requires `OWNER` or `ADMIN` and returns
-`401` if unauthenticated or `403` when the role is insufficient. JSON errors
-use the API's standard error shape; successful delete operations have no body.
+All six operations require an authenticated request. The current workspace
+comes from the usual workspace selection: the `workspace_id` query parameter
+(the CLI adds it from your selected workspace) or the `X-Workspace-ID`
+header. `GET` requires a
+workspace member with the read permission. Override writes require `OWNER` or
+`ADMIN` of the workspace; definition writes additionally require an instance
+administrator. Every mutation returns `401` if unauthenticated or `403` when
+the caller is not allowed. JSON errors use the API's standard error shape;
+successful delete operations have no body.
+
+## WebSocket events
+
+All five events carry `{ "key": "<flag key>" }` and are sent to the workspace
+the request was made in only. Other workspaces are not notified when a
+definition changes; they see the new value on their next read.

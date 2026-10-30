@@ -1,0 +1,486 @@
+---
+title: "Design, Craft and Mooring connect"
+description: "Edit Design artifacts, drive a native Craft lease and exchange Mooring session frames from the CLI, with verified output and errors."
+icon: "pen-ruler"
+stability: experimental
+tag: Experimental
+---
+
+This page is a task guide for three experimental command groups that edit
+artifacts from a terminal:
+
+- `crewship page design` edits a Design artifact (a canvas of frames, shapes,
+  text and images) and manages its versions, shared version and comments.
+- `crewship craft` opens a human edit session on a native Craft document (Word),
+  takes the lease, reads and saves whole-document versions and starts agent tasks.
+- `crewship mooring connect` exchanges the original protocol frames of a Mooring
+  collaboration session over a WebSocket.
+
+Design commands sit under the `page` root for historical reasons; the objects
+they create are Artifacts and appear in the Artifacts library when the web
+library is enabled. Per-flag details for every subcommand stay in
+[`crewship page`](/cli/page), [`crewship craft`](/cli/craft) and
+[`crewship mooring`](/cli/mooring).
+
+All examples use a human CLI login (`crewship login`) and the workspace selected
+with `--workspace` or `CREWSHIP_WORKSPACE`. Outputs were recorded against a test
+workspace and shortened; IDs are replaced with placeholders.
+
+## Before you start
+
+Everything on this page is off by default.
+
+| Surface | What turns it on | Off behaviour |
+|---|---|---|
+| Design API and CLI | Workspace flag `artifacts_design`: `crewship feature-flag enable artifacts_design`. Operators can force it on for every workspace with `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true`. | Every `page design` call returns `404 design not found`. |
+| Design canvas in the web app | Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN=true` (the Artifacts library itself needs `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true`). | The CLI still works; the canvas is hidden. |
+| Native Craft sessions, lease, preview, initialize | Instance switch `CREWSHIP_CRAFT_NATIVE_ENABLED=true` plus a qualified Word profile (`CREWSHIP_CRAFT_NATIVE_WORD_*`). | `craft availability` reports `enabled: false`; other `craft` commands fail with `native HTTP 503`. |
+| Native Craft agent tasks | `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true` in addition to the above and a configured agent runtime. | `craft task …` fails with `native HTTP 503`. |
+| Craft lease bar in chat | Build-time `NEXT_PUBLIC_CHAT_CRAFT_LEASE=true`. | No lease controls in chat; the CLI is unaffected. |
+| Mooring sessions | Instance switch `CREWSHIP_MOORING_ENABLED=true`. | Routes are not registered: `mooring session` returns `404`, `mooring connect` prints `Mooring connection rejected`. |
+
+Check the current workspace flags with `crewship feature-flag list`. Instance
+switches are described in [Environment variables](/configuration/environment).
+
+## Output and exit codes
+
+`page design` commands always print the server's JSON object; the default
+format, `-f json` and `-f table` give the same JSON, and `-f yaml` prints YAML.
+`craft` commands print one JSON line per response (NDJSON) or YAML documents
+separated by `---` with `-f yaml`; `craft availability` prints a single object.
+`page design watch` and `mooring connect` refuse `-f quiet`; `craft` has no
+quiet mode and prints NDJSON under `-f quiet`, including the `watch` stream.
+
+Errors go to stderr. With the default format they are one line of text; with
+`-f json`, `-f ndjson` or `-f yaml` they use the standard CLI error envelope.
+For `page design` the envelope carries the HTTP status and server text, and the
+exit code follows the status:
+
+```json
+{
+  "error": {
+    "message": "API error (404): design not found",
+    "status": 404,
+    "detail": "design not found",
+    "exit_code": 3,
+    "extensions": { "error": "design not found" }
+  }
+}
+```
+
+| HTTP | Exit code | Typical `page design` message |
+|---|---|---|
+| 400 | 2 | `invalid Design update` |
+| 403 | 4 | `current Design edit permission required` |
+| 404 | 3 | `design not found` (also when the flag is off or the version does not exist) |
+| 409 | 5 | `Design changed; reload and reapply` |
+| 413 | 1 | `Design capacity is full; existing work is retained` |
+| 503 | 7 | `Design engine is unavailable; changes are not acknowledged` |
+
+`craft` and `mooring connect` use the same envelope, but it holds only
+`message` and `exit_code` (always `1`). There is no `status`, `detail` or
+`extensions` field and the server's error text is not shown; the message is
+short, such as `native HTTP 409` or `Mooring connection rejected`:
+
+```json
+{ "error": { "message": "native HTTP 503", "exit_code": 1 } }
+```
+
+Use the HTTP status inside the message to decide what to do.
+
+Argument checks run before any request and exit with code 1, for example
+`--name is required` or `--version must be a positive safe integer`.
+
+## Design artifacts
+
+### Permissions
+
+| Command | Needs |
+|---|---|
+| `create` | A human login with `pages:write` and a workspace role that may create artifacts. Agent runs cannot create a Design. |
+| `get`, `versions`, `comments`, `watch` | `pages:read` and visibility of the artifact. Without edit rights, `get --version` accepts only the shared version, `comments` lists only comments on the shared version and `watch` sends no initial canvas. |
+| `apply`, `snapshot`, `restore` | `pages:write` and edit rights on the artifact. |
+| `share` | Edit rights **and** ownership of the artifact. An Edit grant does not allow changing the shared version. |
+| `comment` | Edit rights, or `pages:write` with a Comment grant. `--send-to-agent` additionally needs edit rights. |
+| `agent` | Ownership of the artifact and a private chat with an agent that you created. |
+
+### Create a Design and add content
+
+```sh
+crewship page design create launch-hero --name "Launch hero" -f json
+```
+
+```json
+{ "page_id": "<page-id>", "slug": "launch-hero", "version": 1 }
+```
+
+The slug must be unused in the workspace. A taken slug currently returns
+`409 Design changed; reload and reapply`.
+
+Edits are a JSON object with `operations` (1 to 500) and an optional `message`.
+An upsert carries a whole node: `id`, `type` (`frame`, `rect`, `text` or
+`image`), `name`, `x`, `y`, `width`, `height`, `fill` and optionally
+`parentId`, `text` or `src`. Delete uses `{"op":"delete","id":"<node-id>"}` and
+reorder uses `{"op":"reorder","order":["<id>", …]}`. Keep the IDs of existing
+nodes. The file may be at most 1 MiB; other top-level keys are refused before
+the request (`unknown design field "extra"`).
+
+```json title="hero.json"
+{"operations":[
+  {"op":"upsert","node":{"id":"frame-1","type":"frame","name":"Hero","x":0,"y":0,"width":1280,"height":720,"fill":"#ffffff"}},
+  {"op":"upsert","node":{"id":"title-1","type":"text","name":"Title","parentId":"frame-1","x":80,"y":80,"width":800,"height":96,"fill":"#111111","text":"Quarterly review"}}
+],"message":"Add hero frame"}
+```
+
+```sh
+crewship page design apply launch-hero --file hero.json -f json
+```
+
+```json
+{
+  "nodes": [
+    { "id": "frame-1", "type": "frame", "name": "Hero", "x": 0, "y": 0, "width": 1280, "height": 720, "fill": "#ffffff" },
+    { "id": "title-1", "type": "text", "name": "Title", "parentId": "frame-1", "x": 80, "y": 80, "width": 800, "height": 96, "fill": "#111111", "text": "Quarterly review" }
+  ],
+  "order": ["frame-1", "title-1"],
+  "version": 2
+}
+```
+
+`apply` changes the live canvas that open browsers see immediately, and works
+even when no browser has it open. Every successful `apply`
+records a new version. Re-applying the same file is not a no-op: upserting the
+same nodes again still updates the canvas state and records another version.
+Use `--file -` to read stdin. An
+unknown node type or malformed node returns `400 invalid Design update`.
+
+### Read the canvas
+
+```sh
+crewship page design get launch-hero -f json
+crewship page design get launch-hero --version 1 -f json
+```
+
+```json
+{
+  "actor": { "id": "<user-id>", "name": "Docs Owner" },
+  "authority_revision": "71",
+  "can_comment": true,
+  "can_edit": true,
+  "latest_version": 2,
+  "nodes": [ … ],
+  "order": ["frame-1", "title-1"],
+  "origin": null,
+  "page_id": "<page-id>",
+  "shared_version": 0,
+  "version": 2
+}
+```
+
+`--version 0` (the default) reads the live canvas. With `--version N`, the
+`version` and `latest_version` fields both report `N`; use
+`page design versions` for the real latest version.
+
+### Save and list versions
+
+```sh
+crewship page design snapshot launch-hero --message "Hero draft" -f json
+crewship page design versions launch-hero -f json
+```
+
+```json
+{ "actor": "<user-id>", "version": 3 }
+```
+
+```json
+{
+  "latest_version": 3,
+  "shared_version": 0,
+  "versions": [
+    { "version": 3, "message": "Hero draft", "entry_point": "design.yjs", "actor": "<user-id>", "created_at": "2026-10-30T00:30:37Z" },
+    { "version": 2, "message": "Add hero frame", "entry_point": "design.yjs", "actor": "<user-id>", "created_at": "2026-10-30T00:30:37Z" },
+    { "version": 1, "message": "Create Design", "entry_point": "design.yjs", "actor": "<user-id>", "created_at": "2026-10-30T00:30:31Z" }
+  ]
+}
+```
+
+`snapshot` (alias `save`) records the live canvas as a new version even when it
+is unchanged since the last one. Take `latest_version` from `versions` whenever
+a command below needs the latest version.
+
+### Share a version
+
+```sh
+crewship page design share launch-hero --version 3 -f json
+```
+
+```json
+{ "shared_version": 3, "version": 3 }
+```
+
+Only the owner can change the shared version. A version that does not exist
+returns `404 design not found`.
+
+### Comment on a node
+
+Use the latest version from `page design versions` (`3` in this walkthrough):
+
+```sh
+crewship page design comment launch-hero --version <latest-version> --node title-1 \
+  --quote "Quarterly review" --text "Make the title shorter" -f json
+crewship page design comments launch-hero -f json
+```
+
+```json
+{
+  "id": "<comment-id>",
+  "version": 3,
+  "path": "design.json",
+  "selector": "title-1",
+  "quote": "Quarterly review",
+  "text": "Make the title shorter",
+  "author": "<user-id>",
+  "author_kind": "human",
+  "status": "comment",
+  "delivery_retryable": false,
+  "replies": [],
+  "created_at": "2026-10-30T00:30:42Z"
+}
+```
+
+`--version` must be the **latest** version, and `--node` must exist in it;
+`--quote`, when given, must equal the node's name or text. Otherwise the
+server returns `409 Design changed; reload and reapply`. `comments` returns
+`{"comments":[…]}` with up to 500 comments.
+
+With `--send-to-agent`, the comment is queued for the agent connected through
+`page design agent` and its `status` is `pending`.
+
+### Restore a version
+
+```sh
+crewship page design restore launch-hero --version 1 -f json
+```
+
+```json
+{ "actor": "<user-id>", "version": 4 }
+```
+
+`restore` never rewrites history: it copies the selected version into the live
+canvas and records it as a new version. Version 1 is the empty canvas from
+`create`, so restoring it removes every node from the live canvas (`get` then
+returns `"nodes": []`) and makes it the latest version. Comments on `title-1`
+now fail with `409` because the node no longer exists. To continue, apply
+`hero.json` again (this records version 5) and use the new latest version.
+
+### Connect an agent chat
+
+```sh
+crewship chat create <agent-slug> -f json        # {"agent_id":"<agent-id>","id":"<chat-id>"}
+crewship page design agent launch-hero --chat-id <chat-id> -f json
+```
+
+```json
+{ "origin": { "agent_id": "<agent-id>", "chat_id": "<chat-id>" } }
+```
+
+The chat must be private, created by you and attached to an agent. Any other
+chat ID returns `403 current Design edit permission required`. `get` then
+reports the same `origin` to the owner.
+
+### Watch live changes
+
+```sh
+crewship page design watch launch-hero --count 2
+```
+
+```json
+{"frame":"AAAHAfXC…"}
+{"frame":"AAFIAQb1…"}
+```
+
+Each line is one binary Yjs sync or awareness frame, base64-encoded. `--count 0`
+(the default) watches until interrupted. A live agent run reads Design through
+the `design_get` tool instead; with `CREWSHIP_AGENT_TOKEN` set, `watch` is
+refused.
+
+## Native Craft documents
+
+Native Craft keeps a Word document as whole-document versions. One holder at a
+time owns the edit **lease**; saves need the current lease generation.
+
+### Check availability
+
+```sh
+crewship craft availability <artifact-slug> -f json
+```
+
+```json
+{ "enabled": false, "can_edit": false, "preview_enabled": false, "agents_enabled": false }
+```
+
+`availability` never fails for a missing artifact; it reports `false` values.
+Run it first. `enabled` is `false` when the instance switch is off (the other
+commands then return `native HTTP 503`), and also when the artifact is not a
+native document or you cannot read it (then expect a 403; `connect` reports `native session HTTP 403`).
+
+### Read the shared preview
+
+```sh
+crewship craft preview <artifact-slug>
+```
+
+Returns the shared version without opening a session or taking the lease. If no
+version is shared the command fails; it never falls back to the latest private
+content.
+
+### Edit with a lease: acquire, read, save, release
+
+`craft connect` opens one human session, prints its public `session_id`, then
+reads one JSON action per stdin line and prints one response per action. The
+private session token stays in the process, and the session ends when the
+command exits.
+
+Several action fields come from earlier responses, so feed the actions one at a
+time: start the command in a terminal, type one line, read the response, then
+type the next line. A script does the same by keeping the command's stdin open
+(for example a shell coprocess or a named pipe) and writing each line only
+after it has read the previous response. A file written in advance works only
+for actions that need no response values, such as `status`.
+
+```sh
+crewship craft connect <artifact-slug>
+```
+
+```json
+{"session_id":"<session-id>"}
+```
+
+1. Type `{"action":"acquire"}`. The lease view comes back: `holder`, `mine`,
+   `generation`, `expires_at`, `can_edit`, `can_write` and any pending
+   `handoff_requested_by`. Note `generation`.
+2. Type `{"action":"read"}`. The response holds `version`, `bytes` (the
+   document, base64), `applicationId`, `enginePin`, editor bundle fields and
+   `quota` (`usedBytes`, `limitBytes`, `warning`, `retention`). Note
+   `version`, `applicationId` and `enginePin`.
+3. Edit the decoded document, then type one `save` line:
+
+   ```json
+   {"action":"save","snapshot":{"workspaceId":"<workspace-id>","pageId":"<page-id>","applicationId":"wordcraft","enginePin":"<engine-pin>","sessionId":"<session-id>","generation":"<generation>","baseVersion":"<version>","editorRevision":"<editor-revision>","contentHash":"sha256:<hex>","bytes":"<base64>"}}
+   ```
+
+4. Type `{"action":"release","generation":"<generation>"}` to give the lease
+   back. End of input does not save or release.
+
+Where each snapshot field comes from:
+
+| Field | Source |
+|---|---|
+| `workspaceId` | The workspace **ID**, not its slug (the server compares it with the workspace's ID). Read it with `crewship workspace list -f json`. |
+| `pageId` | The artifact's page ID, for example `id` in `crewship page get <artifact-slug> -f json`. |
+| `applicationId`, `enginePin` | The `read` response. |
+| `sessionId` | `session_id` printed when the command started. |
+| `generation` | The `acquire` (or `status`) response. |
+| `baseVersion` | `version` from the `read` you edited. |
+| `editorRevision` | A label you choose for this edit, 1 to 256 characters without NUL. It is stored in the version's audit message; the server does not interpret it. |
+| `contentHash` | `sha256:` followed by the lowercase hex SHA-256 of the exact document bytes you send (before base64 encoding). A mismatch is refused. |
+| `bytes` | The edited document, base64-encoded, at most 32 MiB. |
+
+Other actions: `status` (lease view), `acquire-explicit`, `renew` (needs
+`generation`), `import`, `restore` and `reconcile` (snapshot actions),
+`share` (publish an existing version as the preview), `reauthorize` and
+`watch` (follow the live event stream; later input lines are ignored). See
+[`crewship craft`](/cli/craft) for the route of each action and the snapshot
+fields.
+
+Generations and versions are positive decimal **strings**. Unknown fields are
+refused, control lines are limited to 16 KiB and one connection accepts at most
+4096 actions. A failed action stops the command; nothing is retried
+automatically.
+
+### Hand off the lease
+
+The person who wants the lease sends `{"action":"request-handoff"}` and gets a
+`request_id`. The current holder then sends:
+
+```json
+{"action":"handoff","generation":"7","request_id":"<request-id>"}
+```
+
+The target is always the server-issued request, never a user named on the
+command line.
+
+### Initialize an empty artifact as Word
+
+```sh
+crewship craft initialize <artifact-slug> --file document.json
+```
+
+The artifact must exist, be empty and be owned by you, and you need
+`pages:write`. `document.json` is not a `.docx` file: it is the Word editor's
+native document, a single JSON object (1 byte to 32 MiB) that the instance's
+Word profile validates; anything else is refused. Only Word
+(`wordcraft`) can be initialized. The command prints `session_id`,
+`application_id`, `page_id`, `generation` and `version` (`"1"`), holds the new
+lease, and then reads actions from stdin one line at a time exactly like
+`connect`; use the printed `generation`, `page_id` and `session_id` in them.
+With `--file -` the document is read from stdin and no actions follow. An empty
+file fails before any request.
+
+### Start, check and stop an agent task
+
+```sh
+crewship craft task start <artifact-slug> --chat-id <chat-id> --message-id <message-id> --whole-document
+crewship craft task status <artifact-slug> <work-id>
+crewship craft task stop <artifact-slug>
+```
+
+`start` needs your own stored message in that chat and explicit
+`--whole-document` consent; without it the command stops with
+`native agent start requires explicit --whole-document=true consent`. Success
+returns `{"work_id":"<work-id>","status":"queued"}`: queued, not saved.
+`status` reads the task's recorded outcomes. `stop` revokes the agent's mandate
+on the artifact and returns `grant_revoked`, `lease_retired`,
+`cancel_requested`, `stopped` and `stop_pending`. Stop cannot take the lease
+from a human holder.
+
+### Craft errors
+
+| Message | Meaning |
+|---|---|
+| `native HTTP 503`, `native session HTTP 503`, `native initialization HTTP 503` | Native Craft (or agent tasks) is switched off on this instance. |
+| `native HTTP 400` | The snapshot does not match the document, for example `workspaceId` holds a slug instead of the workspace ID, or another binding field differs from the session. |
+| `native HTTP 403` | No edit rights on the artifact, or the lease action is not allowed for you. |
+| `native HTTP 409` | The lease or document changed (busy, stale generation or newer version). Read the lease and document again; keep your local draft. |
+| `native HTTP 413` | The native history quota is full; existing versions are kept. |
+| `native HTTP 422` | The native document bytes are invalid. |
+| `native document must contain 1 to32MiB of native bytes` | `initialize --file` was empty or larger than 32 MiB. |
+
+## Mooring connect
+
+`crewship mooring connect` joins a Mooring collaboration session that
+`crewship mooring session` admitted. It needs a human login; an agent token is
+refused before any request.
+
+```sh
+crewship mooring session <artifact-slug> --file session.json -f json
+crewship mooring connect <artifact-slug> --connection <connection-ref> --file frames.ndjson
+```
+
+Pass the returned `connection_ref` with `--connection`. `--file` holds one
+original JSON frame per line (`-` reads stdin); the first is the original
+`session_join` with its one-use ticket. Each frame is limited to 256 KiB. Server
+frames print as JSON lines by default and with `-f json` or `-f ndjson`, or as
+YAML documents with `-f yaml`.
+
+| Message | Meaning |
+|---|---|
+| `--connection and --file are required` | A flag is missing or the connection reference is not valid. |
+| `Mooring streams require json, ndjson or yaml output` | `-f quiet` was used. |
+| `Mooring connection rejected` | The upgrade was refused: Mooring is disabled, the reference is unknown, used or expired, or you lack access. The HTTP status is not shown. |
+| `Mooring input failed; retain original packets` | A line was not valid JSON, exceeded 256 KiB or could not be sent. |
+| `Mooring connection ended; retain original packets` | The server closed the connection unexpectedly. |
+
+A pending frame is not a saved change, and the command creates no receipts.
+Keep your original frames to retry them. The transport contract is in
+[Mooring session transport](/specs/mooring-session-transport).

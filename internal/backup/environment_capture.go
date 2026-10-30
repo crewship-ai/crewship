@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // ErrEnvironmentUnsupported: the Docker ops given cannot commit or save
@@ -185,9 +186,17 @@ func (c *environmentCapture) flush(ctx context.Context) {
 	}
 }
 
+// truncate caps s at n bytes, backing off to a rune boundary so the kept
+// prefix stays valid UTF-8.
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
+	}
+	if n < 0 {
+		n = 0
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n] + "…"
 }
