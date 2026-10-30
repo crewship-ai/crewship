@@ -27,6 +27,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Native agent proposals are idempotent within their authenticated run.** Two runs of the same agent can reuse a request identifier without adopting each other’s proposal. Apply and propose share the run’s change request limit; proposals cannot bypass an unresolved save. Exact retries reuse the recorded candidate without running the engine again, including after the document advances.
 
+- **Design keeps work visible when saved history is full.** A clear message replaces the saved status and offers a draft download containing the local canvas and unsent feedback, or an explicit copy of the canvas into a new Design with fresh history. The original editor, unsent feedback and retained versions stay intact. Copy creation checks current source and create permissions atomically and is never automatically replayed.
+
 - ⚠️ **Design readers and commenters see only the shared version.** Private saved and live changes are withheld from REST and websocket readers, and comments target the displayed shared snapshot. Workspace administrators read and edit every Design, with foreign access recorded atomically in the audit log and keyed journal, and edits using the existing locks and versions.
 
 - **A Page opens with its content inside Artifacts.** Its application or panels show in the library detail with the same views Pages uses, read by the page's immutable ID; the detail no longer sends you to Pages.

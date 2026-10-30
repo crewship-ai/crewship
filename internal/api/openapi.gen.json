@@ -7356,6 +7356,15 @@
           "created_by_test": {
             "type": "boolean"
           },
+          "expected_human": {
+            "type": "string"
+          },
+          "initial_state": {
+            "description": "Optional recovery copy, at most 4 MiB decoded Yjs. Requires source_page_id and expected_human together, fresh human source Edit and Page create authority.",
+            "format": "byte",
+            "maxLength": 5592408,
+            "type": "string"
+          },
           "name": {
             "maxLength": 200,
             "minLength": 1,
@@ -7363,6 +7372,10 @@
           },
           "slug": {
             "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+            "type": "string"
+          },
+          "source_page_id": {
+            "maxLength": 128,
             "type": "string"
           }
         },
