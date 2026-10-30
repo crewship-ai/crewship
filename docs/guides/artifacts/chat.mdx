@@ -14,8 +14,8 @@ leave comments for the agent and share a version, without leaving the chat. For
 documents, a **Craft lock bar** in the chat tells you who is editing right now.
 
 The chat shows the artifacts that this conversation produced. With the
-Artifacts library turned on, the full catalogue of your artifacts lives in
-[Artifacts](/guides/artifacts/library).
+Artifacts library turned on, the full catalogue of your artifacts lives under
+**Artifacts** in the left navigation.
 
 <Note>
 Everything on this page is off by default. Each surface needs these switches:
@@ -26,7 +26,7 @@ Everything on this page is off by default. Each surface needs these switches:
 | Progress cards, artifact cards and the side viewer | Build-time `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true`, plus the workspace flag `artifact_projects`. The default production build sets `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=false`. |
 | **Dashboard** on a card | Build-time `NEXT_PUBLIC_ARTIFACT_DASHBOARDS=true`. Without it a dashboard shows as **Project**. |
 | **Slides** on a card | Build-time `NEXT_PUBLIC_ARTIFACT_SLIDES=true`, plus the workspace flag `artifact_slides` (`crewship feature-flag enable artifact_slides`) or the instance switch `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true`. With only the build-time variable, a slide deck shows as **Artifact** with **Can't show this version here**. Without the build-time variable, it shows as **Project**. |
-| **Artifacts** in the left navigation and the [Artifacts library](/guides/artifacts/library) | Build-time `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` (off by default). Without it, **Artifacts** in the left navigation opens the older Pages list. |
+| **Artifacts** in the left navigation and the Artifacts library | Build-time `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` (off by default). Without it, **Artifacts** in the left navigation opens the older Pages list. |
 | **+** › **New artifact** in the composer | Build-time `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true` and the document engine on the instance: `CREWSHIP_DOCUMENTS_ENABLED=true` with its sockets (off by default; see [Private document engine](/configuration/environment#private-document-engine)). It offers **Word** only. |
 | **Saved documents** in a conversation | The document engine on the instance (`CREWSHIP_DOCUMENTS_ENABLED=true`, off by default). |
 | An agent creating or publishing an artifact | The workspace artifact policy must be on and list the agent's crew (workspace owner or admin); see [Turn on the artifact policy](#turn-on-the-artifact-policy). |
@@ -68,9 +68,7 @@ permission is not a setting and does not carry over to later messages.
 
 Click **Create artifact project** again before sending to withdraw the
 permission. The agent creates a private Project owned by you. Nobody else sees
-it until you share a version; see [Sharing and access](/guides/artifacts/sharing-and-access).
-For the Project itself (screens, comments, the agent's tools) see
-[Projects](/guides/artifacts/project).
+it until you share a version.
 
 If the agent's crew is not on the workspace artifact policy, the agent cannot
 create the Project, even when you allowed it.
@@ -97,8 +95,7 @@ When the instance runs the document engine (`CREWSHIP_DOCUMENTS_ENABLED`), the c
 button (**New artifact**). It lists **Word** with starter prompts such as "A
 partner brief from this chat". Click a starter prompt: it goes into the
 composer in front of any text you already typed, and **Create document** turns
-on for that message. Edit the text and send it. See
-[Word and Sheet](/guides/artifacts/word-and-sheet).
+on for that message. Edit the text and send it.
 
 ## Follow the agent's work
 
@@ -212,9 +209,5 @@ here** and **Open full editor** instead.
 
 ## Related
 
-- [Artifacts library](/guides/artifacts/library): all your artifacts in one place (`NEXT_PUBLIC_ARTIFACTS_LIBRARY=true`).
-- [Projects](/guides/artifacts/project): screens, comments and what the agent may do.
-- [Sharing and access](/guides/artifacts/sharing-and-access): shared versions and who sees what.
-- [Word and Sheet](/guides/artifacts/word-and-sheet): Craft documents and the edit lease.
 - [Chat & Sessions](/guides/chat-sessions): the chat itself, including the right drawer for output files.
 - [`crewship workspace artifact-policy set`](/cli/workspace#crewship-workspace-artifact-policy-set): which crews may create artifacts.
