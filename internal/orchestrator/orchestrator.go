@@ -55,6 +55,11 @@ type AgentRunRequest struct {
 	// It is not populated from model output and never grants terminal authority.
 	CapturedExit func(completedAt string)
 
+	// ObservedTerminalAfterStop reports that a cancelled observer raced a
+	// non-signal terminal exit. Callers may settle the actual outcome under a
+	// fresh bounded context; this does not authorize or report cancellation.
+	ObservedTerminalAfterStop func()
+
 	// RuntimeUse pins the concrete container acquired by the caller. RunAgent
 	// retains its own handle, so callers may release theirs after RunAgent
 	// returns even when a detached process still needs the container.

@@ -2,6 +2,7 @@ package chatbridge
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -69,7 +70,10 @@ func TestAgentStop_ChatOutcomePreservesStopAndLateSuccess(t *testing.T) {
 				t.Fatal(err)
 			}
 			select {
-			case <-done:
+			case err := <-done:
+				if got := errors.Is(err, ws.ErrRunCancelled); got != (tc.want == "CANCELLED") {
+					t.Fatalf("cancellation confirmation=%v, outcome=%s err=%v", got, tc.want, err)
+				}
 			case <-ctx.Done():
 				t.Fatal("chat never settled")
 			}

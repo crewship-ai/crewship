@@ -45,9 +45,9 @@ type parityRequest struct {
 	Body   []byte
 }
 
-// parityStub is one fake server. Tests set the hooks they need before running
+// chatParityStub is one fake server. Tests set the hooks they need before running
 // the binary; every request and every WS frame is recorded.
-type parityStub struct {
+type chatParityStub struct {
 	t   *testing.T
 	srv *httptest.Server
 
@@ -65,9 +65,9 @@ type parityStub struct {
 	routes  map[string]http.HandlerFunc // "METHOD /path" exact matches, checked first
 }
 
-func newParityStub(t *testing.T) *parityStub {
+func newChatParityStub(t *testing.T) *chatParityStub {
 	t.Helper()
-	s := &parityStub{t: t, gotFrame: make(chan cli.WSMessage, 64), routes: map[string]http.HandlerFunc{}}
+	s := &chatParityStub{t: t, gotFrame: make(chan cli.WSMessage, 64), routes: map[string]http.HandlerFunc{}}
 	wsHandler := websocket.Handler(func(conn *websocket.Conn) {
 		defer conn.Close()
 		for {
@@ -114,9 +114,11 @@ func newParityStub(t *testing.T) *parityStub {
 	return s
 }
 
-func (s *parityStub) serve(w http.ResponseWriter, r *http.Request) {
+func (s *chatParityStub) serve(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Path
 	switch {
+	case p == "/api/v1/auth/cli-token/validate":
+		_, _ = w.Write([]byte(`{"user_id":"caller"}`))
 	case p == "/api/v1/ws-token":
 		_, _ = w.Write([]byte(`{"token":"ws-tok"}`))
 	case p == "/api/v1/agents":
@@ -166,7 +168,7 @@ func (s *parityStub) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *parityStub) Frames(typ string) []cli.WSMessage {
+func (s *chatParityStub) Frames(typ string) []cli.WSMessage {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []cli.WSMessage
@@ -178,7 +180,7 @@ func (s *parityStub) Frames(typ string) []cli.WSMessage {
 	return out
 }
 
-func (s *parityStub) Requests(method, prefix string) []parityRequest {
+func (s *chatParityStub) Requests(method, prefix string) []parityRequest {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []parityRequest
@@ -215,7 +217,7 @@ func decodeSent(t *testing.T, f cli.WSMessage) sentMessage {
 	return m
 }
 
-func (s *parityStub) command(ctx context.Context, args ...string) *exec.Cmd {
+func (s *chatParityStub) command(ctx context.Context, args ...string) *exec.Cmd {
 	s.t.Helper()
 	cfg := filepath.Join(s.t.TempDir(), "cli.yaml")
 	if err := os.WriteFile(cfg, []byte("server: "+s.srv.URL+"\nworkspace: ws_parity\ntoken: fake-token\nformat: table\n"), 0o600); err != nil {
@@ -232,7 +234,7 @@ func (s *parityStub) command(ctx context.Context, args ...string) *exec.Cmd {
 }
 
 // run executes the binary and returns stdout, stderr and the exit error.
-func (s *parityStub) run(args ...string) (string, string, error) {
+func (s *chatParityStub) run(args ...string) (string, string, error) {
 	s.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -246,7 +248,7 @@ func (s *parityStub) run(args ...string) (string, string, error) {
 // ─── chat <id>: the ts bug ──────────────────────────────────────────────
 
 func TestAcceptance_ChatTranscript_ReadsServerTimestamp(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	// The shape conversation.Message marshals to: `ts`, RFC 3339 with nanos.
 	s.messagesBody = `{"messages":[
 	 {"id":"m1","session_id":"chat_parity","role":"user","content":"old question","ts":"2020-01-01T09:00:00.123456789Z"},
@@ -272,11 +274,12 @@ func TestAcceptance_ChatTranscript_ReadsServerTimestamp(t *testing.T) {
 // ─── chat stop ──────────────────────────────────────────────────────────
 
 func TestAcceptance_ChatStop_WaitsForTheRunToEnd(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.onFrame = func(conn *websocket.Conn, f cli.WSMessage) bool {
 		if f.Type == "cancel_message" {
 			time.Sleep(100 * time.Millisecond)
 			sendEvents(conn, wsproto.ChatEvent{Type: "done"})
+			sendCancelResult(conn, f, true)
 		}
 		return true
 	}
@@ -299,18 +302,18 @@ func TestAcceptance_ChatStop_WaitsForTheRunToEnd(t *testing.T) {
 }
 
 func TestAcceptance_ChatStop_WaitTimesOutWithoutARun(t *testing.T) {
-	s := newParityStub(t) // never answers the cancel: no run of ours is live
+	s := newChatParityStub(t) // never answers the cancel: no run of ours is live
 	_, errOut, err := s.run("chat", "stop", parityChatID, "--wait", "--timeout", "500ms")
 	if err == nil {
 		t.Fatal("an unconfirmed stop must exit non-zero")
 	}
-	if !strings.Contains(errOut, "no run end was confirmed") {
+	if !strings.Contains(errOut, "no cancellation was confirmed") {
 		t.Errorf("stderr does not say why:\n%s", errOut)
 	}
 }
 
 func TestAcceptance_ChatStop_WithoutWaitOnlySends(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	_, errOut, err := s.run("chat", "stop", parityChatID)
 	if err != nil {
 		t.Fatalf("chat stop: %v\n%s", err, errOut)
@@ -331,7 +334,7 @@ func TestAcceptance_ChatStop_WithoutWaitOnlySends(t *testing.T) {
 // ─── run: SIGTERM stops like Ctrl-C, and says so only once confirmed ────
 
 func TestAcceptance_Run_SIGTERMStopsTheRunAndWaitsForConfirmation(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.onFrame = func(conn *websocket.Conn, f cli.WSMessage) bool {
 		switch f.Type {
 		case "send_message":
@@ -339,6 +342,7 @@ func TestAcceptance_Run_SIGTERMStopsTheRunAndWaitsForConfirmation(t *testing.T) 
 		case "cancel_message":
 			time.Sleep(200 * time.Millisecond)
 			sendEvents(conn, wsproto.ChatEvent{Type: "done"})
+			sendCancelResult(conn, f, true)
 		}
 		return true
 	}
@@ -366,6 +370,11 @@ func TestAcceptance_Run_SIGTERMStopsTheRunAndWaitsForConfirmation(t *testing.T) 
 		t.Fatal(err)
 	}
 	waitFor("cancel_message")
+	frames := s.Frames("cancel_message")
+	var cancellation map[string]any
+	if len(frames) != 1 || json.Unmarshal(frames[0].Payload, &cancellation) != nil || cancellation["origin_only"] != true {
+		t.Fatalf("signal did not bind its originating socket: %+v", frames)
+	}
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("a confirmed stop exits 0: %v\nstderr:\n%s", err, stderr.String())
 	}
@@ -409,7 +418,7 @@ func writeTempFile(t *testing.T, name, body string) string {
 }
 
 func TestAcceptance_Run_AttachUploadsAndNamesThePaths(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.onFrame = replyOnce
 	a := writeTempFile(t, "notes.txt", "hello")
 	b := writeTempFile(t, "diagram.png", "png")
@@ -437,7 +446,7 @@ func TestAcceptance_Run_AttachUploadsAndNamesThePaths(t *testing.T) {
 }
 
 func TestAcceptance_Run_AttachOnlyNeedsNoPrompt(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.onFrame = replyOnce
 	a := writeTempFile(t, "photo.jpg", "jpg")
 	_, errOut, err := s.run("run", "viktor", "--chat", parityChatID, "--attach", a)
@@ -451,7 +460,7 @@ func TestAcceptance_Run_AttachOnlyNeedsNoPrompt(t *testing.T) {
 }
 
 func TestAcceptance_Run_AttachMissingFileFailsBeforeAnything(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	_, errOut, err := s.run("run", "viktor", "--attach", filepath.Join(t.TempDir(), "nope.txt"), "hi")
 	if err == nil || !strings.Contains(errOut, "nope.txt") {
 		t.Fatalf("want a refusal naming the file, got %v\n%s", err, errOut)
@@ -462,7 +471,7 @@ func TestAcceptance_Run_AttachMissingFileFailsBeforeAnything(t *testing.T) {
 }
 
 func TestAcceptance_Ask_AttachUploadsIntoTheNewChat(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.onFrame = replyOnce
 	a := writeTempFile(t, "log.txt", "x")
 	_, errOut, err := s.run("ask", "--agent", "viktor", "--attach", a, "what failed?")
@@ -478,7 +487,7 @@ func TestAcceptance_Ask_AttachUploadsIntoTheNewChat(t *testing.T) {
 }
 
 func TestAcceptance_Run_PageSendsOnlyTheSlug(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.onFrame = replyOnce
 	_, errOut, err := s.run("run", "viktor", "--chat", parityChatID, "--page", "fleet", "summarise this page")
 	if err != nil {
@@ -495,7 +504,7 @@ func TestAcceptance_Run_PageSendsOnlyTheSlug(t *testing.T) {
 }
 
 func TestAcceptance_Run_CreateDocumentSendsTheComposerIntent(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.onFrame = replyOnce
 	_, errOut, err := s.run("run", "viktor", "--chat", parityChatID, "--create-document", "write up the incident")
 	if err != nil {
@@ -514,7 +523,7 @@ func TestAcceptance_Run_CreateDocumentSendsTheComposerIntent(t *testing.T) {
 }
 
 func TestAcceptance_Run_ExtrasRefuseInteractive(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	_, errOut, err := s.run("run", "viktor", "--interactive", "--page", "fleet")
 	if err == nil || !strings.Contains(errOut, "--interactive") {
 		t.Fatalf("want refusal, got %v\n%s", err, errOut)
@@ -537,7 +546,7 @@ const parityAskForms = `[{
 }]`
 
 func TestAcceptance_Run_AskFormPassesTheServersCheck(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.askForms = parityAskForms
 	var checkErr error
 	var checked bool
@@ -583,7 +592,7 @@ func TestAcceptance_Run_AskFormPassesTheServersCheck(t *testing.T) {
 }
 
 func TestAcceptance_Run_AskFormRefusalExitsNonZero(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.askForms = parityAskForms
 	s.onFrame = func(conn *websocket.Conn, f cli.WSMessage) bool {
 		if f.Type == "send_message" {
@@ -604,7 +613,7 @@ func TestAcceptance_Run_AskFormRefusalExitsNonZero(t *testing.T) {
 }
 
 func TestAcceptance_Run_AskFormValidatesLocally(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.askForms = parityAskForms
 	_, errOut, err := s.run("run", "viktor", "--chat", parityChatID, "--ask-form", "receipt", "--var", "category=Telco")
 	if err == nil || !strings.Contains(errOut, "supplier") {
@@ -618,7 +627,7 @@ func TestAcceptance_Run_AskFormValidatesLocally(t *testing.T) {
 // ─── chat stream: the events it used to drop ───────────────────────────
 
 func TestAcceptance_ChatStream_RendersBroadcastsAndSummaries(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.streamBody = strings.Join([]string{
 		`{"type":"stream.open","chat_id":"chat_parity","active":true,"from_seq":0}`,
 		`{"type":"run_begin","seq":1}`,
@@ -648,5 +657,53 @@ func TestAcceptance_ChatStream_RendersBroadcastsAndSummaries(t *testing.T) {
 	}
 	if strings.TrimSpace(out) != "delegated" {
 		t.Errorf("stdout must stay the reply only, got %q", out)
+	}
+}
+
+func sendCancelResult(conn *websocket.Conn, request cli.WSMessage, cancelled bool) {
+	var payload map[string]any
+	_ = json.Unmarshal(request.Payload, &payload)
+	_ = websocket.JSON.Send(conn, map[string]any{"type": "cancel_result", "payload": map[string]any{"session_id": payload["session_id"], "request_id": payload["request_id"], "cancelled": cancelled}})
+}
+
+func TestAcceptance_ChatStopDoesNotConfirmUnrelatedDone(t *testing.T) {
+	s := newChatParityStub(t)
+	s.onFrame = func(conn *websocket.Conn, f cli.WSMessage) bool {
+		if f.Type == "cancel_message" {
+			sendEvents(conn, wsproto.ChatEvent{Type: "done"})
+		}
+		return true
+	}
+	out, _, err := s.run("chat", "stop", parityChatID, "--wait", "--timeout", "100ms", "--format", "json")
+	if err == nil || strings.Contains(out, `"stopped"`) {
+		t.Fatalf("unrelated done confirmed stop: %s %v", out, err)
+	}
+}
+
+func TestAcceptance_ChatRetryUsesOwnTurn(t *testing.T) {
+	s := newChatParityStub(t)
+	s.messagesBody = `{"messages":[{"role":"user","author_user_id":"caller","content":"my request","agent_id":"ag_parity"},{"role":"user","author_user_id":"someone-else","content":"their request","agent_id":"ag_parity"},{"role":"user","content":"unknown author request","agent_id":"ag_parity"}]}`
+	s.onFrame = func(conn *websocket.Conn, f cli.WSMessage) bool {
+		if f.Type == "send_message" {
+			sendEvents(conn, wsproto.ChatEvent{Type: "text", Content: "answer"}, wsproto.ChatEvent{Type: "done"})
+		}
+		return true
+	}
+	_, errOut, err := s.run("chat", "retry", parityChatID, "--no-stream")
+	if err != nil {
+		t.Fatalf("retry: %v %s", err, errOut)
+	}
+	frames := s.Frames("send_message")
+	if len(frames) != 1 || !strings.Contains(string(frames[0].Payload), "my request") || strings.Contains(string(frames[0].Payload), "their request") {
+		t.Fatalf("wrong retry: %+v", frames)
+	}
+}
+
+func TestAcceptance_ChatRetryRefusesUnattributedTurns(t *testing.T) {
+	s := newChatParityStub(t)
+	s.messagesBody = `{"messages":[{"role":"user","content":"unknown author request","agent_id":"ag_parity"}]}`
+	_, errOut, err := s.run("chat", "retry", parityChatID, "--no-stream")
+	if err == nil || !strings.Contains(errOut, "no message of yours") || len(s.Frames("send_message")) != 0 {
+		t.Fatalf("unattributed turn replayed: %v %s", err, errOut)
 	}
 }

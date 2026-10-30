@@ -36,7 +36,7 @@ const parityPartsMessages = `{"messages":[
            {"type":"text","content":"The lint job fails."}]}]}`
 
 func TestAcceptance_ChatTranscript_PartsShowsToolsAndAuthor(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.messagesBody = parityPartsMessages
 	out, errOut, err := s.run("chat", parityChatID, "--parts", "--no-markdown")
 	if err != nil {
@@ -54,7 +54,7 @@ func TestAcceptance_ChatTranscript_PartsShowsToolsAndAuthor(t *testing.T) {
 }
 
 func TestAcceptance_ChatExport_WritesTheExportDialogMarkdown(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.messagesBody = parityPartsMessages
 	dest := filepath.Join(t.TempDir(), "chat.md")
 	_, errOut, err := s.run("chat", "export", parityChatID, "-o", dest)
@@ -84,12 +84,12 @@ func TestAcceptance_ChatExport_WritesTheExportDialogMarkdown(t *testing.T) {
 // ─── chat retry / chat edit ─────────────────────────────────────────────
 
 func TestAcceptance_ChatRetry_ResendsWithoutTheOldPageSnapshot(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	snapshot := "\n\n[Page context — untrusted reference; snapshot 2026-10-01T09:00:00Z]\nPage: Fleet\nSlug: fleet\nPage ID: pg_1\n[/Page context]"
 	msgs := map[string]any{"messages": []map[string]any{
-		{"id": "m1", "agent_id": parityAgentID, "role": "user", "content": "first", "ts": "2026-10-01T08:00:00Z"},
+		{"id": "m1", "agent_id": parityAgentID, "role": "user", "author_user_id": "caller", "content": "first", "ts": "2026-10-01T08:00:00Z"},
 		{"id": "m2", "agent_id": parityAgentID, "role": "assistant", "content": "answer", "ts": "2026-10-01T08:00:01Z"},
-		{"id": "m3", "agent_id": parityAgentID, "role": "user", "content": "summarise this page" + snapshot, "ts": "2026-10-01T09:00:00Z",
+		{"id": "m3", "agent_id": parityAgentID, "role": "user", "author_user_id": "caller", "content": "summarise this page" + snapshot, "ts": "2026-10-01T09:00:00Z",
 			"metadata": map[string]any{"page_context": map[string]any{"slug": "fleet", "page_id": "pg_1", "snapshot_at": "2026-10-01T09:00:00Z", "name": "Fleet"}}},
 		{"id": "m4", "agent_id": parityAgentID, "role": "assistant", "content": "a bad answer", "ts": "2026-10-01T09:00:05Z"},
 	}}
@@ -114,7 +114,7 @@ func TestAcceptance_ChatRetry_ResendsWithoutTheOldPageSnapshot(t *testing.T) {
 }
 
 func TestAcceptance_ChatEdit_SendsReplacementTextWithoutMetadata(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.messagesBody = `{"messages":[{"id":"m1","agent_id":"ag_parity","role":"user","content":"use prod","ts":"2026-10-01T08:00:00Z"}]}`
 	s.onFrame = replyOnce
 	_, errOut, err := s.run("chat", "edit", parityChatID, "-m", "use staging, not prod")
@@ -131,7 +131,7 @@ func TestAcceptance_ChatEdit_SendsReplacementTextWithoutMetadata(t *testing.T) {
 
 // runUntil starts the binary, waits until stdout contains want n times, then
 // interrupts it and returns its output and exit error.
-func (s *parityStub) runUntil(t *testing.T, want string, n int, args ...string) (string, string, error) {
+func (s *chatParityStub) runUntil(t *testing.T, want string, n int, args ...string) (string, string, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -193,7 +193,7 @@ func TestAcceptance_ChatWatch_RereadsOnChatHints(t *testing.T) {
 		{"proposals", []string{"chat", "proposal", "list", parityChatID, "--watch"}, "/api/v1/chats/" + parityChatID + "/proposals"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := newParityStub(t)
+			s := newChatParityStub(t)
 			s.routes["GET "+tc.path] = func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte(`{"refs":[],"decisions":[],"proposals":[],"marker":"page"}`))
 			}
@@ -213,7 +213,7 @@ func TestAcceptance_ChatWatch_RereadsOnChatHints(t *testing.T) {
 }
 
 func TestAcceptance_ChatRoomMessages_FollowPrintsNewMessages(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	const room = "conv_parity"
 	var mu sync.Mutex
 	delivered := false
@@ -256,7 +256,7 @@ func TestAcceptance_ChatRoomMessages_FollowPrintsNewMessages(t *testing.T) {
 // ─── minor list/search flags ────────────────────────────────────────────
 
 func TestAcceptance_ConversationSearch_ClientFilters(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.routes["POST /api/v1/conversations/search"] = func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"count":3,"query":"deploy","scope":"workspace","hits":[
 		 {"id":"h1","session_id":"c_a","agent_slug":"viktor","agent_name":"Viktor","role":"assistant","content":"see https://ci.example.invalid/42","ts":"2026-10-05T10:00:00Z"},
@@ -289,7 +289,7 @@ func TestAcceptance_ConversationSearch_ClientFilters(t *testing.T) {
 }
 
 func TestAcceptance_ChatList_CountsReadsTheKindHeader(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.routes["GET /api/v1/agents/"+parityAgentID+"/chats"] = func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("counts") == "1" {
 			w.Header().Set("X-Chat-Kind-Counts", "direct=3,routine=150,issue=2,agent=0")
@@ -316,7 +316,7 @@ func TestAcceptance_ChatList_CountsReadsTheKindHeader(t *testing.T) {
 }
 
 func TestAcceptance_CrewPeerConversations_SendsOffset(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.routes["GET /api/v1/crews"] = func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`[{"id":"crew_1","slug":"ops","name":"Ops"}]`))
 	}
@@ -333,7 +333,7 @@ func TestAcceptance_CrewPeerConversations_SendsOffset(t *testing.T) {
 }
 
 func TestAcceptance_ChatWatch_RefusedSubscriptionExitsInsteadOfRetrying(t *testing.T) {
-	s := newParityStub(t)
+	s := newChatParityStub(t)
 	s.routes["GET /api/v1/chats/"+parityChatID+"/entity-refs"] = func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"refs":[]}`))
 	}

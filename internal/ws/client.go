@@ -45,6 +45,7 @@ type Client struct {
 	sendClosed       bool
 	consecutiveDrops atomic.Uint32
 	disconnectFired  atomic.Bool
+	cancelWaiting    atomic.Bool // at most one completion waiter per socket
 	// writeWait overrides defaultWriteWait per connection; zero means use
 	// the default. Set at construction in the hub; only tests vary it.
 	writeWait time.Duration
@@ -458,21 +459,51 @@ func clampMaxTurns(n int) int {
 }
 
 func (c *Client) handleCancelMessage(msg ClientMessage) {
-	var payload sendMessagePayload
+	var payload struct {
+		ChatID     string `json:"session_id"`
+		RequestID  string `json:"request_id"`
+		OriginOnly bool   `json:"origin_only"`
+	}
 	raw := unwrapDoubleEncoded(msg.Payload)
-	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChatID == "" {
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChatID == "" || len(payload.RequestID) > 128 {
 		return
 	}
 
 	cancelKey := c.userID + ":" + payload.ChatID
 	c.hub.cancelMu.Lock()
 	cancel, ok := c.hub.cancelFns[cancelKey]
+	done := c.hub.cancelDone[cancelKey]
+	if payload.OriginOnly && (done == nil || done.origin != c) {
+		ok = false
+	}
 	c.hub.cancelMu.Unlock()
 
 	if ok {
 		c.hub.logger.Info("cancelling run", "session_id", payload.ChatID, "user_id", c.userID)
 		cancel()
 	}
+	// Legacy clients do not request a confirmation. A confirmation is private
+	// to its requesting socket and cannot be confused with another user's done.
+	if payload.RequestID == "" {
+		return
+	}
+	reply := func(cancelled bool) {
+		data, _ := json.Marshal(ServerMessage{Type: "cancel_result", Payload: map[string]any{"session_id": payload.ChatID, "request_id": payload.RequestID, "cancelled": cancelled}})
+		c.safeSend(data)
+	}
+	if !ok || done == nil || !c.cancelWaiting.CompareAndSwap(false, true) {
+		reply(false)
+		return
+	}
+	go func() {
+		select {
+		case <-done.done:
+			c.cancelWaiting.Store(false)
+			reply(done.cancelled)
+		case <-c.ctx.Done():
+			c.cancelWaiting.Store(false)
+		}
+	}()
 }
 
 type resumePayload struct {
@@ -601,8 +632,9 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		// network blip) must not cancel an in-flight generation — the run has to
 		// finish and persist server-side so the reply is never lost. Explicit
 		// Stop still cancels this run via cancelFns (handleCancelMessage).
-		runCtx, runCancel := context.WithCancel(c.hub.baseRunContext())
-		defer runCancel()
+		runCtx, runCancelCause := context.WithCancelCause(c.hub.baseRunContext())
+		runCancel := func() { runCancelCause(ErrExplicitStopRequested) }
+		defer runCancelCause(nil)
 
 		// Reject if a run is already in progress for this user+session
 		cancelKey := c.userID + ":" + payload.ChatID
@@ -612,11 +644,15 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			sendRefusal(channel, "a message is already being processed")
 			return
 		}
+		runDone := &cancelCompletion{done: make(chan struct{}), origin: c}
 		c.hub.cancelFns[cancelKey] = runCancel
+		c.hub.cancelDone[cancelKey] = runDone
 		c.hub.cancelMu.Unlock()
 		defer func() {
 			c.hub.cancelMu.Lock()
 			delete(c.hub.cancelFns, cancelKey)
+			delete(c.hub.cancelDone, cancelKey)
+			close(runDone.done)
 			c.hub.cancelMu.Unlock()
 		}()
 
@@ -700,6 +736,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 				Metadata:           payload.Metadata,
 			},
 		)
+		runDone.cancelled = errors.Is(err, ErrRunCancelled)
 		if err != nil {
 			var submissionError *askforms.SubmissionError
 			if errors.As(err, &submissionError) {
@@ -727,7 +764,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 				return
 			}
 			// Don't emit error if context was cancelled (user requested stop)
-			if runCtx.Err() == context.Canceled {
+			if runCtx.Err() == context.Canceled || errors.Is(err, ErrRunCancelled) {
 				streamFn(ChatEvent{Type: "done", Content: ""})
 				return
 			}

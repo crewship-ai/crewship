@@ -11,13 +11,9 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"io"
-	"strings"
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // recordingAudit is a fake AuditEmitter that captures every RecordAudit
@@ -120,23 +116,10 @@ func TestRunAgent_RecordsAuditOnCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mc := &mockContainer{
-		// Cancel synchronously inside the first Exec so ctx.Err() is
-		// already non-nil by the time RunAgent reaches its cancellation
-		// check — see TestRunAgentCancelledContext for the same pattern
-		// and why it's race-free across schedulers.
-		execFn: func(_ provider.ExecConfig) (*provider.ExecResult, error) {
-			cancel()
-			return &provider.ExecResult{
-				ExecID: "noop",
-				Reader: io.NopCloser(strings.NewReader("")),
-			}, nil
-		},
-		inspectResult: struct {
-			running  bool
-			exitCode int
-		}{false, 0},
-	}
+	// The caller cancels only after the actual agent exec is created.
+	// A stop is then positively acknowledged for that exact exec/session;
+	// empty runtime output or an exit0 cannot stand in for cancellation.
+	mc := newConfirmedCancellationFixture(cancel)
 
 	rec := &recordingAudit{}
 	o := New(mc, newMemState(), covQuietLogger())
@@ -145,6 +128,10 @@ func TestRunAgent_RecordsAuditOnCancellation(t *testing.T) {
 	req := covRunReq()
 	if err := o.RunAgent(ctx, req, nil); err == nil {
 		t.Fatal("expected error from cancelled context")
+	}
+
+	if !mc.stopObserved.Load() {
+		t.Fatal("cancellation was not confirmed at the original host execution")
 	}
 
 	calls := rec.snapshot()

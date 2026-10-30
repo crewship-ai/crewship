@@ -31,6 +31,7 @@ type collectResult struct {
 	Text      string
 	StreamErr string
 	GotDone   bool
+	Cancelled bool
 	ReadErr   error
 	TimedOut  bool
 	// Busy is set when the server bounced the send off the per-agent run
@@ -55,7 +56,11 @@ type collectResult struct {
 // goroutine on a blocked send forever (the caller's socket Close unblocks
 // ReadMessage, not a channel send). The goroutine then exits after at
 // most one more ReadMessage.
-func collectAgentStream(src chatEventSource, timeout time.Duration) collectResult {
+func collectAgentStream(src chatEventSource, timeout time.Duration, stops ...*runStop) collectResult {
+	var cancellation *runStop
+	if len(stops) > 0 {
+		cancellation = stops[0]
+	}
 	type wsRead struct {
 		msg *cli.WSMessage
 		err error
@@ -99,6 +104,16 @@ func collectAgentStream(src chatEventSource, timeout time.Duration) collectResul
 				res.Text = string(fullText)
 				return res
 			}
+			if cancellation.wasRequested() {
+				if matched, cancelled := cancellationResult(r.msg, cancellation.chatID, cancellation.requestID); matched {
+					res.Cancelled = cancelled
+					if !cancelled {
+						res.StreamErr = "stop was not confirmed: server found no cancelled run"
+					}
+					res.Text = string(fullText)
+					return res
+				}
+			}
 			event, err := cli.ParseChatEvent(r.msg)
 			if err != nil || event == nil {
 				continue
@@ -123,6 +138,9 @@ func collectAgentStream(src chatEventSource, timeout time.Duration) collectResul
 			case "done":
 				if wait.deferredDone() {
 					continue // the deferral's done; the replayed run follows
+				}
+				if cancellation.wasRequested() {
+					continue
 				}
 				res.GotDone = true
 				res.Text = string(fullText)

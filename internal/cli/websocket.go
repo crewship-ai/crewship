@@ -137,8 +137,29 @@ func (c *WSClient) SendMessageWithMetadata(channel, chatID, content string, maxT
 
 // CancelMessage sends a cancel request for the active run in the given chat.
 func (c *WSClient) CancelMessage(chatID string) error {
-	payload := map[string]string{
+	return c.CancelMessageWithID(chatID, "")
+}
+
+// CancelMessageWithID requests a private completion confirmation for this cancellation.
+func (c *WSClient) CancelMessageWithID(chatID, requestID string) error {
+	return c.cancelMessage(chatID, requestID, false)
+}
+
+// CancelOwnMessageWithID refuses to cancel a replacement run started by a
+// different socket after this command's original invocation ended.
+func (c *WSClient) CancelOwnMessageWithID(chatID, requestID string) error {
+	return c.cancelMessage(chatID, requestID, true)
+}
+
+func (c *WSClient) cancelMessage(chatID, requestID string, originOnly bool) error {
+	payload := map[string]any{
 		"session_id": chatID,
+	}
+	if requestID != "" {
+		payload["request_id"] = requestID
+	}
+	if originOnly {
+		payload["origin_only"] = true
 	}
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {

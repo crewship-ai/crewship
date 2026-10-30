@@ -31,17 +31,18 @@ var ErrAgentDetachedBusy = errors.New("orchestrator: agent busy: a previous run'
 //     only once the runtime is CONFIRMED gone, never before (#2626 review:
 //     a running agent must not be marked available).
 type detachedHold struct {
-	runID       string
-	containerID string
-	agentSlug   string
-	execID      string
-	req         AgentRunRequest
-	release     func()
-	finalize    func()
-	once        sync.Once
-	alertAfter  time.Duration
-	done        chan struct{}
-	startedAt   time.Time
+	runID               string
+	containerID         string
+	agentSlug           string
+	execID              string
+	requireExecTerminal bool
+	req                 AgentRunRequest
+	release             func()
+	finalize            func()
+	once                sync.Once
+	alertAfter          time.Duration
+	done                chan struct{}
+	startedAt           time.Time
 }
 
 // detachedWatchCap is an alert deadline, never permission to reopen admission.
@@ -121,6 +122,16 @@ func (o *Orchestrator) watchDetachedHold(h *detachedHold, poll time.Duration) {
 			}
 			capTimer.Reset(detachedWatchCap)
 		case <-t.C:
+			if h.requireExecTerminal {
+				ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
+				stopped, _, err := o.legacyRunStoppedOnce(ctx, RunLocation{ContainerID: h.containerID, AgentSlug: h.agentSlug, RunID: h.runID, Managed: h.req.managedLaunch != nil}, h.execID)
+				cancel()
+				if err == nil && stopped {
+					o.closeDetachedHold(h, true)
+					return
+				}
+				continue
+			}
 			if h.req.strictContentPrivacy {
 				// Private runs execute directly. An absent tmux session is
 				// not evidence that this original native exec has stopped.

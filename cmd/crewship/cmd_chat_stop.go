@@ -1,23 +1,11 @@
 package main
 
-// `crewship chat stop` and the stop half of `crewship run`'s signal handling.
-//
-// The web chat's Stop button sends one `cancel_message` frame over the socket
-// and then WAITS: the request is not the stop, the run's terminal `done` is
-// (hooks/use-chat.ts stopGeneration — "A Stop request is not a server terminal
-// acknowledgement"). Until that frame arrives the run is still spending, still
-// writing files, still able to call tools. The CLI used to print `[cancelled]`
-// the instant Ctrl-C was pressed, which claimed an outcome nobody had
-// confirmed, and SIGTERM — what a supervisor, `timeout(1)` or a CI runner
-// sends — skipped the cancel entirely and left the run going server-side.
-//
-// The server keys the cancel on (user, chat): internal/ws/client.go
-// handleCancelMessage looks up cancelFns[userID+":"+chatID]. So this stops a
-// run YOU started on that chat, from any socket — a second terminal, the
-// browser's run seen from a shell — and is a silent no-op for a run another
-// member started. --wait is how a caller tells those apart.
+// `crewship chat stop` and signal handling require a private cancel_result
+// correlated to their request ID. A shared chat's ordinary done does not prove
+// whose run finished or whether cancellation caused its end.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -26,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -39,13 +28,14 @@ var chatStopCmd = &cobra.Command{
 	Use:   "stop <chat-id>",
 	Short: "Stop the agent run you started in a chat session",
 	Long: `Ask the server to cancel the run in flight on a chat session — the CLI
-equivalent of the chat's Stop button.
+equivalent of the chat's Stop button. This targets ordinary human chat sends;
+native Craft and Mooring tasks use their separate task cancellation controls.
 
 The cancel is scoped to you: it stops a run you started on this chat, from any
 terminal or browser tab, and is ignored for a run another member started.
 
 Without --wait the request is sent and the command returns. With --wait it
-stays connected until the run's terminal event confirms the stop, and exits
+stays connected until the server confirms cancellation of your exact request, and exits
 non-zero if no confirmation arrives within --timeout (no run of yours was
 active, or it belongs to someone else).
 
@@ -84,14 +74,15 @@ Examples:
 				return fmt.Errorf("subscribe: %w", err)
 			}
 		}
-		if err := ws.CancelMessage(chatID); err != nil {
+		requestID := uuid.NewString()
+		if err := ws.CancelMessageWithID(chatID, requestID); err != nil {
 			return fmt.Errorf("send stop: %w", err)
 		}
 
 		status := "requested"
 		if wait {
 			fmt.Fprintf(os.Stderr, "%s[stopping…]%s waiting for the run to confirm\n", cli.Dim, cli.Reset)
-			if err := waitForRunEnd(ws, timeout); err != nil {
+			if err := waitForRunEnd(ws, chatID, requestID, timeout); err != nil {
 				return err
 			}
 			status = "stopped"
@@ -113,22 +104,26 @@ Examples:
 
 // errStopUnconfirmed is the --wait timeout. Its own value so a caller in this
 // package (and its tests) can tell "no confirmation" from a transport failure.
-var errStopUnconfirmed = errors.New("no run end was confirmed")
+var errStopUnconfirmed = errors.New("no cancellation was confirmed")
 
-// waitForRunEnd reads the session channel until the run's terminal `done`.
-// An `error` frame is not terminal on its own — the server always follows it
-// with `done` (ws/client.go emits the pair) — so it is skipped like any other
-// non-terminal event.
-func waitForRunEnd(ws *cli.WSClient, timeout time.Duration) error {
+// waitForRunEnd requires the private result of this request. Shared done and
+// unrelated request IDs cannot confirm cancellation.
+func waitForRunEnd(ws *cli.WSClient, chatID, requestID string, timeout time.Duration) error {
 	type read struct {
 		msg *cli.WSMessage
 		err error
 	}
 	reads := make(chan read, 1)
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
 		for {
 			msg, err := ws.ReadMessage()
-			reads <- read{msg, err}
+			select {
+			case reads <- read{msg, err}:
+			case <-done:
+				return
+			}
 			if err != nil {
 				return
 			}
@@ -153,11 +148,10 @@ func waitForRunEnd(ws *cli.WSClient, timeout time.Duration) error {
 				closeReason = reason
 				continue
 			}
-			ev, err := cli.ParseChatEvent(r.msg)
-			if err != nil || ev == nil {
-				continue
-			}
-			if ev.Type == "done" {
+			if matched, cancelled := cancellationResult(r.msg, chatID, requestID); matched {
+				if !cancelled {
+					return fmt.Errorf("%w: server did not confirm cancellation of an active run of yours", errStopUnconfirmed)
+				}
 				return nil
 			}
 		}
@@ -178,6 +172,8 @@ type runStop struct {
 	mu        sync.Mutex
 	requested bool
 	timedOut  bool
+	chatID    string
+	requestID string
 }
 
 // activeRunStop is read by streamEvents to word its terminal line. Package
@@ -211,7 +207,7 @@ func (s *runStop) didTimeOut() bool {
 // installRunStop wires SIGINT and SIGTERM to a confirmed stop of chatID. The
 // returned func detaches the handler; call it when the stream ends.
 func installRunStop(ws *cli.WSClient, chatID string) (*runStop, func()) {
-	stop := &runStop{}
+	stop := &runStop{chatID: chatID, requestID: uuid.NewString()}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	done := make(chan struct{})
@@ -227,7 +223,7 @@ func installRunStop(ws *cli.WSClient, chatID string) (*runStop, func()) {
 		stop.mu.Lock()
 		stop.requested = true
 		stop.mu.Unlock()
-		if err := ws.CancelMessage(chatID); err != nil {
+		if err := ws.CancelOwnMessageWithID(chatID, stop.requestID); err != nil {
 			fmt.Fprintf(os.Stderr, "\n%s[stop failed]%s %v\n", cli.Red, cli.Reset, err)
 			_ = ws.Close()
 			return
@@ -255,4 +251,20 @@ func init() {
 	chatStopCmd.Flags().Bool("wait", false, "Stay connected until the run's terminal event confirms the stop")
 	chatStopCmd.Flags().Duration("timeout", chatStopDefaultWait, "With --wait: give up after this long without confirmation")
 	chatCmd.AddCommand(chatStopCmd)
+}
+
+// cancellationResult accepts only the private answer for this exact request.
+func cancellationResult(msg *cli.WSMessage, chatID, requestID string) (bool, bool) {
+	if msg.Type != "cancel_result" || requestID == "" {
+		return false, false
+	}
+	var result struct {
+		ChatID    string `json:"session_id" yaml:"session_id"`
+		RequestID string `json:"request_id" yaml:"request_id"`
+		Cancelled bool   `json:"cancelled" yaml:"cancelled"`
+	}
+	if json.Unmarshal(msg.Payload, &result) != nil || result.ChatID != chatID || result.RequestID != requestID {
+		return false, false
+	}
+	return true, result.Cancelled
 }

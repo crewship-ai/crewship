@@ -373,11 +373,11 @@ func runNoStream(serverURL, wsToken, agentID, chatID, prompt string, quiet bool,
 	// silent success. The collect loop is shared with routine iterate
 	// (collectAgentStream, #998); timeout 0 = block until the server closes
 	// the stream, the historical interactive behaviour.
-	res := collectAgentStream(ws, 0)
+	res := collectAgentStream(ws, 0, stop)
 	if stop.didTimeOut() {
 		return fmt.Errorf("stop was requested but the run did not confirm it within %s", runStopGrace)
 	}
-	if stop.wasRequested() && res.GotDone && res.StreamErr == "" {
+	if res.Cancelled {
 		// A confirmed stop: whatever text arrived is the answer, and an empty
 		// reply is not the "agent returned no text" failure below.
 		if res.Text != "" {
@@ -617,6 +617,23 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 			continue
 		}
 
+		if activeRunStop.wasRequested() {
+			if matched, cancelled := cancellationResult(msg, activeRunStop.chatID, activeRunStop.requestID); matched {
+				flush()
+				if !cancelled {
+					return joinErrs(fmt.Errorf("%w: server did not confirm cancellation", errStopUnconfirmed))
+				}
+				if save != nil && saveErr == nil {
+					saveErr = save.Commit()
+				}
+				if !quiet {
+					fmt.Fprintf(os.Stderr, "\n%s[cancelled]%s\n", cli.Yellow, cli.Reset)
+				}
+				maybeNotifyRunComplete(startedAt, "", "CANCELLED")
+				return saveErr
+			}
+		}
+
 		event, err := cli.ParseChatEvent(msg)
 		if err != nil || event == nil {
 			if msg.Type == "pong" || msg.Type == "ping" {
@@ -732,21 +749,15 @@ func streamEvents(ws *cli.WSClient, quiet bool, md *cli.MarkdownRenderer, save *
 				// finishes and ends that run with its own done (or error).
 				continue
 			}
+			if activeRunStop.wasRequested() {
+				continue
+			}
 			flush()
 			if save != nil && saveErr == nil {
 				if err := save.Commit(); err != nil {
 					saveErr = fmt.Errorf("save commit: %w", err)
 					fmt.Fprintf(os.Stderr, "%s[save]%s commit failed: %v\n", cli.Yellow, cli.Reset, err)
 				}
-			}
-			if activeRunStop.wasRequested() {
-				// The run's own terminal frame after a stop request: this is
-				// the confirmation, so only now is "cancelled" true.
-				if !quiet {
-					fmt.Fprintf(os.Stderr, "\n%s[cancelled]%s\n", cli.Yellow, cli.Reset)
-				}
-				maybeNotifyRunComplete(startedAt, "", "CANCELLED")
-				return saveErr
 			}
 			if !quiet {
 				fmt.Fprintf(os.Stderr, "\n%s[done]%s\n", cli.Green, cli.Reset)

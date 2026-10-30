@@ -234,6 +234,8 @@ crewship chat export c_abc123 -o incident.md
 
 ### `chat retry <chat-id>`
 
+Retry selects only a turn explicitly attributed to the authenticated caller. Legacy turns without an author are not retried; use a new message instead.
+
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--no-stream` | `false` | Wait for completion and print only the final text. |
@@ -271,15 +273,21 @@ crewship chat edit c_abc123 -m "use the staging database, not prod"
 
 | Flag | Default | Effect |
 | --- | --- | --- |
-| `--wait` | `false` | Stay connected until the run's terminal event confirms the stop. |
+| `--wait` | `false` | Stay connected until the server privately confirms cancellation of this request. |
 | `--timeout <duration>` | `30s` | With `--wait`: exit non-zero if no confirmation arrives within this long. |
+
+Targets an ordinary human chat send registered on this session. Native Craft
+and Mooring tasks have separate work lifecycles and cancellation controls;
+sharing a chat ID does not make those tasks part of `chat stop`.
 
 Sends `cancel_message` over the WebSocket, the frame the chat's Stop button
 sends. The server scopes a cancel to its sender: it stops a run **you** started
-on that chat — from this terminal, another one or a browser tab — and is ignored
-for a run another member started. Without `--wait` the command returns once the
-request is sent. With `--wait` it subscribes to the session first and returns
-when the run's `done` arrives; a timeout means no run of yours was active.
+on that chat — from this terminal, another one or a browser tab. With `--wait`,
+the CLI sends a unique request ID and requires the matching private server
+result after that exact run exits with cancellation. Another member's `done`,
+a naturally completed run or a missing run cannot confirm a stop. An older
+server without this confirmation protocol times out; it cannot report success.
+
 `--format json` prints `{"chat_id": …, "status": "requested" | "stopped"}`.
 
 ```bash

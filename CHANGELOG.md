@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **CLI stop confirms the caller’s cancelled run.** Waiting for a stop and signal handling require a private request-correlated completion; another member’s terminal event cannot report success. Chat retry selects the caller’s authored turn rather than another member’s latest message.
+
 - ⚠️ **Behaviour change: `crewship run` stops a run on SIGTERM and only says `[cancelled]` once the server confirms it.** SIGTERM — what `timeout`, CI runners and supervisors send — used to kill the CLI and leave the run going server-side; it now sends the same stop as Ctrl-C. Both print `[stopping…]` and keep reading until the run's own terminal event, then `[cancelled]`; a stop not confirmed within 30 s exits non-zero, and a second signal still exits at once. `--no-stream` runs are stoppable the same way. New `crewship chat stop <chat-id> [--wait]` stops a run you started from another terminal or the browser (#4504).
 
 - **`crewship run` and `crewship ask` can send what the web composer sends.** `--attach <file>` (repeatable) uploads into the chat and names the paths in the message with the composer's exact wording; `--page <slug>` attaches a Page snapshot; `run --chat <id> --ask-form <form> --var name=value` submits an agent's ask form with the envelope the server re-checks, printing `[form delivered]` or exiting non-zero with the refusal; `run --create-document` sends the composer's "Create document" intent. `run` also prints the run summary (`[summary] $… · tokens · turns`) and delegation, escalation and port-exposure progress (#4504).

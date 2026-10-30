@@ -82,6 +82,10 @@ func (c *capResolver) CreateRun(ctx context.Context, runID, _, _, _, _ string, _
 	return c.createRunErr
 }
 
+func (c *capResolver) UpdateRunOutcome(ctx context.Context, runID, status string, exitCode *int, message *string, metadata map[string]interface{}, _ string) (string, error) {
+	return status, c.UpdateRun(ctx, runID, status, exitCode, message, metadata)
+}
+
 func (c *capResolver) UpdateRun(_ context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}) error {
 	c.mu.Lock()
 	c.runUpdates = append(c.runUpdates, runUpdateRec{
@@ -140,6 +144,7 @@ type scriptedContainer struct {
 	agentOutput  string
 	agentExecErr error
 	exitCode     int
+	stopObserved bool
 }
 
 func (s *scriptedContainer) EnsureCrewRuntime(_ context.Context, cc provider.CrewConfig) (string, error) {
@@ -166,9 +171,20 @@ func (s *scriptedContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*p
 			Reader: io.NopCloser(strings.NewReader(s.agentOutput)),
 		}, nil
 	}
+	if strings.Contains(strings.Join(cfg.Cmd, " "), "tmux kill-session") {
+		s.mu.Lock()
+		s.stopObserved = true
+		s.mu.Unlock()
+		return &provider.ExecResult{ExecID: "noop", Reader: io.NopCloser(strings.NewReader("ABSENT"))}, nil
+	}
 	return &provider.ExecResult{ExecID: "noop", Reader: io.NopCloser(strings.NewReader(""))}, nil
 }
-func (s *scriptedContainer) ExecInspect(context.Context, string) (bool, int, error) {
+func (s *scriptedContainer) ExecInspect(_ context.Context, id string) (bool, int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id == "agent-exec" && s.stopObserved {
+		return false, 143, nil
+	}
 	return false, s.exitCode, nil
 }
 func (s *scriptedContainer) ContainerStats(context.Context, string) (*provider.ContainerMetrics, error) {
@@ -552,6 +568,9 @@ func TestHandleChatMessageCancelMidRunPersistsPartial(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "run agent") {
 		t.Fatalf("expected wrapped run agent cancellation error, got: %v", err)
 	}
+	if !errors.Is(err, ws.ErrRunCancelled) {
+		t.Fatalf("confirmed cancellation sentinel missing: %v", err)
+	}
 	if len(errEvents) != 0 {
 		t.Errorf("cancellation must not stream error events, got %+v", errEvents)
 	}
@@ -598,6 +617,9 @@ func TestHandleChatMessageCancelBeforeOutputCountsUserOnly(t *testing.T) {
 	err := b.HandleChatMessage(ctx, "user-1", "sess-cancel2", "hi", streamFn)
 	if err == nil {
 		t.Fatal("expected cancellation error")
+	}
+	if errors.Is(err, ws.ErrRunCancelled) {
+		t.Fatal("failed terminal bookkeeping claimed confirmed cancellation")
 	}
 	if len(resolver.runUpdates) != 1 || resolver.runUpdates[0].status != "CANCELLED" {
 		t.Fatalf("runUpdates = %+v, want one CANCELLED", resolver.runUpdates)

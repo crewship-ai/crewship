@@ -146,6 +146,24 @@ Cancel an in-progress agent chat response.
 }
 ```
 
+With optional `payload.request_id` (at most 128 bytes), the server sends a
+private control frame to the requesting socket after the exact caller-owned
+run finishes with cancellation:
+
+```json
+{"type":"cancel_result","payload":{"session_id":"chat-id","request_id":"unique-request-id","cancelled":true}}
+```
+
+`cancelled:false` means no cancellation was confirmed (including a missing run,
+a run owned by another user, natural completion, or another outstanding
+confirmation on this socket). Ordinary session `done` events do not confirm a
+cancel. Clients must match both request and session IDs. Omitting `request_id`
+retains the existing cancellation behavior without requesting a result.
+A single-run client may also set `payload.origin_only:true`: cancellation then
+requires the active run to have originated on this exact WebSocket. This avoids
+stopping a replacement invocation that the same user started in another terminal;
+ordinary `chat stop` intentionally permits stopping from a different socket.
+
 ---
 
 ## Error frames
@@ -173,6 +191,7 @@ when one terminates work it has in flight.
 ## Channels
 
 Channels follow the format `type:id`. Access is validated against database membership when subscribing.
+
 
 ### Channel Types
 

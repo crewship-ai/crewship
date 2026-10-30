@@ -48,11 +48,16 @@ func retryContent(m map[string]any) (content, pageSlug string) {
 	return content, pageSlug
 }
 
-// lastUserMessage returns the newest user turn, or nil.
-func lastUserMessage(messages []map[string]any) map[string]any {
+// lastUserMessage returns the newest turn with explicit caller attribution.
+// An absent author cannot safely establish ownership, including in shared chats.
+func lastUserMessage(messages []map[string]any, caller string) map[string]any {
 	for i := len(messages) - 1; i >= 0; i-- {
 		role, _ := messages[i]["role"].(string)
 		if r := strings.ToLower(role); r == "user" || r == "human" {
+			author, _ := messages[i]["author_user_id"].(string)
+			if caller == "" || author != caller {
+				continue
+			}
 			return messages[i]
 		}
 	}
@@ -123,7 +128,16 @@ Examples:
 		if err != nil {
 			return err
 		}
-		last := lastUserMessage(messages)
+		var me struct {
+			UserID string `json:"user_id" yaml:"user_id"`
+		}
+		if err := getJSON(client, "/api/v1/auth/cli-token/validate", &me); err != nil {
+			return err
+		}
+		if me.UserID == "" {
+			return fmt.Errorf("could not determine your user id for retry")
+		}
+		last := lastUserMessage(messages, me.UserID)
 		if last == nil {
 			return fmt.Errorf("chat %s has no message of yours to retry", chatID)
 		}
