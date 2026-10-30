@@ -150,7 +150,7 @@ it("a click on desktop peeks at the item on the right and the list stays with it
   ])
   expect(screen.getByRole("button", { name: "Open Partner brief" }).getAttribute("aria-current")).toBe("true")
   peekOpen()
-  expect(state.select).toHaveBeenCalledWith("brief")
+  expect(state.select).toHaveBeenCalledWith("page-brief")
 })
 
 it("the peek shares and stars the item it shows, and closes", () => {
@@ -182,7 +182,7 @@ it("J and K move the peek, Enter opens the peeked item, Escape closes the peek",
   fireEvent.keyDown(window, { key: "j" })
   expect(within(peek()).getByRole("heading", { name: "Partner brief" })).toBeTruthy()
   fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Enter" })
-  expect(state.select).toHaveBeenLastCalledWith("brief")
+  expect(state.select).toHaveBeenLastCalledWith("page-brief")
 })
 
 it("on a phone a click opens the detail directly, with no peek", () => {
@@ -190,7 +190,7 @@ it("on a phone a click opens the detail directly, with no peek", () => {
   renderLibrary()
   openAll()
   fireEvent.click(screen.getByRole("button", { name: "Open Partner brief" }))
-  expect(state.select).toHaveBeenCalledWith("brief")
+  expect(state.select).toHaveBeenCalledWith("page-brief")
   expect(screen.queryByRole("complementary", { name: "Preview" })).toBeNull()
 })
 
@@ -215,7 +215,7 @@ it("desktop rows keep their checkboxes without a Select toggle", () => {
 })
 
 it("a project detail opens the project preview", () => {
-  state.item = "site"
+  state.item = "page-site"
   renderLibrary()
   // The viewer names it; the library does not repeat the title above it.
   expect(screen.queryByRole("heading", { level: 1, name: "Pricing site" })).toBeNull()
@@ -228,20 +228,20 @@ it("a project detail opens the project preview", () => {
 
 it("without the project surface the detail links to the Page instead of a dead viewer", () => {
   state.projectsOn = false
-  state.item = "site"
+  state.item = "page-site"
   renderLibrary()
   expect(screen.queryByTestId("viewer-panel")).toBeNull()
   expect(screen.getByRole("link", { name: "Open in Pages" }).getAttribute("href")).toBe("/pages/%40page-site?workspace_id=ws1&artifact=1")
 })
 
 it("a native Word detail shows its edit lock by Page reference", () => {
-  state.item = "brief"
+  state.item = "page-brief"
   renderLibrary()
   expect(screen.getByTestId("lock-bar").dataset.slug).toBe("@page-brief")
 })
 
 it("a Word detail shows the saved document read-only, never an editor", () => {
-  state.item = "brief"
+  state.item = "page-brief"
   renderLibrary()
   expect(screen.getByRole("region", { name: "Partner brief, saved version" })).toBeTruthy()
   expect(state.reads.at(-1)).toMatchObject({ enabled: true, target: { pageId: "page-brief", type: "document", mode: "latest", workspaceId: "ws1" } })
@@ -250,7 +250,7 @@ it("a Word detail shows the saved document read-only, never an editor", () => {
 it.each(["unavailable", "error"])("an old-editor Word that answers %s says so plainly, and the list still works", status => {
   state.pages.push(wire({ slug: "old", id: "page-old", name: "Old contract", has_document: true }))
   state.readStatus = status
-  state.item = "old"
+  state.item = "page-old"
   renderLibrary()
   expect(screen.getByRole("status")).toHaveTextContent("This document is from an older version of the editor and does not open here.")
   expect(screen.getByRole("status").textContent).not.toMatch(/engine|503|service/i)
@@ -262,28 +262,47 @@ it.each(["unavailable", "error"])("an old-editor Word that answers %s says so pl
 
 it("a native Word whose service is down says the service is down", () => {
   state.readStatus = "unavailable"
-  state.item = "brief"
+  state.item = "page-brief"
   renderLibrary()
   expect(screen.getByRole("status")).toHaveTextContent("The document service is not answering right now")
 })
 
 it("other kinds do not read a document", () => {
-  state.item = "model"
+  state.item = "page-model"
   renderLibrary()
   expect(screen.queryByRole("region", { name: /saved version/ })).toBeNull()
   expect(state.reads.every(read => !read.enabled)).toBe(true)
 })
 
 it("a panel Page opens on its page", () => {
-  state.item = "weekly"
+  state.item = "page-weekly"
   renderLibrary()
   expect(screen.queryByTestId("lock-bar")).toBeNull()
   expect(screen.getByRole("link", { name: "Open page" }).getAttribute("href")).toBe("/pages/weekly?workspace_id=ws1")
 })
 
 it("an unknown or removed item falls back to the gallery", () => {
-  state.item = "gone"
+  state.item = "page-gone"
   renderLibrary()
+  expect(screen.getByText("This artifact is not available.")).toBeTruthy()
+})
+
+it("an ID address fails closed: another artifact now holding that slug never opens in its place", () => {
+  state.pages = [wire({ id: "different-page-id", slug: "page-site", name: "Replacement", artifact_kind: "project" })]
+  state.item = "page-site"
+  renderLibrary()
+  expect(screen.getByText("This artifact is not available.")).toBeTruthy()
+  expect(screen.queryByTestId("viewer-panel")).toBeNull()
+})
+
+it("a link from before IDs opens by slug and hands the route the artifact's ID", () => {
+  const canonical = vi.fn()
+  render(withQuery(<ArtifactsLibrary workspaceId="ws1" item="site" bySlug onSelect={state.select} onCanonical={canonical} />))
+  expect(screen.getByTestId("viewer-provider").dataset.slug).toBe("site")
+  expect(canonical).toHaveBeenCalledWith("page-site")
+  cleanup()
+  // A slug never stands in for an ID, and an ID never matches as a slug.
+  render(withQuery(<ArtifactsLibrary workspaceId="ws1" item="page-site" bySlug onSelect={state.select} onCanonical={canonical} />))
   expect(screen.getByText("This artifact is not available.")).toBeTruthy()
 })
 
@@ -321,14 +340,14 @@ it.each(["project", "dashboard", "slides"] as const)("keeps %s routed through it
   openAll()
   fireEvent.click(screen.getByRole("button", { name: "Open Owner artifact" }))
   peekOpen()
-  expect(state.select).toHaveBeenLastCalledWith("ordinary-owner-page")
+  expect(state.select).toHaveBeenLastCalledWith("owner-page")
   state.select.mockReset()
   fireEvent.click(screen.getByRole("radio", { name: "Table" }))
   fireEvent.keyDown(document.body, { key: "Escape" })
   fireEvent.click(screen.getByRole("button", { name: "Owner artifact" }))
   peekOpen()
-  expect(state.select).toHaveBeenLastCalledWith("ordinary-owner-page")
-  state.item = "ordinary-owner-page"
+  expect(state.select).toHaveBeenLastCalledWith("owner-page")
+  state.item = "owner-page"
   view.rerender(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
   expect(screen.getByRole("link", { name: "Open in Pages" })).toHaveAttribute("href", "/pages/%40owner-page?workspace_id=ws1&artifact=1")
   expect(screen.queryByTestId("viewer-panel")).toBeNull()
@@ -336,14 +355,14 @@ it.each(["project", "dashboard", "slides"] as const)("keeps %s routed through it
 
 it.each(["word", "sheet"] as const)("preserves the existing reader link for native %s", artifact_kind => {
   state.pages = [wire({ id: "native-page", slug: "saved-native", name: "Native document", artifact_kind })]
-  state.projectsOn = false; state.item = "saved-native"
+  state.projectsOn = false; state.item = "native-page"
   renderLibrary()
   expect(screen.getByRole("link", { name: "Open in Pages" })).toHaveAttribute("href", "/pages/saved-native?workspace_id=ws1")
 })
 
 it("keeps legacy Slides in their existing Page reader", () => {
   state.pages = [wire({ id: "legacy-page", slug: "legacy-slides", name: "Legacy deck", has_slides: true })]
-  state.item = "legacy-slides"
+  state.item = "legacy-page"
   renderLibrary()
   expect(screen.getByRole("link", { name: "Open in Pages" })).toHaveAttribute("href", "/pages/legacy-slides?workspace_id=ws1")
 })
@@ -359,19 +378,19 @@ it("J and K move between items, Enter opens, Escape leaves the detail, never fro
   expect(document.activeElement?.getAttribute("aria-label")).toBe("Open Partner brief")
   // The peeked row's second click opens it, as Enter does.
   fireEvent.click(document.activeElement as HTMLElement)
-  expect(state.select).toHaveBeenLastCalledWith("brief")
+  expect(state.select).toHaveBeenLastCalledWith("page-brief")
   const search = screen.getByRole("textbox", { name: "Search artifacts" })
   search.focus()
   fireEvent.keyDown(search, { key: "j" })
   expect(document.activeElement).toBe(search)
-  state.item = "brief"
+  state.item = "page-brief"
   view.rerender(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
   fireEvent.keyDown(document.body, { key: "Escape" })
   expect(state.select).toHaveBeenLastCalledWith(null)
 })
 
 it("remembers what was opened and starred, per person, in Recently opened and Favorites", () => {
-  state.item = "brief"
+  state.item = "page-brief"
   const view = renderLibrary()
   fireEvent.click(screen.getByRole("button", { name: "Add to favorites" }))
   expect(screen.getByRole("button", { name: "Remove from favorites" }).getAttribute("aria-pressed")).toBe("true")
@@ -404,7 +423,7 @@ it("selecting rows in the list opens the bulk bar with exactly those items", () 
 })
 
 it("a detail offers Share, Move and an Access tab", () => {
-  state.item = "model"
+  state.item = "page-model"
   renderLibrary()
   fireEvent.click(screen.getByRole("radio", { name: "Access" }))
   expect(screen.getByRole("region", { name: "Access to Price model" })).toBeTruthy()

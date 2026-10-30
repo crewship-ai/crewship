@@ -106,6 +106,12 @@ func computeCrewBudget(ctx context.Context, db *sql.DB, crewID string) (int, err
 // rows (COMPLETED / FAILED / CANCELLED) are excluded so a re-
 // dispatch attempt on a finished assignment is a no-op.
 func claimCrewSlot(ctx context.Context, db *sql.DB, assignmentID, crewID string, budget int) (bool, error) {
+	if id, err := assignmentWorkID(ctx, db, assignmentID); err != nil {
+		return false, err
+	} else if id != "" {
+		return false, nil
+	}
+
 	if budget < 1 {
 		// Defence in depth: even if the CHECK constraint somehow
 		// admitted a 0, the CAS below would always fail and queue
@@ -260,6 +266,7 @@ func pumpCrewQueue(ctx context.Context, db *sql.DB, crewID string, budget int) (
 			   SELECT a.id FROM assignments a
 			     JOIN agents ag ON ag.id = a.assigned_to_id
 			    WHERE a.status = 'QUEUED' AND ag.crew_id = ?
+			      AND NOT EXISTS (SELECT 1 FROM work_items w WHERE w.source='assignment' AND w.domain_kind='assignment' AND w.domain_id=a.id)
 			      -- Agent-aware (defect #4, #2269 follow-up): skip a row
 			      -- whose target agent ALREADY has a RUNNING assignment
 			      -- rather than claiming it and letting it bounce off

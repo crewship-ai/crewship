@@ -29,18 +29,35 @@ export function useArtifactAgentDispatch(workspaceId: string, pageId: string | u
   const entry=intent?.submission_id?pending.current.get(intent.submission_id):undefined
   if(entry){clearTimeout(entry.timer);entry.resolve(true);pending.current.delete(intent!.submission_id!)}
  },[])
+ // The server refuses a send while the agent is already running. That frame
+ // carries no submission id; this hook has at most one send in flight, so
+ // it settles the pending confirmation instead of waiting for the timeout.
+ const refusals=useRef(new Map<string,string>())
+ const refused=useCallback((reason:string)=>{
+  for(const [id,entry] of pending.current){clearTimeout(entry.timer);refusals.current.set(id,reason);entry.resolve(false)}
+  pending.current.clear()
+ },[])
  const base=resolveWsBase()
- const chat=useChat({workspaceId,sessionId:origin?.chat_id??"",currentUserId:user,wsUrl:base?`${base}/ws`:"",getToken,realtimeEnabled:Boolean(enabled&&origin&&profile.data&&!profile.isError),canSend:Boolean(enabled&&origin&&profile.data&&!profile.isError),executionProfile:profile.data?"trusted":"pending",onOwnMessageSaved:saved})
+ const chat=useChat({workspaceId,sessionId:origin?.chat_id??"",currentUserId:user,wsUrl:base?`${base}/ws`:"",getToken,realtimeEnabled:Boolean(enabled&&origin&&profile.data&&!profile.isError),canSend:Boolean(enabled&&origin&&profile.data&&!profile.isError),executionProfile:profile.data?"trusted":"pending",onOwnMessageSaved:saved,onSendRefused:refused})
+ // This hook renders no transcript, so it never loads history. Open the
+ // sequenced-event gate anyway: the server's echo of our message and the
+ // run's done are sequenced and would otherwise never be applied.
+ const realtime=Boolean(enabled&&origin&&profile.data&&!profile.isError)
+ const {markHistoryUnavailable}=chat
+ useEffect(()=>{if(realtime)markHistoryUnavailable()},[realtime,markHistoryUnavailable,scope])
  const dispatch=async(comment:ArtifactComment):Promise<boolean>=>{
   if(!enabled||!profile.data||profile.isError||!pageId||!origin||chat.connectionStatus!=="connected"||chat.isStreaming)return false
   // A retry refers to the same queued task; the server owns replay admission.
   const submissionId=`artifact-comment-${comment.id}`
   if(pending.current.has(submissionId))return false
+  refusals.current.delete(submissionId)
   const confirmation=new Promise<boolean>(resolve=>{const timer=setTimeout(()=>{pending.current.delete(submissionId);resolve(false)},15000);pending.current.set(submissionId,{resolve,timer})})
   const prompt = kind === "design" ? `Update Design @${pageId} according to comment ${comment.id}: ${comment.text}. Selected node: ${comment.selector}, original version: ${comment.version}. Use design_get, design_apply, then design_snapshot to save a new version. Preserve concurrent changes and report the confirmed version.` : `Update the artifact project according to this exact comment. Page: @${pageId}. Base version: ${comment.version}. File: ${comment.path}. Element: ${comment.selector}. Selected text: ${comment.quote}\nRequested change: ${comment.text}\nPublish a new version with base_version ${comment.version}, then reply to comment ${comment.id} with the new version and what changed. If the anchor no longer matches, ask for clarification.`
   const sent=await chat.sendMessage(prompt,{artifact_project_intent:{...(kind === "design" ? {kind:"design"} : {}),submission_id:submissionId,page_id:pageId,comment_id:comment.id,base_version:comment.version}})
   if(sent===false){const entry=pending.current.get(submissionId);if(entry){clearTimeout(entry.timer);entry.resolve(false);pending.current.delete(submissionId)}}
   return confirmation
  }
- return {dispatch,ready:chat.connectionStatus==="connected"&&!chat.isStreaming&&Boolean(enabled&&profile.data&&!profile.isError)}
+ /** Why the last delivery of this comment was refused, if the server said so. */
+ const refusal=(commentId:string)=>refusals.current.get(`artifact-comment-${commentId}`)
+ return {dispatch,refusal,ready:chat.connectionStatus==="connected"&&!chat.isStreaming&&Boolean(enabled&&profile.data&&!profile.isError)}
 }
