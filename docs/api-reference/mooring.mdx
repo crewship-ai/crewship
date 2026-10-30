@@ -10,8 +10,11 @@ These routes are off by default. The first six routes below (`/api/v1/mooring/ap
 through the mandate routes) exist only when the server runs with
 `CREWSHIP_GRIDCRAFT_ENABLED=true`. Provenance and the command session exist only
 with `CREWSHIP_MOORING_ENABLED=true`; the command session also needs
-`CREWSHIP_MOORING_COMMANDS_ENABLED=true`. Without the switch the route is not
-registered and returns `404`.
+`CREWSHIP_MOORING_COMMANDS_ENABLED=true`. Without `CREWSHIP_GRIDCRAFT_ENABLED`
+or `CREWSHIP_MOORING_ENABLED` the routes are not registered and return `404`.
+With Mooring on but `CREWSHIP_MOORING_COMMANDS_ENABLED` off, the command
+session is still registered and returns `503` "native command editing is
+disabled".
 </Note>
 
 Each Mooring document is a private [artifact](/api-reference/artifacts) owned by

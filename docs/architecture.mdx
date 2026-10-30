@@ -424,10 +424,13 @@ Projects, Designs, and Word and Sheet documents keep their content in one
 version store inside the Crewship database. Every save is a new immutable
 version; files are stored once per artifact by content hash. Each artifact has
 two heads: the **latest version**, which the owner and editors work on, and
-the **shared version**, which is all that other readers can see. A write must
-name the `base_version` it started from. If another write landed first, the
-server answers `409` and keeps both the stored version and the client's draft
-intact. Authority is checked inside the write transaction and again just
+the **shared version**, which is all that other readers can see. How a write
+is guarded depends on the type. A project write (and a Dashboard data batch)
+must name the `base_version` it started from; a Craft save names its lease
+`generation` and its `baseVersion`. A Design write has no base: it is merged
+into the server's live Yjs document. If another write landed first, the server
+answers `409` and keeps both the stored version and the client's draft intact.
+Authority is checked inside the write transaction and again just
 before commit, so a permission removed mid-request stops the save.
 
 Versions are not pruned. When an artifact reaches its history quota, existing
@@ -462,8 +465,8 @@ agent edits a document at a time. The holder of the **lease** gets a
 handoff and every save must carry the current generation, so a stale tab or a
 replaced agent cannot write. The lease lasts 15 seconds and is kept alive by the
 editor's server-sent event stream, not by typing. Others can request a handoff.
-A save also carries the `base_version`, so it is checked against both the lease
-and the version store.
+A save also carries the `baseVersion` it started from, so it is checked against
+both the lease and the version store.
 
 ### Agents
 
@@ -480,8 +483,10 @@ For every project and Design tool call the server rechecks that:
 - the human who started the run consented and still has access;
 - the run is bound to that one artifact.
 
-An agent writes new versions with the same `base_version` rule as a person, and
-it cannot move the shared version. A Craft agent task is started by a person
+An agent follows the same rules as a person for each type: project tools such
+as `artifact_publish` and `artifact_data_batch` send `base_version`, Design
+tools such as `design_apply` act on the live Yjs document with no base, and the
+Craft agent holds the lease. An agent cannot move the shared version. A Craft agent task is started by a person
 from the open document; the agent then holds the lease like any other editor,
 and the person can stop it. People hand work back to the agent through
 comments: a project or Design comment sent with `send_to_agent` becomes a task
