@@ -37,6 +37,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Add an original-human and immutable-Page bound key-recovery primitive for private browser drafts, checked against current read authority. Browser retention and sign-out integration remain separate.
 
+- **Artifact API reference explains version and access rules.** OpenAPI summaries and descriptions now document artifact manifests, comments, Design and native Craft tasks, including conflict, quota and visibility behavior; routes and schemas are unchanged.
+
 - **A Page opens with its content inside Artifacts.** Its application or panels show in the library detail with the same views Pages uses, read by the page's immutable ID; the detail no longer sends you to Pages.
 
 - **New `crewship` commands for API operations the CLI reached only with another method.** `crew member set-role` (or `--clear`), `agent learning`, `agent files --container`, `persona suggest`, `checkpoint get`, `notifychannel update` and `nuke keeper-requests`; `workspace member capabilities list` without a user id lists every member in one request, and `workflow get` reads a template by id before falling back to a name lookup. `GET /api/v1/workflow-templates` now creates the built-in templates on a fresh workspace, as `/api/v1/templates` already did, so `crewship workflow list` is no longer empty there. Built-in workflow templates are now read-only through `/api/v1/workflow-templates` too (`403` on update or delete, as on `/api/v1/templates`), since listing would otherwise recreate a deleted one and duplicate a renamed one. The `docs-inventory -strict` CLI-parity gate now compares HTTP method and path rather than path alone, and calls made only by `crewship seed` no longer count as coverage (#4510).

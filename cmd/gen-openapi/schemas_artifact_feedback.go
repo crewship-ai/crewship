@@ -17,7 +17,11 @@ func artifactProjectFeedbackComponents() map[string]any {
 		return map[string]any{"type": "string", "maxLength": max, "description": "The server additionally enforces this bound in UTF-8 bytes."}
 	}
 	path := func() map[string]any {
-		return map[string]any{"type": "string", "minLength": 1, "maxLength": 512, "description": "Canonical relative project path, at most512 UTF8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused."}
+		return map[string]any{"type": "string", "minLength": 1, "maxLength": 512, "description": "Canonical relative project path, at most 512 UTF-8 bytes; absolute paths, traversal, backslashes, query strings and fragments are refused."}
+	}
+	described := func(schema map[string]any, description string) map[string]any {
+		schema["description"] = description
+		return schema
 	}
 	schemas := map[string]any{}
 	schemas["ArtifactProjectOrigin"] = object(map[string]any{"chat_id": str(), "agent_id": str()}, "chat_id", "agent_id")
@@ -47,7 +51,7 @@ func artifactProjectFeedbackComponents() map[string]any {
 		},
 	}
 	schemas["ArtifactProjectCommentRequest"] = object(map[string]any{
-		"version": integer(1), "path": path(), "selector": text(2000), "quote": text(2000), "text": text(10000), "send_to_agent": boolean(),
+		"version": described(integer(1), "Exact retained version visible to the commenter; owners and editors comment on latest, other commenters on the shared version."), "path": path(), "selector": text(2000), "quote": text(2000), "text": text(10000), "send_to_agent": described(boolean(), "Queue an agent task only when the owner has the required source-chat authority; delivery and run start are separate."),
 	}, "version", "path", "selector", "quote", "text")
 	schemas["ArtifactProjectReplyRequest"] = object(map[string]any{"text": text(10000), "version": integer(1), "needs_clarification": boolean()}, "text", "version")
 	return schemas
