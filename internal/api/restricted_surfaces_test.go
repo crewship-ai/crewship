@@ -16,6 +16,8 @@ import (
 // (or a surface's optional parts) rather than defining one. Naming them here is
 // what keeps the next allowlist entry from silently appearing in no surface.
 var restrictedSharedPatterns = map[string]bool{
+	// Recovery is shared by private-custody editors; exact scope is fenced in the handler.
+	"POST /api/v1/pages/{slug}/draft-key": true,
 	// Optional crew context; no Crews navigation surface is enabled yet.
 	"GET /api/v1/crews":                                                                    true,
 	"GET /api/v1/crews/{crewId}":                                                           true,
