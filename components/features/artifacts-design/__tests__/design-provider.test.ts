@@ -60,6 +60,15 @@ describe("Design standard sync provider", () => {
   expect(Socket.instances).toHaveLength(1)
   expect(status).toHaveBeenLastCalledWith("rejected")
  })
+
+ it("stops reconnecting when a frame exceeded the server read limit", () => {
+  vi.useFakeTimers()
+  const { socket, status } = setup(true)
+  socket.close(1009)
+  vi.advanceTimersByTime(10_000)
+  expect(Socket.instances).toHaveLength(1)
+  expect(status).toHaveBeenLastCalledWith("rejected")
+ })
  it("read-only clients receive updates and awareness without sending document writes", () => {
   const { doc, socket, dirty } = setup(false)
   const server = new Y.Doc(); server.getMap("nodes").set("hello", "world")

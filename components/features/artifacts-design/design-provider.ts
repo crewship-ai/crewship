@@ -164,9 +164,10 @@ export class DesignProvider {
     this.canEdit = false
     this.status("denied")
     if (this.prepare) this.connect(true)
-   } else if (event.code === 4400) {
-    // The engine refused this client's update; a reconnect would resend the
-    // same change in sync step 2 and be refused again, forever.
+   } else if (event.code === 4400 || event.code === 1009) {
+    // The server refused this client's update (invalid, or a frame over the
+    // read limit); a reconnect would resend the same change in sync step 2
+    // and be refused again, forever.
     this.status("rejected")
    } else {
     this.status("offline")
