@@ -194,5 +194,5 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const connectAgent = useMutation({ mutationFn: (chat_id: string) => pinnedRequest("/agent", { chat_id }), onSuccess: invalidate })
  const comment = useMutation({ mutationFn: (body: { version: number; path: string; selector: string; quote: string; text: string; send_to_agent: boolean }) => pinnedRequest<ArtifactComment>("/comments", body), onSuccess: invalidate })
  const share = useMutation({ mutationFn: (version: number) => pinnedRequest("/share", { version }), onSuccess: invalidate })
- return { readRevoked: readRevokedPage === pageId, query, versions, comments, doc, nodes: selectedVersion ? query.data?.nodes ?? [] : nodes, peers, connection, editable, dirty, draftError, save, restore, share, comment, connectAgent, setCursor: (cursor: { x: number; y: number } | null) => provider.current?.setCursor(cursor) }
+ return { readRevoked: readRevokedPage === pageId, query, versions, comments, doc, nodes: selectedVersion || query.data?.can_edit === false ? query.data?.nodes ?? [] : nodes, peers, connection, editable, dirty, draftError, save, restore, share, comment, connectAgent, setCursor: (cursor: { x: number; y: number } | null) => provider.current?.setCursor(cursor) }
 }

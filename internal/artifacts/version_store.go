@@ -179,6 +179,8 @@ func versionHead(ctx context.Context, tx *sql.Tx, k VersionKey) (latest, shared 
 func (s *VersionStore) quota(ctx context.Context, tx *sql.Tx, k VersionKey) (q VersionQuota, err error) {
 	q.LimitBytes = s.opts.MaxHistoryBytes
 	q.Retention = "keep-all"
+	// Native proposals have a separate retained budget. They cannot consume
+	// the human's version allowance or make Read/View/Save scan candidates.
 	err = tx.QueryRowContext(ctx, `SELECT coalesce((SELECT sum(length(content)) FROM artifact_version_blobs WHERE workspace_id=? AND page_id=?),0)+coalesce((SELECT sum(length(CAST(manifest_json AS BLOB))+length(CAST(message AS BLOB))+length(CAST(actor AS BLOB))+length(created_at)+128) FROM artifact_versions WHERE workspace_id=? AND page_id=?),0)`, k.WorkspaceID, k.PageID, k.WorkspaceID, k.PageID).Scan(&q.UsedBytes)
 	q.Warning = q.UsedBytes*100 >= q.LimitBytes*int64(s.opts.WarningPercent)
 	return

@@ -177,6 +177,11 @@ func TestDesignWebsocketGrantABARejectsOldWriteAndReadAdmissions(t *testing.T) {
 	for _, level := range []string{"write", "read"} {
 		t.Run(level, func(t *testing.T) {
 			f := newDesignAuthorityFixture(t)
+			if level == "read" {
+				if w := f.call(t, f.owner, "share", `{"version":1}`); w.Code != 200 {
+					t.Fatal(w.Code, w.Body)
+				}
+			}
 			user := "design-aba-" + level
 			f.addUser(t, user)
 			if w := f.grant(t, user, level); w.Code != 200 {
@@ -339,17 +344,17 @@ func TestDesignCanonicalCommentGrantIsFailClosedOrFeedbackOnly(t *testing.T) {
 		CanEdit    bool              `json:"can_edit"`
 		CanComment bool              `json:"can_comment"`
 	}
-	if get.Code != 200 || json.Unmarshal(get.Body.Bytes(), &view) != nil || view.CanEdit || !view.CanComment || len(view.Nodes) != 2 {
-		t.Fatalf("Comment live projection %d %s", get.Code, get.Body)
+	if get.Code != 200 || json.Unmarshal(get.Body.Bytes(), &view) != nil || view.CanEdit || !view.CanComment || len(view.Nodes) != 1 || strings.Contains(get.Body.String(), "Latest saved title") || strings.Contains(get.Body.String(), "live-node") {
+		t.Fatalf("Comment shared projection %d %s", get.Code, get.Body)
 	}
 	versions, revision := f.versions(t), f.revision(t)
-	comment := `{"version":3,"path":"design.json","selector":"saved-title","quote":"Latest saved title","text":"Feedback without content authority"}`
+	comment := `{"version":2,"path":"design.json","selector":"saved-title","quote":"Shared saved title","text":"Feedback without content authority"}`
 	if w := f.call(t, user, "comment", comment); w.Code != 201 {
 		t.Fatalf("Comment feedback %d %s", w.Code, w.Body)
 	}
 	for _, step := range []struct{ op, body string }{
 		{"apply", `{"operations":[{"op":"delete","id":"saved-title"}]}`}, {"snapshot", `{}`}, {"restore", `{"version":2}`}, {"share", `{"version":3}`}, {"agent", `{"chat_id":"cannot-create-owner-mandate"}`},
-		{"comment", `{"version":3,"path":"design.json","selector":"saved-title","quote":"Latest saved title","text":"Cannot dispatch owner agent","send_to_agent":true}`},
+		{"comment", `{"version":2,"path":"design.json","selector":"saved-title","quote":"Shared saved title","text":"Cannot dispatch owner agent","send_to_agent":true}`},
 	} {
 		if w := f.call(t, user, step.op, step.body); w.Code != 403 {
 			t.Errorf("Comment gained %s authority: %d %s", step.op, w.Code, w.Body)
@@ -377,7 +382,7 @@ func TestDesignCanonicalCommentGrantIsFailClosedOrFeedbackOnly(t *testing.T) {
 	if refused.Code != 404 {
 		t.Fatalf("Comment selected unshared retained history: %d %s", refused.Code, refused.Body)
 	}
-	// Read-only live synchronization remains available, but a document update
+	// Read-only shared synchronization remains available, but a document update
 	// from the same Comment socket is still a write and must be denied.
 	socket := f.dial(t, user)
 	update, err := design.Run(t.Context(), design.Request{Operations: json.RawMessage(`[{"op":"upsert","node":{"id":"forbidden-comment-write","type":"rect","x":0,"y":0,"width":10,"height":10}}]`)})

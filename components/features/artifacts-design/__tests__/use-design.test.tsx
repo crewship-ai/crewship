@@ -19,7 +19,7 @@ vi.mock("@/lib/local-draft-seal", () => {
   return { close() {} }
  } }
 })
-const server = vi.hoisted(() => ({ status: 200, post401: false, actorId: "same-user", bearer: false, pageId: "old-private-page", authorityRevision: "1", canEdit: true, providers: [] as { admittedEdit: boolean; editable: boolean; destroyed: boolean; deny: () => void; connect: () => void; prepare?: () => Promise<string> }[], urls: [] as string[], calls: [] as { url: string; method: string; skipRefresh?: boolean }[] }))
+const server = vi.hoisted(() => ({ status: 200, post401: false, actorId: "same-user", bearer: false, pageId: "old-private-page", authorityRevision: "1", canEdit: true, nodes: [] as Record<string, unknown>[], providers: [] as { admittedEdit: boolean; editable: boolean; destroyed: boolean; deny: () => void; connect: () => void; prepare?: () => Promise<string> }[], urls: [] as string[], calls: [] as { url: string; method: string; skipRefresh?: boolean }[] }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "same-user", name: "Owner" } } }) }))
 vi.mock("@/lib/server-base", () => ({ resolveWsBase: () => "ws://localhost", getAuthMode: () => server.bearer ? "bearer" : "cookie" }))
 vi.mock("@/lib/api-fetch", () => ({ tryRefresh: vi.fn(async () => "ok"), apiFetch: async (url: string, init?: RequestInit & { skipRefresh?: boolean }) => {
@@ -28,7 +28,7 @@ vi.mock("@/lib/api-fetch", () => ({ tryRefresh: vi.fn(async () => "ok"), apiFetc
  if (init?.method === "POST" && url.includes("/@old-private-page/") && server.pageId !== "old-private-page") return new Response(JSON.stringify({ error: "not found" }), { status: 404 })
  if (server.status !== 200 && !url.includes("/comments?") && !url.includes("/versions?")) return new Response(JSON.stringify({ error: "not found" }), { status: server.status })
  const common = { latest_version: 1, shared_version: 0 }
- const data = url.includes("/comments?") ? { comments: [] } : url.includes("/versions?") ? { ...common, versions: [] } : { ...common, page_id: server.pageId, authority_revision: server.authorityRevision, can_edit: server.canEdit, version: 1, nodes: [], order: [], actor: { id: server.actorId, name: "Owner" } }
+ const data = url.includes("/comments?") ? { comments: [] } : url.includes("/versions?") ? { ...common, versions: [] } : { ...common, page_id: server.pageId, authority_revision: server.authorityRevision, can_edit: server.canEdit, version: 1, nodes: server.nodes, order: [], actor: { id: server.actorId, name: "Owner" } }
  return new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } })
 } }))
 vi.mock("../design-provider", () => ({ DesignProvider: class {
@@ -63,6 +63,7 @@ beforeEach(() => {
  vi.mocked(tryRefresh).mockClear().mockResolvedValue("ok")
  server.authorityRevision = "1"
  server.canEdit = true
+ server.nodes = []
  vi.mocked(localStorage.getItem).mockImplementation(key => drafts.get(key) ?? null)
  vi.mocked(localStorage.setItem).mockImplementation((key, value) => { drafts.set(key, value) })
  vi.mocked(localStorage.removeItem).mockImplementation(key => { drafts.delete(key) })
@@ -226,4 +227,16 @@ describe("Design local drafts after access loss", () => {
   await waitFor(() => expect([...drafts.keys()]).toEqual([]))
   expect(drafts.size).toBe(0)
  })
+})
+
+
+it("renders the authorized shared snapshot for a read-only user even when its live document differs", async () => {
+ server.canEdit = false
+ server.nodes = [{ id: "shared-title", type: "text", text: "Shared", x: 0, y: 0, width: 200, height: 30 }]
+ const view = mount()
+ await waitFor(() => expect(view.result.current.query.data?.can_edit).toBe(false))
+ expect(view.result.current.nodes.map(node => node.id)).toEqual(["shared-title"])
+ await waitFor(() => expect(view.result.current.doc).not.toBeNull())
+ act(() => upsertDesignNode(view.result.current.doc!, { id: "old-private-live", type: "text", text: "Private", x: 0, y: 0, width: 200, height: 30 }))
+ expect(view.result.current.nodes.map(node => node.id)).toEqual(["shared-title"])
 })

@@ -90,6 +90,9 @@ func TestDesignReadGrantNeverWritesAndRevocationIsLive(t *testing.T) {
 	if w := call(owner, "create", `{"slug":"board","name":"Board"}`); w.Code != 201 {
 		t.Fatal(w.Code, w.Body)
 	}
+	if w := call(owner, "share", `{"version":1}`); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
 	user := "design-reader"
 	mustExec(t, h.db, `INSERT INTO users(id,email,full_name) VALUES(?,'design-reader@example.test','Reader')`, user)
 	mustExec(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, generateCUID(), ws, user)
@@ -145,8 +148,8 @@ func TestDesignReaderHistoryAndCommentsStayAtSharedPin(t *testing.T) {
 			t.Fatalf("reader %s leaked history %d %s", op, w.Code, w.Body)
 		}
 	}
-	if w := call(user, "get", ""); w.Code != 200 || !strings.Contains(w.Body.String(), "#ff0000") {
-		t.Fatalf("live readonly canvas stopped receiving current state: %d %s", w.Code, w.Body)
+	if w := call(user, "get", ""); w.Code != 200 || strings.Contains(w.Body.String(), "#ff0000") || !strings.Contains(w.Body.String(), `"version":2`) {
+		t.Fatalf("readonly canvas escaped its shared snapshot: %d %s", w.Code, w.Body)
 	}
 }
 

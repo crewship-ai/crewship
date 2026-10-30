@@ -21,6 +21,7 @@ type designClient struct {
 	actor           string
 	displayName     string
 	canEdit         bool
+	canReadLive     bool
 	awareness       []byte
 	clientID, clock uint64
 	hasID           bool
@@ -40,6 +41,9 @@ func (client *designClient) enqueue(frame []byte) error {
 func (room *designRoom) broadcast(frame []byte, except *designClient) {
 	for client := range room.clients {
 		if client != except {
+			if len(frame) > 0 && frame[0] == 0 && !client.canEdit && !client.canReadLive {
+				continue
+			}
 			_ = client.enqueue(frame)
 		}
 	}
@@ -187,7 +191,7 @@ func designAwarenessGone(c *designClient) []byte {
 	return append(out, p...)
 }
 func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
-	k, ok := h.designKey(w, r)
+	k, r, ok := h.designKey(w, r)
 	if !ok {
 		return
 	}
@@ -206,6 +210,7 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 	var actor, displayName, admittedRevision string
 	var initial design.Result
 	canEdit := false
+	canReadLive := false
 	err := h.designTx(r, k, false, func(ctx context.Context, tx *sql.Tx, a string) error {
 		actor = a
 		var epochErr error
@@ -223,7 +228,14 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 		}
 		_, e := h.designAuthority(r, k, true)(ctx, tx)
 		canEdit = e == nil
-		if canEdit {
+		canReadLive = canEdit
+		if !canReadLive {
+			canReadLive, e = h.designManagerRead(ctx, tx, k)
+			if e != nil {
+				return e
+			}
+		}
+		if canReadLive {
 			var state []byte
 			if e = tx.QueryRowContext(ctx, `SELECT state FROM artifact_design_documents WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&state); e != nil {
 				return e
@@ -250,9 +262,9 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 	conn.SetReadLimit(4 << 20)
 	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(60 * time.Second)) })
-	client := &designClient{conn: conn, out: make(chan []byte, 64), actor: actor, displayName: displayName, canEdit: canEdit}
+	client := &designClient{conn: conn, out: make(chan []byte, 64), actor: actor, displayName: displayName, canEdit: canEdit, canReadLive: canReadLive}
 	room.mu.Lock()
-	if canEdit {
+	if canReadLive {
 		_ = client.enqueue(initial.Hello)
 	}
 	room.clients[client] = true
@@ -364,7 +376,7 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 						e = errDesignAccess
 					} else {
 						var result design.Result
-						result, e = h.designApplyLocked(r, k, design.Request{Frame: frame})
+						result, e = h.designApplyLocked(newDesignAdminAuditRequest(r, "write"), k, design.Request{Frame: frame})
 						if e == nil {
 							room.broadcast(designUpdateFrame(result.Update), client)
 							if len(result.Response) > 0 {
@@ -376,10 +388,15 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 					var result design.Result
 					e = h.designTx(r, k, false, func(ctx context.Context, tx *sql.Tx, _ string) error {
 						var state []byte
-						if x := tx.QueryRowContext(ctx, `SELECT state FROM artifact_design_documents WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&state); x != nil {
+						var x error
+						if canReadLive {
+							x = tx.QueryRowContext(ctx, `SELECT state FROM artifact_design_documents WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&state)
+						} else {
+							state, x = designSharedState(ctx, tx, k)
+						}
+						if x != nil {
 							return x
 						}
-						var x error
 						result, x = design.Run(ctx, design.Request{State: state, Frame: frame})
 						return x
 					})

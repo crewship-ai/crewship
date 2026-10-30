@@ -9,8 +9,8 @@ Page, initializes its native Word model and releases the initial lease before
 opening the full editor. An ambiguous initialization is never blindly replayed. Native format metadata on
 Page reads reopens an existing native Page through that same fresh admission.
 A lost creation-release response cannot erase or reinitialize its confirmed data.
-This does not convert existing documents, enable agent proposals, or qualify the
-complete editor acceptance.
+This does not convert existing documents or qualify the complete editor
+acceptance. Agent proposals are described under "Agent proposals" below.
 
 Availability requires a readable Page with an explicit `craft_native_documents`
 profile. Other profiles, inaccessible Pages and absent Pages report disabled.
@@ -46,6 +46,10 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Same whole snapshot contract; existing explicit native Page only. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Exact original snapshot binding and hash; no blind retry. | Original pinned commit receipt,200; never an arbitrary latest head. |
 | POST | `/api/v1/pages/{slug}/craft/document/restore` | Current binding and targetVersion. | New committed version and node durability, 200. |
+| GET | `/api/v1/pages/{slug}/craft/proposals` | Craft admission header; Page read. | `{proposals: [...]}` open and decided agent proposals, 200. |
+| GET | `/api/v1/pages/{slug}/craft/proposals/{proposalID}` | Craft admission header; `ncp_` id. | `{proposal, bytes, content_hash, engine_pin}` candidate, 200; 404 when absent. |
+| POST | `/api/v1/pages/{slug}/craft/proposals/{proposalID}/accept` | `{generation: "1"}` of this admission's lease; Page write. | `{proposal, receipt}` with the new committed version, 200; 409 `stale` when the content changed after base. |
+| POST | `/api/v1/pages/{slug}/craft/proposals/{proposalID}/reject` | `{}`; Page write, no lease. | Rejected proposal, 200; 409 when already decided. |
 
 Except availability, agent task controls, initialization and initial session creation, send `X-Craft-Session` as well
 as ordinary authentication. Session creation returns `session_token`, the distinct
@@ -140,6 +144,18 @@ request still expires at its original JWT horizon. A short, bounded retry of a
 409 metadata GET only waits for the previous connection to close; saves, custody
 mutations and ambiguous outcomes are never replayed. Bearer credentials do not
 enter the cookie-refresh flow.
+
+A transport reset, clean SSE EOF or temporary HTTP failure reconnects only
+metadata after current same-admission reauthorization. At most eight recovery
+attempts back off from 100 ms to five seconds. A 409 while the server still holds
+an old stream after transport loss uses the same exponential budget, allowing
+several seconds for cleanup. Planned credential rotation keeps its separate
+short handoff grace. A valid lease on a stream shorter than five seconds does
+not reset the recovery budget. Invalid metadata, authorization
+refusal and explicit session retirement are terminal. Exhaustion uses the
+existing draft-retaining disconnection path. Closing the client cancels both
+the stream and a coalesced periodic/recovery authorization. No save, custody
+mutation or new admission is replayed by this recovery.
 
 ## Whole-document configuration and receipts
 
@@ -254,7 +270,9 @@ of execution or a save. The same original human can inspect
 `GET /api/v1/pages/{slug}/craft/tasks/{workID}?workspace_id=…` under fresh current
 Page write rights. This read-only projection contains actual bounded tool
 outcomes and `last_committed_receipt`, never prompt or command bodies, native document
-bytes or credentials. The last receipt is explicitly historical; an uncertain
+bytes or credentials. `outcome` is `saved` once the run has a committed receipt,
+or `proposal` with `proposal_id` when it recorded a proposal instead; it is
+absent while the run has neither. The last receipt is explicitly historical; an uncertain
 or in-flight later attempt is not Saved. Append `craft_task_id=<work_id>` to the
 normal native editor URL to inspect this task in the editor. That selector is
 not authority and never starts or resumes a run.
@@ -303,8 +321,11 @@ SQL writer before acknowledging. It cannot force a human holder. The response
 reports `grant_revoked`, `lease_retired`, `cancel_requested`, `stopped` and
 `stop_pending`; physical process termination is not assumed from cancellation.
 The human editor exposes Stop only when `can_stop_agent` is true. A stopped
-process is successful only with a qualified actual Node receipt and retired
-custody; no-receipt and uncertain outcomes remain distinct.
+process is successful only with retired custody and either a qualified actual
+Node receipt (`native_outcome: "saved"`) or a proposal this run recorded
+(`native_outcome: "proposal"`, `native_proposal_id`); a run with neither fails
+with "native agent finished without a committed native receipt", and uncertain
+outcomes remain distinct.
 
 This pilot retains at most 128 captured task entries per process and at most 64
 apply IDs per task. It refuses further work instead of evicting uncertain
@@ -351,5 +372,71 @@ builds exclude them. Default CI is not evidence that either engine executed.
 The human and agent transport boundaries have targeted API, original-engine,
 private-process, retirement, cancellation and receipt regressions. Live editor
 and genuine dispatched-agent acceptance must still qualify the exact release;
-unit provider/model fixtures are not live agent evidence. Proposals and complete
-visible-editor feature acceptance remain separate work.
+unit provider/model fixtures are not live agent evidence. Complete
+visible-editor feature acceptance remains separate work.
+
+## Agent proposals
+
+When a person holds the lease, an agent never waits for, steals or retries it.
+`craft_propose` runs the same allowlisted original-engine commands over the
+exact `base_version` the agent read and stores the complete candidate in
+`craft_native_proposals`; the document, its versions and the lease are
+unchanged. At most 16 proposals per document may be open. Before counting, a
+new proposal marks every open proposal whose base content differs from the
+current head `stale` (decided by `system:superseded`; rows are kept), because
+such a proposal can no longer be accepted. A proposal over an older version with
+identical content stays open, since accept still applies it on the head. The stored idempotency key includes the authenticated run. A different run of
+the same agent has a separate request namespace and cannot adopt its earlier
+candidate; the display author remains the agent identity.
+
+Apply and propose requests share a limit of 64 admitted change attempts per
+run; reaching it returns 429 before another engine invocation. Exact retries
+consume no further slot and never rerun the engine, including after the document
+advances. Changing commands under the same request identifier conflicts. An
+unknown save or proposal commit blocks new changes with 503 until that exact
+request is reconciled. Only its pending candidate is retained for this purpose;
+completed or definitely refused candidates do not accumulate in memory.
+
+All retained proposal content, including rejected, stale and accepted rows,
+counts toward its own per-document proposal allowance (64 MiB by default,
+`NativeStoreConfig.MaxProposalBytes` for trusted host configuration). This
+allowance is separate from human version history: filling it refuses additional
+proposals while leaving the human's available history allowance intact. Accept
+charges the newly saved version to version history and keeps the candidate in
+the proposal allowance. Reject never replenishes either retained candidate space
+or the human's version history.
+
+Accounting uses exact bytes for older rows restored as TEXT and reserves decision
+metadata up front. Native BLOB lengths use SQLite's metadata-only length path;
+Read, View and Save do not scan retained candidate payloads. Insertion and the
+proposal budget check share the authorized writer transaction; a refusal rolls
+back the new candidate without deleting any confirmed candidate or version.
+These are document allowances; aggregate workspace/disk reservations remain a
+separate storage requirement.
+
+A proposal is a successful task outcome: the work item and run succeed with
+`native_outcome: "proposal"` and `native_proposal_id`, and the task status shows
+`outcome: "proposal"` with `proposal_id`. Only a proposal recorded by this run's
+own session counts. A different run may reuse a client `request_id`; it records
+its own proposal instead of adopting an earlier run's candidate.
+
+A person with an admitted session reviews them (`GET .../craft/proposals`,
+candidate bytes at `GET .../craft/proposals/{id}`) and decides once. Accept is
+the person's own fenced save: Page write rights, the immutable profile, this
+admission's lease generation, base == latest and the open state are checked and
+the version and decision commit in one transaction. The editor saves the
+holder's state before accepting; versions that only repeat the base bytes do not
+count as a change, and the proposal applies on the current head. If the document
+content moved on, the proposal becomes `stale` and nothing is applied; it is
+never rebased over changed content.
+Reject needs write rights but no lease: any co-editor with current Page write
+rights may reject a proposal while another person holds the lease, and the
+document is never changed. Reading the list and a candidate uses the same
+session-bound read gate as the document, so a Read-only admission can review
+but not decide; Comment-only access is not admitted at all. A proposal id is
+resolved only within the admitted page and workspace; another page's id
+answers 404. The agent cannot decide its own proposal.
+
+The bounded proposal review list puts all open proposals before decided history,
+then orders each group by creation time. Newer decisions cannot hide a pending
+proposal; the per-document open-proposal cap remains 16 and the list cap 50.

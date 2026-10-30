@@ -11,6 +11,18 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Add an original-human and immutable-Page bound key-recovery primitive for private browser drafts, checked against current read authority. Browser retention and sign-out integration remain separate.
 
+- **Design keeps work visible when saved history is full.** A clear message replaces the saved status and offers a draft download containing the local canvas and unsent feedback, or an explicit copy of the canvas into a new Design with fresh history. The original editor, unsent feedback and retained versions stay intact. Copy creation checks current source and create permissions atomically and is never automatically replayed.
+
+- ⚠️ **Design readers and commenters see only the shared version.** Private saved and live changes are withheld from REST and websocket readers, and comments target the displayed shared snapshot. Workspace administrators read and edit every Design, with foreign access recorded atomically in the audit log and keyed journal, and edits using the existing locks and versions.
+
+- **Craft reconnects an interrupted metadata stream.** Recovery checks current authority for the same admission, allows exponential backoff while an old server stream is still held after transport loss, and stops after bounded retries; saves and custody changes are never replayed.
+
+- **Native Word and Sheet proposals have a separate retained storage allowance.** Every retained candidate counts toward a 64 MiB default budget, including rejected and superseded proposals. Concurrent proposals cannot exceed it, and filling it leaves the human’s available history allowance intact. Reads and saves no longer scan proposal payloads. A refusal preserves existing work and history.
+
+- **Native agent proposals are idempotent within their authenticated run.** Two runs of the same agent can reuse a request identifier without adopting each other’s proposal. Apply and propose share the run’s change request limit; proposals cannot bypass an unresolved save. Exact retries reuse the recorded candidate without running the engine again, including after the document advances.
+
+- **Native Word and Sheet proposals survive backup and fork restore.** A fork keeps each candidate on its new document with an identifier the editor and CLI can open; backups preserve the exact candidate bytes and content hash.
+
 - **A Page opens with its content inside Artifacts.** Its application or panels show in the library detail with the same views Pages uses, read by the page's immutable ID; the detail no longer sends you to Pages.
 
 - **Every artifact in the Artifacts library has its own address.** Opening one goes to `/artifacts/<id>` (its immutable page ID), so Back returns to the list it was opened from, and a reload or a shared link opens it again. Links from before, `/artifacts?item=<slug>`, open by slug and move to the new address; an ID address never falls back to a slug another artifact may hold now.
@@ -20,6 +32,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Design System artifacts get an opt-in token preview.** An artifact project with a `design-system.json` file (colors, typography, spacing, radii and an optional component list) opens as a read-only sheet of swatches, type scale, spacing and radii when the web UI is built with `NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM=true`. Agents and the CLI create and version it through the existing `page artifact create/publish/restore` commands; no new endpoint or storage. Default off.
 
 - ⚠️ **Behaviour change: notification channel URLs are checked more strictly.** The delivery library (shoutrrr 0.22.1) rejects a channel URL that could never send when a channel is created from the provider form or tested, and at send time for raw URLs: Gotify needs a real application token (15 characters starting with `A`, or a Gotify 3 `gtfya.` token), Google Chat needs both `key` and `token`, Mattermost needs a host, and ntfy topics follow ntfy's naming rule. Saved channels are never checked at startup or when listed; a Google Chat channel saved without `key` or `token` now reports a delivery error. SQLite driver updated to modernc.org/sqlite 1.61.0.
+
+- **Agents prepare a proposal when a person is editing a Word or Sheet document.** Instead of a bare refusal, the agent's `craft_propose` records a complete candidate over the version it read; the document stays unchanged. The person holding the editor can compare it, accept it as their own save (rights, lease and current version are re-checked in one transaction; a proposal over an older version becomes stale) or reject it. Any co-editor with write rights can reject without holding the editor. Open proposals over a version the document has moved past are marked stale when the agent proposes again, so they no longer count toward the limit of 16 open proposals per document. Also available as `crewship craft connect` actions. The agent's task then succeeds with outcome `proposal` and the proposal id (shown by `crewship craft task status`) instead of failing without a receipt; only a proposal recorded by that run counts.
 
 - **An agent runtime is no longer held busy by another crew's interrupted run.** A run recovered without a container but recorded for a different crew no longer blocks refreshing this crew's runtime; a run with an unknown crew still blocks it (#4486).
 
