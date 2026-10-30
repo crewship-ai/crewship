@@ -183,6 +183,16 @@ type identityStep struct {
 // and credentials are re-attributed before their bindings and rotations are
 // anonymised, so a rolled-back custodian lookup leaves both untouched.
 var identitySteps = []identityStep{
+	// Collaboration attribution is historical DATA, not permanent accountability.
+	// Generic mandates retain their preconditions, but an erased human identity
+	// cannot satisfy authorizeAgent's exact original-human comparison.
+	{key: "mooring_collab_artifact_edits_anonymised",
+		sql:  `UPDATE mooring_collab_artifact_edits SET human_user_id='erased' WHERE workspace_id=? AND human_user_id=?`,
+		args: []identityArg{argWorkspace, argSubject}},
+	{key: "mooring_intents_anonymised",
+		sql:  `UPDATE mooring_intents SET human_user_id='erased' WHERE page_id IN (SELECT page_id FROM mooring_documents WHERE workspace_id=?) AND human_user_id=?`,
+		args: []identityArg{argWorkspace, argSubject}},
+
 	// ── The subject's own records — deleted ────────────────────────────
 	{key: "saved_views_removed", deletes: true,
 		sql:  `DELETE FROM saved_views WHERE workspace_id = ? AND user_id = ?`,

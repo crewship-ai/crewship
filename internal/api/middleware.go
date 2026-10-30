@@ -455,6 +455,13 @@ func (m *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 // of the requested workspace and stores the workspace ID and role in the context.
 func (m *AuthMiddleware) RequireWorkspace(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Draft recovery must distinguish a proven membership removal from
+		// an unavailable authority store. Its handler checks membership under
+		// the writer fence; this narrow resolver never grants Page access.
+		if r.Pattern == "POST /api/v1/pages/{slug}/draft-key" {
+			m.localDraftWorkspace(next).ServeHTTP(w, r)
+			return
+		}
 		user := UserFromContext(r.Context())
 		if user == nil {
 			writeAuthError(w, http.StatusUnauthorized, reasonNoCredentials)

@@ -225,7 +225,8 @@ var journalPriorityCmd = &cobra.Command{
 Examples:
   crewship journal priority j_abc --mark permanent --reason "FX compliance rule"
   crewship journal priority j_abc --mark pin --reason "team playbook entry"
-  crewship journal priority j_abc --mark normal`,
+  crewship journal priority j_abc --mark normal
+  crewship journal priority j_abc --mark high --format json   # {"id","priority","previous"}`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := requireAuth(); err != nil {
@@ -264,8 +265,11 @@ Examples:
 		if err := cli.ReadJSON(resp, &out); err != nil {
 			return err
 		}
-		fmt.Printf("Entry %s: priority %s → %s\n", out.ID, out.Previous, out.Priority)
-		return nil
+		// --format json/yaml/ndjson get the server's answer; the prose
+		// line is for a person at a terminal.
+		return newFormatter().AutoHuman(out, func() {
+			fmt.Printf("Entry %s: priority %s → %s\n", out.ID, out.Previous, out.Priority)
+		})
 	},
 }
 

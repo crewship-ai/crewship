@@ -63,6 +63,10 @@ refusal bodies can describe a private runtime, but exit with the same codes.
 | `restore` | `POST /api/v1/pages/{slug}/craft/document/restore` |
 | `reconcile` | `POST /api/v1/pages/{slug}/craft/document/reconcile` |
 | `share` | `POST /api/v1/pages/{slug}/craft/document/share` |
+| `proposals` | `GET /api/v1/pages/{slug}/craft/proposals` |
+| `proposal` | `GET /api/v1/pages/{slug}/craft/proposals/{proposal_id}` |
+| `accept-proposal` | `POST /api/v1/pages/{slug}/craft/proposals/{proposal_id}/accept` |
+| `reject-proposal` | `POST /api/v1/pages/{slug}/craft/proposals/{proposal_id}/reject` |
 
 ```json
 {"action":"status"}
@@ -70,7 +74,22 @@ refusal bodies can describe a private runtime, but exit with the same codes.
 {"action":"renew","generation":"9007199254740993"}
 {"action":"handoff","generation":"9007199254740993","request_id":"server-issued-target-request"}
 {"action":"watch"}
+{"action":"proposals"}
+{"action":"accept-proposal","proposal_id":"ncp_0123456789abcdef01234567","generation":"9007199254740993"}
 ```
+
+### Agent proposals
+
+When a person holds the lease, an agent task does not wait or steal it: its
+`craft_propose` tool records a complete candidate over the exact version it read
+and leaves the document unchanged. `proposals` lists them (author, base version,
+summary, state); `proposal` returns the candidate bytes for comparison.
+`accept-proposal` saves the candidate as this connection's own write: it needs
+the current generation of this connection's lease and re-checks Page rights, the
+lease and that the document is still at the proposal's base version, all in one
+transaction. If the document changed meanwhile, the proposal becomes `stale` and
+nothing is applied. `reject-proposal` needs write rights but no lease. Decisions
+are final.
 
 Use the actual generation returned by the server; it is a canonical positive
 int64 decimal **string**. Handoff targets an opaque server-issued request ID,

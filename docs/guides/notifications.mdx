@@ -502,7 +502,7 @@ requests require authentication and workspace context unless stated otherwise.
 
 #### GET /api/v1/notification-channels
 
-**Request:** optional list filters; no body. **Response:** `200 OK` with workspace channels and redacted secrets. **Statuses:** `200 OK`; `401 Unauthorized` without authentication and `403 Forbidden` without workspace access.
+**Request:** optional list filters; no body. **Response:** `200 OK` with workspace channels and redacted signing secrets. Workspace webhook `url` is omitted unless the caller is ADMIN/OWNER; personal-channel owners retain their own destination. Other channel metadata remains available. **Statuses:** `200 OK`; `401 Unauthorized` without authentication and `403 Forbidden` without workspace access.
 
 #### POST /api/v1/notification-channels
 

@@ -53,11 +53,16 @@ func (m *craftNativeAgentManager) Close() {
 	}
 	m.cancel()
 	m.mu.Lock()
+	entries := make([]*craftNativeAgentEntry, 0, len(m.entries))
 	for _, e := range m.entries {
 		e.closed = true
+		entries = append(entries, e)
 	}
 	done := m.done
 	m.mu.Unlock()
+	for _, e := range entries {
+		m.clearClosedProposalCandidates(e)
+	}
 	if done != nil {
 		select {
 		case <-done:
@@ -197,7 +202,7 @@ func (rt *craftNativeAgentRuntime) Run(ctx context.Context, a dispatch.Assignmen
 	if err = rt.h.resolver.CreateRun(runCtx, a.RunID, g.AgentID, g.Original.ChatID, g.Scope.WorkspaceID, "CHAT", map[string]interface{}{"native_craft_task": true}); err != nil {
 		return err
 	}
-	prompt := "Use only the provided native Craft tools for this explicit whole-document task. Acquire the lease first; if busy, report busy without stealing or retrying. Inspect, apply only the requested edit, retain the original request_id for uncertain results, and release after a committed receipt. Never claim Saved without that receipt.\n\n" + g.Instruction
+	prompt := "Use only the provided native Craft tools for this explicit whole-document task. Acquire the lease first; if a human holds it, never steal or retry: read the current version and call craft_propose with the requested edit over that exact base_version, then report the proposal for the human to review. Inspect, apply only the requested edit, retain the original request_id for uncertain results, and release after a committed receipt. Never claim Saved without that receipt.\n\n" + g.Instruction
 	req := info.ToAgentRunRequest(chatbridge.AgentRunOverrides{ChatID: g.Original.ChatID, ContainerID: use.ContainerID(), UserMessage: prompt, LLMModel: info.LLMModel, TimeoutSecs: info.TimeoutSecs, MemoryMB: info.MemoryMB, CPUs: info.CPUs, MaxTurns: orchestrator.RoutineMaxTurns}).WithStrictContentPrivacy()
 	req.RunID, req.RuntimeUse = a.RunID, use
 	req, err = req.WithNativeCraftTools()
@@ -247,27 +252,34 @@ func (rt *craftNativeAgentRuntime) Run(ctx context.Context, a dispatch.Assignmen
 	}
 	// Only original-provider exit proves retirement. An uncertain Run return is
 	// neither success nor permission to rerun the native mutation.
-	finishErr := m.finishStoppedRun(inspectCtx, e)
+	outcome, finishErr := m.finishStoppedRun(inspectCtx, e)
 	// This captures only observed output, never authority or terminal status.
 	// A closed/revoked grant can prevent retirement but must not erase the
 	// positively observed original-exec stop from a cancelled work outcome.
 	result := work.RunResult{CompletedAt: time.Now().UTC().Format(time.RFC3339Nano), Metadata: map[string]any{"native_runtime_stopped": true}}
 	switch {
 	case finishErr == nil:
-		receipt, uncertain, _ := craftNativeAgentCompletion(e)
-		if receipt == nil || uncertain {
+		if _, uncertain, _ := craftNativeAgentCompletion(e); uncertain {
 			finishErr = orchestrator.ErrPrivateRunUnqualified
-		} else {
+			break
+		}
+		result.Metadata["native_outcome"] = outcome.Kind
+		switch outcome.Kind {
+		case craftNativeAgentOutcomeSaved:
 			result.Metadata["native_saved"] = true
-			result.Metadata["native_version"] = receipt.Version
-			if runErr == nil {
-				zero := 0
-				result.ExitCode = &zero
-			}
+			result.Metadata["native_version"] = outcome.Receipt.Version
+		case craftNativeAgentOutcomeProposal:
+			// The document is unchanged; the human reviews this proposal.
+			result.Metadata["native_saved"] = false
+			result.Metadata["native_proposal_id"] = outcome.ProposalID
+		}
+		if runErr == nil {
+			zero := 0
+			result.ExitCode = &zero
 		}
 	case errors.Is(finishErr, errNativeAgentNoReceipt):
 		result.Metadata["native_saved"] = false
-		message := "native agent finished without a committed native receipt"
+		message := errNativeAgentNoReceipt.Error()
 		result.ErrorMessage = &message
 	}
 	stageCtx, stageCancel := context.WithTimeout(context.WithoutCancel(runCtx), 5*time.Second)
@@ -335,26 +347,53 @@ func (rt *craftNativeAgentRuntime) Stop(ctx context.Context, locator string) (bo
 	return (&collaborationAgentTaskRuntime{WebhookRuntime: rt.WebhookRuntime}).Stop(ctx, locator)
 }
 
-func (m *craftNativeAgentManager) finishStoppedRun(ctx context.Context, e *craftNativeAgentEntry) error {
+const (
+	craftNativeAgentOutcomeSaved    = "saved"
+	craftNativeAgentOutcomeProposal = "proposal"
+)
+
+// craftNativeAgentOutcome is a finished run's successful result: a committed
+// save receipt, or, when a human held the lease, a proposal this run recorded.
+type craftNativeAgentOutcome struct {
+	Kind       string
+	Receipt    *mooring.NativeSaveReceipt
+	ProposalID string
+}
+
+func (m *craftNativeAgentManager) finishStoppedRun(ctx context.Context, e *craftNativeAgentEntry) (craftNativeAgentOutcome, error) {
 	receipt, uncertain, _ := craftNativeAgentCompletion(e)
+	proposal, proposalUncertain := craftNativeAgentProposalOutcome(e)
 	proof, err := m.stoppedProof(ctx, e)
 	if err != nil {
-		return err
+		return craftNativeAgentOutcome{}, err
 	}
 	p := craftNativeAgentPrincipal(e)
 	if err = m.retireStoppedLease(ctx, proof); err != nil {
-		return err
+		return craftNativeAgentOutcome{}, err
 	}
-	if uncertain {
-		return orchestrator.ErrPrivateRunUnqualified
+	if uncertain || proposalUncertain {
+		return craftNativeAgentOutcome{}, orchestrator.ErrPrivateRunUnqualified
 	}
 	if receipt == nil {
-		return errNativeAgentNoReceipt
+		if proposal == nil {
+			return craftNativeAgentOutcome{}, errNativeAgentNoReceipt
+		}
+		// Bound to this run's session and still recorded for this page by
+		// this agent; a proposal from any other run never counts.
+		var found int
+		err = m.human.pages.db.QueryRowContext(ctx, `SELECT 1 FROM craft_native_proposals WHERE id=? AND page_id=? AND workspace_id=? AND author_actor_id=?`, proposal.ID, e.grant.Scope.ArtifactID, e.grant.Scope.WorkspaceID, p.ActorID).Scan(&found)
+		if errors.Is(err, sql.ErrNoRows) || proposal.SessionID != p.SessionID {
+			return craftNativeAgentOutcome{}, errNativeAgentNoReceipt
+		}
+		if err != nil {
+			return craftNativeAgentOutcome{}, err
+		}
+		return craftNativeAgentOutcome{Kind: craftNativeAgentOutcomeProposal, ProposalID: proposal.ID}, nil
 	}
 	if receipt.Phase != "committed" || receipt.IssuedBy != "crewship" || receipt.Durability != "node" || receipt.SessionID != p.SessionID || receipt.WorkspaceID != e.grant.Scope.WorkspaceID || receipt.PageID != e.grant.Scope.ArtifactID {
-		return orchestrator.ErrPrivateRunUnqualified
+		return craftNativeAgentOutcome{}, orchestrator.ErrPrivateRunUnqualified
 	}
-	return nil
+	return craftNativeAgentOutcome{Kind: craftNativeAgentOutcomeSaved, Receipt: receipt}, nil
 }
 
 var _ dispatch.Runtime = (*craftNativeAgentRuntime)(nil)

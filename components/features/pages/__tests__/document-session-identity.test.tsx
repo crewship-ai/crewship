@@ -17,7 +17,16 @@ afterEach(() => { cleanup(); request.mockReset(); account.user = "human-A"; acco
 it.each([200, 403])("unmounts the former human's editor and draft download before the next human's %s response", async (status) => {
   const a = documentSchema.create({ type: "doc", content: [{ type: "paragraph", attrs: { id: "paragraph" }, content: [{ type: "text", text: "A-only private content" }] }] }, 3)
   const b = documentSchema.create({ type: "doc", content: [{ type: "paragraph", attrs: { id: "paragraph" }, content: [{ type: "text", text: "B-authorized content" }] }] }, 3)
-  request.mockImplementation((_url: string, init?: RequestInit) => {
+  const keys = new Map<string, string>()
+  request.mockImplementation((url: string, init?: RequestInit) => {
+    // The private draft store asks the server for its key with a fresh read
+    // admission for the signed-in human; B without Page read is refused.
+    if (url.includes("/draft-key")) {
+      const body = JSON.parse(String(init?.body))
+      if (body.human === "human-B" && status === 403) return Promise.resolve({ ok: false, status: 403, json: async () => ({ code: "draft_read_revoked" }) })
+      if (body.operation === "wrap") { const envelope = `v1:test-${keys.size}`; keys.set(envelope, body.key); return Promise.resolve({ ok: true, status: 200, json: async () => ({ envelope }) }) }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ key: keys.get(body.envelope) }) })
+    }
     if (init?.method === "POST") return Promise.resolve({ ok: false, status: 400, json: async () => ({ error: "Draft rejected" }) })
     const second = account.user === "human-B"
     return Promise.resolve(second && status === 403

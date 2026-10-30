@@ -113,7 +113,7 @@ func TestLabelCreateRunE_PostsBody(t *testing.T) {
 
 func TestLabelUpdateRunE_PatchesChangedFields(t *testing.T) {
 	s := covStubCli9(t)
-	s.OnPatch("/api/v1/labels/lbl_1", clitest.JSONResponse(200, map[string]string{"id": "lbl_1"}))
+	s.OnPatch("/api/v1/labels/lbl_1", clitest.JSONResponse(200, map[string]string{"id": "lbl_1", "name": "renamed", "color": "#abc"}))
 	covSetFlagCli9(t, labelUpdateCmd, "name", "renamed")
 	covSetFlagCli9(t, labelUpdateCmd, "color", "#abc")
 	covSetFlagCli9(t, labelUpdateCmd, "group", "")
@@ -123,7 +123,7 @@ func TestLabelUpdateRunE_PatchesChangedFields(t *testing.T) {
 			t.Errorf("RunE: %v", err)
 		}
 	})
-	if !strings.Contains(stderr, "Label updated.") {
+	if !strings.Contains(stderr, "Label updated: renamed (lbl_1)") {
 		t.Errorf("update confirmation missing:\n%s", stderr)
 	}
 

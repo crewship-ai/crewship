@@ -1,3 +1,9 @@
+// UI lifecycle tests use a cipher seam (as in artifact-viewer-panel.test.tsx);
+// real-browser tests cover draft encryption and server admission.
+vi.mock("@/lib/local-draft-seal", () => ({
+ createLocalDraftCipher: async () => ({ seal: async (text: string) => text, open: async (text: string) => text, close() {} }),
+ forgetLocalDraftPage() {}, isSealedLocalDraft: () => true, LocalDraftReadRevoked: class extends Error {},
+}))
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import type { ArtifactComment, ArtifactProjectSnapshot } from "@/components/features/chat/artifact-context/projects/types"
@@ -81,20 +87,23 @@ afterEach(cleanup)
 
 const open = () => render(withQuery(<ArtifactsLibrary workspaceId="workspace-1" item="page-1" onSelect={vi.fn()} />))
 
-function compose() {
+// The composer opens once the private local draft has loaded.
+async function compose() {
   fireEvent.click(screen.getByRole("button", { name: "Select" }))
   const frame = screen.getByTitle(/Preview of/) as HTMLIFrameElement
   act(() => window.dispatchEvent(new MessageEvent("message", {
     source: frame.contentWindow,
     data: { type: "crewship-artifact-select", selector: "#heading", quote: "Hello" },
   })))
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: saved.text } })
+  const box = screen.getByRole("textbox", { name: "Comment" })
+  await waitFor(() => expect(box).not.toBeDisabled())
+  fireEvent.change(box, { target: { value: saved.text } })
 }
 
-it("provides Preview, History and Comments tabs without losing an unsent anchored comment", () => {
+it("provides Preview, History and Comments tabs without losing an unsent anchored comment", async () => {
   open()
   expect(screen.getByRole("tab", { name: "Preview", selected: true })).toBeInTheDocument()
-  compose()
+  await compose()
   fireEvent.click(screen.getByRole("tab", { name: "History" }))
   expect(screen.getByRole("region", { name: "Version history" })).toBeVisible()
   fireEvent.click(screen.getByRole("tab", { name: "Comments" }))
@@ -119,7 +128,7 @@ it("supports arrow keys and Home and End between detail tabs", () => {
 
 it("starts the source agent only after saving the exact library comment", async () => {
   open()
-  compose()
+  await compose()
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   expect(state.comment).toHaveBeenCalledWith({
     version: 3, path: "index.html", selector: "#heading", quote: "Hello", text: saved.text, send_to_agent: true,
@@ -132,7 +141,7 @@ it("starts the source agent only after saving the exact library comment", async 
 it("retries delivery of the saved task without creating a second comment", async () => {
   state.dispatch.mockResolvedValueOnce(false).mockResolvedValueOnce(true)
   open()
-  compose()
+  await compose()
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   expect(await screen.findByText("The agent did not start")).toBeInTheDocument()
   const current = { ...saved, author: "owner", status: "pending" as const, delivery_retryable: true }
@@ -148,7 +157,7 @@ it("retries delivery of the saved task without creating a second comment", async
 it.each([false, undefined])("refuses a library Retry when fresh delivery eligibility is %s", async deliveryRetryable => {
   state.dispatch.mockResolvedValue(false)
   open()
-  compose()
+  await compose()
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   expect(await screen.findByText("The agent did not start")).toBeInTheDocument()
   state.snapshot!.comments = [{ ...saved, author: "owner", status: "pending", delivery_retryable: deliveryRetryable }]
@@ -162,7 +171,7 @@ it.each([false, undefined])("refuses a library Retry when fresh delivery eligibi
 it("never reports agent delivery when the server provides no source chat", async () => {
   state.snapshot!.origin = null
   open()
-  compose()
+  await compose()
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   expect(await screen.findByText("Comment saved for the agent")).toBeInTheDocument()
   expect(state.dispatch).not.toHaveBeenCalled()

@@ -1,4 +1,10 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+// UI lifecycle tests use a cipher seam; real browser tests cover encryption/admission.
+vi.mock("@/lib/local-draft-seal", () => ({
+ createLocalDraftCipher: async () => ({ seal: async (text:string) => text, open: async (text:string) => text, close() {} }),
+ forgetLocalDraftPage() {}, isSealedLocalDraft: () => true, LocalDraftReadRevoked: class extends Error {},
+}))
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { purgeOtherArtifactDrafts, setArtifactDraftStore } from "@/lib/artifact-drafts"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import type { ArtifactComment, ArtifactProjectSnapshot } from "../../projects/types"
 import type { ArtifactViewerTarget } from "../../projects/artifact-viewer-context"
@@ -67,13 +73,13 @@ function selectHero() {
 }
 const history = () => within(screen.getByRole("region", { name: "Version history" }))
 
-it("renders nothing without a target", () => {
+it("renders nothing without a target", async () => {
   state.target = null
   const { container } = render(<ArtifactViewerPanel />)
   expect(container).toBeEmptyDOMElement()
 })
 
-it("shows header, version switch and the screens with the entrypoint first", () => {
+it("shows header, version switch and the screens with the entrypoint first", async () => {
   render(<ArtifactViewerPanel />)
   expect(screen.getByRole("heading", { name: "Launch site" })).toBeInTheDocument()
   expect(screen.getByText("Draft")).toBeInTheDocument()
@@ -87,7 +93,7 @@ it("shows header, version switch and the screens with the entrypoint first", () 
   expect(state.close).toHaveBeenCalled()
 })
 
-it("hides the Shared segment when the latest version is shared", () => {
+it("hides the Shared segment when the latest version is shared", async () => {
   state.snapshot.data = snap({ shared_version: 3 })
   render(<ArtifactViewerPanel />)
   expect(within(screen.getByRole("radiogroup", { name: "Version" })).getAllByRole("radio")).toHaveLength(1)
@@ -95,7 +101,7 @@ it("hides the Shared segment when the latest version is shared", () => {
   expect(screen.queryByRole("button", { name: "Share" })).toBeNull()
 })
 
-it("switches to the shared version and offers to share the latest", () => {
+it("switches to the shared version and offers to share the latest", async () => {
   render(<ArtifactViewerPanel />)
   fireEvent.click(screen.getByRole("radio", { name: "Shared · v2" }))
   expect(state.versionArg.at(-1)).toBe(2)
@@ -108,17 +114,17 @@ it("switches to the shared version and offers to share the latest", () => {
   expect(state.share).toHaveBeenCalledWith({ base_version: 3, version: 3 }, expect.anything())
 })
 
-it("offers Back to chat in fullscreen", () => {
+it("offers Back to chat in fullscreen", async () => {
   render(<ArtifactViewerPanel variant="fullscreen" />)
   expect(screen.getByRole("button", { name: "Back to chat" })).toBeInTheDocument()
   expect(screen.queryByRole("button", { name: "Close viewer" })).toBeNull()
 })
 
-it.each([["Send to agent", true], ["Save comment", false]] as const)("%s posts the exact anchor with send_to_agent=%s", (button, send) => {
+it.each([["Send to agent", true], ["Save comment", false]] as const)("%s posts the exact anchor with send_to_agent=%s", async (button, send) => {
   render(<ArtifactViewerPanel />)
   selectHero()
   expect(screen.getByText(/On #hero/)).toHaveTextContent("On #hero · “Big idea” · v3")
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Make it bolder" } })
+  await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Make it bolder" } })
   fireEvent.click(screen.getByRole("button", { name: button }))
   expect(state.comment).toHaveBeenCalledWith(
     { version: 3, path: "home.html", selector: "#hero", quote: "Big idea", text: "Make it bolder", send_to_agent: send },
@@ -128,7 +134,7 @@ it.each([["Send to agent", true], ["Save comment", false]] as const)("%s posts t
   expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull()
 })
 
-it("keeps the segmented screen switch for up to four screens and adds a compact select only beyond", () => {
+it("keeps the segmented screen switch for up to four screens and adds a compact select only beyond", async () => {
   render(<ArtifactViewerPanel />)
   expect(screen.getByRole("radiogroup", { name: "Screen" }).parentElement!.className).not.toContain("hidden")
   expect(screen.queryByRole("combobox", { name: "Screen (compact)" })).toBeNull()
@@ -139,7 +145,7 @@ it("keeps the segmented screen switch for up to four screens and adds a compact 
   expect(screen.getByRole("combobox", { name: "Screen (compact)" })).toBeInTheDocument()
 })
 
-it("labels screens by their <title>", () => {
+it("labels screens by their <title>", async () => {
   const titled = (path: string, title: string) => ({ path, content: `<title>${title}</title><body>x</body>`, media_type: "text/html" })
   state.snapshot.data = snap({ manifest: { version: 3, entrypoint: "plans.html", files: [titled("plans.html", "Our plans"), titled("faq.html", "Questions")] } })
   render(<ArtifactViewerPanel />)
@@ -147,29 +153,29 @@ it("labels screens by their <title>", () => {
   expect(screen.getByTitle("Preview of Our plans")).toBeInTheDocument()
 })
 
-it("drops the sent notice when a new version arrives or a new selection starts", () => {
-  const send = () => {
+it("drops the sent notice when a new version arrives or a new selection starts", async () => {
+  const send = async () => {
     selectHero()
-    fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
+    await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
     fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
     act(() => state.comment.mock.calls.at(-1)![1].onSuccess({}))
     expect(screen.getByText("Comment saved for the agent")).toBeInTheDocument()
   }
   const { rerender } = render(<ArtifactViewerPanel />)
-  send()
+  await send()
   fireEvent.click(screen.getByRole("button", { name: "Select" }))
   expect(screen.queryByText("Comment saved for the agent")).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "Select" }))
-  send()
+  await send()
   state.snapshot = { ...state.snapshot, data: snap({ latest_version: 4, manifest: { ...snap().manifest, version: 4 } }) }
   rerender(<ArtifactViewerPanel />)
   expect(screen.queryByText("Comment saved for the agent")).toBeNull()
 })
 
-it("keeps the draft and shows one conflict banner on a version conflict", () => {
+it("keeps the draft and shows one conflict banner on a version conflict", async () => {
   render(<ArtifactViewerPanel />)
   selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Keep me" } })
+  await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Keep me" } })
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   act(() => state.comment.mock.calls[0][1].onError(err(409, "artifact_version_conflict")))
   act(() => state.comment.mock.calls[0][1].onError(err(409, "artifact_version_conflict")))
@@ -180,10 +186,10 @@ it("keeps the draft and shows one conflict banner on a version conflict", () => 
   expect(state.snapshot.refetch).toHaveBeenCalled()
 })
 
-it("asks for a new selection when the anchor no longer matches", () => {
+it("asks for a new selection when the anchor no longer matches", async () => {
   render(<ArtifactViewerPanel />)
   selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Draft" } })
+  await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Draft" } })
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   act(() => state.comment.mock.calls[0][1].onError(err(409, "artifact_anchor_mismatch")))
   expect(screen.getByText("This element changed. Select it again.")).toBeInTheDocument()
@@ -191,14 +197,14 @@ it("asks for a new selection when the anchor no longer matches", () => {
   expect(screen.getByRole("button", { name: "Send to agent" })).toBeDisabled()
 })
 
-it("warns about quota and reports a full history", () => {
+it("warns about quota and reports a full history", async () => {
   state.snapshot.data = snap({ quota: { used_bytes: 8 * 1024 * 1024, limit_bytes: 10 * 1024 * 1024, warning: true } })
   render(<ArtifactViewerPanel />)
   expect(screen.getByText("This project is close to its limit")).toBeInTheDocument()
   expect(screen.getByText(/8\.0 MB of 10 MB \(80%\)\. History is never deleted without you\./)).toBeInTheDocument()
   expect(screen.getByRole("progressbar", { name: "History storage used" })).toHaveAttribute("aria-valuenow", "80")
   selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "x" } })
+  await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "x" } })
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   act(() => state.comment.mock.calls[0][1].onError(err(413, "artifact_history_quota")))
   expect(screen.getByText("Saving is paused")).toBeInTheDocument()
@@ -206,7 +212,7 @@ it("warns about quota and reports a full history", () => {
   expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("x")
 })
 
-it("restores against the latest version from the history list", () => {
+it("restores against the latest version from the history list", async () => {
   render(<ArtifactViewerPanel />)
   expect(screen.queryByRole("region", { name: "Version history" })).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: "History" }))
@@ -225,16 +231,16 @@ it("restores against the latest version from the history list", () => {
   expect(state.versionArg.at(-1)).toBe(1)
 })
 
-it("opens history for target.tab=versions", () => {
+it("opens history for target.tab=versions", async () => {
   state.target = { slug: "launch", tab: "versions" }
   render(<ArtifactViewerPanel />)
   expect(screen.getByRole("region", { name: "Version history" })).toHaveFocus()
 })
 
-it("keeps an unsent comment when a card asks for the comments or history of the same project", () => {
+it("keeps an unsent comment when a card asks for the comments or history of the same project", async () => {
   const { rerender } = render(<ArtifactViewerPanel />)
   selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
+  await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
   state.target = { slug: "launch", tab: "comments" }
   rerender(<ArtifactViewerPanel />)
   expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Bolder")
@@ -244,7 +250,7 @@ it("keeps an unsent comment when a card asks for the comments or history of the 
   expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Bolder")
 })
 
-it("names the reader's own comments You and never shows a raw account id", () => {
+it("names the reader's own comments You and never shows a raw account id", async () => {
   state.snapshot.data = snap({ comments: [
     comment({ id: "c1", path: "home.html", text: "Mine", author: "user-me" }),
     comment({ id: "c2", path: "home.html", text: "Theirs", author: "cmuxw94hh0001de39519d" }),
@@ -261,7 +267,7 @@ it("Send to agent starts the agent in this chat for the saved comment and offers
   state.snapshot.data=snap({origin:{chat_id:"origin-chat",agent_id:"origin-agent"}})
   render(<ArtifactViewerPanel />)
   selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
+  await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   const saved = { id: "cm9", version: 3, path: "home.html", selector: "#hero", quote: "Big idea", text: "Bolder", task_id: "t9" }
   await act(async () => { state.comment.mock.calls.at(-1)![1].onSuccess(saved) })
@@ -282,13 +288,13 @@ it("Save only never starts the agent", async () => {
   state.sendToAgent = sendToAgent
   render(<ArtifactViewerPanel />)
   selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Later" } })
+  await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Later" } })
   fireEvent.click(screen.getByRole("button", { name: "Save comment" }))
   await act(async () => { state.comment.mock.calls.at(-1)![1].onSuccess({ id: "cm8", version: 3, path: "home.html", selector: "#hero", quote: "Big idea", text: "Later" }) })
   expect(sendToAgent).not.toHaveBeenCalled()
 })
 
-it("says so when the screen has nothing a comment can anchor to", () => {
+it("says so when the screen has nothing a comment can anchor to", async () => {
   const bare = { path: "home.html", content: "<body><h1>No ids here</h1></body>", media_type: "text/html" }
   state.snapshot.data = snap({ manifest: { ...snap().manifest, entrypoint: "home.html", files: [bare] } })
   render(<ArtifactViewerPanel />)
@@ -297,13 +303,13 @@ it("says so when the screen has nothing a comment can anchor to", () => {
   expect(screen.getByText(/nothing on this screen can take a comment/i)).toBeInTheDocument()
 })
 
-it("does not warn on a screen with anchorable parts", () => {
+it("does not warn on a screen with anchorable parts", async () => {
   render(<ArtifactViewerPanel />)
   fireEvent.click(screen.getByRole("button", { name: "Select" }))
   expect(screen.queryByText(/nothing on this screen can take a comment/i)).toBeNull()
 })
 
-it("names version authors You or Agent instead of account and run ids", () => {
+it("names version authors You or Agent instead of account and run ids", async () => {
   state.target = { slug: "launch", tab: "versions" }
   state.snapshot.data = snap({ versions: [
     { version: 1, message: "First", actor: "user-me", created_at: "2026-10-20T10:00:00Z" },
@@ -318,7 +324,7 @@ it("names version authors You or Agent instead of account and run ids", () => {
   expect(rows.queryByText(/cmuxw9|msg_/)).toBeNull()
 })
 
-it("shares only when the viewer can write, after confirming", () => {
+it("shares only when the viewer can write, after confirming", async () => {
   render(<ArtifactViewerPanel />)
   fireEvent.click(screen.getByRole("button", { name: "Share" }))
   expect(screen.getByText(/People with access will see v3. Later versions stay private until you share them./)).toBeInTheDocument()
@@ -330,7 +336,7 @@ it("shares only when the viewer can write, after confirming", () => {
   expect(screen.queryByRole("button", { name: /Share|Restore|History/ })).toBeNull()
 })
 
-it.each([[403, "You can't open this artifact"], [404, "This artifact isn't available"]] as const)("hides the project behind a generic message on %i", (status, message) => {
+it.each([[403, "You can't open this artifact"], [404, "This artifact isn't available"]] as const)("hides the project behind a generic message on %i", async (status, message) => {
   state.snapshot = { data: undefined, isLoading: false, error: err(status, "forbidden"), refetch: vi.fn() }
   render(<ArtifactViewerPanel />)
   expect(screen.getByText(message)).toBeInTheDocument()
@@ -351,7 +357,7 @@ it.each<[Partial<ArtifactComment>, string | null]>([
   expect(commentQueueChip(comment(patch))?.label ?? null).toBe(label)
 })
 
-it("lists the queue, focuses it for target.tab=comments and jumps to the comment's screen", () => {
+it("lists the queue, focuses it for target.tab=comments and jumps to the comment's screen", async () => {
   state.target = { slug: "launch", tab: "comments" }
   state.snapshot.data = snap({ comments: [comment({ id: "c1", path: "about.html", text: "Fix the title", status: "working", author: "Ada" })] })
   render(<ArtifactViewerPanel />)
@@ -363,7 +369,7 @@ it("lists the queue, focuses it for target.tab=comments and jumps to the comment
   expect(within(screen.getByRole("radiogroup", { name: "Screen" })).getByRole("radio", { name: "About" })).toHaveAttribute("aria-checked", "true")
 })
 
-it.each([403, 404])("drops the cached project when a background refresh answers %i: no stale preview after access is lost", status => {
+it.each([403, 404])("drops the cached project when a background refresh answers %i: no stale preview after access is lost", async status => {
   state.snapshot = { data: snap(), isLoading: false, error: err(status, "forbidden"), refetch: vi.fn() }
   render(<ArtifactViewerPanel />)
   expect(screen.getByText(status === 403 ? "You can't open this artifact" : "This artifact isn't available")).toBeInTheDocument()
@@ -371,7 +377,7 @@ it.each([403, 404])("drops the cached project when a background refresh answers 
   expect(screen.queryByText("Launch site")).toBeNull()
 })
 
-it("keeps the last project through a transient refresh failure", () => {
+it("keeps the last project through a transient refresh failure", async () => {
   state.snapshot = { data: snap(), isLoading: false, error: err(0, "unavailable"), refetch: vi.fn() }
   render(<ArtifactViewerPanel />)
   expect(screen.getByTitle(/Preview of/)).toBeInTheDocument()
@@ -383,7 +389,7 @@ for (const phase of ["working", "answered"] as const) {
   state.sendToAgent = vi.fn(() => new Promise<boolean>(resolve => { resolveDispatch = resolve }))
   const view = render(<ArtifactViewerPanel />)
   selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
+  await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   const saved: ArtifactComment = { id: "cm9", version: 3, path: "home.html", selector: "#hero", quote: "Big idea", text: "Bolder", task_id: "t9", status: "pending" }
   await act(async () => { state.comment.mock.calls.at(-1)![1].onSuccess(saved) })
@@ -400,7 +406,7 @@ it("keeps a failed pending delivery Retry when another task is answered, then cl
  state.sendToAgent = vi.fn().mockResolvedValue(false)
  const view = render(<ArtifactViewerPanel />)
  selectHero()
- fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
+ await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Bolder" } })
  fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
  const saved: ArtifactComment = { id: "cm9", version: 3, path: "home.html", selector: "#hero", quote: "Big idea", text: "Bolder", task_id: "t9", status: "pending" }
  await act(async () => { state.comment.mock.calls.at(-1)![1].onSuccess(saved) })
@@ -414,7 +420,7 @@ it("keeps a failed pending delivery Retry when another task is answered, then cl
  expect(state.sendToAgent).toHaveBeenCalledTimes(1)
 })
 
-it("preserves a legacy Project's ordinary preview with a dashboard.json asset when Dashboard is off", () => {
+it("preserves a legacy Project's ordinary preview with a dashboard.json asset when Dashboard is off", async () => {
   vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", "false")
   try {
     const snapshot = snap()
@@ -428,7 +434,7 @@ it("preserves a legacy Project's ordinary preview with a dashboard.json asset wh
 })
 
 
-it.each([["true", true, "Dashboard"], ["false", true, "Project"], ["true", false, "Project"]] as const)("labels only the opted-in selected valid Dashboard (%s/%s)", (flag, valid, label) => {
+it.each([["true", true, "Dashboard"], ["false", true, "Project"], ["true", false, "Project"]] as const)("labels only the opted-in selected valid Dashboard (%s/%s)", async (flag, valid, label) => {
   vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", flag)
   try {
     const snapshot = snap()
@@ -439,7 +445,7 @@ it.each([["true", true, "Dashboard"], ["false", true, "Project"], ["true", false
   } finally { vi.unstubAllEnvs() }
 })
 
-it.each([false, undefined])("keeps reader controls inert when can_write is %s", canWrite => {
+it.each([false, undefined])("keeps reader controls inert when can_write is %s", async canWrite => {
   state.snapshot.data = snap({ can_write: canWrite, comments: [comment({ text: "Existing feedback" })] })
   render(<ArtifactViewerPanel />)
   expect(screen.queryByRole("button", { name: "Select" })).toBeNull()
@@ -451,17 +457,17 @@ it.each([false, undefined])("keeps reader controls inert when can_write is %s", 
   expect(state.comment).not.toHaveBeenCalled()
 })
 
-it("does not invite a read-only reader to select an element in an empty queue", () => {
+it("does not invite a read-only reader to select an element in an empty queue", async () => {
   state.snapshot.data = snap({ can_write: false })
   render(<ArtifactViewerPanel />)
   expect(screen.getByText("No comments yet.", { exact: true })).toBeInTheDocument()
   expect(screen.queryByText(/Turn on Select/)).toBeNull()
 })
 
-it("retires a lost writer's anchor and selection while preserving the unsent draft", () => {
+it("retires a lost writer's anchor and selection while preserving the unsent draft", async () => {
   const view = render(<ArtifactViewerPanel />)
   selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Keep my draft" } })
+  await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Keep my draft" } })
   const frame = screen.getByTitle(/Preview of/) as HTMLIFrameElement
   state.snapshot.data = snap({ can_write: false })
   view.rerender(<ArtifactViewerPanel />)
@@ -482,7 +488,7 @@ it("never dispatches a saved comment callback after write authority has changed"
   state.sendToAgent = send
   const view = render(<ArtifactViewerPanel />)
   selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Preserve pending draft" } })
+  await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Preserve pending draft" } })
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   const callbacks = state.comment.mock.calls.at(-1)![1]
   const saved = { id: "pending-comment", version: 3, path: "home.html", selector: "#hero", quote: "Big idea", text: "Preserve pending draft" }
@@ -502,7 +508,7 @@ it("removes agent retry mutations when the writer becomes a reader", async () =>
   state.sendToAgent = send
   const view = render(<ArtifactViewerPanel />)
   selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Retry later" } })
+  await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Retry later" } })
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   await act(async () => state.comment.mock.calls.at(-1)![1].onSuccess({ id: "saved", version: 3 }))
   expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
@@ -513,12 +519,12 @@ it("removes agent retry mutations when the writer becomes a reader", async () =>
 })
 
 
-it.each([false, true])("fences a pending comment only when refresh loses authority (query error: %s)", queryError => {
+it.each([false, true])("fences a pending comment only when refresh loses authority (query error: %s)", async queryError => {
   const send = vi.fn().mockResolvedValue(true)
   state.sendToAgent = send
   const view = render(<ArtifactViewerPanel />)
   selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Pending refresh" } })
+  await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Pending refresh" } })
   fireEvent.click(screen.getByRole("button", { name: "Send to agent" }))
   const callbacks = state.comment.mock.calls.at(-1)![1]
   // A new ordinary snapshot object and newer private version are not a permission change.
@@ -533,7 +539,7 @@ it.each([false, true])("fences a pending comment only when refresh loses authori
   })
 })
 
-it.each([["true", "slides", "typed"], ["true", undefined, "unsupported"], ["false", "slides", "legacy"]] as const)("routes the selected deck safely with Slides flag %s and kind %s", (flag, kind, mode) => {
+it.each([["true", "slides", "typed"], ["true", undefined, "unsupported"], ["false", "slides", "legacy"]] as const)("routes the selected deck safely with Slides flag %s and kind %s", async (flag, kind, mode) => {
   vi.stubEnv("NEXT_PUBLIC_ARTIFACT_SLIDES", flag)
   try {
     const data = Object.assign(snap(), { artifact_kind: kind })
@@ -549,7 +555,7 @@ it.each([["true", "slides", "typed"], ["true", undefined, "unsupported"], ["fals
   } finally { vi.unstubAllEnvs() }
 })
 
-it("refuses ambiguous deck and dashboard source without either preview", () => {
+it("refuses ambiguous deck and dashboard source without either preview", async () => {
   vi.stubEnv("NEXT_PUBLIC_ARTIFACT_SLIDES", "true")
   vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", "true")
   try {
@@ -676,12 +682,12 @@ it.each(["another-origin",null])("fences an old Retry refresh after origin chang
  expect(state.sendToAgent).not.toHaveBeenCalled()
 })
 
-it.each([false,undefined,"true"])("withholds owner actions from an editor when capabilities are %s",cap=>{
+it.each([false,undefined,"true"])("withholds owner actions from an editor when capabilities are %s", async cap =>{
  state.snapshot.data=snap({can_share:cap,can_restore:cap,can_send_to_agent:cap} as unknown as Partial<ArtifactProjectSnapshot>)
  render(<ArtifactViewerPanel />)
  fireEvent.click(screen.getByRole("button",{name:"History"}))
  expect(screen.queryAllByRole("button",{name:/Share|Restore as new version/})).toHaveLength(0)
- selectHero();fireEvent.change(screen.getByRole("textbox",{name:"Comment"}),{target:{value:"Feedback"}})
+ selectHero();await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox",{name:"Comment"}),{target:{value:"Feedback"}})
  expect(screen.queryByRole("button",{name:"Send to agent"})).toBeNull()
  fireEvent.submit(screen.getByRole("form",{name:"New comment"}))
  expect(state.comment).toHaveBeenCalledWith(expect.objectContaining({send_to_agent:false}),expect.anything())
@@ -689,14 +695,14 @@ it.each([false,undefined,"true"])("withholds owner actions from an editor when c
 it("retires an acknowledged agent comment when send permission changes while Edit remains",async()=>{
  const send=vi.fn().mockResolvedValue(true);state.sendToAgent=send
  const view=render(<ArtifactViewerPanel />)
- selectHero();fireEvent.change(screen.getByRole("textbox",{name:"Comment"}),{target:{value:"Feedback"}})
+ selectHero();await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox",{name:"Comment"}),{target:{value:"Feedback"}})
  fireEvent.click(screen.getByRole("button",{name:"Send to agent"}))
  const success=state.comment.mock.calls[0][1].onSuccess
  state.snapshot.data=snap({can_send_to_agent:false});view.rerender(<ArtifactViewerPanel />)
  await act(async()=>success(comment({task_id:"task"})))
  expect(send).not.toHaveBeenCalled()
 })
-it("offers only editors an escaped unpinned source editor link",()=>{
+it("offers only editors an escaped unpinned source editor link", async () =>{
  state.target={slug:"a/b ?&"}
  render(<ArtifactViewerPanel variant="library" />)
  expect(screen.getByRole("link",{name:"Edit source"})).toHaveAttribute("href","/pages/a%2Fb%20%3F%26?artifact=1&workspace_id=ws1")
@@ -704,21 +710,60 @@ it("offers only editors an escaped unpinned source editor link",()=>{
  expect(screen.queryByRole("link",{name:"Edit source"})).toBeNull()
 })
 
-it("offers an unsent comment back after the tab was lost, only to the same person", () => {
-  const storage = new Map<string,string>()
-  vi.mocked(localStorage.getItem).mockImplementation(key => storage.get(key) ?? null)
-  vi.mocked(localStorage.setItem).mockImplementation((key,value) => { storage.set(key,value) })
-  vi.mocked(localStorage.removeItem).mockImplementation(key => { storage.delete(key) })
-  const first = render(<ArtifactViewerPanel />)
+it("offers an unsent comment back after the browser was killed, only to the same person", async () => {
+  const disk = new Map<string,string>()
+  setArtifactDraftStore({
+  capture: async () => [], removeCaptured: async rows => { for(const row of rows) disk.delete(JSON.stringify(row.row)) },
+    get: async key => disk.get(JSON.stringify(key)),
+    put: async (key, text) => { disk.set(JSON.stringify(key), text) },
+    delete: async key => { disk.delete(JSON.stringify(key)) },
+    purge: async keep => { for (const key of [...disk.keys()]) if (keep === null || JSON.parse(key)[0] !== keep) disk.delete(key) },
+  })
+  vi.mocked(localStorage.setItem).mockClear()
+  try {
+    const first = render(<ArtifactViewerPanel />)
+    selectHero()
+    await waitFor(()=>expect(screen.getByRole("textbox",{name:"Comment"})).not.toBeDisabled()); fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Typed before the crash" } })
+    await waitFor(() => expect(disk.get(JSON.stringify(["user-me", "artifact-viewer-comment", "ws1", "p1"]))).toBe("Typed before the crash"))
+    expect(localStorage.setItem).not.toHaveBeenCalled()
+    first.unmount()
+    render(<ArtifactViewerPanel />)
+    selectHero()
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Typed before the crash"))
+    cleanup()
+    state.userId = "someone-else"
+    render(<ArtifactViewerPanel />)
+    selectHero()
+    await act(async () => {})
+    expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("")
+    // Sign-out deletes the draft for the next person on this browser.
+    await purgeOtherArtifactDrafts(null)
+    expect(disk.size).toBe(0)
+  } finally { setArtifactDraftStore(undefined) }
+})
+
+it.each([undefined, "library"] as const)("lets a Comment-level reader leave plain feedback on the shared version (variant %s)", async variant => {
+  state.snapshot.data = snap({ can_write: false, can_share: false, can_restore: false, can_send_to_agent: false, can_comment: true, latest_version: 2, shared_version: 2, manifest: { ...snap().manifest, version: 2 } })
+  render(<ArtifactViewerPanel variant={variant} />)
   selectHero()
-  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Typed before the crash" } })
-  first.unmount()
-  render(<ArtifactViewerPanel />)
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Comment" })).not.toBeDisabled())
+  fireEvent.change(screen.getByRole("textbox", { name: "Comment" }), { target: { value: "Reader feedback" } })
+  expect(screen.queryByRole("button", { name: "Send to agent" })).toBeNull()
+  expect(screen.queryByRole("button", { name: "Add to queue" })).toBeNull()
+  expect(screen.queryByRole("link", { name: "Edit source" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Save comment" }))
+  expect(state.comment).toHaveBeenCalledWith(
+    { version: 2, path: "home.html", selector: "#hero", quote: "Big idea", text: "Reader feedback", send_to_agent: false },
+    expect.anything(),
+  )
+})
+
+it("retires a reader's selection when the Comment grant is lost", () => {
+  state.snapshot.data = snap({ can_write: false, can_send_to_agent: false, can_comment: true })
+  const view = render(<ArtifactViewerPanel />)
   selectHero()
-  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("Typed before the crash")
-  cleanup()
-  state.userId = "someone-else"
-  render(<ArtifactViewerPanel />)
-  selectHero()
-  expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue("")
+  state.snapshot.data = snap({ can_write: false, can_send_to_agent: false, can_comment: false })
+  view.rerender(<ArtifactViewerPanel />)
+  expect(screen.queryByRole("button", { name: "Select" })).toBeNull()
+  expect(screen.queryByRole("form", { name: "New comment" })).toBeNull()
 })

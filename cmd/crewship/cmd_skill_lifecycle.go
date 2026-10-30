@@ -13,7 +13,7 @@ import (
 // runSkillLifecycle resolves the skill and sends the one POST its command owns.
 // Each command passes its own call, with the route spelled out in full, so the
 // route-contract test can see which endpoint it hits.
-func runSkillLifecycle(args []string, done string, post func(c *cli.Client, ws, skillID string) (*http.Response, error)) error {
+func runSkillLifecycle(cmd *cobra.Command, args []string, done string, post func(c *cli.Client, ws, skillID string) (*http.Response, error)) error {
 	if err := requireAuth(); err != nil {
 		return err
 	}
@@ -32,7 +32,16 @@ func runSkillLifecycle(args []string, done string, post func(c *cli.Client, ws, 
 	if err := cli.CheckError(resp); err != nil {
 		return err
 	}
-	_ = resp.Body.Close()
+	raw, err := readServerDocument(resp)
+	if err != nil {
+		return err
+	}
+	// -f json: the server's {skill_id, lifecycle_state} — the state the
+	// skill is actually in, which for a no-op archive is not "archived by
+	// this call".
+	if handled, err := machineMutationResult(cmd, raw, map[string]any{"skill_id": skillID}); handled {
+		return err
+	}
 	cli.PrintSuccess(fmt.Sprintf("Skill %s %s", args[0], done))
 	return nil
 }
@@ -48,7 +57,7 @@ Examples:
   crewship skill archive my-old-skill`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runSkillLifecycle(args, "archived", func(c *cli.Client, ws, id string) (*http.Response, error) {
+		return runSkillLifecycle(cmd, args, "archived", func(c *cli.Client, ws, id string) (*http.Response, error) {
 			return c.Post("/api/v1/workspaces/"+ws+"/skills/"+id+"/archive", nil)
 		})
 	},
@@ -65,7 +74,7 @@ Examples:
   crewship skill restore my-old-skill`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runSkillLifecycle(args, "restored", func(c *cli.Client, ws, id string) (*http.Response, error) {
+		return runSkillLifecycle(cmd, args, "restored", func(c *cli.Client, ws, id string) (*http.Response, error) {
 			return c.Post("/api/v1/workspaces/"+ws+"/skills/"+id+"/restore", nil)
 		})
 	},

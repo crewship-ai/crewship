@@ -65,9 +65,9 @@ package memory
 //     changing agent UX. Defense-in-depth, not gatekeeping.
 //
 // Wired into the server lifecycle alongside the harbormaster
-// timeout sweeper. Disabled gracefully if fsnotify init fails on
-// the host (Linux-only; macOS dev boxes don't have crew containers
-// in the first place, so this never fires there).
+// timeout sweeper. If fsnotify cannot start on the host (inotify
+// limits, unsupported filesystem) the watcher degrades to the poll
+// fallback instead of disabling the audit.
 
 import (
 	"context"
@@ -137,12 +137,17 @@ type AuditWatcherConfig struct {
 	// in well under a second; production leaves the default so a
 	// crew provision doesn't burn a poll storm.
 	DeferredBootInterval time.Duration
+
+	// watchHooks is forwarded to WatchConfig.hooks (test seam only).
+	watchHooks fsnotifyHooks
 }
 
 // StartAuditWatcher launches a goroutine that watches BasePath/crews
 // for memory-file changes and audits each one (scrubber + version row
 // + journal). Returns immediately. The goroutine exits when ctx is
-// cancelled OR fsnotify init fails (logged at warn; server stays up).
+// cancelled or the watch root cannot be watched at all. An fsnotify
+// failure alone does not stop it: the watcher logs a warning and keeps
+// auditing through the poll fallback.
 //
 // db must be a live SQL connection; journal an Emitter; logger a
 // non-nil slog.Logger. Passing nil for any of these is a programming
@@ -205,18 +210,7 @@ func waitForRootThenWatch(ctx context.Context, db *sql.DB, j journal.Emitter, cf
 }
 
 func runAuditWatcher(ctx context.Context, db *sql.DB, j journal.Emitter, cfg AuditWatcherConfig, root string, logger *slog.Logger) {
-	// UseFsnotify=true so the audit lands within fsnotify's
-	// sub-second debounce window rather than the 30s poll
-	// fallback. The poll fallback still runs (PollInterval > 0)
-	// so the audit also catches the bind-mount cases where
-	// fsnotify on Docker Desktop / NFS misses events — fsnotify
-	// is the fast path, poll is the safety net.
-	wc := WatchConfig{
-		UseFsnotify:  true,
-		Debounce:     cfg.DebounceInterval,
-		PollInterval: cfg.PollFallbackInterval,
-		Logger:       logger,
-	}
+	wc := auditWatchConfig(cfg, logger)
 	w, err := StartWatcher(ctx, root, wc)
 	if err != nil {
 		logger.Warn("memory audit watcher: StartWatcher failed; audit disabled this boot",
@@ -244,6 +238,36 @@ func runAuditWatcher(ctx context.Context, db *sql.DB, j journal.Emitter, cfg Aud
 				}
 			}
 		}
+	}
+}
+
+// defaultAuditPollFallback is the poll cadence used when
+// AuditWatcherConfig.PollFallbackInterval is zero.
+const defaultAuditPollFallback = 30 * time.Second
+
+// auditWatchConfig maps the audit config onto the generic watcher.
+//
+// UseFsnotify=true so the audit lands within fsnotify's sub-second
+// debounce window rather than the 30s poll fallback. The poll
+// fallback still runs (PollInterval > 0) so the audit also catches
+// the bind-mount cases where fsnotify on Docker Desktop / NFS misses
+// events — fsnotify is the fast path, poll is the safety net.
+//
+// PollFallbackInterval zero means the documented 30 s default, never
+// "no polling": production wiring leaves it zero, and an fsnotify-only
+// audit watcher would record nothing once fsnotify fails or misses an
+// event.
+func auditWatchConfig(cfg AuditWatcherConfig, logger *slog.Logger) WatchConfig {
+	poll := cfg.PollFallbackInterval
+	if poll <= 0 {
+		poll = defaultAuditPollFallback
+	}
+	return WatchConfig{
+		UseFsnotify:  true,
+		Debounce:     cfg.DebounceInterval,
+		PollInterval: poll,
+		Logger:       logger,
+		hooks:        cfg.watchHooks,
 	}
 }
 

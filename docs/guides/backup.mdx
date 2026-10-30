@@ -130,7 +130,7 @@ Inside `payload.age`, bundles carry three distinct notions of "memory" — don't
 A workspace bundle whose pages carry [custom applications](/guides/pages#custom-applications) has one more section, **`page-projects/`**, sealed in the same payload:
 
 - `page-projects/sources/<sha256>.yaml` — every source project a draft, revision, build or publication row still points at, as the same YAML `crewship page project pack` prints.
-- `page-projects/artifacts/<sha256>.json` — every compiled artifact a build or publication row points at.
+- `page-projects/artifacts/<sha256>.json` — every compiled build output a build or publication row points at. These are Pages application builds, not [Artifacts](/guides/artifacts/operations); Artifacts live in database rows and need no extra section (see [Artifacts in a backup](#artifacts-in-a-backup)).
 - `page-projects/git/<page-key>/<kind>/<id>` and `…/shallow` — the Git objects behind the retained checkpoints, truncated at the retained checkpoint boundaries so the bundle carries what `crewship page project history` can restore and nothing older. `<page-key>` is the sha256 of the page id; restore maps it onto the target's page ids, so a renamed restore lands it too.
 
 This section is written under a shared lease on the page project store, held from before the DB dump, so no save or build can move a pointer between the dump and the files it references; a source or artifact the rows name but the disk no longer holds fails the backup rather than producing a bundle that would fail to restore. The section only exists when the `page_project_*` rows reference something, and it needs `CREWSHIP_PAGE_PROJECTS_PATH` on the instance taking the backup — a bundle whose rows reference sources with no path configured is refused at create time. On restore, the whole section is verified in a staging directory — every checksum, every checkpoint against the definition the row recorded — **before** the database transaction, and applied under an exclusive lease before the commit; a dry run verifies it too. A bundle whose `page_project_*` rows have no matching section is refused as incomplete, and one whose section references nothing the rows name is refused as well, so a database-only restore can never leave a live publication pointing at code the instance does not hold.
@@ -184,6 +184,23 @@ Most tables have more than one such chain, and **which one is chosen decides whi
 The practical consequence for an operator: a table added by a migration is picked up automatically, but only once it declares an intent in `BackupTableIntent`. Until then, restore-time drift detection refuses rather than guessing — see [`migrations`](/guides/migrations).
 
 `memory_included` counts **files inside a `.memory` directory**, not tar entries. The distinction matters because the container runtime creates `crews/<id>/shared` and `crews/<id>/agents` when a crew container is created, so counting entries would report memory for every provisioned crew whether or not an agent had ever written a note. `crew_files_included` is the separate flag for "the `/crew` section carries something" — `init.sh` and other crew-level content — and is what decides whether the section is restored at all.
+
+### Artifacts in a backup
+
+[Artifacts](/guides/artifacts/operations) are stored entirely in database rows, so a workspace bundle carries them in its DB dump with no extra payload section. All of these tables belong to the `pages` content category:
+
+| What | Tables |
+|---|---|
+| Versions of a Project, Dashboard, Slides, Design, Word or Sheet artifact | `artifact_version_heads`, `artifact_versions`, `artifact_version_blobs` (file content, stored losslessly) |
+| Live Design canvas, including edits not yet saved as a version | `artifact_design_documents` |
+| Dashboard data | `artifact_data_collections`, `artifact_data_documents` |
+| Version-bound comments, their tasks and replies, and the chat an artifact came from | `artifact_project_comments`, `artifact_project_comment_tasks`, `artifact_project_comment_replies`, `artifact_project_origins` |
+| Word and Sheet documents | `craft_native_documents`, `mooring_documents`, `mooring_receipts`, `mooring_collab_*` |
+| Workbooks | `gridcraft_heads`, `gridcraft_revisions`, `gridcraft_operations`, `gridcraft_audit`, `gridcraft_outbox` |
+
+The workspace's artifact creation policy (`workspace_artifact_creation_policy`, `workspace_artifact_creation_crews`) belongs to the `agents` category. A custom plan without `pages` therefore holds no artifacts at all.
+
+Runtime authority is never carried: editing leases and lease requests, delivery gates, session owners, chat-run consents and message intents, and pending creation consents are excluded. After a restore, an editor opens the document again to get a fresh lease, and an agent needs a new permission from a person. A whole-instance recovery keeps the lease rows but clears their holders, so no editor from before the recovery can keep writing.
 
 ## Create a workspace backup
 
@@ -1095,6 +1112,8 @@ false. The categories and what each needs:
 | `pages` | Pages and their files | — |
 | `files` | Crew working files (workspace, outputs, home and tools volumes) | — |
 | `env` | Complete container environments — follows the plan's environment mode, not the list | `files` |
+
+Every artifact rides the `pages` category; see [Artifacts in a backup](#artifacts-in-a-backup).
 
 A memory-only plan therefore carries the crews and agents rows (the
 dependency), the memory tables, the crew memory trees and the memory version

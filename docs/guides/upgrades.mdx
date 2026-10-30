@@ -125,6 +125,15 @@ crewship self-update
 crewship start          # migrations apply here, after an automatic snapshot
 ```
 
+An upgrade does not switch Artifacts on. The migrations that add the Artifacts
+flags (`artifact_projects`, `artifact_dashboard_data`, `artifact_slides`,
+`artifacts_design`, and `gridcraft_editor` for live workbook editing) seed them
+with the instance default **off**, and an existing flag of the same key keeps its
+value. They stay off until you enable them; see
+[Operate Artifacts](/guides/artifacts/operations#turning-artifacts-on). Other
+migrations may seed their own flags on, so check
+[the Migrations Catalog](/guides/migrations) for a specific flag.
+
 ### Server installs (systemd): `self-update --systemd`
 
 On a long-running install managed by systemd — a VM or bare-metal server, the
@@ -349,6 +358,16 @@ pre-upgrade snapshot, which predates any v2 choice. Canonical grants are
 unaffected by the choice records.
 </Warning>
 
+<Warning>
+Artifacts, Word and Sheet documents and workbooks are stored in tables added by
+the migrations listed in the
+[Migrations Catalog](/guides/migrations#artifacts-craft-documents-and-workbooks-october-2026),
+which run between `20261018074717` and `20261028202000`.
+A build from before them refuses to start against the upgraded database. Roll
+back by restoring the matching pre-upgrade snapshot as described below, never by
+deleting migration records. The snapshot predates every artifact, version and
+dataset created after the upgrade, so those are lost.
+</Warning>
 
 Migrations are **forward-only**. An older binary will **refuse to start**
 against a database a newer binary already migrated — with an error naming

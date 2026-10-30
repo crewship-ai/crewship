@@ -64,7 +64,7 @@ const (
 // it is deliberate. A slot, unlike a credential's display name, IS an
 // environment variable and nothing else — so:
 //
-//   - accept anything credname can render (credname.Deliverable), which is
+//   - accept anything credname can render (credname.Canonical reports ok), which is
 //     LOOSER than the old regexp: `gh-token` is now a legal slot, and
 //     `GH_TOKEN` is what the agent gets.
 //   - store the rendered form (credname.Canonical), which is STRICTER than the
