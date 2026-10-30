@@ -26,7 +26,7 @@ func TestCraftNativeProposalBackupRoundTrip(t *testing.T) {
 				if _, err := source.Exec(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES(?,?,?,'Native','u_admin','{}')`, scope.ArtifactID, ws, scope.ArtifactID); err != nil {
 					t.Fatal(err)
 				}
-				principal := mooring.EditLeasePrincipal{ActorID: "u_admin", SessionID: "proposal-connection"}
+				principal := mooring.EditLeasePrincipal{ActorID: "user:u_admin", SessionID: "proposal-connection"}
 				restoredStoreLeases := func(db *sql.DB) *mooring.EditLeaseStore {
 					return mooring.NewEditLeaseStore(db, mooring.EditLeaseConfig{Enabled: true, Clock: recoveredOwnerClock{}, TTL: time.Minute, Authority: func(context.Context, *sql.Tx, mooring.EditLeaseAccess) error { return nil }})
 				}
