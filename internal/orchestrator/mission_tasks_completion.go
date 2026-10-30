@@ -16,13 +16,19 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/missionactivity"
+	"github.com/crewship-ai/crewship/internal/runauthority"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID, status, resultSummary, errorMessage string) error {
+	tx, err := e.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	var taskID, missionID, workspaceID string
 	var assignedAgentID sql.NullString
-	err := e.db.QueryRowContext(ctx,
+	err = tx.QueryRowContext(ctx,
 		`SELECT t.id,t.mission_id,t.assigned_agent_id,m.workspace_id FROM mission_tasks t JOIN missions m ON m.id=t.mission_id WHERE t.assignment_id=?`,
 		assignmentID).Scan(&taskID, &missionID, &assignedAgentID, &workspaceID)
 	if err != nil {
@@ -32,6 +38,26 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		return fmt.Errorf("lookup task for assignment %s: %w", assignmentID, err)
 	}
 
+	var applied sql.NullString
+	var currentStatus string
+	if err = tx.QueryRowContext(ctx, `SELECT completion_assignment_id,status FROM mission_tasks WHERE id=?`, taskID).Scan(&applied, &currentStatus); err != nil {
+		return err
+	}
+	if applied.Valid && applied.String == assignmentID {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+		if currentStatus == "COMPLETED" {
+			return e.unblockDependentTasks(ctx, missionID, taskID)
+		}
+		return nil
+	}
+	if currentStatus == "CANCELLED" || currentStatus == "COMPLETED" || currentStatus == "FAILED" {
+		if _, err = tx.ExecContext(ctx, `UPDATE mission_tasks SET completion_assignment_id=? WHERE id=?`, assignmentID, taskID); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	taskStatus := "COMPLETED"
 	if status == "FAILED" || status == "TIMEOUT" {
@@ -52,7 +78,7 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 	// A clean process exit is not task success. Consume the persisted outcome;
 	// nullable legacy rows retain their historical technical-status behaviour.
 	var outcome sql.NullString
-	outcomeErr := e.db.QueryRowContext(ctx, `SELECT outcome FROM assignments WHERE id=?`, assignmentID).Scan(&outcome)
+	outcomeErr := tx.QueryRowContext(ctx, `SELECT outcome FROM assignments WHERE id=?`, assignmentID).Scan(&outcome)
 	if outcomeErr != nil && !errors.Is(outcomeErr, sql.ErrNoRows) {
 		return fmt.Errorf("load assignment outcome: %w", outcomeErr)
 	}
@@ -65,21 +91,6 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		case OutcomeCancelled:
 			taskStatus = "CANCELLED"
 		}
-	}
-
-	// Circuit breaker: track consecutive failures per agent
-	if assignedAgentID.Valid {
-		e.cbMu.Lock()
-		if taskStatus == "FAILED" {
-			e.failures[assignedAgentID.String]++
-			e.logger.Warn("agent failure tracked",
-				"agent_id", assignedAgentID.String,
-				"consecutive_failures", e.failures[assignedAgentID.String],
-			)
-		} else {
-			delete(e.failures, assignedAgentID.String) // reset on success
-		}
-		e.cbMu.Unlock()
 	}
 
 	// Parse structured handoff from FULL output before truncation.
@@ -114,10 +125,10 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 			needsReview = 1
 		}
 		if confVal != nil {
-			if _, err := e.db.ExecContext(ctx,
+			if _, err := tx.ExecContext(ctx,
 				`UPDATE mission_tasks SET confidence = ?, handoff_context = ?, needs_review = ? WHERE id = ?`,
 				*confVal, handoff.Summary, needsReview, taskID); err != nil {
-				e.logger.Error("persist handoff data", "error", err, "task_id", taskID)
+				return fmt.Errorf("persist handoff: %w", err)
 			}
 		}
 		if needsReview == 1 {
@@ -134,7 +145,7 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 	// Auto-post agent comment on the issue with completion summary
 	if assignedAgentID.Valid {
 		var agentName string
-		_ = e.db.QueryRowContext(ctx, `SELECT name FROM agents WHERE id = ?`, assignedAgentID.String).Scan(&agentName)
+		_ = tx.QueryRowContext(ctx, `SELECT name FROM agents WHERE id = ?`, assignedAgentID.String).Scan(&agentName)
 
 		var commentBody string
 		if taskStatus == "AWAITING_APPROVAL" {
@@ -161,10 +172,14 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 			}
 		}
 		if commentBody != "" {
-			commentID := generateID()
-			written, commentErr := WriteAssignmentResultComment(ctx, e.db, assignmentID, workspaceID, missionID, assignedAgentID.String, commentID, commentBody, now)
+			commentID := "assignment-comment:" + assignmentID
+			written, commentErr := WriteAssignmentResultCommentTx(ctx, tx, assignmentID, workspaceID, missionID, assignedAgentID.String, commentID, commentBody, now)
 			if commentErr != nil {
-				e.logger.Warn("mission result comment withheld", "assignment_id", assignmentID, "error", commentErr)
+				if errors.Is(commentErr, runauthority.ErrUnavailable) || errors.Is(commentErr, runauthority.ErrIdentityMismatch) || errors.Is(commentErr, runauthority.ErrRequesterStale) {
+					e.logger.Warn("mission result comment withheld", "assignment_id", assignmentID, "error", commentErr)
+				} else {
+					return commentErr
+				}
 			}
 			if written {
 				// Activity log — through missionactivity.Emit, the one
@@ -183,15 +198,15 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 				} else if taskStatus == "AWAITING_APPROVAL" {
 					action = "commented"
 				}
-				if _, err := missionactivity.Emit(ctx, e.db, missionactivity.Entry{
-					ID:        generateID(),
+				if _, err := missionactivity.EmitTx(ctx, tx, missionactivity.Entry{
+					ID:        "assignment-activity:" + assignmentID,
 					MissionID: missionID,
 					ActorType: "agent",
 					ActorID:   assignedAgentID.String,
 					Action:    action,
 					Details:   commentBody,
 				}); err != nil {
-					e.logger.Error("emit mission activity", "error", err, "mission_id", missionID)
+					return err
 				}
 			}
 		}
@@ -199,12 +214,15 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 
 	// Approval gate: check if this task requires human approval before unblocking dependents.
 	if taskStatus == "COMPLETED" {
-		taskStatus = e.checkApprovalGate(ctx, taskID, missionID)
+		taskStatus, err = e.checkApprovalGateQuery(ctx, tx, taskID, missionID)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Calculate task duration
 	var startedAt sql.NullString
-	e.db.QueryRowContext(ctx, `SELECT started_at FROM mission_tasks WHERE id = ?`, taskID).Scan(&startedAt)
+	tx.QueryRowContext(ctx, `SELECT started_at FROM mission_tasks WHERE id = ?`, taskID).Scan(&startedAt)
 	var durationMs int64
 	if startedAt.Valid {
 		if st, err := time.Parse(time.RFC3339, startedAt.String); err == nil {
@@ -235,7 +253,7 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 	// container — silently resurrected it to COMPLETED. AWAITING_APPROVAL
 	// is deliberately NOT in this list: it is not terminal, and ApproveTask
 	// above transitions out of it through its own guarded UPDATE.
-	res, err := e.db.ExecContext(ctx,
+	res, err := tx.ExecContext(ctx,
 		`UPDATE mission_tasks SET `+updates+` WHERE id = ? AND status NOT IN ('CANCELLED', 'COMPLETED', 'FAILED')`, args...)
 	if err != nil {
 		return fmt.Errorf("update task %s: %w", taskID, err)
@@ -250,34 +268,46 @@ func (e *MissionEngine) OnAssignmentCompleted(ctx context.Context, assignmentID,
 		return nil
 	}
 
-	// If the task failed, attempt retry via LoopController before proceeding
+	// Persistent callback effects and loop retries commit with one receipt.
+	retried := false
 	if taskStatus == "FAILED" && e.lc != nil {
-		retried, retryErr := e.lc.RetryLoopBack(ctx, taskID, missionID)
-		if retryErr != nil {
-			e.logger.Error("loop controller retry check failed", "error", retryErr, "task_id", taskID)
+		lc := *e.lc
+		lc.db = tx
+		retried, err = lc.RetryLoopBack(ctx, taskID, missionID)
+		if err != nil {
+			return err
 		}
-		if retried {
-			e.logger.Info("task retry initiated by loop controller",
-				"task_id", taskID, "mission_id", missionID)
-			// Task was reset to PENDING — broadcast and return without checking completion
-			e.mu.Lock()
-			ms := e.active[missionID]
-			e.mu.Unlock()
-			if ms != nil {
-				e.broadcastTaskStatus(ms, taskID, "PENDING")
-				e.pw.WriteEvent(ms.TraceID, ms.CrewSlug, ProgressEvent{
-					Type:   "task_retry",
-					TaskID: taskID,
-					Error:  errorMessage,
-				})
-			}
-			return nil
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE mission_tasks SET completion_assignment_id=? WHERE id=?`, assignmentID, taskID); err != nil {
+		return err
+	}
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	// Circuit breaker: track consecutive failures per agent
+	if assignedAgentID.Valid {
+		e.cbMu.Lock()
+		if taskStatus == "FAILED" {
+			e.failures[assignedAgentID.String]++
+			e.logger.Warn("agent failure tracked",
+				"agent_id", assignedAgentID.String,
+				"consecutive_failures", e.failures[assignedAgentID.String],
+			)
+		} else {
+			delete(e.failures, assignedAgentID.String) // reset on success
 		}
+		e.cbMu.Unlock()
+	}
+
+	if retried {
+		return nil
 	}
 
 	// Unblock dependent tasks (only for completed tasks)
 	if taskStatus == "COMPLETED" {
-		e.unblockDependentTasks(ctx, missionID, taskID)
+		if err = e.unblockDependentTasks(ctx, missionID, taskID); err != nil {
+			return err
+		}
 	}
 
 	// Get mission state for broadcasting
@@ -602,15 +632,20 @@ func (e *MissionEngine) fireIssueReviewInboxNotification(ctx context.Context, ms
 
 // unblockDependentTasks transitions BLOCKED tasks to PENDING when all deps are done.
 
-func (e *MissionEngine) unblockDependentTasks(ctx context.Context, missionID, completedTaskID string) {
+func (e *MissionEngine) unblockDependentTasks(ctx context.Context, missionID, completedTaskID string) error {
 	// Load every task's status for this mission in one scan, so dep-readiness checks
 	// below are O(1) map lookups instead of one QueryRowContext per dep (was N*K queries).
-	statusRows, err := e.db.QueryContext(ctx,
+	tx, err := e.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	statusRows, err := tx.QueryContext(ctx,
 		`SELECT id, status, depends_on FROM mission_tasks WHERE mission_id = ?`,
 		missionID)
 	if err != nil {
 		e.logger.Error("query mission tasks", "error", err)
-		return
+		return err
 	}
 
 	type blockedTask struct {
@@ -643,6 +678,10 @@ func (e *MissionEngine) unblockDependentTasks(ctx context.Context, missionID, co
 			candidates = append(candidates, blockedTask{id: id, deps: deps})
 		}
 	}
+	if err = statusRows.Err(); err != nil {
+		statusRows.Close()
+		return err
+	}
 	statusRows.Close()
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -660,15 +699,19 @@ func (e *MissionEngine) unblockDependentTasks(ctx context.Context, missionID, co
 		}
 	}
 	if len(ready) == 0 {
-		return
+		return tx.Commit()
 	}
 
 	// One transaction for the whole frontier: every row takes the identical
 	// PENDING stamp, and a per-row loop both re-took SQLite's single writer
 	// lock N times and could unblock half a frontier before failing.
-	if err := e.updateTasksBatch(ctx, `status = 'PENDING', updated_at = ?`, []any{now}, ready); err != nil {
-		e.logger.Error("unblock tasks", "mission_id", missionID, "count", len(ready), "error", err)
-		return
+	for _, id := range ready {
+		if _, err = tx.ExecContext(ctx, `UPDATE mission_tasks SET status='PENDING',updated_at=? WHERE id=? AND status='BLOCKED'`, now, id); err != nil {
+			return err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return err
 	}
 
 	// Fan-out notification happens after the commit — never inside the write
@@ -677,7 +720,7 @@ func (e *MissionEngine) unblockDependentTasks(ctx context.Context, missionID, co
 	ms := e.active[missionID]
 	e.mu.Unlock()
 	if ms == nil {
-		return
+		return nil
 	}
 	for _, id := range ready {
 		e.broadcastTaskStatus(ms, id, "PENDING")
@@ -686,6 +729,7 @@ func (e *MissionEngine) unblockDependentTasks(ctx context.Context, missionID, co
 			TaskID: id,
 		})
 	}
+	return nil
 }
 
 // dispatchLeadPlanning sends the mission to the lead agent for autonomous task planning.

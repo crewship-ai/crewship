@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/runoutput"
 )
@@ -32,8 +33,16 @@ func (o *Orchestrator) AnalyzeRetainedRun(ctx context.Context, run RunState) (Re
 		parse = factory.NewStreamLineParser()
 	}
 	var inBand inBandFailure
+	var text strings.Builder
 	handler := func(event AgentEvent) {
 		inBand.observe(event)
+		if event.Type == "text" && text.Len() < 128*1024 {
+			content := event.Content
+			if remaining := 128*1024 - text.Len(); len(content) > remaining {
+				content = content[:remaining]
+			}
+			text.WriteString(content)
+		}
 		metadata, _ := event.Metadata.(map[string]any)
 		if event.Type == "result" {
 			analysis.TerminalObserved = true
@@ -96,6 +105,7 @@ func (o *Orchestrator) AnalyzeRetainedRun(ctx context.Context, run RunState) (Re
 	// Structured adapters should report a terminal result. Unknown success is
 	// parked for reconciliation rather than fabricating a successful envelope.
 	analysis.Unknown = adapter.UseStreamJSON() && !analysis.TerminalObserved && !analysis.Failed
+	analysis.Metadata["assignment_result"] = text.String()
 	analysis.Metadata["semantic_terminal_observed"] = analysis.TerminalObserved
 	if analysis.Unknown {
 		analysis.Metadata["terminal_envelope_missing"] = true
