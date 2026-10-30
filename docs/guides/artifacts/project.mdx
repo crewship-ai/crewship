@@ -29,21 +29,46 @@ Dashboards and Slides are Projects with extra files and have their own flags
 
 ## Create a Project
 
-Only an agent writes a Project, and only after you allow it for one message.
+In the app, a new Project is written by an agent, and only after you allow it
+for one message.
+
+### Before you start
+
+- The workspace flag `artifact_projects` is on (see the note above).
+- You have an agent that can run: it has a model set. Its chat shows "Model not
+  set" otherwise, and nothing is created.
+- The workspace artifact policy is on and lists that agent's crew. A workspace
+  owner or admin checks it with `crewship workspace artifact-policy show` and
+  changes it with `crewship workspace artifact-policy set`. Without it the
+  agent's create call is refused.
+
+### Steps
 
 1. Open **Artifacts** and click **New artifact**.
 2. **Project** ("Screens that link together") is selected. Under **Start with**
    choose **Describe it** and write what the screens should contain, or choose
    **From template** (Pricing site, Sign-up flow, Landing page, Status page).
-3. Click **Continue in chat**. The chat opens with your description as an
-   unsent draft. Open a direct conversation with the agent who should build it;
-   the draft goes into that conversation's composer.
-4. Turn on **Create artifact project** under the composer. It reads
+3. Click **Continue in chat**. Chat opens on the conversation you were last in,
+   with your description already in the composer as an unsent draft, for
+   example "Create a project: …". Nothing is sent yet.
+4. Check the agent name at the top of the chat. If it is the agent who should
+   build the Project, go on. If you have several agents or want a different
+   one, copy the draft text, open that agent under **Agents** in the sidebar,
+   start a chat with it and paste the text into its composer. The draft does
+   not move with you to another conversation.
+5. Turn on **Create artifact project** under the composer. It reads
    "Private project · Sharing requires your approval".
-5. Send the message.
+6. Send the message.
 
-You can also skip the dialog: in any direct chat with an agent, turn on
+You can also skip the dialog: in any private chat with an agent, turn on
 **Create artifact project** and describe the screens yourself.
+
+People with permission to create pages can also create a Project from the
+command line, without an agent, by supplying all files in one manifest:
+`crewship page artifact create <slug> --name "<name>" --file manifest.json`.
+See [Artifact projects in the CLI reference](/cli/page#artifact-projects-disabled-by-default).
+A Project created this way has no source chat, so its comments are saved but
+cannot be sent to an agent.
 
 The agent saves all files in one step as version 1. The new Project is private
 to you until you share a version. The agent cannot share it, choose an owner or
@@ -108,7 +133,7 @@ change.
 3. Click the element. A numbered card opens on the canvas, titled with the
    element and version, for example
    "On #artifact-settings-email · "Email me when an order ships." · v1".
-4. Type the change under **What should change here?**.
+4. Type the change in the box (its placeholder reads "What should change here?").
 5. Save it (see the next section for which buttons you get).
 
 Only elements with an `id` can be selected; clicking inside one selects the
@@ -163,7 +188,9 @@ Each comment in **Comments** shows its state:
 
 | Label | Meaning |
 | --- | --- |
+| No label | Saved with **Save comment**; it is not for the agent |
 | **Waiting** | Saved for the agent, not started yet |
+| **Sent to agent** | The request went out; the agent's run has not reported back yet |
 | **Agent working** | The agent's run has picked it up |
 | **Done · v2** | The agent published version 2 and replied |
 | **Needs a new selection** | The agent could not find the element and asked you to select it again |
@@ -173,8 +200,10 @@ for example "v2: Added the shipping date". When you see **Needs a new
 selection**, read the reply, select the element on the latest version and send
 a new comment.
 
-The **Comments** tab count shows comments still waiting. On a wide window the
-same list also sits beside the preview.
+The number on the **Comments** tab counts only tasks in **Waiting**, that is
+comments for the agent that have not been sent yet. Saved comments and tasks the
+agent already has are not counted, so the tab can show no number while it holds
+comments. On a wide window the same list also sits beside the preview.
 
 ### When something changed meanwhile
 
@@ -188,12 +217,28 @@ same list also sits beside the preview.
 
 ## Edit the source yourself
 
-People who can edit a Project see **Edit source** above the preview. It opens
-the full project view:
+People who can edit a Project see an **Edit source** link above the preview.
+Editing takes two clicks:
 
-1. Click **Edit source**, choose a file under **Source file path** and edit it.
-2. Click **Save project**. The save becomes a new version.
-3. **Discard source draft** throws your changes away.
+1. Click **Edit source** in **Artifacts**. This opens the full project view, a
+   separate page.
+2. Click **Edit source** again in that view. Choose a file under **Source file
+   path** and edit it.
+3. Click **Save project**. The save becomes a new version.
+4. **Discard source draft** throws your changes away.
+
+The full project view is meant for editing source. It differs from **Preview**:
+
+- Its screens are buttons named after their files (for example `detail.html`,
+  `index.html`, `settings.html`), not after their titles.
+- It has its own **Version** select with **Restore version N** and **Share
+  version N** buttons for the version you pick.
+- It has its own simpler comment pane (**Select an element**, "What should
+  change?", **Post comment** or **Send to agent**). Use the comment card in
+  **Preview** instead: it shows the comment states described above and offers
+  **Add to queue**.
+- **Back to Page** leaves the view. To return to the Project in Artifacts, open
+  **Artifacts** again.
 
 Your unsaved source draft is kept in this browser. When you come back you see
 "Unsaved source draft from version N was kept in this browser" with **Restore
@@ -217,22 +262,30 @@ Rules the server enforces:
 
 - **One run, one permission.** An agent may create a Project only in the run
   started by your message with **Create artifact project** on. It may change a
-  Project only in a run started by **Send to agent** on that Project, and only
-  in a private chat that you started. The permission ends with the run.
+  Project only in the run that created it, or in a run started by **Send to
+  agent** on that Project, and only in a private chat that you started. The
+  permission ends with the run.
 - **Crew policy.** The workspace artifact policy must be on and include the
   agent's crew. The policy is a ceiling and never replaces your permission for
   the run.
 - **Exact base version.** Every publish names the version the agent read. If
   the Project moved on, the server refuses with a conflict and keeps the
-  current version. The agent must keep its changes, explain the conflict and
-  reconcile on purpose. It never retries blindly against a newer version.
+  current version.
 - **No sharing.** Agents cannot share a version or grant access. Sharing is
   always your step.
-- **Stable IDs.** Agents must write `artifact-` IDs on meaningful elements and
-  keep IDs of unchanged elements, so existing comments stay anchored.
-- **Answer the comment.** After publishing, the agent replies with the new
-  version and what changed. If the anchor no longer identifies the element, it
-  asks for a fresh selection instead of guessing.
+
+What agents are instructed to do (the tool descriptions ask for it; the server
+does not check it):
+
+- **Reconcile conflicts.** After a conflict, keep the changes, explain the
+  conflict and reconcile on purpose instead of retrying blindly against a
+  newer version.
+- **Stable IDs.** Write `artifact-` IDs on meaningful elements and keep IDs of
+  unchanged elements, so existing comments stay anchored. The server never
+  adds IDs itself.
+- **Answer the comment.** After publishing, reply with the new version and what
+  changed. If the anchor no longer identifies the element, ask for a fresh
+  selection instead of guessing.
 
 Limits per Project: up to 256 files and 32 MiB per version, and 256 MiB of
 history in total. The viewer warns before the history is full.
