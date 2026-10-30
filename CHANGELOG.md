@@ -17,6 +17,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **An agent runtime is no longer held busy by another crew's interrupted run.** A run recovered without a container but recorded for a different crew no longer blocks refreshing this crew's runtime; a run with an unknown crew still blocks it (#4486).
 
+- **A preference no longer carries over to the next account signed in to the same browser.** The browser's copy of each preference (recently opened artifacts, favorites, panel sizes) now belongs to one signed-in user, so the next account no longer sees the previous account's values on first paint or uploads them, private artifact slugs included, into its own preferences. Nothing is read from the browser until the session is known, the older shared copy is dropped, and a change not yet saved for one account is sent only when that account signs in again.
+
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.
 
 - **Shared artifact commenters can post feedback in the preview.** Comments stay anchored to the shared version without granting editing or agent execution rights; changing accounts, workspace or permissions retires an unfinished selection.
