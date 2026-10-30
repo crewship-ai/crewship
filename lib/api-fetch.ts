@@ -361,8 +361,8 @@ function emitSessionExpired(reason: string): void {
  *  also drop their UI state. Different event from session-expired — a
  *  user-initiated logout shouldn't show the "your session expired"
  *  toast in the other tab, just a clean redirect. */
-export function broadcastSignOut(): void {
-  getAuthChannel()?.postMessage({ type: "signout" })
+export function broadcastSignOut(human?: string): void {
+  getAuthChannel()?.postMessage(human ? { type: "signout", human } : { type: "signout" })
 }
 
 /** broadcastSessionExpired is the public mirror of emitSessionExpired —

@@ -1,3 +1,5 @@
+import { isSealedLocalDraft } from "./local-draft-seal"
+
 /** Private, browser-local recovery journal. It never grants replay authority. */
 export interface DocumentDraft {
   id: string
@@ -138,7 +140,7 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
       const serialized = JSON.stringify(draft)
       if (serialized.length > maxDraftBytes || (options?.maxDraftBytes !== undefined && new TextEncoder().encode(serialized).byteLength > maxDraftBytes)) throw new DocumentStorageError(message)
       const key: [string,string] = [owner,JSON.stringify([draft.schema,draft.epoch,draft.id])]
-      await transaction("readwrite", store => store.put({ key, draft }))
+      await transaction("readwrite", store => store.put({ key, draft, revision: crypto.randomUUID() }))
       keys.set(draft.id,key)
     },
     async remove(id) {
@@ -154,16 +156,17 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
 
 // Auth transitions retire mounted writers synchronously, before any asynchronous
 // storage operation. A late mount from the old principal is retired too.
-const draftWriters = new Map<symbol, { human: string; retire: () => Promise<void> }>()
+interface DraftWriter { human: string; retire: () => Promise<void>; suspend: () => Promise<void>; storage: boolean; hasDraft: () => boolean }
+const draftWriters = new Map<symbol, DraftWriter>()
 let journalHuman: string | null | undefined
 let identityPurge = Promise.resolve()
-export function registerDocumentDraftWriter(human: string, retire: () => Promise<void>): () => void {
+export function registerDocumentDraftWriter(human: string, retire: () => Promise<void>, options?: { suspend?: () => Promise<void>; storage?: boolean; hasDraft?: () => boolean }): () => void {
   if (journalHuman !== undefined && human !== journalHuman) {
     void retire().catch(() => {})
     return () => {}
   }
   const key = Symbol()
-  draftWriters.set(key, { human, retire })
+  draftWriters.set(key, { human, retire, suspend: options?.suspend ?? retire, storage: options?.storage === true, hasDraft: options?.hasDraft ?? (() => false) })
   return () => { draftWriters.delete(key) }
 }
 
@@ -233,4 +236,102 @@ export function purgeOtherDocumentDrafts(userId: string | null): Promise<void> {
     try { return !userId || JSON.parse(owner)[0] !== userId } catch { return true }
   }))
   return identityPurge
+}
+
+/** Preserve rows on expiry/account replacement. Editors capture before journals close. */
+let suspensionInFlight: Promise<void> | undefined
+export function suspendOtherDocumentDrafts(userId: string | null): Promise<void> {
+  const previous = journalHuman
+  journalHuman = userId
+  const perform = () => {
+    const retiring: Array<[symbol, DraftWriter]> = []
+    for (const [key, writer] of draftWriters) {
+      if (userId !== null && writer.human === userId && previous === userId) continue
+      draftWriters.delete(key); retiring.push([key, writer])
+    }
+    const editors = retiring.filter(([, writer]) => !writer.storage), storage = retiring.filter(([, writer]) => writer.storage)
+    const suspend = (writer: DraftWriter) => { try { return writer.suspend() } catch (error) { return Promise.reject(error) } }
+    return Promise.allSettled(editors.map(([, writer]) => suspend(writer))).then(async results => {
+      const failure = results.find(result => result.status === "rejected")
+      if (failure?.status === "rejected") {
+        for (let i = 0; i < editors.length; i++) if (results[i].status === "rejected") draftWriters.set(...editors[i])
+        for (const item of storage) draftWriters.set(...item)
+        throw failure.reason
+      }
+      const closed = await Promise.allSettled(storage.map(([, writer]) => suspend(writer)))
+      for (let i = 0; i < closed.length; i++) if (closed[i].status === "rejected") draftWriters.set(...storage[i])
+      const closeFailure = closed.find(result => result.status === "rejected")
+      if (closeFailure?.status === "rejected") throw closeFailure.reason
+      // Old builds stored plaintext. Only encrypted rows qualify for expiry
+      // retention. Finish this strict transaction before exposing an identity.
+      if (typeof indexedDB !== "undefined") await withDraftRows<void>("readwrite", (store, done) => {
+        done(undefined)
+        const cursor = store.openCursor()
+        cursor.onsuccess = () => {
+          const row = cursor.result; if (!row) return
+          const value = row.value
+          let human: unknown
+          try { human = JSON.parse(value.key[0])[0] } catch { /* Unknown plaintext ownership is not retainable. */ }
+          const sealed = typeof value.draft?.snapshot === "string" && isSealedLocalDraft(value.draft.snapshot) && value.draft.update === "" && !value.draft.request
+          if ((!userId || human !== userId) && !sealed) row.delete()
+          row.continue()
+        }
+      })
+    })
+  }
+  // Start the first retirement synchronously. Later transitions select again
+  // after it settles, so they cannot overlook a reinserted failed writer.
+  const work = suspensionInFlight ? suspensionInFlight.catch(() => {}).then(perform) : perform()
+  suspensionInFlight = identityPurge = work
+  void work.then(() => { if (suspensionInFlight === work) suspensionInFlight = undefined }, () => { if (suspensionInFlight === work) suspensionInFlight = undefined })
+  return work
+}
+export interface CapturedDocumentDraft { key: [string, string]; revision: string | null; draft?: string }
+async function withDraftRows<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore, done: (value: T) => void) => void): Promise<T> {
+  if (typeof indexedDB === "undefined") throw new DocumentStorageError(message)
+  return new Promise<T>((resolve, reject) => {
+    let settled = false, db: IDBDatabase | undefined, transaction: IDBTransaction | undefined, value: T
+    const fail = () => { if (settled) return; settled = true; clearTimeout(timer); try { transaction?.abort() } catch { /* Already completed. */ }; db?.close(); reject(new DocumentStorageError(message)) }
+    const timer = setTimeout(fail, STORAGE_OPEN_TIMEOUT_MS)
+    const request = indexedDB.open("crewship-document-drafts", 1)
+    request.onupgradeneeded = () => request.result.createObjectStore("drafts", { keyPath: "key" })
+    request.onerror = request.onblocked = fail
+    request.onsuccess = () => {
+      db = request.result
+      if (settled) { db.close(); return }
+      try {
+        transaction = db.transaction("drafts", mode, { durability: "strict" })
+        transaction.onabort = transaction.onerror = fail
+        transaction.oncomplete = () => { if (!settled) { settled = true; clearTimeout(timer); resolve(value) }; db?.close() }
+        action(transaction.objectStore("drafts"), result => { value = result })
+      } catch { fail() }
+    }
+  })
+}
+export function captureDocumentDrafts(human: string, workspace?: string, page?: string): Promise<CapturedDocumentDraft[]> {
+  if (typeof indexedDB === "undefined") return Promise.resolve([])
+  return withDraftRows("readwrite", (store, done) => {
+    const rows: CapturedDocumentDraft[] = []; done(rows)
+    const cursor = store.openCursor()
+    cursor.onsuccess = () => {
+      const row = cursor.result; if (!row) return
+      const value = row.value
+      try {
+        const owner = JSON.parse(value.key[0])
+        if (owner[0] === human && (!workspace || owner[1] === workspace) && (!page || owner[2] === page) && value.draft) {
+          const revision = typeof value.revision === "string" ? value.revision : crypto.randomUUID()
+          if (!value.revision) row.update({...value, revision})
+          rows.push({key:value.key, revision})
+        }
+      } catch { /* Unknown legacy rows are preserved. */ }
+      row.continue()
+    }
+  })
+}
+export function removeCapturedDocumentDrafts(rows: CapturedDocumentDraft[]): Promise<void> {
+  if (!rows.length) return Promise.resolve()
+  return withDraftRows("readwrite", (store, done) => {
+    done(undefined)
+    for (const row of rows) { const get = store.get(row.key); get.onsuccess = () => { if (row.revision !== null ? get.result?.revision === row.revision : get.result && !get.result.revision && JSON.stringify(get.result.draft) === row.draft) store.delete(row.key) } }
+  })
 }

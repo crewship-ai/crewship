@@ -2,6 +2,7 @@
 import { existsSync } from "node:fs"
 import { buildSync } from "esbuild"
 import { chromium, type Page } from "@playwright/test"
+import { installLocalDraftKeyFixture } from "../local-draft-seal.test-support"
 import { expect, it } from "vitest"
 
 const scope = { human: "alice", workspace: "w", page: "p", applicationId: "wordcraft" }
@@ -17,7 +18,7 @@ async function withBrowser(run: (a: Page, b: Page) => Promise<void>) {
     const native = buildSync({ entryPoints: [`${process.cwd()}/lib/mooring/native-draft.ts`], bundle: true, write: false, format: "iife", globalName: "nativeDraft", platform: "browser" }).outputFiles[0].text
     const legacy = buildSync({ entryPoints: [`${process.cwd()}/lib/document-queue.ts`], bundle: true, write: false, format: "iife", globalName: "legacyDraft", platform: "browser" }).outputFiles[0].text
     const a = await context.newPage(), b = await context.newPage()
-    for (const page of [a, b]) { await page.goto("http://localhost/privacy"); await page.addScriptTag({ content: native }); await page.addScriptTag({ content: legacy }) }
+    for (const page of [a, b]) { await installLocalDraftKeyFixture(page, {human: () => "alice"}); await page.goto("http://localhost/privacy"); await page.addScriptTag({ content: native }); await page.addScriptTag({ content: legacy }) }
     await run(a, b)
   } finally { await browser.close() }
 }

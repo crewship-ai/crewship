@@ -21,6 +21,18 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Artifact API reference explains version and access rules.** OpenAPI summaries and descriptions now document artifact manifests, comments, Design and native Craft tasks, including conflict, quota and visibility behavior; routes and schemas are unchanged.
 
+- **Native Word and Sheet proposals have a separate retained storage allowance.** Every retained candidate counts toward a 64 MiB default budget, including rejected and superseded proposals. Concurrent proposals cannot exceed it, and filling it leaves the human’s available history allowance intact. Reads and saves no longer scan proposal payloads. A refusal preserves existing work and history.
+
+- **Native Word and Sheet proposals survive backup and fork restore.** A fork keeps each candidate on its new document with an identifier the editor and CLI can open; backups preserve the exact candidate bytes and content hash.
+
+- **Native agent proposals are idempotent within their authenticated run.** Two runs of the same agent can reuse a request identifier without adopting each other’s proposal. Apply and propose share the run’s change request limit; proposals cannot bypass an unresolved save. Exact retries reuse the recorded candidate without running the engine again, including after the document advances.
+
+- **Design keeps work visible when saved history is full.** A clear message replaces the saved status and offers a draft download containing the local canvas and unsent feedback, or an explicit copy of the canvas into a new Design with fresh history. The original editor, unsent feedback and retained versions stay intact. Copy creation checks current source and create permissions atomically and is never automatically replayed.
+
+- ⚠️ **Design readers and commenters see only the shared version.** Private saved and live changes are withheld from REST and websocket readers, and comments target the displayed shared snapshot. Workspace administrators read and edit every Design, with foreign access recorded atomically in the audit log and keyed journal, and edits using the existing locks and versions.
+
+- Add an original-human and immutable-Page bound key-recovery primitive for private browser drafts, checked against current read authority. Browser retention and sign-out integration remain separate.
+
 - **A Page opens with its content inside Artifacts.** Its application or panels show in the library detail with the same views Pages uses, read by the page's immutable ID; the detail no longer sends you to Pages.
 
 - **New `crewship` commands for API operations the CLI reached only with another method.** `crew member set-role` (or `--clear`), `agent learning`, `agent files --container`, `persona suggest`, `checkpoint get`, `notifychannel update` and `nuke keeper-requests`; `workspace member capabilities list` without a user id lists every member in one request, and `workflow get` reads a template by id before falling back to a name lookup. `GET /api/v1/workflow-templates` now creates the built-in templates on a fresh workspace, as `/api/v1/templates` already did, so `crewship workflow list` is no longer empty there. Built-in workflow templates are now read-only through `/api/v1/workflow-templates` too (`403` on update or delete, as on `/api/v1/templates`), since listing would otherwise recreate a deleted one and duplicate a renamed one. The `docs-inventory -strict` CLI-parity gate now compares HTTP method and path rather than path alone, and calls made only by `crewship seed` no longer count as coverage (#4510).
@@ -36,6 +48,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change: notification channel URLs are checked more strictly.** The delivery library (shoutrrr 0.22.1) rejects a channel URL that could never send when a channel is created from the provider form or tested, and at send time for raw URLs: Gotify needs a real application token (15 characters starting with `A`, or a Gotify 3 `gtfya.` token), Google Chat needs both `key` and `token`, Mattermost needs a host, and ntfy topics follow ntfy's naming rule. Saved channels are never checked at startup or when listed; a Google Chat channel saved without `key` or `token` now reports a delivery error. SQLite driver updated to modernc.org/sqlite 1.61.0.
 
 - **Artifact history warns before it is full and previews a retention rule.** Artifact and native document reads now return `quota.level` (`none`, `near` from 80%, `critical` from 95%, `full` at the limit) next to the existing `warning`. The owner snapshot, also printed by `crewship page artifact versions`, adds `retention_preview`: a dry run of "keep every version from the last 14 days, then the newest per day, plus latest, shared, named and restored versions" listing what it would thin. Nothing is deleted; retention stays keep-all. A `QuotaBanner` component for the Artifacts library is included but not yet wired.
+
+- **Agents prepare a proposal when a person is editing a Word or Sheet document.** Instead of a bare refusal, the agent's `craft_propose` records a complete candidate over the version it read; the document stays unchanged. The person holding the editor can compare it, accept it as their own save (rights, lease and current version are re-checked in one transaction; a proposal over an older version becomes stale) or reject it. Any co-editor with write rights can reject without holding the editor. Open proposals over a version the document has moved past are marked stale when the agent proposes again, so they no longer count toward the limit of 16 open proposals per document. Also available as `crewship craft connect` actions. The agent's task then succeeds with outcome `proposal` and the proposal id (shown by `crewship craft task status`) instead of failing without a receipt; only a proposal recorded by that run counts.
 
 - **An agent runtime is no longer held busy by another crew's interrupted run.** A run recovered without a container but recorded for a different crew no longer blocks refreshing this crew's runtime; a run with an unknown crew still blocks it (#4486).
 
@@ -61,6 +75,10 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **Agents gain bundled Design and native Craft playbooks.** They explain scoped mandates, retained Design versions, session-bound leases and confirmed native saves. Design tool descriptions clarify version and conflict handling.
 
 - **`crewship slides` and `crewship doc` help describes the real commands.** The generic "Slides <op>" and "Document <op>" texts are replaced with descriptions and examples, the `doc draft` subcommands get a summary, and native decks and documents are no longer presented as living in Pages. Command behaviour is unchanged.
+
+- **Private artifact and document drafts survive expired sign-in.** Recovery requires the same identity and a fresh Page-read check. Failed local capture keeps the editor open behind a recovery warning; explicit sign-out asks before removing persistent copies and preserves newer revisions. New local payloads are encrypted; legacy plaintext from other identities is removed before identity admission, and confirmed read revocation removes reachable copies (#4606).
+
+- **Artifact and Design drafts are no longer lost or left behind in the browser.** Edit source no longer overwrites a source draft kept after a crash, a successful save keeps edits typed after it was submitted, and a failed browser-storage read no longer deletes the stored comment draft.
 
 - **Test Design canvases can be identified in the library.** Human canvas creation now retains the explicit test-item marker for catalog filtering.
 

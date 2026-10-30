@@ -54,7 +54,7 @@ func TestCraftNativeAgentStoppedTerminalRunRetiresOwnLease(t *testing.T) {
 	if denied := call(`{"operation":"read"}`); denied.Code != 403 {
 		t.Fatal("terminal run retained tool authority", denied.Code, denied.Body)
 	}
-	if err := m.finishStoppedRun(human, e); err != nil {
+	if _, err := m.finishStoppedRun(human, e); err != nil {
 		t.Fatalf("actual stopped original exec could not retire after terminal journal: %v", err)
 	}
 	token := nativeAgentHumanIssued(t, m.human, human)
@@ -70,7 +70,7 @@ func TestCraftNativeAgentRunningOriginalExecCannotUseRetirement(t *testing.T) {
 	}
 	e := m.runs[f.a.RunID]
 	nativeAgentRetirementRuntime(m, e, true)
-	if err := m.finishStoppedRun(human, e); err == nil {
+	if _, err := m.finishStoppedRun(human, e); err == nil {
 		t.Fatal("running original provider obtained retirement proof")
 	}
 	m.mu.Lock()
