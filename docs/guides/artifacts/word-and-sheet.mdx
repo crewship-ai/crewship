@@ -6,8 +6,9 @@ stability: experimental
 tag: Experimental
 ---
 
-A Word document or a Sheet in Artifacts is a native Craft file: Word opens in
-WordCraft, a Sheet in GridCraft. Exactly one person or agent edits it at a
+This guide covers native Craft Word and Sheet files: Word opens in WordCraft,
+a Sheet in GridCraft. Word documents using the separate Docs backend follow
+[Document save state](/guides/document-drafts) instead. Exactly one person or agent edits it at a
 time. That person or agent holds the **lease**, and everyone else sees the
 document read-only until the lease is released or handed over. Every confirmed
 save becomes a new **version**.
@@ -17,8 +18,9 @@ save becomes a new **version**.
 
 - **Instance switch (required):** the operator starts the server with
   `CREWSHIP_CRAFT_NATIVE_ENABLED=true` and a qualified Word or Sheet editor
-  profile. Without it, the editor page shows *Nativní editor není zapnutý*
-  ("The native editor is not enabled"), and no Word or Sheet can be created.
+  profile. Without it, the native editor page shows *Nativní editor není zapnutý*
+  ("The native editor is not enabled"). The separate Docs backend may still
+  offer Word creation.
 - **Agent tasks** also need `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true` on the
   server.
 - **Build-time UI flags:** the Artifacts library needs
@@ -61,7 +63,7 @@ offers **Word** and **Sheet**. It opens at `/pages` on your Crewship address
    - **Editing: *name*** · *you see a read-only preview*, with **Request edit**.
      When an agent holds the lease, its name is followed by **(agent)**.
 3. Choose **Edit** (it opens the editor in a new tab) or **Open in Pages** (it
-   opens the same editor in this tab).
+   opens the same editor in this tab). Without the lock bar, use **Open in Pages**.
 
 A document result in chat has the same bar in its side panel. There, **Edit**
 also opens the editor in a new tab. Chat never takes the lease itself.
@@ -90,7 +92,10 @@ The bar at the top of the editor shows who holds the lease:
 
 While you hold the lease, the editor renews it in the background. If you close
 the tab or lose the connection, the lease runs out by itself after about 15
-seconds. A server restart also ends every lease.
+seconds. A server restart invalidates editor admissions; reopen the editor and recheck
+the lease. On Linux a process restart does not change the persisted lease’s
+host boot ID, so it can remain occupied until expiry; a host reboot makes the
+old lease read as free.
 
 ### Release editing
 
@@ -104,10 +109,8 @@ confirmed. The draft is kept.").
 
 When someone else is editing:
 
-1. In the editor, choose **Požádat o předání** (Ask for handoff). From the
-   Artifacts detail view or the chat panel, the same request is
-   **Request edit**, and the bar then reads *Request sent to name · they can
-   hand over or decline*.
+1. Open the editor and keep that tab open. Choose **Požádat o předání**
+   (Ask for handoff) there. The request is bound to this editor session.
 2. The editor of the person holding the lease shows a button
    **Předat uživateli *your name*** (Hand over to *your name*).
 3. When they choose it, their last change is saved and their editor becomes
@@ -122,12 +125,17 @@ The holder doesn't get a decline button: if they never hand over, your
 request lapses when the lease changes hands or ends. A request made for one
 lease doesn't carry over to the next holder.
 
-<Tip>
-If you asked from the Artifacts detail view or from chat, the bar there
-changes to **Editing: you** after the handoff. Choose **Open in new tab**; the
-editor shows **Upravuje *your name*** and the **Převzít úpravy** button from
-step 4. Choose it to start typing.
-</Tip>
+<Warning>
+**Request edit** in the Artifacts detail view or chat requests handoff to that
+preview’s admission session. Opening the editor afterwards creates another
+session, which does not own that lease, even for the same person. The preview
+may say **Editing: you**, but the new editor cannot take over that session’s
+lease. Use the already-open editor to request handoff. If you requested from
+a preview, stop using that preview and wait for its lease to expire before
+acquiring a free lease in the editor; if another holder has acquired it, ask
+from the editor again. Do not treat the person’s name as proof that this tab
+owns the lease.
+</Warning>
 
 ## Follow or stop an agent task
 
@@ -144,8 +152,10 @@ document.
    - **Chat ID.** In an agent chat, send your instruction for the document.
      `crewship chat list <agent>` shows that chat's ID in the **ID** column.
    - **Message ID.** `crewship chat source messages agent_session <chat-id> --format json`
-     lists the chat's messages with their original message IDs. Pick your
-     instruction message.
+     lists the chat’s messages. Use `messages[].message_ref.source_message_id`
+     from your own instruction (`role: "user"`, with your `author.user_id`).
+     Do not use `source_id` (the chat ID) or the message’s position. The agent
+     slug for `chat list` comes from `crewship agent list`.
 2. Start the task from the CLI. Write the page ID with a leading `@`:
 
    ```bash
@@ -181,10 +191,7 @@ The CLI equivalents are `crewship craft task status @<page-id> <work-id>` and
 `crewship craft task stop @<page-id>`. Stopping an agent never takes the lease
 from a person and leaves saved versions in place.
 
-<Note>
-Agent proposals that wait for you to accept or reject them are not available
-in this release: an agent with a task saves versions directly.
-</Note>
+An admitted agent task saves confirmed versions directly.
 
 ## Publish a shared version
 
@@ -209,7 +216,7 @@ your lease ends, editing stops. The bar or the status line shows one of:
 | Text | Meaning |
 |---|---|
 | Výsledek nepotvrzen | The last save's result is unknown. Choose **Ověřit výsledek** (Check result) to ask the server. |
-| Pouze čtení · místní koncept zachován | You no longer hold the lease; your draft is kept in this browser. |
+| Pouze čtení · místní koncept zachován | This session cannot write; your draft is kept in this browser. The lease may still name you. |
 | Koncept zůstává v tomto editoru | The draft couldn't be captured safely; it stays in the open editor. Don't close the tab yet. |
 | Editor odpojen · koncept zachován | The editor disconnected; the draft is kept. |
 
@@ -236,7 +243,7 @@ The same browser-copy rules as for Docs apply; see
 ## When the history is full
 
 Every saved version is kept. Each Word document or Sheet has its own history
-budget, 16 GiB by default. The status line shows how much is used, for example
+budget, 16 GiB. The status line shows how much is used, for example
 *Historie 1288490188 / 17179869184 B*. From 80 % it adds
 *blíží se limit* ("nearing the limit").
 
@@ -263,6 +270,6 @@ offered as a **Místní koncept** row, as after a crash.
 
 ## Related
 
-- [Document history, revert and proposals](/guides/document-history-review)
+- [Document history](/guides/document-history-review)
 - [Document save state](/guides/document-drafts)
 - [Craft commands](/cli/craft)
