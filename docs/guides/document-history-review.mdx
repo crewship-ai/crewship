@@ -44,8 +44,29 @@ block has none.
 
 ## Proposals
 
-Where an agent prepared a proposal instead of editing directly, **Proposals**
-lists it. Open one to see the difference against the original, then **Accept
-proposal** or **Reject proposal** (rejecting asks to confirm). Accepting applies
-the whole proposal or nothing; a changed document is refused as a conflict.
-Readers can compare but not decide.
+Where an agent prepared a proposal instead of editing directly, it waits under
+**Proposals** below the document. Nothing in a proposal reaches the document
+until someone accepts it.
+
+1. Under **Proposals**, choose a proposal. Each entry shows its author, its
+   state and the revision it was based on, for example
+   *Crew agent · open · revision 12*.
+2. Read the comparison of **the original** with **the proposal**. It uses the
+   same change labels as **Compare**.
+3. Choose **Accept proposal**, or **Reject proposal** and then
+   **Confirm reject** (**Keep reviewing** goes back).
+
+Accepting applies the whole proposal or nothing. If the document changed since
+you opened the proposal, nothing is applied and the conflict is shown. As with
+revert, accept stays disabled while you have unsent edits, and a dropped
+connection gives an unknown result that you retry with
+**Try again (same request)**. Readers can compare but not decide; they see
+*You can compare this proposal but not decide on it.*
+
+Proposals need the same `NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS=true` build flag
+as revert, and the server endpoints that serve them. Without the endpoints the
+panel shows *Proposals could not be loaded.*
+
+This section covers the Docs editor. Native Word documents and Sheets in
+Artifacts have no proposals; an agent task there saves versions directly. See
+[Word and Sheet editing](/guides/artifacts/word-and-sheet).
