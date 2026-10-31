@@ -385,6 +385,12 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    freezeInput(r);r.ackedVersion=undefined;r.receiptAck=undefined;r.receiptVersion=undefined;setSavedVersion(undefined)
    await r.coordinator.flush()
    const acknowledgement=r.receiptAck,version=r.receiptVersion
+   // Nothing new to send: the final capture equals the confirmed server version.
+   if(!acknowledgement&&!version){
+    const confirmed=r.coordinator.confirmedVersion()
+    if(!confirmed||!live(r)||!r.writable||r.phase?.phase!=='saved'||r.phase.dirty)return false
+    r.ackedVersion=confirmed;return true
+   }
    if(!acknowledgement||!version||!await acknowledgement)return false
    return live(r)&&r.writable&&r.phase?.phase==='saved'&&!r.phase.dirty&&r.ackedVersion===version&&r.receiptAck===acknowledgement
   }
