@@ -74,7 +74,8 @@ exit code follows the status:
 | 403 | 4 | `current Design edit permission required` |
 | 404 | 3 | `design not found` (also when the flag is off or the version does not exist) |
 | 409 | 5 | `Design changed; reload and reapply` |
-| 413 | 1 | `Design capacity is full; existing work is retained` |
+| 413 | 1 | `Design capacity is full; existing work is retained` (a Design version or history is full) |
+| 422 | 1 | `This workspace has reached its page limit: …` (`pages_limit`; creating a new Design at the workspace page limit) |
 | 503 | 7 | `Design engine is unavailable; changes are not acknowledged` |
 
 `craft` and `mooring connect` use the same envelope, but it holds only

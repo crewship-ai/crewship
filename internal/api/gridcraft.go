@@ -353,13 +353,12 @@ func (h *gridcraftHTTP) create(w http.ResponseWriter, r *http.Request) {
 		gridcraftError(w, err)
 		return
 	}
-	var count int
-	if err = tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM pages WHERE workspace_id=?`, wsID).Scan(&count); err != nil {
+	if err = pages.CheckCap(r.Context(), tx, wsID); err != nil {
+		if limit, ok := pagesLimitFrom(err); ok {
+			writePagesLimit(w, limit)
+			return
+		}
 		gridcraftError(w, err)
-		return
-	}
-	if count >= pages.MaxPagesPerWorkspace {
-		replyError(w, 409, "workspace page limit reached")
 		return
 	}
 	var staged int

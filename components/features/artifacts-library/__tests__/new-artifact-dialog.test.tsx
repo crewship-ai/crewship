@@ -119,6 +119,24 @@ it("does not file an unfiled Page and shows the server's refusal inline", async 
   expect(m.addPage).not.toHaveBeenCalled()
 })
 
+it("shows the page limit sentence, with the limit, when a Design or Page is refused at the cap", async () => {
+  const sentence = "This workspace has reached its page limit: it holds 100 pages and the limit is 100. Nothing was created."
+  for (const kind of ["design", "page"] as const) {
+    cleanup()
+    m.caps = { ...ALL, designs: true }
+    m.fetch.mockReset()
+    m.fetch.mockImplementation(() => response({ error: sentence, message: sentence, code: "pages_limit", kind: "cap", rejected: true, detail: { pages_existing: 100, pages_limit: 100 } }, 422))
+    const { onCreated } = mount({ defaultKind: kind })
+    name("Checkout")
+    fireEvent.click(create())
+    const alert = await screen.findByRole("alert")
+    expect(alert).toHaveTextContent("reached its page limit")
+    expect(alert).toHaveTextContent("the limit is 100")
+    expect(alert).not.toHaveTextContent(/capacity|quota|history/i)
+    expect(onCreated).not.toHaveBeenCalled()
+  }
+})
+
 it("keeps a created Page when filing fails and offers to open it", async () => {
   m.fetch.mockImplementation(() => response({ id: "p1", slug: "monitor", pages_version: 0 }, 201))
   m.addPage.mockRejectedValue(new Error("folder changed"))

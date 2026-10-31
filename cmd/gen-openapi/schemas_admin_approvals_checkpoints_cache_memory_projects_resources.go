@@ -254,6 +254,8 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 	}
 	retentionWindows := object(retentionProps, retentionKeys...)
 	retentionPatch := object(retentionProps)
+	pageLimitAdmin := object(map[string]any{"max_pages_per_workspace": integer(), "default": integer(), "min": integer(), "max": integer()},
+		"max_pages_per_workspace", "default", "min", "max")
 	artifactStorageAdmin := object(map[string]any{
 		"workspace_limit_bytes": integer(), "instance_limit_bytes": integer(), "used_bytes": integer(), "reserved_bytes": integer(),
 		"level": str(), "workspaces": integer(), "retention": str(),
@@ -379,6 +381,10 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		}, "mode")},
 		// Aggregate artifact storage: limits and instance counters, and the
 		// counter recompute (drift is reported per workspace, before and after).
+		"GET /api/v1/admin/instance/page-limit": {Response: pageLimitAdmin},
+		"PUT /api/v1/admin/instance/page-limit": {
+			Request:  object(map[string]any{"max_pages_per_workspace": integer()}, "max_pages_per_workspace"),
+			Response: pageLimitAdmin},
 		"GET /api/v1/admin/instance/artifact-storage": {Response: artifactStorageAdmin},
 		"PUT /api/v1/admin/instance/artifact-storage": {
 			Request:  object(map[string]any{"workspace_limit_bytes": integer(), "instance_limit_bytes": integer()}),
