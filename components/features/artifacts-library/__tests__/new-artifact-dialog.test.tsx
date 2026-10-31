@@ -7,7 +7,7 @@ import type { ArtifactCapabilities } from "@/components/features/chat/artifact-c
 
 const m = vi.hoisted(() => ({
   fetch: vi.fn(), push: vi.fn(), addPage: vi.fn(), wordCreate: vi.fn(), createWorkbook: vi.fn(),
-  caps: {} as ArtifactCapabilities, pages: [] as PageView[], folders: [] as PageFolderView[],
+  caps: {} as ArtifactCapabilities, gridcraft: true, pages: [] as PageView[], folders: [] as PageFolderView[],
 }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: m.fetch, broadcastSessionExpired: vi.fn() }))
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: m.push }) }))
@@ -19,7 +19,7 @@ vi.mock("@/hooks/use-page-folders", async importOriginal => ({
   usePageFolderMutations: () => ({ addPage: { mutateAsync: m.addPage } }),
 }))
 vi.mock("@/components/features/pages/use-word-document-creation", () => ({
-  useWordDocumentCreation: () => ({ allowed: true, formatAvailable: true, frozen: false, retrying: false, create: { mutateAsync: m.wordCreate, isPending: false } }),
+  useWordDocumentCreation: () => ({ allowed: true, formatAvailable: true, wordFormat: "native", wordFormatAvailable: true, availability: { gridcraftNative: m.gridcraft }, frozen: false, retrying: false, create: { mutateAsync: m.wordCreate, isPending: false } }),
 }))
 vi.mock("@/lib/workbooks/create", () => ({ createWorkbook: m.createWorkbook }))
 
@@ -34,6 +34,7 @@ const response = (value: unknown, status = 200) => Promise.resolve({ ok: status 
 
 beforeEach(() => {
   m.caps = { ...ALL }
+  m.gridcraft = true
   m.pages = []
   m.folders = [folder("sales", "Sales"), folder("board", "Board", { canAcceptPages: false })]
   for (const f of [m.fetch, m.push, m.addPage, m.wordCreate, m.createWorkbook]) f.mockReset()
@@ -89,7 +90,7 @@ it("creates a blank Word document through the shared document creation, then fil
   name("Partner brief")
   fireEvent.click(create())
   await waitFor(() => expect(onCreated).toHaveBeenCalledWith("partner-brief"))
-  expect(m.wordCreate).toHaveBeenCalledWith({ name: "Partner brief", slug: "partner-brief" })
+  expect(m.wordCreate).toHaveBeenCalledWith({ name: "Partner brief", slug: "partner-brief", format: "native" })
   expect(m.addPage).toHaveBeenCalledWith({ folder: "sales", page: "partner-brief", pagesVersion: 0, aclVersion: 3 })
   expect(m.fetch).not.toHaveBeenCalled()
 })
@@ -131,13 +132,21 @@ it("keeps a created Page when filing fails and offers to open it", async () => {
   expect(m.fetch).toHaveBeenCalledTimes(1)
 })
 
-it("creates a Sheet through the workbook route", async () => {
-  m.createWorkbook.mockResolvedValue({ pageId: "w1", slug: "price-model", name: "Price model" })
+it("creates a native Sheet through the shared creation with the sheet format", async () => {
+  m.wordCreate.mockResolvedValue({ slug: "price-model", pagesVersion: 0, nativePageId: "w1" })
   const { onCreated } = mount({ defaultKind: "sheet" })
   name("Price model")
   fireEvent.click(create())
   await waitFor(() => expect(onCreated).toHaveBeenCalledWith("price-model"))
-  expect(m.createWorkbook).toHaveBeenCalledWith("ws1", { name: "Price model", slug: "price-model" })
+  expect(m.wordCreate).toHaveBeenCalledWith({ name: "Price model", slug: "price-model", format: "sheet" })
+  expect(m.createWorkbook).not.toHaveBeenCalled()
+})
+
+it("keeps Sheet disabled while the profile is not confirmed", () => {
+  m.gridcraft = false
+  mount({ defaultKind: "sheet" })
+  name("Price model")
+  expect(create()).toBeDisabled()
 })
 
 it("warns about the same name and kind in the folder and opens the existing one", () => {
