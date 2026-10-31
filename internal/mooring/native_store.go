@@ -110,6 +110,25 @@ func (s *NativeStore) authority(k EditLeaseScope, l *EditLease, intent string) a
 		return p.ActorID, nil
 	}
 }
+
+// holderAuthority checks current Page rights and that the caller is the
+// lease's original holder, without requiring that lease to be live. Only
+// read-only proofs about that holder's own past commits may use it.
+func (s *NativeStore) holderAuthority(l EditLease, intent string) artifacts.VersionAuthorize {
+	return func(ctx context.Context, tx *sql.Tx) (string, error) {
+		p, err := s.config.Authorize(ctx, tx, l.Scope, intent)
+		if err != nil {
+			return "", err
+		}
+		if err = s.profile(ctx, tx, l.Scope); err != nil {
+			return "", err
+		}
+		if l.Holder != p {
+			return "", ErrEditLeaseDenied
+		}
+		return p.ActorID, nil
+	}
+}
 func (s *NativeStore) candidate(ctx context.Context, raw []byte) ([]byte, error) {
 	if len(raw) == 0 || len(raw) > 32<<20 {
 		return nil, ErrInvalid

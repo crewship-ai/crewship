@@ -522,7 +522,10 @@ belong to --author-crew.`,
 		// (workspace, definition_hash, this user). The internal
 		// /api/v1/internal/pipelines/save route is internalAuth (sidecar only);
 		// a user CLI token always 403s there (issue #654), so we never touch it.
-		fmt.Println("Validating routine (server-side dry-run)...")
+		formatter := resolvedFormatter(cmd)
+		if formatter.RoutesToHuman() {
+			fmt.Println("Validating routine (server-side dry-run)...")
+		}
 		testBody := map[string]any{
 			"definition":     json.RawMessage(definitionRaw),
 			"author_crew_id": authorCrewID,
@@ -548,7 +551,9 @@ belong to --author-crew.`,
 			return fmt.Errorf("routine failed validation (status=%s): %s", testResult.Status, testResult.Error)
 		}
 
-		fmt.Println("Saving routine...")
+		if formatter.RoutesToHuman() {
+			fmt.Println("Saving routine...")
+		}
 		saveBody := map[string]any{
 			"slug":           slugifyName(name),
 			"name":           name,
@@ -629,24 +634,25 @@ belong to --author-crew.`,
 		if len(shortHash) > 12 {
 			shortHash = shortHash[:12]
 		}
-		fmt.Printf("Saved routine %s (id=%s, hash=%s)\n", saved.Slug, saved.ID, shortHash)
-		// B8 (#2359): name the trigger's first fire time, or the fact that
-		// there isn't one, right where the save is reported — the same
-		// thing the agent's save_routine final message states.
-		switch t := saved.Trigger; {
-		case t == nil:
-			// No trigger was requested on this save.
-		case t.Kind == "manual":
-			fmt.Println("Trigger: none (manual only)")
-		case t.ApprovalRequired:
-			fmt.Printf("Trigger: schedule %s — DISABLED, awaiting MANAGER approval (first run would be %s)\n",
-				t.CronExpr, t.FirstFireAt)
-			fmt.Println("One approval item is now in the workspace inbox: crewship routine schedules activate " + t.ScheduleID)
-		default:
-			fmt.Printf("Trigger: schedule %s — first run %s\n", t.CronExpr, t.FirstFireAt)
-		}
-		fmt.Printf("Invoke with: crewship routine run %s\n", saved.Slug)
-		return nil
+		return formatter.AutoHuman(saved, func() {
+			fmt.Printf("Saved routine %s (id=%s, hash=%s)\n", saved.Slug, saved.ID, shortHash)
+			// B8 (#2359): name the trigger's first fire time, or the fact that
+			// there isn't one, right where the save is reported — the same
+			// thing the agent's save_routine final message states.
+			switch t := saved.Trigger; {
+			case t == nil:
+				// No trigger was requested on this save.
+			case t.Kind == "manual":
+				fmt.Println("Trigger: none (manual only)")
+			case t.ApprovalRequired:
+				fmt.Printf("Trigger: schedule %s — DISABLED, awaiting MANAGER approval (first run would be %s)\n",
+					t.CronExpr, t.FirstFireAt)
+				fmt.Println("One approval item is now in the workspace inbox: crewship routine schedules activate " + t.ScheduleID)
+			default:
+				fmt.Printf("Trigger: schedule %s — first run %s\n", t.CronExpr, t.FirstFireAt)
+			}
+			fmt.Printf("Invoke with: crewship routine run %s\n", saved.Slug)
+		})
 	},
 }
 

@@ -17,6 +17,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/design"
 	"github.com/crewship-ai/crewship/internal/featureflags"
+	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/pages"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
@@ -102,8 +103,8 @@ func (h *PageHandler) designKey(w http.ResponseWriter, r *http.Request) (artifac
 	return k, ensureDesignAdminAuditRequest(r, r.Method != http.MethodGet), true
 }
 
-// A websocket retains the authority epoch admitted under the writer fence.
-// Regranting an identical grant does not revive an older connection.
+// A websocket retains the authority generations admitted under the writer
+// fence. Regranting an identical grant does not revive an older connection.
 type designAdmissionKey struct{}
 type designAdmission struct{ WorkspaceID, Revision string }
 type designAuthorityStamp struct {
@@ -118,28 +119,70 @@ func (s *designAuthorityStamp) admit(actor, revision string) (string, error) {
 	s.actor, s.revision, s.initialized = actor, revision, true
 	return actor, nil
 }
+
+// designScopeKey carries the Design Page into nested authority reads, so the
+// revision is scoped to this person and this Page rather than the workspace.
+type designScopeKey struct{}
+
+func withDesignScope(ctx context.Context, k artifacts.VersionKey) context.Context {
+	return context.WithValue(ctx, designScopeKey{}, k)
+}
+
+// designAuthorityRevision is the Design session's continuity fence: the
+// author-relevant generations of the authenticated human and the Design Page
+// (mooring_authority_generations, shared with native Craft sessions). The broad
+// workspace delivery epoch is deliberately not used: it also moves when anyone
+// creates another Page, changes a grant on another Page or adds a member, which
+// retired every live Design socket in the workspace and its unconfirmed edits.
+// These generations still move for every change whose recipients include this
+// person or this Page, including revoke-then-restore. They are not an ACL; the
+// canonical Page policy, membership and credential are evaluated live.
+// SELECT-only: an absent row or a missing Design scope denies.
 func designAuthorityRevision(ctx context.Context, tx *sql.Tx, workspace string) (string, error) {
-	var revision string
-	if err := tx.QueryRowContext(ctx, `SELECT CAST(authority_revision AS TEXT) FROM workspaces WHERE id=?`, workspace).Scan(&revision); err != nil {
-		return "", err
+	k, ok := ctx.Value(designScopeKey{}).(artifacts.VersionKey)
+	u := UserFromContext(ctx)
+	if !ok || u == nil || k.WorkspaceID != workspace || k.PageID == "" {
+		return "", artifacts.ErrVersionAuthority
 	}
+	g, err := readCraftNativeGenerations(ctx, tx, mooring.EditLeaseScope{WorkspaceID: workspace, ArtifactID: k.PageID}, u.ID)
+	if err != nil {
+		return "", artifacts.ErrVersionAuthority
+	}
+	revision := g.user + "." + g.page
 	if admitted, ok := ctx.Value(designAdmissionKey{}).(designAdmission); ok && (admitted.WorkspaceID != workspace || admitted.Revision != revision) {
 		return "", artifacts.ErrVersionAuthority
 	}
 	return revision, nil
 }
 
+// A fresh (not socket-pinned) admission installs absent baseline generations,
+// only after the canonical checks allowed it. A pinned socket never creates or
+// refreshes rows, so a missing row there is uncertainty and denies.
+func designCaptureGenerations(ctx context.Context, tx *sql.Tx, k artifacts.VersionKey) error {
+	if _, pinned := ctx.Value(designAdmissionKey{}).(designAdmission); pinned {
+		return nil
+	}
+	u := UserFromContext(ctx)
+	if u == nil {
+		return artifacts.ErrVersionAuthority
+	}
+	if _, err := captureCraftNativeGenerations(ctx, tx, mooring.EditLeaseScope{WorkspaceID: k.WorkspaceID, ArtifactID: k.PageID}, u.ID); err != nil {
+		if errors.Is(err, errCraftNativeAccess) {
+			return artifacts.ErrVersionAuthority
+		}
+		return err
+	}
+	return nil
+}
+
 // Canonical Page ACLs, live credentials and membership are checked under the
-// same SQLite writer fence as every persisted update. Read/Comment never writes.
+// same SQLite writer fence as every persisted update. Read/Comment never writes
+// Design state; a fresh allowed admission may only install generation baselines.
 func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, write bool) artifacts.VersionAuthorize {
 	r = ensureDesignAdminAuditRequest(r, write)
 	var stamp designAuthorityStamp
 	return func(ctx context.Context, tx *sql.Tx) (string, error) {
-		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
-		revision, err := designAuthorityRevision(ctx, tx, k.WorkspaceID)
-		if err != nil {
-			return "", err
-		}
+		ctx = withDesignScope(context.WithValue(ctx, pageAuthReaderKey{}, tx), k)
 		if !h.designEnabled(ctx) {
 			return "", artifacts.ErrDisabled
 		}
@@ -188,6 +231,15 @@ func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, w
 			if err := tx.QueryRowContext(ctx, `SELECT coalesce(p.owner_user_id,''),coalesce(p.owner_crew_id,'') FROM pages p JOIN artifact_design_documents d ON d.workspace_id=p.workspace_id AND d.page_id=p.id JOIN artifact_version_heads h ON h.workspace_id=p.workspace_id AND h.page_id=p.id AND h.content_type='design' WHERE p.workspace_id=? AND p.id=?`, k.WorkspaceID, k.PageID).Scan(&ownerUser, &ownerCrew); err != nil {
 				return "", err
 			}
+			// The manager role is this path's canonical check; only now may a
+			// fresh admission install its generation baselines.
+			if err := designCaptureGenerations(ctx, tx, k); err != nil {
+				return "", err
+			}
+			revision, err := designAuthorityRevision(ctx, tx, k.WorkspaceID)
+			if err != nil {
+				return "", err
+			}
 			actor := u.ID
 			if agent != nil {
 				actor = "agent:" + agent.AgentID + ":" + agent.RunID
@@ -234,6 +286,13 @@ func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, w
 		if write && !h.mayEditSpec(ctx, k.WorkspaceID, u.ID, role, rec) {
 			return "", errDesignAccess
 		}
+		if err = designCaptureGenerations(ctx, tx, k); err != nil {
+			return "", err
+		}
+		revision, err := designAuthorityRevision(ctx, tx, k.WorkspaceID)
+		if err != nil {
+			return "", err
+		}
 		if agent != nil {
 			return stamp.admit("agent:"+agent.AgentID+":"+agent.RunID, revision)
 		}
@@ -253,7 +312,14 @@ func (h *PageHandler) designAuthorizedTx(r *http.Request, k artifacts.VersionKey
 	if _, err = tx.ExecContext(r.Context(), `UPDATE document_writer_fence SET seq=seq WHERE id=1`); err != nil {
 		return err
 	}
-	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
+	ctx := withDesignScope(context.WithValue(r.Context(), pageAuthReaderKey{}, tx), k)
+	if _, pinned := ctx.Value(designAdmissionKey{}).(designAdmission); !pinned {
+		if _, absent := designAuthorityRevision(ctx, tx, k.WorkspaceID); absent != nil {
+			// A first Feedback admission reads generations before any Design
+			// check; the canonical read check installs them only when allowed.
+			_, _ = h.designAuthority(r, k, false)(ctx, tx)
+		}
+	}
 	actor, err := auth(ctx, tx)
 	if err != nil {
 		return err

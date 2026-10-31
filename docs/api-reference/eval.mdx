@@ -121,7 +121,7 @@ GET /api/v1/eval/runs?limit=50
 
 | Param | Type | Default | Description |
 |---|---|---|---|
-| `limit` | integer | 50 | Positive integer up to 200. Missing, malformed, zero, or out-of-range values use the default `50`. |
+| `limit` | integer | 50 | Positive integer up to 200. Values above 200 are clamped to 200; missing, malformed, zero, or negative values use the default `50`. |
 
 **Response:** `200 OK`
 

@@ -274,7 +274,7 @@ func TestCovEvalListRuns_LimitClamping(t *testing.T) {
 	}{
 		{"valid-in-range", "?limit=10", 10},
 		{"upper-bound", "?limit=200", 200},
-		{"over-max-ignored", "?limit=999", 50},
+		{"over-max-clamped", "?limit=999", 200},
 		{"zero-ignored", "?limit=0", 50},
 		{"negative-ignored", "?limit=-5", 50},
 		{"non-numeric-ignored", "?limit=abc", 50},

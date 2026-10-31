@@ -34,9 +34,9 @@ func TestWorkerSocketAuthenticationBoundsAndCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	var calls atomic.Int32
-	entered, release := make(chan struct{}), make(chan struct{})
+	// Preserve readiness when the worker enters before the test starts waiting.
+	entered, release := make(chan struct{}, 1), make(chan struct{})
 	var releaseOnce sync.Once
-	defer releaseOnce.Do(func() { close(release) })
 	runner := runnerFunc(func(ctx context.Context, in []byte, c Command) (EngineResult, error) {
 		calls.Add(1)
 		select {
@@ -59,6 +59,8 @@ func TestWorkerSocketAuthenticationBoundsAndCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer stop(context.Background())
+	// Unblock an active request before server shutdown, including on Fatal.
+	defer releaseOnce.Do(func() { close(release) })
 	badFile := filepath.Join(dir, "bad-token")
 	os.WriteFile(badFile, []byte(strings.Repeat("b", 64)), 0600)
 	bad, err := NewWorkerClient(socket, badFile)

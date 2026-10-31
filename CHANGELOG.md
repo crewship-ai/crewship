@@ -9,9 +9,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Routine saves honor machine output formats.** `routine save --format json|yaml|ndjson` returns the saved routine identity and trigger metadata without progress text; the human receipt stays unchanged (#4621).
+
 - **Agent peer-card errors no longer expose server internals.** When reading or deleting an agent's peer cards fails inside the server, the API now answers `Internal server error` and logs the cause, instead of returning database driver text or a host file path.
+- **Artifact MCP tools advertise the inputs they accept.** Tool descriptions now name the Slides/data flag dependencies and explain mandate, version conflict and quota behavior; version schemas require the positive values already enforced by the host.
 
 - ⚠️ **Behaviour change: workspace webhook destinations are visible only to channel administrators.** Channel lists omit a workspace webhook URL for roles below ADMIN/OWNER while retaining its metadata and personal destinations owned by the caller. Delivery configuration and signing secrets are unchanged.
+
+- **New artifact can create a blank Sheet.** When the server advertises `gridcraft_native` (see `crewship doc status`), **Sheet** is offered in the Artifacts New artifact dialog and opens the native GridCraft editor; without the profile it stays listed under Coming. It reuses the existing page and craft initialize endpoints, so no new API or CLI command (#4635).
 
 - **A skipped schedule no longer blames a routine disabled afterwards.** When a schedule's last fire was skipped with nothing counted as missed, the Triggers tab now always shows "skipped: previous run busy or routine inactive". Before, a routine that skipped a tick because its previous run was still going and was disabled later showed "skipped: routine inactive", reading today's state into a past fire.
 
@@ -32,6 +37,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Design readers and commenters see only the shared version.** Private saved and live changes are withheld from REST and websocket readers, and comments target the displayed shared snapshot. Workspace administrators read and edit every Design, with foreign access recorded atomically in the audit log and keyed journal, and edits using the existing locks and versions.
 
 - Add an original-human and immutable-Page bound key-recovery primitive for private browser drafts, checked against current read authority. Browser retention and sign-out integration remain separate.
+
+- **A Word or Sheet save whose reply was lost in a long outage is still confirmed.** Reconciling the exact attempted version no longer needs a live editing lease, so an outage longer than the lease no longer leaves an already saved draft offered for recovery; the expired lease still cannot save.
+
+- **The chat's side viewer lies over the chat on a tablet.** With chat artifact projects on, below the large breakpoint an open artifact or saved document covers 78% of the chat from the right instead of squeezing the conversation into a narrow column. Wide screens keep the shared row; phones keep the full-screen viewer.
+
+- **Chat starts a project from "+" › New artifact.** With chat artifact projects on, the composer's "+" menu offers Project next to Word. Picking a starter sets the same explicit creation consent as before, and the chosen kind shows as one removable chip ("New Project") in place of the two text buttons, so the toolbar fits on a phone.
 
 - **A Page opens with its content inside Artifacts.** Its application or panels show in the library detail with the same views Pages uses, read by the page's immutable ID; the detail no longer sends you to Pages.
 
@@ -59,10 +70,14 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Deleting a workspace closes its public Page links.** Deletion revokes the links in the same transaction, and public reads also refuse previously deleted workspaces.
 
+- **A preference no longer carries over to the next account signed in to the same browser.** The browser's copy of each preference (recently opened artifacts, favorites, panel sizes) now belongs to one signed-in user, so the next account no longer sees the previous account's values on first paint or uploads them, private artifact slugs included, into its own preferences. Nothing is read from the browser until the session is known, the older shared copy is dropped, and a change not yet saved for one account is sent only when that account signs in again.
+
+- **Chat opens saved items in Artifacts.** With the Artifacts library on, the chat viewer has *Open in Artifacts*, and saved-document cards, the document access panel and page provenance link to the item's own `/artifacts/<id>` address instead of Pages. Without the library flag the links stay as they were.
+
 - **Pages can hand its overview to the Artifacts library.** With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` and the library flag both on, `/pages` opens `/artifacts` in the same workspace. Reference links, restricted members' catalogs and single pages stay on Pages. Off by default.
 
 - **The built-in `crewship` agent skill now covers Artifacts.** The guide an agent reads through the CLI explains when to use artifact projects, Design canvases and native Craft documents, which flags and switches each needs, who may write, how to reply to comments and hold the Craft lease, and what to do on a version conflict (409), full storage (413) or an uncertain 503 without retrying blindly. Command behaviour is unchanged.
-- **Artifacts is the single home for a page and its Word or Sheet.** Behind the same two flags, `/pages/<slug>` resolves the page's immutable ID and opens `/artifacts/<id>` in the same workspace for a Page, a native Word or Sheet or a versioned project. Reference links, pinned versions, edit addresses, restricted members and any page whose ID cannot be resolved stay on Pages. A native Word or Sheet is edited inside its Artifacts detail in the single Craft editor with its lease (who edits now, ask for the handoff) when the server confirms the editor is available; otherwise the detail keeps its lock bar and saved preview. Off by default.
+- **Artifacts is the single home for a page and its Word or Sheet.** Behind the same two flags, `/pages/<slug>` resolves the page's immutable ID and opens `/artifacts/<id>` in the same workspace for a Page, a native Word or Sheet or a versioned project. Reference links, pinned versions, edit addresses, restricted members and any page whose ID cannot be resolved stay on Pages. A native Word or Sheet is edited inside its Artifacts detail in the single Craft editor with its lease (who edits now, ask for the handoff) when the server confirms the editor is available; otherwise the detail says editing is not available and keeps the saved preview. Off by default.
 
 - **Shared artifact commenters can post feedback in the preview.** Comments stay anchored to the shared version without granting editing or agent execution rights; changing accounts, workspace or permissions retires an unfinished selection.
 
@@ -80,6 +95,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Artifact and Design drafts are no longer lost or left behind in the browser.** Edit source no longer overwrites a source draft kept after a crash, a successful save keeps edits typed after it was submitted, and a failed browser-storage read no longer deletes the stored comment draft.
 
+- **The Artifacts detail no longer sends you to Pages where Pages opens nothing.** Behind `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS`, a native Word or Sheet whose editor is unavailable shows its saved version without an Edit that opened the same unavailable editor on Pages, and its preview error no longer points to Pages. An old-editor Word keeps Open in Pages only while its saved document can be read, because Pages opens it with the same read. Off by default.
 - **Test Design canvases can be identified in the library.** Human canvas creation now retains the explicit test-item marker for catalog filtering.
 
 - ⚠️ **Behaviour change: `journal priority` and `memory export` honour `--format`.** With `--format json` (or `yaml`/`ndjson`), `crewship journal priority` prints the server's answer as an object with `id`, `priority` and `previous`, and `crewship memory export` writes the bundle as before and then prints `out`, `documents` and `skipped` instead of the prose listing. With the default table or `quiet` output both keep their human-readable line. `memory export` help now states that it requires OWNER or ADMIN.
@@ -142,6 +158,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add opt-in inert Dashboard previews (`NEXT_PUBLIC_ARTIFACT_DASHBOARDS`): authorized collection data refreshes numbers, tables and native meter charts without publishing new code; shared readers stay on their shared manifest and data has source and freshness labels.
 
 - **Every Dashboard number shows where it came from.** With `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` on, hovering or keyboard-focusing a bound value in a Dashboard preview shows its dataset, row and field, its producer (`You`, `Contributor` or `Agent`) and its last update time in UTC; the same text is the value's accessible description and appears in the Data sources list. Values whose producer is unknown, or whose document is not loaded, are marked "Source not stated" and drawn with a dashed underline instead of looking authoritative. The provenance comes from the reader-safe fields the data API already returns; no API or storage change.
+- **A Design created from the Artifacts New dialog opens.** The dialog handed the new page's slug to the detail as if it were an ID, so a fresh Design landed on "This artifact is not available". It now opens the created artifact by its slug.
 - Add Preview, History and Comments tabs to the opt-in Artifacts library; sending an anchored comment starts the source agent, with delivery confirmation and retry of the saved task.
 - Add a bounded Slides artifact import adapter for a closed `deck.json` and authored HTML profile, reusing the existing slide schema and static comment anchors without enabling a new editor or preview.
 - Open backend-typed artifacts in their versioned viewer from library links and ordinary Page URLs, preserving workspace and selected versions without falling back to an empty panels view.
@@ -157,6 +174,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Add a default-off typed artifact Slides preview (`NEXT_PUBLIC_ARTIFACT_SLIDES`) with existing slide canvases, thumbnails, presentation, authored comment anchors and authorized PDF download; requires the backend Slides capability.
 - Show the Craft edit-lock bar, agent proposal cards (Compare / Accept / Reject) and recovered local drafts in chat, and a "+ New artifact" composer menu offering only kinds with a backend; off by default behind `NEXT_PUBLIC_CHAT_CRAFT_LEASE` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 - **Opening a new conversation logged three 404s.** A draft session no longer requests its execution profile, messages or participants before the first send creates it.
+
+- **`crewship workspace artifact-policy show|set` work with a workspace chosen by slug.** The slug from `--workspace`/`-w`, `CREWSHIP_WORKSPACE` or the config is now resolved to the workspace ID before the request, as other workspace commands do, instead of being put raw into `/workspaces/{id}/` and answered with 404; a slug that does not resolve fails rather than falling back. `set` without either `--crew-id` or `--clear-crews` now says one of them is required instead of `not both`.
 - **Project Edit grants could return 403 instead of allowing changes.** Human editors can read and save the latest complete project with version conflict checks and their own attribution. Read and Comment stay on the shared version; publishing a shared pin, restoring history and agent execution keep separate owner permissions.
 
 - **Artifacts CLI help now explains data, Slides, archive and creation policy commands.** The help includes required flags and examples, and agent refusal text names artifact and Design operations. Command behavior is unchanged.
@@ -374,6 +393,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - ⚠️ **Behaviour change: routine expression inputs stay data.** CEL and expr code now receive typed inputs and prior step outputs instead of rendered program text. Simple legacy `{{ inputs.x }}` references, including a whole quoted reference, translate at runtime without rewriting saved definitions. Embedded or complex templates are rejected on save and fail closed for historical definitions; use typed selectors directly. Complete JSON step outputs retain their JSON types, missing selectors fail explicitly, and nested selectors walk each path segment. `crewship routine validate` reports the same migration guidance.
 - ⚠️ **Behaviour change:** Public Pages password checks have configurable process-wide and per-link concurrency limits. Busy checks return 429 with Retry-After immediately; existing per-link rate limits and password refusal responses remain in force.
 - **Native WordCraft and GridCraft editors stay connected through unrelated workspace changes.** Creating another Page, changing a grant on another Page or adding a workspace member no longer disconnects every open native editor with "Editor odpojen" and a 403 on the next save. A native editing session now ends only when a change can affect that person or that Page, including a revoked and restored grant, membership loss or a revoked credential.
+- **Open Design canvases stay connected through unrelated workspace changes.** Creating another Page, changing a grant on another Page or adding a workspace member no longer closes every open Design websocket in the workspace, which could drop unconfirmed edits on large canvases. A Design connection now closes only when a change can affect that person or that Design Page, including a revoked and restored grant, membership loss or a revoked credential.
 - ⚠️ **Behaviour change:** Routine-version and consolidation diff previews share configurable byte, line and concurrency budgets. Oversized previews return 413 and busy comparisons return 429 with Retry-After immediately; the UI and CLI show an explicit refusal. Accepted comparisons keep their existing hunks and stored definitions are unchanged.
 
 - **Audit history damage is detected without operator requests.** Full instance and workspace verification now runs at startup and hourly outside writer transactions; post-upgrade defects and unchained fallback records alert instance admins. Delivery receipts commit with the inbox notice and survive inbox purge/retention, so handled security notices are not repeatedly restored or resent.
@@ -1354,6 +1374,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - Routine budget views clear data when their workspace changes and ignore obsolete mutation responses. A pending read can no longer overwrite a successfully edited cap.
 
+- **Routine tag and step override commands honor machine output.** Tag additions/removals and step override writes now emit structured results for JSON and YAML output while keeping the existing human messages.
+
 - Keep the skills browser scoped to the current workspace and Installed lens across imports; rebuild active search results after catalog changes and show crew-assignment network failures in the dialog.
 - Isolate Docker network integration-test installations and subnet leases so concurrent runs cannot adopt or remove each other’s containers.
 - Workflow graphs omit dependency and permission edges whose source or target is absent from the displayed graph.
@@ -1680,6 +1702,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Backup: five `BackupTables` entries no table backs (`agent_runs`, `hooks`, `routines`, `schedules`, `webhooks`) are removed — each was a silent no-op on every restore — and a schema guard now checks the list in both directions. (#2274, partial)
 - OpenAPI preserves the incoming webhook signature profile in the final create request and endpoint list schemas, so generated clients can configure and recognize GitHub endpoints.
 - Approval or signal delivery arriving while a routine is parking waits for the original execution to release its slot before resuming, preventing a decided run from remaining stuck in waiting.
+
+- **Routine signals support machine output.** `routine signal -f json` and YAML output now return the run ID, event type and delivery result instead of a human sentence.
+
 - Incoming webhooks use the shared Integrations explorer, overview and endpoint detail on desktop and phones. Creation opens from Add integration, target links survive reload, and Refresh reloads endpoints and receipts. Agent catalogs report whether a signing key is configured without exposing it; paged catalogs are fully read before counting endpoints.
 - **Manifest:** a standalone `Project` can name a workspace agent as lead, `Project.status` uses the API vocabulary (`backlog|planned|in_progress|paused|completed|cancelled`; a bad value is a 400 naming the field instead of a 500), re-applying a `Label` is idempotent, and `Issue.status` is honoured on create — `POST …/issues` and `crewship issue create --status` accept a starting status. (#2426)
 
@@ -1834,6 +1859,9 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Pages demo setup leaves time for a full compiler run and publication; invalid container resource limits no longer produce healthy snapshots.
 - **Pages restart verification** (#2472) — require the real CLI publication/restart scenario in the Docker CI lane and use a runtime origin accepted by current configuration validation.
 - **Page application history** (#2472) — use a fixed bounded allocation and verify zero, negative and oversized pagination limits are rejected.
+
+- **List requests above the pagination cap return the maximum allowed page.** Keeper logs, checkpoints, approvals, eval runs, inbox, top spenders, runs, audit logs and persona history now clamp an oversized limit to their existing ceiling instead of falling back to a smaller default. Their effective pagination parameters remain documented in OpenAPI.
+
 - **Deferred routine dispatch** (#2472) — preserve the scheduled occurrence when loading due runs, so rearming a one-time row receives a new dispatch identity instead of replaying the old run.
 
 - Routines waiting for a decision resume their captured recipe after publication or restart, preserving the original form and effective step settings.
@@ -7367,6 +7395,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - **GDPR export and erase failures show the server's reason.** The admin user-data toasts now show the API's error sentence (or "Export failed. Nothing was downloaded." / "Erase failed. No data was removed.") instead of a raw status code and response body.
 
 - **`crewship routine schedules now` names an unknown schedule instead of a missing endpoint.** An id that is not a schedule in this workspace now prints the server's `API error (404): schedule not found` and exits 3 (not found); it used to print "force-fire endpoint unavailable on this server" and exit 1. The "endpoint unavailable" hint remains for a server that has no force-fire route. ⚠️ **Behaviour change:** scripts that matched the old message or exit code 1 for an unknown id need updating.
+
 
 ## [1.0.0-rc.1] — 2026-07-12
 

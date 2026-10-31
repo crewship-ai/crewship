@@ -243,6 +243,7 @@ func (r *Router) registerAdminRoutes() {
 
 	// Keeper admin log
 	keeperLog := NewKeeperLogHandler(r.db, r.logger)
+	// openapi: query limit:integer offset:integer
 	r.authedAdmin("GET", "/api/v1/admin/keeper/requests", keeperLog.List)
 	// Append-only transition history for one request (issue #1369). The List
 	// route above returns the CURRENT decision; this returns how the request got

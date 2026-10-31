@@ -51,7 +51,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   let active = true, writable = true, dirty = false, edits = 0, baseVersion = options.baseVersion
   let blocked: string | undefined, latest: Prepared | undefined, unconfirmed: Prepared | undefined
   let confirmed: { nativeState: string; contentHash: string; version: string } | undefined
-  let pending: { abort: AbortController; done: Promise<void> } | undefined
+  let pending: { attempt: Prepared; abort: AbortController; done: Promise<void> } | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
   let preparations = Promise.resolve(), draftWrites = Promise.resolve()
   let lastPersistedSequence = 0, manualCount = 0
@@ -122,7 +122,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   async function transmit(attempt: Prepared, reconcile: boolean) {
     if (!active || !writable || pending) return
     let complete!: () => void
-    const operation = { abort: new AbortController(), done: new Promise<void>(resolve => { complete = resolve }) }; pending = operation
+    const operation = { attempt, abort: new AbortController(), done: new Promise<void>(resolve => { complete = resolve }) }; pending = operation
     emit("saving")
     try {
       const result = await bounded(signal => reconcile ? options.transport.reconcile!(attempt.draft, signal) : options.transport.save(attempt.draft, signal), operation.abort)
@@ -264,6 +264,9 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     // Revoke sending synchronously. The host must first suspend input, then
     // await this fresh durable capture before closing the editor or journal.
     // A failed capture retains the native frame; it never grants a handoff.
+    // A save already sent may have committed; its reply is abandoned here, so
+    // keep it as the unconfirmed attempt for proveLost to reconcile.
+    if (pending && !unconfirmed) unconfirmed = pending.attempt
     writable = false; blocked = "write_revoked"; clearTimeout(timer); pending?.abort.abort()
     const sequence = nextPreparation + 1
     writeRetirement = new Promise<boolean>(resolve => {
@@ -277,10 +280,30 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       const deadline = setTimeout(() => finish(false), timeoutMs)
       lifetime.signal.addEventListener("abort", abort, { once: true })
       if (lifetime.signal.aborted) { abort(); return }
-      void save().then(() => finish(active && lastPersistedSequence >= sequence), () => finish(false))
+      void save().then(async () => {
+        const captured = active && lastPersistedSequence >= sequence
+        if (captured && !finished) { clearTimeout(deadline); await proveLost() }
+        finish(captured)
+      }, () => finish(false))
     })
     emit("read-only", "write_revoked")
     return writeRetirement
+  }
+  // A reply lost while the lease expired is still provable for its exact
+  // successor. Confirm only that attempt and an identical fresh capture; any
+  // other capture stays a draft to compare. Never sends the snapshot again.
+  async function proveLost() {
+    const attempt = unconfirmed
+    if (!attempt || !options.transport.reconcile) return
+    try {
+      const raw = await bounded(signal => options.transport.reconcile!(attempt.draft, signal), new AbortController())
+      const receipt: unknown = raw && typeof raw === "object" ? { ...raw } : raw
+      if (!active || unconfirmed !== attempt || !validReceipt(receipt, attempt)) return
+      unconfirmed = undefined
+      await options.journal.confirm(attempt.draft)
+      const capture = latest?.draft
+      if (active && capture && capture !== attempt.draft && capture.contentHash === attempt.draft.contentHash) await options.journal.confirm(capture)
+    } catch { /* Unproven: the captured draft remains for comparison. */ }
   }
   function revokeRead() { stop(); unregister(); return options.journal.revokeRead() }
   return {

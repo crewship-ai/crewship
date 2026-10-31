@@ -9,7 +9,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -300,12 +299,7 @@ func (h *EvalHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "workspace required")
 		return
 	}
-	limit := 50
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
-			limit = n
-		}
-	}
+	limit, _ := parsePagination(r, 50, 200)
 	runs, err := quartermaster.ListRuns(r.Context(), h.db, workspaceID, limit)
 	if err != nil {
 		h.logger.Error("eval list runs", "err", err)
