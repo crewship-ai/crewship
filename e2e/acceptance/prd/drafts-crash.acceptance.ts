@@ -322,8 +322,13 @@ test.describe("drafts after a crash", () => {
           // change in the workspace retires open native editor sessions.
           const tag = Math.random().toString(36).slice(2, 6)
           const created = await native.createNative(request, ws.id, app, tag)
-          const grantStatus = await grantPage(request, ws.id, created.pageId, other.userId, "read")
-          expect(grantStatus, `${app}: grant the other person read access`).toBeLessThan(300)
+          // Write, not read: a Read person never opens the live editor (the entry
+          // mounts the shared preview, which exists only once a version is
+          // published), so "sees no draft" would be checked against a page
+          // that cannot show one. As with the Project test above, the person
+          // gets real access to the live editor so the check is meaningful.
+          const grantStatus = await grantPage(request, ws.id, created.pageId, other.userId, "write")
+          expect(grantStatus, `${app}: grant the other person write access`).toBeLessThan(300)
           r.pageId = created.pageId
           r.grantStatus = grantStatus
           await pause(5000)

@@ -84,6 +84,41 @@ with `PRD acceptance `, and pages whose slug starts with `prd-` AND name with
 `PRD ` (in `PRD_AGENT_WORKSPACE_ID` / `PRD_WORKSPACE_ID`). Objects matching only
 one rule, or younger than `--older-than` minutes (default 60), are listed and kept.
 
+## Agent workspace
+
+The scenarios that need a real agent (`A.craft.proposal.*`, `B.design.agent-*`, `B.project.agent-*`)
+cannot run in a disposable `prd-qa-*` workspace. An agent's model login is a
+credential owned by one workspace; `crewship credential` has no way to share it
+into another workspace, and copying its value would mean handling a secret the
+harness must never see. A new workspace's agent therefore has no credential
+(`crewship agent credential-readiness` says so) and its first run fails. So the
+agent, its chat and the pages it works on live in `PRD_AGENT_WORKSPACE_ID`,
+which on the dev instances is the shared demo workspace.
+
+That workspace has the caps of any workspace: 100 pages (HTTP 422 on create) and
+the Project/Design history budget (HTTP 413, or the agent answering that "the
+artifact history quota is full"). When other work fills it, these rows fail on
+capacity, not on the product; the failure messages say so. The harness never
+deletes pages it did not create.
+
+To make the rows independent of the demo workspace, an operator creates one
+dedicated agent workspace once (the credential step is the only one that needs
+the secret, so it is a person's job, not the harness's):
+
+```
+crewship workspace create --name "PRD agent home" --slug prd-agent-home   # not named "PRD acceptance ...": the harness cleanup deletes those
+crewship crew create --name agents --workspace prd-agent-home
+crewship agent create --name Jamie --slug prd-agent --crew agents --workspace prd-agent-home \
+  --llm-provider ANTHROPIC --llm-model claude-haiku-4-5
+crewship credential create --type AI_CLI_TOKEN ... --workspace prd-agent-home   # the one manual step
+crewship credential assign <credential> prd-agent --workspace prd-agent-home
+crewship agent credential-readiness prd-agent --workspace prd-agent-home        # must say ready
+```
+
+Add the existing member (`PRD_MEMBER_*`) to that workspace, then run with
+`PRD_AGENT_SLUG=prd-agent PRD_AGENT_WORKSPACE_ID=<its id>`. Design must be
+enabled there.
+
 ## Output
 
 ```
