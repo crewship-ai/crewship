@@ -241,10 +241,24 @@ the canonical origin and an `appSha` equal to the release candidate. Exceptions:
 
 - `A.craft.lease.fail-closed` may be `skipped` (servers with a native editor only).
 - Rows marked `allowManual` (`A.craft.session.hour-*`) may be `mode=manual` with
-  a link to the recording in `evidence`; without it the row fails.
+  a link to the recording in `evidence` and every check of the row's
+  `manualChecks` set to `true` in `checks` (Enter, font, styles, table, image,
+  reload, restart, content after restart); otherwise the row fails. No other
+  ID accepts a manual record.
+- Evidence from an older SHA counts only through `--carryover` (below).
 
 Several runs assemble one RC. Per ID the latest row on the RC SHA wins; a row
-on another SHA counts only when none exists on the RC, and then fails as `appSha`.
+on another SHA counts only when none exists on the RC, and then fails as `appSha`
+unless a carryover record covers it.
+
+A carried row keeps the SHA it was proven on; the gate never rewrites it to the
+RC. It records `carriedFrom` with the `git diff --stat <fromSha> <RC>` over the
+row's scenario paths plus `sharedPaths` from `required-ids.json`
+(authorization, saving, drafts, migrations, runtime config, the release
+profile). The diff must be empty and the engine pins (`engines.from`,
+`engines.rc`) present and equal. Rows marked `alwaysRerun` (save, lease, soak,
+roundtrip, outage, lost-ack, restart, write-revoked, stale) never carry over.
+Run the gate from a checkout that has both SHAs.
 
 ```sh
 # gate the run just made
@@ -259,11 +273,22 @@ node e2e/acceptance/prd/report.mjs --rc <SHA> --origin-map craft=<url>,artifacts
 `--merge` takes a run directory or a `summary.json` and may repeat. The gate
 prints each problem (`missing`, `result`, `mode`, `origin`, `appSha`,
 `evidence`) with its ID and exits non-zero (2 for bad arguments), and writes
-`rc-gate.json` (and `rc-gate.md` with `report.mjs --output`).
+`rc-gate.json` (and `rc-gate.md` with `report.mjs --output`). A rejected
+carryover is reported as `carryover`.
 
 `manual-rows.json` is an array; the origin defaults to the row's canonical one:
 
 ```json
 [{ "id": "A.craft.session.hour-word", "result": "passed", "appSha": "<SHA>",
-   "evidence": "https://…/recording", "recordedAt": "2026-10-31T10:00:00Z" }]
+   "evidence": "https://…/recording", "recordedAt": "2026-10-31T10:00:00Z",
+   "checks": { "enter": true, "font": true, "styles": true, "table": true, "image": true,
+               "reload": true, "restart": true, "content-after-restart": true } }]
+```
+
+`carryover.json` is an array:
+
+```json
+[{ "id": "B.design.two-humans", "fromSha": "<evidence SHA>",
+   "paths": ["e2e/acceptance/prd/design.acceptance.ts", "internal/design"],
+   "engines": { "from": "<pins on evidence run>", "rc": "<pins on RC>" } }]
 ```

@@ -209,3 +209,79 @@ test("parseArgs: --rc, --manual, --merge, --required", () => {
   assert.deepEqual(parseOriginMap(a.originMap), { craft: "https://c.test" })
   assert.throws(() => parseOriginMap("craft"), /key=url/)
 })
+
+// ---- Manual records and carried-over evidence (G3 rules 3–4, review 31. 10.) ----
+
+const OLD = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+const strict = {
+  origins: { craft: CRAFT, artifacts: ART },
+  sharedPaths: ["internal/mooring", "internal/database/migrations"],
+  rows: [
+    { id: "A.hour", origin: "craft", allowManual: true, manualChecks: ["restart", "content-after-restart"] },
+    { id: "A.save", origin: "craft", alwaysRerun: true },
+    { id: "B.one", origin: "artifacts" },
+  ],
+}
+const strictGood = () => [
+  ...manualToRows([{ id: "A.hour", result: "passed", appSha: RC, evidence: "https://rec.test/v/1", recordedAt: "2026-10-31T10:00:00Z", checks: { restart: true, "content-after-restart": true } }], strict),
+  row({ requirement: "A.save", origin: CRAFT, appSha: RC }),
+  row({ requirement: "B.one", origin: ART, appSha: RC }),
+]
+
+test("gate: a manual row must record every check its ID requires", () => {
+  assert.deepEqual(evaluateRequired(strictGood(), strict, { rc: RC }).problems, [])
+  const partial = strictGood().map((x) => (x.requirement === "A.hour" ? { ...x, checks: { restart: true } } : x))
+  assert.deepEqual(kinds(evaluateRequired(partial, strict, { rc: RC })), ["A.hour:evidence"])
+  const falsy = strictGood().map((x) => (x.requirement === "A.hour" ? { ...x, checks: { restart: true, "content-after-restart": false } } : x))
+  assert.deepEqual(kinds(evaluateRequired(falsy, strict, { rc: RC })), ["A.hour:evidence"])
+})
+
+test("gate: carried-over evidence keeps its own SHA and needs an empty diff over scenario and shared paths", () => {
+  const rows = strictGood().map((x) => (x.requirement === "B.one" ? { ...x, appSha: OLD } : x))
+  const carry = [{ id: "B.one", fromSha: OLD, paths: ["e2e/acceptance/prd/project.acceptance.ts"], engines: { from: "word@1 sheet@2", rc: "word@1 sheet@2" } }]
+  /** @type {any[]} */
+  const calls = []
+  const empty = (from, to, paths) => (calls.push({ from, to, paths }), "")
+  const ok = evaluateRequired(rows, strict, { rc: RC, carryover: carry, diff: empty })
+  assert.deepEqual(ok.problems, [])
+  const b = ok.rows.find((r) => r.requirement === "B.one")
+  assert.equal(b.appSha, OLD, "the carried row keeps the SHA it was proven on")
+  assert.equal(b.carriedFrom.fromSha, OLD)
+  assert.equal(b.carriedFrom.diffStat, "")
+  assert.deepEqual(calls[0].paths, ["e2e/acceptance/prd/project.acceptance.ts", "internal/mooring", "internal/database/migrations"])
+  assert.equal(calls[0].to, RC)
+
+  const changed = () => " internal/mooring/adapter.go | 2 +-\n"
+  assert.deepEqual(kinds(evaluateRequired(rows, strict, { rc: RC, carryover: carry, diff: changed })), ["B.one:carryover"])
+  const engines = [{ ...carry[0], engines: { from: "word@1", rc: "word@2" } }]
+  assert.deepEqual(kinds(evaluateRequired(rows, strict, { rc: RC, carryover: engines, diff: empty })), ["B.one:carryover"])
+  const noEngines = [{ id: "B.one", fromSha: OLD, paths: ["e2e/x"] }]
+  assert.deepEqual(kinds(evaluateRequired(rows, strict, { rc: RC, carryover: noEngines, diff: empty })), ["B.one:carryover"])
+  const noPaths = [{ ...carry[0], paths: [] }]
+  assert.deepEqual(kinds(evaluateRequired(rows, strict, { rc: RC, carryover: noPaths, diff: empty })), ["B.one:carryover"])
+  assert.deepEqual(kinds(evaluateRequired(rows, strict, { rc: RC })), ["B.one:appSha"], "without a carryover record an old SHA still fails")
+})
+
+test("gate: save-class rows can never be carried over", () => {
+  const rows = strictGood().map((x) => (x.requirement === "A.save" ? { ...x, appSha: OLD } : x))
+  const carry = [{ id: "A.save", fromSha: OLD, paths: ["e2e/x"], engines: { from: "e", rc: "e" } }]
+  assert.deepEqual(kinds(evaluateRequired(rows, strict, { rc: RC, carryover: carry, diff: () => "" })), ["A.save:carryover"])
+})
+
+test("gate: shipped required-ids.json marks save rows, hour checklists and shared paths", () => {
+  const real = loadRequired(new URL("./required-ids.json", import.meta.url).pathname, `craft=${CRAFT},artifacts=${ART}`)
+  assert.ok((real.sharedPaths ?? []).length > 0)
+  for (const p of ["internal/database/migrations", "internal/mooring", "lib/mooring", ".env.production"]) assert.ok(real.sharedPaths.includes(p), p)
+  const save = /roundtrip|soak|\.lease\.|outage|lost-ack|session\.hour|restart|write-revoked|stale/
+  for (const x of real.rows.filter((r) => save.test(r.id))) assert.equal(x.alwaysRerun, true, x.id)
+  for (const id of ["A.craft.session.hour-word", "A.craft.session.hour-sheet"]) {
+    const r = real.rows.find((x) => x.id === id)
+    for (const c of ["enter", "font", "styles", "table", "image", "reload", "restart", "content-after-restart"]) assert.ok(r.manualChecks?.includes(c), `${id} ${c}`)
+  }
+  assert.deepEqual(real.rows.filter((x) => x.allowManual).map((x) => x.id), ["A.craft.session.hour-word", "A.craft.session.hour-sheet"])
+})
+
+test("manualToRows keeps the recorded checks", () => {
+  const [r] = manualToRows([{ id: "A.hour", result: "passed", appSha: RC, evidence: "x", checks: { restart: true } }], strict)
+  assert.deepEqual(r.checks, { restart: true })
+})

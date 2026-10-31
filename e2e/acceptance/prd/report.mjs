@@ -1,6 +1,7 @@
 // Pure helpers shared by the PRD acceptance reporter and runner: reading
 // result rows, rendering the requirement table and parsing runner arguments.
 // Tested with `node --test e2e/acceptance/prd/report.test.mjs`.
+import { execFileSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as path from "node:path"
 
@@ -96,8 +97,8 @@ export function writeSummary(outputDir, rows, run) {
  * @param {string[]} argv
  */
 export function parseArgs(argv) {
-  /** @type {{ originMap: string | null, rc: string | null, manual: string | null, merge: string[], required: string | null, origin: string | null, mode: "quick" | "full" | null, output: string | null, grep: string | null, list: boolean, cleanup: boolean, dryRun: boolean, olderThan: number | undefined, help: boolean, passthrough: string[] }} */
-  const out = { originMap: null, rc: null, manual: null, merge: [], required: null, origin: null, mode: null, output: null, grep: null, list: false, cleanup: false, dryRun: false, olderThan: undefined, help: false, passthrough: [] }
+  /** @type {{ originMap: string | null, rc: string | null, manual: string | null, carryover: string | null, merge: string[], required: string | null, origin: string | null, mode: "quick" | "full" | null, output: string | null, grep: string | null, list: boolean, cleanup: boolean, dryRun: boolean, olderThan: number | undefined, help: boolean, passthrough: string[] }} */
+  const out = { originMap: null, rc: null, manual: null, carryover: null, merge: [], required: null, origin: null, mode: null, output: null, grep: null, list: false, cleanup: false, dryRun: false, olderThan: undefined, help: false, passthrough: [] }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const [flag, inline] = a.startsWith("--") && a.includes("=") ? [a.slice(0, a.indexOf("=")), a.slice(a.indexOf("=") + 1)] : [a, null]
@@ -130,6 +131,9 @@ export function parseArgs(argv) {
         break
       case "--manual":
         out.manual = take()
+        break
+      case "--carryover":
+        out.carryover = take()
         break
       case "--merge":
         out.merge.push(take())
@@ -176,8 +180,9 @@ export function parseArgs(argv) {
 export const DEFAULT_REQUIRED = path.join(path.dirname(new URL(import.meta.url).pathname), "required-ids.json")
 
 /**
- * @typedef {{ id: string, origin: string, allowSkipped?: boolean, allowManual?: boolean }} RequiredRow
- * @typedef {{ origins: Record<string, string>, rows: RequiredRow[] }} Required
+ * @typedef {{ id: string, origin: string, allowSkipped?: boolean, allowManual?: boolean, manualChecks?: string[], alwaysRerun?: boolean }} RequiredRow
+ * @typedef {{ origins: Record<string, string>, sharedPaths?: string[], rows: RequiredRow[] }} Required
+ * @typedef {{ id: string, fromSha: string, paths: string[], engines?: { from: string, rc: string } }} Carryover
  */
 
 /** "craft=https://a,artifacts=https://b" (flag or PRD_RC_ORIGINS) to a map. @param {string | null | undefined} spec */
@@ -216,7 +221,7 @@ const shaMatches = (a, b) => {
 const time = (r) => Date.parse(r.finishedAt) || 0
 
 /**
- * Manual rows ({ id, result, appSha, evidence, recordedAt }) as ordinary rows
+ * Manual rows ({ id, result, appSha, evidence, recordedAt, checks }) as ordinary rows
  * with mode "manual". Origin defaults to the row's canonical origin.
  * @param {any[]} manual @param {Required} required
  */
@@ -230,16 +235,26 @@ export function manualToRows(manual, required) {
       requirement: m.id, title: null, scenario: "manual", test: "manual walkthrough", result: m.result,
       appSha: m.appSha ?? "unknown", evidence: m.evidence || null, evidenceFiles: m.evidence ? [m.evidence] : [],
       mode: "manual", origin: m.origin ?? (req ? required.origins[req.origin] : "unknown"),
-      reason: null, durationMs: 0, finishedAt: m.recordedAt ?? "",
+      reason: null, durationMs: 0, finishedAt: m.recordedAt ?? "", checks: m.checks ?? {},
     }
   })
+}
+
+/** `git diff --stat from to -- paths`; empty output means the paths did not change. */
+export function gitDiffStat(from, to, paths) {
+  return execFileSync("git", ["diff", "--stat", from, to, "--", ...paths], { encoding: "utf8" })
 }
 
 /**
  * Checks merged rows against the required list. Per ID the latest row on the
  * RC SHA wins (ties: worst result); rows on other SHAs only count when no row
- * on the RC exists, and then fail as "appSha".
- * @param {PrdRow[]} rows @param {Required} required @param {{ rc?: string | null }} opts
+ * on the RC exists, and then fail as "appSha" unless a carryover record
+ * covers them. A carried row keeps the SHA it was proven on and gets
+ * `carriedFrom` with the diff against the RC over its scenario paths plus the
+ * shared paths (authorization, saving, migrations, runtime config); the diff
+ * must be empty and the engine pins equal. Save-class rows never carry over.
+ * @param {PrdRow[]} rows @param {Required} required
+ * @param {{ rc?: string | null, carryover?: Carryover[], diff?: (from: string, to: string, paths: string[]) => string }} opts
  */
 export function evaluateRequired(rows, required, opts) {
   const rc = opts?.rc
@@ -251,16 +266,33 @@ export function evaluateRequired(rows, required, opts) {
     const mine = rows.filter((r) => r.requirement === req.id)
     const onRc = mine.filter((r) => shaMatches(r.appSha, rc))
     const pool = onRc.length ? onRc : mine
-    const row = [...pool].sort((a, b) => time(b) - time(a) || ORDER[a.result] - ORDER[b.result])[0]
+    let row = [...pool].sort((a, b) => time(b) - time(a) || ORDER[a.result] - ORDER[b.result])[0]
     const fail = (kind, detail) => problems.push({ id: req.id, kind, detail })
     if (!row) {
       fail("missing", "no result row recorded")
       continue
     }
-    checked.push(row)
-    if (!shaMatches(row.appSha, rc)) fail("appSha", `${String(row.appSha).slice(0, 12)} is not RC ${rc.slice(0, 12)}`)
+    const carry = onRc.length ? null : (opts.carryover ?? []).find((c) => c.id === req.id)
+    let checkedRow = row
+    if (!shaMatches(row.appSha, rc) && carry) {
+      const from = mine.filter((r) => shaMatches(r.appSha, carry.fromSha)).sort((a, b) => time(b) - time(a) || ORDER[a.result] - ORDER[b.result])[0]
+      if (!from) fail("appSha", `no row on carryover SHA ${String(carry.fromSha).slice(0, 12)}`)
+      else {
+        const paths = [...(carry.paths ?? []), ...(required.sharedPaths ?? [])]
+        const why = req.alwaysRerun ? "save-class row must rerun on the RC"
+          : !(carry.paths ?? []).length ? "carryover lists no scenario paths"
+          : !carry.engines?.from || carry.engines.from !== carry.engines.rc ? "engine pins missing or different"
+          : null
+        const diffStat = why ? null : (opts.diff ?? gitDiffStat)(carry.fromSha, rc, paths)
+        checkedRow = { ...from, carriedFrom: { fromSha: carry.fromSha, rc, paths, engines: carry.engines ?? null, diffStat } }
+        if (why) fail("carryover", why)
+        else if (diffStat.trim()) fail("carryover", `paths changed since ${carry.fromSha.slice(0, 12)}: ${diffStat.trim().split("\n").pop()}`)
+      }
+    } else if (!shaMatches(row.appSha, rc)) fail("appSha", `${String(row.appSha).slice(0, 12)} is not RC ${rc.slice(0, 12)}`)
+    checked.push(checkedRow)
     const want = required.origins[req.origin]
     if (normOrigin(row.origin) !== normOrigin(want)) fail("origin", `${row.origin} is not ${want}`)
+    row = checkedRow
     if (row.result === "skipped" && req.allowSkipped) {
       // Pre-approved skip (native editor servers only); nothing else to check.
     } else if (row.result !== "passed") {
@@ -269,6 +301,10 @@ export function evaluateRequired(rows, required, opts) {
     if (row.mode === "manual") {
       if (!req.allowManual) fail("mode", "manual is not allowed for this row")
       else if (!String(row.evidence ?? "").trim()) fail("evidence", "manual row has no link to the recording")
+      else {
+        const missing = (req.manualChecks ?? []).filter((c) => row.checks?.[c] !== true)
+        if (missing.length) fail("evidence", `manual record lacks checks: ${missing.join(", ")}`)
+      }
     } else if (row.mode !== "full") {
       fail("mode", `mode ${row.mode}, need full`)
     }
@@ -292,19 +328,20 @@ export function readRunRows(p) {
 }
 
 /** Merges runs and the optional manual file, evaluates, returns { rows, result }. */
-export function gateFromInputs({ rc, required: requiredFile, originMap, runs, manual }) {
+export function gateFromInputs({ rc, required: requiredFile, originMap, runs, manual, carryover }) {
   const required = loadRequired(requiredFile ?? DEFAULT_REQUIRED, originMap)
   const rows = runs.flatMap(readRunRows)
   if (manual) rows.push(...manualToRows(JSON.parse(fs.readFileSync(manual, "utf8")), required))
-  return { rows, result: evaluateRequired(rows, required, { rc }) }
+  const carried = carryover ? JSON.parse(fs.readFileSync(carryover, "utf8")) : []
+  return { rows, result: evaluateRequired(rows, required, { rc, carryover: carried }) }
 }
 
-// Standalone: node report.mjs --rc SHA --merge DIR [--merge DIR ...] [--manual manual-rows.json] [--required FILE] [--output DIR]
+// Standalone: node report.mjs --rc SHA --merge DIR [--merge DIR ...] [--manual manual-rows.json] [--carryover carryover.json] [--required FILE] [--output DIR]
 if (process.argv[1] && path.resolve(process.argv[1]) === new URL(import.meta.url).pathname) {
   try {
     const a = parseArgs(process.argv.slice(2))
     if (!a.rc || a.merge.length === 0) throw new Error("usage: report.mjs --rc <SHA> --merge <run dir|summary.json> [--merge ...] [--manual file] --origin-map craft=URL,artifacts=URL [--output DIR]")
-    const { result } = gateFromInputs({ rc: a.rc, required: a.required, originMap: a.originMap, runs: a.merge, manual: a.manual })
+    const { result } = gateFromInputs({ rc: a.rc, required: a.required, originMap: a.originMap, runs: a.merge, manual: a.manual, carryover: a.carryover })
     console.log(formatGate(result))
     if (a.output) {
       fs.mkdirSync(a.output, { recursive: true })
