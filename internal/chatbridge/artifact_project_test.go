@@ -106,3 +106,27 @@ func TestArtifactProjectPersistedEchoConfirmsValidatedIntent(t *testing.T) {
 		})
 	}
 }
+
+func TestArtifactProjectCrewPolicyRefusalIsTyped(t *testing.T) {
+	b, r := documentCreationBridgeFixture(t)
+	b.cfg.ArtifactProjectsEnabled = true
+	b.SetArtifactProjectIntentRecorder(artifactRecorderFunc(func(context.Context, *chataudience.Receipt, string, artifacts.ProjectIntent) error {
+		return fmt.Errorf("artifact project access denied: %w", artifacts.ErrCrewNotAllowed)
+	}))
+	var refusal *ws.ChatEvent
+	err := b.HandleChatMessage(t.Context(), "creation-human", "creation-chat", "Make a landing page", func(e ws.ChatEvent) {
+		if e.Type == "error" {
+			refusal = &e
+		}
+	}, ws.ChatMessageOption{Metadata: map[string]any{artifacts.ProjectIntentMetadataKey: map[string]any{"submission_id": "s1"}}})
+	if err == nil || r.runCalls != 0 {
+		t.Fatalf("refused send was not an error or started a run: runs=%d err=%v", r.runCalls, err)
+	}
+	if refusal == nil || refusal.Content == "failed to save message" {
+		t.Fatalf("generic or missing refusal: %+v", refusal)
+	}
+	meta, _ := refusal.Metadata.(map[string]any)
+	if meta["code"] != artifacts.CodeCrewNotAllowed || refusal.Content != artifacts.CrewNotAllowedMessage {
+		t.Fatalf("untyped refusal: %+v", refusal)
+	}
+}

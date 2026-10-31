@@ -89,3 +89,31 @@ it.each(["desktop", "mobile"] as const)("shows the selected private artifact aud
  selectCreation()
  expect(screen.queryByText(/Private project · Sharing/)).toBeNull()
 })
+
+describe("server refusal because the agent's crew is outside the artifact policy", () => {
+  it("restores the typed message and names the reason instead of a generic failure", async () => {
+    const view = render(<ChatComposer {...props} />)
+    selectCreation(); submit("Build me a landing page")
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
+    send.mockClear()
+    // Optimistically cleared on send ...
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue(""))
+    // ... then the server answers with the typed refusal.
+    view.rerender(<ChatComposer {...props} sendRefusal={{ id: 1, code: "artifact_crew_not_allowed" }} artifactCreationEnabled={false} />)
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("Build me a landing page"))
+    expect(screen.getByRole("alert")).toHaveTextContent("This agent's crew is not allowed to create artifact projects in this workspace")
+    expect(screen.queryByText(/failed to save message/i)).toBeNull()
+    expect(screen.queryByRole("button", { name: "Create artifact project" })).toBeNull()
+  })
+  it("does not overwrite something the person already started typing", async () => {
+    const view = render(<ChatComposer {...props} />)
+    selectCreation(); submit("First attempt")
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue(""))
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "Something new" } })
+    view.rerender(<ChatComposer {...props} sendRefusal={{ id: 1, code: "artifact_crew_not_allowed" }} />)
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
+    expect(screen.getByRole("textbox")).toHaveValue("Something new")
+  })
+})
+

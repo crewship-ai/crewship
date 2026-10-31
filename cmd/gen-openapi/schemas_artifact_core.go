@@ -39,7 +39,7 @@ func artifactProjectCoreComponents() map[string]any {
 		"level":     map[string]any{"type": "string", "enum": []string{"none", "near", "critical", "full"}, "description": "none below 80% of limit_bytes, near from 80%, critical from 95%, full when used_bytes reaches limit_bytes. Omitted when the quota is withheld (shared or editor views report limit_bytes 0)."},
 		"retention": map[string]any{"type": "string", "description": "Owner views use keep-all with history usage; non-owner editors use latest-version-only and other readers shared-version-only, with zero usage/limit values. These visibility labels do not prune stored versions; quota refusal preserves existing data."},
 	}, "used_bytes", "limit_bytes", "warning", "retention")
-	schemas["ArtifactProjectAvailability"] = object(map[string]any{"enabled": boolean()}, "enabled")
+	schemas["ArtifactProjectAvailability"] = object(map[string]any{"enabled": boolean(), "can_create": boolean(), "code": map[string]any{"type": "string", "enum": []string{"artifact_crew_not_allowed"}}}, "enabled")
 	manifestProps := map[string]any{"entrypoint": path(), "files": files("ArtifactProjectFileInput"), "message": text(4096)}
 	schemas["ArtifactProjectCreateRequest"] = object(mergeProps(manifestProps, map[string]any{
 		"created_by_test": boolean(),

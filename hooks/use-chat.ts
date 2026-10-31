@@ -11,6 +11,7 @@ import { apiFetch, AUTH_EVENT } from "@/lib/api-fetch"
 import { projectInputVersionIds } from "@/components/features/chat/files/project-input-metadata"
 import { AskSubmissionError, askSubmissionError } from "@/lib/ask-submission-error"
 import { ASK_SUBMISSION_METADATA_KEY } from "@/components/features/chat/asks/ask-envelope"
+import { ARTIFACT_CREW_NOT_ALLOWED } from "@/lib/artifact-refusal"
 import { randomUUIDv4 } from "@/lib/random-id"
 
 /** Upper bound on out-of-order events held during reassembly. Past this, a gap
@@ -1261,7 +1262,11 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         case "done": handleDoneEvent(metadata); break
         case "crew_provisioning": handleCrewProvisioningEvent(content, metadata); break
         case "user_message": handleUserMessageEvent(content, metadata); break
-        case "error": handleErrorEvent(content); break
+        case "error":
+          handleErrorEvent(content)
+          // A typed refusal tells the composer to give the typed message back.
+          if (metadata?.code === ARTIFACT_CREW_NOT_ALLOWED) sendRefusedRef.current?.(ARTIFACT_CREW_NOT_ALLOWED)
+          break
         // Cross-user run exclusivity (backend: chatbridge.HandleChatMessage):
         // another sender's message is already being processed for this chat.
         // Reuses the error rendering shape — additive case only, no new UI.

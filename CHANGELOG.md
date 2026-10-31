@@ -11,6 +11,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Routine saves honor machine output formats.** `routine save --format json|yaml|ndjson` returns the saved routine identity and trigger metadata without progress text; the human receipt stays unchanged (#4621).
 
+- **Chat no longer offers Project creation to an agent whose crew the workspace policy excludes.** The composer asks `GET /api/v1/pages/artifacts/availability?agent_id=...` (CLI: `crewship page artifact availability --agent <id>`), which now returns `can_create` and, when refused, `code` `artifact_crew_not_allowed`. If a send is refused anyway, the chat shows "This agent's crew is not allowed to create artifact projects in this workspace", keeps the typed message and starts no run, instead of "failed to save message".
+
 - **Agent peer-card errors no longer expose server internals.** When reading or deleting an agent's peer cards fails inside the server, the API now answers `Internal server error` and logs the cause, instead of returning database driver text or a host file path.
 - **Artifact MCP tools advertise the inputs they accept.** Tool descriptions now name the Slides/data flag dependencies and explain mandate, version conflict and quota behavior; version schemas require the positive values already enforced by the host.
 

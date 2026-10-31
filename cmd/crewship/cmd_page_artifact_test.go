@@ -98,6 +98,27 @@ func TestPageArtifactAvailabilityUsesAuthenticatedWorkspaceTransport(t *testing.
 	}
 }
 
+func TestPageArtifactAvailabilityAgentFlagScopesTheQuery(t *testing.T) {
+	stub := pageStub(t)
+	route := "/api/v1/pages/artifacts/availability"
+	stub.OnGet(route, func(r *http.Request, _ []byte) (int, []byte, string) {
+		if got := r.URL.Query().Get("agent_id"); got != "agent 1" {
+			t.Errorf("agent_id = %q", got)
+		}
+		return 200, []byte(`{"enabled":true,"can_create":false,"code":"artifact_crew_not_allowed"}`), "application/json"
+	})
+	cmd := newPageArtifactCommand()
+	cmd.PersistentPreRun = rootCmd.PersistentPreRun
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"availability", "--agent", "agent 1"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.CallsFor("GET", route)) != 1 {
+		t.Fatal("scoped availability was not requested")
+	}
+}
+
 func TestPageArtifactPublishRequiresPositiveBaseBeforeNetwork(t *testing.T) {
 	stub := pageStub(t)
 	file := pageBundleFile(t, `{"entrypoint":"index.html","files":[{"path":"index.html","content":"<h1>Draft</h1>","media_type":"text/html"}]}`)

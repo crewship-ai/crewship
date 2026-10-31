@@ -1551,6 +1551,15 @@
       "ArtifactProjectAvailability": {
         "additionalProperties": false,
         "properties": {
+          "can_create": {
+            "type": "boolean"
+          },
+          "code": {
+            "enum": [
+              "artifact_crew_not_allowed"
+            ],
+            "type": "string"
+          },
           "enabled": {
             "type": "boolean"
           }
@@ -127661,13 +127670,22 @@
     },
     "/api/v1/pages/artifacts/availability": {
       "get": {
-        "description": "Report whether Artifacts are enabled for the selected workspace. Artifacts are off by default: enable the `artifact_projects` workspace feature flag, or set CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true for every workspace on the instance.",
+        "description": "Report whether Artifacts are enabled for the selected workspace. Artifacts are off by default: enable the `artifact_projects` workspace feature flag, or set CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true for every workspace on the instance. Pass the optional `agent_id` query parameter to also learn whether that agent may create artifact projects: `can_create` is false with `code` `artifact_crew_not_allowed` when its crew is outside the workspace artifact-creation policy.",
         "operationId": "get_api_v1_pages_artifacts_availability",
         "parameters": [
           {
             "description": "Workspace ID or slug.",
             "in": "header",
             "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Agent whose crew policy to check. When set the response adds can_create and, if refused, code artifact_crew_not_allowed.",
+            "in": "query",
+            "name": "agent_id",
             "required": false,
             "schema": {
               "type": "string"

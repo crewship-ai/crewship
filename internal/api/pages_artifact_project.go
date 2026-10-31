@@ -81,7 +81,23 @@ func (h *PageHandler) ArtifactProjectAvailability(w http.ResponseWriter, r *http
 		replyError(w, http.StatusForbidden, "current artifact project read authority required")
 		return
 	}
-	writeJSON(w, 200, artifactProjectAvailabilityResponse{Enabled: h.artifactProjectEnabled(r.Context())})
+	out := artifactProjectAvailabilityResponse{Enabled: h.artifactProjectEnabled(r.Context())}
+	if agent := strings.TrimSpace(r.URL.Query().Get("agent_id")); agent != "" {
+		ctx := r.Context()
+		workspace := WorkspaceIDFromContext(ctx)
+		var crew sql.NullString
+		err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT crew_id FROM agents WHERE id=? AND workspace_id=?`, agent, workspace).Scan(&crew)
+		allowed := err == nil && crew.Valid && h.artifactAgentPolicyAllows(ctx, workspace, crew.String)
+		out.CanCreate = new(bool)
+		switch {
+		case !allowed:
+			out.Code = artifacts.CodeCrewNotAllowed
+		case out.Enabled:
+			user := UserFromContext(ctx)
+			*out.CanCreate = user != nil && h.artifactPrincipalMayCreate(ctx, workspace, user.ID)
+		}
+	}
+	writeJSON(w, 200, out)
 }
 func (h *PageHandler) artifactProjectStore(ctx context.Context) *artifacts.VersionStore {
 	return artifacts.NewVersionStore(h.db, artifacts.VersionOptions{Enabled: h.artifactProjectEnabled(ctx)})

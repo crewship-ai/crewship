@@ -152,7 +152,7 @@ scope; reads require `pages:read`.
 
 | Route | Who | Notes |
 |---|---|---|
-| `GET /api/v1/pages/artifacts/availability` | Members | `{"enabled": true\|false}` for the workspace. |
+| `GET /api/v1/pages/artifacts/availability` | Members | `{"enabled": true\|false}` for the workspace. With `?agent_id=<id>` (CLI: `crewship page artifact availability --agent <id>`) it adds `can_create`; `false` with `code: "artifact_crew_not_allowed"` when that agent's crew is outside the workspace artifact-creation policy. A send refused for that reason emits a chat `error` event with the same `code` and no run starts. |
 | `POST /api/v1/pages/artifacts` | Page creators, admitted agent runs | Creates a private Page and version 1. `201`. A workspace that already has 100 Pages answers `413`. A taken slug answers `409` with code `artifact_slug_taken`. |
 | `GET /api/v1/pages/{slug}/artifact` | Owner, editors, readers | Optional `version`. Owners can read any version; editors only the latest; readers only the shared version. |
 | `GET /api/v1/pages/{slug}/artifact/versions` | Same as above | Same response as the read; the version list is complete only for the owner. |
