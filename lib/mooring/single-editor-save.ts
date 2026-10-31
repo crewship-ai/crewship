@@ -23,6 +23,10 @@ export interface SingleEditorSaveOptions {
   applicationId: string
   enginePin: string
   baseVersion: string
+  /** The bytes the server confirmed as `baseVersion`, exactly as loaded. Seeds
+   * the unchanged-content baseline for a freshly opened editor. Never a local
+   * draft. Word's per-RPC nativeState is unknown at load, so it is not compared. */
+  loaded?: { bytes: Uint8Array }
   generation: string
   sessionId: string
   journal: NativeDraftJournal
@@ -50,7 +54,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   if (!Number.isFinite(idleMs) || idleMs < 1 || idleMs > 5000 || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) throw new Error("invalid_save_deadline")
   let active = true, writable = true, dirty = false, edits = 0, baseVersion = options.baseVersion
   let blocked: string | undefined, latest: Prepared | undefined, unconfirmed: Prepared | undefined
-  let confirmed: { nativeState: string | undefined; contentHash: string; version: string } | undefined
+  let confirmed: { nativeState: string | undefined; contentHash: string; version: string; seeded?: boolean } | undefined
   let pending: { attempt: Prepared; abort: AbortController; done: Promise<void> } | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
   let preparations = Promise.resolve(), draftWrites = Promise.resolve()
@@ -75,6 +79,15 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     emit("stopped")
   }
   const unregister = options.journal.onRetire(stop)
+  // Seed the baseline from the confirmed server bytes (same SHA-256 as a save).
+  // A later receipt replaces it; a normalized or restored-draft capture hashes
+  // differently, so it simply never matches and is saved.
+  const seedVersion = options.baseVersion
+  const seeding: Promise<void> = options.loaded
+    ? crypto.subtle.digest("SHA-256", new Uint8Array(options.loaded.bytes)).then(digest => {
+      if (active && !confirmed) confirmed = { nativeState: undefined, seeded: true, version: seedVersion, contentHash: `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("")}` }
+    }, () => {})
+    : Promise.resolve()
   emit("idle")
   function schedule() {
     clearTimeout(timer)
@@ -220,7 +233,8 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       // retire only the local recovery row; the RPC-bound receipt and native ACK
       // remain exclusive to the original request. A native Ctrl+S ticket always
       // transmits, as its ACK is bound to its own RPC.
-      if ((autosaveToken !== undefined || hostFlush && requestId === undefined) && confirmed && confirmed.nativeState === attempt.nativeState && confirmed.contentHash === attempt.draft.contentHash && confirmed.version === baseVersion) {
+      await seeding
+      if ((autosaveToken !== undefined || hostFlush && requestId === undefined) && confirmed && (confirmed.seeded || confirmed.nativeState === attempt.nativeState) && confirmed.contentHash === attempt.draft.contentHash && confirmed.version === baseVersion) {
         const baseline = confirmed
         try { await options.journal.confirm(attempt.draft) } catch {
           if (!unavailable() && confirmed === baseline && baseVersion === baseline.version) { blocked = "storage"; emit("draft", "storage") }
