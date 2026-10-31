@@ -21,6 +21,9 @@ const REQ = {
 
 // The server rechecks authority on a 5 s tick; leave generous slack.
 const STOP_WITHIN_MS = 45_000
+// The shared preview is told by a push (page.access_recheck) and rereads at once;
+// the 30 s poll is only the fallback and must not be what makes this pass.
+const PREVIEW_REMOVED_WITHIN_MS = 5_000
 
 for (const { application, label } of APPLICATIONS) {
   test.describe(`${label} read right lost`, () => {
@@ -135,12 +138,14 @@ for (const { application, label } of APPLICATIONS) {
           const revokedAt = Date.now()
           await doc.revoke(request, peer.userId, "read")
 
-          // The preview rereads on a 30 s timer (and on focus/online) and
-          // removes the content as soon as the read is refused.
-          await expect(page.getByRole("alert").filter({ hasText: "Sdílený náhled není dostupný" }).first(), "the preview says access is gone").toBeVisible({ timeout: STOP_WITHIN_MS })
-          await expect(page.locator("iframe"), "the document content is removed from the page").toHaveCount(0)
+          // The server pushes "re-check access" to this reader only; the preview
+          // rereads at once and removes the content as soon as the read is
+          // refused (the 30 s timer and focus/online rereads are the fallback).
+          await expect(page.getByRole("alert").filter({ hasText: "Sdílený náhled není dostupný" }).first(), "the preview says access is gone").toBeVisible({ timeout: PREVIEW_REMOVED_WITHIN_MS })
+          await expect(page.locator("iframe"), "the document content is removed from the page").toHaveCount(0, { timeout: 1_000 })
           await expect(page.locator("canvas")).toHaveCount(0)
           const shownAfterMs = Date.now() - revokedAt
+          expect(shownAfterMs, "removed by the push, not by the 30 s poll").toBeLessThan(PREVIEW_REMOVED_WITHIN_MS)
           shots["reader-revoked.png"] = await page.screenshot({ fullPage: true })
 
           // Nothing is served any more, not to the old tab, a direct call or a reload.

@@ -541,11 +541,14 @@ scoped to the originating chat session.
 
 ### User Channel (`user:{userId}`)
 
-The identity-scoped channel. It currently carries **no events**: its only
-producer was `notification.created`, from the entity-scoped in-app
-notifications table removed in
-[#1751](https://github.com/crewship-ai/crewship/issues/1751). Subscribing is
-still allowed, and the channel is where a future per-user feed would land.
+The identity-scoped channel. Its only producer, `notification.created`, was
+removed with the entity-scoped in-app notifications table
+([#1751](https://github.com/crewship-ai/crewship/issues/1751)). It now carries
+one control event:
+
+| Event Type | Description | Payload |
+|---|---|---|
+| `page.access_recheck` | A grant on a native Craft page that names you was added or removed: re-read your access. Open shared previews re-read at once and drop their content when the read is refused. No content, level or other users | `{ page_id }` |
 
 For "what needs my attention", use the workspace inbox channel
 (`inbox.updated`) instead.
