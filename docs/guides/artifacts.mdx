@@ -157,8 +157,8 @@ Identical file contents are stored once per project. The owner's project
 response carries `quota` with `used_bytes`, `limit_bytes` and `warning`, which
 turns true at 80 % of the limit. A save that would exceed the history limit
 returns `413` with code `artifact_history_quota` and keeps every existing
-version; keep your local draft. A creation at the 100-Page workspace limit
-returns `422` with code `pages_limit` instead; it says nothing about an
+version; keep your local draft. A creation at the workspace page limit (100
+by default) returns `422` with code `pages_limit` instead; it says nothing about an
 existing project’s history. Other readers see a `quota` that names only
 their retention (`latest-version-only` or `shared-version-only`).
 

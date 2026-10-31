@@ -32,9 +32,7 @@ A person starts the task with the CLI:
 They can stop it in the app or with `crewship craft task stop <page>`.
 The instance must enable native documents and native agents with
 `CREWSHIP_CRAFT_NATIVE_ENABLED=true` and
-`CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true`. Both are off by default. The
-workspace's agent artifact policy must also be enabled and list your crew
-(`crewship workspace artifact-policy show`).
+`CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true`. Both are off by default.
 
 If a tool answers `403` ("live native Craft task required" or "confirmed
 native Craft task required") or `503` ("native Craft agents unavailable" or
