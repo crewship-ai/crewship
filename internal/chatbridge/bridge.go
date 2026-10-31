@@ -1327,11 +1327,19 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// Exec into the same container. Released via the defer registered there.
 	req.RuntimeUse = runtimeUse
 	var capturedCompletedAt string
+	var observedTerminalAfterStop bool
+	req.ObservedTerminalAfterStop = func() { observedTerminalAfterStop = true }
 	req.CapturedExit = func(at string) { capturedCompletedAt = at }
 	chatWork := b.bindHostChatWork(ctx, &req, runID)
 	defer chatWork.Stop()
 	runErr := b.orch.RunAgent(ctx, req, handler)
 	chatWork.Stop()
+	if observedTerminalAfterStop {
+		terminalCtx, terminalCancel := context.WithTimeout(context.WithoutCancel(ctx), ledgerWriteTimeout)
+		defer terminalCancel()
+		ctx = terminalCtx
+	}
+
 	updateRun := func(ctx context.Context, id, status string, exitCode *int, message *string, metadata map[string]interface{}) error {
 		ctx = chatWork.completionContext(ctx, runErr)
 		if capturedCompletedAt == "" {
@@ -1428,7 +1436,16 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			if errors.Is(runErr, orchestrator.ErrAgentStopped) {
 				meta["stop_origin"] = "agent_stop"
 			}
-			if err := updateRun(cleanCtx, runID, "CANCELLED", nil, &cancelMsg, meta); err != nil {
+			var confirmedStatus string
+			var terminalErr error
+			if updater, ok := b.resolver.(RunOutcomeUpdater); ok {
+				confirmedStatus, terminalErr = updater.UpdateRunOutcome(chatWork.completionContext(cleanCtx, runErr), runID, "CANCELLED", nil, &cancelMsg, meta, capturedCompletedAt)
+			} else {
+				// A legacy resolver can record the request but cannot attest
+				// that idempotency/work projection actually chose CANCELLED.
+				terminalErr = updateRun(cleanCtx, runID, "CANCELLED", nil, &cancelMsg, meta)
+			}
+			if err := terminalErr; err != nil {
 				b.logger.Warn("failed to update run status", "run_id", runID, "status", "CANCELLED", "error", err)
 			}
 			// Persist whatever the run produced before it was stopped so the
@@ -1453,6 +1470,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 				b.notifyReply(cleanCtx, chatID, userID, info, acc.Text(), repliedAt)
 			} else {
 				_ = b.resolver.IncrementMessageCount(cleanCtx, chatID, 1)
+			}
+			if terminalErr == nil && confirmedStatus == "CANCELLED" && errors.Is(runErr, orchestrator.ErrExecutionStopConfirmed) {
+				return fmt.Errorf("run agent: %w", errors.Join(ws.ErrRunCancelled, runErr))
 			}
 			return fmt.Errorf("run agent: %w", runErr)
 		}

@@ -17,10 +17,14 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$HERE/lib.sh"
 
-ROUTINE="${ROUTINE:-normalize-dates}"
+ROUTINE="${ROUTINE:-}"
 RUNS="${RUNS:-5}"
 
 preflight
+
+# shellcheck source=routine-fixtures.sh
+source "$HERE/routine-fixtures.sh"
+[[ -n "$ROUTINE" ]] || harness_fixture dates engineering ROUTINE
 
 if ! have jq; then
   skip "determinism test" "requires jq to read run outputs"
@@ -31,9 +35,9 @@ fi
 # every `routine run` 404s and the suite would otherwise report a phantom
 # "product regression" (5× non-zero exit). Fail loudly on the missing
 # prerequisite instead. See issue #1005.
-if ! cs routine show "$ROUTINE" >/dev/null 2>&1; then
+if ! cs routine get "$ROUTINE" >/dev/null 2>&1; then
   _fail "routine '$ROUTINE' exists in the target workspace" \
-    "routine show returned non-zero (404?) — set ROUTINE=<seeded-slug>, e.g. normalize-dates / extract-contacts"
+    "routine get returned non-zero (404?) — set ROUTINE=<seeded-slug>, e.g. normalize-dates / extract-contacts"
   finish
 fi
 

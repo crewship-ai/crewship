@@ -62,8 +62,16 @@ func TestNormalChatIPCRegistersCurrentMemoryAttempt(t *testing.T) {
 }
 
 func TestNormalChatLifecycleProofFencedAndRevocationAtCreation(t *testing.T) {
-	for _, revoke := range []bool{false, true} {
-		t.Run(map[bool]string{false: "normal", true: "revoked"}[revoke], func(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		revoke bool
+		status string
+		exit   int
+	}{
+		{"normal", false, "COMPLETED", 0}, {"confirmed-stop", false, "CANCELLED", 143}, {"revoked", true, "COMPLETED", 0},
+	} {
+		revoke := tc.revoke
+		t.Run(tc.name, func(t *testing.T) {
 			h, ws, agent := covIRunFixture(t)
 			wireTestJournalForHandler(t, h.db, h)
 			var user string
@@ -126,9 +134,13 @@ func TestNormalChatLifecycleProofFencedAndRevocationAtCreation(t *testing.T) {
 			if got := phase("tok", "RUNNING", "started", nil); got != 200 {
 				t.Fatalf("actual creation status=%d", got)
 			}
-			zero := 0
-			if got := phase("tok", "COMPLETED", "finish", &zero); got != 200 {
+			zero := tc.exit
+			if got := phase("tok", tc.status, "finish", &zero); got != 200 {
 				t.Fatalf("actual exit status=%d", got)
+			}
+			projection, owned, err := work.NewStore(h.db).RunProjection(t.Context(), run)
+			if err != nil || !owned || !projection.Ready || projection.Status != tc.status {
+				t.Fatalf("actual host terminal projection: %+v %v", projection, err)
 			}
 			memoryHandler := NewMemoryMutationHandler(h.db, storageDir(t), storageDir(t), newTestLogger(), "tok")
 			if err = memoryHandler.authorizeRun(ws, agent, run, binding.Generation)(t.Context()); err == nil {

@@ -25,7 +25,19 @@ Arguments and flags:
 | `<query>` | Required search text; remaining arguments are joined with spaces. |
 | `--agent` | Narrow to one agent (slug or ID); the server verifies workspace membership. Default is every agent in the workspace. |
 | `--limit` | Maximum hits, default `20`, accepted range `1–100`. |
+| `--chat <chat-id>` | Only hits from this chat session. |
+| `--from <who>` | Only the agent's replies: `agent` for any agent, or one agent's slug or name. `me` is refused — a hit carries a role, not an author, so your own lines cannot be told from a co-member's in a group chat. |
+| `--has <kind>` | Only hits containing a `link`, `code` (a fenced block) or a `tool` call. Repeatable. |
+| `--after <YYYY-MM-DD>` | Only hits on or after this date (UTC midnight). |
+| `--before <YYYY-MM-DD>` | Only hits before this date (UTC midnight). |
 | `--format` | `json`, `yaml`, or `ndjson` for machine-readable output. |
+
+The search endpoint understands only the query, `--agent` and `--limit`.
+`--chat`, `--from`, `--has`, `--after` and `--before` narrow the page it
+returns on the client, exactly as the chat's search box does. When they remove
+hits from a full page, more matches may exist that the server never sent: the
+result is marked `partial` (`"partial": true` in JSON) — raise `--limit` to look
+further.
 
 Each hit carries the agent that said it, the session id and the timestamp, so
 a workspace-wide result stays readable and you can follow up in the right

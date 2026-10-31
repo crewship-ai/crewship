@@ -91,7 +91,9 @@ func (s *NativeStore) SaveSnapshot(ctx context.Context, l EditLease, base int64,
 
 // ReconcileSnapshot proves only the exact attempted successor, including when
 // the head has since advanced. It never retries a mutation or confirms a later
-// matching document. The current original admission and lease are checked again.
+// matching document. Current write rights and the original admission are
+// checked again; the lease need not be live, so a reply lost during an outage
+// longer than the lease TTL stays provable. That lease still cannot save.
 func (s *NativeStore) ReconcileSnapshot(ctx context.Context, l EditLease, base int64, editorRevision, contentHash string) (NativeSaveReceipt, error) {
 	if err := s.ready(); err != nil {
 		return NativeSaveReceipt{}, err
@@ -100,7 +102,7 @@ func (s *NativeStore) ReconcileSnapshot(ctx context.Context, l EditLease, base i
 	if err != nil {
 		return NativeSaveReceipt{}, err
 	}
-	m, err := s.versions.ReadVersion(ctx, nativeVersionKey(l.Scope), base+1, s.authority(l.Scope, &l, "write"))
+	m, err := s.versions.ReadVersion(ctx, nativeVersionKey(l.Scope), base+1, s.holderAuthority(l, "write"))
 	if errors.Is(err, artifacts.ErrVersionNotFound) {
 		return NativeSaveReceipt{}, ErrNativeUnconfirmed
 	}

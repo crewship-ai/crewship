@@ -91,6 +91,8 @@ export const RESTRICTED_FE_ENDPOINTS = [
   "GET /api/v1/workspaces/{workspaceId}/restricted-routine-runs",
   "POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}",
   "POST /api/v1/pages/{slug}/application/actions/{panelId}/{actionId}",
+  // Private local drafts wrap and unwrap their key with a fresh read admission.
+  "POST /api/v1/pages/{slug}/draft-key",
   "GET /api/v1/agents/{agentId}/run-profile",
   "POST /api/v1/agents/{agentId}/restricted-cli-chats",
   "GET /api/v1/chats/{chatId}/execution-profile",

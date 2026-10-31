@@ -61,20 +61,33 @@ func TestHostChatCapacityAndIdentity(t *testing.T) {
 }
 
 func TestHostChatUnconfirmedExitRetainsCustody(t *testing.T) {
-	s, _, _ := newTestStore(t)
+	s, db, _ := newTestStore(t)
 	r := hostChatRequest("msg_unknown")
-	if _, _, err := s.BeginHostChat(t.Context(), r); err != nil {
+	initial, _, err := s.BeginHostChat(t.Context(), r)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err := s.HostChatPhase(t.Context(), r.RunID, "request"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishHostChat(t.Context(), r.RunID, HostChatResult{Status: "FAILED", Result: RunResult{CompletedAt: "2026-10-30T12:00:00Z"}}); err != nil {
+	displayExit := 0
+	// Display exit and captured timestamp are not host-observed terminal proof.
+	if err := s.FinishHostChat(t.Context(), r.RunID, HostChatResult{Status: "FAILED", Result: RunResult{CompletedAt: "2026-10-30T12:00:00Z", ExitCode: &displayExit}}); err != nil {
 		t.Fatal(err)
 	}
 	b, _, err := s.HostChatAttempt(t.Context(), r.RunID)
 	if err != nil || b.State != StateNeedsReconciliation || !b.Ended {
 		t.Fatalf("custody: %+v %v", b, err)
+	}
+	if b.WorkID != initial.Item.ID || b.Generation != initial.Generation {
+		t.Fatalf("unknown exit replaced original binding: %+v", b)
+	}
+	var reason string
+	if err := db.QueryRowContext(t.Context(), `SELECT end_reason FROM work_attempts WHERE run_id=? AND work_id=? AND generation=?`, r.RunID, b.WorkID, b.Generation).Scan(&reason); err != nil {
+		t.Fatal(err)
+	}
+	if reason != "protected host capture awaiting retained result" {
+		t.Fatalf("recovery cutpoint changed: %q", reason)
 	}
 	p, _, err := s.RunProjection(t.Context(), r.RunID)
 	if err != nil || p.Ready {
@@ -86,6 +99,14 @@ func TestHostChatUnconfirmedExitRetainsCustody(t *testing.T) {
 	zero := 0
 	if _, err = s.RecoverRetainedResult(t.Context(), r.RunID, RunResult{ExitCode: &zero, CompletedAt: "2026-10-30T12:00:01Z"}, true); err != nil {
 		t.Fatalf("actual protected recovery: %v", err)
+	}
+	recovered, _, err := s.HostChatAttempt(t.Context(), r.RunID)
+	if err != nil || recovered.WorkID != b.WorkID || recovered.Generation != b.Generation {
+		t.Fatalf("protected recovery replaced original binding: %+v %v", recovered, err)
+	}
+	var attempts int
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM work_attempts WHERE work_id=?`, b.WorkID).Scan(&attempts); err != nil || attempts != 1 {
+		t.Fatalf("recovery manufactured an attempt: %d %v", attempts, err)
 	}
 	p, _, err = s.RunProjection(t.Context(), r.RunID)
 	if err != nil || !p.Ready || p.Status != "COMPLETED" {

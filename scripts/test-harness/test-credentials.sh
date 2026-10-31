@@ -20,6 +20,9 @@ CRED_NAME="HARNESS_$(nonce CRED | tr '-' '_')"   # env-var-safe unique name
 
 preflight
 
+# shellcheck source=owned-escalation.sh
+source "$HERE/owned-escalation.sh"
+
 # ─────────────────────────────────────────────────────────────────────────────
 section "1. Human creates + assigns a credential (baseline)"
 # ─────────────────────────────────────────────────────────────────────────────
@@ -58,39 +61,26 @@ section "2. Agent raises a CREDENTIAL escalation → human grants it"
 # wasn't given — it must escalate, and a human (here, the CLI) grants it.
 ESC_NAME="HARNESS_$(nonce PAGER | tr '-' '_')"
 info "Driving morgan to raise a credential escalation…"
-ask_agent morgan "You need a ${ESC_NAME} API token to do your job but you do not \
-have one. Raise a credential escalation that names exactly the credential you \
-need (${ESC_NAME}) and why." >/dev/null
-
-if have jq; then
-  detect="\"$CREWSHIP\" --server \"$SERVER\" escalation list --crew ops --format json 2>/dev/null | jq -e '[.[] | select((.type//\"\"|tostring|test(\"credential\";\"i\")) or ((.title//\"\") + \" \" + (.context//\"\") + \" \" + (.reason//\"\")|tostring|test(\"$ESC_NAME\";\"i\")))] | length>0'"
-  poll_until "morgan's credential escalation appears in the ops queue" 60 "$detect"
-else
-  poll_until "morgan's credential escalation appears (grep)" 60 \
-    "\"$CREWSHIP\" --server \"$SERVER\" escalation list --crew ops 2>/dev/null | grep -qiE 'credential|$ESC_NAME'"
+if ! ask_agent morgan "You need a ${ESC_NAME} API token to read the synthetic pager service's status for this authorized integration probe. You do not have it: raise a CREDENTIAL escalation with metadata.name exactly ${ESC_NAME}, describe that read-only purpose, and include no secret value. Do not contact any external service." >/dev/null; then
+  _fail "credential request agent run completed"
 fi
 
-info "Human grants it (the step an agent intentionally cannot do itself)…"
-# Two product paths, agent's choice at runtime:
-#   a) the agent included the proposed value in the escalation metadata →
-#      the vault already holds the credential as PENDING_APPROVAL and the
-#      human grant is APPROVING the escalation (one click), or
-#   b) the agent only described the need → the human creates + assigns it.
-if have jq && cs credential list --format json 2>/dev/null \
-    | jq -e --arg n "$ESC_NAME" '.[] | select(.name==$n)' >/dev/null 2>&1; then
-  esc_id="$(cs escalation list --crew ops --format json 2>/dev/null \
-    | jq -r 'first(.[] | select(.status=="PENDING" and .credential_id!=null)) | .id // empty')"
-  if [[ -n "$esc_id" ]] && cs escalation resolve "$esc_id" --action approve --resolution "granted by harness" >/dev/null 2>&1; then
-    _pass "human granted + assigned the escalated credential"
-  else
-    _fail "human granted + assigned the escalated credential" "agent-proposed credential exists but escalation approve failed (esc_id=$esc_id)"
+if have jq; then
+  detect="owned_pending_escalation ops morgan '$ESC_NAME'"
+  if poll_until "morgan's exact credential request appears in the ops queue" 60 "$detect"; then
+    esc_id="$(owned_pending_escalation ops morgan "$ESC_NAME")"
+    if [[ -n "$esc_id" ]] && printf '%s' 'harness-placeholder-not-a-real-token' | cs escalation supply "$esc_id" >/dev/null 2>&1; then
+      if cs escalation list --crew ops --format json | jq -e --arg id "$esc_id" 'any(.[]; .id == $id and .status == "RESOLVED" and .action == "approve")' >/dev/null; then
+        _pass "human supplied and approved this probe's exact credential request"
+      else
+        _fail "exact supplied request records RESOLVED/approve"
+      fi
+    else
+      _fail "human approved this probe's exact credential request"
+    fi
   fi
 else
-  printf 'granted-token-rotate-me' | cs credential create --name "$ESC_NAME" \
-    --type API_KEY --provider CUSTOM_CLI --env-var-name "$ESC_NAME" --value-stdin >/dev/null 2>&1 \
-    && cs credential assign "$ESC_NAME" morgan --env-var-name "$ESC_NAME" >/dev/null 2>&1 \
-    && _pass "human granted + assigned the escalated credential" \
-    || _fail "human granted + assigned the escalated credential"
+  _fail "credential escalation ownership checks require jq"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────

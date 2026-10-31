@@ -900,6 +900,18 @@ fn running_actor_rejects_unqualified_document_replacement_and_recovers_original(
 #[test]
 fn driver_renews_exact_first_send_nonce_and_only_advances_owner_knowledge() {
     use std::sync::atomic::Ordering;
+    fn await_permission(driver: &mut Driver, expected: Counter) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while driver.known_owner_permission() != expected {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "renewal reply was not applied before advancing the fake clock"
+            );
+            driver
+                .maintain_owner(&host(), Duration::from_millis(20))
+                .unwrap();
+        }
+    }
     let (mut driver, mut peer, now) = renewing_driver();
     let before = driver.confirmed().document().checkpoint().unwrap();
     now.store(500, Ordering::SeqCst);
@@ -909,9 +921,7 @@ fn driver_renews_exact_first_send_nonce_and_only_advances_owner_knowledge() {
     let response = renewal_reply(&first, "4");
     mooring_collab::write_frame(&mut peer, &response).unwrap();
     now.store(550, Ordering::SeqCst);
-    driver
-        .maintain_owner(&host(), Duration::from_millis(20))
-        .unwrap();
+    await_permission(&mut driver, Counter(4));
     assert_eq!(driver.known_owner_permission(), Counter(4));
     assert_eq!(driver.confirmed().checkpoint().revision, Counter(10));
     assert_eq!(driver.confirmed().document().checkpoint().unwrap(), before);
@@ -931,19 +941,21 @@ fn driver_renews_exact_first_send_nonce_and_only_advances_owner_knowledge() {
     driver.maintain_owner(&host(), Duration::ZERO).unwrap();
     let (retry, _) = receive_json(&mut peer);
     assert_eq!(retry, second);
-    mooring_collab::write_frame(&mut peer, &renewal_reply(&second, "4")).unwrap();
+    // A bounded maintenance step may consume only this duplicate. Observe the
+    // new grant before advancing fake time to the old owner's expiry.
+    mooring_collab::write_frame(&mut peer, &response).unwrap();
+    mooring_collab::write_frame(&mut peer, &renewal_reply(&second, "5")).unwrap();
     now.store(1400, Ordering::SeqCst);
-    driver
-        .maintain_owner(&host(), Duration::from_millis(20))
-        .unwrap();
+    await_permission(&mut driver, Counter(5));
+    assert_eq!(driver.known_owner_permission(), Counter(5));
     now.store(1500, Ordering::SeqCst);
     driver.maintain_owner(&host(), Duration::ZERO).unwrap();
     let (third, _) = receive_json(&mut peer);
     now.store(2000, Ordering::SeqCst);
     assert!(driver.maintain_owner(&host(), Duration::ZERO).is_err());
-    let _ = mooring_collab::write_frame(&mut peer, &renewal_reply(&third, "5"));
+    let _ = mooring_collab::write_frame(&mut peer, &renewal_reply(&third, "6"));
     assert!(driver.maintain_owner(&host(), Duration::ZERO).is_err());
-    assert_eq!(driver.known_owner_permission(), Counter(4));
+    assert_eq!(driver.known_owner_permission(), Counter(5));
     assert_eq!(driver.confirmed().document().checkpoint().unwrap(), before);
 }
 #[test]

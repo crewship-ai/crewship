@@ -142,11 +142,18 @@ output preserves the API envelopes, including pagination cursors.`}
 		if q.Has("after_sequence") && q.Has("before_sequence") {
 			return fmt.Errorf("use only one of --after-sequence and --before-sequence")
 		}
+		if follow, _ := c.Flags().GetBool("follow"); follow {
+			if q.Has("before_sequence") {
+				return fmt.Errorf("--follow reads forward; it cannot be combined with --before-sequence")
+			}
+			return followRoomMessages(c, a[0], after, c.Flags().Changed("after-sequence"), limit)
+		}
 		return chatRoomRequest(http.MethodGet, chatRoomPath(a[0])+"/messages?"+q.Encode(), nil)
 	})
 	messages.Flags().Int("limit", 100, "Page size (1..100); JSON includes has_more")
 	messages.Flags().Int64("after-sequence", 0, "Catch up after this cursor; 0 starts at the beginning")
 	messages.Flags().Int64("before-sequence", 0, "Read messages older than this sequence")
+	messages.Flags().Bool("follow", false, "Print the latest page (or everything after --after-sequence), then each new message as it arrives (Ctrl-C to stop)")
 	send := add("send <room-id>", "Send a message with a stable retry ID and optional structured agent mentions", 1, func(c *cobra.Command, a []string) error {
 		content, _ := c.Flags().GetString("message")
 		id, _ := c.Flags().GetString("client-id")

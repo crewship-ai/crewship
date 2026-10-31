@@ -275,6 +275,9 @@ type streamFrame struct {
 	ChatID  string `json:"chat_id" yaml:"chat_id"`
 	Active  bool   `json:"active" yaml:"active"`
 	FromSeq int64  `json:"from_seq" yaml:"from_seq"`
+	// Metadata is a chat event's metadata, or a session broadcast's payload
+	// (assignment_*, escalation_*, …), which the server passes through here.
+	Metadata any `json:"metadata,omitempty" yaml:"metadata,omitempty"`
 }
 
 func (r *chatStreamRenderer) line(raw []byte) error {
@@ -367,6 +370,20 @@ func (r *chatStreamRenderer) line(raw []byte) error {
 		r.flushText()
 		if !r.quiet && !r.passthrough {
 			fmt.Fprintf(os.Stderr, "%s[done]%s\n", cli.Green, cli.Reset)
+		}
+	default:
+		// Everything the browser also draws: the human's own line, the run's
+		// cost/usage summary, a busy bounce, an environment build, delegation
+		// and escalation progress. Informational, so stderr and never quiet-
+		// proof; an unknown type is still named under -v rather than dropped.
+		if r.quiet || r.passthrough {
+			return nil
+		}
+		if label, detail, ok := describeSessionEvent(f.Type, f.Content, f.Metadata); ok {
+			r.flushText()
+			fmt.Fprintf(os.Stderr, "%s[%s]%s %s\n", cli.Dim, label, cli.Reset, sanitizeTerminal(detail))
+		} else if flagVerbose {
+			fmt.Fprintf(os.Stderr, "%s[event %s]%s %s\n", cli.Gray, sanitizeTerminal(f.Type), cli.Reset, truncate(sanitizeTerminal(f.Content), 120))
 		}
 	}
 	return nil

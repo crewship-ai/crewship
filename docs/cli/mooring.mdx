@@ -67,6 +67,27 @@ participant/origin identifiers and `websocket_path`; admission is not a save.
 See the [session transport contract](/specs/mooring-session-transport) for limits
 and the current qualification boundary.
 
+`--reauthorize` refreshes a still-live, already joined connection instead: the
+packet is exactly `{"connection_ref":"…"}` from the original session response,
+and the request goes to `POST /api/v1/pages/{slug}/mooring/session/reauthorize`.
+It never creates a connection, revives a retired one or saves anything. The
+host requires the original credential and a same-origin request; the CLI sends
+`Origin` as the configured server's `scheme://host`, the value `mooring connect`
+uses, so a server behind a different public origin refuses it (exit `4`).
+
+```bash
+crewship mooring session notes --reauthorize --file - <<<'{"connection_ref":"conn-1"}'
+```
+
+## crewship mooring command-session
+
+`crewship mooring command-session <slug|@ID> --file packet.json` opens a session
+in the separately enabled native command editor profile (default off; the host
+answers `503` when it is disabled). Use `--file -` for stdin. The packet is the
+host's closed object — `action` with optional `view`, `create`, `write` and
+`raw` — forwarded unchanged. Like reauthorize, it is same-origin only and the
+CLI sends the configured server's `Origin`.
+
 ## crewship mooring connect
 
 `crewship mooring connect <slug|@ID> --connection CONNECTION_REF --file frames.ndjson`

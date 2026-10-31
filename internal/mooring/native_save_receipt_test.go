@@ -62,7 +62,44 @@ func TestNativeSaveSnapshotCannotClaimGenericSaveOrRevokedGeneration(t *testing.
 	if _, err = leases.Acquire(t.Context(), scope, EditLeasePrincipal{ActorID: p.ActorID, SessionID: "new-holder"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.ReconcileSnapshot(t.Context(), l, 2, "r2", hash); !errors.Is(err, ErrEditLeaseStale) {
-		t.Fatal("revoked generation confirmed", err)
+	if _, err = s.SaveSnapshot(t.Context(), l, 3, "r3", nativeReceiptHash([]byte(`{"v":3}`)), []byte(`{"v":3}`)); !errors.Is(err, ErrEditLeaseStale) {
+		t.Fatal("revoked generation saved", err)
+	}
+	// The revoked generation may still prove its own committed successor, but
+	// another admission of the same person cannot claim it.
+	if r, err := s.ReconcileSnapshot(t.Context(), l, 2, "r2", hash); err != nil || r.Version != "3" || r.Generation != "1" {
+		t.Fatal("own committed snapshot unprovable after takeover", r, err)
+	}
+	other := l
+	other.Holder.SessionID = "new-holder"
+	if _, err = s.ReconcileSnapshot(t.Context(), other, 2, "r2", hash); !errors.Is(err, ErrEditLeaseDenied) {
+		t.Fatal("another admission confirmed a foreign snapshot", err)
+	}
+}
+
+// A lost reply during an outage longer than the lease TTL must still be
+// provable once the connection returns; the expired lease cannot save again.
+func TestNativeSaveSnapshotReconcilesAfterLeaseExpired(t *testing.T) {
+	s, _, _, clock, scope, p := nativeStoreFixture(t)
+	l, _, err := s.Initialize(t.Context(), scope, p, []byte(`{"v":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{"v":2}`)
+	hash := nativeReceiptHash(raw)
+	receipt, err := s.SaveSnapshot(t.Context(), l, 1, "r1", hash, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock.advance(time.Minute)
+	reconciled, err := s.ReconcileSnapshot(t.Context(), l, 1, "r1", hash)
+	if err != nil || reconciled != receipt {
+		t.Fatalf("lost reply unprovable after lease expiry: %+v %v", reconciled, err)
+	}
+	if _, err = s.ReconcileSnapshot(t.Context(), l, 1, "r1", nativeReceiptHash([]byte("other"))); !errors.Is(err, ErrNativeUnconfirmed) {
+		t.Fatal("expired lease confirmed a foreign snapshot", err)
+	}
+	if _, err = s.SaveSnapshot(t.Context(), l, 2, "r2", nativeReceiptHash([]byte(`{"v":3}`)), []byte(`{"v":3}`)); err == nil {
+		t.Fatal("expired lease saved")
 	}
 }

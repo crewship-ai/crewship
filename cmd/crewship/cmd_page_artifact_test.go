@@ -21,6 +21,11 @@ func TestPageArtifactPublishPreservesManifestCAS(t *testing.T) {
 		}
 		return 409, []byte(`{"error":"artifact changed; keep your draft","latest_version":8}`), "application/json"
 	})
+	// A 409 may be the echo of a first attempt whose reply was lost, so the CLI
+	// reads version 8 once. Someone else's version 8 keeps the conflict as is.
+	stub.OnGet("/api/v1/pages/demo/artifact", func(r *http.Request, _ []byte) (int, []byte, string) {
+		return 200, []byte(`{"manifest":{"version":8,"entrypoint":"index.html","files":[{"path":"index.html","content":"<h1>Theirs</h1>","media_type":"text/html"}]}}`), "application/json"
+	})
 	file := pageBundleFile(t, `{"entrypoint":"index.html","files":[{"path":"index.html","content":"<h1>Draft</h1>","media_type":"text/html"}]}`)
 	cmd := newPageArtifactCommand()
 	cmd.PersistentPreRun = rootCmd.PersistentPreRun

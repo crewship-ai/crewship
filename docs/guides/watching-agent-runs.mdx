@@ -100,6 +100,14 @@ curl -N -H "Authorization: Bearer $CREWSHIP_TOKEN" \
 | `slow_consumer` | This reader fell far enough behind that frames were dropped. Reconnect with `last_seq` — the replay buffer fills the gap. |
 | `stream_closed` | The server closed the channel. Reconnect with `last_seq`. |
 
+Besides the run's own chat events, the stream carries what else is broadcast on the session: the human's line (`user_message`), the run summary (`result`, with `total_cost_usd`, `usage`, `num_turns` in `metadata`; cost is removed for viewers who may not see money), and delegation, escalation, peer-query and port-exposure progress (`assignment_*`, `escalation_*`, `peer_query_*`, `port_expose_created`). Those broadcasts have no `seq` and carry their payload — which assignment, which target, the exposed URL — in `metadata`:
+
+```
+{"type":"assignment_created","metadata":{"id":"as_1","target":"lucy","task":"collect invoices"}}
+```
+
+`crewship chat stream` renders each of them as one stderr line (`[delegated] → lucy · collect invoices`, `[summary] $0.0123 · 1200 in / 340 out tokens`); stdout stays the reply text only.
+
 `stream.heartbeat` appears after roughly 20 seconds of silence. It exists so proxies and NAT tables do not reap an idle connection; ignore it. It deliberately does **not** reset the idle timer — a heartbeat proves the socket is alive, not that the run is.
 
 ## Reconnecting without losing or duplicating output

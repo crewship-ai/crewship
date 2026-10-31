@@ -484,6 +484,7 @@ func init() {
 	crewStandupCmd.Flags().String("since", "", "Show activity since (RFC3339, default: 24h ago)")
 
 	crewPeerConvsCmd.Flags().Int("limit", 50, "Number of conversations to show")
+	crewPeerConvsCmd.Flags().Int("offset", 0, "Skip this many conversations (next page: --offset <limit>)")
 	crewPeerConvsCmd.Flags().String("agent", "", "Only conversations this agent (slug or id) asked or answered")
 
 	crewMemberCmd.AddCommand(crewMemberListCmd)

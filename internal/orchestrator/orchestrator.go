@@ -55,6 +55,11 @@ type AgentRunRequest struct {
 	// It is not populated from model output and never grants terminal authority.
 	CapturedExit func(completedAt string)
 
+	// ObservedTerminalAfterStop reports that a cancelled observer raced a
+	// non-signal terminal exit. Callers may settle the actual outcome under a
+	// fresh bounded context; this does not authorize or report cancellation.
+	ObservedTerminalAfterStop func()
+
 	// RuntimeUse pins the concrete container acquired by the caller. RunAgent
 	// retains its own handle, so callers may release theirs after RunAgent
 	// returns even when a detached process still needs the container.
@@ -217,8 +222,8 @@ type AgentRunRequest struct {
 	// this run wait on it.
 	OnExecStarted func(execID string)
 
-	// OnExecTerminal reports an inspected natural process exit, never an inferred
-	// status from an error or an observation timeout.
+	// OnExecTerminal reports an inspected process exit, including a confirmed
+	// stop, never an inferred status from an error or an observation timeout.
 	OnExecTerminal func(exitCode int)
 
 	// MemoryBinding is the seam the memory Ledger Store.Write plugs into

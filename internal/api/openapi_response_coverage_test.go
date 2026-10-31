@@ -60,6 +60,10 @@ var responseShapeExclusions = map[string]string{
 	"Connector": "the schema types verify.http and verify.sql as nullable strings; connectors.Manifest " +
 		"has them as nested objects ({method,url,headers,...} / {driver,dsn}). A real response with a " +
 		"verify block sends an object where the schema promises a string — fix the property types first.",
+	"LocalDraftKeyResponse": "oneOf {envelope} / {key} built from map[string]string literals in LocalDraftKey " +
+		"(internal/api/pages_draft_key.go), so there is no backing struct to derive tags from. Each branch is closed " +
+		"(additionalProperties false) and requires its one field; TestLocalDraftKey* drive the real handler and " +
+		"cmd/gen-openapi schemas_local_draft_key_test.go checks both branches.",
 	"StatusResponse": "five DELETE routes share it and one disagrees: DELETE /credentials/{id} writes " +
 		"{\"success\": true} where the schema says {\"status\": string} — wrong key and wrong type. " +
 		"Every writer is a map literal, so there are no tags to derive from either.",

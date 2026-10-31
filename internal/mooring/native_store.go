@@ -25,8 +25,9 @@ type NativeStoreConfig struct {
 	Authorize                                               NativeAuthorize
 	// Validate must invoke the exact pinned application engine, outside the SQL
 	// writer. It must reject lossy import/repair warnings, not silently normalize.
-	Validate        func(context.Context, []byte) error
-	MaxHistoryBytes int64
+	Validate         func(context.Context, []byte) error
+	MaxHistoryBytes  int64
+	MaxProposalBytes int64 // trusted per-Page retained proposal budget, separate from human history
 }
 
 // NativeStore wraps the existing manifest VersionStore. It owns no parallel
@@ -41,7 +42,14 @@ type NativeStore struct {
 // Exhaustion preserves every version; the caller must offer recovery or a larger budget.
 const DefaultNativeHistoryBytes int64 = 16 << 30
 
+// DefaultNativeProposalBytes caps retained candidates independently of human
+// history. Every state counts; rejection never replenishes this allowance.
+const DefaultNativeProposalBytes int64 = 64 << 20
+
 func NewNativeStore(db *sql.DB, c NativeStoreConfig) *NativeStore {
+	if c.MaxProposalBytes <= 0 {
+		c.MaxProposalBytes = DefaultNativeProposalBytes
+	}
 	if c.MaxHistoryBytes <= 0 {
 		c.MaxHistoryBytes = DefaultNativeHistoryBytes
 	}
@@ -97,6 +105,25 @@ func (s *NativeStore) authority(k EditLeaseScope, l *EditLease, intent string) a
 			if err = s.config.Leases.CheckWrite(ctx, tx, *l); err != nil {
 				return "", err
 			}
+		}
+		return p.ActorID, nil
+	}
+}
+
+// holderAuthority checks current Page rights and that the caller is the
+// lease's original holder, without requiring that lease to be live. Only
+// read-only proofs about that holder's own past commits may use it.
+func (s *NativeStore) holderAuthority(l EditLease, intent string) artifacts.VersionAuthorize {
+	return func(ctx context.Context, tx *sql.Tx) (string, error) {
+		p, err := s.config.Authorize(ctx, tx, l.Scope, intent)
+		if err != nil {
+			return "", err
+		}
+		if err = s.profile(ctx, tx, l.Scope); err != nil {
+			return "", err
+		}
+		if l.Holder != p {
+			return "", ErrEditLeaseDenied
 		}
 		return p.ActorID, nil
 	}

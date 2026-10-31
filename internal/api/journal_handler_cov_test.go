@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -213,33 +214,68 @@ func TestCovJrnStreamNoFlusher(t *testing.T) {
 	}
 }
 
+// covJrnReadyEmitter publishes readiness only after Stream has captured the
+// notify channel, following its empty seed and live-tail watermark setup.
+type covJrnReadyEmitter struct {
+	*emitRecorder
+	ready chan struct{}
+	once  sync.Once
+}
+
+func (e *covJrnReadyEmitter) Notify() <-chan struct{} {
+	notify := e.emitRecorder.Notify()
+	e.once.Do(func() { close(e.ready) })
+	return notify
+}
+
 // TestCovJrnStreamFreshEmptyThenLivePoll covers two otherwise-uncovered
 // Stream branches at once:
 //   - the "brand-new client, empty seed" path that starts the live tail
 //     from time.Now() (no Last-Event-ID, no rows at connect time), and
-//   - the 1s poll loop emitting a row inserted after connect.
+//   - a journal flush notification emitting a row inserted after connect.
 //
-// A row written after the stream attaches must arrive via the poll tick;
-// we wait just past one tick then cancel so the loop's ctx.Done() branch
-// also fires. Uses a fully-populated row so the poll-path serializer
-// covers the optional fields too.
+// Wait for readiness and the actual emitted event rather than estimating how
+// much time a race-enabled DB query needs. Cancellation still exercises the
+// loop's ctx.Done branch. The populated row covers optional serialization fields.
 func TestCovJrnStreamFreshEmptyThenLivePoll(t *testing.T) {
 	h, userID, wsID, rec := newJournalHandlerTest(t)
+	notifier := &covJrnReadyEmitter{emitRecorder: rec, ready: make(chan struct{})}
+	h.journal = notifier
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	req := httptest.NewRequestWithContext(ctx, "GET", "/api/v1/journal/stream", nil)
 	req = withWorkspaceUser(req, userID, wsID, "OWNER")
 	rr := httptest.NewRecorder()
+	emitted := make(chan struct{})
+	var emittedOnce sync.Once
+	writer := &authorityStreamWriter{ResponseRecorder: rr, afterFlush: func() {
+		if strings.Contains(rr.Body.String(), "id: j_live\n") {
+			emittedOnce.Do(func() { close(emitted) })
+		}
+	}}
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		h.Stream(rr, req)
+		h.Stream(writer, req)
+	}()
+	defer func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("Stream did not return after cleanup cancellation")
+		}
 	}()
 
-	// Let the empty seed land and the live tail watermark settle to "now".
-	time.Sleep(150 * time.Millisecond)
+	select {
+	case <-notifier.ready:
+	case <-done:
+		t.Fatal("Stream ended before attaching its live notifier")
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stream did not attach its live notifier")
+	}
 	// Insert a row strictly newer than the watermark, then simulate the
 	// journal Writer's flush notify (#1411 — Stream no longer polls on a
 	// fixed 1s tick; it wakes off flushNotifier.Notify() instead, with only
@@ -247,8 +283,13 @@ func TestCovJrnStreamFreshEmptyThenLivePoll(t *testing.T) {
 	covJrnFullRow(t, h, "j_live", wsID, time.Now().UTC().Add(2*time.Second))
 	rec.WakeNotify()
 
-	// Give the woken poll a moment to land.
-	time.Sleep(150 * time.Millisecond)
+	select {
+	case <-emitted:
+	case <-done:
+		t.Fatal("Stream ended before emitting the live entry")
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stream did not emit the notified live entry")
+	}
 	cancel()
 	select {
 	case <-done:

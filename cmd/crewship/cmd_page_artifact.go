@@ -13,7 +13,8 @@ import (
 )
 
 // Artifacts use the same authenticated Page transport as the editor. A conflict
-// is returned unchanged; the CLI never rereads and silently overwrites a head.
+// is returned unchanged; the CLI never silently overwrites a head. After a lost
+// publish reply it only reads base+1 to confirm its own save (reconcile).
 func newPageArtifactCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "artifact", Short: "Create, version and discuss a multi-screen Page artifact"}
 	cmd.AddCommand(newArtifactDataCommand())
@@ -44,6 +45,9 @@ func newPageArtifactCommand() *cobra.Command {
 					return fmt.Errorf("--base-version must be the exact positive latest version; use create for a new project")
 				}
 				body["base_version"] = base
+				if os.Getenv("CREWSHIP_AGENT_TOKEN") == "" {
+					return artifactPublishHuman(cmd, args[0], base, body)
+				}
 			}
 			return artifactCLIRequest(cmd, "POST", endpoint, body)
 		}}
@@ -110,6 +114,7 @@ func newPageArtifactCommand() *cobra.Command {
 	}}
 	cmd.AddCommand(reply, availability)
 	cmd.AddCommand(newPageArtifactCommentCommand())
+	cmd.AddCommand(newPageArtifactReconcileCommand())
 	return cmd
 }
 

@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 
 	"github.com/crewship-ai/crewship/internal/cartographer"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -65,12 +64,7 @@ func (h *CartographerHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit := 50
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
-			limit = n
-		}
-	}
+	limit, _ := parsePagination(r, 50, 200)
 
 	rows, err := cartographer.List(r.Context(), h.db, workspaceID, missionID, limit)
 	if err != nil {

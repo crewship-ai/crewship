@@ -85,6 +85,7 @@ func TestDesignSchemasValidateNodePatchesAndExactReceipts(t *testing.T) {
 		{"DesignNode", `{"id":"screen","type":"frame","x":0,"y":0,"width":360,"height":640}`, `{"id":"screen","type":"script","x":0,"y":0,"width":360,"height":640}`},
 		{"DesignVersionReceipt", `{"version":2,"actor":"user"}`, `{"Version":2,"Actor":"user"}`},
 		{"DesignCreateRequest", `{"slug":"checkout","name":"Checkout","created_by_test":true}`, `{"slug":"checkout","name":"Checkout","actor":"forged"}`},
+		{"DesignCreateRequest", `{"slug":"continued","name":"Continued","source_page_id":"page","expected_human":"alice","initial_state":"AAA="}`, `{"slug":"continued","name":"Continued","source_page_id":17,"expected_human":"alice","initial_state":"AAA="}`},
 		{"DesignSnapshot", `{"page_id":"page","authority_revision":"9007199254740993","origin":null,"can_edit":false,"can_comment":false,"nodes":[],"order":[],"version":1,"latest_version":1,"shared_version":0,"actor":{"id":"user","name":"Reader"}}`, `{"page_id":"page","nodes":[]}`},
 	}
 	for _, fixture := range fixtures {
