@@ -359,3 +359,27 @@ func storageSeedQuery(t *testing.T) string {
 }
 
 const storageMigrationFile = "20261030224950_artifact_aggregate_storage_budget.sql"
+
+// B9: legacy document, Slides and restore writers do not call
+// CheckStorageHeadroom (the free-disk probe) because documents and slides sit
+// below this package. Their LOGICAL admission still holds: the SQL triggers
+// charge every row and abort once the workspace or the instance is full.
+func TestStorageBudgetTriggersAbortLegacyWritersWithoutHeadroomProbe(t *testing.T) {
+	for _, tc := range []struct{ name, stmt string }{
+		{"documents", `INSERT INTO documents(workspace_id,page_id,schema_version,snapshot,projection) VALUES('ws','legacy-b9',3,zeroblob(4096),x'7b7d')`},
+		{"slides", `INSERT INTO slides_revisions(workspace_id,page_id,rev,parent_rev,order_version,schema_version,canonical_json,content_hash,actor,kind,mutation_id) VALUES('ws','legacy-b9',1,0,1,1,zeroblob(4096),'h','a','k','m')`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, db := versionFixture(t, VersionOptions{})
+			if _, err := db.Exec(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('legacy-b9','ws','legacy-b9','B9','owner','{}')`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`INSERT INTO artifact_storage_workspaces(workspace_id,max_bytes) VALUES('ws',1024) ON CONFLICT(workspace_id) DO UPDATE SET max_bytes=1024`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(tc.stmt); err == nil || !strings.Contains(err.Error(), "artifact_storage_quota") {
+				t.Fatalf("legacy writer was admitted past the workspace limit: %v", err)
+			}
+		})
+	}
+}

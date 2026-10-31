@@ -1,0 +1,309 @@
+{
+  "version": 1,
+  "description": "Required PRD A+B acceptance IDs (G3 of the validation brief). Row origin is a key (craft, artifacts); the canonical URLs are supplied at run time with --origin-map or PRD_RC_ORIGINS because deployment hostnames are not published.",
+  "rows": [
+    {
+      "id": "A.craft.roundtrip.rich",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.sheet.data-roundtrip",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.soak.saves-2000",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.soak.saves-2000-sheet",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.session.hour-word",
+      "origin": "craft",
+      "allowManual": true
+    },
+    {
+      "id": "A.craft.session.hour-sheet",
+      "origin": "craft",
+      "allowManual": true
+    },
+    {
+      "id": "A.craft.lease.holder",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.lease.holder-sheet",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.lease.handoff",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.lease.handoff-sheet",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.lease.stale-generation",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.lease.stale-generation-sheet",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.lease.fail-closed",
+      "origin": "craft",
+      "allowSkipped": true
+    },
+    {
+      "id": "A.lock",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.agent.free-edit-word",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.agent.free-edit-sheet",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.proposal.word.agent-409",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.proposal.word.compare",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.proposal.word.accept",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.proposal.word.reject",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.proposal.word.stale",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.proposal.sheet.agent-409",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.proposal.sheet.compare",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.proposal.sheet.accept",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.proposal.sheet.reject",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.proposal.sheet.stale",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.proposal.admission",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.proposal.reader-403",
+      "origin": "craft"
+    },
+    {
+      "id": "A.resilience.outage.word",
+      "origin": "craft"
+    },
+    {
+      "id": "A.resilience.lost-ack.word",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.write-revoked-word",
+      "origin": "craft"
+    },
+    {
+      "id": "A.resilience.restart.word",
+      "origin": "craft"
+    },
+    {
+      "id": "A.resilience.outage.sheet",
+      "origin": "craft"
+    },
+    {
+      "id": "A.resilience.lost-ack.sheet",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.write-revoked-sheet",
+      "origin": "craft"
+    },
+    {
+      "id": "A.resilience.restart.sheet",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.read-revoked",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.read-revoked-sheet",
+      "origin": "craft"
+    },
+    {
+      "id": "B.project.agent-screens",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.project.element-comment",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.project.agent-version",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.project.from-chat",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.project.share-version",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.project.conflict",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.project.restore",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.project.agent-restore",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.project.restore-restart",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.durability.outage",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.durability.lost-ack",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.durability.lost-ack.contract",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.design.two-humans",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.design.save-reload",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.design.agent-live",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.design.agent-tools",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.design.agent-version",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.design.agent-receipt",
+      "origin": "artifacts"
+    },
+    {
+      "id": "B.design.tool-route-live",
+      "origin": "artifacts"
+    },
+    {
+      "id": "quota.project.message",
+      "origin": "artifacts"
+    },
+    {
+      "id": "quota.project.refused",
+      "origin": "artifacts"
+    },
+    {
+      "id": "quota.project.work-kept",
+      "origin": "artifacts"
+    },
+    {
+      "id": "quota.native.visible",
+      "origin": "craft"
+    },
+    {
+      "id": "quota.native.full",
+      "origin": "craft"
+    },
+    {
+      "id": "quota.aggregate.workspace",
+      "origin": "artifacts"
+    },
+    {
+      "id": "drafts.crash.comments",
+      "origin": "artifacts"
+    },
+    {
+      "id": "drafts.crash.immediate",
+      "origin": "artifacts"
+    },
+    {
+      "id": "drafts.crash.nothing-saved",
+      "origin": "artifacts"
+    },
+    {
+      "id": "drafts.crash.private",
+      "origin": "artifacts"
+    },
+    {
+      "id": "drafts.crash.source",
+      "origin": "artifacts"
+    },
+    {
+      "id": "drafts.crash.native-nothing-saved",
+      "origin": "craft"
+    },
+    {
+      "id": "drafts.crash.native-nothing-saved-sheet",
+      "origin": "craft"
+    },
+    {
+      "id": "drafts.crash.native-offer",
+      "origin": "craft"
+    },
+    {
+      "id": "drafts.crash.native-offer-sheet",
+      "origin": "craft"
+    },
+    {
+      "id": "drafts.crash.native-private",
+      "origin": "craft"
+    },
+    {
+      "id": "drafts.crash.native-private-sheet",
+      "origin": "craft"
+    },
+    {
+      "id": "drafts.identity-switch",
+      "origin": "artifacts"
+    }
+  ]
+}
