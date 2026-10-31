@@ -122,6 +122,13 @@ func (s *DataStore) Batch(ctx context.Context, key VersionKey, collection string
 	}
 	var out []DataDocument
 	err := s.transaction(ctx, key, auth, func(tx *sql.Tx, actor string) error {
+		if err := ConsumeStorageUpload(ctx, tx, key); err != nil {
+			return err
+		}
+		if err := CheckStorageHeadroom(ctx, tx, MaxDataBatchBytes); err != nil {
+			return err
+		}
+
 		var exists bool
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM artifact_data_collections WHERE workspace_id=? AND page_id=? AND name=?)`, key.WorkspaceID, key.PageID, collection).Scan(&exists); err != nil {
 			return err

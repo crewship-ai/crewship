@@ -43,6 +43,9 @@ import (
 // either add it to BackupTables (FK-safe order, plus BackupTableIntent) or
 // write its reason here. "It is not important" is not a reason; see #1437.
 var workspaceTablesNotBundled = map[string]string{
+	"artifact_storage_pages":           "derived Page-to-workspace accounting scope; rebuilt by triggers when payload rows are restored",
+	"artifact_storage_reservations":    "in-flight upload reservations expire within minutes and never survive a restore",
+	"artifact_storage_workspaces":      "target-local capacity counters; restored payload rows recharge them through triggers",
 	"artifact_project_message_intents": "original-message run authority requires fresh admission after restore",
 	"artifact_project_run_consents":    "live original-run Page permissions cannot travel in a bundle",
 	"mooring_authority_generations":    "target-local non-ABA author generations must survive logical replacement; portable bundles cannot reset them",
