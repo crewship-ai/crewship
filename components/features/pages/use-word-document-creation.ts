@@ -49,9 +49,13 @@ export function useWordDocumentCreation(workspaceId: string) {
   const selectedFormat: DocumentFormat = format ?? (availability.wordcraftNative ? "native" : availability.gridcraftNative === true ? "sheet" : availability.wordcraftSDKPrefix ? "wordcraft" : availability.data === true ? "doc" : availability.wordcraftCommands ? "commands" : "doc")
   const formatAvailable = selectedFormat === "native" ? availability.wordcraftNative === true : selectedFormat === "sheet" ? availability.gridcraftNative === true : selectedFormat === "commands" ? availability.wordcraftCommands === true : selectedFormat === "wordcraft" ? Boolean(availability.wordcraftSDKPrefix) : availability.data === true
   const client = useQueryClient()
-  const create = useMutation<CreatedDocument, Error, { name: string; slug: string }>({ mutationFn: async input => {
-    if (!allowed || !formatAvailable) throw new Error("Document creation is unavailable.")
-    const original = intent.current ??= { name: input.name.trim(), slug: input.slug, attempted: false, format: selectedFormat, sdkPrefix: availability.wordcraftSDKPrefix }
+  const create = useMutation<CreatedDocument, Error, { name: string; slug: string; format?: DocumentFormat }>({ mutationFn: async input => {
+    // An explicit format (Sheet from New artifact) is checked against its own
+    // profile; otherwise the Word-first selection applies.
+    const requested = input.format ?? selectedFormat
+    const requestedAvailable = input.format === "sheet" ? availability.gridcraftNative === true : formatAvailable
+    if (!allowed || !requestedAvailable) throw new Error("Document creation is unavailable.")
+    const original = intent.current ??= { name: input.name.trim(), slug: input.slug, attempted: false, format: requested, sdkPrefix: availability.wordcraftSDKPrefix }
     setFrozen(true)
     if (!original.pageId) {
       // Page creation has no idempotency key. An ambiguous response must not
