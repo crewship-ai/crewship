@@ -371,3 +371,43 @@ it("never deletes a stored comment draft when reading it fails",async()=>{
  await act(async()=>{})
  expect(disk.get(row("owner","artifact-comment"))).toBe("Unsent private comment")
 })
+
+// Codex #4690 B3: a slug is not a Page identity. A slug-keyed copy left by an older
+// build is never adopted into the Page that now holds the slug, and is not deleted.
+it("does not adopt a slug-keyed draft from an older build into the Page that now uses the slug (Codex #4690 B3)",async()=>{
+ const previous=state.data.page_id; state.data.page_id="page-123"
+ const store=new Map<string,string>([["artifact-source:owner:w:demo",keptSource("Old page draft")],["artifact-comment:owner:w:demo","Old page comment"]])
+ vi.mocked(localStorage.getItem).mockImplementation(key => store.get(key) ?? null)
+ vi.mocked(localStorage.removeItem).mockImplementation(key => { store.delete(key) })
+ try{
+  render(<ArtifactProject workspaceId="w" slug="demo" />)
+  await waitFor(() => expect(screen.getByRole("button",{name:"Edit source"})).toBeEnabled())
+  expect(screen.queryByRole("button",{name:"Restore source draft"})).toBeNull()
+  expect(screen.getByLabelText("Comment for agent")).toHaveValue("")
+  expect(store.get("artifact-comment:owner:w:demo")).toBe("Old page comment")
+  expect(disk.get(JSON.stringify(["owner","artifact-source","w","page-123"]))).toBeUndefined()
+ }finally{state.data.page_id=previous;vi.mocked(localStorage.getItem).mockReset().mockReturnValue(null)}
+})
+
+// G4 B23: not confirmed on main. Evidence: forgetSource/send clear by the revision captured at submit time.
+it("keeps a draft typed while a save is pending (G4 B23, already guarded)",async()=>{
+ render(<ArtifactProject workspaceId="w" slug="demo" />)
+ await editSource()
+ fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"Draft A"}})
+ await waitFor(() => expect(disk.get(row("owner","artifact-source"))).toContain("Draft A"))
+ fireEvent.click(screen.getByRole("button",{name:"Save project"}))
+ fireEvent.change(screen.getByLabelText("Source file"),{target:{value:"Draft B"}})
+ await waitFor(() => expect(disk.get(row("owner","artifact-source"))).toContain("Draft B"))
+ await act(async()=>state.save.mock.calls[0][1].onSuccess({version:3}))
+ expect(screen.getByLabelText("Source file")).toHaveValue("Draft B")
+ expect(disk.get(row("owner","artifact-source"))).toContain("Draft B")
+})
+it("does not offer one Page's draft to a different Page that reuses the slug (G4 B23, already keyed by Page ID)",async()=>{
+ disk.set(JSON.stringify(["owner","artifact-source","w","deleted-page"]),keptSource("Deleted page draft"))
+ const previous=state.data.page_id; state.data.page_id="new-page"
+ try{
+  render(<ArtifactProject workspaceId="w" slug="demo" />)
+  await waitFor(() => expect(screen.getByRole("button",{name:"Edit source"})).toBeEnabled())
+  expect(screen.queryByRole("button",{name:"Restore source draft"})).toBeNull()
+ }finally{state.data.page_id=previous}
+})

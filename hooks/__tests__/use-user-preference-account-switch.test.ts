@@ -185,4 +185,69 @@ describe("useUserPreference with two accounts in one browser", () => {
     await waitFor(() => expect(hook.result.current[2].ready).toBe(true))
     expect(hook.result.current[0]).toEqual([])
   })
+  it("does not retry the owner's write under another account after the 401 refresh", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const hook = renderHook(() => useUserPreference<Recent>(KEY, []))
+    await waitFor(() => expect(hook.result.current[2].ready).toBe(true))
+    let releaseRefresh!: () => void
+    const refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve })
+    const base = fetchMock.getMockImplementation()!
+    let firstPut = true
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/api/auth/token/refresh") || (init?.method === "PUT" && firstPut)) callUser.push(session.user)
+      if (String(url).includes("/api/auth/token/refresh")) {
+        await refreshGate
+        return okJSON(null)
+      }
+      if (init?.method === "PUT" && firstPut) {
+        firstPut = false
+        return { ok: false, status: 401, json: async () => ({ error: "session_expired" }), clone() { return this } } as unknown as Response
+      }
+      return base(url, init)
+    })
+    act(() => hook.result.current[1](ownerPrivate))
+    await act(async () => {
+      vi.advanceTimersByTime(450)
+    })
+    // The owner's request got its 401 and waits for the refresh; meanwhile a reader signs in.
+    signIn("reader")
+    hook.rerender()
+    releaseRefresh()
+    await settle()
+    expect(putsFor("reader")).toHaveLength(0)
+    expect(JSON.stringify(server.reader ?? {})).not.toContain("owner-private")
+  })
+  it("does not re-send an unmounted owner's write under a reader who signed in during the 401 refresh (Codex #4690 B1)", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const owner = renderHook(() => useUserPreference<Recent>(KEY, []))
+    await waitFor(() => expect(owner.result.current[2].ready).toBe(true))
+    let releaseRefresh!: () => void
+    const refreshGate = new Promise<void>((resolve) => { releaseRefresh = resolve })
+    const base = fetchMock.getMockImplementation()!
+    let firstPut = true
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/api/auth/token/refresh") || (init?.method === "PUT" && firstPut)) callUser.push(session.user)
+      if (String(url).includes("/api/auth/token/refresh")) {
+        await refreshGate
+        return okJSON(null)
+      }
+      if (init?.method === "PUT" && firstPut) {
+        firstPut = false
+        return { ok: false, status: 401, json: async () => ({ error: "session_expired" }), clone() { return this } } as unknown as Response
+      }
+      return base(url, init)
+    })
+    act(() => owner.result.current[1](ownerPrivate))
+    await act(async () => {
+      vi.advanceTimersByTime(450)
+    })
+    // The AuthProvider remounts its children on the account change: the owner's hook is gone.
+    owner.unmount()
+    signIn("reader")
+    renderHook(() => useUserPreference<Recent>(KEY, []))
+    releaseRefresh()
+    await settle()
+    expect(putsFor("reader").filter(([, init]) => String((init as RequestInit).body).includes("owner-private"))).toHaveLength(0)
+    expect(JSON.stringify(server.reader ?? {})).not.toContain("owner-private")
+  })
 })
