@@ -88,7 +88,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
  React.useEffect(()=>{
   if(!enabled||!humanId||!workspaceId||!pageId)return
   setBusy(true);setConnectionRetired(false)
-  const lifetime=new AbortController(),client=createNativeDocumentClient({workspaceId,pageId})
+  const lifetime=new AbortController()
+  // Replaced only by a fresh read admission after the server retires write (#4348).
+  let client=createNativeDocumentClient({workspaceId,pageId})
   let sessionApplication:NativeDocumentSnapshot['applicationId']|undefined
   let dead=false,networkRetired=false,nativeFailed=false,sessionId='',current:Runtime|undefined,transition=false,viewNow=vacant,readerRefresh:Promise<void>|undefined
   let privacyJournal:NativeDraftJournal|undefined,privacyRetirement:Promise<void>|undefined
@@ -314,6 +316,31 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    client.close()
    if(!dead)stop(message)
   }
+  // #4348: the server retired this admission because Page write was removed
+  // while read remains. Retire local writing exactly as on lease loss (capture
+  // the draft, never send it), then ask the server for a FRESH read admission.
+  // Nothing of the old token or lease generation is reused; any refusal ends
+  // in the ordinary disconnected state with the draft kept.
+  async function reopenReadOnly(){
+   if(dead||networkRetired)return
+   const message='Právo upravovat bylo odebráno. Dokument je jen pro čtení; neuložené změny zůstaly jako místní koncept.'
+   networkRetired=true;clearInterval(reauthorize);clearInterval(leaseWatch);viewNow=vacant;setView(vacant);setOwnsEditor(false);setError(message)
+   const r=current
+   if(r&&(r.writable||r.retiring&&!r.retirementFinished)&&!await retireWrite(r)){client.close();return}
+   client.close()
+   if(dead||current?.blocked)return
+   client=createNativeDocumentClient({workspaceId,pageId})
+   try{
+    const opened=await client.open(lifetime.signal)
+    if(opened.applicationId!==sessionApplication)throw Error('native_application_changed')
+    sessionId=opened.sessionId
+    const snapshot=await client.read(lifetime.signal);viewNow=leaseView(await client.lease(lifetime.signal));setView(viewNow)
+    if(dead)return
+    await mountEditor(snapshot,viewNow.generation??'1')
+   }catch{stop(message);return}
+   if(dead)return
+   networkRetired=false;setBusy(false);setError(message);watch()
+  }
   async function refreshReader(){
    if(dead||networkRetired||transition||current?.writable||current?.blocked||current&&(!current.nativeReadOnly||current.retiring&&!current.retirementFinished))return
    if(readerRefresh)return readerRefresh
@@ -438,18 +465,24 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    const opened=await client.open(lifetime.signal);if(opened.applicationId!=='wordcraft'&&opened.applicationId!=='gridcraft')throw Error('unsupported_native_application');sessionApplication=opened.applicationId;sessionId=opened.sessionId
    const snapshot=await client.read(lifetime.signal);viewNow=leaseView(await client.lease(lifetime.signal));setView(viewNow)
    await mountEditor(snapshot,viewNow.generation??'1');if(dead)return;setBusy(false)
-   leaseWatch=setInterval(()=>{const r=current;if(r?.writable&&!owns(viewNow,r.generation))void retireWrite(r).catch(()=>stop('Platnost úprav skončila. Koncept zůstává zachován.'))},1000)
    void loadProposals();proposalWatch=setInterval(()=>{if(viewNow.can_edit===true)void loadProposals()},5000)
-   reauthorize=setInterval(()=>{void client.reauthorize(lifetime.signal).catch(()=>{if(!dead)void retireConnection('Spojení bylo ukončeno. Koncept zůstává zachován.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})},30000)
-   void client.events(lifetime.signal,(event,value)=>{
-    if(dead)return
+   watch()
+  })().catch(()=>{if(!dead)stop('Dokument nelze bezpečně otevřít.')})
+  function watch(){
+   // Callbacks of a superseded admission never act on its fresh successor.
+   const own=client
+   leaseWatch=setInterval(()=>{const r=current;if(r?.writable&&!owns(viewNow,r.generation))void retireWrite(r).catch(()=>stop('Platnost úprav skončila. Koncept zůstává zachován.'))},1000)
+   reauthorize=setInterval(()=>{void own.reauthorize(lifetime.signal).catch(()=>{if(!dead&&client===own)void retireConnection('Spojení bylo ukončeno. Koncept zůstává zachován.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})},30000)
+   void own.events(lifetime.signal,(event,value)=>{
+    if(dead||client!==own)return
     if(event==='session_retired'&&value.draft==='purge'){
      void retirePrivacy().catch(()=>setError('Vymazání místního konceptu nebylo potvrzeno.'));return
     }
+    if(event==='session_retired'&&value.reason==='write_revoked'){void reopenReadOnly().catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'));return}
     if(event==='session_retired'){void retireConnection('Spojení bylo ukončeno. Koncept zachován.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'));return}
     void observeLease(value).catch(()=>stop('Aktuální přístup nelze potvrdit. Koncept zachován.'))
-   }).catch(()=>{if(!dead)void retireConnection('Spojení přerušeno. Zápis není potvrzen.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})
-  })().catch(()=>{if(!dead)stop('Dokument nelze bezpečně otevřít.')})
+   }).catch(()=>{if(!dead&&client===own)void retireConnection('Spojení přerušeno. Zápis není potvrzen.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})
+  }
   return()=>{unregisterPrivacy();window.removeEventListener('message',windowMessage);control.current=()=>{};publishPreview.current=()=>{};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};stop('Editor uzavřen · koncept zachován',true)}
  },[enabled,humanId,workspaceId,pageId])
  function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`${draft.applicationId}-recovery.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}

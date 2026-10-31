@@ -325,6 +325,54 @@ describe('native Word host authority and persistence',()=>{
 })
 
 
+describe('write access removed while read access remains (#4348)',()=>{
+ const readerLease={...emptyLease,can_edit:false}
+ const writeRevoked={delivery:'stopped',draft:'retain',reason:'write_revoked'}
+ // A queued fresh client must not leak into the next test when the host never asked for it.
+ afterEach(()=>{m.createClient.mockReset()})
+ it('reopens read-only under a fresh read admission and keeps the unsaved draft for copy or compare',async()=>{
+  mount();await ready();await acquire()
+  const first=client,second=clientRig(),writer=ports.length;second.lease.mockResolvedValue(readerLease);m.createClient.mockReturnValueOnce(second)
+  act(()=>portOptions.at(-1)!.onChanged('unsaved-before-revoke','doc'))
+  act(()=>stream?.('session_retired',writeRevoked))
+  await waitFor(()=>expect(second.open).toHaveBeenCalledOnce())
+  await waitFor(()=>expect(ports.length).toBe(writer+1))
+  const reader=ports.at(-1)!
+  await waitFor(()=>expect(reader.bootstrap).toHaveBeenCalledOnce())
+  await waitFor(()=>expect(second.events).toHaveBeenCalledOnce())
+  // The old write admission is closed; it never saves again or reuses its generation.
+  expect(first.close).toHaveBeenCalled();expect(second.save).not.toHaveBeenCalled();expect(second.leaseAction).not.toHaveBeenCalled()
+  expect(reader.setReadOnly.mock.calls.some(c=>c[0]===false)).toBe(false)
+  expect(ports[writer-1].close).toHaveBeenCalled()
+  expect(document.querySelectorAll('iframe')).toHaveLength(1)
+  expect(screen.getByRole('status')).toHaveTextContent('Pouze čtení')
+  expect(screen.getByRole('alert')).toHaveTextContent('Právo upravovat bylo odebráno')
+  expect(screen.queryByText(/Editor odpojen/)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:'Převzít úpravy'})).not.toBeInTheDocument()
+  expect(screen.getByRole('button',{name:'Kopie konceptu'})).toBeInTheDocument();expect(screen.getByRole('button',{name:'Porovnat'})).toBeInTheDocument()
+  expect(journal.revokeRead).not.toHaveBeenCalled()
+  // The fresh read view stays subject to read authority: losing read stops delivery and never reconnects.
+  act(()=>stream?.('session_retired',{delivery:'stopped',draft:'purge',reason:'authority_changed'}))
+  await waitFor(()=>expect(document.querySelector('iframe')).toBeNull())
+  expect(screen.getByRole('status')).toHaveTextContent('Přístup ke čtení byl odebrán')
+  expect(m.createClient).toHaveBeenCalledTimes(2);expect(second.open).toHaveBeenCalledOnce();expect(second.close).toHaveBeenCalled()
+ })
+ it('stays disconnected with the draft kept when the server refuses the fresh read admission',async()=>{
+  mount();await ready();await acquire()
+  const second=clientRig();second.open.mockRejectedValue(Error('native_session_unavailable'));m.createClient.mockReturnValueOnce(second)
+  act(()=>stream?.('session_retired',writeRevoked))
+  await screen.findByText('Editor odpojen · koncept zachován')
+  expect(document.querySelector('iframe')).toBeNull();expect(second.open).toHaveBeenCalledOnce();expect(second.read).not.toHaveBeenCalled();expect(m.createClient).toHaveBeenCalledTimes(2)
+  expect(journal.revokeRead).not.toHaveBeenCalled()
+ })
+ it('keeps disconnecting for any other retirement reason',async()=>{
+  mount();await ready();await acquire()
+  act(()=>stream?.('session_retired',{delivery:'stopped',draft:'retain',reason:'authority_changed'}))
+  await screen.findByText('Editor odpojen · koncept zachován')
+  expect(m.createClient).toHaveBeenCalledOnce()
+ })
+})
+
 describe('editor origin mismatch (#4649)',()=>{
  const violation=(over:Record<string,unknown>={})=>{const e=new Event('securitypolicyviolation') as Event&Record<string,unknown>;Object.assign(e,{effectiveDirective:'frame-src',violatedDirective:'frame-src',blockedURI:`https://native.example/b/${'b'.repeat(64)}/index.html`,originalPolicy:"default-src 'self'; frame-src https://studio.example.test",...over});return e}
  it('names the configured editor address at once and keeps the draft',async()=>{
