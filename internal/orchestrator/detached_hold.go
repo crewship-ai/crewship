@@ -125,8 +125,18 @@ func (o *Orchestrator) watchDetachedHold(h *detachedHold, poll time.Duration) {
 			if h.requireExecTerminal {
 				ctx, cancel := context.WithTimeout(context.Background(), preflightExecTimeout)
 				stopped, _, err := o.legacyRunStoppedOnce(ctx, RunLocation{ContainerID: h.containerID, AgentSlug: h.agentSlug, RunID: h.runID, Managed: h.req.managedLaunch != nil}, h.execID)
-				cancel()
 				if err == nil && stopped {
+					cancel()
+					o.closeDetachedHold(h, true)
+					return
+				}
+				// A container removed while the stop confirmation is pending
+				// leaves no exec to inspect; its absence is the proof, as in
+				// the other branches. Without it this hold retries forever
+				// and never releases admission, capacity, HOME or credentials.
+				absent, absentErr := o.containerRuntimeAbsent(ctx, h.containerID)
+				cancel()
+				if absentErr == nil && absent {
 					o.closeDetachedHold(h, true)
 					return
 				}

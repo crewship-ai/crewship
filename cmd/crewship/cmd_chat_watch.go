@@ -43,15 +43,39 @@ var chatWatchDebounce = 300 * time.Millisecond
 // watchChannel subscribes to channel and calls onEvent for every frame on it
 // until the context ends. A dropped socket reconnects with backoff and then
 // calls onReconnect, because anything announced while disconnected is lost.
+// onReconnect runs once the new subscription is in place, so nothing announced
+// after the catch-up read can be missed.
 func watchChannel(ctx context.Context, client *cli.Client, channel string, onEvent func(*cli.WSMessage), onReconnect func()) error {
-	backoff := time.Second
-	first := true
-	for {
+	return watchChannelSubscribed(ctx, client, channel, onEvent, func(first bool) {
 		if !first && onReconnect != nil {
 			onReconnect()
 		}
-		first = false
-		err := watchChannelOnce(ctx, client, channel, onEvent)
+	})
+}
+
+// watchChannelSubscribed is watchChannel with a hook that runs after every
+// successful subscribe (first reports the initial connection). Reading state
+// from that hook, not before connecting, closes the gap in which an
+// announcement has no subscriber.
+// watchOnce and watchReconnectBackoff are replaceable by tests.
+var (
+	watchOnce             = watchChannelOnce
+	watchReconnectBackoff = time.Second
+)
+
+func watchChannelSubscribed(ctx context.Context, client *cli.Client, channel string, onEvent func(*cli.WSMessage), onSubscribed func(first bool)) error {
+	backoff := watchReconnectBackoff
+	first := true
+	for {
+		// Only a subscription that succeeded ends "first": a connection that
+		// failed before subscribing leaves the strict first read still to come.
+		err := watchOnce(ctx, client, channel, onEvent, func() {
+			isFirst := first
+			first = false
+			if onSubscribed != nil {
+				onSubscribed(isFirst)
+			}
+		})
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -70,7 +94,7 @@ func watchChannel(ctx context.Context, client *cli.Client, channel string, onEve
 	}
 }
 
-func watchChannelOnce(ctx context.Context, client *cli.Client, channel string, onEvent func(*cli.WSMessage)) error {
+func watchChannelOnce(ctx context.Context, client *cli.Client, channel string, onEvent func(*cli.WSMessage), onSubscribed func()) error {
 	token, err := cli.WSTokenFromServer(client)
 	if err != nil {
 		return fmt.Errorf("get WS token: %w", err)
@@ -85,6 +109,28 @@ func watchChannelOnce(ctx context.Context, client *cli.Client, channel string, o
 	if err := ws.Subscribe(channel); err != nil {
 		return fmt.Errorf("subscribe: %w", err)
 	}
+	// Subscribe has no acknowledgement. The server handles frames in order, so
+	// the pong for a ping sent right behind it proves the subscription is
+	// registered; only then may the caller read state, or a message committed
+	// in between would have no subscriber to announce it to.
+	if err := ws.Ping(); err != nil {
+		return fmt.Errorf("ping: %w", err)
+	}
+	for registered := false; !registered; {
+		msg, err := ws.ReadMessage()
+		if err != nil {
+			return err
+		}
+		if reason, ok := cli.CloseReason(msg); ok {
+			return cli.WithExitCode(fmt.Errorf("%w %s: %s", errWatchRefused, channel, reason), cli.ExitAuth)
+		}
+		if msg.Type == "pong" {
+			registered = true
+		} else if msg.Channel == channel {
+			onEvent(msg)
+		}
+	}
+	onSubscribed()
 	for {
 		msg, err := ws.ReadMessage()
 		if err != nil {
@@ -247,9 +293,6 @@ func followRoomMessages(cmd *cobra.Command, roomID string, after int64, fromStar
 			}
 		}
 	}
-	if err := fetch(); err != nil {
-		return err
-	}
 	ctx, cancel := watchCommandContext(cmd)
 	defer cancel()
 	refresh := func() {
@@ -257,7 +300,11 @@ func followRoomMessages(cmd *cobra.Command, roomID string, after int64, fromStar
 			fmt.Fprintf(os.Stderr, "%s[refresh failed]%s %v\n", cli.Yellow, cli.Reset, err)
 		}
 	}
-	return watchChannel(ctx, client, "user:"+me.UserID, func(msg *cli.WSMessage) {
+	// The first read happens after the subscription is in place: a message
+	// committed between a read and the subscribe would have no subscriber and
+	// never be printed.
+	var firstErr error
+	err = watchChannelSubscribed(ctx, client, "user:"+me.UserID, func(msg *cli.WSMessage) {
 		if msg.Type != "conversation.updated" {
 			return
 		}
@@ -267,5 +314,18 @@ func followRoomMessages(cmd *cobra.Command, roomID string, after int64, fromStar
 		if json.Unmarshal(msg.Payload, &p) == nil && p.ConversationID == roomID {
 			refresh()
 		}
-	}, refresh)
+	}, func(first bool) {
+		if first {
+			// A failed first read is fatal, as before the reorder.
+			if firstErr = fetch(); firstErr != nil {
+				cancel()
+			}
+			return
+		}
+		refresh()
+	})
+	if firstErr != nil {
+		return firstErr
+	}
+	return err
 }

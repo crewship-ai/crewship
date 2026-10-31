@@ -1591,7 +1591,7 @@ jobs:
         run: node --test e2e/static-app-engines.test.mjs
       - name: PRD acceptance runner tests
         timeout-minutes: 2
-        run: node --test e2e/acceptance/prd/report.test.mjs
+        run: node --test e2e/acceptance/prd/report.test.mjs e2e/acceptance/prd/env.test.mjs
 
   frontend-test-shards:
     needs: [merge-conflict-markers, changes]

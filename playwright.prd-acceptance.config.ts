@@ -23,7 +23,7 @@ export default defineConfig({
   use: {
     ...devices["Desktop Chrome"],
     baseURL: prd.origin,
-    storageState: storageStatePath(prd.origin, "owner"),
+    storageState: storageStatePath(prd, "owner"),
     screenshot: "only-on-failure",
     // Traces record request bodies, including logins of provisioned people.
     trace: prd.trace ? "retain-on-failure" : "off",
