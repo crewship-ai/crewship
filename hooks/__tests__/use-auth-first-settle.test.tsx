@@ -14,6 +14,14 @@ function okJSON(body: unknown): Response {
 }
 const session = (id: string) => ({ user: { id, name: id, email: `${id}@example.test` }, expires: "2099-12-01" })
 
+class FakeBroadcastChannel {
+  static instances: FakeBroadcastChannel[] = []
+  postMessage = vi.fn()
+  close = vi.fn()
+  onmessage: ((ev: { data?: unknown }) => void) | null = null
+  constructor() { FakeBroadcastChannel.instances.push(this) }
+}
+
 describe("AuthProvider first settle", () => {
   let mockFetch: ReturnType<typeof vi.fn>
 
@@ -22,7 +30,8 @@ describe("AuthProvider first settle", () => {
     vi.resetModules()
     mockFetch = vi.fn()
     vi.stubGlobal("fetch", mockFetch)
-    vi.stubGlobal("BroadcastChannel", undefined)
+    FakeBroadcastChannel.instances = []
+    vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel)
   })
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -53,11 +62,11 @@ describe("AuthProvider first settle", () => {
   })
 
   it.each([
-    ["the same person again", session("u1"), session("u1"), 1],
-    ["the first person after a signed-out page", null, session("u1"), 1],
-    ["another person", session("u1"), session("u2"), 2],
-    ["signed out", session("u1"), null, 2],
-  ] as const)("on a later refresh to %s mounts the tree %i time(s)", async (_name, first, later, mounts) => {
+    ["the same person again keeps the tree", session("u1"), session("u1"), 1],
+    ["the first person after a signed-out page keeps the tree", null, session("u1"), 1],
+    ["another person remounts the tree", session("u1"), session("u2"), 2],
+    ["signed out remounts the tree", session("u1"), null, 2],
+  ] as const)("a later refresh to %s", async (_name, first, later, mounts) => {
     mockFetch.mockResolvedValue(okJSON(first))
     const { counts, probe } = await mount()
     await waitFor(() => expect(probe.auth?.status).toBe(first ? "authenticated" : "unauthenticated"))
@@ -65,5 +74,16 @@ describe("AuthProvider first settle", () => {
     await act(async () => { await probe.auth!.refresh() })
     await waitFor(() => expect(probe.auth?.session?.user.id ?? null).toBe(later?.user.id ?? null))
     expect(counts.mounts).toBe(mounts)
+  })
+
+  it("remounts when another tab signed the person out and the same person is back", async () => {
+    // The sign-out closed that person's draft handles, so the editors must reopen.
+    mockFetch.mockResolvedValue(okJSON(session("u1")))
+    const { counts, probe } = await mount()
+    await waitFor(() => expect(probe.auth?.session?.user.id).toBe("u1"))
+    const channel = FakeBroadcastChannel.instances.find(c => c.onmessage)!
+    await act(async () => { channel.onmessage!({ data: { type: "signout", human: "u1" } }) })
+    await waitFor(() => expect(counts.mounts).toBe(2))
+    expect(probe.auth?.session?.user.id).toBe("u1")
   })
 })
