@@ -219,6 +219,12 @@ export function installInteractiveRuntime(config: { html: string; requestType: s
     batch: (collection: string, documents: unknown) => call("data.batch", { collection, documents }),
   })
   Object.defineProperty(window, "crewship", { value: Object.freeze({ version: 1, data, viewer: () => call("viewer", {}) }), enumerable: false, configurable: false, writable: false })
+  // The frame has one verified document. A followed link would replace it and
+  // end the session, so only same-document fragment links navigate.
+  document.addEventListener("click", event => {
+    const link = event.target instanceof Element ? event.target.closest("a[href]") : null
+    if (link && !(link.getAttribute("href") ?? "").startsWith("#")) event.preventDefault()
+  }, true)
   const parsed = new DOMParser().parseFromString(config.html, "text/html")
   if (parsed.title) document.title = parsed.title
   for (const style of Array.from(parsed.head.querySelectorAll("style"))) document.head.append(document.importNode(style, true))

@@ -27,6 +27,7 @@ const POLL = `<title>Lunch poll</title>
 <p>Viewer: <span id="who"></span></p>
 <p>Pizza: <span id="count">loading</span></p>
 <button id="vote" type="button">Vote pizza</button>
+<a id="away" href="details.html">Details</a>
 <p id="error"></p>
 <pre id="probe"></pre>
 <script>
@@ -132,6 +133,12 @@ it("runs artifact script in the isolated runtime, shares data through the broker
     cookie: "blocked:SecurityError", parentDom: "blocked:SecurityError", topHref: "blocked:SecurityError", storage: "blocked:SecurityError",
     origin: "null", port: "undefined", fetch: "blocked:TypeError",
   })
+
+  // A link cannot replace the verified document.
+  await owner.click("#away")
+  await page.waitForTimeout(300)
+  expect(await page.getAttribute('iframe[name="owner"]', "data-ended")).toBeNull()
+  expect(new URL(owner.url()).pathname).toBe("/api/v1/pages/runtime/bootstrap")
 
   // Write through the broker with the viewer's session.
   await owner.click("#vote")
