@@ -230,3 +230,31 @@ func countForeignRows(t *testing.T, s *Server, runID, ws, agent string) int {
 	}
 	return n
 }
+
+// A failed agent lookup is not a verdict: the run must stay retryable and
+// settle only once ownership is actually established (review of #4700).
+func TestRetainedRunAgentLookupErrorDoesNotSettle(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('retained-ws','Recovery','retained-ws')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('retained-agent','retained-ws','Agent','retained','RUNNING')`)
+	run := seedHostOutputWith(t, s, "retained-lookup-error", "secret output line\n", true)
+	mustExec(t, s.db, `ALTER TABLE agents RENAME TO agents_unavailable`)
+
+	if err := s.flushRetainedOutput(t.Context()); err == nil {
+		t.Fatal("agent lookup error reported as settled")
+	}
+	raw, err := s.state.Get(t.Context(), "agent_runs", run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state struct {
+		Status string         `json:"status"`
+		Output map[string]any `json:"output"`
+	}
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatal(err)
+	}
+	if state.Status == "error" || state.Output["unprojected"] != nil {
+		t.Fatalf("transient lookup error settled the run: %s", raw)
+	}
+}
