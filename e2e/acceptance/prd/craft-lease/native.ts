@@ -161,6 +161,15 @@ export class NativePage {
     return api.post(this.url(`lease/${op}`), { data: body, headers: { "X-Craft-Session": a.token } })
   }
 
+  /**
+   * The editor's event stream (SSE). Playwright buffers a response until it
+   * ends, so this resolves only when the server closes the stream; a stream
+   * that never stops rejects at `timeoutMs`.
+   */
+  eventsRaw(api: APIRequestContext, a: Admission, timeoutMs: number): Promise<APIResponse> {
+    return api.get(this.url("events"), { headers: { "X-Craft-Session": a.token, Accept: "text/event-stream" }, timeout: timeoutMs })
+  }
+
   documentRaw(api: APIRequestContext, a: Admission): Promise<APIResponse> {
     return api.get(this.url("document"), { headers: { "X-Craft-Session": a.token, "Cache-Control": "no-cache" } })
   }
@@ -203,6 +212,31 @@ export class NativePage {
     })
     await json(res, 200, `grant ${level}`)
   }
+
+  /** Withdraws a grant (DELETE .../grants), as the share dialog does. */
+  async revoke(owner: APIRequestContext, userId: string, level: "read" | "comment" | "write"): Promise<void> {
+    const q = new URLSearchParams({ workspace_id: this.workspaceId, subject_type: "user", subject: userId, level })
+    const res = await owner.delete(`/api/v1/pages/${encodeURIComponent("@" + this.pageId)}/grants?${q}`)
+    if (res.status() >= 300) throw new Error(`revoke ${level}: HTTP ${res.status()} ${(await res.text()).slice(0, 300)}`)
+  }
+}
+
+/** Parses a buffered text/event-stream body into its events, in order. */
+export function parseEvents(body: string): Array<{ event: string; data: unknown }> {
+  const out: Array<{ event: string; data: unknown }> = []
+  for (const block of body.split(/\n\n+/)) {
+    const event = /^event: (.+)$/m.exec(block)?.[1]
+    const data = /^data: (.+)$/m.exec(block)?.[1]
+    if (!event) continue
+    let parsed: unknown = data
+    try {
+      parsed = data === undefined ? undefined : JSON.parse(data)
+    } catch {
+      // keep the raw text
+    }
+    out.push({ event, data: parsed })
+  }
+  return out
 }
 
 /** Id of the person behind a session (Auth.js session endpoint). */
