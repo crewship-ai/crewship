@@ -23,6 +23,7 @@ import {
   type NativeApp,
   type ProposalView,
 } from "./craft-proposal/native"
+import { frameOf, typeMarker } from "./drafts-crash/native"
 import { expect, prdRequirement, test, type PrdScenario } from "./fixtures"
 
 const UNKNOWN_PROPOSAL = "ncp_000000000000000000000000"
@@ -321,77 +322,89 @@ test.describe("craft proposal", () => {
     )
   }
 
-  test(
-    "Word: the person rejects a proposal and a proposal over an older version goes stale",
-    {
-      annotation: [
-        prdRequirement("A.craft.proposal.word.reject", "Word: rejecting a proposal leaves the document and its version unchanged"),
-        prdRequirement("A.craft.proposal.word.stale", "Word: after the person saves, accepting an older proposal is refused as stale and nothing is applied"),
-      ],
-    },
-    async ({ prd, request, page }) => {
-      const flow = await AgentFlow.start(prd, request, page, "wordcraft")
-      try {
-        // Reject.
-        const m1 = `PRDREJECT_${randomUUID().slice(0, 8)}`
-        const p1 = await flow.propose(wordInstruction(m1), "reject")
-        const g1 = await flow.banner(p1.before.version)
-        const rejectRes = page.waitForResponse((r) => r.url().includes(`/proposals/${p1.proposal.id}/reject`), { timeout: 60_000 })
-        await g1.getByRole("button", { name: "Odmítnout", exact: true }).click()
-        const rr = await rejectRes
-        const afterReject = await flow.doc.head()
-        const fin1 = await flow.proposalState(p1.proposal.id)
-        await expect(flow.group(p1.before.version)).toHaveCount(0, {
-          timeout: 30_000,
-        })
-        const reject = {
-          ...p1.summary,
-          rejectStatus: rr.status(),
-          headAfter: afterReject.version,
-          unchanged: afterReject.hash === p1.before.hash,
-          proposalAfter: fin1,
-        }
-        await prd.evidence("word-reject.json", reject)
-        expect(rr.status()).toBe(200)
-        expect(afterReject.version).toBe(p1.before.version)
-        expect(afterReject.hash).toBe(p1.before.hash)
-        expect(fin1?.state).toBe("rejected")
+  for (const app of ["wordcraft", "gridcraft"] as const) {
+    const label = app === "wordcraft" ? "Word" : "Sheet"
+    const slug = label.toLowerCase()
+    const instruct = (marker: string) => (app === "wordcraft" ? wordInstruction(marker) : sheetInstruction("B2", marker))
+    // Sheet text lives in a cell: the person's value goes to A9, the proposal to B2.
+    const has = (d: Record<string, unknown>, text: string) => (app === "wordcraft" ? wordText(d).includes(text) : sheetCell(d, 8, 0) === text || sheetCell(d, 1, 1) === text)
 
-        // Stale: the person saves after the agent's base, then tries to accept.
-        const m2 = `PRDSTALE_${randomUUID().slice(0, 8)}`
-        const human = `PRDHUMAN_${randomUUID().slice(0, 8)}`
-        const p2 = await flow.propose(wordInstruction(m2), "stale")
-        const humanSave = await flow.typeAndSave(human)
-        expect(BigInt(humanSave.version) > BigInt(p2.before.version), "the person's save is a new version").toBe(true)
-        expect(wordText(humanSave.doc)).toContain(human)
-        const g2 = await flow.banner(p2.before.version)
-        const acceptRes = page.waitForResponse((r) => r.url().includes(`/proposals/${p2.proposal.id}/accept`), { timeout: 60_000 })
-        await g2.getByRole("button", { name: "Přijmout", exact: true }).click()
-        const ar = await acceptRes
-        const message = page.getByRole("alert").filter({ hasText: STALE_MESSAGE })
-        await message.waitFor({ timeout: 20_000 })
-        const post = await flow.doc.head()
-        const fin2 = await flow.proposalState(p2.proposal.id)
-        await prd.evidence("word-stale.json", {
-          ...p2.summary,
-          humanSaveVersion: humanSave.version,
-          acceptStatus: ar.status(),
-          uiMessage: await message.innerText(),
-          headAfter: post.version,
-          keepsHumanEdit: wordText(post.doc).includes(human),
-          appliedProposal: wordText(post.doc).includes(m2),
-          proposalAfter: fin2,
-        })
-        await prd.evidence("word-stale.png", await page.screenshot({ fullPage: true }))
-        expect(ar.status()).toBe(409)
-        expect(fin2?.state).toBe("stale")
-        expect(wordText(post.doc), "the person's edit is kept").toContain(human)
-        expect(wordText(post.doc), "the stale proposal is not applied").not.toContain(m2)
-      } finally {
-        await flow.dispose()
-      }
-    },
-  )
+    test(
+      `${label}: the person rejects a proposal`,
+      { annotation: prdRequirement(`A.craft.proposal.${slug}.reject`, `${label}: rejecting a proposal leaves the document and its version unchanged`) },
+      async ({ prd, request, page }) => {
+        const flow = await AgentFlow.start(prd, request, page, app)
+        try {
+          const m1 = `PRD${label.toUpperCase()}REJECT_${randomUUID().slice(0, 8)}`
+          const p1 = await flow.propose(instruct(m1), "reject")
+          const g1 = await flow.banner(p1.before.version)
+          const rejectRes = page.waitForResponse((r) => r.url().includes(`/proposals/${p1.proposal.id}/reject`), { timeout: 60_000 })
+          await g1.getByRole("button", { name: "Odmítnout", exact: true }).click()
+          const rr = await rejectRes
+          const afterReject = await flow.doc.head()
+          const fin1 = await flow.proposalState(p1.proposal.id)
+          await expect(flow.group(p1.before.version)).toHaveCount(0, { timeout: 30_000 })
+          await prd.evidence(`${slug}-reject.json`, {
+            ...p1.summary,
+            rejectStatus: rr.status(),
+            headAfter: afterReject.version,
+            unchanged: afterReject.hash === p1.before.hash,
+            keepsProposal: has(afterReject.doc, m1),
+            proposalAfter: fin1,
+          })
+          expect(rr.status()).toBe(200)
+          expect(afterReject.version).toBe(p1.before.version)
+          expect(afterReject.hash).toBe(p1.before.hash)
+          expect(has(afterReject.doc, m1), "the rejected proposal is not applied").toBe(false)
+          expect(fin1?.state).toBe("rejected")
+        } finally {
+          await flow.dispose()
+        }
+      },
+    )
+
+    test(
+      `${label}: a proposal over an older version goes stale`,
+      { annotation: prdRequirement(`A.craft.proposal.${slug}.stale`, `${label}: after the person saves, accepting an older proposal is refused as stale and nothing is applied`) },
+      async ({ prd, request, page }) => {
+        const flow = await AgentFlow.start(prd, request, page, app)
+        try {
+          // The person saves after the agent's base, then tries to accept.
+          const m2 = `PRD${label.toUpperCase()}STALE_${randomUUID().slice(0, 8)}`
+          const human = `PRDHUMAN_${randomUUID().slice(0, 8)}`
+          const p2 = await flow.propose(instruct(m2), "stale")
+          const humanSave = await flow.typeAndSave(human)
+          expect(BigInt(humanSave.version) > BigInt(p2.before.version), "the person's save is a new version").toBe(true)
+          expect(has(humanSave.doc, human)).toBe(true)
+          const g2 = await flow.banner(p2.before.version)
+          const acceptRes = page.waitForResponse((r) => r.url().includes(`/proposals/${p2.proposal.id}/accept`), { timeout: 60_000 })
+          await g2.getByRole("button", { name: "Přijmout", exact: true }).click()
+          const ar = await acceptRes
+          const message = page.getByRole("alert").filter({ hasText: STALE_MESSAGE })
+          await message.waitFor({ timeout: 20_000 })
+          const post = await flow.doc.head()
+          const fin2 = await flow.proposalState(p2.proposal.id)
+          await prd.evidence(`${slug}-stale.json`, {
+            ...p2.summary,
+            humanSaveVersion: humanSave.version,
+            acceptStatus: ar.status(),
+            uiMessage: await message.innerText(),
+            headAfter: post.version,
+            keepsHumanEdit: has(post.doc, human),
+            appliedProposal: has(post.doc, m2),
+            proposalAfter: fin2,
+          })
+          await prd.evidence(`${slug}-stale.png`, await page.screenshot({ fullPage: true }))
+          expect(ar.status()).toBe(409)
+          expect(fin2?.state).toBe("stale")
+          expect(has(post.doc, human), "the person's edit is kept").toBe(true)
+          expect(has(post.doc, m2), "the stale proposal is not applied").toBe(false)
+        } finally {
+          await flow.dispose()
+        }
+      },
+    )
+  }
 })
 
 interface Proposed {
@@ -541,15 +554,19 @@ class AgentFlow {
     }
   }
 
-  /** Types at the end of the Word document in the editor and saves with Ctrl+S. */
+  /** Types in the editor (end of the Word text, cell A9 of the Sheet) and saves with Ctrl+S. */
   async typeAndSave(text: string) {
-    const frame = this.page.frameLocator('iframe[title="WordCraft editor"]')
-    await frame
-      .locator("canvas")
-      .first()
-      .click({ position: { x: 400, y: 340 } })
-    await this.page.keyboard.press("Control+End")
-    await this.page.keyboard.type(" " + text + " ", { delay: 20 })
+    if (this.app === "wordcraft") {
+      const frame = this.page.frameLocator('iframe[title="WordCraft editor"]')
+      await frame
+        .locator("canvas")
+        .first()
+        .click({ position: { x: 400, y: 340 } })
+      await this.page.keyboard.press("Control+End")
+      await this.page.keyboard.type(" " + text + " ", { delay: 20 })
+    } else {
+      await typeMarker(this.page, await frameOf(this.page, this.app), this.app, text, 9)
+    }
     const saved = this.page.waitForResponse((r) => r.url().includes("/document/save") && r.request().method() === "POST" && r.status() === 200, {
       timeout: 60_000,
     })

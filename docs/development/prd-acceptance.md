@@ -50,6 +50,7 @@ repository names a real host or account.
 | `PRD_AGENT_SLUG`, `PRD_AGENT_WORKSPACE_ID` | Full mode: seeded agent and the workspace it belongs to |
 | `PRD_CLI` | Path of the `crewship` CLI binary for CLI-driven scenarios (`prd.requireCli()`) |
 | `PRD_CRAFT_NATIVE` | `on` or `off`: whether the origin has a native Word/Sheet editor profile. Unset, full mode assumes `on` and quick mode reads `GET /api/v1/documents/status`. The craft-lease scenarios decide from it, never from the initialize call they check |
+| `PRD_HOUR_MINUTES` | Length of the `A.craft.session.hour-word` / `-sheet` work session in minutes. Default 60, and in full mode 60 is required: a shorter run (set `PRD_HOUR_SHORT_RUN=1` to allow it while debugging) does the same work but ends red, so it can never be mistaken for the evidence |
 | `PRD_OUTPUT_DIR` | Results directory. The runner's `--output` sets it; default `test-results/prd-acceptance/<mode>-<timestamp>` |
 | `PRD_KEEP_WORKSPACES` | `1` keeps created QA workspaces for inspection |
 | `PRD_TRACE` | `1` keeps Playwright traces of failed tests. Off by default because traces contain request bodies, including logins |
@@ -66,6 +67,71 @@ treated as a replay, which revokes the whole session (`session_revoked` for
 every holder). So global setup only checks that the accounts can sign in; each
 test signs the owner in again, and every extra context (`prd.api(role)`,
 `prd.browserContext(role)`, crashable browser profiles) gets its own login.
+
+## Craft session rows
+
+The restart rows (`A.resilience.restart.*`, `A.craft.session.hour-*`) restart
+the server under test from inside the test, through `PRD_RESTART_COMMAND`
+(for example `crew restart dev3`) or, where that command cannot run under
+`crewship-heavy`, through `PRD_RESTART_HANDSHAKE` (a directory: the test writes
+`restart.request` and waits for `restart.done`, which a watcher in the operator's
+own shell answers); `PRD_RESTART_NOTE_FILE` gets one line before each restart.
+The restart is proven by `GET /healthz`: a new process reports a lower uptime.
+Without a command or a handshake these rows fail in full mode. Run them serially
+and only when needed: a restart interrupts everyone on the instance.
+
+`craft-hour.acceptance.ts` (`A.craft.session.hour-word`, `-sheet`) is one real
+work session in the native editor of a deployed origin, driven in a browser
+for `PRD_HOUR_MINUTES` (60). A provisioned person types continuously, presses
+Enter, changes the font and styles, inserts a table and an image (Sheet: cells
+of every data class, formulas, formats, a second sheet) and saves once a
+minute. Halfway through, with unsaved typing in the editor, the test runs
+the restart command. After the restart it checks that everything saved is
+there, that the unsaved typing is offered back as a local draft, that nothing
+was saved behind the person's back and that the editor works again after a
+reload; then it keeps working, reloads once more and checks the document a
+last time. The row's `result.json` carries the duration, the restart time and
+the SHA-256 of the final document.
+
+`craft-restart.acceptance.ts` (`A.resilience.restart.word`, `.sheet`) is the
+short form of the restart: unsaved typing, restart, reload, draft offered, no
+duplicate version, editor usable.
+
+`craft-write-revoked.acceptance.ts` (`A.craft.write-revoked-word`, `-sheet`)
+withdraws the write right of a person who holds the open editor and has unsaved
+typing: the editor turns read-only, the server refuses further writes, and the
+draft is kept and offered (also after a reload once the right returns).
+
+`craft-agent-free-edit.acceptance.ts` (`A.craft.agent.free-edit-word`, `-sheet`)
+lets the seeded agent edit a free document while a person watches it in the
+browser: the person sees "Upravuje <agent>", then the new version.
+
+### Manual walkthrough: `A.craft.session.hour-word`
+
+The Word hour is a manual row (`mode=manual`) because the Word editor is driven
+through a canvas ribbon and, on r5, drops to read-only while typing continues
+during an autosave in flight (automation reproduces it in the first cycle:
+`PRD_HOUR_WORD_AUTOMATED=1 ... --grep "Word: an hour"`; the failure evidence has
+`failure-steps.json`, the editor calls and the lease polls, which show the server
+still saw the person as holder). Procedure, on the canonical Craft origin, as a
+non-owner person in a QA workspace, recording the screen (video) for the whole hour:
+
+1. Note the app SHA (`GET /api/v1/system/version` -> `commit`) and the start time.
+2. Create a Word document, take the editor. For 30 minutes type continuously, press
+   Enter, change font and size, apply Heading 1 and bold/italic, insert a 2x2 table
+   and a picture. Press Ctrl+S about once a minute. Screenshot after the table and
+   after the picture.
+3. At minute 30, while typing a steady stream, restart the server (`crew restart dev3`,
+   one line in ROZHRANI first). Screenshot the editor right after.
+4. After the restart: check that everything saved is there, that the unsaved typing
+   is offered as "Místni koncept" (Porovnat), reload, take the editor, type, save.
+5. Work 30 more minutes, reload, and compare the document with the screenshots.
+   Compute the SHA-256 of the saved bytes (`crewship` CLI or the editor API).
+
+Manual row (same fields as the automatic ones): `id=A.craft.session.hour-word`,
+`result=passed|failed`, `appSha`, `mode=manual`, `evidence` (path of the recording and
+a notes file with the times, SHA-256 and what the document held after the restart),
+`recordedAt`.
 
 ## Cleanup
 
