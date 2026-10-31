@@ -37,6 +37,7 @@ import "sort"
 // surfaces before a bundle ships missing rows.
 var BackupTableIntent = map[string]ScopedTableIntent{
 	"artifact_storage_global":       IntentExcludeRuntime, // instance-wide capacity counters and limits, never portable
+	"instance_page_limits":          IntentExcludeRuntime, // instance-wide admin setting, never portable
 	"artifact_storage_pages":        IntentExcludeRuntime, // derived Page/workspace accounting scope, not portable data
 	"artifact_storage_workspaces":   IntentExcludeRuntime, // derived target-local capacity accounting
 	"artifact_storage_reservations": IntentExcludeRuntime, // in-flight uploads never survive portable restore

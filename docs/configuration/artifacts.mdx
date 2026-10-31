@@ -237,6 +237,21 @@ The workbook engine and editor use `CREWSHIP_GRIDCRAFT_SERVICE_SOCKET`,
 `editor_bundles` and `editor_origin`); see
 [Environment variables](/configuration/environment).
 
+## Page limit
+
+A workspace may hold at most 100 pages by default (archived pages count). Pages, Designs, artifact projects, Documents and
+Workbooks all check the same limit and, when it is reached, refuse with `422` `pages_limit` and a message that states the
+limit. It is not an environment variable or YAML key: an instance administrator sets it at runtime (10 to 10000) and the
+value is kept in the database. Lowering it never deletes pages; it only blocks new ones.
+
+```bash
+crewship admin instance page-limit get
+crewship admin instance page-limit set 250
+```
+
+Pages marked as test items (`created_by_test`) still count toward the limit; excluding them is a possible follow-up. See
+[Admin API](/api-reference/admin) and [Admin CLI](/cli/admin).
+
 ## Artifact storage limits
 
 Every artifact family (versions, proposals, Design, Data, documents, Slides, GridCraft and Mooring) counts against one

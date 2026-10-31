@@ -1109,6 +1109,54 @@ disabled origin is enabled again after three consecutive passing checks;
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
 
+## `GET /api/v1/admin/instance/page-limit`
+
+The maximum number of pages a workspace may hold, for instance administrators.
+The default is 100. Every page-creating path (pages, Designs, artifact projects,
+Documents, Workbooks, imports) checks this one setting. Archived pages count.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{ "max_pages_per_workspace": 100, "default": 100, "min": 10, "max": 10000 }
+```
+
+| Status | Meaning |
+|---|---|
+| `200` | The current limit and its bounds. |
+| `401` | Not signed in. |
+| `403` | Caller is not an instance administrator (a workspace owner, an agent token, a viewer or a non-member all get `403`). |
+| `500` | A read failed. |
+
+## `PUT /api/v1/admin/instance/page-limit`
+
+Set the maximum number of pages per workspace. The change applies to every
+workspace and is recorded in the instance audit log (`instance.page_limit_set`,
+with the old and new value). Lowering the limit below what a workspace already
+holds deletes nothing: it only refuses new pages there until the count falls.
+
+**Auth:** instance administrator. **Request body:** JSON, unknown keys refused.
+
+```json
+{ "max_pages_per_workspace": 250 }
+```
+
+The value is a whole number from 10 to 10000. **Response:** the same object as
+`GET`.
+
+A create that reaches the limit is refused with `422` and
+`code: "pages_limit"` (`kind: "cap"`, `detail.pages_existing`,
+`detail.pages_limit`); the `error` sentence states the limit. This is the same
+answer for pages, Designs and artifact projects.
+
+| Status | Meaning |
+|---|---|
+| `200` | Saved; the new limit. |
+| `400` | Invalid JSON, no value, a value that is not a whole number, or outside 10-10000. |
+| `401` | Not signed in. |
+| `403` | Caller is not an instance administrator. |
+| `500` | The save failed; nothing changed. |
+
 ## `GET /api/v1/admin/instance/artifact-storage`
 
 The aggregate artifact storage budget, for instance administrators: the

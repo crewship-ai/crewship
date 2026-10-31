@@ -636,7 +636,7 @@ for the general model this follows.
 | 400 | Invalid JSON, missing `workspace_id`/`name`, empty `panels`, `crew_id` empty after delegation resolution, `agent_id` not in the authoring crew, or `name` slugifies to nothing. |
 | 403 | Cross-tenant `workspace_id`/`crew_id` against the token binding, or the autonomy gate held the request (see above). |
 | 409 | A page with the resolved slug already exists in the workspace. |
-| 422 | Panel spec validation, reference resolution, or gate-expression resolution failed, or the workspace's page cap (`pages.MaxPagesPerWorkspace`) was reached. |
+| 422 | Panel spec validation, reference resolution, or gate-expression resolution failed, or the workspace's page cap (`pages.CheckCap`, default 100, set by `crewship admin instance page-limit`) was reached. |
 | 500 | DB error. |
 
 ## Pages: project source

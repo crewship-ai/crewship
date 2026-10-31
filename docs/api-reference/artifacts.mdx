@@ -296,6 +296,7 @@ status for those.
 | 409 | `artifact_data_conflict` | A Dashboard document's `ifVersion` is stale |
 | 409 | — | Design: "Design changed; reload and reapply". Craft: "native editor lease changed" or "native document or lease changed; keep the local draft" |
 | 413 | `artifact_history_quota` | Project history or version size limit reached |
+| 422 | `pages_limit` | The workspace has reached its page limit; creating a project or Design is refused and nothing is created. The `error` sentence states the limit |
 | 413 | — | Design: "Design capacity is full". Craft: "native history quota reached" |
 | 413 | `artifact_data_quota` | A Dashboard limit was exceeded |
 | 413 | `artifact_slides_limit` | The Slides export is too large |

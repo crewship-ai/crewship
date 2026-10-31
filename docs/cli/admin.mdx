@@ -839,6 +839,29 @@ crewship admin instance workbook-editor
 crewship admin instance workbook-editor -f json
 ```
 
+### page-limit get
+
+`GET /api/v1/admin/instance/page-limit`. The maximum number of pages a workspace
+may hold (100 by default, allowed range 10-10000). Archived pages count. At the
+limit, creating a page, Design or artifact project is refused with `pages_limit`.
+Instance administrators only. `crewship admin instance page-limit` without a
+subcommand does the same.
+
+```
+crewship admin instance page-limit get
+crewship admin instance page-limit get -f json
+```
+
+### page-limit set
+
+`PUT /api/v1/admin/instance/page-limit`. Takes the new maximum as a whole number
+from 10 to 10000. Lowering it below what a workspace holds deletes nothing; it
+only blocks new pages. The change is audited (`instance.page_limit_set`).
+
+```
+crewship admin instance page-limit set 250
+```
+
 ### artifact-storage get
 
 `GET /api/v1/admin/instance/artifact-storage`. The aggregate artifact storage

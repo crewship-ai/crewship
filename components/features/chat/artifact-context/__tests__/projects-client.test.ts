@@ -66,6 +66,8 @@ describe("artifact project client", () => {
     [409, { error: "Someone published a newer version", code: "artifact_version_conflict" }, "artifact_version_conflict", "Someone published a newer version"],
     [409, { error: "Anchor moved", code: "artifact_anchor_mismatch" }, "artifact_anchor_mismatch", "Anchor moved"],
     [413, { error: "History is full", code: "artifact_history_quota" }, "artifact_history_quota", "History is full"],
+    [422, { error: "This workspace has reached its page limit: it holds 100 pages and the limit is 100.", code: "pages_limit" }, "pages_limit", "This workspace has reached its page limit: it holds 100 pages and the limit is 100."],
+    [422, { code: "pages_limit" }, "pages_limit", "This workspace has reached its page limit. Nothing was created."],
     [403, { error: "nope" }, "forbidden", "nope"],
     [404, "404 page not found", "not_found", undefined],
     [400, { code: "mystery" }, "invalid", undefined],

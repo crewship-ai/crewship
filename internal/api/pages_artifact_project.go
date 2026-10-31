@@ -126,6 +126,9 @@ func artifactProjectError(w http.ResponseWriter, err error) {
 		writeJSON(w, 409, map[string]any{"error": "This address is already in use. Choose another slug.", "code": "artifact_slug_taken"})
 	case errors.Is(err, artifacts.ErrVersionConflict):
 		writeJSON(w, 409, map[string]any{"error": "This project changed. Read the current version and compare your changes before publishing again. Your draft has not been discarded.", "code": "artifact_version_conflict"})
+	case errors.As(err, new(*pages.LimitError)):
+		limit, _ := pagesLimitFrom(err)
+		writePagesLimit(w, limit)
 	case errors.Is(err, artifacts.ErrVersionQuota):
 		writeJSON(w, 413, map[string]any{"error": "Project history quota is full. Every existing version is retained and your draft stays in this browser. Copy your source files to keep them; saving more versions is not possible until history space is available.", "code": "artifact_history_quota"})
 	case errors.Is(err, artifacts.ErrVersionInvalid):
@@ -350,12 +353,10 @@ func (h *PageHandler) CreateArtifactProject(w http.ResponseWriter, r *http.Reque
 		if !canRole(role, "create") && !HasCapability(resolveCapabilitiesFromRow(caps, role), CapabilityPageCreate) {
 			return "", errArtifactProjectAccess
 		}
-		var n int
-		if e = tx.QueryRowContext(ctx, `SELECT count(*) FROM pages WHERE workspace_id=?`, k.WorkspaceID).Scan(&n); e != nil {
-			return "", e
-		}
-		if !staged && n >= pages.MaxPagesPerWorkspace {
-			return "", artifacts.ErrVersionQuota
+		if !staged {
+			if e = pages.CheckCap(ctx, tx, k.WorkspaceID); e != nil {
+				return "", e
+			}
 		}
 		if staged {
 			var valid int

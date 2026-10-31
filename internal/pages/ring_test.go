@@ -268,7 +268,7 @@ func TestRingAndPayloadLimitsMatchThePRD(t *testing.T) {
 		{"payload size cap in KiB (§10)", MaxPayloadBytes / 1024, 64},
 		{"spec size cap in KiB (§10)", MaxSpecBytes / 1024, 256},
 		{"panels per page (§10b.3)", MaxPanelsPerPage, 24},
-		{"pages per workspace (§10b.3)", MaxPagesPerWorkspace, 100},
+		{"pages per workspace (§10b.3)", DefaultMaxPagesPerWorkspace, 100},
 		{"versions per page (§10b.1)", MaxVersionsPerPage, 50},
 	}
 	for _, tc := range cases {
