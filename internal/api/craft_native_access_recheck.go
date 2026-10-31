@@ -128,7 +128,9 @@ func publishUserAccessRecheck(hub *ws.Hub, logger *slog.Logger, users []string, 
 		return
 	}
 	recheckInFlight.Add(1)
+	done := beginBackgroundWork()
 	go func() {
+		defer done()
 		defer recheckInFlight.Done()
 		recheckSlots <- struct{}{}
 		defer func() { <-recheckSlots }()
