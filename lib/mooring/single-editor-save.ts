@@ -327,6 +327,12 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     save: (requestId?: string) => save(requestId),
     // Host transfer flush waits for pending transport without claiming a native Ctrl+S ticket.
     async flush() { await save(undefined, undefined, true); await waitForCleanSaved() },
+    // The server version the editor's clean, saved content is confirmed at: the
+    // last receipt, or the loaded version when nothing has changed since opening.
+    confirmedVersion(): string | undefined {
+      if (!active || !writable || blocked || unconfirmed || pending || dirty || lastState.phase !== "saved") return undefined
+      return confirmed?.version === baseVersion ? confirmed.version : undefined
+    },
     async reconcile() { if (active && writable && unconfirmed && !pending && options.transport.reconcile) await transmit(unconfirmed, true) },
     revokeWrite,
     revokeRead,
