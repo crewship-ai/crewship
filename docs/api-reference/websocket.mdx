@@ -548,7 +548,7 @@ one control event:
 
 | Event Type | Description | Payload |
 |---|---|---|
-| `page.access_recheck` | A grant on a native Craft page that names you was added or removed: re-read your access. Open shared previews re-read at once and drop their content when the read is refused. No content, level or other users | `{ page_id }` |
+| `page.access_recheck` | A grant on a native Craft page that names you was added or removed: re-read your access. Open shared previews re-read at once and drop their content when the read is refused. No content, level or other users. After a workspace member removal or role change the payload is empty and means "re-check every open shared preview" | `{ page_id }` or `{}` |
 
 For "what needs my attention", use the workspace inbox channel
 (`inbox.updated`) instead.

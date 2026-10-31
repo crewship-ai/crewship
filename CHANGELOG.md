@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Craft preview rechecks no longer slow grant changes and also follow membership changes (follow-up to #4652).** The `page.access_recheck` signals are sent after the commit from a bounded background goroutine, in batches, and skip suspended and restricted accounts. Removing a workspace member or changing their role sends that member alone an empty `page.access_recheck`, which makes open shared previews re-read at once.
+
 - **A revoked Craft shared preview removes its content within seconds, not up to 30 s (#4652).** When a Read or Comment grant on a Word or Sheet page is removed, the server sends the affected person alone a `page.access_recheck` signal with the page id only (on their own `user:{id}` channel; no content, no other users). The open shared preview repeats its authorised read at once and shows "Sdílený náhled není dostupný" on 403/404. The 30 s poll and the focus/online rereads remain as the fallback, and the PRD row `A.craft.read-revoked` now expects removal within about 5 s.
 
 - **Craft names the editor address when the page is opened on another origin (#4649).** If the browser blocks the editor frame because the page is not on the configured editor origin (`CREWSHIP_PAGE_STUDIO_ORIGIN`), the editor now says at once "Editor je dostupný jen na adrese <origin>. Otevřete stránku tam." with a link, instead of waiting 20 seconds for a generic connection error. The local draft is kept, and the Content-Security-Policy is unchanged.
