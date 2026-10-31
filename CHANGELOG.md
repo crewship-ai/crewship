@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Craft names the editor address when the page is opened on another origin (#4649).** If the browser blocks the editor frame because the page is not on the configured editor origin (`CREWSHIP_PAGE_STUDIO_ORIGIN`), the editor now says at once "Editor je dostupný jen na adrese <origin>. Otevřete stránku tam." with a link, instead of waiting 20 seconds for a generic connection error. The local draft is kept, and the Content-Security-Policy is unchanged.
+
 - **Routine saves honor machine output formats.** `routine save --format json|yaml|ndjson` returns the saved routine identity and trigger metadata without progress text; the human receipt stays unchanged (#4621).
 
 - **Chat no longer offers Project creation to an agent whose crew the workspace policy excludes.** The composer asks `GET /api/v1/pages/artifacts/availability?agent_id=...` (CLI: `crewship page artifact availability --agent <id>`), which now returns `can_create` and, when refused, `code` `artifact_crew_not_allowed`. If a send is refused anyway, the chat shows "This agent's crew is not allowed to create artifact projects in this workspace", keeps the typed message and starts no run, instead of "failed to save message".

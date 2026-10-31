@@ -286,6 +286,38 @@ describe('native Word host authority and persistence',()=>{
 })
 
 
+describe('editor origin mismatch (#4649)',()=>{
+ const violation=(over:Record<string,unknown>={})=>{const e=new Event('securitypolicyviolation') as Event&Record<string,unknown>;Object.assign(e,{effectiveDirective:'frame-src',violatedDirective:'frame-src',blockedURI:`https://native.example/b/${'b'.repeat(64)}/index.html`,originalPolicy:"default-src 'self'; frame-src https://studio.example.test",...over});return e}
+ it('names the configured editor address at once and keeps the draft',async()=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   m.createPort.mockImplementationOnce((o:NativeEditorPortOptions)=>{portOptions.push(o);const p=portRig();p.bootstrap.mockReturnValue(new Promise(()=>{}));ports.push(p);return p})
+   mount()
+   await waitFor(()=>expect(document.querySelector('iframe')).not.toBeNull())
+   act(()=>{document.dispatchEvent(violation())})
+   const alert=await screen.findByRole('alert')
+   expect(alert).toHaveTextContent('Editor je dostupný jen na adrese https://studio.example.test')
+   expect(within(alert).getByRole('link')).toHaveAttribute('href','https://studio.example.test')
+   expect(screen.queryByText(/Editor se bezpečně nepřipojil/)).toBeNull()
+   expect(journal.revokeRead).not.toHaveBeenCalled();expect(m.purge).not.toHaveBeenCalled()
+   expect(screen.getByText('Editor odpojen · koncept zachován')).toBeInTheDocument()
+  }finally{vi.useRealTimers()}
+ })
+ it('still explains the mismatch without a link when the policy names no origin',async()=>{
+  m.createPort.mockImplementationOnce((o:NativeEditorPortOptions)=>{portOptions.push(o);const p=portRig();p.bootstrap.mockReturnValue(new Promise(()=>{}));ports.push(p);return p})
+  mount();await waitFor(()=>expect(document.querySelector('iframe')).not.toBeNull())
+  act(()=>{document.dispatchEvent(violation({originalPolicy:"default-src 'self'"}))})
+  const alert=await screen.findByRole('alert');expect(alert).toHaveTextContent('nastavené adrese')
+  expect(within(alert).queryByRole('link')).toBeNull()
+ })
+ it('ignores violations for other resources',async()=>{
+  m.createPort.mockImplementationOnce((o:NativeEditorPortOptions)=>{portOptions.push(o);const p=portRig();p.bootstrap.mockReturnValue(new Promise(()=>{}));ports.push(p);return p})
+  mount();await waitFor(()=>expect(document.querySelector('iframe')).not.toBeNull())
+  act(()=>{document.dispatchEvent(violation({blockedURI:'https://elsewhere.test/x'}));document.dispatchEvent(violation({effectiveDirective:'img-src',violatedDirective:'img-src'}))})
+  expect(screen.queryByRole('alert')).toBeNull()
+ })
+})
+
 describe('native Word executable URL binding',()=>{
  it.each(['http://127.0.0.1:8083','http://localhost:8083','http://[::1]:8083'])('accepts same-origin literal loopback in production %s',async(host)=>{vi.stubEnv('NODE_ENV','production');try{const snapshot=await client.read(new AbortController().signal),path=`/_editor/b/${'b'.repeat(64)}/index.html`;for(const editorURL of [path,host+path]){const value=nativeCraftFrameURL({...snapshot,editorURL},host);expect(value).not.toBeNull();const url=new URL(value!);expect(url.origin).toBe(host);expect(url.pathname).toBe(path);expect(url.searchParams.get('parent_origin')).toBe(host);expect([...url.searchParams.keys()].sort()).toEqual(['host','parent_origin','readonly','save'])}}finally{vi.unstubAllEnvs()}})
  it.each([['http://127.0.0.1:8083','http://127.0.0.1:8084'],['http://127.0.0.1:8083','http://localhost:8083'],['https://crew.example','http://127.0.0.1:8083'],['http://crew.example','http://crew.example']])('rejects cross-origin or nonliteral loopback HTTP in production %s to %s',async(host,editor)=>{vi.stubEnv('NODE_ENV','production');try{const snapshot=await client.read(new AbortController().signal),path=editor===host?'/_editor/b/':'/b/';expect(nativeCraftFrameURL({...snapshot,editorURL:`${editor}${path}${'b'.repeat(64)}/index.html`},host)).toBeNull()}finally{vi.unstubAllEnvs()}})

@@ -41,6 +41,23 @@ export function nativeCraftFrameURL(snapshot:NativeDocumentSnapshot,hostOrigin:s
   return url.toString()
  }catch{return null}
 }
+/** The one origin the page's CSP lets frame; null when the policy names none we can safely show. */
+export function allowedFrameOrigin(policy:string):string|null {
+ for(const directive of policy.split(';')){
+  const [name,...sources]=directive.trim().split(/\s+/)
+  if(name!=='frame-src'&&name!=='child-src')continue
+  for(const source of sources){
+   if(!/^https?:\/\/[^*\s/]+$/i.test(source))continue
+   try{const u=new URL(source);if(u.origin===source.toLowerCase().replace(/\/$/,'')||u.origin===source)return u.origin}catch{}
+  }
+ }
+ return null
+}
+/** True when a CSP violation is the browser refusing exactly this editor frame. */
+function blocksEditorFrame(e:SecurityPolicyViolationEvent,src:string):boolean {
+ if(e.effectiveDirective!=='frame-src'&&e.effectiveDirective!=='child-src'&&e.violatedDirective!=='frame-src')return false
+ try{const want=new URL(src),got=new URL(e.blockedURI);return got.origin===want.origin&&(got.pathname==='/'||got.pathname===want.pathname)}catch{return false}
+}
 interface Comparison {version:string;server:string;draft:string;serverHash:string;draftHash:string;equal:boolean;draftLabel?:string}
 interface Props {workspaceId:string;pageId:string;humanId:string;enabled?:boolean}
 type Coordinator=ReturnType<typeof createSingleEditorSave>
@@ -66,7 +83,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
  const compare=React.useRef<(draft:NativeDraft)=>void>(()=>{}),reconcile=React.useRef<()=>void>(()=>{}),[uncertain,setUncertain]=React.useState(false)
  const [applicationId,setApplicationId]=React.useState<NativeDocumentSnapshot['applicationId']>()
  const mount=React.useRef<HTMLDivElement>(null),control=React.useRef<(action:NativeCraftLeaseAction,body:{generation?:string;request_id?:string})=>void>(()=>{})
- const [view,setView]=React.useState<Lease>(vacant),[busy,setBusy]=React.useState(false),[label,setLabel]=React.useState('Připojuji…'),[savedVersion,setSavedVersion]=React.useState<string>(),[error,setError]=React.useState<string>(),[dirty,setDirty]=React.useState(false),[recoveries,setRecoveries]=React.useState<NativeRecovery[]>([]),[comparison,setComparison]=React.useState<Comparison>(),[ownsEditor,setOwnsEditor]=React.useState(false),[connectionRetired,setConnectionRetired]=React.useState(false),[quota,setQuota]=React.useState<NativeDocumentSnapshot['quota']>()
+ const [view,setView]=React.useState<Lease>(vacant),[busy,setBusy]=React.useState(false),[label,setLabel]=React.useState('Připojuji…'),[savedVersion,setSavedVersion]=React.useState<string>(),[error,setError]=React.useState<string>(),[editorAddress,setEditorAddress]=React.useState<string>(),[dirty,setDirty]=React.useState(false),[recoveries,setRecoveries]=React.useState<NativeRecovery[]>([]),[comparison,setComparison]=React.useState<Comparison>(),[ownsEditor,setOwnsEditor]=React.useState(false),[connectionRetired,setConnectionRetired]=React.useState(false),[quota,setQuota]=React.useState<NativeDocumentSnapshot['quota']>()
  useLeaveGuard(dirty)
  React.useEffect(()=>{
   if(!enabled||!humanId||!workspaceId||!pageId)return
@@ -163,6 +180,18 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    let resolve!:(r:Runtime)=>void,reject!:(e:Error)=>void
    const ready=new Promise<Runtime>((done,fail)=>{resolve=done;reject=fail})
    const timer=setTimeout(()=>{reject(Error('native_bootstrap_timeout'));if(r&&live(r))stop('Editor se bezpečně nepřipojil. Koncept nebyl označen jako uložený.')},20000)
+   // A page opened on another origin than the configured editor origin has the frame
+   // refused by CSP at once; say so instead of waiting for the bootstrap timeout.
+   // Reporting only: the policy and the draft are untouched.
+   const onViolation=(e:Event)=>{
+    if(!blocksEditorFrame(e as SecurityPolicyViolationEvent,src)||dead)return
+    const allowed=allowedFrameOrigin((e as SecurityPolicyViolationEvent).originalPolicy||'')
+    clearTimeout(timer);reject(Error('native_editor_origin_mismatch'))
+    setEditorAddress(allowed??undefined)
+    stop(allowed?'Editor je dostupný jen na adrese ':'Editor je dostupný jen na nastavené adrese editoru. Otevřete stránku tam. Koncept nebyl označen jako uložený.')
+   }
+   document.addEventListener('securitypolicyviolation',onViolation)
+   ready.then(()=>document.removeEventListener('securitypolicyviolation',onViolation),()=>document.removeEventListener('securitypolicyviolation',onViolation))
    let port:NativeEditorPort
    try{port=createNativeEditorPort({applicationId:snapshot.applicationId,enginePin:snapshot.enginePin,bundle:snapshot.editorBundle,frame:frame.contentWindow,scope:{workspaceId,pageId,sessionId,baseVersion:snapshot.version,generation},requireAccessProtocol:true,
     onExport(file){
@@ -424,7 +453,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   <div role="status" className="px-3 py-2"><span>{label}</span>{savedVersion&&<span> · verze {savedVersion}</span>}{quota&&<span className="ml-3 text-muted-foreground">Historie {quota.usedBytes} / {quota.limitBytes} B{quota.warning?' · blíží se limit':''}</span>}</div>
   {quotaFull&&<div role="alert" className="space-y-2 border-y px-3 py-2"><p><b>Kapacita úložiště neumožňuje další uložení.</b> Další verze se neuloží. Všechny dosavadní verze zůstávají a vaše neuložené změny jsou v tomto prohlížeči.</p><p className="text-sm text-muted-foreground">Navýšení ani mazání historie aplikace zatím nenabízí. Práci si stáhněte jako soubor koncept nebo exportem z editoru; koncept se nabídne i po znovuotevření.</p><Button variant="outline" onClick={()=>downloadDraft.current()}>Stáhnout koncept</Button></div>}
   {uncertain&&<Button variant="outline" onClick={()=>reconcile.current()}>Ověřit výsledek</Button>}
-  {error&&<p role="alert" className="px-3 py-2">{error}</p>}
+  {error&&<p role="alert" className="px-3 py-2">{error}{editorAddress&&<><a className="underline" href={editorAddress} rel="noopener noreferrer">{editorAddress}</a>. Otevřete stránku tam. Koncept nebyl označen jako uložený.</>}</p>}
   {!connectionRetired&&proposals.map(proposal=><div key={proposal.id} role="group" aria-label={`Návrh ${proposal.authorName}`} className="flex flex-wrap items-center gap-2 border-y px-3 py-2">
    <span className="min-w-0 flex-1"><b>{proposal.authorName} připravil návrh nad verzí {proposal.baseVersion}</b>{proposal.summary&&<span> · {proposal.summary}</span>}<small className="block text-muted-foreground">{proposal.state==='stale'?'Zastaralé: dokument se mezitím změnil, návrh nelze použít.':'Dokument zůstává beze změny, dokud návrh nepřijmete.'}</small></span>
    <Button variant="outline" onClick={()=>compareProposal.current(proposal)}>Porovnat</Button>
