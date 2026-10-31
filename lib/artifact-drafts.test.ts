@@ -376,3 +376,44 @@ it("clearing a fallback copy also removes the older IndexedDB revision it replac
   expect(disk.has(JSON.stringify(["alice", "artifact-comment", "w", "page"]))).toBe(false)
   await expect(drafts.readArtifactDraft(key)).resolves.toBe("")
 })
+
+function revisionStore() {
+  const disk = new Map<string, { text: string; revision?: string }>()
+  const store = {
+    disk, refuse: false as boolean, beforeRefuse: undefined as undefined | (() => void), removeFails: false as boolean,
+    capture: async () => [], purge: async () => {},
+    get: async (row: Row) => disk.get(JSON.stringify(row))?.text,
+    read: async (row: Row) => disk.get(JSON.stringify(row)),
+    put: async (row: Row, text: string, revision?: string) => { if (store.refuse) { store.beforeRefuse?.(); throw new Error("IndexedDB refused") } disk.set(JSON.stringify(row), { text, revision }) },
+    delete: async (row: Row) => { disk.delete(JSON.stringify(row)) },
+    removeCaptured: async (rows: { row: Row; revision: string | null }[]) => { if (store.removeFails) throw new Error("IndexedDB delete failed"); for (const r of rows) if (disk.get(JSON.stringify(r.row))?.revision === r.revision) disk.delete(JSON.stringify(r.row)) },
+  }
+  return store
+}
+const ROW = JSON.stringify(["alice", "artifact-comment", "w", "page"])
+
+it("a newer draft another tab stored while this tab's write failed survives clearing this tab's fallback (Codex #4690 r2 B1)", async () => {
+  const store = revisionStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("artifact-comment", "alice", "w", "page")!
+  await drafts.writeArtifactDraft(key, "older A")
+  store.refuse = true
+  // Tab B's newer write lands in IndexedDB while this tab's put is failing.
+  store.beforeRefuse = () => { store.disk.set(ROW, { text: "tab B newer", revision: "rev-b" }); store.beforeRefuse = undefined }
+  await drafts.writeArtifactDraft(key, "this tab")
+  await drafts.clearArtifactDraft(key, "this tab", drafts.artifactDraftRevision(key))
+  expect(store.disk.get(ROW)?.text).toBe("tab B newer")
+})
+
+it("a failed IndexedDB delete keeps the newer fallback copy instead of resurrecting the older revision (Codex #4690 r2 B2)", async () => {
+  const store = revisionStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("artifact-comment", "alice", "w", "page")!
+  await drafts.writeArtifactDraft(key, "older A")
+  store.refuse = true
+  await drafts.writeArtifactDraft(key, "newer B")
+  store.removeFails = true
+  await drafts.clearArtifactDraft(key, "newer B", drafts.artifactDraftRevision(key)).catch(() => {})
+  expect(local.get("artifact-comment:alice:w:page")).toBe("newer B")
+  await expect(drafts.readArtifactDraft(key)).resolves.toBe("newer B")
+})

@@ -220,6 +220,10 @@ async function persist(row: Row, text: string): Promise<void> {
     catch (error) { if (error instanceof LocalDraftReadRevoked) void purgeLocalDraftPage(scopeFor(row)).catch(() => {}); throw error }
   }
   const store = durable()
+  // The IndexedDB revision a fallback copy would supersede, read before this
+  // write: a revision another tab stores later is newer and must stay.
+  let over: string | undefined
+  if (text && store?.read) { try { over = (await store.read(row))?.revision } catch { /* unreadable: nothing to supersede safely */ } }
   if (store) {
     try {
       if (text) await store.put(row, sealed, revision)
@@ -230,9 +234,6 @@ async function persist(row: Row, text: string): Promise<void> {
     } catch { /* Fall back to localStorage below rather than lose the text. */ }
   }
   if (!text) { legacyRemove(row); if (!store) return; throw new Error("Artifact draft storage is unavailable.") }
-  // The IndexedDB revision this copy supersedes; clearing the copy removes it too.
-  let over: string | undefined
-  if (store?.read) { try { over = (await store.read(row))?.revision } catch { /* unreadable: nothing to supersede safely */ } }
   localStorage.setItem(legacyKey(row), sealed)
   // Remember the fallback copy so a save, discard or sign-out can remove it.
   successfulWrites.set(key, { text, revision, fallback: sealed, over })
@@ -425,9 +426,11 @@ export async function clearArtifactDraft(key: string, text: string, revision: nu
   const row = parse(key), saved = successfulWrites.get(key)
   if (!row || !saved || saved.text !== text || artifactDraftRevision(key) !== revision) return
   if (saved.fallback !== undefined) {
-    try { if (localStorage.getItem(legacyKey(row)) === saved.fallback) localStorage.removeItem(legacyKey(row)) } catch { /* Unavailable storage holds nothing to remove. */ }
-    // Revision-guarded: a newer write from another tab stays.
+    // The superseded IndexedDB revision goes first (revision-guarded: a newer
+    // write from another tab stays). If that fails, the newer fallback copy
+    // stays too, so the older revision is never what reopening finds.
     if (saved.over) await durable()?.removeCaptured([{ row, revision: saved.over }])
+    try { if (localStorage.getItem(legacyKey(row)) === saved.fallback) localStorage.removeItem(legacyKey(row)) } catch { /* Unavailable storage holds nothing to remove. */ }
     successfulWrites.delete(key)
     return
   }
