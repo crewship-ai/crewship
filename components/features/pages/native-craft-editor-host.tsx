@@ -349,7 +349,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(!live(r)){await journal.close();return}
    if(!owns(finalProof,r.generation)){await journal.close();r.journal=undefined;throw Error('lease_not_current')}
    viewNow=finalProof;setView(finalProof)
-   const coordinator=createSingleEditorSave({workspaceId,pageId,applicationId:snapshot.applicationId,enginePin:snapshot.enginePin,baseVersion:snapshot.version,generation:r.generation,sessionId,journal:wrapJournal(journal,r),engine:{snapshot:(signal,id)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.snapshot(signal,id),validate:(draft,signal)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.validate(draft,signal)},transport:client,
+   const coordinator=createSingleEditorSave({workspaceId,pageId,applicationId:snapshot.applicationId,enginePin:snapshot.enginePin,baseVersion:snapshot.version,loaded:{bytes:snapshot.bytes},generation:r.generation,sessionId,journal:wrapJournal(journal,r),engine:{snapshot:(signal,id)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.snapshot(signal,id),validate:(draft,signal)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.validate(draft,signal)},transport:client,
     onState(state){r.phase=state;display(r);if(state.phase==='read-only'&&r.writable&&!transition){r.writable=false;freezeInput(r);queueMicrotask(()=>{if(live(r))void retireWrite(r).catch(()=>stop('Zápis byl zastaven; přístup editoru se nepotvrdil.'))})}},
     onReceipt(receipt){
      const edit=r.edit
