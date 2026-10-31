@@ -20,9 +20,10 @@ function PreviewSession({humanId,workspaceId,pageId,retry}:Props&{retry:()=>void
  const mount=React.useRef<HTMLDivElement>(null)
  const [version,setVersion]=React.useState<string>(),[error,setError]=React.useState<string>()
  const recheck=React.useRef<()=>void>(()=>{})
- // Push: the server names only this person and this page ("re-check access").
+ // Push: the server names only this person and this page, or no page ("re-check
+ // everything", after a membership or role change).
  // The answer still comes from the ordinary authorised read; 30 s polling stays.
- useRealtimeEventSafe('page.access_recheck',event=>{if(event.payload.page_id===pageId)recheck.current()})
+ useRealtimeEventSafe('page.access_recheck',event=>{const id=event.payload.page_id;if(id===undefined||id===pageId)recheck.current()})
  useRealtimeEventSafe('realtime.reconnected',()=>recheck.current())
  React.useEffect(()=>{
   const abort=new AbortController()

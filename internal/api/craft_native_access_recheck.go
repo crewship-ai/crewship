@@ -3,7 +3,13 @@ package api
 import (
 	"context"
 	"database/sql"
+	"log/slog"
+	"runtime"
 	"sort"
+	"strings"
+	"sync"
+
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // pageAccessRecheckEvent is the push that tells ONE person their access to ONE
@@ -59,20 +65,93 @@ func nativeCraftRecheckUsers(ctx context.Context, tx *sql.Tx, workspace string, 
 			return nil, err
 		}
 	}
-	users := make([]string, 0, len(set))
+	return trustedRecheckUsers(ctx, tx, set)
+}
+
+// trustedRecheckUsers keeps only people the realtime layer may deliver to:
+// not suspended and not under the restricted-profile ceiling (the same rule as
+// ws.trustedChannelMember). Others get no frame; their reads are refused anyway.
+func trustedRecheckUsers(ctx context.Context, tx *sql.Tx, set map[string]bool) ([]string, error) {
+	all := make([]string, 0, len(set))
 	for id := range set {
-		users = append(users, id)
+		if id != "" {
+			all = append(all, id)
+		}
+	}
+	sort.Strings(all)
+	users := make([]string, 0, len(all))
+	for start := 0; start < len(all); start += recheckBatch {
+		chunk := all[start:min(start+recheckBatch, len(all))]
+		args := make([]any, len(chunk))
+		for i, id := range chunk {
+			args[i] = id
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT u.id FROM users u WHERE u.id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")+`)
+ AND u.suspended_at IS NULL
+ AND NOT EXISTS(SELECT 1 FROM workspace_members r WHERE r.user_id=u.id AND r.access_mode='restricted')`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			users = append(users, id)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
 	}
 	sort.Strings(users)
 	return users, nil
 }
 
-// publishNativeCraftAccessRecheck runs after the grant commit.
-func (h *PageHandler) publishNativeCraftAccessRecheck(pageID string, users []string) {
-	if h == nil || h.hub == nil {
+const recheckBatch = 500
+
+// recheckSlots bounds how many fan-outs run at once; a fan-out waits for a slot
+// inside its own goroutine, never on the request goroutine.
+var recheckSlots = make(chan struct{}, 4)
+
+// recheckInFlight lets tests wait for the asynchronous sends.
+var recheckInFlight sync.WaitGroup
+
+// publishUserAccessRecheck sends payload to each user's own channel after the
+// mutation committed. The request returns at once; the sends run in a bounded
+// goroutine, in batches that yield to other hub traffic. A failure (including
+// a panic) is logged and never affects the response: the 30 s poll is the fallback.
+func publishUserAccessRecheck(hub *ws.Hub, logger *slog.Logger, users []string, payload map[string]any) {
+	if hub == nil || len(users) == 0 {
 		return
 	}
-	for _, user := range users {
-		h.hub.BroadcastChannel("user", user, pageAccessRecheckEvent, map[string]any{"page_id": pageID})
+	recheckInFlight.Add(1)
+	go func() {
+		defer recheckInFlight.Done()
+		recheckSlots <- struct{}{}
+		defer func() { <-recheckSlots }()
+		sent := 0
+		defer func() {
+			if r := recover(); r != nil && logger != nil {
+				logger.Error("page access recheck fan-out failed", "recipients", len(users), "sent", sent, "panic", r)
+			}
+		}()
+		for start := 0; start < len(users); start += recheckBatch {
+			for _, user := range users[start:min(start+recheckBatch, len(users))] {
+				hub.BroadcastChannel("user", user, pageAccessRecheckEvent, payload)
+				sent++
+			}
+			runtime.Gosched()
+		}
+	}()
+}
+
+// publishNativeCraftAccessRecheck runs after the grant commit.
+func (h *PageHandler) publishNativeCraftAccessRecheck(pageID string, users []string) {
+	if h == nil {
+		return
 	}
+	publishUserAccessRecheck(h.hub, h.logger, users, map[string]any{"page_id": pageID})
 }

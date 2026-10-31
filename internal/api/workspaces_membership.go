@@ -379,6 +379,9 @@ func (h *WorkspaceHandler) RemoveMember(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Tell only the departed member's own channel to re-check every open
+	// shared preview (generic frame, no page id).
+	publishUserAccessRecheck(h.hub, h.logger, []string{memberUserID}, map[string]any{})
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 
