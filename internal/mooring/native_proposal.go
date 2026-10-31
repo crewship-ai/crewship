@@ -280,44 +280,60 @@ func (s *NativeStore) AcceptProposal(ctx context.Context, l EditLease, id string
 	if "sha256:"+hex.EncodeToString(sum[:]) != p.ContentHash {
 		return NativeProposal{}, NativeSaveReceipt{}, ErrNativeValidation
 	}
-	base, err := s.proposalBase(ctx, l, p.BaseVersion, write)
-	if err != nil {
-		return NativeProposal{}, NativeSaveReceipt{}, err
-	}
-	revision := nativeProposalRevision(id)
-	message, err := s.snapshotMessage(l, base, revision, p.ContentHash)
-	if err != nil {
-		return NativeProposal{}, NativeSaveReceipt{}, err
-	}
-	request := nativeManifest(base, b)
-	request.Message = message
-	decided := false
-	receipt, err := s.versions.Apply(ctx, nativeVersionKey(l.Scope), request, func(ctx context.Context, tx *sql.Tx) (string, error) {
-		actor, err := write(ctx, tx)
-		if err != nil || decided {
-			return actor, err
-		}
-		decided = true
-		res, err := tx.ExecContext(ctx, `UPDATE craft_native_proposals SET state='accepted',decided_by=?,decided_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),result_version=? WHERE id=? AND page_id=? AND state='open'`, actor, base+1, id, l.Scope.ArtifactID)
+	var (
+		base     int64
+		revision = nativeProposalRevision(id)
+		receipt  artifacts.VersionReceipt
+	)
+	for {
+		base, err = s.proposalBase(ctx, l, p.BaseVersion, write)
 		if err != nil {
-			return "", err
+			return NativeProposal{}, NativeSaveReceipt{}, err
 		}
-		if n, _ := res.RowsAffected(); n != 1 {
-			return "", ErrNativeProposalDecided
+		if s.afterProposalBase != nil {
+			s.afterProposalBase()
 		}
-		return actor, nil
-	})
-	if errors.Is(err, artifacts.ErrVersionConflict) {
-		// The human (or anyone) saved after the agent's base. Record that the
-		// proposal no longer applies; never rebase it over changed content.
-		if staleErr := s.decideProposal(ctx, l.Scope, &l, id, "stale"); staleErr != nil && !errors.Is(staleErr, ErrNativeProposalDecided) {
-			return NativeProposal{}, NativeSaveReceipt{}, staleErr
+		message, err := s.snapshotMessage(l, base, revision, p.ContentHash)
+		if err != nil {
+			return NativeProposal{}, NativeSaveReceipt{}, err
 		}
-		p.State = "stale"
-		return p, NativeSaveReceipt{}, artifacts.ErrVersionConflict
-	}
-	if err != nil {
-		return NativeProposal{}, NativeSaveReceipt{}, err
+		request := nativeManifest(base, b)
+		request.Message = message
+		decided := false
+		receipt, err = s.versions.Apply(ctx, nativeVersionKey(l.Scope), request, func(ctx context.Context, tx *sql.Tx) (string, error) {
+			actor, err := write(ctx, tx)
+			if err != nil || decided {
+				return actor, err
+			}
+			decided = true
+			res, err := tx.ExecContext(ctx, `UPDATE craft_native_proposals SET state='accepted',decided_by=?,decided_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),result_version=? WHERE id=? AND page_id=? AND state='open'`, actor, base+1, id, l.Scope.ArtifactID)
+			if err != nil {
+				return "", err
+			}
+			if n, _ := res.RowsAffected(); n != 1 {
+				return "", ErrNativeProposalDecided
+			}
+			return actor, nil
+		})
+		if errors.Is(err, artifacts.ErrVersionConflict) {
+			// A save landed after the base was chosen. Only a save that changed
+			// the content makes the proposal stale; when the new head repeats the
+			// base bytes, proposalBase moves to it and acceptance retries.
+			if next, nerr := s.proposalBase(ctx, l, p.BaseVersion, write); nerr == nil && next > base {
+				continue
+			}
+			// The document content changed after the agent's base. Record that
+			// the proposal no longer applies; never rebase it.
+			if staleErr := s.decideProposal(ctx, l.Scope, &l, id, "stale"); staleErr != nil && !errors.Is(staleErr, ErrNativeProposalDecided) {
+				return NativeProposal{}, NativeSaveReceipt{}, staleErr
+			}
+			p.State = "stale"
+			return p, NativeSaveReceipt{}, artifacts.ErrVersionConflict
+		}
+		if err != nil {
+			return NativeProposal{}, NativeSaveReceipt{}, err
+		}
+		break
 	}
 	p.State, p.ResultVersion = "accepted", receipt.Version
 	return p, s.snapshotReceipt(l, base, revision, p.ContentHash, receipt.Version), nil
