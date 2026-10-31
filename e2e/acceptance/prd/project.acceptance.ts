@@ -6,7 +6,12 @@
 // the three screens and answers the comment through the public API, as the
 // agent's tools would. Full mode adds the real seeded agent: it creates the
 // screens from a chat message and publishes v2 from an element comment.
-// Server restart persistence is not covered (the suite never restarts a slot).
+// The "agent creates ... publishes v2" test is the chat-first path
+// (B.project.from-chat): it starts in the browser chat, the person opens the
+// Project in /artifacts, comments there and the agent answers with a new
+// version. The quick "element comment" test creates its Project through the
+// API and does not start in the chat. Concurrent saves and the server restart
+// are in project-rows.acceptance.ts.
 import { loginStorageState } from "./auth"
 import { expect, prdRequirement, test } from "./fixtures"
 import {
@@ -245,6 +250,7 @@ test.describe("project", () => {
         prdRequirement("B.project.agent-screens", "A real agent creates a Project with three linked screens from chat"),
         prdRequirement("B.project.agent-version", "A comment on an element sends the agent to publish a new version"),
         prdRequirement("B.project.agent-restore", "The agent's earlier version can be restored as a new version after reload"),
+        prdRequirement("B.project.from-chat", "From the browser chat: the person asks the agent for 3 screens, opens the Project in Artifacts, comments on an element, the agent publishes a new version"),
       ],
     },
     async ({ prd, page, request, context }) => {
