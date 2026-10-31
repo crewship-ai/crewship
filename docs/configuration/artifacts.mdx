@@ -307,6 +307,20 @@ crewship page artifact availability
 { "enabled": true }
 ```
 
+Add `--agent <id>` (query `agent_id`) to ask whether that agent's crew may
+create artifact projects under the workspace artifact-creation policy. The
+answer then also carries `can_create`; a crew outside the policy returns
+`can_create: false` with `code: "artifact_crew_not_allowed"`, and the chat
+composer hides Project creation for that agent:
+
+```bash
+crewship page artifact availability --agent <agent-id>
+```
+
+```json
+{ "enabled": true, "can_create": false, "code": "artifact_crew_not_allowed" }
+```
+
 Ask which document engines the instance serves (`GET /api/v1/documents/status`):
 
 ```bash

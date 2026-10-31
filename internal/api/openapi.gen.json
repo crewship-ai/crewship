@@ -127681,6 +127681,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Agent whose crew policy to check. When set the response adds can_create and, if refused, code artifact_crew_not_allowed.",
+            "in": "query",
+            "name": "agent_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
