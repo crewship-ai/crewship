@@ -207,3 +207,47 @@ and an isolated `HOME`, and record its output as evidence.
 
 Unit tests for the runner's table and arguments:
 `node --test e2e/acceptance/prd/report.test.mjs`.
+
+## RC gate: required IDs
+
+`pnpm acceptance:prd` alone reports only what ran, so a scenario nobody wrote
+shows nothing. The RC gate closes that hole. [`required-ids.json`](../../e2e/acceptance/prd/required-ids.json)
+lists every ID the release must prove (PRD §7 and §0), including IDs whose tests
+do not exist yet; those are reported as `missing`, which is a failure. Each row
+names its canonical origin as a key: `craft` (Word and Sheet editor scenarios) or
+`artifacts` (Projects, Design, quota, drafts). The URLs are not stored in the
+public repository; pass them with `--origin-map craft=<url>,artifacts=<url>` or
+`PRD_RC_ORIGINS`. The gate refuses to run without them. Adding a scenario means
+adding its ID here in the same change.
+
+A required ID passes only when its latest row has result `passed`, `mode=full`,
+the canonical origin and an `appSha` equal to the release candidate. Exceptions:
+
+- `A.craft.lease.fail-closed` may be `skipped` (servers with a native editor only).
+- Rows marked `allowManual` (`A.craft.session.hour-*`) may be `mode=manual` with
+  a link to the recording in `evidence`; without it the row fails.
+
+Several runs assemble one RC. Per ID the latest row on the RC SHA wins; a row
+on another SHA counts only when none exists on the RC, and then fails as `appSha`.
+
+```sh
+# gate the run just made
+pnpm acceptance:prd --origin <craft url> --rc <SHA> \
+  --origin-map craft=<url>,artifacts=<url> --merge <earlier run dir> --manual manual-rows.json
+
+# merge existing runs only, no browser
+node e2e/acceptance/prd/report.mjs --rc <SHA> --origin-map craft=<url>,artifacts=<url> \
+  --merge runs/craft --merge runs/artifacts --manual manual-rows.json --output close-ab/rc-<SHA>
+```
+
+`--merge` takes a run directory or a `summary.json` and may repeat. The gate
+prints each problem (`missing`, `result`, `mode`, `origin`, `appSha`,
+`evidence`) with its ID and exits non-zero (2 for bad arguments), and writes
+`rc-gate.json` (and `rc-gate.md` with `report.mjs --output`).
+
+`manual-rows.json` is an array; the origin defaults to the row's canonical one:
+
+```json
+[{ "id": "A.craft.session.hour-word", "result": "passed", "appSha": "<SHA>",
+   "evidence": "https://…/recording", "recordedAt": "2026-10-31T10:00:00Z" }]
+```
