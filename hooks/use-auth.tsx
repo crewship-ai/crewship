@@ -178,7 +178,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [session, setSession] = useState<AuthSession | null>(null)
   const [status, setStatus] = useState<AuthStatus>("loading")
   const [draftAdmission, setDraftAdmission] = useState(0)
-  const admitted = useRef(false)
+  // Last admitted identity transition. Only a tree a person used can hold their
+  // drafts or editors, so only a change after one remounts it.
+  const admitted = useRef<{ generation: number; human: string | null } | null>(null)
   const [draftRecovery, setDraftRecovery] = useState<{ retry: () => Promise<void> } | null>(null)
   const [draftRetrying, setDraftRetrying] = useState(false)
   const retryDraftTransition = useRef<() => Promise<void>>(async () => {})
@@ -205,10 +207,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try { admission = await preserveDraftsForIdentity(next?.user.id ?? null) }
     catch { if (gen === refreshGen.current) setDraftRecovery({ retry: () => retryDraftTransition.current() }); return }
     if (gen !== refreshGen.current) return
-    // The first admission only ends the cold load: nothing mounted belongs to an
-    // earlier person, so the tree (and anything typed meanwhile) stays mounted.
-    if (admitted.current) setDraftAdmission(admission)
-    admitted.current = true
+    // The cold load and signed-out pages hold nothing of a person, so admitting
+    // one there keeps the tree (and anything typed meanwhile) mounted.
+    if (admitted.current?.human && admitted.current.generation !== admission) setDraftAdmission(admission)
+    admitted.current = { generation: admission, human: next?.user.id ?? null }
     setDraftRecovery(null)
     setUnreachable(null)
     sessionRef.current = next
@@ -484,6 +486,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
         if (gen !== refreshGen.current) return false
         sessionRef.current = null; statusRef.current = "unauthenticated"
+        admitted.current = { generation: admission, human: null }
         setSession(null); setStatus("unauthenticated"); setDraftAdmission(admission); setDraftRecovery(null)
         broadcastSignOut(signingOutHuman)
         return true
