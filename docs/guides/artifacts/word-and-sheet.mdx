@@ -156,7 +156,9 @@ owns the lease.
 An agent can edit a Word document or Sheet only after you give it a task with
 explicit whole-document consent. Agent tasks need
 `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true`, a qualified private native agent
-runtime on the server, and your current edit rights on the document. The two
+runtime on the server, your current edit rights on the document, and the
+agent's crew allowed by the [agent publishing policy](/cli/artifacts#agent-publishing-policy)
+(enabled, with the crew listed). The two
 startup switches alone do not supply that runtime. Before starting, finish
 your save and choose **Uvolnit úpravy** so the human editor no longer renews
 the lease; a task cannot take it away from a person.
