@@ -29,7 +29,7 @@ export function takeTrackedPages(): CreatedPage[] {
  */
 export function capacityHint(status: number, body: string): string {
   if (status !== 422 && status !== 413) return ""
-  if (!/limit|quota|capacity|full/i.test(body)) return ""
+  if (!/limit|quota|capacity|full|\bcap\b|pages_/i.test(body)) return ""
   return (
     ` [the agent's workspace (PRD_AGENT_WORKSPACE_ID) is full, HTTP ${status}: this is capacity, not the scenario. ` +
     "Free pages there that you own, or point PRD_AGENT_SLUG/PRD_AGENT_WORKSPACE_ID at a dedicated agent workspace - see \"Agent workspace\" in docs/development/prd-acceptance.md]"
