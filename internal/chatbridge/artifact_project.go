@@ -43,7 +43,7 @@ func artifactProjectForSend(enabled bool, opt ws.ChatMessageOption, info *ChatIn
 
 func artifactProjectRunPrompt(content string, intent *artifacts.ProjectIntent) string {
 	if intent.Kind == "design" {
-		return fmt.Sprintf("%s\n\nThe human authorized editing only Design Page @%s from version %d (comment %s). Use design_get and design_apply with node upsert/delete/reorder operations, then design_snapshot to save a normal version. Use the exact @ID as slug. Preserve concurrent edits, keep shared version unchanged, and report the confirmed saved version. Never use a human CLI profile or mutate another Page.", content, intent.PageID, intent.BaseVersion, intent.CommentID)
+		return fmt.Sprintf("%s\n\nThe human authorized editing only Design Page @%s from version %d (comment %s). Use design_get and design_apply with node upsert/delete/reorder operations; each successful design_apply already saves a new version and answers the comment, so do not call design_snapshot afterwards. Use the exact @ID as slug. Preserve concurrent edits, keep shared version unchanged, and report the confirmed saved version. Never use a human CLI profile or mutate another Page.", content, intent.PageID, intent.BaseVersion, intent.CommentID)
 	}
 	if intent.PageID == "" {
 		return content + "\n\nThe human explicitly authorized one private multi-screen HTML artifact project in this live run. Use artifact_create with a complete atomic manifest (entrypoint plus files with path/content/media_type), include all three linked screens, and return the confirmed project URL/version. Do not use save_page, a human CLI profile, or create a replacement Document. A tool denial or uncertain outcome must be reported honestly."
