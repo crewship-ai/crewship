@@ -90,7 +90,8 @@ export class InteractiveArtifactBroker {
 
   private validate(message: Record<string, unknown>): { method: InteractiveMethod; collection?: string; documents?: InteractiveWrite[] } {
     if (byteLength(message) > INTERACTIVE_MAX_REQUEST_BYTES) throw new InteractiveRequestError("The request exceeds the 1 MiB batch limit.", "limit")
-    const { method, params } = message
+    const { params } = message
+    const method = message.method as InteractiveMethod
     if (Object.keys(message).some(key => !["type", "id", "method", "params"].includes(key))) throw new InteractiveRequestError("Unsupported request.")
     if (typeof method !== "string" || !(INTERACTIVE_METHODS as readonly string[]).includes(method)) throw new InteractiveRequestError("Unsupported request.")
     if (!plainObject(params)) throw new InteractiveRequestError("Request parameters must be an object.")
