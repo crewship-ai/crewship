@@ -9,11 +9,11 @@ const receipt = (r: NativeSaveRequest) => ({ ...r, version: String(BigInt(r.base
 
 // A freshly opened editor: the server confirmed v3 with bytes [3]. `engineBytes`
 // is what the engine exports (equal unless it normalizes or a draft was restored).
-function opened(applicationId: "wordcraft" | "gridcraft", engineBytes = 3, loadedBytes = 3) {
+function opened(applicationId: "wordcraft" | "gridcraft", engineBytes = 3, loadedBytes = 3, mountedFromLoaded = false) {
   let value = engineBytes, captures = 0
   const requests: NativeSaveRequest[] = [], states: NativeSaveState[] = []
   const controller = createSingleEditorSave({ workspaceId: "w", pageId: "p", applicationId, enginePin: "engine", baseVersion: "3", generation: "1", sessionId: "s", idleMs: 5,
-    loaded: { bytes: new Uint8Array([loadedBytes]) },
+    loaded: { bytes: new Uint8Array([loadedBytes]), ...(mountedFromLoaded ? { mountedFromLoaded: true } : {}) },
     journal: { async persist() {}, async confirm() {}, async recovery() { return [] }, onRetire() { return () => {} }, async close() {}, async revokeRead() {} },
     engine: { async snapshot(_s, id) { captures++; return { bytes: new Uint8Array([value]), editorRevision: id ?? `rpc:${captures}`, ...(applicationId === "wordcraft" ? { nativeState: `state:${captures}` } : {}) } }, async validate() {} },
     transport: { async save(r) { requests.push(r); return receipt(r) }, async reconcile(r) { return receipt(r) } },
@@ -41,6 +41,30 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
   it(`${app}: engine normalizes on load -> skip does not apply, nothing lost`, async () => {
     const r = opened(app, 5, 3)
     try { await r.controller.flush(); expect(r.requests).toHaveLength(1) } finally { await r.controller.close() }
+  })
+  // #4699: the host mounted the engine from exactly the loaded bytes, so an
+  // export before any edit is the engine's rendition of that server version.
+  it(`${app}: mounted from the loaded bytes, normalized export, no edit -> no save`, async () => {
+    const r = opened(app, 5, 3, true)
+    try { await r.controller.flush(); expect(r.requests).toHaveLength(0); expect(r.controller.confirmedVersion()).toBe("3") } finally { await r.controller.close() }
+  })
+  it(`${app}: mounted from the loaded bytes, normalized export, then an edit -> saves`, async () => {
+    const r = opened(app, 5, 3, true)
+    try {
+      r.edit(6)
+      await r.controller.flush(); expect(r.requests).toHaveLength(1); expect(r.requests[0].baseVersion).toBe("3"); expect(r.controller.confirmedVersion()).toBe("4")
+    } finally { await r.controller.close() }
+  })
+  it(`${app}: mounted from the loaded bytes, an edit typed during the capture -> still saved`, async () => {
+    const r = opened(app, 5, 3, true)
+    try {
+      const flushed = r.controller.flush(); r.edit(6); await flushed
+      expect(r.requests.map(q => q.bytes[0])).toEqual([6]); expect(r.controller.confirmedVersion()).toBe("4")
+    } finally { await r.controller.close() }
+  })
+  it(`${app}: mounted from the loaded bytes, a native Ctrl+S ticket still transmits`, async () => {
+    const r = opened(app, 5, 3, true)
+    try { await r.controller.save("ticket-1"); expect(r.requests).toHaveLength(1) } finally { await r.controller.close() }
   })
   it(`${app}: a native Ctrl+S ticket still transmits unchanged bytes`, async () => {
     const r = opened(app)
