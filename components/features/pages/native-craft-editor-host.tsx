@@ -83,7 +83,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
  const compare=React.useRef<(draft:NativeDraft)=>void>(()=>{}),reconcile=React.useRef<()=>void>(()=>{}),[uncertain,setUncertain]=React.useState(false)
  const [applicationId,setApplicationId]=React.useState<NativeDocumentSnapshot['applicationId']>()
  const mount=React.useRef<HTMLDivElement>(null),control=React.useRef<(action:NativeCraftLeaseAction,body:{generation?:string;request_id?:string})=>void>(()=>{})
- const [view,setView]=React.useState<Lease>(vacant),[busy,setBusy]=React.useState(false),[label,setLabel]=React.useState('Připojuji…'),[savedVersion,setSavedVersion]=React.useState<string>(),[error,setError]=React.useState<string>(),[editorAddress,setEditorAddress]=React.useState<string>(),[dirty,setDirty]=React.useState(false),[recoveries,setRecoveries]=React.useState<NativeRecovery[]>([]),[comparison,setComparison]=React.useState<Comparison>(),[ownsEditor,setOwnsEditor]=React.useState(false),[connectionRetired,setConnectionRetired]=React.useState(false),[quota,setQuota]=React.useState<NativeDocumentSnapshot['quota']>()
+ const [view,setView]=React.useState<Lease>(vacant),[busy,setBusy]=React.useState(false),[label,setLabel]=React.useState('Připojuji…'),[savedVersion,setSavedVersion]=React.useState<string>(),[error,setError]=React.useState<string>(),[mismatch,setMismatch]=React.useState<{message:string;address:string}>(),[dirty,setDirty]=React.useState(false),[recoveries,setRecoveries]=React.useState<NativeRecovery[]>([]),[comparison,setComparison]=React.useState<Comparison>(),[ownsEditor,setOwnsEditor]=React.useState(false),[connectionRetired,setConnectionRetired]=React.useState(false),[quota,setQuota]=React.useState<NativeDocumentSnapshot['quota']>()
  useLeaveGuard(dirty)
  React.useEffect(()=>{
   if(!enabled||!humanId||!workspaceId||!pageId)return
@@ -187,8 +187,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     if(!blocksEditorFrame(e as SecurityPolicyViolationEvent,src)||dead)return
     const allowed=allowedFrameOrigin((e as SecurityPolicyViolationEvent).originalPolicy||'')
     clearTimeout(timer);reject(Error('native_editor_origin_mismatch'))
-    setEditorAddress(allowed??undefined)
-    stop(allowed?'Editor je dostupný jen na adrese ':'Editor je dostupný jen na nastavené adrese editoru. Otevřete stránku tam. Koncept nebyl označen jako uložený.')
+    const message=allowed?`Editor je dostupný jen na adrese ${allowed}. Otevřete stránku tam. Koncept nebyl označen jako uložený.`:'Editor je dostupný jen na nastavené adrese editoru. Otevřete stránku tam. Koncept nebyl označen jako uložený.'
+    if(allowed)setMismatch({message,address:allowed})
+    stop(message)
    }
    document.addEventListener('securitypolicyviolation',onViolation)
    ready.then(()=>document.removeEventListener('securitypolicyviolation',onViolation),()=>document.removeEventListener('securitypolicyviolation',onViolation))
@@ -453,7 +454,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   <div role="status" className="px-3 py-2"><span>{label}</span>{savedVersion&&<span> · verze {savedVersion}</span>}{quota&&<span className="ml-3 text-muted-foreground">Historie {quota.usedBytes} / {quota.limitBytes} B{quota.warning?' · blíží se limit':''}</span>}</div>
   {quotaFull&&<div role="alert" className="space-y-2 border-y px-3 py-2"><p><b>Kapacita úložiště neumožňuje další uložení.</b> Další verze se neuloží. Všechny dosavadní verze zůstávají a vaše neuložené změny jsou v tomto prohlížeči.</p><p className="text-sm text-muted-foreground">Navýšení ani mazání historie aplikace zatím nenabízí. Práci si stáhněte jako soubor koncept nebo exportem z editoru; koncept se nabídne i po znovuotevření.</p><Button variant="outline" onClick={()=>downloadDraft.current()}>Stáhnout koncept</Button></div>}
   {uncertain&&<Button variant="outline" onClick={()=>reconcile.current()}>Ověřit výsledek</Button>}
-  {error&&<p role="alert" className="px-3 py-2">{error}{editorAddress&&<><a className="underline" href={editorAddress} rel="noopener noreferrer">{editorAddress}</a>. Otevřete stránku tam. Koncept nebyl označen jako uložený.</>}</p>}
+  {error&&<p role="alert" className="px-3 py-2">{error}{mismatch&&error===mismatch.message&&<> <a className="underline" href={mismatch.address+window.location.pathname+window.location.search+window.location.hash} rel="noopener noreferrer">Otevřít na {mismatch.address}</a></>}</p>}
   {!connectionRetired&&proposals.map(proposal=><div key={proposal.id} role="group" aria-label={`Návrh ${proposal.authorName}`} className="flex flex-wrap items-center gap-2 border-y px-3 py-2">
    <span className="min-w-0 flex-1"><b>{proposal.authorName} připravil návrh nad verzí {proposal.baseVersion}</b>{proposal.summary&&<span> · {proposal.summary}</span>}<small className="block text-muted-foreground">{proposal.state==='stale'?'Zastaralé: dokument se mezitím změnil, návrh nelze použít.':'Dokument zůstává beze změny, dokud návrh nepřijmete.'}</small></span>
    <Button variant="outline" onClick={()=>compareProposal.current(proposal)}>Porovnat</Button>

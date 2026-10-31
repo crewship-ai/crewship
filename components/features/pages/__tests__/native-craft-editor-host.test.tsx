@@ -297,7 +297,8 @@ describe('editor origin mismatch (#4649)',()=>{
    act(()=>{document.dispatchEvent(violation())})
    const alert=await screen.findByRole('alert')
    expect(alert).toHaveTextContent('Editor je dostupný jen na adrese https://studio.example.test')
-   expect(within(alert).getByRole('link')).toHaveAttribute('href','https://studio.example.test')
+   const here=window.location
+   expect(within(alert).getByRole('link')).toHaveAttribute('href','https://studio.example.test'+here.pathname+here.search+here.hash)
    expect(screen.queryByText(/Editor se bezpečně nepřipojil/)).toBeNull()
    expect(journal.revokeRead).not.toHaveBeenCalled();expect(m.purge).not.toHaveBeenCalled()
    expect(screen.getByText('Editor odpojen · koncept zachován')).toBeInTheDocument()
@@ -309,6 +310,22 @@ describe('editor origin mismatch (#4649)',()=>{
   act(()=>{document.dispatchEvent(violation({originalPolicy:"default-src 'self'"}))})
   const alert=await screen.findByRole('alert');expect(alert).toHaveTextContent('nastavené adrese')
   expect(within(alert).queryByRole('link')).toBeNull()
+ })
+ it('drops the link when a different error follows the mismatch on a reconnect',async()=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   const hang=(o:NativeEditorPortOptions)=>{portOptions.push(o);const p=portRig();p.bootstrap.mockReturnValue(new Promise(()=>{}));ports.push(p);return p}
+   m.createPort.mockImplementationOnce(hang).mockImplementationOnce(hang)
+   const view=mount();await waitFor(()=>expect(document.querySelector('iframe')).not.toBeNull())
+   act(()=>{document.dispatchEvent(violation())})
+   expect(within(await screen.findByRole('alert')).getByRole('link')).toBeInTheDocument()
+   view.rerender(<NativeCraftEditorHost workspaceId="w" pageId="p2" humanId="human" enabled />)
+   await waitFor(()=>expect(ports.length).toBe(2))
+   await act(async()=>{await vi.advanceTimersByTimeAsync(20001)})
+   await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Editor se bezpečně nepřipojil'))
+   expect(screen.getByRole('alert')).not.toHaveTextContent('Otevřete stránku tam')
+   expect(within(screen.getByRole('alert')).queryByRole('link')).toBeNull()
+  }finally{vi.useRealTimers()}
  })
  it('ignores violations for other resources',async()=>{
   m.createPort.mockImplementationOnce((o:NativeEditorPortOptions)=>{portOptions.push(o);const p=portRig();p.bootstrap.mockReturnValue(new Promise(()=>{}));ports.push(p);return p})
