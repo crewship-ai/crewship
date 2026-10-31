@@ -220,6 +220,45 @@ describe('native Word host authority and persistence',()=>{
   const handoff=client.leaseAction.mock.calls.findIndex(c=>c[0]==='handoff')
   expect(p.ack.mock.invocationCallOrder[0]).toBeLessThan(client.leaseAction.mock.invocationCallOrder[handoff])
  })
+ // Taking the editor and handing it on without typing: the final capture is the
+ // confirmed server version, so nothing is sent and custody still moves.
+ for(const action of ['handoff','release'] as const)it(`${action === 'handoff' ? 'hands off' : 'releases'} an unchanged editor without a save`,async()=>{
+  mount();await ready();await acquire()
+  const p=ports.at(-1)!
+  p.snapshot.mockResolvedValue({bytes:new TextEncoder().encode('{"body":[]}'),editorRevision:'initial',documentId:'doc'})
+  client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:action==='handoff'?{actor_id:'user:other',display_name:'Jana',kind:'human'}:null,generation:'9007199254740996'});return emptyLease})
+  if(action==='handoff'){
+   act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}))
+   fireEvent.click(await screen.findByRole('button',{name:'Předat uživateli Jana'}))
+  }else fireEvent.click(screen.getByRole('button',{name:'Uvolnit úpravy'}))
+  await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]===action)).toBe(true))
+  expect(p.snapshot).toHaveBeenCalled()
+  expect(client.save).not.toHaveBeenCalled()
+  expect(screen.queryByText('Výsledek akce nebyl potvrzen. Koncept zůstává zachován.')).not.toBeInTheDocument()
+ })
+ // The final capture equals a version an idle save just committed: custody waits
+ // for the editor's ACK of that receipt and never moves when the ACK fails.
+ for(const acknowledged of [true,false])it(`${acknowledged?'releases':'keeps'} an unchanged editor ${acknowledged?'after':'when'} the last save's editor ACK ${acknowledged?'arrives':'fails'}`,async()=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   mount();await ready();await acquire()
+   const p=ports.at(-1)!,ack=deferred<boolean>()
+   p.ack.mockReturnValueOnce(ack.promise)
+   act(()=>portOptions.at(-1)!.onChanged('idle-edit','doc'))
+   await act(async()=>{await vi.advanceTimersByTimeAsync(300)})
+   await waitFor(()=>expect(p.ack).toHaveBeenCalledOnce())
+   client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:null,generation:'9007199254740996'});return emptyLease})
+   const captures=p.snapshot.mock.calls.length
+   fireEvent.click(screen.getByRole('button',{name:'Uvolnit úpravy'}))
+   await waitFor(()=>expect(p.snapshot.mock.calls.length).toBeGreaterThan(captures))
+   await act(async()=>{await vi.advanceTimersByTimeAsync(50)})
+   expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(false)
+   await act(async()=>ack.resolve(acknowledged))
+   if(acknowledged)await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(true))
+   else{await screen.findByRole('alert');expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(false)}
+   expect(client.save).toHaveBeenCalledOnce()
+  }finally{vi.useRealTimers()}
+ })
  it('waits for the running idle save and commits its own final snapshot before handoff',async()=>{
   vi.useFakeTimers({shouldAdvanceTime:true})
   try{
