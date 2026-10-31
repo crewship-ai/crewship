@@ -146,6 +146,10 @@ return 404 for other paths. Do not strip or weaken Crewship's CSP/frame headers.
 The browser origin (`CREWSHIP_PAGE_STUDIO_ORIGIN`) uses the existing
 authenticated application proxy configuration.
 
+Open the app on that origin. On any other address the browser's CSP `frame-src`
+blocks the Craft editor frame; the editor then shows the configured address with a
+link right away, and the local draft is kept.
+
 A hosts-file entry on the server is not browser DNS. Verify from a viewer machine:
 
 ```bash
