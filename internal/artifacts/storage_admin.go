@@ -78,6 +78,9 @@ func SetStorageLimits(ctx context.Context, tx *sql.Tx, workspace, instance *int6
 	if instance != nil {
 		after.InstanceLimitBytes = *instance
 	}
+	if after.WorkspaceLimitBytes > after.InstanceLimitBytes {
+		return before, after, fmt.Errorf("%w: the workspace limit (%d bytes) cannot exceed the instance limit (%d bytes); set both together", ErrStorageLimit, after.WorkspaceLimitBytes, after.InstanceLimitBytes)
+	}
 	if _, err = tx.ExecContext(ctx, `UPDATE artifact_storage_global SET workspace_max_bytes=?,max_bytes=? WHERE id=1`, after.WorkspaceLimitBytes, after.InstanceLimitBytes); err != nil {
 		return before, after, err
 	}

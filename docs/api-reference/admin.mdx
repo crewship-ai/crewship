@@ -1155,13 +1155,13 @@ Defaults are unchanged until you call this.
 { "workspace_limit_bytes": 17179869184, "instance_limit_bytes": 51539607552 }
 ```
 
-Each value is an integer number of bytes between 1 MiB (`1048576`) and 1 PiB.
+Each value is an integer number of bytes between 1 MiB (`1048576`) and 1 PiB, and the workspace limit cannot exceed the instance limit.
 **Response:** the same object as `GET`.
 
 | Status | Meaning |
 |---|---|
 | `200` | Saved; the new limits and counters. |
-| `400` | Invalid JSON, no limit given, or a value out of range. |
+| `400` | Invalid JSON, no limit given, a value out of range, or a workspace limit above the instance limit (set both together to raise or lower them). |
 | `401` | Not signed in. |
 | `403` | Caller is not an instance administrator. |
 | `500` | The save failed; nothing changed. |

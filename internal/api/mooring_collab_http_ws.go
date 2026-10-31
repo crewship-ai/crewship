@@ -616,7 +616,8 @@ const collaborationCloseStorageFull = designCloseStorageFull
 // session ends, that the write failed because aggregate artifact storage is
 // full. The SQL transaction rolled back, so nothing was saved and all existing
 // history is kept. The private runtime protocol has no error reply for a
-// submit, so the unchanged teardown follows; the clients keep their local work.
+// submit, and a shared session's submit is not tied to one connection (every socket
+// is informed because the session ends for all of them), so the unchanged teardown follows; the clients keep their local work.
 func (d *collaborationHTTPDocument) refuseStorageFull(err error) bool {
 	if d == nil || !errors.Is(artifacts.StorageBudgetError(err), artifacts.ErrStorageQuota) {
 		return false

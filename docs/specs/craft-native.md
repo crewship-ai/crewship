@@ -108,6 +108,30 @@ nonboolean edit capabilities grant no host access. The legacy explicit Read
 observer API remains compatible, while Comment alone never opens an editor
 admission or receives private latest native bytes.
 
+### Revocation of a shared preview (push)
+
+The preview has no event stream of its own. When a grant on a native Craft page
+is added or removed (`PUT`/`DELETE /api/v1/pages/{slug}/grants`), the server,
+after the grant transaction commits, sends one `page.access_recheck` frame with
+the payload `{ "page_id": "<id>" }` to each person the changed grant names: the
+user, the members of a named crew, or the workspace members for a workspace
+grant (agents are not viewers). It travels on that person's own identity channel
+`user:{userId}`, which only that person may subscribe to, so nobody receives a
+signal about another user's rights or about a page that is not theirs. The frame
+carries no content, no level and no names; it only means "re-check".
+
+An open preview that receives a frame for its own `page_id` (and on
+`realtime.reconnected`) immediately repeats the ordinary `craft/preview` read.
+On 403/404 or any failed read it removes the frame, closes the editor port and
+shows "Sdílený náhled není dostupný". A frame for another page is ignored. If a
+read is already in flight, one more read runs after it, so a result that began
+before the commit cannot keep the content. The 30 s timer and the focus/online
+rereads stay as the fallback for every change that sends no frame (workspace
+member removal, role or ownership changes, a missed frame). The frame cannot
+grant or reveal anything: the answer always comes from the server's own
+authorisation of the read. PRD row `A.craft.read-revoked` expects the removal
+within about 5 s.
+
 `POST /api/v1/pages/{slug}/craft/document/share` requires ordinary human auth and
 `X-Craft-Session`. Its strict JSON request contains `workspaceId`, `pageId`,
 `applicationId`, `enginePin`, `sessionId`, `generation`, `baseVersion` and

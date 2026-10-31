@@ -119,6 +119,9 @@ func TestSetStorageLimitsTable(t *testing.T) {
 		{"both", i(5 << 20), i(9 << 20), false, 5 << 20, 9 << 20},
 		{"only instance keeps workspace", nil, i(11 << 20), false, 5 << 20, 11 << 20},
 		{"none", nil, nil, true, 0, 0},
+		{"workspace above instance", i(30 << 20), i(20 << 20), true, 0, 0},
+		{"workspace above the kept instance limit", i(50 << 20), nil, true, 0, 0},
+		{"instance below the kept workspace limit", nil, i(2 << 20), true, 0, 0},
 		{"too small", i(10), nil, true, 0, 0},
 		{"too large", nil, i(MaxStorageLimitBytes + 1), true, 0, 0},
 	} {

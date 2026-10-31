@@ -217,6 +217,8 @@ export function connectWordCraftHost(workspaceId: string, pageId: string, openin
         state("pending"); send(raw)
       } catch { stop("unqualified_original") }
     },
+    /** Exact bytes of every submitted original not yet confirmed Saved. */
+    pendingOriginals(): string[] { return [...pending.values()].map(item => item.raw) },
     stop,
     close() { stop("closed"); socket.onopen = null; socket.onmessage = null; socket.onclose = null; socket.onerror = null; for (const item of pending.values()) item.receipt.free() },
   }

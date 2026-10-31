@@ -5,6 +5,7 @@ import { useSessionSafe } from "@/hooks/use-auth"
 import { useLeaveGuard } from "@/lib/editor-lifecycle/use-leave-guard"
 import { createCapabilityChannel, decodeMessage, transferEditorPort, verifyEditorHello, type CapabilityPort } from "@/lib/mooring/channel"
 import { connectWordCraftHost, loadWordCraftReceiptSDK, openWordCraftSession, WORDCRAFT_BOOTSTRAP_BYTES, WORDCRAFT_FRAME_BYTES, type WordCraftBootstrap, type WordCraftHostState } from "@/lib/mooring/wordcraft-host-session"
+import { artifactDraftKey, artifactDraftRevision, clearArtifactDraft, loadArtifactDraft, writeArtifactDraft } from "@/lib/artifact-drafts"
 import { editorFrameSrc } from "@/lib/workbooks/editor-client"
 import { createEditorFrame, editorFrameSupported } from "./workbook-editor-host"
 
@@ -12,6 +13,8 @@ const labels: Record<WordCraftHostState, string> = {
   connecting: "Connecting…", ready: "No unsaved changes", draft: "Not saved · draft", pending: "Saving…",
   saved: "Saved", unknown: "Not confirmed", "unsaved-draft": "Not saved · local draft retained", stopped: "Editor closed",
 }
+const STORAGE_FULL_MESSAGE = "Kapacita úložiště neumožňuje další uložení. Vaše neuložené změny zůstávají v tomto prohlížeči."
+const WORDCRAFT_DRAFT_FORMAT = "crewship-wordcraft-draft-v1"
 const exact = (message: Record<string, unknown>, keys: string[]) => Object.keys(message).length === keys.length && keys.every(key => key in message)
 
 /** Actual WordCraft protocol host; the legacy JSON pilot uses a separate host. */
@@ -26,6 +29,30 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
   pageUnavailable.current = unavailable
   const [state, setState] = React.useState<WordCraftHostState>("connecting")
   const [error, setError] = React.useState<string>()
+  const [recovered, setRecovered] = React.useState("")
+  const draftKey = React.useRef<string | null>(null)
+  draftKey.current = artifactDraftKey("wordcraft-pending", humanId, workspaceId, pageId)
+  // A draft kept by an earlier storage-full stop is offered again on reopen.
+  React.useEffect(() => {
+    const key = artifactDraftKey("wordcraft-pending", humanId, workspaceId, pageId)
+    if (!key) return
+    let active = true
+    void loadArtifactDraft(key).then(text => { if (active && text) setRecovered(text) }, () => { /* unreadable: keep the stored copy */ })
+    return () => { active = false }
+  }, [humanId, workspaceId, pageId])
+  const downloadRecovered = () => {
+    const url = URL.createObjectURL(new Blob([recovered], { type: "application/json" }))
+    const anchor = document.createElement("a")
+    anchor.href = url; anchor.download = `wordcraft-${pageId}-draft.json`
+    document.body.appendChild(anchor)
+    try { anchor.click() } finally { anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 0) }
+  }
+  const discardRecovered = () => {
+    const key = draftKey.current
+    if (!key) return
+    const text = recovered
+    void clearArtifactDraft(key, text, artifactDraftRevision(key)).then(() => setRecovered(""), () => setError("Místní koncept se nepodařilo odstranit."))
+  }
   const unavailableCallback = React.useRef(onUnavailable)
   React.useEffect(() => { unavailableCallback.current = onUnavailable }, [onUnavailable])
   const dirty = ["draft", "pending", "unknown", "unsaved-draft"].includes(state)
@@ -46,12 +73,27 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
       dead = true
       unavailableCallback.current?.()
       setState(previous => ["draft", "pending", "unknown", "unsaved-draft"].includes(previous) ? "unsaved-draft" : "stopped")
+      const storageFull = reason === "storage_full"
+      // Capture the submitted-but-unconfirmed originals before the host stops.
+      const originals = storageFull ? host?.pendingOriginals() ?? [] : []
       host?.stop(reason)
       // Preserve the original producer's memory on a live failure, but end
       // interaction and all future content delivery immediately.
       if (port) { try { send({ type: "wordcraft:stop", reason }) } catch { /* already closed */ }; port.onmessage = null; port.close(); port = undefined }
-      if (frame) frame.hidden = true
-      setError(reason === "storage_full" ? "Kapacita úložiště neumožňuje další uložení. Vaše neuložené změny zůstávají v tomto prohlížeči." : "The editor is unavailable. Unconfirmed changes are not saved.")
+      // A full storage budget is not an access loss: keep the stopped editor
+      // visible so its document can still be read and copied, and keep the
+      // submitted changes as a local draft that is offered again on reopen.
+      if (frame && !storageFull) frame.hidden = true
+      if (storageFull) {
+        setError(STORAGE_FULL_MESSAGE)
+        const key = draftKey.current
+        if (key) {
+          const text = JSON.stringify({ format: WORDCRAFT_DRAFT_FORMAT, workspace_id: workspaceId, page_id: pageId, originals })
+          void writeArtifactDraft(key, text).then(() => { if (!abort.signal.aborted) setRecovered(text) }, () => setError(`${STORAGE_FULL_MESSAGE} Místní koncept se nepodařilo uložit; obsah zůstává viditelný v editoru.`))
+        }
+        return
+      }
+      setError("The editor is unavailable. Unconfirmed changes are not saved.")
     }
     const deliverBootstrap = () => {
       if (bootstrap && port) { send({ type: "wordcraft:bootstrap", ...bootstrap, display_name: displayName.current }, WORDCRAFT_BOOTSTRAP_BYTES); bootstrap = undefined }
@@ -145,6 +187,7 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
   return <section className="flex h-full min-h-0 flex-col" aria-label={`${name ?? "WordCraft"} editor`}>
     <div className="px-4 py-2 text-sm" role="status">{labels[state]}</div>
     {error && <p className="px-4 py-2 text-sm" role="alert">{error}</p>}
+    {recovered && <div className="flex items-center gap-2 px-4 py-2 text-sm" role="group" aria-label="Místní koncept"><span>V tomto prohlížeči je uložený koncept neodeslaných změn.</span><button type="button" className="underline" onClick={downloadRecovered}>Stáhnout koncept</button><button type="button" className="underline" onClick={discardRecovered}>Zahodit koncept</button></div>}
     <div className="relative min-h-0 flex-1" ref={mount} />
   </section>
 }

@@ -8,19 +8,27 @@ vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id
 const mocks = vi.hoisted(() => ({ open: vi.fn(), connect: vi.fn(), sdk: vi.fn(), ready: vi.fn(), draft: vi.fn(), submit: vi.fn(), stop: vi.fn(), close: vi.fn() }))
 vi.mock("@/lib/mooring/wordcraft-host-session", () => ({ openWordCraftSession: mocks.open, connectWordCraftHost: mocks.connect, loadWordCraftReceiptSDK: mocks.sdk, WORDCRAFT_FRAME_BYTES: 262144, WORDCRAFT_BOOTSTRAP_BYTES: 2097152 }))
 vi.mock("@/lib/editor-lifecycle/use-leave-guard", () => ({ useLeaveGuard: vi.fn() }))
+const drafts = vi.hoisted(() => ({ store: new Map<string, string>() }))
+vi.mock("@/lib/artifact-drafts", () => ({
+  artifactDraftKey: (kind: string, human: string | null, workspace: string, target: string) => human ? JSON.stringify([human, kind, workspace, target]) : null,
+  writeArtifactDraft: async (key: string, text: string) => { drafts.store.set(key, text) },
+  loadArtifactDraft: async (key: string) => drafts.store.get(key) ?? "",
+  clearArtifactDraft: async (key: string) => { drafts.store.delete(key) },
+  artifactDraftRevision: () => 1,
+}))
 const digest = "b".repeat(64)
 const windowMock = { postMessage: vi.fn() }
 const credentialless = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "credentialless")
 const contentWindow = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "contentWindow")
 const ports: MessagePort[] = []
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.clearAllMocks(); drafts.store.clear()
   identity.id = "human-one"; identity.status = "authenticated"
   Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", { configurable: true, get() { return (this as HTMLIFrameElement).hasAttribute("credentialless") } })
   Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", { configurable: true, get: () => windowMock })
   mocks.open.mockResolvedValue({ editor: { url: `https://editor.example.test/b/${digest}/index.html`, bundle_digest: digest }, sdk_prefix: `/mooring-sdk/generated/${"a".repeat(64)}` })
   mocks.sdk.mockResolvedValue({})
-  mocks.connect.mockReturnValue({ ready: mocks.ready, draft: mocks.draft, submit: mocks.submit, stop: mocks.stop, close: mocks.close })
+  mocks.connect.mockReturnValue({ pendingOriginals: () => ["{\"type\":\"submit_changes\",\"request_id\":\"r1\"}"], ready: mocks.ready, draft: mocks.draft, submit: mocks.submit, stop: mocks.stop, close: mocks.close })
 })
 afterEach(() => {
   cleanup(); ports.splice(0).forEach(port => port.close())
@@ -154,10 +162,29 @@ it("stops and retains the original dirty frame on metadata denial without reopen
   expect(frame.hidden).toBe(true)
   expect(screen.queryByText("Saved")).toBeNull()
 })
-it("names a full artifact storage budget when the host stops with storage_full and keeps the local draft state", async () => {
-  await open()
+it("on storage_full keeps the editor visible, saves the submitted changes as a local draft and offers it again on reopen", async () => {
+  const first = await open()
   await act(async () => { mocks.connect.mock.calls[0][5].state("draft"); await new Promise(resolve => setTimeout(resolve, 10)) })
   await act(async () => { mocks.connect.mock.calls[0][5].stopped("storage_full"); await new Promise(resolve => setTimeout(resolve, 10)) })
-  expect(screen.getByRole("alert")).toHaveTextContent("Kapacita úložiště neumožňuje další uložení")
+  expect(screen.getAllByRole("alert")[0]).toHaveTextContent("Kapacita úložiště neumožňuje další uložení")
   expect(screen.getByRole("status")).toHaveTextContent("Not saved · local draft retained")
+  // The stopped editor stays readable so its content can be copied.
+  expect(first.frame.hidden).toBe(false)
+  expect(first.frame.isConnected).toBe(true)
+  const stored = [...drafts.store.entries()]
+  expect(stored).toHaveLength(1)
+  expect(JSON.parse(stored[0][0])[1]).toBe("wordcraft-pending")
+  expect(JSON.parse(stored[0][1])).toMatchObject({ format: "crewship-wordcraft-draft-v1", workspace_id: "workspace", page_id: "page", originals: ['{"type":"submit_changes","request_id":"r1"}'] })
+  expect(screen.getByRole("group", { name: "Místní koncept" })).toBeInTheDocument()
+  // Reopen: a fresh mount finds the stored draft and offers it again.
+  cleanup(); ports.splice(0).forEach(port => port.close()); windowMock.postMessage.mockClear()
+  render(<WordCraftEditorHost workspaceId="workspace" pageId="page" name="Original title" />)
+  await waitFor(() => expect(screen.getByRole("group", { name: "Místní koncept" })).toBeInTheDocument())
+  expect(screen.getByText("Stáhnout koncept")).toBeInTheDocument()
+})
+it("other stops still hide the editor and save no draft", async () => {
+  const t = await open()
+  await act(async () => { mocks.connect.mock.calls[0][5].stopped("connection_unavailable"); await new Promise(resolve => setTimeout(resolve, 10)) })
+  expect(t.frame.hidden).toBe(true)
+  expect(drafts.store.size).toBe(0)
 })

@@ -858,7 +858,7 @@ crewship admin instance artifact-storage get -f json
 
 `PUT /api/v1/admin/instance/artifact-storage`. Set the limits; a limit you
 leave out keeps its value. Sizes are bytes or carry a binary suffix (`512MiB`,
-`16GiB`, `1TiB`), between 1 MiB and 1 PiB. Lowering a limit below current usage
+`16GiB`, `1TiB`), between 1 MiB and 1 PiB, and the workspace limit cannot exceed the instance limit (change both together when needed). Lowering a limit below current usage
 deletes nothing; it only refuses further growth. The change is audited.
 
 | Flag | Meaning |
