@@ -13,6 +13,7 @@ import {
   HERO, SCREENS, commentOnHero, createProject, deletePage, enableProjects, grantRead, heroOf, historyRow, linkedScreens, openHistory,
   FatalWait, openProject, pinWorkspace, preview, projectSlug, publish, reply, snapshot, threeScreens, trySnapshot, waitFor, wsQuery,
 } from "./project/project-api"
+import { trackPage } from "./created"
 
 const V1 = "Welcome to the PRD cafe"
 const V2 = "Welcome to the PRD cafe, open 8-18"
@@ -254,6 +255,8 @@ test.describe("project", () => {
       const slug = projectSlug("prd-agent-project")
       const token = slug.slice(-6)
       const evidence: Record<string, unknown> = { mode: prd.mode, appSha: prd.appSha, agent: agent.slug, slug }
+      // The agent creates this project; remove it even if the test fails.
+      trackPage(wsId, slug)
       try {
         const list = await request.get(`/api/v1/agents?${wsQuery(wsId)}`)
         expect(list.status()).toBe(200)

@@ -96,8 +96,8 @@ export function writeSummary(outputDir, rows, run) {
  * @param {string[]} argv
  */
 export function parseArgs(argv) {
-  /** @type {{ origin: string | null, mode: "quick" | "full" | null, output: string | null, grep: string | null, list: boolean, help: boolean, passthrough: string[] }} */
-  const out = { origin: null, mode: null, output: null, grep: null, list: false, help: false, passthrough: [] }
+  /** @type {{ origin: string | null, mode: "quick" | "full" | null, output: string | null, grep: string | null, list: boolean, cleanup: boolean, dryRun: boolean, olderThan: number | undefined, help: boolean, passthrough: string[] }} */
+  const out = { origin: null, mode: null, output: null, grep: null, list: false, cleanup: false, dryRun: false, olderThan: undefined, help: false, passthrough: [] }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     const [flag, inline] = a.startsWith("--") && a.includes("=") ? [a.slice(0, a.indexOf("=")), a.slice(a.indexOf("=") + 1)] : [a, null]
@@ -131,6 +131,18 @@ export function parseArgs(argv) {
       case "--list":
         out.list = true
         break
+      case "--cleanup":
+        out.cleanup = true
+        break
+      case "--dry-run":
+        out.dryRun = true
+        break
+      case "--older-than": {
+        const n = Number(take())
+        if (!Number.isFinite(n) || n < 0) throw new Error("--older-than needs a number of minutes")
+        out.olderThan = n
+        break
+      }
       case "-h":
       case "--help":
         out.help = true

@@ -3,6 +3,7 @@
 // the message checks. Nothing here names a host or an account.
 import { expect, type APIRequestContext, type Page } from "@playwright/test"
 import { randomBytes } from "node:crypto"
+import { trackPage } from "../created"
 
 const MiB = 1 << 20
 /** Below the server's 16 MiB request-body cap, including JSON overhead. */
@@ -66,7 +67,9 @@ export async function createProject(api: APIRequestContext, workspaceId: string)
     data: { slug, name: "PRD quota project", created_by_test: true, base_version: 0, entrypoint: "index.html", files: projectFiles(slug, "v1") },
   })
   expect(res.status(), `create Project: ${(await res.text()).slice(0, 300)}`).toBe(201)
-  return { slug, pageId: ((await res.json()) as { page_id: string }).page_id }
+  const pageId = ((await res.json()) as { page_id: string }).page_id
+  trackPage(workspaceId, pageId)
+  return { slug, pageId }
 }
 
 export async function readArtifact(api: APIRequestContext, workspaceId: string, pageId: string, version?: number): Promise<{ status: number; body: ArtifactRead }> {

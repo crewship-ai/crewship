@@ -5,6 +5,7 @@ import { createHash } from "node:crypto"
 import * as fs from "node:fs"
 import type { APIRequestContext, APIResponse } from "@playwright/test"
 import { emptyGridCraftNativeDocument } from "../../../../lib/mooring/gridcraft-empty"
+import { trackPage } from "../created"
 
 // lib/mooring/wordcraft-native-create.ts imports this JSON, which Playwright's
 // ESM loader cannot import without an attribute; read it the same way instead.
@@ -97,6 +98,7 @@ export class NativePage {
       data: { name, slug, panels: [], allow_empty: true },
     })
     const body = await json<{ id: string }>(res, 201, "create page")
+    trackPage(workspaceId, body.id)
     return new NativePage(workspaceId, body.id, application)
   }
 

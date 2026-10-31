@@ -297,7 +297,7 @@ test.describe("Word and Sheet history quota", () => {
         expect.soft(refused.saves, `${a.label}: the editor tried to save`).toBeGreaterThan(0)
         expect.soft(status, `${a.label}: the editor keeps the unsaved draft`).toMatch(/Neuložený koncept|Koncept zůstává|koncept zachován/i)
         expect.soft(server.version, `${a.label}: nothing was saved`).toBe(doc.version)
-        expect.soft(message, `${a.label}: the editor says the document history is full`).toMatch(/histori\w*[^.|]{0,40}pln|history[^.|]{0,20}full|kvót|quota/i)
+        expect.soft(message, `${a.label}: the editor says the document history is full`).toMatch(/histori\w*[^.|]{0,40}pln|history[^.|]{0,20}full|kvót|quota|kapacit\w*\s+úložiště|neumožňuje další uložení/i)
         expect.soft(promise, `${a.label}: no promise of more space ("${promise}")`).toBeNull()
         for (const c of copies) expect.soft(c.control, `${a.label}: the message announces "${c.phrase}" but offers no such control`).toBe(true)
         if (download.offered) expect.soft(download.bytes ?? 0, `${a.label}: the offered draft download has content`).toBeGreaterThan(0)

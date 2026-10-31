@@ -4,6 +4,7 @@
 import { expect, type APIRequestContext, type Frame, type Page } from "@playwright/test"
 import * as fs from "node:fs"
 import { emptyGridCraftNativeDocument } from "../../../../lib/mooring/gridcraft-empty"
+import { trackPage } from "../created"
 
 export type NativeApp = "wordcraft" | "gridcraft"
 export const NATIVE_APPS: ReadonlyArray<{ app: NativeApp; label: "Word" | "Sheet"; frameTitle: string }> = [
@@ -46,6 +47,7 @@ export async function createNative(api: APIRequestContext, ws: string, app: Nati
   const c = await api.post(`/api/v1/pages?${q(ws)}`, { data: { name: `PRD quota ${app}`, slug, panels: [], allow_empty: true, created_by_test: true } })
   expect(c.status(), `create page: ${(await c.text()).slice(0, 300)}`).toBe(201)
   const pageId = ((await c.json()) as { id: string }).id
+  trackPage(ws, pageId)
   const init = await api.post(`${craft(pageId)}initialize?${q(ws)}`, { data: { application_id: app, bytes: emptyBytes(app).toString("base64") }, timeout: 120_000 })
   expect(init.status(), `initialize ${app}: ${(await init.text()).slice(0, 300)}`).toBe(201)
   const i = (await init.json()) as { version: string; generation: string; session_token: string }

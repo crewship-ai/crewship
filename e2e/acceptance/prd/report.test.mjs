@@ -80,3 +80,23 @@ test("readRows + writeSummary round-trip", () => {
     fs.rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test("parseArgs: --cleanup, --dry-run and --older-than", () => {
+  const a = parseArgs(["--origin", "https://x.test", "--cleanup", "--dry-run", "--older-than", "15"])
+  assert.equal(a.cleanup, true)
+  assert.equal(a.dryRun, true)
+  assert.equal(a.olderThan, 15)
+  assert.throws(() => parseArgs(["--cleanup", "--older-than", "soon"]), /minutes/)
+})
+
+test("cleanup patterns need both slug and name to look like the harness's", async () => {
+  const { isHarnessPage, isHarnessWorkspace } = await import("./cleanup.mjs")
+  assert.equal(isHarnessPage({ slug: "prd-quota-word-lx2k", name: "PRD quota word" }), true)
+  assert.equal(isHarnessPage({ slug: "prd-lease-wordcraft-1", name: "PRD lease Word" }), true)
+  assert.equal(isHarnessPage({ slug: "qa-close-ab-x-1", name: "QA close-ab probe" }), false)
+  assert.equal(isHarnessPage({ slug: "prd-notes", name: "My notes" }), false)
+  assert.equal(isHarnessPage({ slug: "pricing-site", name: "PRD pricing" }), false)
+  assert.equal(isHarnessWorkspace({ slug: "prd-qa-sheet-soak-6bcf1c9a8f", name: "PRD acceptance Sheet soak" }), true)
+  assert.equal(isHarnessWorkspace({ slug: "qa-c2-rights-be389ab9e6514a46", name: "QA Codex2 Craft rights" }), false)
+  assert.equal(isHarnessWorkspace({ slug: "prd-qa-sheet-soak-6bcf1c9a8f", name: "Someone's workspace" }), false)
+})

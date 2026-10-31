@@ -5,6 +5,7 @@ import type { APIRequestContext } from "@playwright/test"
 import { createHash, randomUUID } from "node:crypto"
 import { readFileSync } from "node:fs"
 import { emptyGridCraftNativeDocument } from "../../../../lib/mooring/gridcraft-empty"
+import { trackPage } from "../created"
 
 export type NativeApp = "wordcraft" | "gridcraft"
 
@@ -289,6 +290,7 @@ export async function createNativePage(
     }),
   )
   if (c.status !== 201 || !c.body.id) throw new Error(`create test page: HTTP ${c.status} ${JSON.stringify(c.body).slice(0, 200)}`)
+  trackPage(workspaceId, c.body.id)
   const page = new NativePage(api, workspaceId, c.body.id)
   const init = await json<{
     session_token?: string
