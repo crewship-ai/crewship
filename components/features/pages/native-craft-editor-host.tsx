@@ -72,7 +72,7 @@ async function retireCommitted(journal:NativeDraftJournal,rows:NativeRecovery[],
  }
  return kept
 }
-interface Runtime {enginePin:string;port:NativeEditorPort;frame:HTMLIFrameElement;abort:AbortController;version:string;generation:string;ready:boolean;writable:boolean;nativeReadOnly:boolean;coordinator?:Coordinator;journal?:NativeDraftJournal;phase?:NativeSaveState;ackedVersion?:string;receiptAck?:Promise<boolean>;receiptVersion?:string;edit:number;blocked:boolean;capture?:NativeDraft;retiring?:Promise<boolean>;retirementFinished?:boolean}
+interface Runtime {enginePin:string;port:NativeEditorPort;frame:HTMLIFrameElement;abort:AbortController;version:string;generation:string;ready:boolean;writable:boolean;nativeReadOnly:boolean;coordinator?:Coordinator;journal?:NativeDraftJournal;phase?:NativeSaveState;ackedVersion?:string;receiptAck?:Promise<boolean>;receiptVersion?:string;lastAck?:Promise<boolean>;lastAckVersion?:string;edit:number;blocked:boolean;capture?:NativeDraft;retiring?:Promise<boolean>;retirementFinished?:boolean}
 
 /** One authenticated client/session owns both lease controls and the isolated full Craft editor. */
 export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}:Props){
@@ -363,7 +363,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
        display(r);return r.edit===edit
       }catch{if(live(r))failNative(r,'Potvrzení editoru selhalo. Poslední změny nejsou potvrzené; původní editor zůstává uzamčený.');return false}
      })()
-     r.receiptAck=acknowledgement;r.receiptVersion=receipt.version
+     r.receiptAck=acknowledgement;r.receiptVersion=receipt.version;r.lastAck=acknowledgement;r.lastAckVersion=receipt.version
      return acknowledgement
     },
    });r.coordinator=coordinator
@@ -385,6 +385,15 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    freezeInput(r);r.ackedVersion=undefined;r.receiptAck=undefined;r.receiptVersion=undefined;setSavedVersion(undefined)
    await r.coordinator.flush()
    const acknowledgement=r.receiptAck,version=r.receiptVersion
+   // Nothing new to send: the final capture equals the confirmed server version.
+   if(!acknowledgement&&!version){
+    const confirmed=r.coordinator.confirmedVersion()
+    if(!confirmed||!live(r)||!r.writable||r.phase?.phase!=='saved'||r.phase.dirty)return false
+    // A version confirmed by an earlier receipt moves custody only once the editor acknowledged it.
+    if(r.lastAckVersion===confirmed&&!(r.lastAck&&await r.lastAck))return false
+    if(!live(r)||!r.writable||r.coordinator.confirmedVersion()!==confirmed)return false
+    r.ackedVersion=confirmed;return true
+   }
    if(!acknowledgement||!version||!await acknowledgement)return false
    return live(r)&&r.writable&&r.phase?.phase==='saved'&&!r.phase.dirty&&r.ackedVersion===version&&r.receiptAck===acknowledgement
   }
