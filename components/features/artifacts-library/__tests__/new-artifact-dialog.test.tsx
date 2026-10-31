@@ -19,7 +19,7 @@ vi.mock("@/hooks/use-page-folders", async importOriginal => ({
   usePageFolderMutations: () => ({ addPage: { mutateAsync: m.addPage } }),
 }))
 vi.mock("@/components/features/pages/use-word-document-creation", () => ({
-  useWordDocumentCreation: () => ({ allowed: true, formatAvailable: true, availability: { gridcraftNative: m.gridcraft }, frozen: false, retrying: false, create: { mutateAsync: m.wordCreate, isPending: false } }),
+  useWordDocumentCreation: () => ({ allowed: true, formatAvailable: true, wordFormat: "native", wordFormatAvailable: true, availability: { gridcraftNative: m.gridcraft }, frozen: false, retrying: false, create: { mutateAsync: m.wordCreate, isPending: false } }),
 }))
 vi.mock("@/lib/workbooks/create", () => ({ createWorkbook: m.createWorkbook }))
 
@@ -90,7 +90,7 @@ it("creates a blank Word document through the shared document creation, then fil
   name("Partner brief")
   fireEvent.click(create())
   await waitFor(() => expect(onCreated).toHaveBeenCalledWith("partner-brief"))
-  expect(m.wordCreate).toHaveBeenCalledWith({ name: "Partner brief", slug: "partner-brief" })
+  expect(m.wordCreate).toHaveBeenCalledWith({ name: "Partner brief", slug: "partner-brief", format: "native" })
   expect(m.addPage).toHaveBeenCalledWith({ folder: "sales", page: "partner-brief", pagesVersion: 0, aclVersion: 3 })
   expect(m.fetch).not.toHaveBeenCalled()
 })
