@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -119,6 +121,15 @@ var recheckSlots = make(chan struct{}, 4)
 // recheckInFlight lets tests wait for the asynchronous sends.
 var recheckInFlight sync.WaitGroup
 
+// recheckPending counts fan-outs that were admitted and have not finished,
+// whether running or waiting for a slot; recheckMaxWaiting bounds the waiters.
+var recheckPending atomic.Int64
+
+const recheckMaxWaiting = 64
+
+// recheckSendTimeout caps one fan-out against a hub that stopped draining.
+const recheckSendTimeout = 5 * time.Second
+
 // publishUserAccessRecheck sends payload to each user's own channel after the
 // mutation committed. The request returns at once; the sends run in a bounded
 // goroutine, in batches that yield to other hub traffic. A failure (including
@@ -127,11 +138,27 @@ func publishUserAccessRecheck(hub *ws.Hub, logger *slog.Logger, users []string, 
 	if hub == nil || len(users) == 0 {
 		return
 	}
+	// Bound the goroutines themselves, not just the running ones: past the
+	// slots plus a short waiting line the signal is dropped and the 30 s poll
+	// covers it.
+	if recheckPending.Add(1) > int64(cap(recheckSlots))+recheckMaxWaiting {
+		recheckPending.Add(-1)
+		if logger != nil {
+			logger.Warn("page access recheck fan-out dropped: too many pending", "recipients", len(users))
+		}
+		return
+	}
 	recheckInFlight.Add(1)
+	finish := beginBackgroundWork()
 	go func() {
+		defer finish()
 		defer recheckInFlight.Done()
+		defer recheckPending.Add(-1)
 		recheckSlots <- struct{}{}
 		defer func() { <-recheckSlots }()
+		// A stopped hub never drains its queue; do not hold the slot forever.
+		sendCtx, cancel := context.WithTimeout(context.Background(), recheckSendTimeout)
+		defer cancel()
 		sent := 0
 		defer func() {
 			if r := recover(); r != nil && logger != nil {
@@ -140,7 +167,12 @@ func publishUserAccessRecheck(hub *ws.Hub, logger *slog.Logger, users []string, 
 		}()
 		for start := 0; start < len(users); start += recheckBatch {
 			for _, user := range users[start:min(start+recheckBatch, len(users))] {
-				hub.BroadcastChannel("user", user, pageAccessRecheckEvent, payload)
+				if err := hub.BroadcastChannelContext(sendCtx, "user", user, pageAccessRecheckEvent, payload); err != nil {
+					if logger != nil {
+						logger.Warn("page access recheck fan-out abandoned", "recipients", len(users), "sent", sent, "error", err)
+					}
+					return
+				}
 				sent++
 			}
 			runtime.Gosched()
