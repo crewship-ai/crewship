@@ -50,7 +50,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   if (!Number.isFinite(idleMs) || idleMs < 1 || idleMs > 5000 || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) throw new Error("invalid_save_deadline")
   let active = true, writable = true, dirty = false, edits = 0, baseVersion = options.baseVersion
   let blocked: string | undefined, latest: Prepared | undefined, unconfirmed: Prepared | undefined
-  let confirmed: { nativeState: string; contentHash: string; version: string } | undefined
+  let confirmed: { nativeState: string | undefined; contentHash: string; version: string } | undefined
   let pending: { attempt: Prepared; abort: AbortController; done: Promise<void> } | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
   let preparations = Promise.resolve(), draftWrites = Promise.resolve()
@@ -101,7 +101,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     unconfirmed = undefined
     try { await options.journal.confirm(attempt.draft) } catch { blocked = "storage"; emit("draft", "storage"); return }
     if (!active || !writable) return
-    confirmed = attempt.nativeState === undefined ? undefined : { nativeState: attempt.nativeState, contentHash: attempt.draft.contentHash, version: receipt.version }
+    confirmed = { nativeState: attempt.nativeState, contentHash: attempt.draft.contentHash, version: receipt.version }
     try { void Promise.resolve(options.onReceipt?.(receipt)).catch(() => {}) } catch { /* Receipt observers cannot change persistence. */ }
     if (!active || !writable) return
     dirty = preparingCount > 0 || lastFailedPreparation > (latest?.sequence ?? 0) || edits !== attempt.epoch || latest?.draft.contentHash !== attempt.draft.contentHash || latest?.draft.editorRevision !== attempt.draft.editorRevision
@@ -214,11 +214,13 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         // Another manual operation may have started while this journal write
         // awaited storage. Repeat both the transport fence and base sampling.
       }
-      // A timer can capture a second RPC for the exact state already committed
-      // by the server. Retire only its local recovery row; the RPC-bound receipt
-      // and native ACK remain exclusive to the original request. Explicit saves
-      // (including transfer flushes without a native ticket) always transmit.
-      if (autosaveToken !== undefined && attempt.nativeState !== undefined && confirmed?.nativeState === attempt.nativeState && confirmed.contentHash === attempt.draft.contentHash && confirmed.version === baseVersion) {
+      // A timer, a reconnect or a host release/transfer flush can capture a
+      // second RPC for the exact bytes already committed at the current base
+      // (any application, not only Word). Never create a version from them:
+      // retire only the local recovery row; the RPC-bound receipt and native ACK
+      // remain exclusive to the original request. A native Ctrl+S ticket always
+      // transmits, as its ACK is bound to its own RPC.
+      if ((autosaveToken !== undefined || hostFlush && requestId === undefined) && confirmed && confirmed.nativeState === attempt.nativeState && confirmed.contentHash === attempt.draft.contentHash && confirmed.version === baseVersion) {
         const baseline = confirmed
         try { await options.journal.confirm(attempt.draft) } catch {
           if (!unavailable() && confirmed === baseline && baseVersion === baseline.version) { blocked = "storage"; emit("draft", "storage") }

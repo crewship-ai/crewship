@@ -376,16 +376,14 @@ it("does not overwrite readonly state when the receipt observer retires write au
   await r.controller.close()
 })
 
-it("autosaves a changed opaque editor revision even when its native bytes match the previous save", async () => {
+it("does not create a version when an opaque editor revision changes but the bytes match the confirmed save", async () => {
   const r = rig()
   await r.controller.save()
   r.engine.snapshot.mockResolvedValueOnce({ bytes: new Uint8Array([1, 2]), editorRevision: "doc:next:opaque" })
   r.controller.edited()
-  await vi.waitFor(() => expect(r.transport.save).toHaveBeenCalledTimes(2))
-  const [first, second] = r.transport.save.mock.calls.map(([request]) => request)
-  expect(second.contentHash).toBe(first.contentHash)
-  expect(second.editorRevision).toBe("doc:next:opaque")
-  expect(second.baseVersion).toBe("2")
+  await vi.waitFor(() => expect(r.engine.snapshot).toHaveBeenCalledTimes(2))
+  await new Promise(done => setTimeout(done, 50))
+  expect(r.transport.save).toHaveBeenCalledOnce()
   await r.controller.close()
 })
 
