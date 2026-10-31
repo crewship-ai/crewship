@@ -7,6 +7,8 @@
 // Quick mode drives the stream over the editor's own HTTP API when the server
 // runs with a native editor profile (skipped otherwise). Full mode also opens
 // the editor in a real browser on a deployed instance with native bundles.
+// A Read person is shown the read-only shared preview of the published version
+// (not the live editor), so the browser test publishes one first.
 import { peerApi, requireNative, traceCraft, type CraftCall } from "./craft-lease/helpers"
 import { APPLICATIONS, NativePage, parseEvents, sessionUserId } from "./craft-lease/native"
 import { pause } from "./drafts-crash/crash"
@@ -104,40 +106,65 @@ for (const { application, label } of APPLICATIONS) {
           const ws = await prd.qaWorkspace()
           const doc = await NativePage.create(request, ws.id, application, `PRD read revoked UI ${label}`)
           await requireNative(prd, request, doc)
-          const { peer, state } = await peerApi(prd, cleanup)
+          const { peer, state, api: readerApi } = await peerApi(prd, cleanup)
           await doc.grant(request, peer.userId, "read")
           expect(await sessionUserId(request)).not.toBe(peer.userId)
+
+          // A Read person never opens the live editor: the entry mounts the
+          // read-only shared preview (docs/specs/craft-native.md, "Shared
+          // previews"), which exists only once the owner has published a
+          // version. Without it the reader rightly sees nothing.
+          const unpublished = await doc.previewRaw(readerApi)
+          expect(unpublished.status(), "no shared version is published yet").toBe(404)
+          const version = await doc.publishPreview(request)
+          const preview = await doc.previewRaw(readerApi)
+          expect(preview.status(), "the reader receives the published version").toBe(200)
+          const probe = ((await preview.json()) as { bytes: string }).bytes.slice(0, 64)
+          expect(probe.length).toBeGreaterThan(0)
 
           const readerContext = await prd.browserContext(state)
           const page = await readerContext.newPage()
           page.setDefaultTimeout(60_000)
           traceCraft(page, "reader", trail)
           await page.goto(doc.editorPath)
-          await expect(page.getByRole("status").filter({ hasText: "Pouze čtení" }).first()).toBeVisible({ timeout: 90_000 })
-          await expect(page.locator("iframe")).toHaveCount(1, { timeout: 90_000 })
+          await expect(page.getByRole("status").filter({ hasText: `Sdílený náhled · verze ${version}` }).first()).toBeVisible({ timeout: 90_000 })
+          await expect(page.locator("iframe"), "the read-only editor with the content is shown").toHaveCount(1, { timeout: 90_000 })
+          expect(await page.getByRole("button", { name: "Převzít úpravy", exact: true }).count(), "a reader cannot take the editor").toBe(0)
+          expect(trail.some((c) => c.path === "craft/sessions"), "a reader opens no editor admission").toBe(false)
           const shots: Record<string, Buffer> = { "reader-open.png": await page.screenshot({ fullPage: true }) }
-          const streamOpen = trail.some((c) => c.path === "craft/events")
           const revokedAt = Date.now()
           await doc.revoke(request, peer.userId, "read")
 
-          await expect(page.getByRole("status").filter({ hasText: "Přístup ke čtení byl odebrán" }).first(), "the editor says read access was withdrawn").toBeVisible({ timeout: STOP_WITHIN_MS })
+          // The preview rereads on a 30 s timer (and on focus/online) and
+          // removes the content as soon as the read is refused.
+          await expect(page.getByRole("alert").filter({ hasText: "Sdílený náhled není dostupný" }).first(), "the preview says access is gone").toBeVisible({ timeout: STOP_WITHIN_MS })
           await expect(page.locator("iframe"), "the document content is removed from the page").toHaveCount(0)
           await expect(page.locator("canvas")).toHaveCount(0)
           const shownAfterMs = Date.now() - revokedAt
           shots["reader-revoked.png"] = await page.screenshot({ fullPage: true })
-          expect(await page.getByRole("button", { name: "Převzít úpravy", exact: true }).count(), "no way to take the editor").toBe(0)
 
-          // The stream is over and stays over: no further successful editor GET.
-          await expect.poll(() => trail.some((c) => c.path === "craft/events" && c.status === "stream ended"), { timeout: 30_000, message: "the event stream ended" }).toBe(true)
+          // Nothing is served any more, not to the old tab, a direct call or a reload.
+          const denied = await doc.previewRaw(readerApi)
+          expect(denied.status(), "preview read after the revocation").toBe(403)
+          expect(await denied.text()).not.toContain(probe)
+          // The availability probe answers 200 with every flag false and no content.
+          const flags = await readerApi.get(`/api/v1/pages/${encodeURIComponent("@" + doc.pageId)}/craft/availability?workspace_id=${ws.id}`)
+          expect(await flags.json(), "availability after the revocation grants nothing").toEqual({ enabled: false, can_edit: false, preview_enabled: false, agents_enabled: false })
           const settled = trail.length
+          await page.reload()
+          await expect(page.locator("iframe"), "no content after a reload").toHaveCount(0, { timeout: 30_000 })
+          expect(trail.slice(settled).filter((c) => c.path === "craft/preview" && c.status === 200), "the reload receives no preview").toEqual([])
+
+          // No further successful editor GET.
+          const settled2 = trail.length
           await pause(12_000)
-          const after = trail.slice(settled).filter((c) => c.method === "GET" && typeof c.status === "number" && c.status < 300)
+          const after = trail.slice(settled2).filter((c) => c.method === "GET" && c.path !== "craft/availability" && typeof c.status === "number" && c.status < 300)
           expect(after, "no content or event request succeeds after the editor shows the revoked state").toEqual([])
           shots["reader-later.png"] = await page.screenshot({ fullPage: true })
 
           await prd.evidence("result.json", {
             application, mode: prd.mode, appSha: prd.appSha, workspaceId: ws.id, pageId: doc.pageId,
-            streamOpenBeforeRevoke: streamOpen, revokedShownAfterMs: shownAfterMs, requestsAfter: after.length,
+            revokedShownAfterMs: shownAfterMs, requestsAfter: after.length,
           })
           for (const [name, png] of Object.entries(shots)) await prd.evidence(name, png)
           passed = true
