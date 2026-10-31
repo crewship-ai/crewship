@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Nullable API fields no longer publish unsupported null types in OpenAPI 3.0.** Artifact and Design origins and Page folders retain null values and their existing object constraints using OpenAPI 3.0 nullable alternatives. Arbitrary JSON payload and preference arrays also retain nested null values.
+
 - **Routine saves honor machine output formats.** `routine save --format json|yaml|ndjson` returns the saved routine identity and trigger metadata without progress text; the human receipt stays unchanged (#4621).
 
 - **Agent peer-card errors no longer expose server internals.** When reading or deleting an agent's peer cards fails inside the server, the API now answers `Internal server error` and logs the cause, instead of returning database driver text or a host file path.

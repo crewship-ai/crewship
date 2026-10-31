@@ -2178,7 +2178,11 @@
                 "$ref": "#/components/schemas/ArtifactProjectOrigin"
               },
               {
-                "type": "null"
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
               }
             ]
           },
@@ -7705,7 +7709,11 @@
                 "$ref": "#/components/schemas/ArtifactProjectOrigin"
               },
               {
-                "type": "null"
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
               }
             ]
           },
@@ -10300,7 +10308,9 @@
             "type": "object"
           },
           {
-            "items": {},
+            "items": {
+              "$ref": "#/components/schemas/FinalAuthUserPreferenceValue"
+            },
             "type": "array"
           },
           {
@@ -10313,7 +10323,11 @@
             "type": "boolean"
           },
           {
-            "type": "null"
+            "enum": [
+              null
+            ],
+            "nullable": true,
+            "type": "object"
           }
         ]
       },
@@ -10325,7 +10339,9 @@
             "type": "object"
           },
           {
-            "items": {},
+            "items": {
+              "$ref": "#/components/schemas/FinalAuthWebhookPayload"
+            },
             "type": "array"
           },
           {
@@ -10338,7 +10354,11 @@
             "type": "boolean"
           },
           {
-            "type": "null"
+            "enum": [
+              null
+            ],
+            "nullable": true,
+            "type": "object"
           }
         ]
       },
@@ -123308,7 +123328,11 @@
                                 "type": "object"
                               },
                               {
-                                "type": "null"
+                                "enum": [
+                                  null
+                                ],
+                                "nullable": true,
+                                "type": "object"
                               }
                             ]
                           },
@@ -124671,7 +124695,11 @@
                                   "type": "object"
                                 },
                                 {
-                                  "type": "null"
+                                  "enum": [
+                                    null
+                                  ],
+                                  "nullable": true,
+                                  "type": "object"
                                 }
                               ]
                             },
@@ -125121,7 +125149,11 @@
                               "type": "object"
                             },
                             {
-                              "type": "null"
+                              "enum": [
+                                null
+                              ],
+                              "nullable": true,
+                              "type": "object"
                             }
                           ]
                         },
@@ -125440,7 +125472,11 @@
                               "type": "object"
                             },
                             {
-                              "type": "null"
+                              "enum": [
+                                null
+                              ],
+                              "nullable": true,
+                              "type": "object"
                             }
                           ]
                         },
@@ -125832,7 +125868,11 @@
                                 "type": "object"
                               },
                               {
-                                "type": "null"
+                                "enum": [
+                                  null
+                                ],
+                                "nullable": true,
+                                "type": "object"
                               }
                             ]
                           },
@@ -126308,7 +126348,11 @@
                             "type": "object"
                           },
                           {
-                            "type": "null"
+                            "enum": [
+                              null
+                            ],
+                            "nullable": true,
+                            "type": "object"
                           }
                         ]
                       },
@@ -126750,7 +126794,11 @@
                           "type": "object"
                         },
                         {
-                          "type": "null"
+                          "enum": [
+                            null
+                          ],
+                          "nullable": true,
+                          "type": "object"
                         }
                       ]
                     },
@@ -127011,7 +127059,11 @@
                           "type": "object"
                         },
                         {
-                          "type": "null"
+                          "enum": [
+                            null
+                          ],
+                          "nullable": true,
+                          "type": "object"
                         }
                       ]
                     },
@@ -128249,7 +128301,11 @@
                           "type": "object"
                         },
                         {
-                          "type": "null"
+                          "enum": [
+                            null
+                          ],
+                          "nullable": true,
+                          "type": "object"
                         }
                       ]
                     },
@@ -128510,7 +128566,11 @@
                           "type": "object"
                         },
                         {
-                          "type": "null"
+                          "enum": [
+                            null
+                          ],
+                          "nullable": true,
+                          "type": "object"
                         }
                       ]
                     },
@@ -129254,7 +129314,11 @@
                           "type": "object"
                         },
                         {
-                          "type": "null"
+                          "enum": [
+                            null
+                          ],
+                          "nullable": true,
+                          "type": "object"
                         }
                       ]
                     },
@@ -129777,7 +129841,11 @@
                           "type": "object"
                         },
                         {
-                          "type": "null"
+                          "enum": [
+                            null
+                          ],
+                          "nullable": true,
+                          "type": "object"
                         }
                       ]
                     },
@@ -150221,7 +150289,11 @@
                               "type": "object"
                             },
                             {
-                              "type": "null"
+                              "enum": [
+                                null
+                              ],
+                              "nullable": true,
+                              "type": "object"
                             }
                           ]
                         },
