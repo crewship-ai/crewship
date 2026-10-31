@@ -223,7 +223,7 @@ describe('native Word host authority and persistence',()=>{
  it('waits for the running idle save and commits its own final snapshot before handoff',async()=>{
   vi.useFakeTimers({shouldAdvanceTime:true})
   try{
-   vi.stubGlobal('crypto',{randomUUID:webcrypto.randomUUID.bind(webcrypto),getRandomValues:webcrypto.getRandomValues.bind(webcrypto),subtle:{digest:vi.fn(async()=>new Uint8Array(32).buffer)}})
+   vi.stubGlobal('crypto',{randomUUID:webcrypto.randomUUID.bind(webcrypto),getRandomValues:webcrypto.getRandomValues.bind(webcrypto),subtle:{digest:vi.fn(async(_a:string,data:Uint8Array)=>{const out=new Uint8Array(32);data.forEach((b,i)=>{out[i%32]=(out[i%32]*31+b)&255});return out.buffer})}})
    const idle=deferred<ReturnType<typeof receipt>>()
    client.save.mockReturnValueOnce(idle.promise)
    mount();await ready();await acquire()
