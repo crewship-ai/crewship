@@ -2,6 +2,7 @@ package chatbridge
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"sync"
@@ -69,7 +70,13 @@ func TestAgentStop_ChatOutcomePreservesStopAndLateSuccess(t *testing.T) {
 				t.Fatal(err)
 			}
 			select {
-			case <-done:
+			case err := <-done:
+				// An agent stop is its own request (POST /agents/{id}/stop):
+				// it is recorded CANCELLED but never confirms a chat
+				// cancellation a user may have asked for.
+				if errors.Is(err, ws.ErrRunCancelled) {
+					t.Fatalf("agent stop confirmed a chat cancellation: outcome=%s err=%v", tc.want, err)
+				}
 			case <-ctx.Done():
 				t.Fatal("chat never settled")
 			}

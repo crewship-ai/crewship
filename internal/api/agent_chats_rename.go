@@ -72,6 +72,11 @@ type chatResponse struct {
 	// empty: `direct` is the catch-all (see chat_kinds.go).
 	Kind   ChatKind        `json:"kind"`
 	Source *chatWorkSource `json:"source,omitempty"`
+	// Visibility ('private' or 'group') and CreatedByCaller let a client
+	// decide whether unattributed legacy user turns are the caller's own
+	// (`crewship chat retry`).
+	Visibility      string `json:"visibility"`
+	CreatedByCaller bool   `json:"created_by_caller"`
 }
 
 // errChatTitleEmpty and errChatTitleTooLong are the two ways a title is
@@ -253,13 +258,14 @@ func (h *AgentHandler) chatRowByID(r *http.Request, chatID, userID string) (*cha
 			c.message_count, c.started_at, c.ended_at, c.created_at, c.origin,
 			COALESCE(c.last_activity_at,
 				strftime('%Y-%m-%dT%H:%M:%fZ', c.started_at),
-				c.started_at) AS last_activity_at
+				c.started_at) AS last_activity_at,
+			c.visibility, COALESCE(c.created_by = ?, 0)
 		FROM chats c
 		WHERE c.id = ?
-	`, chatID).Scan(&c.ID, &c.AgentID, &c.WorkspaceID, &c.Title,
+	`, userID, chatID).Scan(&c.ID, &c.AgentID, &c.WorkspaceID, &c.Title,
 		&c.Mode, &c.Status, &c.MessageCount,
 		&c.StartedAt, &c.EndedAt, &c.CreatedAt, &c.Origin,
-		&c.LastActivityAt); err != nil {
+		&c.LastActivityAt, &c.Visibility, &c.CreatedByCaller); err != nil {
 		return nil, err
 	}
 	c.Kind = ChatKindOf(c.Mode, derefOr(c.Origin, ""))

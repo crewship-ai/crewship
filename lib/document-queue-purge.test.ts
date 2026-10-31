@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Real IndexedDB in Chromium, no storage mock. Skipped where Chromium is not provisioned.
-import { existsSync, readFileSync } from "node:fs"
-import { transformSync } from "esbuild"
+import { existsSync } from "node:fs"
+import { buildSync } from "esbuild"
 import { chromium } from "@playwright/test"
 import { expect, it } from "vitest"
 
@@ -9,10 +9,10 @@ it.skipIf(!existsSync(chromium.executablePath()))("purges a Page's rows, then ot
   const browser = await chromium.launch({ headless: true })
   try {
     const page = await browser.newPage()
-    await page.route("http://document-queue.test/**", route => route.fulfill({ body: "<!doctype html><title>Document journal</title>", contentType: "text/html" }))
-    await page.goto("http://document-queue.test")
-    const { code } = transformSync(readFileSync(`${process.cwd()}/lib/document-queue.ts`, "utf8"), { loader: "ts", format: "iife", globalName: "documentQueue" })
-    await page.addScriptTag({ content: code })
+    await page.route("https://document-queue.test/**", route => route.fulfill({ body: "<!doctype html><title>Document journal</title>", contentType: "text/html" }))
+    await page.goto("https://document-queue.test")
+    const { outputFiles } = buildSync({ entryPoints: [`${process.cwd()}/lib/document-queue.ts`], bundle: true, write: false, platform: "browser", format: "iife", globalName: "documentQueue" })
+    await page.addScriptTag({ content: outputFiles[0].text })
     const result = await page.evaluate(async () => {
       const q = (window as unknown as { documentQueue: typeof import("./document-queue") }).documentQueue
       const draft = (id: string) => ({ id, update: "u", attempted: false, schema: 3, epoch: "e", snapshot: "private text" })

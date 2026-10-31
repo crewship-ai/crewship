@@ -45,6 +45,10 @@ type Client struct {
 	sendClosed       bool
 	consecutiveDrops atomic.Uint32
 	disconnectFired  atomic.Bool
+	// cancelWaiters holds this socket's pending cancel confirmations, one
+	// waiter per registered run. Requests for the same run share it.
+	cancelWaitMu  sync.Mutex
+	cancelWaiters map[*cancelCompletion]*cancelWaiter
 	// writeWait overrides defaultWriteWait per connection; zero means use
 	// the default. Set at construction in the hub; only tests vary it.
 	writeWait time.Duration
@@ -458,21 +462,139 @@ func clampMaxTurns(n int) int {
 }
 
 func (c *Client) handleCancelMessage(msg ClientMessage) {
-	var payload sendMessagePayload
+	var payload struct {
+		ChatID     string `json:"session_id"`
+		RequestID  string `json:"request_id"`
+		OriginOnly bool   `json:"origin_only"`
+	}
 	raw := unwrapDoubleEncoded(msg.Payload)
-	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChatID == "" {
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.ChatID == "" || len(payload.RequestID) > 128 {
 		return
 	}
 
 	cancelKey := c.userID + ":" + payload.ChatID
 	c.hub.cancelMu.Lock()
 	cancel, ok := c.hub.cancelFns[cancelKey]
+	done := c.hub.cancelDone[cancelKey]
+	if payload.OriginOnly && (done == nil || done.origin != c) {
+		ok = false
+	}
 	c.hub.cancelMu.Unlock()
 
 	if ok {
 		c.hub.logger.Info("cancelling run", "session_id", payload.ChatID, "user_id", c.userID)
 		cancel()
 	}
+	// Legacy clients do not request a confirmation. A confirmation is private
+	// to its requesting socket and cannot be confused with another user's done.
+	if payload.RequestID == "" {
+		return
+	}
+	if !ok || done == nil {
+		c.sendCancelResult(payload.ChatID, payload.RequestID, false, cancelReasonNoActiveRun)
+		return
+	}
+	c.awaitCancelResult(done, payload.ChatID, payload.RequestID)
+}
+
+// Reasons carried by a cancel_result that reports cancelled:false.
+const (
+	cancelReasonNoActiveRun     = "no_active_run"
+	cancelReasonNotCancelled    = "run_ended_without_cancellation"
+	cancelReasonDeadline        = "confirmation_deadline_exceeded"
+	cancelReasonTooManyRequests = "too_many_pending_requests"
+)
+
+// cancelResultDeadline bounds how long a socket waits for a run it asked to
+// cancel. A handler that never returns must not pin the waiter (or leave the
+// caller without an answer): past the deadline the request is answered
+// cancelled:false. A var so tests can shorten it.
+var cancelResultDeadline = 90 * time.Second
+
+// maxPendingCancelRequests caps the request IDs one socket may have waiting.
+const maxPendingCancelRequests = 32
+
+type cancelWaiter struct {
+	chatID     string
+	requestIDs []string
+}
+
+// awaitCancelResult registers requestID against the run's completion. A
+// second request for a run that already has a waiter on this socket joins it
+// and receives the same outcome, never an early denial.
+func (c *Client) awaitCancelResult(done *cancelCompletion, chatID, requestID string) {
+	c.cancelWaitMu.Lock()
+	pending := 0
+	for _, w := range c.cancelWaiters {
+		pending += len(w.requestIDs)
+	}
+	if pending >= maxPendingCancelRequests {
+		c.cancelWaitMu.Unlock()
+		c.sendCancelResult(chatID, requestID, false, cancelReasonTooManyRequests)
+		return
+	}
+	if c.cancelWaiters == nil {
+		c.cancelWaiters = make(map[*cancelCompletion]*cancelWaiter)
+	}
+	if w, exists := c.cancelWaiters[done]; exists {
+		w.requestIDs = append(w.requestIDs, requestID)
+		c.cancelWaitMu.Unlock()
+		c.sendCancelAccepted(chatID, requestID)
+		return
+	}
+	c.cancelWaiters[done] = &cancelWaiter{chatID: chatID, requestIDs: []string{requestID}}
+	c.cancelWaitMu.Unlock()
+	// The acknowledgement tells a client that this server will answer with a
+	// cancel_result; a client that never sees one is talking to a server that
+	// predates the protocol.
+	c.sendCancelAccepted(chatID, requestID)
+	go func() {
+		timer := time.NewTimer(cancelResultDeadline)
+		defer timer.Stop()
+		var cancelled bool
+		var reason string
+		select {
+		case <-done.done:
+			cancelled = done.cancelled
+			if !cancelled {
+				reason = cancelReasonNotCancelled
+			}
+		case <-timer.C:
+			reason = cancelReasonDeadline
+		case <-c.ctx.Done():
+			c.takeCancelWaiter(done)
+			return
+		}
+		w := c.takeCancelWaiter(done)
+		if w == nil {
+			return
+		}
+		for _, id := range w.requestIDs {
+			c.sendCancelResult(w.chatID, id, cancelled, reason)
+		}
+	}()
+}
+
+func (c *Client) takeCancelWaiter(done *cancelCompletion) *cancelWaiter {
+	c.cancelWaitMu.Lock()
+	defer c.cancelWaitMu.Unlock()
+	w := c.cancelWaiters[done]
+	delete(c.cancelWaiters, done)
+	return w
+}
+
+func (c *Client) sendCancelAccepted(chatID, requestID string) {
+	data, _ := json.Marshal(ServerMessage{Type: "cancel_accepted", Payload: map[string]any{"session_id": chatID, "request_id": requestID}})
+	c.safeSend(data)
+}
+
+func (c *Client) sendCancelResult(chatID, requestID string, cancelled bool, reason string) {
+	payload := map[string]any{"session_id": chatID, "request_id": requestID, "cancelled": cancelled}
+	if reason != "" {
+		payload["reason"] = reason
+	}
+	data, _ := json.Marshal(ServerMessage{Type: "cancel_result", Payload: payload})
+	c.safeSend(data)
 }
 
 type resumePayload struct {
@@ -601,8 +723,9 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 		// network blip) must not cancel an in-flight generation — the run has to
 		// finish and persist server-side so the reply is never lost. Explicit
 		// Stop still cancels this run via cancelFns (handleCancelMessage).
-		runCtx, runCancel := context.WithCancel(c.hub.baseRunContext())
-		defer runCancel()
+		runCtx, runCancelCause := context.WithCancelCause(c.hub.baseRunContext())
+		runCancel := func() { runCancelCause(ErrExplicitStopRequested) }
+		defer runCancelCause(nil)
 
 		// Reject if a run is already in progress for this user+session
 		cancelKey := c.userID + ":" + payload.ChatID
@@ -612,11 +735,15 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 			sendRefusal(channel, "a message is already being processed")
 			return
 		}
+		runDone := &cancelCompletion{done: make(chan struct{}), origin: c}
 		c.hub.cancelFns[cancelKey] = runCancel
+		c.hub.cancelDone[cancelKey] = runDone
 		c.hub.cancelMu.Unlock()
 		defer func() {
 			c.hub.cancelMu.Lock()
 			delete(c.hub.cancelFns, cancelKey)
+			delete(c.hub.cancelDone, cancelKey)
+			close(runDone.done)
 			c.hub.cancelMu.Unlock()
 		}()
 
@@ -700,6 +827,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 				Metadata:           payload.Metadata,
 			},
 		)
+		runDone.cancelled = errors.Is(err, ErrRunCancelled)
 		if err != nil {
 			var submissionError *askforms.SubmissionError
 			if errors.As(err, &submissionError) {
@@ -727,7 +855,7 @@ func (c *Client) handleSendMessage(msg ClientMessage) {
 				return
 			}
 			// Don't emit error if context was cancelled (user requested stop)
-			if runCtx.Err() == context.Canceled {
+			if runCtx.Err() == context.Canceled || errors.Is(err, ErrRunCancelled) {
 				streamFn(ChatEvent{Type: "done", Content: ""})
 				return
 			}

@@ -1424,6 +1424,29 @@ unclassified folder entries before matching, preventing title confirmation.
 Canonical backup/recovery data retains its existing OWNER/instance-admin gates;
 this does not introduce Page folder ACL mutation auditing or change its atomicity.
 
+### Private browser draft recovery
+
+Native documents, text documents, Project source/comments and Design drafts use
+an immutable Page ID and human identity as their recovery scope. New durable
+payloads are encrypted in the browser. Recovery obtains a key envelope through
+a fresh authenticated Page-read check; an expired session retains the copy and
+does not authorize releasing it to another identity. Bound legacy records are
+migrated before entering an editor. Unbound slug records are never replayed.
+
+A positively verified loss of current Page read erases reachable local drafts;
+a network failure, expired cookie, or loss of Edit alone does not prove that
+loss. Offline clients cannot promise immediate deletion. Deferred deletion
+compares the captured revision, preserving a later replacement.
+
+Before an authentication transition unmounts an editor, admitted local writes
+must drain. Failed capture, unavailable storage, and an over-limit Design draft
+keep the live model mounted behind recovery UI and block navigation. Explicit
+sign-out warns before deleting persistent recovery copies and deletes only the
+revisions covered by that confirmation. Later writes remain for recovery.
+Recovery does not replay native snapshot saves, custody operations or agent
+dispatch. Design resumes standard CRDT synchronization only after fresh
+same-person Edit admission; read-only viewers do not restore a writer canvas.
+
 ### Design canvases (opt-in)
 
 Design uses the same Page identity, grants and retained artifact versions. The
@@ -1439,6 +1462,17 @@ and unsaved draft. Fresh metadata must confirm the same actor, immutable Page,
 Edit capability and opaque authority revision. Browser websocket admission sends
 that `authority_revision`; the host rejects a mismatch before upgrading, including
 a revoke-and-regrant gap. Revocation never restores an earlier writer draft.
+The authority revision is scoped to the authenticated person and this Design
+Page: it is built from their `user` and `page` rows in
+`mooring_authority_generations` (installed on a fresh admission if absent),
+the same generations native Craft sessions use. A change whose recipients
+include that person or that Page (their grants, crew or workspace membership,
+folder ACL, account status, or the Page's owner, audience or folder) closes
+an open Design websocket, including a revoke-then-restore cycle. The broad
+workspace delivery epoch is not part of it, so creating another Page, changing
+a grant for someone else on another Page or adding a member does not close an
+open canvas or drop its unconfirmed edits. Current Page rights, membership and
+the credential are still checked live on every frame and heartbeat.
 Credential renewal does not replay an HTTP snapshot or mutation.
 Human Design creation accepts the optional create-only `created_by_test` boolean
 and retains it in Page catalog metadata, just like other artifact creation.
@@ -1464,7 +1498,36 @@ changes supplied fields of a stable node; new nodes need complete geometry:
 Delete uses `{"op":"delete","id":"cart"}`; reorder uses
 `{"op":"reorder","order":["cart"]}`. Keep existing IDs when changing colors,
 text or geometry. A snapshot creates an ordinary retained artifact version;
-restore creates a new version and preserves history.
+restore creates a new version and preserves history. The CLI reads at most
+1 MiB from `--file`; the HTTP route accepts up to 4 MiB.
+
+Persistence has two layers. The live Yjs head (at most 4 MiB encoded) is
+written on every accepted websocket update and REST operation. Each `apply` and
+`restore` also commits a retained version. Browser edits become a retained
+version through `snapshot` or through an automatic `Automatic Design checkpoint`
+snapshot, taken while an editor's websocket is open once the live head has been
+idle for about 10 seconds. Engine limits (500 operations per request, 2,000
+nodes, 4,000 order entries, unknown node fields) answer 400; history quota
+answers 413 and keeps existing versions.
+
+When saved history is full, the editor shows the refused checkpoint and offers
+both a draft download (canvas and unsent feedback) and **Continue in a new
+Design**. Continuing copies the current canvas, including pending local changes,
+to a new Page with version 1. It does not prune or rewrite the original history.
+The original tab and unsent feedback remain open; the confirmed copy opens by
+an explicit link in a new tab. A failed or uncertain request keeps the original
+canvas and feedback and is not automatically replayed, including after login
+expiry. Creation is confirmed only by a 201 response and a version-1 receipt.
+
+The existing human Design-create API accepts `source_page_id`, `expected_human`
+and base64 `initial_state` together for this action. The decoded Yjs state is
+bounded to 4 MiB. Current source Edit authority, the expected identity and target
+Page-create authority are checked under the same writer transaction as the new
+Page and initial version. After the final document insert, identity, creation
+and source authority are checked again, followed by exact Page/document
+acknowledgement. Failure rolls back the entire new Page and leaves the source
+unchanged. Copying does not transfer comments or their anchors. The
+normal empty-create and CLI behavior is unchanged.
 
 The corresponding agent tools are `design_get`, `design_apply`,
 `design_snapshot`, `design_versions` and `design_restore`. CLI invocations with a
@@ -1476,7 +1539,11 @@ agents edit an explicitly selected existing Design. The host rejects calls when 
 not enabled. A failed response is never automatically retried.
 The agent tool's `slug` accepts a Page slug or the exact immutable Page ID
 selected by that run's original human mandate, with or without `@`. This does
-not permit selecting another Page.
+not permit selecting another Page. Tool arguments are closed objects of at most
+1 MiB. When the run was triggered by a `--send-to-agent` comment, a successful
+`design_apply` that commits a newer version answers that one bound comment task
+with the reply "Updated the selected Design element."; snapshot and restore do
+not.
 
 Additional human CLI commands list or create anchored comments, pin a shared
 version, and connect the owner's private chat:
@@ -1492,5 +1559,93 @@ crewship page design watch checkout --count 1
 `watch` exposes unchanged standard Yjs frames as base64 NDJSON and stops after
 `--count` binary frames (zero watches until interrupted). It uses the saved
 human credential with the normal server-host guard; agent runs use the bounded
-MCP read/apply tools. `get` returns the current canvas, while `versions` lists
-immutable retained snapshots. Sharing never grants a reader edit rights.
+MCP read/apply tools. `get` returns the live canvas for an editor. Read and
+Comment users receive only the shared immutable snapshot, including its version
+number; before a version is shared, content reads return 404. Their websocket
+can synchronize that shared snapshot and presence but receives no private live
+updates. Comment users anchor feedback on the shared version. `versions` also
+stays at that shared pin for readers. Sharing never grants edit rights.
+
+Workspace ADMIN and OWNER may read and edit every Design, including another
+human's unshared or private Design. A read-scoped credential keeps full manager
+read and history access but cannot mutate or send websocket updates. Normal
+Read/Comment audiences still receive only the shared snapshot.
+
+Access to a foreign Design is recorded as `design.workspace_admin_accessed` in
+the existing audit log, bound to the Page, workspace, original human, actor and
+custodian. The compliance row and configured keyed journal share one identity
+and commit together under the writer fence. Permission probes verify the
+original native journal receipt rather than appending duplicates; notifications
+follow commit. One HTTP request or websocket admission has one audit identity,
+and incoming websocket writes receive their own identity.
+
+This records authorized read/write access, not a saved-version receipt. REST
+versioned changes can commit a preflight access receipt before publication;
+that receipt remains when later publication is refused. The publication
+transaction rechecks both receipts and current authority after the final
+content write. Unacknowledged or corrupted receipts refuse access and preserve
+confirmed content. Manager edits
+use the existing room lock, revision checks and VersionStore. This policy is
+local to Design and does not alter other Page families' audience rules.
+
+### Browser-local draft key recovery
+
+`POST /api/v1/pages/{slug}/draft-key` accepts only an explicit immutable
+`@<page-id>` reference, a current human credential with `pages:read`, and the
+current workspace. It uses the canonical per-Page read model, including
+workspace administrators. Restricted members may use only the existing
+exact private-custodian boundary. No document bytes or server rows are created.
+
+`{"human":"<expected-human-id>","operation":"wrap","key":"<base64 32-byte data key>"}` returns
+`{"envelope":"<versioned encrypted key>"}`. The encrypted payload contains an
+explicit domain, original human ID, workspace ID and Page ID. A missing server
+master key refuses protection; the plaintext-secrets escape hatch does not apply.
+`{"human":"<expected-human-id>","operation":"unwrap","envelope":"..."}` returns `{"key":"..."}` only to
+that original human after a fresh current-read check under the SQL writer fence.
+All responses use `Cache-Control: no-store`. A stale client identity is refused
+before creating a key envelope; an account switch cannot rebind the draft.
+Slugs cannot alias an old draft.
+
+A 403 with `code: "draft_read_revoked"` is positive evidence for deleting that
+Page's local draft. `draft_identity_mismatch`, generic 403, 400 (unavailable or
+invalid envelope), 401 (sign in again), 500 and 503 do not authorize deletion.
+An offline browser cannot immediately learn revocation. This endpoint is the
+key-protection primitive; retention, sealing and explicit sign-out confirmation
+in the browser are separate integration work, not established by this route.
+
+Browser key envelopes are external to the server database. Keep their master-key
+versions resolvable while those drafts may need recovery; a successful database
+re-encryption walk does not migrate browser envelopes or prove old versions safe
+to remove. See [encryption rotation](../security/encryption.mdx).
+
+The matching CLI is `crewship page draft-key @PAGE_ID --file -` (or a local
+JSON file). Input is `{human,operation:"wrap",key}` or
+`{human,operation:"unwrap",envelope}`. Key material belongs in stdin/a protected
+file, not shell arguments. Output contains sensitive key material. Agent runs
+cannot use a saved human profile for this command.
+
+For draft-key recovery only, workspace resolution does not pre-empt the fenced
+membership check: a current credential for the expected human with removed
+membership receives `403 draft_read_revoked`. ACL/storage faults return 5xx and
+retain drafts. Workspace administrators use the canonical Page read policy;
+the envelope still belongs to its original human and cannot cross identities.
+
+Legacy plaintext recovery copies do not qualify for encrypted retention. Before
+admitting a different identity (or completing expiry/sign-out), the browser drains
+mounted writers and removes reachable unsealed rows belonging to other identities
+from both IndexedDB journals and legacy Design/comment localStorage keys. Sealed
+rows remain. Cleanup uses strict IndexedDB transactions; a failed cleanup blocks
+identity admission behind the retry curtain. A legacy copy for the current human
+migrates durably before entering an editor. Explicit sign-out counts legacy
+localStorage copies in its discard warning; cancel leaves those copies intact.
+
+Rollout order for encrypted draft retention is mandatory: deploy the backend
+`draft-key` route first, including current membership and Design administrator
+checks, then the durable artifact-draft base, then the complete browser migration.
+The browser migration and all its writer/auth changes are one release unit.
+A binary that embeds the frontend may ship these prerequisites and the browser
+unit atomically; separate frontend upgrades must follow the backend.
+Deploying that browser unit against an older backend is unsupported and prevents
+editing; it must not be rolled out independently. Keep the backend route present
+when rolling back browser code. Release integration must exercise this order and
+fresh same-human recovery; unit/browser fixtures alone are not deployment proof.

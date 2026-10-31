@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -379,6 +380,21 @@ type CompletionTimeUpdater interface {
 }
 
 func (r *IPCResolver) UpdateRunWithCompletion(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}, completedAt string) error {
+	_, err := r.updateRunOutcome(ctx, runID, status, exitCode, errorMsg, metadata, completedAt, false)
+	return err
+}
+
+// RunOutcomeUpdater acknowledges the actual persisted terminal outcome, which
+// may differ from a requested update after idempotency or work settlement.
+type RunOutcomeUpdater interface {
+	UpdateRunOutcome(context.Context, string, string, *int, *string, map[string]interface{}, string) (string, error)
+}
+
+func (r *IPCResolver) UpdateRunOutcome(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}, completedAt string) (string, error) {
+	return r.updateRunOutcome(ctx, runID, status, exitCode, errorMsg, metadata, completedAt, true)
+}
+
+func (r *IPCResolver) updateRunOutcome(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}, completedAt string, confirm bool) (string, error) {
 	reqURL := fmt.Sprintf("%s/api/v1/internal/runs/%s", r.baseURL, url.PathEscape(runID))
 	payload := map[string]interface{}{"status": status}
 	if completedAt != "" {
@@ -395,24 +411,47 @@ func (r *IPCResolver) UpdateRunWithCompletion(ctx context.Context, runID, status
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return fmt.Errorf("update run: marshal: %w", err)
+		return "", fmt.Errorf("update run: marshal: %w", err)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPatch, reqURL, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return "", err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("X-Internal-Token", r.internalToken)
 	resp, err := r.httpClient.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("update run: %w", err)
+		return "", fmt.Errorf("update run: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
-		return fmt.Errorf("update run: server returned %d: %s", resp.StatusCode, respBody)
+		return "", fmt.Errorf("update run: server returned %d: %s", resp.StatusCode, respBody)
 	}
-	return nil
+	if !confirm {
+		return "", nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("update run: unconfirmed HTTP status %d", resp.StatusCode)
+	}
+	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 8193))
+	if readErr != nil {
+		return "", fmt.Errorf("read run outcome: %w", readErr)
+	}
+	if len(raw) > 8192 {
+		return "", errors.New("run outcome exceeds limit")
+	}
+	var outcome struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &outcome); err != nil {
+		return "", fmt.Errorf("decode run outcome: %w", err)
+	}
+	if outcome.ID != runID || outcome.Status == "" {
+		return "", errors.New("run outcome identity/status missing or mismatched")
+	}
+	return outcome.Status, nil
 }
 
 // RecordCost forwards a completed run's CLI-reported token usage to the

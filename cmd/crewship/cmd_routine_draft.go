@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -32,6 +34,21 @@ Shared drafts instead use the exact reference from routine shared-draft:
 Shared validate checks structure only and never authorizes execution.`,
 }
 
+// routineDraftHelp is {Short, Example} per draft subcommand.
+var routineDraftHelp = map[string][2]string{
+	"list": {"List unpublished routine drafts (slug, revision, updated_at)",
+		"  crewship routine draft list\n  crewship routine draft list -f json"},
+	"get": {"Print a routine's draft revision envelope (or the live recipe as a starting point)",
+		"  crewship routine draft get digest -f json > draft.json"},
+	"save": {"Save a draft revision envelope; does not change the live routine",
+		"  crewship routine draft save draft.json -f json > saved.json"},
+	"validate": {"", "  crewship routine draft validate shared --draft-id d1 --revision 3 --base-revision 2"},
+	"publish": {"Publish a saved draft file, or a reviewed shared draft by --draft-id/--revision/--base-revision",
+		"  crewship routine draft publish saved.json\n  crewship routine draft publish saved.json --approve-risk"},
+	"discard": {"Delete a saved draft revision; the live routine is untouched",
+		"  crewship routine draft discard saved.json"},
+}
+
 func newRoutineDraftCommand(action string) *cobra.Command {
 	use := action
 	if action == "get" {
@@ -40,7 +57,7 @@ func newRoutineDraftCommand(action string) *cobra.Command {
 	if action == "save" || action == "publish" || action == "discard" {
 		use += " <draft.json>"
 	}
-	cmd := &cobra.Command{Use: use, Short: action + " a routine draft", Args: cobra.ExactArgs(1)}
+	cmd := &cobra.Command{Use: use, Short: routineDraftHelp[action][0], Example: routineDraftHelp[action][1], Args: cobra.ExactArgs(1)}
 	if action == "list" {
 		cmd.Args = cobra.NoArgs
 	}
@@ -79,6 +96,9 @@ func newRoutineDraftCommand(action string) *cobra.Command {
 				return fmt.Errorf("use the revision envelope from routine draft get/save")
 			}
 			slug = draft.Slug
+			// json.Marshal compacts the file and keeps key order. It also
+			// HTML-escapes & < >, so the stored definition holds the escaped
+			// form; get returns it as stored and publish proves those bytes.
 			body = json.RawMessage(raw)
 			if action == "publish" || action == "discard" {
 				if draft.ID == "" || draft.Revision < 1 {
@@ -92,11 +112,20 @@ func newRoutineDraftCommand(action string) *cobra.Command {
 					}
 					// Validate exactly the file's document; publication rejects if another
 					// editor saved a different revision while this proof was being minted.
-					testBody := map[string]any{"definition": draft.Document["definition"]}
+					testBody := map[string]json.RawMessage{"definition": draft.Document["definition"]}
 					if crew, ok := draft.Document["author_crew_id"]; ok {
 						testBody["author_crew_id"] = crew
 					}
-					resp, err := client.Post(base+"/test_run", testBody)
+					// The proof is minted for the definition's exact bytes. Compact
+					// whitespace (the stored form is compact) but keep key order and
+					// characters: no HTML escaping, no re-sorting through a map.
+					var encoded bytes.Buffer
+					encoder := json.NewEncoder(&encoded)
+					encoder.SetEscapeHTML(false)
+					if err := encoder.Encode(testBody); err != nil {
+						return fmt.Errorf("prepare validation: %w", err)
+					}
+					resp, err := client.Post(base+"/test_run", &encoded)
 					if err != nil {
 						return err
 					}
@@ -146,8 +175,15 @@ func newRoutineDraftCommand(action string) *cobra.Command {
 		if action == "discard" {
 			return resolvedFormatter(cmd).JSON(map[string]bool{"discarded": true})
 		}
+		raw, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+		if action == "get" || action == "save" {
+			return printRoutineDraftEnvelope(cmd, raw)
+		}
 		var result any
-		if err = json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		if err = json.Unmarshal(raw, &result); err != nil {
 			return err
 		}
 		return resolvedFormatter(cmd).AutoHuman(result, func() { b, _ := json.MarshalIndent(result, "", "  "); fmt.Fprintln(cmd.OutOrStdout(), string(b)) })
@@ -168,6 +204,36 @@ func newRoutineDraftCommand(action string) *cobra.Command {
 	}
 	return cmd
 }
+
+// printRoutineDraftEnvelope prints a draft revision envelope from the server's
+// bytes. Decoding into a map and re-encoding would sort the definition's keys
+// and HTML-escape it, so a file saved from this output would no longer match
+// the stored definition and publish would be refused (save_token mismatch).
+// json.Indent and json.Compact change only whitespace outside strings.
+func printRoutineDraftEnvelope(cmd *cobra.Command, raw []byte) error {
+	f := resolvedFormatter(cmd)
+	var out bytes.Buffer
+	switch f.Format {
+	case "yaml":
+		var v any
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return err
+		}
+		return f.YAML(v)
+	case "ndjson":
+		if err := json.Compact(&out, raw); err != nil {
+			return err
+		}
+	default:
+		if err := json.Indent(&out, bytes.TrimSpace(raw), "", "  "); err != nil {
+			return err
+		}
+	}
+	out.WriteByte('\n')
+	_, err := f.Writer.Write(out.Bytes())
+	return err
+}
+
 func init() {
 	for _, action := range []string{"list", "get", "save", "validate", "publish", "discard"} {
 		routineDraftCmd.AddCommand(newRoutineDraftCommand(action))

@@ -41,6 +41,7 @@ type craftAction struct {
 	Action     string                 `json:"action" yaml:"action"`
 	Generation string                 `json:"generation,omitempty" yaml:"generation,omitempty"`
 	RequestID  string                 `json:"request_id,omitempty" yaml:"request_id,omitempty"`
+	ProposalID string                 `json:"proposal_id,omitempty" yaml:"proposal_id,omitempty"`
 	Snapshot   *craftDocumentSnapshot `json:"snapshot,omitempty" yaml:"snapshot,omitempty"`
 }
 
@@ -52,10 +53,13 @@ func craftConnect(cmd *cobra.Command, args []string) error {
 	c = c.WithContext(cmd.Context())
 	r, e := c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/sessions", struct{}{})
 	if e != nil {
-		return fmt.Errorf("native session request failed")
+		return craftTransportError("native session request failed")
 	}
 	defer r.Body.Close()
 	if r.StatusCode != 201 {
+		if r.StatusCode < 200 || r.StatusCode >= 300 {
+			return craftHTTPError(r, "")
+		}
 		return fmt.Errorf("native session HTTP %d", r.StatusCode)
 	}
 	return craftUseAdmission(cmd, args, c, r, false)
@@ -128,7 +132,14 @@ func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http
 		} else if a.Snapshot != nil || len(scanner.Bytes()) > 16<<10 {
 			return fmt.Errorf("invalid or oversized native action")
 		}
-		if a.Action == "renew" || a.Action == "release" || a.Action == "handoff" {
+		if a.Action == "proposal" || a.Action == "accept-proposal" || a.Action == "reject-proposal" {
+			if !craftProposalID(a.ProposalID) {
+				return fmt.Errorf("invalid proposal_id")
+			}
+		} else if a.ProposalID != "" {
+			return fmt.Errorf("invalid native action")
+		}
+		if a.Action == "renew" || a.Action == "release" || a.Action == "handoff" || a.Action == "accept-proposal" {
 			v, err := strconv.ParseInt(a.Generation, 10, 64)
 			if err != nil || v < 1 || strconv.FormatInt(v, 10) != a.Generation {
 				return fmt.Errorf("invalid native generation")
@@ -173,20 +184,42 @@ func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http
 			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/lease/handoff", body)
 		case "reauthorize":
 			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/sessions/reauthorize", struct{}{})
+		case "proposals":
+			r, e = c.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/craft/proposals")
+		case "proposal":
+			r, e = c.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/craft/proposals/" + a.ProposalID)
+		case "accept-proposal":
+			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/proposals/"+a.ProposalID+"/accept", map[string]string{"sessionId": admission.ID, "generation": a.Generation})
+		case "reject-proposal":
+			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/proposals/"+a.ProposalID+"/reject", struct{}{})
 		case "watch":
 			return craftWatch(cmd, c, args[0], token)
 		default:
 			return fmt.Errorf("unknown native action")
 		}
 		limit := int64(64 << 10)
-		if a.Action == "read" {
+		if a.Action == "read" || a.Action == "proposal" {
 			limit = craftNativeJSONLimit
 		}
 		if e = craftResponseLimit(cmd, r, e, token, limit); e != nil {
+			if craftLeaseAction(a.Action) {
+				return craftWithLeaseHolder(c, args[0], e, token)
+			}
 			return e
 		}
 	}
 	return scanner.Err()
+}
+
+// craftProposalID accepts only the server's opaque ncp_ identifier, so an
+// action line cannot steer the request to another route.
+func craftProposalID(id string) bool {
+	rest, ok := strings.CutPrefix(id, "ncp_")
+	if !ok || len(rest) != 24 {
+		return false
+	}
+	_, err := hex.DecodeString(rest)
+	return err == nil && strings.ToLower(rest) == rest
 }
 func craftReadJSON(r io.Reader) (json.RawMessage, error) { return craftReadJSONLimit(r, 64<<10) }
 func craftReadJSONLimit(r io.Reader, limit int64) (json.RawMessage, error) {
@@ -237,11 +270,11 @@ func craftResponse(cmd *cobra.Command, r *http.Response, err error, secret strin
 }
 func craftResponseLimit(cmd *cobra.Command, r *http.Response, err error, secret string, limit int64) error {
 	if err != nil {
-		return fmt.Errorf("native request failed")
+		return craftTransportError("native request failed")
 	}
 	defer r.Body.Close()
 	if r.StatusCode < 200 || r.StatusCode >= 300 {
-		return fmt.Errorf("native HTTP %d", r.StatusCode)
+		return craftHTTPError(r, secret)
 	}
 	raw, e := craftReadJSONLimit(r.Body, limit)
 	if e != nil {
@@ -258,10 +291,13 @@ func craftWatch(cmd *cobra.Command, c *cli.Client, page, secret string) error {
 	stream.HTTPClient = &hc
 	r, e := stream.Get("/api/v1/pages/" + pagePathEscape(page) + "/craft/events")
 	if e != nil {
-		return fmt.Errorf("native stream failed")
+		return craftTransportError("native stream failed")
 	}
 	defer r.Body.Close()
 	if r.StatusCode != 200 {
+		if r.StatusCode < 200 || r.StatusCode >= 300 {
+			return craftHTTPError(r, secret)
+		}
 		return fmt.Errorf("native stream HTTP %d", r.StatusCode)
 	}
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "text/event-stream") {

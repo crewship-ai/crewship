@@ -1,0 +1,44 @@
+{
+  "dsl_version": "1.0",
+  "name": "dates",
+  "description": "Explicit integration harness prerequisite; not part of the demo seed.",
+  "steps": [
+    {
+      "id": "normalize",
+      "type": "agent_run",
+      "agent_slug": "robin",
+      "complexity": "fast",
+      "prompt": "Find every calendar date in {{ inputs.text }}. Return ONLY a JSON array of unique ISO 8601 YYYY-MM-DD dates sorted ascending. No prose or code fences.",
+      "validation": {
+        "must_contain": [
+          "2024-03-03",
+          "2024-04-15",
+          "2024-05-01",
+          "2024-06-01"
+        ],
+        "must_not_contain": [
+          "API_KEY=",
+          "Bearer "
+        ]
+      }
+    },
+    {
+      "id": "canonical",
+      "type": "transform",
+      "needs": [
+        "normalize"
+      ],
+      "transform": {
+        "input": "{{ steps.normalize.output }}",
+        "expression": "@json"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "name": "text",
+      "type": "string",
+      "default": "Kickoff March 3, 2024. Review April 15, 2024. Launch 2024-05-01. Retro June 1, 2024."
+    }
+  ]
+}

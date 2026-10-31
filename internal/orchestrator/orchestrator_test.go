@@ -676,26 +676,10 @@ func TestRunAgentCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	mc := &mockContainer{
-		// Cancel ctx synchronously inside the first Exec invocation. By
-		// the time the call returns, ctx.Err() is non-nil, so every
-		// subsequent setup step and the main agent exec see a cancelled
-		// ctx. RunAgent has no ctx.Err() short-circuit until after
-		// streamOutput, so it walks the full path and reliably hits the
-		// "run cancelled" branch on every scheduler. cancel is
-		// idempotent, so calling it on every Exec is safe.
-		execFn: func(_ provider.ExecConfig) (*provider.ExecResult, error) {
-			cancel()
-			return &provider.ExecResult{
-				ExecID: "noop",
-				Reader: io.NopCloser(strings.NewReader("")),
-			}, nil
-		},
-		inspectResult: struct {
-			running  bool
-			exitCode int
-		}{false, 0},
-	}
+	// The caller cancels only after the actual agent exec is created.
+	// A stop is then positively acknowledged for that exact exec/session;
+	// empty runtime output or an exit0 cannot stand in for cancellation.
+	mc := newConfirmedCancellationFixture(cancel)
 
 	state := newMemState()
 	o := New(mc, state, slog.Default())
@@ -710,6 +694,10 @@ func TestRunAgentCancelledContext(t *testing.T) {
 		UserMessage: "test",
 		TimeoutSecs: 30,
 	}, nil)
+
+	if !mc.stopObserved.Load() {
+		t.Fatal("cancellation was not confirmed at the original host execution")
+	}
 
 	if err == nil {
 		t.Fatal("expected error from cancelled context")

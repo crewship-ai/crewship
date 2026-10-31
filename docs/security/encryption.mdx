@@ -217,6 +217,13 @@ The walk covers every envelope-bearing column: `credentials.encrypted_value`, `c
 <Warning>
   Backup bundles created **before** the rotation contain credential envelopes under the old key. Restoring one requires the old key to still be resolvable (keep it archived offline), or take a fresh backup after the re-encryption run.
 
+  Browser-local draft data-key envelopes are external to the database too. The
+  re-encryption walk cannot discover or migrate them. Keep every master-key
+  version needed by retained browser drafts resolvable until those drafts have
+  been recovered or deliberately discarded. `failed=0` for database rows does
+  not establish that an older master key is safe to remove. Missing keys must
+  leave the encrypted browser draft intact; they are not proof of read revocation.
+
   The CLI-side backup keyring (`~/.crewship/backup-keyring.enc`) is a separate rotation domain: it is encrypted with the **CLI host's** own `ENCRYPTION_KEY`, not the server's, so the server-side run never touches it. If you rotate the CLI host's key, re-store the affected passphrases (`crewship backup create --use-keyring` re-writes the entry) or keep that host's old key resolvable.
 </Warning>
 

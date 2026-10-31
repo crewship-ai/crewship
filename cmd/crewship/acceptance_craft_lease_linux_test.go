@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/api"
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
@@ -223,8 +225,17 @@ func TestAcceptance_CraftLeaseTwoHumans(t *testing.T) {
 	action(owner, map[string]string{"action": "renew", "generation": generation})
 	owner.input.Close()
 	<-owner.done
-	if owner.err == nil || !strings.Contains(owner.stderr.String(), "native HTTP 409") {
+	if owner.err == nil || !strings.Contains(owner.stderr.String(), "API error (409): native editor lease changed") {
 		t.Fatal("old generation was not rejected by the real server and CLI")
+	}
+	// The refusal names who holds the lease now and exits with the conflict
+	// code, instead of a bare "native HTTP 409" exit 1.
+	if !strings.Contains(owner.stderr.String(), `lease held by human "Jana"`) {
+		t.Fatalf("stale-generation refusal does not name the current holder: %s", owner.stderr.String())
+	}
+	var exit *exec.ExitError
+	if !errors.As(owner.err, &exit) || exit.ExitCode() != cli.ExitConflict {
+		t.Fatalf("stale-generation refusal exit = %v, want %d", owner.err, cli.ExitConflict)
 	}
 	other.input.Close()
 	<-other.done

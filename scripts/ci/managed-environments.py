@@ -58,6 +58,7 @@ HOST_TESTS = {
         'TestHostDetachedHoldDoesNotRestopOrOverwriteTerminalOutcome',
         'TestHostForcedLeaderExitRetainsOccupancyUntilWholeContainerAbsent',
         'TestHostRunAgentCompletesThroughDetachedHelperAndPreservesLiteralLaunch',
+        'TestHostRunAgentExplicitStopRequiresRetainedTerminal',
         'TestHostRunAgentObserverCancellationRetainsHomeThenRecoversResult',
         'TestRetainedAcknowledgementRefusesActiveOwnerAndForeignRoot',
         'TestRetainedAcknowledgementRespectsAuthoritativeNonSuccess',

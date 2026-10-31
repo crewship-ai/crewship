@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"unicode/utf8"
 
@@ -34,6 +35,16 @@ func newPageArtifactCommentCommand() *cobra.Command {
 		if body.Version < 1 || strings.TrimSpace(body.Path) == "" || strings.TrimSpace(body.Selector) == "" || strings.TrimSpace(body.Quote) == "" || strings.TrimSpace(body.Text) == "" {
 			return fmt.Errorf("positive --version and nonempty --path, --selector, --quote and --text are required")
 		}
+		wait, timeout, err := artifactCommentWaitRequested(cmd, body.SendToAgent)
+		if err != nil {
+			return err
+		}
+		if wait {
+			return artifactCommentDispatch(cmd, "project", args[0], body, timeout)
+		}
+		if body.SendToAgent && os.Getenv("CREWSHIP_AGENT_TOKEN") == "" {
+			fmt.Fprintln(cmd.ErrOrStderr(), "task queued; it starts when its source chat receives the task message — pass --wait to send it now, or use `crewship run --artifact-target`")
+		}
 		return artifactCLIRequest(cmd, "POST", "/api/v1/pages/"+pagePathEscape(args[0])+"/artifact/comments", body)
 	}}
 	cmd.Flags().Int64("version", 0, "Exact selected project version")
@@ -42,5 +53,6 @@ func newPageArtifactCommentCommand() *cobra.Command {
 	cmd.Flags().String("quote", "", "Selected element text from that exact version")
 	cmd.Flags().String("text", "", "Requested change or comment")
 	cmd.Flags().Bool("send-to-agent", false, "Queue an exact version-bound task for the agent")
+	addArtifactCommentWaitFlags(cmd)
 	return cmd
 }

@@ -80,6 +80,7 @@ import { ArtifactViewerProvider, type ArtifactViewerTarget } from "./artifact-co
 import { artifactCommentMessage, type ArtifactAgentRequest } from "./artifact-context/viewer/agent-dispatch"
 import { ArtifactViewerPanel } from "./artifact-context/viewer"
 import { chatArtifactProjects } from "@/lib/feature-flags"
+import { viewerAsideClass } from "./artifact-context/viewer/viewer-placement"
 import { ComposerArtifactContextStrip } from "./artifact-context/composer/composer-artifact-context"
 import { useComposerArtifactState } from "./artifact-context/use-composer-artifact-state"
 import { useServerConfirmedPrivate } from "./artifact-context/use-server-chat-visibility"
@@ -1764,7 +1765,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
       </div>
 
       <aside aria-label={projectTarget ? "Artifact viewer" : viewerOpen ? "Saved document panel" : undefined} hidden={!viewerOpen}
-        className={cn("min-h-0 min-w-0 shrink-0", documentExpanded ? "w-full" : "w-[45%] min-w-[20rem] max-w-full")}>{viewerPanel}</aside>
+        className={viewerAsideClass({ expanded: documentExpanded, overlay: chatArtifactProjects() })}>{viewerPanel}</aside>
       <div style={{ display: viewerOpen ? "none" : "contents" }} inert={viewerOpen}>
       {executionProfile === "trusted" && <ArtifactPane scopeKey={artifactScope} onAskSelection={askArtifactSelection} agentId={agentId} expanded={artifactFocus} />}
       {executionProfile === "trusted" && (!artifactOpen || artifactFocus) && <RightDrawer>

@@ -101,10 +101,8 @@ func (h *AuditHandler) List(w http.ResponseWriter, r *http.Request) {
 	if page > maxPage {
 		page = maxPage
 	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit < 1 || limit > 100 {
-		limit = 50
-	}
+	// Page-based: the ?offset param is ignored; offset derives from ?page.
+	limit, _ := parsePagination(r, 50, 100)
 	offset := (page - 1) * limit
 	if offset < 0 {
 		offset = 0

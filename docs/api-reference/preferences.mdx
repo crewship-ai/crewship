@@ -10,6 +10,8 @@ User preferences are a per-user, string-keyed store of raw JSON values backing U
 
 The handler is **deliberately schemaless on the value side**. The frontend writes whatever JSON shape it wants under a key; the server stores the bytes and hands them back unchanged on read. This keeps UI iteration fast — adding a new preference doesn't need a migration or a backend release.
 
+The web app keeps a copy of each preference in the browser for the first paint (`hooks/use-user-preference.ts`), under a key that names the signed-in user (`crewship.pref.u.<user id>.<key>`). Two accounts in one browser never see or upload each other's values: nothing is read from that copy until the session is known, a change made for one user is never sent after the session changed to another, and on sign-in the server's value wins over the copy unless the copy holds a change the server never confirmed.
+
 Implementation: `internal/api/user_preferences.go`. Persisted in `user_preferences` (migration v58) as `(user_id, pref_key, pref_value, updated_at)` with a `UNIQUE(user_id, pref_key)` constraint.
 
 ## Endpoints

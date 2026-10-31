@@ -1,0 +1,42 @@
+{
+  "dsl_version": "1.0",
+  "name": "contacts",
+  "description": "Explicit integration harness prerequisite; not part of the demo seed.",
+  "steps": [
+    {
+      "id": "extract",
+      "type": "agent_run",
+      "agent_slug": "sam",
+      "complexity": "fast",
+      "prompt": "Extract every email from {{ inputs.text }}. Return ONLY a JSON object with an emails array of unique lowercase addresses sorted alphabetically. No prose or code fences.",
+      "validation": {
+        "must_contain": [
+          "dana@example.com",
+          "ops@example.org"
+        ],
+        "must_not_contain": [
+          "API_KEY=",
+          "Bearer "
+        ]
+      }
+    },
+    {
+      "id": "canonical",
+      "type": "transform",
+      "needs": [
+        "extract"
+      ],
+      "transform": {
+        "input": "{{ steps.extract.output }}",
+        "expression": "@json"
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "name": "text",
+      "type": "string",
+      "default": "Contact dana@example.com or ops@example.org; dana@example.com is a duplicate."
+    }
+  ]
+}

@@ -148,3 +148,15 @@ func TestCraftAgentCLIConsentFlagDefaultsFalse(t *testing.T) {
 		t.Fatal("whole-document consent did not default to false")
 	}
 }
+
+// A proposal is a successful task outcome; status must print it with its id.
+func TestCraftAgentCLIStatusPrintsProposalOutcome(t *testing.T) {
+	stub := pageStub(t)
+	stub.OnGet("/api/v1/pages/health/craft/tasks/work", func(*http.Request, []byte) (int, []byte, string) {
+		return 200, []byte(`{"work_id":"work","state":"succeeded","outcome":"proposal","proposal_id":"ncp_05ce1f638d32a97955d06534","events":[{"operation":"propose","status":201,"at":"2026-10-29T22:03:51Z"}]}`), "application/json"
+	})
+	out, err := runCraftAgentCLI(t, "task", "status", "health", "work")
+	if err != nil || !strings.Contains(out, "succeeded") || !strings.Contains(out, `"outcome"`) || !strings.Contains(out, "proposal") || !strings.Contains(out, "ncp_05ce1f638d32a97955d06534") {
+		t.Fatal("status did not print the proposal outcome", out, err)
+	}
+}

@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"strconv"
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
@@ -69,18 +68,7 @@ func (h *ApprovalsHandler) List(w http.ResponseWriter, r *http.Request) {
 	} else if status == "" {
 		status = harbormaster.StatusPending
 	}
-	limit := 50
-	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
-			limit = n
-		}
-	}
-	offset := 0
-	if v := r.URL.Query().Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
-		}
-	}
+	limit, offset := parsePagination(r, 50, 200)
 	viewer := ""
 	if user := UserFromContext(r.Context()); user != nil {
 		viewer = user.ID

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -20,6 +21,27 @@ func TestWorkspaceArtifactPolicyCLIRequiresExplicitReplacement(t *testing.T) {
 		if err := command.Execute(); err == nil {
 			t.Fatalf("accepted incomplete policy replacement: %v", args)
 		}
+	}
+}
+
+func TestWorkspaceArtifactPolicyCLINamesTheMissingAllowlistChoice(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"neither", []string{"set", "--base-version", "1", "--enabled=false"}, "--crew-id or --clear-crews is required"},
+		{"both", []string{"set", "--base-version", "1", "--enabled=true", "--crew-id", "crew-a", "--clear-crews"}, "not both"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			command := newWorkspaceArtifactPolicyCommand()
+			command.SetArgs(tc.args)
+			command.SilenceUsage, command.SilenceErrors = true, true
+			err := command.Execute()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %v, want it to contain %q", err, tc.want)
+			}
+		})
 	}
 }
 
