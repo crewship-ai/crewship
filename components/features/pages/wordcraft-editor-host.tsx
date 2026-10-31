@@ -5,7 +5,7 @@ import { useSessionSafe } from "@/hooks/use-auth"
 import { useLeaveGuard } from "@/lib/editor-lifecycle/use-leave-guard"
 import { createCapabilityChannel, decodeMessage, transferEditorPort, verifyEditorHello, type CapabilityPort } from "@/lib/mooring/channel"
 import { connectWordCraftHost, loadWordCraftReceiptSDK, openWordCraftSession, WORDCRAFT_BOOTSTRAP_BYTES, WORDCRAFT_FRAME_BYTES, type WordCraftBootstrap, type WordCraftHostState } from "@/lib/mooring/wordcraft-host-session"
-import { artifactDraftKey, artifactDraftRevision, clearArtifactDraft, loadArtifactDraft, wordcraftStopKind, writeArtifactDraft } from "@/lib/artifact-drafts"
+import { artifactDraftKey, artifactDraftRevision, clearArtifactDraft, loadArtifactDraft, writeArtifactDraft } from "@/lib/artifact-drafts"
 import { editorFrameSrc } from "@/lib/workbooks/editor-client"
 import { createEditorFrame, editorFrameSupported } from "./workbook-editor-host"
 
@@ -90,14 +90,10 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
         setError(STORAGE_FULL_MESSAGE)
         const key = draftKey.current
         if (key) {
-          // 1) Admit this stop's originals at once under a stop-slot key (a valid Page identity; uniqueness lives in the kind),
-          // before any read: identity retirement drains an admitted write, and
-          // another tab can never overwrite it.
-          const ownText = JSON.stringify({ format: WORDCRAFT_DRAFT_FORMAT, workspace_id: workspaceId, page_id: pageId, originals })
-          const ownKey = artifactDraftKey(wordcraftStopKind(crypto.getRandomValues(new Uint8Array(1))[0]), humanId, workspaceId, pageId)
-          const own = ownKey ? writeArtifactDraft(ownKey, ownText).then(() => true, () => false) : Promise.resolve(false)
-          // 2) Merge into the shared draft under a cross-tab lock, so two tabs
-          // cannot both read [A] and write [A,B] and [A,C].
+          // Merge into the shared draft under a cross-tab lock, so two tabs
+          // cannot both read [A] and write [A,B] and [A,C]. Known limit: an
+          // identity change during the read rejects the write; the changes then
+          // stay only in the visible editor (recorded G4 debt on #4682).
           const merge = async () => {
             const existing = await loadArtifactDraft(key)
             let kept: string[] = []
@@ -112,15 +108,11 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
           }
           const locks = typeof navigator === "undefined" ? undefined : navigator.locks
           void (async () => {
-            const kept = await own
             try {
               const text = locks ? await locks.request(`crewship-wordcraft-draft:${key}`, merge) : await merge()
               if (!abort.signal.aborted) setRecovered(text)
-              // Only a lock-protected merge may drop the per-stop copy.
-              if (locks && kept && ownKey) void clearArtifactDraft(ownKey, ownText, artifactDraftRevision(ownKey)).catch(() => {})
             } catch {
-              // The per-stop copy, when written, still holds these changes.
-              setError(kept ? `${STORAGE_FULL_MESSAGE} Místní koncept zůstává uložený odděleně.` : `${STORAGE_FULL_MESSAGE} Místní koncept se nepodařilo uložit; obsah zůstává viditelný v editoru.`)
+              setError(`${STORAGE_FULL_MESSAGE} Místní koncept se nepodařilo uložit; obsah zůstává viditelný v editoru.`)
             }
           })()
         }

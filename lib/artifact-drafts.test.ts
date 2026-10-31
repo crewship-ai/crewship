@@ -281,14 +281,3 @@ it("capture tolerates a localStorage getter that throws", async () => {
     expect(() => drafts.removeCapturedLegacyLocalDrafts([{ key: "crewship-design:alice", text: "x" }])).not.toThrow()
   } finally { if (original) Object.defineProperty(globalThis, "localStorage", original) }
 })
-
-it("G4 round 3: a per-stop WordCraft copy keeps the real Page id as its target, so the draft-key admission accepts it", async () => {
-  const store = durableStore()
-  const drafts = await load(); drafts.setArtifactDraftStore(store)
-  const first = drafts.artifactDraftKey(drafts.wordcraftStopKind(3), "alice", "w", "page_1-A")!
-  const second = drafts.artifactDraftKey(drafts.wordcraftStopKind(4), "alice", "w", "page_1-A")!
-  await drafts.writeArtifactDraft(first, "one"); await drafts.writeArtifactDraft(second, "two")
-  expect(store.disk.size).toBe(2)
-  // A "~" suffix on the Page identity is refused by the same validation.
-  await expect(drafts.writeArtifactDraft(drafts.artifactDraftKey("wordcraft-pending", "alice", "w", "page_1-A~uuid")!, "x")).rejects.toThrow()
-})

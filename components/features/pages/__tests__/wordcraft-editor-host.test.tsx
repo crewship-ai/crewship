@@ -15,7 +15,6 @@ vi.mock("@/lib/artifact-drafts", () => ({
   loadArtifactDraft: async (key: string) => { const text = drafts.store.get(key) ?? ""; if (drafts.delay) await new Promise(resolve => setTimeout(resolve, drafts.delay)); if (drafts.retired) throw new Error("retired"); return text },
   clearArtifactDraft: async (key: string) => { drafts.store.delete(key) },
   artifactDraftRevision: () => 1,
-  wordcraftStopKind: (slot: number) => `wordcraft-stop-${slot % 8}`,
 }))
 const digest = "b".repeat(64)
 const windowMock = { postMessage: vi.fn() }
@@ -207,7 +206,7 @@ it("G4 B4: a second storage_full stop keeps the earlier recovery draft instead o
   expect(JSON.parse(drafts.store.get(key)!).originals).toEqual(["draft A", '{"type":"submit_changes","request_id":"r1"}'])
 })
 
-it("G4 round 2: two tabs stopping at once keep both sets of changes (cross-tab lock, one key per stop)", async () => {
+it("G4 round 2: two tabs stopping at once keep both sets of changes (cross-tab lock)", async () => {
   let chain: Promise<unknown> = Promise.resolve()
   Object.defineProperty(navigator, "locks", { configurable: true, value: { request: (_name: string, task: () => Promise<unknown>) => { const run = chain.then(task, task); chain = run.catch(() => {}); return run } } })
   try {
@@ -224,17 +223,4 @@ it("G4 round 2: two tabs stopping at once keep both sets of changes (cross-tab l
     const primary = drafts.store.get(JSON.stringify(["human-one", "wordcraft-pending", "workspace", "page"]))!
     expect(JSON.parse(primary).originals.sort()).toEqual(["tab-one", "tab-two"])
   } finally { delete (navigator as { locks?: unknown }).locks }
-})
-it("G4 round 2: the stop's originals are admitted before the recovery read, so an identity change during the read loses nothing", async () => {
-  drafts.delay = 40
-  await open()
-  await act(async () => {
-    mocks.connect.mock.calls[0][5].stopped("storage_full")
-    await new Promise(resolve => setTimeout(resolve, 5))
-    drafts.retired = true
-    await new Promise(resolve => setTimeout(resolve, 100))
-  })
-  const kept = [...drafts.store.entries()].filter(([, text]) => text.includes("request_id"))
-  expect(kept).toHaveLength(1)
-  expect(JSON.parse(kept[0][1]).originals).toEqual(['{"type":"submit_changes","request_id":"r1"}'])
 })
