@@ -315,8 +315,13 @@ test.describe("design", () => {
             return ["design_get", "design_apply"].filter((n) => calls.includes(n))
           }, { timeout: 2 * 60_000, intervals: [3_000, 5_000] })
           .toEqual(["design_get", "design_apply"])
+        // design_apply already retained the version; a snapshot would only
+        // duplicate it. Re-read once the run is over so a late snapshot counts.
+        observe("agent status after edit", { status: await waitAgentIdle(request, wsId, agent.slug, 10 * 60_000) })
+        calls = await chatToolCalls(request, wsId, chatId)
         report.toolCalls = calls
-        // design_apply already retained the version; a snapshot would only duplicate it.
+        const after = await listVersions(request, wsId, slug)
+        agentVersions = after.versions.filter((x) => x.version > baseLatest && x.actor?.startsWith("agent:")).length
         expect(calls).not.toContain("design_snapshot")
         expect(agentVersions).toBe(1)
 
