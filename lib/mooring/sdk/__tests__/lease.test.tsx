@@ -69,6 +69,17 @@ describe("Mooring SDK lease view", () => {
     expect(state.observe(held({ generation: "5", holder: { ...bob }, mine: false }))?.holder?.display_name).toBe("Bob")
     expect(() => state.observe({ mine: true })).toThrow(LeaseError)
   })
+
+  it("orders only by generation: same-generation and vacant views apply in arrival order", () => {
+    // Pins the v1 limit documented in mooring-sdk.md: the server view has no
+    // sequence number, so a delayed vacant view or a reordered view within one
+    // generation cannot be detected client-side. The server still fences writes.
+    const state = createLeaseState()
+    state.observe(held({ generation: "4", handoff_requested_by: [bob] }))
+    expect(state.observe(held({ generation: "4" }))?.handoff_requested_by).toEqual([])
+    expect(state.observe(vacant())?.holder).toBeNull()
+    expect(state.observe(held({ generation: "3" }))).toBeUndefined()
+  })
 })
 
 function custody(patch: Partial<LeaseCustody> = {}): LeaseCustody & { calls: string[] } {

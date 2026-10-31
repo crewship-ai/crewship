@@ -52,8 +52,14 @@ SDK carries requests and validates replies; it never grants anything.
    affordances the native lease bar renders (a test keeps them in parity).
 3. **Acquire.** `createLeaseActions(transport, signal).acquire()`. Writing is
    allowed only while `ownsLease(view, generation)` holds.
-4. **Edit and save.** Create one `createSingleEditorSave` per generation, from
-   the confirmed server version. Call `edited()` on input; the lifecycle
+4. **Edit and save.** Create one `createSingleEditorSave` per editing
+   lifecycle, from the confirmed server version, with its **own** journal from
+   `openRecoveryJournal` (one row per journal). Never share a journal between
+   lifecycles: a later lifecycle would overwrite, then confirm away, a draft
+   retained from an earlier lost custody. A lifecycle that revoked writing
+   (phase `read-only` or `stopped`) is never reused; make the input read-only
+   and start a fresh lifecycle if the server still reports your lease. Freeze
+   input before any await that ends a lifecycle (restore, hand-off). Call `edited()` on input; the lifecycle
    autosaves after idle, journals every capture before sending it, and reports
    phases: `idle`, `dirty`, `saving`, `saved`, `draft`, `uncertain`,
    `read-only`, `stopped`. `saveLabel(state)` gives the default Czech labels.
@@ -141,6 +147,9 @@ that applies the same lease, generation and base-version fences as the server.
   native version-list route, and the host client has no `restore` method yet.
   `VersionsTransport` is the contract; the artifact project adapter
   (`artifactProjectVersions`) is the only built-in transport.
+- **Lease ordering is by generation only.** The lease view has no sequence
+  number, so a delayed vacant view, or views reordered within one generation,
+  apply in arrival order. Writes are still fenced by the server.
 - **Lease parsing is duplicated.** The native host keeps a private copy of the
   lease validation; `parseLease`/`ownsLease` apply the same rules. The host can
   switch to the SDK once the open host PRs land.

@@ -9,7 +9,7 @@ const rows = new Map<string, RecoveryDraft>()
 const people = [{ actor_id: "u-alice", display_name: "Alice", kind: "human" as const }, { actor_id: "u-bob", display_name: "Bob", kind: "human" as const }]
 const apps = people.map((actor, i) => {
   const client = server.connect(actor)
-  return mountNoteCraft(document.getElementById(`pane-${i}`)!, { scope: { workspaceId: "demo", pageId: "note", sessionId: `tab-${i}`, enginePin: "demo" }, mayEdit: true, document: client, versions: client.versions, journal: memoryJournal(rows) })
+  return mountNoteCraft(document.getElementById(`pane-${i}`)!, { scope: { workspaceId: "demo", pageId: "note", sessionId: `tab-${i}`, enginePin: "demo" }, mayEdit: true, document: client, versions: client.versions, openJournal: async () => memoryJournal(rows) })
 })
 // Stand-in for the host's lease event stream.
 setInterval(() => { for (const app of apps) void app.refresh() }, 1000)

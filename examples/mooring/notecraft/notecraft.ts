@@ -18,7 +18,11 @@ export interface NoteCraftHost {
     reconcile(request: SaveRequest, signal: AbortSignal): Promise<unknown>
   }
   versions: VersionsTransport
-  journal: RecoveryJournal
+  /** Opens the private draft journal (`openRecoveryJournal` in the product).
+   * Each editing lifecycle opens its own, so it owns one journal row: a draft
+   * retained from an earlier lost custody is never overwritten or confirmed
+   * away by a later lifecycle. */
+  openJournal(): Promise<RecoveryJournal>
 }
 export const NOTECRAFT_APPLICATION = "notecraft"
 const MAX_NOTE_BYTES = 256 * 1024
@@ -39,8 +43,6 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
   const note = $<HTMLTextAreaElement>("note"), status = $<HTMLOutputElement>("save"), alert = $("error")
   const lifetime = new AbortController(), signal = lifetime.signal
   const lease = createLeaseState(), actions = createLeaseActions(host.document, signal), history = createVersionHistory(host.versions)
-  // One journal per mount; each editing lifecycle borrows it. Only unmount closes it.
-  const journal: RecoveryJournal = { ...host.journal, close: async () => {} }
   let server: { version: string; bytes: Uint8Array } = { version: "1", bytes: new Uint8Array() }
   let editing: { controller: SaveController; generation: string; state: SaveState } | undefined
   let edits = 0, tickets = 0, busy = false
@@ -66,14 +68,18 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
       if (editing) for (const t of c.handoffTargets) bar.append(button(t.label, () => void run(() => transfer(t.request_id), "Předání nebylo potvrzeno. Koncept zůstává zachován.")))
     }
     status.textContent = editing ? saveLabel(editing.state) : "Pouze čtení"
-    $<HTMLButtonElement>("save-now").disabled = !editing || busy
+    $<HTMLButtonElement>("save-now").disabled = !editing || busy || retired(editing)
     $("reconcile").hidden = editing?.state.phase !== "uncertain"
   }
   async function load() {
     server = await host.document.read(signal)
     note.value = decode(server.bytes)
   }
-  function startEditing(generation: string) {
+  /** A lifecycle that revoked its writing never writes again. */
+  const retired = (e: typeof editing) => !!e && (e.state.phase === "read-only" || e.state.phase === "stopped")
+  async function startEditing(generation: string) {
+    const journal = await host.openJournal()
+    if (signal.aborted) { await journal.close(); return }
     edits = 0
     let self: SaveController | undefined
     const controller = self = createSingleEditorSave({
@@ -84,7 +90,12 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
         validate: async draft => { if (draft.bytes.byteLength > MAX_NOTE_BYTES) throw new Error("note_too_large"); decode(draft.bytes) },
       },
       transport: host.document,
-      onState: state => { if (editing && editing.controller === self) { editing.state = state; render() } },
+      onState: state => {
+        if (!editing || editing.controller !== self) return
+        editing.state = state
+        if (retired(editing)) note.readOnly = true
+        render()
+      },
     })
     editing = { controller, generation, state: { phase: "idle", dirty: false } }
     note.readOnly = false
@@ -101,10 +112,22 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
     editing = undefined
     const base = server.version
     await load()
-    if (!clean && text !== note.value) {
-      const draft: RecoveryDraft = { applicationId: NOTECRAFT_APPLICATION, enginePin: host.scope.enginePin, sessionId: host.scope.sessionId, generation: current.generation, baseVersion: base, editorRevision: "local", bytes: encode(text) }
-      offer([{ label: "Váš neuložený koncept", draft, compare: s => compareRecovery(s, draft), copy: () => draft.bytes.slice() }])
-    }
+    if (!clean && text !== note.value) keep(text, current.generation, base, "Váš neuložený koncept")
+    else keepStray(text, current.generation, base)
+  }
+  function keep(text: string, generation: string, baseVersion: string, label: string) {
+    const draft: RecoveryDraft = { applicationId: NOTECRAFT_APPLICATION, enginePin: host.scope.enginePin, sessionId: host.scope.sessionId, generation, baseVersion, editorRevision: "local", bytes: encode(text) }
+    offer([{ label, draft, compare: s => compareRecovery(s, draft), copy: () => draft.bytes.slice() }])
+  }
+  /** Input that reached a read-only note (no lifecycle captured it) is never
+   * dropped silently: it is offered for copy and refused visibly. */
+  let stray: string | undefined
+  function keepStray(before: string, generation: string, baseVersion: string) {
+    const text = stray
+    stray = undefined
+    if (text === undefined || text === before) return
+    keep(text, generation, baseVersion, "Text psaný bez úprav")
+    fail("Text napsaný během přepínání nebyl uložen; je nabídnut ke zkopírování.")
   }
   /** Compare and copy are the only actions; there is deliberately no "save". */
   function offer(offers: (Pick<RecoveryOffer, "draft" | "compare" | "copy"> & { label?: string })[]) {
@@ -130,8 +153,10 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
   }
   async function observe(view: LeaseView | undefined) {
     if (!view) return
-    if (editing && !ownsLease(view, editing.generation)) await stopEditing()
-    if (!editing && host.mayEdit && ownsLease(view)) { await load(); startEditing(view.generation!) }
+    // A retired lifecycle (e.g. a failed transfer after local revocation) is
+    // replaced by a fresh one from the confirmed server version, never reused.
+    if (editing && (!ownsLease(view, editing.generation) || retired(editing))) await stopEditing()
+    if (!editing && host.mayEdit && ownsLease(view)) { await load(); await startEditing(view.generation!) }
     render(); await listVersions()
   }
   async function refresh() { await observe(lease.observe(await host.document.lease(signal))) }
@@ -148,23 +173,31 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
     if (!current) return
     const base = current.controller.confirmedVersion()
     if (base === undefined) { fail("Nejdřív uložte koncept; obnovení ho nepřepíše."); return }
+    // The note is confirmed at `base` right now; freeze it before any await.
+    const before = note.value
+    note.readOnly = true
     await current.controller.close()
     editing = undefined
-    await history.restore(target, { base, generation: current.generation }, signal)
-    await load(); startEditing(current.generation); render(); await listVersions()
+    render()
+    try { await history.restore(target, { base, generation: current.generation }, signal) }
+    finally { keepStray(before, current.generation, base) }
+    await load(); await startEditing(current.generation); render(); await listVersions()
   }
 
-  note.addEventListener("input", () => { if (editing) { edits++; editing.controller.edited() } })
+  note.addEventListener("input", () => {
+    if (editing && !retired(editing)) { edits++; editing.controller.edited() } else stray = note.value
+  })
   $("save-now").addEventListener("click", () => { void editing?.controller.save(`notecraft-${++tickets}`).catch(() => {}) })
   $("reconcile").addEventListener("click", () => { void editing?.controller.reconcile() })
   const ready = (async () => {
     await load()
-    offer(await recoveryOffers(host.journal))
+    const journal = await host.openJournal()
+    try { offer(await recoveryOffers(journal)) } finally { await journal.close() }
     await refresh()
   })()
   return {
     ready,
     refresh: () => run(refresh, "Stav úprav se nepodařilo načíst."),
-    async close() { lifetime.abort(); await editing?.controller.close().catch(() => {}); editing = undefined; await host.journal.close() },
+    async close() { lifetime.abort(); await editing?.controller.close().catch(() => {}); editing = undefined },
   }
 }
