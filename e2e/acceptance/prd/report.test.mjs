@@ -4,7 +4,7 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { test } from "node:test"
-import { formatTable, parseArgs, readRows, resultOf, summarize, writeSummary } from "./report.mjs"
+import { parseOriginMap, evaluateRequired, formatGate, loadRequired, manualToRows, formatTable, parseArgs, readRows, resultOf, summarize, writeSummary } from "./report.mjs"
 
 const row = (over = {}) => ({
   requirement: "B.project.version",
@@ -99,4 +99,113 @@ test("cleanup patterns need both slug and name to look like the harness's", asyn
   assert.equal(isHarnessWorkspace({ slug: "prd-qa-sheet-soak-6bcf1c9a8f", name: "PRD acceptance Sheet soak" }), true)
   assert.equal(isHarnessWorkspace({ slug: "qa-c2-rights-be389ab9e6514a46", name: "QA Codex2 Craft rights" }), false)
   assert.equal(isHarnessWorkspace({ slug: "prd-qa-sheet-soak-6bcf1c9a8f", name: "Someone's workspace" }), false)
+})
+
+// ---- Required-ID gate (ZADANI G3 rule 3) ----------------------------------
+
+const RC = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const CRAFT = "https://craft.example.test"
+const ART = "https://artifacts.example.test"
+const required = {
+  origins: { craft: CRAFT, artifacts: ART },
+  rows: [
+    { id: "A.one", origin: "craft" },
+    { id: "A.hour", origin: "craft", allowManual: true },
+    { id: "A.skip", origin: "craft", allowSkipped: true },
+    { id: "B.one", origin: "artifacts" },
+  ],
+}
+const good = () => [
+  row({ requirement: "A.one", origin: CRAFT, appSha: RC }),
+  row({ requirement: "A.hour", origin: CRAFT, appSha: RC }),
+  row({ requirement: "A.skip", origin: CRAFT, appSha: RC, result: "skipped", reason: "native editor" }),
+  row({ requirement: "B.one", origin: ART, appSha: RC }),
+]
+const kinds = (r) => r.problems.map((p) => `${p.id}:${p.kind}`).sort()
+
+test("gate: complete run passes", () => {
+  const r = evaluateRequired(good(), required, { rc: RC })
+  assert.deepEqual(r.problems, [])
+  assert.equal(r.ok, true)
+})
+
+test("gate: missing ID fails", () => {
+  const r = evaluateRequired(good().filter((x) => x.requirement !== "B.one"), required, { rc: RC })
+  assert.equal(r.ok, false)
+  assert.deepEqual(kinds(r), ["B.one:missing"])
+})
+
+test("gate: skipped fails except on the allowed row; failed always fails", () => {
+  const rows = good().map((x) => (x.requirement === "A.one" ? { ...x, result: "skipped" } : x))
+  assert.deepEqual(kinds(evaluateRequired(rows, required, { rc: RC })), ["A.one:result"])
+  const f = good().map((x) => (x.requirement === "A.skip" ? { ...x, result: "failed" } : x))
+  assert.deepEqual(kinds(evaluateRequired(f, required, { rc: RC })), ["A.skip:result"])
+})
+
+test("gate: wrong appSha fails; a row on the RC wins over an older row on another SHA", () => {
+  const bad = good().map((x) => (x.requirement === "B.one" ? { ...x, appSha: "b".repeat(40) } : x))
+  assert.deepEqual(kinds(evaluateRequired(bad, required, { rc: RC })), ["B.one:appSha"])
+  const merged = [...bad, row({ requirement: "B.one", origin: ART, appSha: RC, finishedAt: "2025-01-01T00:00:00.000Z" })]
+  assert.equal(evaluateRequired(merged, required, { rc: RC }).ok, true)
+})
+
+test("gate: wrong origin fails", () => {
+  const bad = good().map((x) => (x.requirement === "A.one" ? { ...x, origin: ART + "/" } : x))
+  assert.deepEqual(kinds(evaluateRequired(bad, required, { rc: RC })), ["A.one:origin"])
+  const ok = good().map((x) => (x.requirement === "A.one" ? { ...x, origin: CRAFT + "/" } : x))
+  assert.equal(evaluateRequired(ok, required, { rc: RC }).ok, true)
+})
+
+test("gate: quick mode fails; manual needs evidence and an allowing row", () => {
+  const quick = good().map((x) => (x.requirement === "A.one" ? { ...x, mode: "quick" } : x))
+  assert.deepEqual(kinds(evaluateRequired(quick, required, { rc: RC })), ["A.one:mode"])
+  const manual = (requirement, evidence) => good().map((x) => (x.requirement === requirement ? { ...x, mode: "manual", evidence } : x))
+  assert.deepEqual(kinds(evaluateRequired(manual("A.hour", null), required, { rc: RC })), ["A.hour:evidence"])
+  assert.equal(evaluateRequired(manual("A.hour", "https://rec.test/v/1"), required, { rc: RC }).ok, true)
+  assert.deepEqual(kinds(evaluateRequired(manual("A.one", "https://rec.test/v/1"), required, { rc: RC })), ["A.one:mode"])
+})
+
+test("gate: rows from several runs merge, latest per ID wins, no rc means any single SHA", () => {
+  const runA = good().filter((x) => x.requirement !== "B.one")
+  const runB = [row({ requirement: "B.one", origin: ART, appSha: RC })]
+  assert.equal(evaluateRequired([...runA, ...runB], required, { rc: RC }).ok, true)
+  const older = row({ requirement: "A.one", origin: CRAFT, appSha: RC, result: "failed", finishedAt: "2025-01-01T00:00:00.000Z" })
+  assert.equal(evaluateRequired([older, ...good()], required, { rc: RC }).ok, true)
+  assert.throws(() => evaluateRequired(good(), required, {}), /--rc/)
+})
+
+test("gate: manual rows are converted and recordedAt orders them", () => {
+  const rows = manualToRows([{ id: "A.hour", result: "passed", appSha: RC, evidence: "https://rec.test/v/1", recordedAt: "2026-10-31T10:00:00Z" }], required)
+  assert.equal(rows[0].mode, "manual")
+  assert.equal(rows[0].origin, CRAFT)
+  assert.equal(rows[0].finishedAt, "2026-10-31T10:00:00Z")
+  const withoutEvidence = manualToRows([{ id: "A.hour", result: "passed", appSha: RC, recordedAt: "2026-10-31T10:00:00Z" }], required)
+  const all = good().filter((x) => x.requirement !== "A.hour").concat(withoutEvidence)
+  assert.deepEqual(kinds(evaluateRequired(all, required, { rc: RC })), ["A.hour:evidence"])
+  assert.throws(() => manualToRows([{ result: "passed" }], required), /id/)
+})
+
+test("gate: formatGate lists every problem; shipped required-ids.json is well formed", () => {
+  const r = evaluateRequired([], required, { rc: RC })
+  const text = formatGate(r)
+  for (const id of ["A.one", "A.hour", "A.skip", "B.one"]) assert.match(text, new RegExp(id.replace(".", "\\.")))
+  assert.match(text, /FAIL/)
+  const real = loadRequired(new URL("./required-ids.json", import.meta.url).pathname, `craft=${CRAFT},artifacts=${ART}`)
+  assert.throws(() => loadRequired(new URL("./required-ids.json", import.meta.url).pathname, ""), /not configured/)
+  const ids = real.rows.map((x) => x.id)
+  assert.equal(new Set(ids).size, ids.length)
+  assert.equal(real.rows.filter((x) => x.allowSkipped).map((x) => x.id).join(), "A.craft.lease.fail-closed")
+  for (const id of ["B.project.from-chat", "A.lock", "quota.aggregate.workspace", "drafts.identity-switch", "A.craft.session.hour-word"]) assert.ok(ids.includes(id), id)
+  assert.equal(ids.filter((i) => i.startsWith("drafts.crash.")).length, 11)
+  for (const x of real.rows) assert.ok(real.origins[x.origin], x.id)
+})
+
+test("parseArgs: --rc, --manual, --merge, --required", () => {
+  const a = parseArgs(["--origin", "https://x.test", "--rc", RC, "--manual", "m.json", "--merge", "a", "--merge", "b", "--required", "r.json", "--origin-map", "craft=https://c.test"])
+  assert.equal(a.rc, RC)
+  assert.equal(a.manual, "m.json")
+  assert.deepEqual(a.merge, ["a", "b"])
+  assert.equal(a.required, "r.json")
+  assert.deepEqual(parseOriginMap(a.originMap), { craft: "https://c.test" })
+  assert.throws(() => parseOriginMap("craft"), /key=url/)
 })
