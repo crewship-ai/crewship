@@ -90,8 +90,15 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
         setError(STORAGE_FULL_MESSAGE)
         const key = draftKey.current
         if (key) {
-          // A second stop must not replace a draft an earlier stop kept.
-          const write = async () => {
+          // 1) Admit this stop's originals at once under a key of their own,
+          // before any read: identity retirement drains an admitted write, and
+          // another tab can never overwrite it.
+          const ownText = JSON.stringify({ format: WORDCRAFT_DRAFT_FORMAT, workspace_id: workspaceId, page_id: pageId, originals })
+          const ownKey = artifactDraftKey("wordcraft-pending", humanId, workspaceId, `${pageId}~${crypto.randomUUID()}`)
+          const own = ownKey ? writeArtifactDraft(ownKey, ownText).then(() => true, () => false) : Promise.resolve(false)
+          // 2) Merge into the shared draft under a cross-tab lock, so two tabs
+          // cannot both read [A] and write [A,B] and [A,C].
+          const merge = async () => {
             const existing = await loadArtifactDraft(key)
             let kept: string[] = []
             if (existing) {
@@ -103,7 +110,19 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
             await writeArtifactDraft(key, text)
             return text
           }
-          void write().then(text => { if (!abort.signal.aborted) setRecovered(text) }, () => setError(`${STORAGE_FULL_MESSAGE} Místní koncept se nepodařilo uložit; obsah zůstává viditelný v editoru.`))
+          const locks = typeof navigator === "undefined" ? undefined : navigator.locks
+          void (async () => {
+            const kept = await own
+            try {
+              const text = locks ? await locks.request(`crewship-wordcraft-draft:${key}`, merge) : await merge()
+              if (!abort.signal.aborted) setRecovered(text)
+              // Only a lock-protected merge may drop the per-stop copy.
+              if (locks && kept && ownKey) void clearArtifactDraft(ownKey, ownText, artifactDraftRevision(ownKey)).catch(() => {})
+            } catch {
+              // The per-stop copy, when written, still holds these changes.
+              setError(kept ? `${STORAGE_FULL_MESSAGE} Místní koncept zůstává uložený odděleně.` : `${STORAGE_FULL_MESSAGE} Místní koncept se nepodařilo uložit; obsah zůstává viditelný v editoru.`)
+            }
+          })()
         }
         return
       }
