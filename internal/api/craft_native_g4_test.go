@@ -62,6 +62,12 @@ func TestCraftNativeAgentApplyRenewalDoesNotRaceWithUploadContext(t *testing.T) 
 // number of goroutines waiting.
 func TestPublishUserAccessRecheckBoundsWaitingFanouts(t *testing.T) {
 	hub := ws.NewHub(newTestLogger(), nil, ws.NopValidatorForTests, ws.NopSessionsForTests) // never Run: broadcast queue fills and blocks
+	// Every admitted fan-out holds a slot until the send timeout against the
+	// stopped hub; at 5 s that cost the shard 85 s (#4710).
+	// Registered first so it runs after the wait below: waiters read it later.
+	saved := recheckSendTimeout
+	t.Cleanup(func() { recheckSendTimeout = saved })
+	recheckSendTimeout = 200 * time.Millisecond
 	t.Cleanup(func() { recheckInFlight.Wait() })
 	users := make([]string, 400) // more than the hub queue holds, so each fan-out blocks
 	for i := range users {
