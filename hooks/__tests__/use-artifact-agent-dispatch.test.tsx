@@ -29,7 +29,8 @@ it("dispatches Design edits with an exact Design intent and Design tools",async(
  act(()=>{result=hook.result.current.dispatch({...comment,path:"design.json",selector:"frame-cart"})})
  const [prompt,metadata]=state.send.mock.calls[0]
  expect(prompt).toContain("design_apply")
- expect(prompt).toContain("design_snapshot")
+ expect(prompt).toContain("do not call design_snapshot")
+ expect(prompt).not.toContain("then design_snapshot")
  expect(metadata).toEqual({artifact_project_intent:{kind:"design",submission_id:"artifact-comment-comment-1",page_id:"page",comment_id:"comment-1",base_version:2}})
  await act(async()=>{state.options.onOwnMessageSaved("saved",metadata);expect(await result!).toBe(true)})
 })
