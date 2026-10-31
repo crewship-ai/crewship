@@ -209,7 +209,7 @@ const retired = (row: Row) => owner !== undefined && owner !== row[0]
 const retiredError = () => new Error("This browser is no longer signed in as the draft's owner.")
 let identityPurge: Promise<void> = Promise.resolve()
 
-const successfulWrites = new Map<string, { text: string; revision: string; fallback?: string }>()
+const successfulWrites = new Map<string, { text: string; revision: string; fallback?: string; over?: string }>()
 async function persist(row: Row, text: string): Promise<void> {
   const key = JSON.stringify(row), revision = crypto.randomUUID()
   // Admission happened in writeArtifactDraft. Already admitted writes must
@@ -230,9 +230,12 @@ async function persist(row: Row, text: string): Promise<void> {
     } catch { /* Fall back to localStorage below rather than lose the text. */ }
   }
   if (!text) { legacyRemove(row); if (!store) return; throw new Error("Artifact draft storage is unavailable.") }
+  // The IndexedDB revision this copy supersedes; clearing the copy removes it too.
+  let over: string | undefined
+  if (store?.read) { try { over = (await store.read(row))?.revision } catch { /* unreadable: nothing to supersede safely */ } }
   localStorage.setItem(legacyKey(row), sealed)
   // Remember the fallback copy so a save, discard or sign-out can remove it.
-  successfulWrites.set(key, { text, revision, fallback: sealed })
+  successfulWrites.set(key, { text, revision, fallback: sealed, over })
 }
 
 /**
@@ -281,7 +284,7 @@ export function admittedArtifactDraftCapture(key: string): (text: string) => Pro
  * localStorage copy exists: the draft may still be on disk, so a caller must
  * not treat the failure as "no draft" and write an empty or fresh value over it.
  */
-export async function loadArtifactDraft(key: string, legacyTarget?: string): Promise<string> {
+export async function loadArtifactDraft(key: string): Promise<string> {
   const row = parse(key)
   if (!row || retired(row)) return ""
   await lanes.get(key)?.tail
@@ -297,16 +300,6 @@ export async function loadArtifactDraft(key: string, legacyTarget?: string): Pro
     const legacy = legacyGet(row), raw = legacy ?? stored
     if (raw === undefined) {
       if (failed) throw new Error("Artifact draft storage could not be read.")
-      // Builds before the Page ID keys stored the draft under the slug. Adopt
-      // that copy once, so recovery survives the upgrade and the unreachable
-      // plaintext is not left to expire.
-      const aliasRow: Row | undefined = legacyTarget && legacyTarget !== row[3] ? [row[0], row[1], row[2], legacyTarget] : undefined
-      const aliased = aliasRow ? legacyGet(aliasRow) : undefined
-      if (aliasRow && aliased !== undefined) {
-        if ((writes.get(key) ?? 0) === seen) { await writeArtifactDraft(key, aliased); legacyRemove(aliasRow) }
-        if (retired(row)) throw retiredError()
-        return aliased
-      }
       return ""
     }
     const text = isSealedLocalDraft(raw) ? await cipher.open(raw, row[1]) : raw
@@ -433,6 +426,8 @@ export async function clearArtifactDraft(key: string, text: string, revision: nu
   if (!row || !saved || saved.text !== text || artifactDraftRevision(key) !== revision) return
   if (saved.fallback !== undefined) {
     try { if (localStorage.getItem(legacyKey(row)) === saved.fallback) localStorage.removeItem(legacyKey(row)) } catch { /* Unavailable storage holds nothing to remove. */ }
+    // Revision-guarded: a newer write from another tab stays.
+    if (saved.over) await durable()?.removeCaptured([{ row, revision: saved.over }])
     successfulWrites.delete(key)
     return
   }

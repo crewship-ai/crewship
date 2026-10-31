@@ -41,10 +41,6 @@ export interface ApiFetchInit extends Omit<RequestInit, "credentials"> {
   /** Skip the 401 → refresh path. Used internally by tryRefresh to
    *  avoid infinite recursion if the refresh endpoint itself 401s. */
   skipRefresh?: boolean
-  /** Called after a successful 401 refresh, before the request is re-sent.
-   *  Throwing abandons the retry: use it when the request belongs to a
-   *  session that may have changed while the refresh was running. */
-  beforeRetry?: () => void
 }
 
 /** assertSameOrigin refuses cross-origin or non-/api/ URLs before the
@@ -149,7 +145,6 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
   if (init?.skipRefresh !== undefined) {
     delete (initWithCreds as ApiFetchInit).skipRefresh
   }
-  delete (initWithCreds as ApiFetchInit).beforeRetry
 
   const res = await workspaceFetch(target, initWithCreds)
   reportBadStatus(target, res)
@@ -231,7 +226,6 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
   // Refresh wrote new cookies; the retry inherits them via the same
   // `credentials: include` and lands on a fresh access token.
   assertWorkspaceRequest(workspaceRequest)
-  init?.beforeRetry?.()
   return workspaceFetch(target, initWithCreds)
 }
 

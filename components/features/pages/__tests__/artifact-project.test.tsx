@@ -372,19 +372,20 @@ it("never deletes a stored comment draft when reading it fails",async()=>{
  expect(disk.get(row("owner","artifact-comment"))).toBe("Unsent private comment")
 })
 
-// G4 B16: drafts written by builds that keyed them by slug are found again under the Page ID.
-it("finds a source and comment draft that an older build kept under the slug (G4 B16)",async()=>{
+// Codex #4690 B3: a slug is not a Page identity. A slug-keyed copy left by an older
+// build is never adopted into the Page that now holds the slug, and is not deleted.
+it("does not adopt a slug-keyed draft from an older build into the Page that now uses the slug (Codex #4690 B3)",async()=>{
  const previous=state.data.page_id; state.data.page_id="page-123"
- const store=new Map<string,string>([["artifact-source:owner:w:demo",keptSource("Slug-keyed draft")],["artifact-comment:owner:w:demo","Slug-keyed comment"]])
+ const store=new Map<string,string>([["artifact-source:owner:w:demo",keptSource("Old page draft")],["artifact-comment:owner:w:demo","Old page comment"]])
  vi.mocked(localStorage.getItem).mockImplementation(key => store.get(key) ?? null)
  vi.mocked(localStorage.removeItem).mockImplementation(key => { store.delete(key) })
  try{
   render(<ArtifactProject workspaceId="w" slug="demo" />)
-  fireEvent.click(await screen.findByRole("button",{name:"Restore source draft"}))
-  expect(screen.getByLabelText("Source file")).toHaveValue("Slug-keyed draft")
-  await waitFor(() => expect(screen.getByLabelText("Comment for agent")).toHaveValue("Slug-keyed comment"))
-  await waitFor(() => expect(store.has("artifact-source:owner:w:demo")||store.has("artifact-comment:owner:w:demo")).toBe(false))
-  expect(JSON.parse(disk.get(JSON.stringify(["owner","artifact-source","w","page-123"]))!).body.files[0].content).toBe("Slug-keyed draft")
+  await waitFor(() => expect(screen.getByRole("button",{name:"Edit source"})).toBeEnabled())
+  expect(screen.queryByRole("button",{name:"Restore source draft"})).toBeNull()
+  expect(screen.getByLabelText("Comment for agent")).toHaveValue("")
+  expect(store.get("artifact-comment:owner:w:demo")).toBe("Old page comment")
+  expect(disk.get(JSON.stringify(["owner","artifact-source","w","page-123"]))).toBeUndefined()
  }finally{state.data.page_id=previous;vi.mocked(localStorage.getItem).mockReset().mockReturnValue(null)}
 })
 

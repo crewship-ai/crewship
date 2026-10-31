@@ -352,3 +352,27 @@ it("does not let an older tab's clear delete a newer tab's draft (G4 B22, mitiga
   await tabA.clearArtifactDraft(key, "older", revision)
   expect(disk.get(JSON.stringify(["alice", "artifact-viewer-comment", "w", "page"]))?.text).toBe("newer")
 })
+
+// Codex #4690 B2: an older revision already in IndexedDB must not come back once the newer fallback copy is cleared.
+it("clearing a fallback copy also removes the older IndexedDB revision it replaced (Codex #4690 B2)", async () => {
+  const disk = new Map<string, { text: string; revision?: string }>()
+  let refuse = false
+  const store = {
+    capture: async () => [], purge: async () => {},
+    get: async (row: Row) => disk.get(JSON.stringify(row))?.text,
+    read: async (row: Row) => disk.get(JSON.stringify(row)),
+    put: async (row: Row, text: string, revision?: string) => { if (refuse) throw new Error("IndexedDB refused"); disk.set(JSON.stringify(row), { text, revision }) },
+    delete: async (row: Row) => { disk.delete(JSON.stringify(row)) },
+    removeCaptured: async (rows: { row: Row; revision: string | null }[]) => { for (const r of rows) if (disk.get(JSON.stringify(r.row))?.revision === r.revision) disk.delete(JSON.stringify(r.row)) },
+  }
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("artifact-comment", "alice", "w", "page")!
+  await drafts.writeArtifactDraft(key, "older A")
+  refuse = true
+  await drafts.writeArtifactDraft(key, "newer B")
+  expect(local.get("artifact-comment:alice:w:page")).toBe("newer B")
+  await drafts.clearArtifactDraft(key, "newer B", drafts.artifactDraftRevision(key))
+  expect(local.has("artifact-comment:alice:w:page")).toBe(false)
+  expect(disk.has(JSON.stringify(["alice", "artifact-comment", "w", "page"]))).toBe(false)
+  await expect(drafts.readArtifactDraft(key)).resolves.toBe("")
+})
