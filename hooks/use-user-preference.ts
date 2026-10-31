@@ -153,6 +153,10 @@ export function useUserPreference<T>(
       apiFetch(`/api/v1/me/preferences/${encodeURIComponent(key)}`, {
         method: "PUT",
         ...(keepalive ? { keepalive: true } : {}),
+        // The 401 refresh can outlast a sign-out: never re-send for another session.
+        beforeRetry: () => {
+          if (lsKeyRef.current !== lsKey) throw new Error("session changed")
+        },
         headers: { "Content-Type": "application/json" },
         // next may legitimately be null — JSON.stringify serialises that as
         // the string "null", which is exactly what the server expects.

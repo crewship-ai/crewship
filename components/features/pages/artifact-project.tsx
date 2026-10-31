@@ -52,13 +52,13 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  useEffect(()=>{
   if(!sourceKey)return
   let live=true
-  loadArtifactDraft(sourceKey).then(raw=>{
+  loadArtifactDraft(sourceKey,slug).then(raw=>{
    if(!live)return
    try{const parsed=raw?JSON.parse(raw):null;setStoredSource(parsed&&Array.isArray(parsed.body?.files)&&typeof parsed.path==="string"?{key:sourceKey,draft:parsed}:undefined)}catch{setStoredSource(undefined)}
    setSourceRead({key:sourceKey,failed:false})
   },error=>{if(live){setSourceRead({key:sourceKey,failed:true});if(error instanceof LocalDraftReadRevoked)setReadDeniedScope(pageScope)}})
   return()=>{live=false}
- },[sourceKey,sourceReadAttempt,pageScope])
+ },[sourceKey,sourceReadAttempt,pageScope,slug])
  const sourceReadDone=sourceRead?.key===sourceKey
  const changeSource = (value: NonNullable<typeof sourceDraft>) => {
   if (!sourceKey || value.scope !== sourceScope) return
@@ -90,9 +90,9 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
   let live = true
   // Text typed while the stored draft loads wins over the stored copy. A failed
   // read leaves the state empty, so nothing writes over the copy on disk.
-  loadArtifactDraft(draftKey).then(text => { if (live) setDraftState(previous => previous?.key === draftKey ? previous : {key:draftKey,text}) }, error => { if (live) { setStorageError(true); if(error instanceof LocalDraftReadRevoked)setReadDeniedScope(pageScope) } })
+  loadArtifactDraft(draftKey,slug).then(text => { if (live) setDraftState(previous => previous?.key === draftKey ? previous : {key:draftKey,text}) }, error => { if (live) { setStorageError(true); if(error instanceof LocalDraftReadRevoked)setReadDeniedScope(pageScope) } })
   return () => { live = false }
- }, [draftKey,pageScope])
+ }, [draftKey,pageScope,slug])
  const lastPage = useRef<{address:string;page?:string}>({address:""})
  const address = JSON.stringify([human,workspaceId,slug])
  if(lastPage.current.address!==address)lastPage.current={address}

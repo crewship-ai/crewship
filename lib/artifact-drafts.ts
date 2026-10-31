@@ -209,7 +209,7 @@ const retired = (row: Row) => owner !== undefined && owner !== row[0]
 const retiredError = () => new Error("This browser is no longer signed in as the draft's owner.")
 let identityPurge: Promise<void> = Promise.resolve()
 
-const successfulWrites = new Map<string, { text: string; revision: string }>()
+const successfulWrites = new Map<string, { text: string; revision: string; fallback?: string }>()
 async function persist(row: Row, text: string): Promise<void> {
   const key = JSON.stringify(row), revision = crypto.randomUUID()
   // Admission happened in writeArtifactDraft. Already admitted writes must
@@ -231,6 +231,8 @@ async function persist(row: Row, text: string): Promise<void> {
   }
   if (!text) { legacyRemove(row); if (!store) return; throw new Error("Artifact draft storage is unavailable.") }
   localStorage.setItem(legacyKey(row), sealed)
+  // Remember the fallback copy so a save, discard or sign-out can remove it.
+  successfulWrites.set(key, { text, revision, fallback: sealed })
 }
 
 /**
@@ -279,7 +281,7 @@ export function admittedArtifactDraftCapture(key: string): (text: string) => Pro
  * localStorage copy exists: the draft may still be on disk, so a caller must
  * not treat the failure as "no draft" and write an empty or fresh value over it.
  */
-export async function loadArtifactDraft(key: string): Promise<string> {
+export async function loadArtifactDraft(key: string, legacyTarget?: string): Promise<string> {
   const row = parse(key)
   if (!row || retired(row)) return ""
   await lanes.get(key)?.tail
@@ -295,6 +297,16 @@ export async function loadArtifactDraft(key: string): Promise<string> {
     const legacy = legacyGet(row), raw = legacy ?? stored
     if (raw === undefined) {
       if (failed) throw new Error("Artifact draft storage could not be read.")
+      // Builds before the Page ID keys stored the draft under the slug. Adopt
+      // that copy once, so recovery survives the upgrade and the unreachable
+      // plaintext is not left to expire.
+      const aliasRow: Row | undefined = legacyTarget && legacyTarget !== row[3] ? [row[0], row[1], row[2], legacyTarget] : undefined
+      const aliased = aliasRow ? legacyGet(aliasRow) : undefined
+      if (aliasRow && aliased !== undefined) {
+        if ((writes.get(key) ?? 0) === seen) { await writeArtifactDraft(key, aliased); legacyRemove(aliasRow) }
+        if (retired(row)) throw retiredError()
+        return aliased
+      }
       return ""
     }
     const text = isSealedLocalDraft(raw) ? await cipher.open(raw, row[1]) : raw
@@ -321,8 +333,10 @@ export function readArtifactDraft(key: string): Promise<string> {
 const LOCAL_PREFIXES = ["crewship-design:v2:", "design-comment:v2:", ...KINDS.map(kind => `${kind}:`), "crewship-design:"]
 
 export interface CapturedLegacyLocalDraft { key: string; text: string }
-/** Old localStorage copies are included in sign-out's visible discard warning. */
-export function captureLegacyLocalDrafts(human?: string): CapturedLegacyLocalDraft[] {
+/** Old localStorage copies are included in sign-out's visible discard warning.
+ * `includeSealed` also takes encrypted fallback copies (written when IndexedDB
+ * refused the draft); sign-out removes them, an identity change keeps them. */
+export function captureLegacyLocalDrafts(human?: string, includeSealed = false): CapturedLegacyLocalDraft[] {
   const rows: CapturedLegacyLocalDraft[] = []
   try {
     if (typeof localStorage === "undefined") return rows
@@ -330,7 +344,7 @@ export function captureLegacyLocalDrafts(human?: string): CapturedLegacyLocalDra
       const prefix = LOCAL_PREFIXES.find(start => key.startsWith(start))
       if (!prefix || (human && key.slice(prefix.length).split(":")[0] !== human)) continue
       const text = localStorage.getItem(key)
-      if (text !== null && !isSealedLocalDraft(text)) rows.push({key, text})
+      if (text !== null && (includeSealed || !isSealedLocalDraft(text))) rows.push({key, text})
     }
   } catch { /* Storage the browser will not let us read holds nothing we can protect or warn about. */ }
   return rows
@@ -417,6 +431,11 @@ export async function clearArtifactDraft(key: string, text: string, revision: nu
   await lanes.get(key)?.tail
   const row = parse(key), saved = successfulWrites.get(key)
   if (!row || !saved || saved.text !== text || artifactDraftRevision(key) !== revision) return
+  if (saved.fallback !== undefined) {
+    try { if (localStorage.getItem(legacyKey(row)) === saved.fallback) localStorage.removeItem(legacyKey(row)) } catch { /* Unavailable storage holds nothing to remove. */ }
+    successfulWrites.delete(key)
+    return
+  }
   await durable()?.removeCaptured([{ row, revision: saved.revision }])
 }
 export interface LocalDraftPageCapture { artifacts: CapturedArtifactDraft[]; documents: CapturedDocumentDraft[]; local: {key:string; text:string}[] }
@@ -424,10 +443,13 @@ export interface LocalDraftPageCapture { artifacts: CapturedArtifactDraft[]; doc
 export async function captureLocalDraftPage(scope: LocalDraftScope): Promise<LocalDraftPageCapture> {
   const [artifacts, documents] = await Promise.all([captureArtifactDrafts(scope.human, scope.workspace, scope.page), captureDocumentDrafts(scope.human, scope.workspace, scope.page)])
   const local: {key:string; text:string}[] = []
-  for (const kind of KINDS) for (const key of legacyKeys([scope.human, kind, scope.workspace, scope.page])) {
-    const text = localStorage.getItem(key)
-    if (text !== null) local.push({key,text})
-  }
+  // Blocked localStorage must not fail a load that IndexedDB can serve.
+  try {
+    for (const kind of KINDS) for (const key of legacyKeys([scope.human, kind, scope.workspace, scope.page])) {
+      const text = localStorage.getItem(key)
+      if (text !== null) local.push({key,text})
+    }
+  } catch { /* Preserve inaccessible storage. */ }
   return {
     local,
     artifacts: artifacts.filter(({row}) => row[2] === scope.workspace && row[3] === scope.page),
@@ -451,5 +473,5 @@ export async function purgeLocalDraftPage(scope: LocalDraftScope, captured?: Loc
     cipherCells.delete(key); successfulWrites.delete(key)
   }
   await Promise.all([removeCapturedArtifactDrafts(known.artifacts), removeCapturedDocumentDrafts(known.documents)])
-  for (const row of known.local) if (localStorage.getItem(row.key) === row.text) localStorage.removeItem(row.key)
+  try { for (const row of known.local) if (localStorage.getItem(row.key) === row.text) localStorage.removeItem(row.key) } catch { /* Unavailable storage holds nothing to remove. */ }
 }

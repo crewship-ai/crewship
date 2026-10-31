@@ -442,7 +442,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     let capturedLegacy: ReturnType<typeof captureLegacyLocalDrafts> = []
     try { if (signingOutHuman) [capturedDocuments, capturedArtifacts] = await Promise.all([captureDocumentDrafts(signingOutHuman), captureArtifactDrafts(signingOutHuman)]) }
     catch { /* No verified deletion snapshot: retain those encrypted copies. */ }
-    try { if (signingOutHuman) capturedLegacy = captureLegacyLocalDrafts(signingOutHuman) } catch { return false }
+    try { if (signingOutHuman) capturedLegacy = captureLegacyLocalDrafts(signingOutHuman, true) } catch { return false }
     const discardDrafts = capturedDocuments.length + capturedArtifacts.length + capturedLegacy.length > 0
     if (discardDrafts && !(await confirmDraftDiscard())) return false
     if (sessionRef.current?.user.id !== signingOutHuman || refreshGen.current !== startingGeneration) return false
