@@ -85,12 +85,18 @@ it('drops the content at once on an access recheck for this page, without waitin
  expect(document.querySelector('iframe')).toBeNull();expect(port.close).toHaveBeenCalled()
  expect(screen.getByRole('alert')).toHaveTextContent('Sdílený náhled není dostupný')
 })
+it('rereads on a generic recheck without a page id (membership or role change)',async()=>{
+ await act(async()=>{render(<NativeCraftPreview humanId="h" workspaceId="w" pageId="p"/>)})
+ await screen.findByText('Sdílený náhled · verze 2')
+ m.read.mockClear().mockRejectedValue(new Error('denied'))
+ await push('page.access_recheck',{})
+ expect(m.read).toHaveBeenCalledOnce();expect(document.querySelector('iframe')).toBeNull()
+})
 it('ignores a recheck that names another page and keeps the content',async()=>{
  await act(async()=>{render(<NativeCraftPreview humanId="h" workspaceId="w" pageId="p"/>)})
  await screen.findByText('Sdílený náhled · verze 2')
  m.read.mockClear().mockRejectedValue(new Error('denied'))
  await push('page.access_recheck',{page_id:'other'})
- await push('page.access_recheck',{})
  expect(m.read).not.toHaveBeenCalled();expect(document.querySelector('iframe')).not.toBeNull()
 })
 it('keeps the content when the recheck confirms access, and rereads once more if a read was in flight',async()=>{

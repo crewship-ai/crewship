@@ -125,9 +125,15 @@ An open preview that receives a frame for its own `page_id` (and on
 On 403/404 or any failed read it removes the frame, closes the editor port and
 shows "Sdílený náhled není dostupný". A frame for another page is ignored. If a
 read is already in flight, one more read runs after it, so a result that began
-before the commit cannot keep the content. The 30 s timer and the focus/online
-rereads stay as the fallback for every change that sends no frame (workspace
-member removal, role or ownership changes, a missed frame). The frame cannot
+before the commit cannot keep the content. The frames are sent after the commit, from a bounded background goroutine in
+batches, so a large crew or workspace does not slow the grant response; a
+failure is logged and never changes the response. Suspended and restricted
+accounts are sent no frame. Removing a member from the workspace or changing
+their role (`DELETE`/`PATCH` on the workspace member) sends that member alone a
+generic `page.access_recheck` with `{}`, meaning "re-check every open shared
+preview". The 30 s timer and the focus/online rereads stay as the fallback for
+every change that sends no frame (ownership transfer, removal by an instance
+administrator or by leaving, a missed frame). The frame cannot
 grant or reveal anything: the answer always comes from the server's own
 authorisation of the read. PRD row `A.craft.read-revoked` expects the removal
 within about 5 s.
