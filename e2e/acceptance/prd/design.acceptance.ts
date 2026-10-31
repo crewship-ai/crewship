@@ -187,7 +187,7 @@ test.describe("design", () => {
     {
       annotation: [
         prdRequirement("B.design.agent-live", "§0.14 Design: a real agent edits the canvas and both connected people see it without reload"),
-        prdRequirement("B.design.agent-tools", "§0.14 Design: the agent works through design_get, design_apply and design_snapshot"),
+        prdRequirement("B.design.agent-tools", "§0.14 Design: the agent works through design_get and design_apply, without a redundant design_snapshot"),
         prdRequirement("B.design.agent-version", "§0.14 Design: the agent's change is a retained version and survives reload"),
         prdRequirement("B.design.agent-receipt", "§0.14 Design: Send to agent reports a delivered comment as sent"),
       ],
@@ -293,13 +293,16 @@ test.describe("design", () => {
         )
         report.agentEditSeenMs = seen
 
-        // A retained version by the agent (design_snapshot).
+        // A retained version by the agent (design_apply saves it).
         let agentVersion = 0
+        let agentVersions = 0
         await expect
           .poll(async () => {
             const v = await listVersions(request, wsId, slug)
             report.versions = v.versions.map((x) => ({ version: x.version, message: x.message, actor: x.actor?.split(":").slice(0, 2).join(":") }))
-            agentVersion = v.versions.filter((x) => x.version > baseLatest && x.actor?.startsWith("agent:")).reduce((m, x) => Math.max(m, x.version), 0)
+            const mine = v.versions.filter((x) => x.version > baseLatest && x.actor?.startsWith("agent:"))
+            agentVersions = mine.length
+            agentVersion = mine.reduce((m, x) => Math.max(m, x.version), 0)
             return agentVersion
           }, { timeout: 3 * 60_000, intervals: [2_000, 5_000] })
           .toBeGreaterThan(baseLatest)
@@ -309,10 +312,13 @@ test.describe("design", () => {
         await expect
           .poll(async () => {
             calls = await chatToolCalls(request, wsId, chatId)
-            return ["design_get", "design_apply", "design_snapshot"].filter((n) => calls.includes(n))
+            return ["design_get", "design_apply"].filter((n) => calls.includes(n))
           }, { timeout: 2 * 60_000, intervals: [3_000, 5_000] })
-          .toEqual(["design_get", "design_apply", "design_snapshot"])
+          .toEqual(["design_get", "design_apply"])
         report.toolCalls = calls
+        // design_apply already retained the version; a snapshot would only duplicate it.
+        expect(calls).not.toContain("design_snapshot")
+        expect(agentVersions).toBe(1)
 
         // Reload both: persisted; the retained version holds the same node.
         for (const p of [page, memberPage]) {
