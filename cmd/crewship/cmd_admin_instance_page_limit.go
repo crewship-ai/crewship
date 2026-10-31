@@ -1,3 +1,5 @@
+//go:build !clionly
+
 package main
 
 // `crewship admin instance page-limit` — the maximum number of pages a
