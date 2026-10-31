@@ -36,7 +36,7 @@ export default async function globalSetup() {
     const account = env.accounts[role]
     if (!account) continue
     const state = await loginStorageState(env.origin, account)
-    const file = storageStatePath(env.origin, role)
+    const file = storageStatePath(env, role)
     fs.writeFileSync(file, JSON.stringify(state), { mode: 0o600 })
     fs.chmodSync(file, 0o600)
     roles.push(role)

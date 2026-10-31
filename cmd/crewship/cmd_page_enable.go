@@ -315,6 +315,11 @@ func runPageEnableImageOnly(ctx context.Context, stdout, stderr io.Writer) error
 // recordPageToolsImage adds id for fingerprint to the record, keeping the
 // entries of other versions (rollback).
 func recordPageToolsImage(dir, fingerprint, id string) error {
+	unlock, err := pagebuild.LockBuildImageRecord(dir)
+	if err != nil {
+		return fmt.Errorf("cannot lock the compiler image record in %s: %w", dir, err)
+	}
+	defer unlock()
 	rec, err := pagebuild.ReadBuildImageRecord(dir)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
@@ -492,15 +497,18 @@ func runPageDisable(cmd *cobra.Command, stdout, stderr io.Writer) error {
 		return err
 	}
 	// Forget the images first: the server fails closed at once, whatever
-	// happens to the images below.
-	entries := make(map[string]pagebuild.RecordedImage, len(targets))
-	for _, fp := range targets {
-		entries[fp] = rec.Images[fp]
-		delete(rec.Images, fp)
+	// happens to the images below. The record is re-read under the lock: the
+	// confirmation above can take any time, and an enable that finished
+	// meanwhile must not be overwritten with the stale copy read before it.
+	entries, err := forgetPageImages(dir, targets)
+	if err != nil {
+		return err
 	}
-	if err := pagebuild.WriteBuildImageRecord(dir, rec); err != nil {
-		return fmt.Errorf("cannot update %s: %w", pagebuild.BuildImageRecordPath(dir), err)
+	targets = targets[:0]
+	for fp := range entries {
+		targets = append(targets, fp)
 	}
+	sort.Strings(targets)
 	var failed int
 	for _, fp := range targets {
 		entry := entries[fp]
@@ -530,6 +538,31 @@ func runPageDisable(cmd *cobra.Command, stdout, stderr io.Writer) error {
 		return fmt.Errorf("%d of %d Pages compiler image(s) were not removed (an image used by a running build cannot be removed; remove it with docker image rm when it finishes)", failed, len(targets))
 	}
 	return nil
+}
+
+// forgetPageImages removes targets from the record under the record lock and
+// returns the entries that were still recorded.
+func forgetPageImages(dir string, targets []string) (map[string]pagebuild.RecordedImage, error) {
+	unlock, err := pagebuild.LockBuildImageRecord(dir)
+	if err != nil {
+		return nil, fmt.Errorf("cannot lock the compiler image record in %s: %w", dir, err)
+	}
+	defer unlock()
+	rec, err := pagebuild.ReadBuildImageRecord(dir)
+	if err != nil {
+		return nil, fmt.Errorf("cannot disable Pages Apps: %v; inspect or remove %s", err, pagebuild.BuildImageRecordPath(dir))
+	}
+	entries := make(map[string]pagebuild.RecordedImage, len(targets))
+	for _, fp := range targets {
+		if entry, ok := rec.Images[fp]; ok {
+			entries[fp] = entry
+			delete(rec.Images, fp)
+		}
+	}
+	if err := pagebuild.WriteBuildImageRecord(dir, rec); err != nil {
+		return nil, fmt.Errorf("cannot update %s: %w", pagebuild.BuildImageRecordPath(dir), err)
+	}
+	return entries, nil
 }
 
 func init() {

@@ -64,6 +64,12 @@ func TestPageArtifactPublishReconcilesTruncatedSuccess(t *testing.T) {
 					_, _ = io.WriteString(w, `{"manifest":`)
 				case http.MethodGet:
 					gets++
+					if scenario == "absent" && r.URL.Query().Get("version") == "" {
+						// 404 for base+1 is proof of absence only when the
+						// latest version is not newer than the base.
+						_ = json.NewEncoder(w).Encode(map[string]any{"page_id": "cpagedemo", "slug": "demo", "manifest": map[string]any{"version": 7}})
+						return
+					}
 					if r.URL.Query().Get("version") != "8" {
 						t.Errorf("wrong successor: %s", r.URL)
 					}
@@ -124,6 +130,9 @@ func TestPageArtifactPublishReconcilesTruncatedSuccess(t *testing.T) {
 				}
 			}
 			wantGets := 1
+			if scenario == "absent" {
+				wantGets = 2 // base+1, then the latest version
+			}
 			if strings.HasSuffix(scenario, "refusal") {
 				wantGets = 0
 			}

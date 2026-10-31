@@ -124,7 +124,10 @@ func TestPageArtifactReconcileCommand(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := pageStub(t)
-			stub.OnGet("/api/v1/pages/demo/artifact", func(*http.Request, []byte) (int, []byte, string) {
+			stub.OnGet("/api/v1/pages/demo/artifact", func(r *http.Request, _ []byte) (int, []byte, string) {
+				if tc.status != 200 && r.URL.Query().Get("version") == "" {
+					return 200, paritySnapshot(7, parityServerFiles), "application/json" // latest == base: absence proven
+				}
 				if tc.status != 200 {
 					return tc.status, []byte(`{"error":"artifact project or selected version not found"}`), "application/json"
 				}
@@ -145,6 +148,25 @@ func TestPageArtifactReconcileCommand(t *testing.T) {
 				t.Fatal("reconcile wrote")
 			}
 		})
+	}
+}
+
+// B14 (G4): an Edit user gets 404 for a historical version, so a 404 for
+// base+1 while newer versions exist must not be reported as "not applied".
+func TestPageArtifactReconcile404WithNewerVersionIsUnknown(t *testing.T) {
+	stub := pageStub(t)
+	stub.OnGet("/api/v1/pages/demo/artifact", func(r *http.Request, _ []byte) (int, []byte, string) {
+		if r.URL.Query().Get("version") == "8" {
+			return 404, []byte(`{"error":"artifact project or selected version not found"}`), "application/json"
+		}
+		return 200, paritySnapshot(9, parityServerFiles), "application/json" // another writer published 9
+	})
+	_, err := runParityArtifact(t, newPageArtifactCommand, "reconcile", "demo", "--base-version", "7", "--file", pageBundleFile(t, parityManifest))
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if cli.ExitCodeFor(err) == cli.ExitNotFound || strings.Contains(err.Error(), "was not applied") || strings.Contains(err.Error(), "is safe") {
+		t.Fatalf("a committed save may exist but was reported as absent: %v (exit %d)", err, cli.ExitCodeFor(err))
 	}
 }
 

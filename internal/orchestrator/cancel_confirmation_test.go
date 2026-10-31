@@ -225,3 +225,69 @@ func TestRunAgentAgentStopIsNotChatCancellationConfirmation(t *testing.T) {
 		t.Fatalf("agent stop outcome misreported: %v", err)
 	}
 }
+
+// absentableContainer reports its container gone (and its execs
+// uninspectable) once absent is set, as when an operator removes it.
+type absentableContainer struct {
+	*covContainer
+	absent atomic.Bool
+}
+
+func (c *absentableContainer) ContainerStatus(ctx context.Context, id string) (*provider.ContainerStatus, error) {
+	if c.absent.Load() {
+		return nil, provider.ErrContainerNotFound
+	}
+	return c.covContainer.ContainerStatus(ctx, id)
+}
+
+func (c *absentableContainer) ExecInspect(ctx context.Context, id string) (bool, int, error) {
+	if c.absent.Load() {
+		return false, 0, errors.New("no such exec")
+	}
+	return c.covContainer.ExecInspect(ctx, id)
+}
+
+// B12 (G4): a legacy run whose container is removed while its stop
+// confirmation is pending must release its holds, not retry forever.
+func TestRunAgentCancellationReleasesHoldsWhenContainerIsRemoved(t *testing.T) {
+	c := &absentableContainer{covContainer: covNewRunContainer(covRunOpts{stream: "{}\n"})} // no authoritative stop reply
+	o := New(c, newMemState(), covQuietLogger())
+	o.ipcToken = "fixture-key"
+	o.SetDetachedExecMonitoring(time.Millisecond, time.Millisecond) // the watcher must tick
+	req := covRunReq()
+	req.RunID = "cancel-container-removed"
+	req.Credentials = []Credential{{Type: "SECRET", EnvVarName: "QA_TOKEN", PlainValue: "synthetic"}}
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+	req.OnExecStarted = func(string) { cancel(ws.ErrExplicitStopRequested) }
+	if err := o.RunAgent(ctx, req, nil); !errors.Is(err, ErrDetachedStillRunning) {
+		t.Fatalf("unconfirmed cancellation misreported: %v", err)
+	}
+	o.detachedMu.Lock()
+	h := o.detached[req.RunID]
+	o.detachedMu.Unlock()
+	if h == nil || !h.requireExecTerminal {
+		t.Fatal("exact exec watcher missing")
+	}
+	t.Cleanup(func() { o.closeDetachedHold(h, true) })
+	c.absent.Store(true)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		o.detachedMu.Lock()
+		_, held := o.detached[req.RunID]
+		o.detachedMu.Unlock()
+		if !held {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("hold survived the container's removal")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(o.runSem) != 0 || o.secretsHoldCount(req.ContainerID, req.AgentSlug, req.RunID) != 0 {
+		t.Fatal("removed container left capacity or credential holds")
+	}
+	if _, _, found := runHomeLocation(req.RunID); found {
+		t.Fatal("removed container left its HOME registration")
+	}
+}

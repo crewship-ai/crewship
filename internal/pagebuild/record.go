@@ -145,6 +145,10 @@ func WriteBuildImageRecord(projectsDir string, rec *BuildImageRecord) error {
 	if err != nil {
 		return err
 	}
+	body = append(body, '\n')
+	if len(body) > maxRecordBytes {
+		return fmt.Errorf("the record would be %d bytes, over the %d-byte limit the server reads; remove old versions with `crewship page disable --all` first", len(body), maxRecordBytes)
+	}
 	tmp, err := os.CreateTemp(projectsDir, ".pages-build-image-*.tmp")
 	if err != nil {
 		return err
@@ -155,7 +159,7 @@ func WriteBuildImageRecord(projectsDir string, rec *BuildImageRecord) error {
 		tmp.Close()
 		return err
 	}
-	if _, err := tmp.Write(append(body, '\n')); err != nil {
+	if _, err := tmp.Write(body); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -281,4 +285,30 @@ func shortID(id string) string {
 		trimmed = trimmed[:12]
 	}
 	return trimmed
+}
+
+// BuildImageRecordLockFile is the advisory lock file next to the record that
+// serialises read/modify/write cycles of `crewship page enable|disable`.
+const BuildImageRecordLockFile = ".pages-build-image.lock"
+
+// LockBuildImageRecord takes an exclusive cross-process lock for a
+// read/modify/write of the record and returns its release function. Atomic
+// rename keeps the file whole, but without this lock two operators' cycles
+// interleave and the later write silently drops the earlier one's change.
+func LockBuildImageRecord(projectsDir string) (func(), error) {
+	if projectsDir == "" || !filepath.IsAbs(projectsDir) {
+		return nil, fmt.Errorf("page project storage %q must be an absolute path", projectsDir)
+	}
+	if err := os.MkdirAll(projectsDir, 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(projectsDir, BuildImageRecordLockFile), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := lockFile(f); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return func() { f.Close() }, nil // closing the descriptor releases the flock
 }

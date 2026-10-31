@@ -26,7 +26,7 @@ export class SharedWorkspace {
 
   async open(label: string): Promise<{ api: APIRequestContext; workspace: QaWorkspace }> {
     const env = readPrdEnv()
-    const state = env.accounts.owner ? await ownerLogin() : storageStatePath(env.origin, "owner")
+    const state = env.accounts.owner ? await ownerLogin() : storageStatePath(env, "owner")
     this.api = await playwrightRequest.newContext({ baseURL: env.origin, storageState: state })
     if (env.workspaceId) {
       const res = await this.api.get(`/api/v1/workspaces/${encodeURIComponent(env.workspaceId)}`)

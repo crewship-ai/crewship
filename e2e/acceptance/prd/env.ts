@@ -107,14 +107,22 @@ export function readPrdEnv(env: Env = process.env): PrdEnv {
 }
 
 /**
- * Storage-state file of one role for one origin. Lives with the other e2e
- * cookie jars (owner-only directory, file mode 0600), never in the output
- * directory, so evidence can be shared without session cookies.
+ * Storage-state file of one role for one run. Lives with the other e2e cookie
+ * jars (owner-only directory, file mode 0600), never in the output directory,
+ * so evidence can be shared without session cookies.
+ *
+ * The name carries the origin, the run's output directory and the configured
+ * account, so concurrent runs that share a HOME and an origin cannot read or
+ * overwrite each other's session (a run would otherwise execute as the other
+ * run's user).
  */
-export function storageStatePath(origin: string, role: PrdRole): string {
+export function storageStatePath(env: Pick<PrdEnv, "origin" | "outputDir" | "accounts">, role: PrdRole): string {
   const dir = path.join(os.homedir(), ".crewship", "e2e-auth")
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
-  const tag = createHash("sha256").update(origin).digest("hex").slice(0, 12)
+  const tag = createHash("sha256")
+    .update(JSON.stringify([env.origin, path.resolve(env.outputDir), env.accounts[role]?.email ?? ""]))
+    .digest("hex")
+    .slice(0, 12)
   return path.join(dir, `prd-acceptance-${role}-${tag}.json`)
 }
 
