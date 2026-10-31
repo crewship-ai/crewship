@@ -188,3 +188,20 @@ it("other stops still hide the editor and save no draft", async () => {
   expect(t.frame.hidden).toBe(true)
   expect(drafts.store.size).toBe(0)
 })
+const draftText = (originals: string[]) => JSON.stringify({ format: "crewship-wordcraft-draft-v1", workspace_id: "workspace", page_id: "page", originals })
+it("G4 B3: a recovered draft of one person is not offered to another person after the identity changes", async () => {
+  drafts.store.set(JSON.stringify(["human-one", "wordcraft-pending", "workspace", "page"]), draftText(["secret of A"]))
+  const view = render(<WordCraftEditorHost workspaceId="workspace" pageId="page" name="Original title" />)
+  await waitFor(() => expect(screen.getByRole("group", { name: "Místní koncept" })).toBeInTheDocument())
+  identity.id = "human-two"
+  view.rerender(<WordCraftEditorHost workspaceId="workspace" pageId="page" name="Original title" />)
+  await waitFor(() => expect(screen.queryByRole("group", { name: "Místní koncept" })).toBeNull())
+  expect(screen.queryByText("Stáhnout koncept")).toBeNull()
+})
+it("G4 B4: a second storage_full stop keeps the earlier recovery draft instead of overwriting it", async () => {
+  const key = JSON.stringify(["human-one", "wordcraft-pending", "workspace", "page"])
+  drafts.store.set(key, draftText(["draft A"]))
+  await open()
+  await act(async () => { mocks.connect.mock.calls[0][5].stopped("storage_full"); await new Promise(resolve => setTimeout(resolve, 10)) })
+  expect(JSON.parse(drafts.store.get(key)!).originals).toEqual(["draft A", '{"type":"submit_changes","request_id":"r1"}'])
+})

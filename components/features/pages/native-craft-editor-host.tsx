@@ -67,12 +67,12 @@ async function retireCommitted(journal:NativeDraftJournal,rows:NativeRecovery[],
  const digest=async(bytes:Uint8Array)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new Uint8Array(bytes))),v=>v.toString(16).padStart(2,'0')).join('')
  const serverHash=await digest(server),kept:NativeRecovery[]=[]
  for(const row of rows){
-  if(await digest(row.draft.bytes)===serverHash){try{await journal.confirm(row.draft);continue}catch{/* Kept for comparison. */}}
+  if(await digest(row.draft.bytes)===serverHash){try{await journal.discardRecovered(row);continue}catch{/* Kept for comparison. */}}
   kept.push(row)
  }
  return kept
 }
-interface Runtime {enginePin:string;port:NativeEditorPort;frame:HTMLIFrameElement;abort:AbortController;version:string;generation:string;ready:boolean;writable:boolean;nativeReadOnly:boolean;coordinator?:Coordinator;journal?:NativeDraftJournal;phase?:NativeSaveState;ackedVersion?:string;receiptAck?:Promise<boolean>;receiptVersion?:string;edit:number;blocked:boolean;capture?:NativeDraft;retiring?:Promise<boolean>;retirementFinished?:boolean}
+interface Runtime {enginePin:string;port:NativeEditorPort;frame:HTMLIFrameElement;abort:AbortController;version:string;generation:string;ready:boolean;writable:boolean;nativeReadOnly:boolean;coordinator?:Coordinator;journal?:NativeDraftJournal;phase?:NativeSaveState;ackedVersion?:string;receiptAck?:Promise<boolean>;receiptVersion?:string;confirmedVersion?:string;edit:number;blocked:boolean;capture?:NativeDraft;retiring?:Promise<boolean>;retirementFinished?:boolean}
 
 /** One authenticated client/session owns both lease controls and the isolated full Craft editor. */
 export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}:Props){
@@ -353,6 +353,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     onState(state){r.phase=state;display(r);if(state.phase==='read-only'&&r.writable&&!transition){r.writable=false;freezeInput(r);queueMicrotask(()=>{if(live(r))void retireWrite(r).catch(()=>stop('Zápis byl zastaven; přístup editoru se nepotvrdil.'))})}},
     onReceipt(receipt){
      const edit=r.edit
+     r.confirmedVersion=receipt.version
      const acknowledgement=(async()=>{
       if(!live(r)||!r.writable)return false
       try{
@@ -382,9 +383,20 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(!live(r))return false
    // An editor that was never unlocked has no native draft to publish.
    if(!r.coordinator)return r.nativeReadOnly&&!r.writable&&!r.capture
+   const earlier=r.receiptAck
    freezeInput(r);r.ackedVersion=undefined;r.receiptAck=undefined;r.receiptVersion=undefined;setSavedVersion(undefined)
    await r.coordinator.flush()
    const acknowledgement=r.receiptAck,version=r.receiptVersion
+   if(!acknowledgement&&!version){
+    // Identical bytes are never uploaded again, so no new receipt exists. The
+    // clean flush then proves the server already holds this content at the
+    // confirmed baseline (the loaded version or the last receipt): transfer
+    // against that version, once its editor acknowledgement is settled.
+    const baseline=r.confirmedVersion??r.version
+    if(earlier&&!await earlier)return false
+    if(!live(r)||!r.writable||r.phase?.phase!=='saved'||r.phase.dirty)return false
+    r.ackedVersion=baseline;return true
+   }
    if(!acknowledgement||!version||!await acknowledgement)return false
    return live(r)&&r.writable&&r.phase?.phase==='saved'&&!r.phase.dirty&&r.ackedVersion===version&&r.receiptAck===acknowledgement
   }

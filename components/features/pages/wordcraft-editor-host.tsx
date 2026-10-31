@@ -35,6 +35,8 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
   // A draft kept by an earlier storage-full stop is offered again on reopen.
   React.useEffect(() => {
     const key = artifactDraftKey("wordcraft-pending", humanId, workspaceId, pageId)
+    // A draft belongs to one person: never keep another person's plaintext.
+    setRecovered("")
     if (!key) return
     let active = true
     void loadArtifactDraft(key).then(text => { if (active && text) setRecovered(text) }, () => { /* unreadable: keep the stored copy */ })
@@ -88,8 +90,20 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
         setError(STORAGE_FULL_MESSAGE)
         const key = draftKey.current
         if (key) {
-          const text = JSON.stringify({ format: WORDCRAFT_DRAFT_FORMAT, workspace_id: workspaceId, page_id: pageId, originals })
-          void writeArtifactDraft(key, text).then(() => { if (!abort.signal.aborted) setRecovered(text) }, () => setError(`${STORAGE_FULL_MESSAGE} Místní koncept se nepodařilo uložit; obsah zůstává viditelný v editoru.`))
+          // A second stop must not replace a draft an earlier stop kept.
+          const write = async () => {
+            const existing = await loadArtifactDraft(key)
+            let kept: string[] = []
+            if (existing) {
+              const parsed = (() => { try { return JSON.parse(existing) } catch { return null } })()
+              if (!parsed || parsed.format !== WORDCRAFT_DRAFT_FORMAT || !Array.isArray(parsed.originals) || !parsed.originals.every((item: unknown) => typeof item === "string")) throw new Error("existing_draft_unreadable")
+              kept = parsed.originals
+            }
+            const text = JSON.stringify({ format: WORDCRAFT_DRAFT_FORMAT, workspace_id: workspaceId, page_id: pageId, originals: [...kept, ...originals.filter(original => !kept.includes(original))] })
+            await writeArtifactDraft(key, text)
+            return text
+          }
+          void write().then(text => { if (!abort.signal.aborted) setRecovered(text) }, () => setError(`${STORAGE_FULL_MESSAGE} Místní koncept se nepodařilo uložit; obsah zůstává viditelný v editoru.`))
         }
         return
       }
