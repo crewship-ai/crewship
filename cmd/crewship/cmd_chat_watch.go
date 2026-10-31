@@ -101,6 +101,27 @@ func watchChannelOnce(ctx context.Context, client *cli.Client, channel string, o
 	if err := ws.Subscribe(channel); err != nil {
 		return fmt.Errorf("subscribe: %w", err)
 	}
+	// Subscribe has no acknowledgement. The server handles frames in order, so
+	// the pong for a ping sent right behind it proves the subscription is
+	// registered; only then may the caller read state, or a message committed
+	// in between would have no subscriber to announce it to.
+	if err := ws.Ping(); err != nil {
+		return fmt.Errorf("ping: %w", err)
+	}
+	for registered := false; !registered; {
+		msg, err := ws.ReadMessage()
+		if err != nil {
+			return err
+		}
+		if reason, ok := cli.CloseReason(msg); ok {
+			return cli.WithExitCode(fmt.Errorf("%w %s: %s", errWatchRefused, channel, reason), cli.ExitAuth)
+		}
+		if msg.Type == "pong" {
+			registered = true
+		} else if msg.Channel == channel {
+			onEvent(msg)
+		}
+	}
 	onSubscribed()
 	for {
 		msg, err := ws.ReadMessage()

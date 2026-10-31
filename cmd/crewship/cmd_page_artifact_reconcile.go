@@ -46,7 +46,9 @@ var errArtifactSuccessorAbsent = errors.New("successor version absent")
 // proven.
 var errArtifactSuccessorUnknown = errors.New("successor version outcome unknown")
 
-// artifactLatestVersion reads the number of the page artifact's latest version.
+// artifactLatestVersion reads the page artifact's latest version. It reports
+// the latest only when the caller may write: a reader is served the shared
+// version in its place, which says nothing about newer saves.
 func artifactLatestVersion(client *cli.Client, slug string) (int64, error) {
 	resp, err := client.Get("/api/v1/pages/" + pagePathEscape(slug) + "/artifact")
 	if err != nil {
@@ -64,14 +66,16 @@ func artifactLatestVersion(client *cli.Client, slug string) (int64, error) {
 		return 0, fmt.Errorf("artifact response exceeds limit")
 	}
 	var snapshot struct {
-		Manifest struct {
-			Version int64 `json:"version" yaml:"version"`
-		} `json:"manifest" yaml:"manifest"`
+		CanWrite      bool  `json:"can_write" yaml:"can_write"`
+		LatestVersion int64 `json:"latest_version" yaml:"latest_version"`
 	}
 	if err := json.Unmarshal(raw, &snapshot); err != nil {
 		return 0, fmt.Errorf("decode artifact: %w", err)
 	}
-	return snapshot.Manifest.Version, nil
+	if !snapshot.CanWrite || snapshot.LatestVersion < 1 {
+		return 0, errors.New("your access no longer includes the latest version (the read returned the shared version), so absence cannot be proven; ask the owner, then confirm before publishing again")
+	}
+	return snapshot.LatestVersion, nil
 }
 
 // errArtifactSuccessorDiffers means base+1 exists with other content: some

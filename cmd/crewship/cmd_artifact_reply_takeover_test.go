@@ -67,7 +67,7 @@ func TestPageArtifactPublishReconcilesTruncatedSuccess(t *testing.T) {
 					if scenario == "absent" && r.URL.Query().Get("version") == "" {
 						// 404 for base+1 is proof of absence only when the
 						// latest version is not newer than the base.
-						_ = json.NewEncoder(w).Encode(map[string]any{"page_id": "cpagedemo", "slug": "demo", "manifest": map[string]any{"version": 7}})
+						_ = json.NewEncoder(w).Encode(map[string]any{"page_id": "cpagedemo", "slug": "demo", "can_write": true, "latest_version": 7, "manifest": map[string]any{"version": 7}})
 						return
 					}
 					if r.URL.Query().Get("version") != "8" {

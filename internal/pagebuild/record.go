@@ -291,6 +291,9 @@ func shortID(id string) string {
 // serialises read/modify/write cycles of `crewship page enable|disable`.
 const BuildImageRecordLockFile = ".pages-build-image.lock"
 
+// matchLockOwner is matchDirOwner, replaceable by tests.
+var matchLockOwner = matchDirOwner
+
 // LockBuildImageRecord takes an exclusive cross-process lock for a
 // read/modify/write of the record and returns its release function. Atomic
 // rename keeps the file whole, but without this lock two operators' cycles
@@ -302,8 +305,15 @@ func LockBuildImageRecord(projectsDir string) (func(), error) {
 	if err := os.MkdirAll(projectsDir, 0o700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(filepath.Join(projectsDir, BuildImageRecordLockFile), os.O_CREATE|os.O_RDWR, 0o600)
+	lockPath := filepath.Join(projectsDir, BuildImageRecordLockFile)
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
+		return nil, err
+	}
+	// Like the record: a lock file created by root (sudo) belongs to the
+	// directory's owner, or that account's later commands are denied.
+	if err := matchLockOwner(lockPath, projectsDir); err != nil {
+		f.Close()
 		return nil, err
 	}
 	if err := lockFile(f); err != nil {

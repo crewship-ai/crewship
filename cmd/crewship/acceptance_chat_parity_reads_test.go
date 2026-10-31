@@ -387,6 +387,9 @@ func TestAcceptance_ChatRoomMessages_FollowSubscribesBeforeFirstRead(t *testing.
 	}
 	s.onFrame = func(conn *websocket.Conn, f cli.WSMessage) bool {
 		if f.Type == "subscribe" && f.Channel == "user:u_me" {
+			// The server may take a while to register a subscription; the
+			// follower must not read before it is registered.
+			time.Sleep(400 * time.Millisecond)
 			mu.Lock()
 			subscribed = append(subscribed, conn)
 			mu.Unlock()
