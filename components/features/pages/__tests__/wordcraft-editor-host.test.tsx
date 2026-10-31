@@ -8,11 +8,13 @@ vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id
 const mocks = vi.hoisted(() => ({ open: vi.fn(), connect: vi.fn(), sdk: vi.fn(), ready: vi.fn(), draft: vi.fn(), submit: vi.fn(), stop: vi.fn(), close: vi.fn() }))
 vi.mock("@/lib/mooring/wordcraft-host-session", () => ({ openWordCraftSession: mocks.open, connectWordCraftHost: mocks.connect, loadWordCraftReceiptSDK: mocks.sdk, WORDCRAFT_FRAME_BYTES: 262144, WORDCRAFT_BOOTSTRAP_BYTES: 2097152 }))
 vi.mock("@/lib/editor-lifecycle/use-leave-guard", () => ({ useLeaveGuard: vi.fn() }))
-const drafts = vi.hoisted(() => ({ store: new Map<string, string>(), delay: 0, retired: false }))
+const drafts = vi.hoisted(() => ({ store: new Map<string, string>(), delay: 0, retired: false, chain: Promise.resolve() as Promise<unknown> }))
 vi.mock("@/lib/artifact-drafts", () => ({
   artifactDraftKey: (kind: string, human: string | null, workspace: string, target: string) => human ? JSON.stringify([human, kind, workspace, target]) : null,
   writeArtifactDraft: async (key: string, text: string) => { if (drafts.retired) throw new Error("retired"); if (!/^[A-Za-z0-9_-]{1,128}$/.test(JSON.parse(key)[3])) throw new Error("draft-key 400: immutable Page reference required"); drafts.store.set(key, text) },
   loadArtifactDraft: async (key: string) => { const text = drafts.store.get(key) ?? ""; if (drafts.delay) await new Promise(resolve => setTimeout(resolve, drafts.delay)); if (drafts.retired) throw new Error("retired"); return text },
+  // Like the real lane-level merge: admitted at the call, reads the stored text when it runs.
+  mergeArtifactDraft: async (key: string, merge: (existing: string) => string) => { if (drafts.retired) throw new Error("retired"); let chain = drafts.chain; const run = chain.then(async () => { const existing = drafts.store.get(key) ?? ""; if (drafts.delay) await new Promise(resolve => setTimeout(resolve, drafts.delay)); const text = merge(existing); drafts.store.set(key, text); return text }); drafts.chain = run.catch(() => {}); chain = run; return chain },
   clearArtifactDraft: async (key: string) => { drafts.store.delete(key) },
   artifactDraftRevision: () => 1,
 }))
@@ -22,7 +24,7 @@ const credentialless = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototy
 const contentWindow = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "contentWindow")
 const ports: MessagePort[] = []
 beforeEach(() => {
-  vi.clearAllMocks(); drafts.store.clear(); drafts.delay = 0; drafts.retired = false
+  vi.clearAllMocks(); drafts.store.clear(); drafts.delay = 0; drafts.retired = false; drafts.chain = Promise.resolve()
   identity.id = "human-one"; identity.status = "authenticated"
   Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", { configurable: true, get() { return (this as HTMLIFrameElement).hasAttribute("credentialless") } })
   Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", { configurable: true, get: () => windowMock })
