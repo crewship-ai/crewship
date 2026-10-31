@@ -41,7 +41,7 @@ repository names a real host or account.
 
 | Variable | Meaning |
 | --- | --- |
-| `PRD_ORIGIN` | Origin under test (`https://host[:port]`, no path). `--origin` sets it |
+| `PRD_ORIGIN` | Origin under test (`https://host[:port]`, no path). `--origin` sets it. Browser scenarios that open the native Word/Sheet editor must use the instance's configured public origin: the editor iframe is allowed only there by the CSP `frame-src`, so on `http://localhost:<port>` or any other host name the editor shows "Editor se bezpečně nepřipojil" |
 | `PRD_MODE` | `quick` or `full`. The runner sets it from `--quick` / `--full` / `--origin` |
 | `PRD_OWNER_EMAIL`, `PRD_OWNER_PASSWORD` | Required. Workspace owner able to create workspaces. Quick mode falls back to `E2E_EMAIL` / `E2E_PASSWORD` |
 | `PRD_MEMBER_EMAIL`, `PRD_MEMBER_PASSWORD` | Optional existing second person |
