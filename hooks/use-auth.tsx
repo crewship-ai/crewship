@@ -303,23 +303,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     if (typeof window === "undefined") return
 
-    let redirected = false
+    // The generation this tab is leaving under. A handler returns while that
+    // generation is still current; any newer refresh or settle bumps it and
+    // re-arms both listeners, so no path can leave them stuck (#4714).
+    let redirectingGen = -1
     const goLoginExpired = async (reason?: string) => {
-      if (redirected) return
+      if (redirectingGen === refreshGen.current) return
       // A path the app has no page for shows the not-found state, signed in
       // or not (app/(dashboard)/layout.tsx). The static-export backend serves
       // the dashboard there, whose first requests answer 401 for a visitor
       // without a session — that is not an expired session, and the login
       // page is not where an unknown link should lead.
       if (!isKnownAppPath(window.location.pathname)) return
-      redirected = true
       const gen = ++refreshGen.current
+      redirectingGen = gen
       purgeOtherE2Recovery(null)
       try { await preserveDraftsForIdentity(null) }
-      catch { setDraftRecovery({ retry: async () => { redirected = false; await goLoginExpired(reason) } }); return }
-      // Superseded by a newer refresh: this tab stays, so it must still follow
-      // a later sign-out or expiry (#4705).
-      if (gen !== refreshGen.current) { redirected = false; return }
+      catch { setDraftRecovery({ retry: async () => { if (redirectingGen === gen) redirectingGen = -1; await goLoginExpired(reason) } }); return }
+      // Superseded by a newer refresh: this tab stays and, the generation
+      // having moved, still follows a later sign-out or expiry (#4705).
+      if (gen !== refreshGen.current) return
       const { pathname, search } = window.location
       const currentPath = pathname + search
       // no_credentials: the browser never had a session (or its cookies
@@ -341,21 +344,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
       window.location.replace(`/login?${params.toString()}`)
     }
     const goLoginSignedOutElsewhere = async (human?: string) => {
-      if (redirected) return
+      if (redirectingGen === refreshGen.current) return
       const currentHuman = sessionRef.current?.user.id
       if (human && currentHuman && human !== currentHuman) return
-      redirected = true
       const gen = ++refreshGen.current
+      redirectingGen = gen
       purgeOtherE2Recovery(null)
       try { await preserveDraftsForIdentity(null) }
-      catch { setDraftRecovery({ retry: async () => { redirected = false; await goLoginSignedOutElsewhere(human) } }); return }
-      if (gen !== refreshGen.current) { redirected = false; return }
+      catch { setDraftRecovery({ retry: async () => { if (redirectingGen === gen) redirectingGen = -1; await goLoginSignedOutElsewhere(human) } }); return }
+      if (gen !== refreshGen.current) return
       // The sender deletes only its captured revisions with CAS. A delayed
       // message never authorizes deleting this tab's newer recovery rows.
       const latest = await fetchSession()
-      if (gen !== refreshGen.current) { redirected = false; return }
-      // Still signed in: the tab stays and keeps listening (#4705).
-      if (latest.kind === "settled" && latest.session) { redirected = false; await settle(latest.session, gen); return }
+      if (gen !== refreshGen.current) return
+      // Still signed in: the tab stays and keeps listening (#4705). The settle
+      // keeps this generation, so leaving is disarmed explicitly.
+      if (latest.kind === "settled" && latest.session) { redirectingGen = -1; await settle(latest.session, gen); return }
       window.location.replace(SIGNED_OUT_URL)
     }
 
