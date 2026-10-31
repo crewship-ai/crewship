@@ -178,6 +178,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [session, setSession] = useState<AuthSession | null>(null)
   const [status, setStatus] = useState<AuthStatus>("loading")
   const [draftAdmission, setDraftAdmission] = useState(0)
+  const admitted = useRef(false)
   const [draftRecovery, setDraftRecovery] = useState<{ retry: () => Promise<void> } | null>(null)
   const [draftRetrying, setDraftRetrying] = useState(false)
   const retryDraftTransition = useRef<() => Promise<void>>(async () => {})
@@ -204,7 +205,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try { admission = await preserveDraftsForIdentity(next?.user.id ?? null) }
     catch { if (gen === refreshGen.current) setDraftRecovery({ retry: () => retryDraftTransition.current() }); return }
     if (gen !== refreshGen.current) return
-    setDraftAdmission(admission); setDraftRecovery(null)
+    // The first admission only ends the cold load: nothing mounted belongs to an
+    // earlier person, so the tree (and anything typed meanwhile) stays mounted.
+    if (admitted.current) setDraftAdmission(admission)
+    admitted.current = true
+    setDraftRecovery(null)
     setUnreachable(null)
     sessionRef.current = next
     statusRef.current = next ? "authenticated" : "unauthenticated"
