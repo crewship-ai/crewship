@@ -317,7 +317,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       purgeOtherE2Recovery(null)
       try { await preserveDraftsForIdentity(null) }
       catch { setDraftRecovery({ retry: async () => { redirected = false; await goLoginExpired(reason) } }); return }
-      if (gen !== refreshGen.current) return
+      // Superseded by a newer refresh: this tab stays, so it must still follow
+      // a later sign-out or expiry (#4705).
+      if (gen !== refreshGen.current) { redirected = false; return }
       const { pathname, search } = window.location
       const currentPath = pathname + search
       // no_credentials: the browser never had a session (or its cookies
@@ -347,12 +349,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       purgeOtherE2Recovery(null)
       try { await preserveDraftsForIdentity(null) }
       catch { setDraftRecovery({ retry: async () => { redirected = false; await goLoginSignedOutElsewhere(human) } }); return }
-      if (gen !== refreshGen.current) return
+      if (gen !== refreshGen.current) { redirected = false; return }
       // The sender deletes only its captured revisions with CAS. A delayed
       // message never authorizes deleting this tab's newer recovery rows.
       const latest = await fetchSession()
-      if (gen !== refreshGen.current) return
-      if (latest.kind === "settled" && latest.session) { await settle(latest.session, gen); return }
+      if (gen !== refreshGen.current) { redirected = false; return }
+      // Still signed in: the tab stays and keeps listening (#4705).
+      if (latest.kind === "settled" && latest.session) { redirected = false; await settle(latest.session, gen); return }
       window.location.replace(SIGNED_OUT_URL)
     }
 
