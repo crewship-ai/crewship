@@ -2172,6 +2172,14 @@ crewship page artifact availability
 Returns `{ "enabled": false }` when the workspace feature is disabled. The
 command uses the same authenticated workspace client as other Page commands.
 
+| Flag | Description |
+|------|-------------|
+| `--agent <id>` | Also report whether this agent's crew may create artifact projects: `can_create`, and `code: artifact_crew_not_allowed` when its crew is outside the workspace artifact-creation policy |
+
+```bash
+crewship page artifact availability --agent agent_123
+```
+
 ### `crewship page artifact storage`
 
 Read the workspace's aggregate artifact storage (`used_bytes`,
