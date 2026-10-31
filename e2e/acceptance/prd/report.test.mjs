@@ -272,7 +272,7 @@ test("gate: shipped required-ids.json marks save rows, hour checklists and share
   const real = loadRequired(new URL("./required-ids.json", import.meta.url).pathname, `craft=${CRAFT},artifacts=${ART}`)
   assert.ok((real.sharedPaths ?? []).length > 0)
   for (const p of ["internal/database/migrations", "internal/mooring", "lib/mooring", ".env.production"]) assert.ok(real.sharedPaths.includes(p), p)
-  const save = /roundtrip|soak|\.lease\.|outage|lost-ack|session\.hour|restart|write-revoked|stale/
+  const save = /save|roundtrip|soak|\.lease\.|outage|lost-ack|durability|work-kept|conflict|session\.hour|restart|write-revoked|stale/
   for (const x of real.rows.filter((r) => save.test(r.id))) assert.equal(x.alwaysRerun, true, x.id)
   for (const id of ["A.craft.session.hour-word", "A.craft.session.hour-sheet"]) {
     const r = real.rows.find((x) => x.id === id)
@@ -284,4 +284,20 @@ test("gate: shipped required-ids.json marks save rows, hour checklists and share
 test("manualToRows keeps the recorded checks", () => {
   const [r] = manualToRows([{ id: "A.hour", result: "passed", appSha: RC, evidence: "x", checks: { restart: true } }], strict)
   assert.deepEqual(r.checks, { restart: true })
+})
+
+test("gate: a carried row is checked against its own origin, not the newer row's (Codex #4689 B1)", () => {
+  const rows = [
+    ...strictGood().filter((x) => x.requirement !== "B.one"),
+    row({ requirement: "B.one", origin: "https://elsewhere.test", appSha: OLD, finishedAt: "2025-01-01T00:00:00.000Z" }),
+    row({ requirement: "B.one", origin: ART, appSha: "c".repeat(40), result: "failed", finishedAt: "2026-01-01T00:00:00.000Z" }),
+  ]
+  const carry = [{ id: "B.one", fromSha: OLD, paths: ["e2e/x"], engines: { from: "e", rc: "e" } }]
+  assert.deepEqual(kinds(evaluateRequired(rows, strict, { rc: RC, carryover: carry, diff: () => "" })), ["B.one:origin"])
+})
+
+test("gate: shipped list marks every saving row alwaysRerun and shares the API layer (Codex #4689 B2, B3)", () => {
+  const real = loadRequired(new URL("./required-ids.json", import.meta.url).pathname, `craft=${CRAFT},artifacts=${ART}`)
+  for (const id of ["B.design.save-reload", "B.durability.outage", "B.durability.lost-ack", "B.durability.lost-ack.contract", "quota.project.work-kept", "B.project.conflict", "B.project.restore-restart"]) assert.equal(real.rows.find((x) => x.id === id)?.alwaysRerun, true, id)
+  for (const p of ["internal/api", "internal/server", "internal/pages", "internal/design"]) assert.ok(real.sharedPaths.includes(p), p)
 })

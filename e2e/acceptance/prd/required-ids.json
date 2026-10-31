@@ -1,7 +1,14 @@
 {
   "version": 1,
-  "description": "Required PRD A+B acceptance IDs (G3 of the validation brief). Row origin is a key (craft, artifacts); the canonical URLs are supplied at run time with --origin-map or PRD_RC_ORIGINS because deployment hostnames are not published. sharedPaths are added to every carryover diff; alwaysRerun rows (save, lease, soak, roundtrip, outage, lost-ack, restart, write-revoked, stale) must run on the RC; manualChecks must all be true in a manual record.",
+  "description": "Required PRD A+B acceptance IDs (G3 of the validation brief). Row origin is a key (craft, artifacts); the canonical URLs are supplied at run time with --origin-map or PRD_RC_ORIGINS because deployment hostnames are not published. sharedPaths are added to every carryover diff; alwaysRerun rows (save, lease, soak, roundtrip, outage, lost-ack, durability, work-kept, conflict, restart, write-revoked, stale) must run on the RC; manualChecks must all be true in a manual record.",
   "sharedPaths": [
+    "internal/ws",
+    "internal/backup",
+    "internal/artifacts",
+    "internal/design",
+    "internal/pages",
+    "internal/server",
+    "internal/api",
     "internal/access",
     "internal/admission",
     "internal/auth",
@@ -242,7 +249,8 @@
     },
     {
       "id": "B.project.conflict",
-      "origin": "artifacts"
+      "origin": "artifacts",
+      "alwaysRerun": true
     },
     {
       "id": "B.project.restore",
@@ -278,7 +286,8 @@
     },
     {
       "id": "B.design.save-reload",
-      "origin": "artifacts"
+      "origin": "artifacts",
+      "alwaysRerun": true
     },
     {
       "id": "B.design.agent-live",
@@ -310,7 +319,8 @@
     },
     {
       "id": "quota.project.work-kept",
-      "origin": "artifacts"
+      "origin": "artifacts",
+      "alwaysRerun": true
     },
     {
       "id": "quota.native.visible",
@@ -334,7 +344,8 @@
     },
     {
       "id": "drafts.crash.nothing-saved",
-      "origin": "artifacts"
+      "origin": "artifacts",
+      "alwaysRerun": true
     },
     {
       "id": "drafts.crash.private",
@@ -346,11 +357,13 @@
     },
     {
       "id": "drafts.crash.native-nothing-saved",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "drafts.crash.native-nothing-saved-sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "drafts.crash.native-offer",

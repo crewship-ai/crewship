@@ -290,9 +290,9 @@ export function evaluateRequired(rows, required, opts) {
       }
     } else if (!shaMatches(row.appSha, rc)) fail("appSha", `${String(row.appSha).slice(0, 12)} is not RC ${rc.slice(0, 12)}`)
     checked.push(checkedRow)
+    row = checkedRow
     const want = required.origins[req.origin]
     if (normOrigin(row.origin) !== normOrigin(want)) fail("origin", `${row.origin} is not ${want}`)
-    row = checkedRow
     if (row.result === "skipped" && req.allowSkipped) {
       // Pre-approved skip (native editor servers only); nothing else to check.
     } else if (row.result !== "passed") {

@@ -254,10 +254,13 @@ unless a carryover record covers it.
 A carried row keeps the SHA it was proven on; the gate never rewrites it to the
 RC. It records `carriedFrom` with the `git diff --stat <fromSha> <RC>` over the
 row's scenario paths plus `sharedPaths` from `required-ids.json`
-(authorization, saving, drafts, migrations, runtime config, the release
-profile). The diff must be empty and the engine pins (`engines.from`,
+(API handlers and their authorization and sharing checks, server and
+websocket layers, pages, Design, artifacts, backup, saving, drafts,
+migrations, runtime config, the release profile). The diff must be empty and the engine pins (`engines.from`,
 `engines.rc`) present and equal. Rows marked `alwaysRerun` (save, lease, soak,
-roundtrip, outage, lost-ack, restart, write-revoked, stale) never carry over.
+roundtrip, outage, lost-ack, durability, work-kept, conflict, restart,
+write-revoked, stale) never carry over. The origin, result and mode checks
+apply to the carried row itself.
 Run the gate from a checkout that has both SHAs.
 
 ```sh
