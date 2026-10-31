@@ -26,7 +26,7 @@ var docPlaceholders = strings.NewReplacer(
 	"<engine-revision>", strings.Repeat("c", 40),
 )
 
-var yamlFence = regexp.MustCompile("(?s)```yaml\n(.*?)```")
+var yamlFence = regexp.MustCompile("(?s)```ya?ml[^\n]*\r?\n(.*?)```")
 
 func strictDecode(t *testing.T, block string) (*Config, error) {
 	t.Helper()
@@ -62,7 +62,9 @@ func TestArtifactsConfigurationDocExamplesLoad(t *testing.T) {
 			// The template claims to start these services; keep the page honest.
 			if !cfg.Documents.Enabled || !cfg.GridCraft.Enabled || !cfg.GridCraft.EditorEnabled ||
 				!cfg.Slides.Enabled || !cfg.Mooring.Enabled || !cfg.CraftNative.Enabled {
-				t.Fatalf("template no longer enables the documented services: %+v", cfg)
+				t.Fatalf("template no longer enables the documented services: documents=%t gridcraft=%t editor=%t slides=%t mooring=%t craft_native=%t",
+					cfg.Documents.Enabled, cfg.GridCraft.Enabled, cfg.GridCraft.EditorEnabled,
+					cfg.Slides.Enabled, cfg.Mooring.Enabled, cfg.CraftNative.Enabled)
 			}
 			if _, ok := cfg.CraftNative.Profiles["wordcraft"]; !ok {
 				t.Fatal("template no longer carries the wordcraft profile")
