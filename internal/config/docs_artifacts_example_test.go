@@ -16,11 +16,14 @@ import (
 const artifactsConfigPage = "../../docs/configuration/artifacts.mdx"
 
 // docPlaceholders are the qualification values the page tells operators to
-// supply themselves. Each is replaced by a value of the required shape.
+// supply themselves. Each is replaced by a value of the shape the server
+// requires (SHA-256 hex digests, a 40-character engine revision pin).
+// Validate does not check those pins, so this test proves the template
+// decodes and validates, not that its profiles qualify.
 var docPlaceholders = strings.NewReplacer(
 	"<bundle-sha256>", strings.Repeat("a", 64),
 	"<cli-sha256>", strings.Repeat("b", 64),
-	"<engine-revision>", "qualified-revision",
+	"<engine-revision>", strings.Repeat("c", 40),
 )
 
 var yamlFence = regexp.MustCompile("(?s)```yaml\n(.*?)```")
@@ -37,6 +40,7 @@ func strictDecode(t *testing.T, block string) (*Config, error) {
 }
 
 func TestArtifactsConfigurationDocExamplesLoad(t *testing.T) {
+	t.Setenv("CREWSHIP_ALLOWED_ORIGINS", "") // Validate reads it; keep the result independent of the host.
 	page, err := os.ReadFile(artifactsConfigPage)
 	if err != nil {
 		t.Fatal(err)
