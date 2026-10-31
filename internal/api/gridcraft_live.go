@@ -69,6 +69,9 @@ func (h *gridcraftHTTP) editorOn(ctx context.Context, q featureflags.RowQuerier,
 
 // editorError writes the live-editing refusals; it reports whether it did.
 func editorError(w http.ResponseWriter, err error) bool {
+	if artifactStorageRefusal(w, err) {
+		return true
+	}
 	switch {
 	case errors.Is(err, errGridCraftEditorDisabled):
 		replyError(w, 503, errGridCraftEditorDisabled.Error())

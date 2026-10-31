@@ -26,6 +26,7 @@ var designWSRun = design.Run
 const (
 	designCloseRejected    = 4400 // the engine refused the update; resending it cannot succeed
 	designCloseRateLimited = 4429 // sync step 1 requests beyond the per-connection bucket
+	designCloseStorageFull = 4009 // aggregate storage is full; the browser keeps its local changes
 )
 
 var (
@@ -60,7 +61,10 @@ func (client *designClient) allowSyncRequest(now time.Time) bool {
 }
 
 func designCloseFor(err error) (int, string) {
+	err = artifacts.StorageBudgetError(err)
 	switch {
+	case errors.Is(err, artifacts.ErrStorageQuota):
+		return designCloseStorageFull, "Design storage capacity full"
 	case errors.Is(err, errDesignAccess), errors.Is(err, artifacts.ErrVersionAuthority), errors.Is(err, sql.ErrNoRows), errors.Is(err, artifacts.ErrDisabled):
 		return websocket.ClosePolicyViolation, "Design permissions changed"
 	case errors.Is(err, design.ErrInvalid), errors.Is(err, artifacts.ErrVersionInvalid):

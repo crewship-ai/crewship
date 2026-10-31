@@ -377,7 +377,7 @@ describe('full native history',()=>{
   client.save.mockRejectedValueOnce(new NativeSaveError('quota'))
   act(()=>portOptions.at(-1)!.onChanged('edit-at-full-quota','doc'))
   act(()=>portOptions.at(-1)!.onSaveRequest({documentId:'doc',editorRevision:'edit-at-full-quota'}))
-  expect(await screen.findByText(/Historie dokumentu je plná/)).toBeInTheDocument()
+  expect(await screen.findByText(/Kapacita úložiště neumožňuje další uložení/)).toBeInTheDocument()
   const click=vi.fn();const create=vi.spyOn(document,'createElement')
   vi.stubGlobal('URL',Object.assign(URL,{createObjectURL:vi.fn(()=>'blob:x'),revokeObjectURL:vi.fn()}))
   create.mockImplementationOnce(()=>Object.assign(document.createElementNS('http://www.w3.org/1999/xhtml','a') as HTMLAnchorElement,{click}))

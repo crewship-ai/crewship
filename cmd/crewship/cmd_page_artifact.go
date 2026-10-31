@@ -119,7 +119,10 @@ func newPageArtifactCommand() *cobra.Command {
 		return artifactCLIRequest(cmd, "GET", path, nil)
 	}}
 	availability.Flags().String("agent", "", "Agent ID: also report whether this agent's crew may create artifact projects (can_create)")
-	cmd.AddCommand(reply, availability)
+	storage := &cobra.Command{Use: "storage", Args: cobra.NoArgs, Short: "Read this workspace's aggregate artifact storage usage (owners and admins)", RunE: func(cmd *cobra.Command, _ []string) error {
+		return artifactCLIRequest(cmd, "GET", "/api/v1/pages/artifacts/storage", nil)
+	}}
+	cmd.AddCommand(reply, availability, storage)
 	cmd.AddCommand(newPageArtifactCommentCommand())
 	cmd.AddCommand(newPageArtifactReconcileCommand())
 	return cmd

@@ -114,6 +114,41 @@ work is retained", and native document routes with "native history quota
 reached; existing versions retained". There is no command that deletes old
 versions or raises the limit for one artifact.
 
+### Aggregate workspace and instance storage
+
+Every artifact family also counts against one shared storage budget per
+workspace (default 32 GiB) and per instance (default 64 GiB), plus a free-disk
+reserve (default 2 GiB beyond one copy of the database). The budget counts
+retained bytes of versions and blobs, native proposals, Design canvases,
+Dashboard data, documents and their journals, Slides, GridCraft and Mooring
+rows. SQLite triggers keep the counters in the same transaction as the write,
+so concurrent writers on different Pages cannot overshoot the limit together.
+
+Large uploads reserve their maximum size before the body is read. The
+reservation is held until the write commits or the request ends, and expires
+after two minutes. At most eight uploads (four per workspace) may be in flight;
+beyond that, routes answer `503` with code `artifact_storage_busy` and
+`Retry-After`, without writing anything.
+
+When the aggregate budget is full, routes answer `413` with code
+`artifact_storage_quota`. The whole transaction is refused, so no partial
+version, blob or proposal is written, every confirmed version is kept, and
+reads stay available. Nothing is deleted to make room. A Design live socket
+closes with code `4009` and the browser keeps its local changes.
+
+The per-Page proposal budget (`MaxProposalBytes`) stays separate from human
+history: running out of proposal space never blocks a human save and is not
+reported as `artifact_storage_quota`. Proposal bytes do count toward the
+aggregate budget, because they occupy the same disk.
+
+Read responses carry `quota.storage_level` (`none`, `near` from 80%,
+`critical` from 95%, `full`) as an advance warning to every writer who sees a
+quota. It contains no byte counts. Workspace owners and admins read the byte
+counts with `GET /api/v1/pages/artifacts/storage`
+(`crewship page artifact storage`). Members get `403`, because
+workspace-wide usage would reveal activity on Pages they cannot read; the
+instance's byte counts are never returned, only `instance_level`.
+
 ## Retention
 
 The store keeps every version. Nothing expires or is pruned. The instance

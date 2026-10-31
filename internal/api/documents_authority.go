@@ -215,6 +215,9 @@ func (h *documentAuthority) authorizeWithReadRecord(r *http.Request, k documents
 	}
 }
 func documentAuthorityError(w http.ResponseWriter, err error) {
+	if artifactStorageRefusal(w, err) {
+		return
+	}
 	if errors.Is(err, documents.ErrRateLimit) {
 		writeJSON(w, 429, map[string]string{"error": "temporary document operation limit; wait and retry the original request", "code": "document_rate_limit"})
 		return

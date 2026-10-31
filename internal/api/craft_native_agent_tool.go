@@ -432,6 +432,12 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 		}
 	}()
 	defer func() { cancel(); <-done }()
+	upload, err := store.ReserveUpload(active, e.grant.Scope, (32<<20)+(256<<10))
+	if err != nil {
+		return zero, err
+	}
+	defer upload.Close()
+	active = upload.Context(active)
 	candidate, err := m.config.AgentApply(active, profile, native, input.Commands)
 	if err != nil {
 		return zero, err
@@ -508,6 +514,13 @@ func (m *craftNativeAgentManager) proposeTool(ctx context.Context, e *craftNativ
 	e.tool.currentAttempt = attempt
 	active, cancel := context.WithTimeout(ctx, 65*time.Second)
 	defer cancel()
+	upload, err := store.ReserveUpload(active, e.grant.Scope, (32<<20)+(256<<10))
+	if err != nil {
+		return mooring.NativeProposal{}, err
+	}
+	defer upload.Close()
+	active = upload.Context(active)
+	ctx = upload.Context(ctx)
 	candidate, err := m.config.AgentApply(active, profile, native, input.Commands)
 	if err != nil {
 		attempt.proposalErr = err

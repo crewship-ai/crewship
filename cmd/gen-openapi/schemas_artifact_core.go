@@ -36,10 +36,22 @@ func artifactProjectCoreComponents() map[string]any {
 	}, "version", "entrypoint", "message", "actor", "created_at", "restored_from")
 	schemas["ArtifactProjectQuota"] = object(map[string]any{
 		"used_bytes": integer(0), "limit_bytes": integer(0), "warning": map[string]any{"type": "boolean", "description": "True from the near threshold upwards; prefer level."},
-		"level":     map[string]any{"type": "string", "enum": []string{"none", "near", "critical", "full"}, "description": "none below 80% of limit_bytes, near from 80%, critical from 95%, full when used_bytes reaches limit_bytes. Omitted when the quota is withheld (shared or editor views report limit_bytes 0)."},
-		"retention": map[string]any{"type": "string", "description": "Owner views use keep-all with history usage; non-owner editors use latest-version-only and other readers shared-version-only, with zero usage/limit values. These visibility labels do not prune stored versions; quota refusal preserves existing data."},
+		"level":         map[string]any{"type": "string", "enum": []string{"none", "near", "critical", "full"}, "description": "none below 80% of limit_bytes, near from 80%, critical from 95%, full when used_bytes reaches limit_bytes. Omitted when the quota is withheld (shared or editor views report limit_bytes 0)."},
+		"storage_level": map[string]any{"type": "string", "enum": []string{"none", "near", "critical", "full"}, "description": "Coarse aggregate (workspace and instance) artifact storage level, using the same thresholds as level. It carries no byte counts; workspace owners and admins read those from GET /api/v1/pages/artifacts/storage. Omitted when the quota is withheld."},
+		"retention":     map[string]any{"type": "string", "description": "Owner views use keep-all with history usage; non-owner editors use latest-version-only and other readers shared-version-only, with zero usage/limit values. These visibility labels do not prune stored versions; quota refusal preserves existing data."},
 	}, "used_bytes", "limit_bytes", "warning", "retention")
 	schemas["ArtifactProjectAvailability"] = object(map[string]any{"enabled": boolean(), "can_create": boolean(), "code": map[string]any{"type": "string", "enum": []string{"artifact_crew_not_allowed"}}}, "enabled")
+	storageLevel := func() map[string]any {
+		return map[string]any{"type": "string", "enum": []string{"none", "near", "critical", "full"}}
+	}
+	schemas["ArtifactStorageUsage"] = object(map[string]any{
+		"used_bytes":     described(integer(0), "Bytes retained by every artifact family in this workspace: versions, proposals, Design, Data, documents, Slides, GridCraft and Mooring rows."),
+		"reserved_bytes": described(integer(0), "Bytes held by in-flight uploads; released when they commit or end."),
+		"limit_bytes":    integer(1),
+		"level":          described(storageLevel(), "Workspace level from used_bytes+reserved_bytes against limit_bytes."),
+		"instance_level": described(storageLevel(), "Coarse instance level; instance byte counts are never returned."),
+		"retention":      map[string]any{"type": "string", "enum": []string{"keep-all"}, "description": "History is never deleted automatically."},
+	}, "used_bytes", "reserved_bytes", "limit_bytes", "level", "instance_level", "retention")
 	manifestProps := map[string]any{"entrypoint": path(), "files": files("ArtifactProjectFileInput"), "message": text(4096)}
 	schemas["ArtifactProjectCreateRequest"] = object(mergeProps(manifestProps, map[string]any{
 		"created_by_test": boolean(),

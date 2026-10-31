@@ -4,7 +4,7 @@ import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwareness
 import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
 
-export type DesignConnection = "connecting" | "connected" | "offline" | "denied" | "rejected"
+export type DesignConnection = "connecting" | "connected" | "offline" | "denied" | "rejected" | "quota"
 export type DesignAdmission = "ready" | "denied" | "retry"
 export interface DesignPeer { clientId: number; name: string; color: string; cursor?: { x: number; y: number } }
 const REMOTE = "design-server"
@@ -19,6 +19,8 @@ export class DesignProvider {
  private admittedEdit: boolean
  private generation = 0
  private renewal: ReturnType<typeof setTimeout> | undefined
+ private full = false
+ get storageFull() { return this.full }
  private connected = false
  private acknowledged = false
  private updateTimer: ReturnType<typeof setTimeout> | undefined
@@ -38,6 +40,7 @@ export class DesignProvider {
   this.changeListener = (update, origin) => {
    if (origin === REMOTE || !this.canEdit) return
    this.dirty()
+   if (this.full) return
    this.queuedUpdates.push(update)
    if (!this.updateTimer) this.updateTimer = setTimeout(() => this.flushUpdates(), 75)
   }
@@ -155,11 +158,14 @@ export class DesignProvider {
    if (this.stopped || this.socket !== socket) return
    this.socket = null
    clearTimeout(this.renewal)
-   this.rejectWaiters("Canvas reconnected before the version was saved. Save again after reconnecting.")
+   this.rejectWaiters(event.code===4009?"Workspace storage is full. Your private draft is retained.":"Canvas reconnected before the version was saved. Save again after reconnecting.",event.code===4009?413:undefined)
    this.connected = false
    this.acknowledged = false
    removeAwarenessStates(this.awareness, [...this.awareness.getStates().keys()].filter(id => id !== this.doc.clientID), REMOTE)
    if (this.stopped) return
+   if(event.code === 4009) {
+    this.full=true;this.queuedUpdates=[];this.status("quota");return
+   }
    if (event.code === 1008 || event.code === 4003 || event.code === 4403) {
     this.canEdit = false
     this.status("denied")
@@ -175,8 +181,8 @@ export class DesignProvider {
    }
   }
  }
- private rejectWaiters(message: string) {
-  for (const waiter of this.waiters) { clearTimeout(waiter.timer); waiter.reject(new Error(message)) }
+ private rejectWaiters(message: string, status?:number) {
+  for (const waiter of this.waiters) { clearTimeout(waiter.timer); waiter.reject(Object.assign(new Error(message),{status})) }
   this.waiters.clear()
  }
  private rotate() {

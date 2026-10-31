@@ -1989,6 +1989,16 @@
             "description": "Owner views use keep-all with history usage; non-owner editors use latest-version-only and other readers shared-version-only, with zero usage/limit values. These visibility labels do not prune stored versions; quota refusal preserves existing data.",
             "type": "string"
           },
+          "storage_level": {
+            "description": "Coarse aggregate (workspace and instance) artifact storage level, using the same thresholds as level. It carries no byte counts; workspace owners and admins read those from GET /api/v1/pages/artifacts/storage. Omitted when the quota is withheld.",
+            "enum": [
+              "none",
+              "near",
+              "critical",
+              "full"
+            ],
+            "type": "string"
+          },
           "used_bytes": {
             "format": "int64",
             "minimum": 0,
@@ -2340,6 +2350,64 @@
         "required": [
           "deck",
           "anchors"
+        ],
+        "type": "object"
+      },
+      "ArtifactStorageUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "instance_level": {
+            "description": "Coarse instance level; instance byte counts are never returned.",
+            "enum": [
+              "none",
+              "near",
+              "critical",
+              "full"
+            ],
+            "type": "string"
+          },
+          "level": {
+            "description": "Workspace level from used_bytes+reserved_bytes against limit_bytes.",
+            "enum": [
+              "none",
+              "near",
+              "critical",
+              "full"
+            ],
+            "type": "string"
+          },
+          "limit_bytes": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reserved_bytes": {
+            "description": "Bytes held by in-flight uploads; released when they commit or end.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "retention": {
+            "description": "History is never deleted automatically.",
+            "enum": [
+              "keep-all"
+            ],
+            "type": "string"
+          },
+          "used_bytes": {
+            "description": "Bytes retained by every artifact family in this workspace: versions, proposals, Design, Data, documents, Slides, GridCraft and Mooring rows.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "used_bytes",
+          "reserved_bytes",
+          "limit_bytes",
+          "level",
+          "instance_level",
+          "retention"
         ],
         "type": "object"
       },
@@ -127756,6 +127824,91 @@
           }
         ],
         "summary": "Check Artifacts availability",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/artifacts/storage": {
+      "get": {
+        "description": "Report this workspace's aggregate artifact storage (used, in-flight reserved and limit bytes, plus warning levels). Workspace owners and admins only; members get 403 because workspace-wide usage reveals activity on Pages they cannot read. History is never deleted automatically; when full, writes are refused with 413 artifact_storage_quota and existing data is kept.",
+        "operationId": "get_api_v1_pages_artifacts_storage",
+        "parameters": [
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactStorageUsage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get artifact storage usage",
         "tags": [
           "pages"
         ],

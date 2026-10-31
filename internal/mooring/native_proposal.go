@@ -151,6 +151,12 @@ func (s *NativeStore) Propose(ctx context.Context, k EditLeaseScope, base int64,
 		if open >= MaxOpenNativeProposals {
 			return "", artifacts.ErrVersionQuota
 		}
+		if err = artifacts.ConsumeStorageUpload(ctx, tx, nativeVersionKey(k)); err != nil {
+			return "", err
+		}
+		if err = artifacts.CheckStorageHeadroom(ctx, tx, int64(len(b))); err != nil {
+			return "", err
+		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO craft_native_proposals(id,page_id,workspace_id,application_id,engine_pin,author_actor_id,request_id,base_version,summary,content_hash,content) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, k.ArtifactID, k.WorkspaceID, s.config.Application, s.EnginePin(), actor, requestKey, base, summary, hash, b); err != nil {
 			return "", err
 		}

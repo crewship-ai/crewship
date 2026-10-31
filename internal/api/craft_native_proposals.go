@@ -54,6 +54,9 @@ func (d *craftNativeDocumentsHTTP) proposalView(r *http.Request, workspaceID str
 }
 
 func craftNativeProposalError(w http.ResponseWriter, err error) {
+	if artifactStorageRefusal(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, mooring.ErrNativeProposalNotFound):
 		replyError(w, 404, "native Craft proposal not found")

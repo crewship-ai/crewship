@@ -135,6 +135,24 @@ crewship page artifact availability -f json
 {"enabled": true}
 ```
 
+### `crewship page artifact storage`
+
+Read the workspace's aggregate artifact storage: bytes used by every artifact
+family, bytes reserved by uploads in flight, the limit, and warning levels.
+Only workspace owners and admins can run it; other members get `403`.
+
+```bash
+crewship page artifact storage -f json
+```
+
+```json
+{"used_bytes": 734003200, "reserved_bytes": 0, "limit_bytes": 34359738368, "level": "none", "instance_level": "none", "retention": "keep-all"}
+```
+
+When `level` reaches `full`, saves fail with `artifact_storage_quota`: nothing
+is saved, your `--file` input is unchanged and every existing version is kept.
+History is never deleted automatically.
+
 ### `crewship page artifact create <slug>`
 
 Create a new artifact and save its first version. `--file` is a JSON manifest
