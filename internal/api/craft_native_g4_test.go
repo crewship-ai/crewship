@@ -65,6 +65,7 @@ func TestPublishUserAccessRecheckBoundsWaitingFanouts(t *testing.T) {
 	// Every admitted fan-out holds a slot until the send timeout against the
 	// stopped hub; at 5 s that cost the shard 85 s (#4710).
 	// Registered first so it runs after the wait below: waiters read it later.
+	recheckInFlight.Wait() // fan-outs left by earlier tests must not read the write below
 	saved := recheckSendTimeout
 	t.Cleanup(func() { recheckSendTimeout = saved })
 	recheckSendTimeout = 200 * time.Millisecond
