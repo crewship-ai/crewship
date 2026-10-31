@@ -25,6 +25,7 @@ CREATE TABLE artifact_storage_reservations (
 );
 CREATE INDEX artifact_storage_reservations_workspace ON artifact_storage_reservations(workspace_id);
 CREATE INDEX artifact_storage_reservations_expiry ON artifact_storage_reservations(expires_at);
+CREATE INDEX artifact_storage_reservations_page ON artifact_storage_reservations(page_id);
 CREATE TRIGGER artifact_storage_reservation_scope BEFORE INSERT ON artifact_storage_reservations
 WHEN NEW.page_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM pages WHERE id=NEW.page_id AND workspace_id=NEW.workspace_id)
 BEGIN SELECT RAISE(ABORT,'artifact storage reservation scope mismatch'); END;
@@ -36,6 +37,7 @@ CREATE TABLE artifact_storage_pages (
  page_id TEXT PRIMARY KEY,
  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE
 );
+CREATE INDEX artifact_storage_pages_workspace ON artifact_storage_pages(workspace_id);
 INSERT INTO artifact_storage_pages(page_id,workspace_id) SELECT id,workspace_id FROM pages;
 CREATE TRIGGER pages_storage_scope_insert AFTER INSERT ON pages
 BEGIN INSERT INTO artifact_storage_pages(page_id,workspace_id) VALUES(NEW.id,NEW.workspace_id); END;
