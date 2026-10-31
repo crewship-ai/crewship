@@ -18,7 +18,9 @@ const REQ = {
   gridcraft: prdRequirement("A.craft.soak.saves-2000-sheet", "Sheet: a workbook above 4 MiB survives 2,000 saves; a fresh login reopens exact content and version count"),
 } as const
 
-const RENEW_EVERY = 100
+// Leases live at most a minute; renew well inside that.
+const RENEW_EVERY_MS = 5_000
+const READMIT_EVERY_MS = 8 * 60_000
 
 for (const { application, label } of APPLICATIONS) {
   test.describe(`${label} soak`, () => {
@@ -37,21 +39,41 @@ for (const { application, label } of APPLICATIONS) {
         expect(body.length, "native state above 4 MiB").toBeGreaterThan(4 * 1024 * 1024)
         expect(body.length).toBeGreaterThan(MIN_NATIVE_BYTES - 1)
 
-        const session = await doc.session(request)
-        const acquired = (await (await doc.leaseOp(request, session, "acquire")).json()) as LeaseView
-        expect(acquired.mine, "the owner holds the editor").toBe(true)
-        const generation = acquired.generation!
-        const head = await doc.document(request, session)
+        // The login lives about 15 minutes, less than a slow run. Before it ends the
+        // editor re-admits like a reloaded tab: release custody, sign in again, take a
+        // fresh admission and a new generation, continue on the current head.
+        let api = request
+        let loggedInAt = Date.now()
+        let session = await doc.session(api)
+        let generation = ((await (await doc.leaseOp(api, session, "acquire")).json()) as LeaseView).generation!
+        const head = await doc.document(api, session)
         let version = head.version
         const first = BigInt(version)
-
+        const reAdmit = async () => {
+          const released = await doc.leaseOp(api, session, "release", { generation })
+          expect(released.status(), "release custody before signing in again").toBe(200)
+          const account = prd.env.accounts.owner
+          expect(account, "owner account").toBeTruthy()
+          api = await apiAs(prd.origin, await loginStorageState(prd.origin, account!))
+          cleanup.push(() => api.dispose())
+          session = await doc.session(api)
+          const view = (await (await doc.leaseOp(api, session, "acquire")).json()) as LeaseView
+          expect(view.mine, "the owner holds the editor again").toBe(true)
+          generation = view.generation!
+          loggedInAt = Date.now()
+          readmissions++
+        }
+        let readmissions = 0
+        let renewedAt = Date.now()
         for (let i = 1; i <= SOAK_SAVES; i++) {
-          if (i % RENEW_EVERY === 0) {
-            const renewed = await doc.leaseOp(request, session, "renew", { generation })
+          if (Date.now() - loggedInAt >= READMIT_EVERY_MS) await reAdmit()
+          if (Date.now() - renewedAt >= RENEW_EVERY_MS) {
+            renewedAt = Date.now()
+            const renewed = await doc.leaseOp(api, session, "renew", { generation })
             expect(renewed.status(), `renew the lease before save ${i}`).toBe(200)
           }
           const bytes = i === SOAK_SAVES ? last : body
-          const res = await doc.save(request, session, { generation, baseVersion: version, enginePin: head.enginePin, bytes, editorRevision: `prd-soak-${i}` })
+          const res = await doc.save(api, session, { generation, baseVersion: version, enginePin: head.enginePin, bytes, editorRevision: `prd-soak-${i}` })
           if (res.status() !== 200) throw new Error(`save ${i}/${SOAK_SAVES} on version ${version}: HTTP ${res.status()} ${(await res.text()).slice(0, 300)}`)
           const receipt = (await res.json()) as { version: string; phase: string }
           expect(receipt.phase, `save ${i} committed`).toBe("committed")
@@ -59,7 +81,7 @@ for (const { application, label } of APPLICATIONS) {
           version = receipt.version
         }
         expect(BigInt(version) - first, "versions written").toBe(BigInt(SOAK_SAVES))
-        const released = await doc.leaseOp(request, session, "release", { generation })
+        const released = await doc.leaseOp(api, session, "release", { generation })
         expect(released.status()).toBe(200)
 
         // Reopen with a fresh login and a fresh admission.
@@ -75,7 +97,7 @@ for (const { application, label } of APPLICATIONS) {
         expect(digest(got), "exact bytes").toBe(digest(last))
         expect(got.toString("utf8").includes(marker), "the last save's content is present").toBe(true)
 
-        log.result = { firstVersion: first.toString(), finalVersion: reopened.version, bytes: got.length, sha256: digest(got) }
+        log.result = { readmissions, firstVersion: first.toString(), finalVersion: reopened.version, bytes: got.length, sha256: digest(got) }
         await prd.evidence("result.json", log)
       } finally {
         for (const c of cleanup.reverse()) await c().catch(() => {})

@@ -33,24 +33,30 @@ export function bigWord(marker: string | null): Buffer {
 export function bigSheet(marker: string | null): Buffer {
   const wb = JSON.parse(emptyDocument("gridcraft").toString("utf8")) as { sheets: Array<{ cells: unknown }> }
   const cell = (v: number) => ({ value: { t: "Number", v }, formula: null, style: 0 })
-  const rows: Record<string, Record<string, unknown>> = {}
+  // The engine keys bands by row / 64 and rows by their absolute index.
+  const bands: Record<string, { rows: Record<string, Record<string, unknown>> }> = {}
+  const put = (r: number, cols: Record<string, unknown>) => {
+    const band = String(Math.floor(r / 64))
+    ;(bands[band] ??= { rows: {} }).rows[String(r)] = cols
+  }
   let size = 0
   let count = 0
+  let next = 0
   for (let r = 0; size < MIN_NATIVE_BYTES; r++) {
     const cols: Record<string, unknown> = {}
     for (let c = 0; c < 10; c++) {
       cols[String(c)] = cell(r * 10 + c + 0.5)
       count++
     }
-    rows[String(r)] = cols
+    put(r, cols)
+    next = r + 1
     size += JSON.stringify(cols).length + 8
   }
   if (marker) {
-    const last = Object.keys(rows).length
-    rows[String(last)] = { "0": { value: { t: "Text", v: marker }, formula: null, style: 0 } }
+    put(next, { "0": { value: { t: "Text", v: marker }, formula: null, style: 0 } })
     count++
   }
-  wb.sheets[0].cells = { bands: { "0": { rows } }, len: count }
+  wb.sheets[0].cells = { bands, len: count }
   return Buffer.from(JSON.stringify(wb))
 }
 
