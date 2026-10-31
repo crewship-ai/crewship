@@ -1,5 +1,6 @@
 "use client"
 
+import { ARTIFACT_CREW_NOT_ALLOWED, ARTIFACT_CREW_NOT_ALLOWED_MESSAGE } from "@/lib/artifact-refusal"
 import { useCallback, useEffect, useId, useRef, useState } from "react"
 import { AlertTriangle, FilePlus2, X } from "lucide-react"
 import { NewArtifactMenu } from "../artifact-context/new-artifact/new-artifact-menu"
@@ -46,6 +47,9 @@ interface ChatComposerProps {
   documentCreationEnabled?: boolean
   /** Server-confirmed support for explicit, private artifact creation. */
   artifactCreationEnabled?: boolean
+  /** A send the server refused for a typed reason. A new `id` restores the last
+   *  typed message and shows the specific reason instead of a generic failure. */
+  sendRefusal?: { id: number; code: string } | null
   /** "desktop" wraps the input in AttachmentZone + mention autocomplete +
    *  attachment button; "mobile" renders the bare input, matching the two
    *  historical branches of ChatPanel. */
@@ -150,6 +154,7 @@ export function ChatComposer({
   agentName,
   documentCreationEnabled = false,
   artifactCreationEnabled = false,
+  sendRefusal = null,
   variant,
   isStreaming,
   connectionStatus,
@@ -189,6 +194,9 @@ export function ChatComposer({
     setCreationSelection(null)
     creationPacket.current = null
   }, [creationScope, canCreateDocument, canCreateArtifact])
+  const lastSent = useRef<{ scope: string; text: string } | null>(null)
+  const handledRefusal = useRef(sendRefusal?.id ?? 0)
+  const [refusalNotice, setRefusalNotice] = useState<string | null>(null)
   const restoreInput = () => {
     const saved = draftKey ? useComposerStore.getState().drafts[draftKey] : undefined
     return saved?.trim() ? saved : initialInput ?? ""
@@ -203,6 +211,18 @@ export function ChatComposer({
     setInput(text)
     if (draftKey) setDraft(draftKey, text)
   }, [draftKey, setDraft, setInput])
+  // A typed refusal arrives after the optimistic clear: hand the message back
+  // (unless the person has already started something new) and say why.
+  useEffect(() => {
+    if (!sendRefusal || sendRefusal.id === handledRefusal.current) return
+    handledRefusal.current = sendRefusal.id
+    if (sendRefusal.code !== ARTIFACT_CREW_NOT_ALLOWED) return
+    const sent = lastSent.current
+    if (sent && sent.scope === inputScope && !input.trim()) updateInput(sent.text)
+    setCreationSelection(null)
+    creationPacket.current = null
+    setRefusalNotice(ARTIFACT_CREW_NOT_ALLOWED_MESSAGE)
+  }, [sendRefusal, inputScope, input, updateInput])
   // If the session ends while this is unsent, the signed-out screen says the
   // message to this agent is kept (#3787, lib/signed-out.ts). The draft itself
   // stays where it is — persisted per user and session above.
@@ -384,12 +404,14 @@ export function ChatComposer({
       }
       await handleSubmit(outgoing)
       if (!sentRef.current) return
+      lastSent.current = { scope: inputScope, text: message.text }
+      setRefusalNotice(null)
       setCreationSelection(null)
       creationPacket.current = null
       setInput("")
       if (draftKey) clearDraft(draftKey)
     },
-    [handleSubmit, clearDraft, draftKey, setInput, createDocument, createArtifact, creationScope, sessionAttachments, sendBlocked, announceBlocked],
+    [handleSubmit, clearDraft, draftKey, inputScope, setInput, createDocument, createArtifact, creationScope, sessionAttachments, sendBlocked, announceBlocked],
   )
 
   /** Submitting a form is submitting a message. Same hook, same guards, same
@@ -527,6 +549,7 @@ export function ChatComposer({
         },
       }
     : {}
+  const refusalAlert = refusalNotice ? <p role="alert" className="px-1 pt-1 text-xs text-destructive">{refusalNotice}</p> : null
   const artifactCreationControl = canCreateArtifact ? (
     <>
       <Button
@@ -629,6 +652,7 @@ export function ChatComposer({
           </PromptInput>
         </AttachmentZone>
         {blockReason}
+{refusalAlert}
       </div>
       </EnsureChatSessionProvider>
     )
@@ -663,6 +687,7 @@ export function ChatComposer({
         </PromptInput>
       </AttachmentZone>
       {blockReason}
+{refusalAlert}
     </div>
     </EnsureChatSessionProvider>
   )

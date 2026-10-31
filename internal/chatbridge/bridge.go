@@ -995,6 +995,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			streamFn(ws.ChatEvent{Type: "error", Content: conversation.ErrDocumentCreationConsentUnconfirmed.Error()})
 			return err
 		}
+		if errors.Is(err, artifacts.ErrCrewNotAllowed) {
+			b.logger.Warn("artifact project refused by crew policy", "chat_id", chatID)
+			streamFn(ws.ChatEvent{Type: "error", Content: artifacts.CrewNotAllowedMessage, Metadata: map[string]any{"code": artifacts.CodeCrewNotAllowed}})
+			return fmt.Errorf("persist user message: %w", err)
+		}
 		b.logger.Error("failed to persist user message", "error", err)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
 		return fmt.Errorf("persist user message: %w", err)

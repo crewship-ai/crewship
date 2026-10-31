@@ -6,6 +6,11 @@ import "github.com/crewship-ai/crewship/internal/artifacts"
 // availability endpoint, including its explicit disabled state.
 type artifactProjectAvailabilityResponse struct {
 	Enabled bool `json:"enabled"`
+	// CanCreate and Code are present only when the caller scoped the request
+	// with agent_id. CanCreate is false with Code "artifact_crew_not_allowed"
+	// when that agent's crew is outside the workspace creation policy.
+	CanCreate *bool  `json:"can_create,omitempty"`
+	Code      string `json:"code,omitempty"`
 }
 
 // artifactProjectSnapshotResponse is the version-selected owner or shared view.

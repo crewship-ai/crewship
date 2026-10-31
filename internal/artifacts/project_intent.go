@@ -9,6 +9,17 @@ import (
 
 const ProjectIntentMetadataKey = "artifact_project_intent"
 
+// CodeCrewNotAllowed is the typed code for a refusal because the agent's crew
+// is outside the workspace artifact-creation policy. CrewNotAllowedMessage is
+// the specific text a client shows instead of a generic save failure.
+const (
+	CodeCrewNotAllowed    = "artifact_crew_not_allowed"
+	CrewNotAllowedMessage = "This agent's crew is not allowed to create artifact projects in this workspace"
+)
+
+// ErrCrewNotAllowed marks an admission refused by the crew allowlist.
+var ErrCrewNotAllowed = errors.New("agent crew is not allowed by the artifact creation policy")
+
 // ProjectIntent is explicit human purpose at the trusted send boundary. It is
 // never a model argument. The host binds the mirrored message to one live run.
 type ProjectIntent struct {
