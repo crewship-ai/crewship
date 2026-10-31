@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
@@ -110,8 +112,13 @@ func newPageArtifactCommand() *cobra.Command {
 	reply.Flags().String("text", "", "Describe the change or ask for a fresh selection")
 	reply.Flags().Int64("version", 0, "Version addressed by this reply")
 	availability := &cobra.Command{Use: "availability", Args: cobra.NoArgs, Short: "Read whether this workspace enables artifact projects", RunE: func(cmd *cobra.Command, _ []string) error {
-		return artifactCLIRequest(cmd, "GET", "/api/v1/pages/artifacts/availability", nil)
+		path := "/api/v1/pages/artifacts/availability"
+		if agent, _ := cmd.Flags().GetString("agent"); strings.TrimSpace(agent) != "" {
+			path += "?agent_id=" + url.QueryEscape(strings.TrimSpace(agent))
+		}
+		return artifactCLIRequest(cmd, "GET", path, nil)
 	}}
+	availability.Flags().String("agent", "", "Agent ID: also report whether this agent's crew may create artifact projects (can_create)")
 	storage := &cobra.Command{Use: "storage", Args: cobra.NoArgs, Short: "Read this workspace's aggregate artifact storage usage (owners and admins)", RunE: func(cmd *cobra.Command, _ []string) error {
 		return artifactCLIRequest(cmd, "GET", "/api/v1/pages/artifacts/storage", nil)
 	}}

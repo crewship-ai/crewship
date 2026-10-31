@@ -2544,10 +2544,16 @@ is enabled.
 
 **Auth:** authenticated workspace member; CLI credentials require `pages:read`.
 **Request:** no body. Select the workspace with `workspace_id` or `X-Workspace-ID`.
+Optional `agent_id` scopes the answer to that agent's crew.
 **Response:** JSON `{ "enabled": false }`, or `true` for an enabled workspace.
+With `agent_id` it also carries `can_create`: `false` with
+`"code": "artifact_crew_not_allowed"` when the agent is unknown or its crew is
+outside the workspace artifact-creation policy, otherwise `true` for a member
+who may create Pages. A send refused for that reason emits a chat `error` event
+with the same `code` and starts no run.
 **Statuses:** 200 success, 401 invalid authentication, 403 unavailable workspace
 or read scope, 500 internal failure. Availability grants no write authority.
-CLI: `crewship page artifact availability`.
+CLI: `crewship page artifact availability [--agent <id>]`.
 
 ### POST /api/v1/pages/artifacts
 

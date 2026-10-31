@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -104,8 +105,11 @@ func (h *PageHandler) artifactProjectMessageAuthority(ctx context.Context, tx *s
 		enabled = h.designEnabled(ctx)
 		contentType = "design"
 	}
-	if err != nil || !enabled || !h.artifactAgentPolicyAllows(ctx, receipt.WorkspaceID, crew) {
+	if err != nil || !enabled {
 		return errArtifactProjectAccess
+	}
+	if !h.artifactAgentPolicyAllows(ctx, receipt.WorkspaceID, crew) {
+		return fmt.Errorf("%w: %w", errArtifactProjectAccess, artifacts.ErrCrewNotAllowed)
 	}
 	if intent.PageID == "" {
 		if !h.artifactPrincipalMayCreate(ctx, receipt.WorkspaceID, receipt.UserID) {

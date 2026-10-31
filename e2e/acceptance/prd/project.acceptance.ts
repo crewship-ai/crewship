@@ -273,8 +273,35 @@ test.describe("project", () => {
         // 1. A chat message with "Create artifact project" on.
         await page.goto(`/chat?agent=${encodeURIComponent(agent.slug)}&${wsQuery(wsId)}`)
         await page.getByRole("button", { name: `New session with ${name}` }).first().click()
-        const create = page.getByRole("button", { name: "Create artifact project" })
-        await expect(create).toBeEnabled({ timeout: 60_000 })
+        // With NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS the composer has a "+ > New artifact"
+        // menu and a removable "New Project" chip; without it the old toggle button.
+        // Detect which one this build renders instead of assuming.
+        const toggle = page.getByRole("button", { name: "Create artifact project" })
+        const menu = page.getByRole("button", { name: "New artifact", exact: true })
+        const chip = page.getByRole("button", { name: "Remove New Project" })
+        const control = await waitFor("a project creation control in the composer", 60_000, 1_000, async () => {
+          if (await menu.isVisible()) return "menu" as const
+          if (await toggle.isVisible()) return "toggle" as const
+          return null
+        })
+        evidence.composerControl = control
+        await expect(control === "menu" ? menu : toggle).toBeEnabled({ timeout: 60_000 })
+        const selectProject = async () => {
+          if (control === "toggle") {
+            if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click()
+            await expect(toggle).toHaveAttribute("aria-pressed", "true")
+            return
+          }
+          if (!(await chip.isVisible())) {
+            await menu.click()
+            const panel = page.getByRole("dialog", { name: "New artifact" })
+            await panel.getByRole("button", { name: /^Project/ }).first().click()
+            await panel.getByRole("list", { name: "Project starter prompts" }).getByRole("button").first().click()
+          }
+          // The consent chip: private project, sharing needs approval.
+          await expect(chip).toBeVisible()
+          await expect(page.getByText("Private project · Sharing requires your approval")).toBeVisible()
+        }
         const prompt =
           `Create an artifact Project named "PRD project ${token}" with slug ${slug} and exactly three linked HTML screens: ` +
           `index.html (entrypoint), menu.html and kontakt.html. Every screen has a <nav> with relative links to the other two screens. ` +
@@ -283,8 +310,7 @@ test.describe("project", () => {
         const sentAt = new Date().toISOString()
         // The agent may still be busy with an earlier run; try again for a few minutes.
         for (let attempt = 0; ; attempt++) {
-          if ((await create.getAttribute("aria-pressed")) !== "true") await create.click()
-          await expect(create).toHaveAttribute("aria-pressed", "true")
+          await selectProject()
           await page.locator("textarea").last().fill(prompt)
           const busyBefore = await page.getByText("The agent is busy with another run right now").count()
           await page.getByRole("button", { name: "Submit" }).click()
