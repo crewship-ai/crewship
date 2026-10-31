@@ -236,11 +236,16 @@ func TestHostRunAgentObserverCancellationRetainsHomeThenRecoversResult(t *testin
 	o.detachedPollInterval = time.Millisecond
 	req := covRunReq()
 	req.RunID = "host-runagent-detach"
+	terminalObserved := false
+	req.OnExecTerminal = func(int) { terminalObserved = true }
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	req.OnExecStarted = func(string) { cancel() }
 	if err := o.RunAgent(ctx, req, nil); !errors.Is(err, ErrHostCaptureUnconfirmed) {
 		t.Fatalf("observer cancellation=%v", err)
+	}
+	if terminalObserved {
+		t.Fatal("observer cancellation manufactured terminal proof")
 	}
 	if _, _, found := runHomeLocation(req.RunID); !found {
 		t.Fatal("observer cancellation removed live HOME")
@@ -347,12 +352,17 @@ func TestHostRunAgentExplicitStopRequiresRetainedTerminal(t *testing.T) {
 	req.OnExecStarted = func(string) { cancel(ws.ErrExplicitStopRequested) }
 	var completedAt string
 	req.CapturedExit = func(at string) { completedAt = at }
+	var observed []int
+	req.OnExecTerminal = func(code int) { observed = append(observed, code) }
 	err = o.RunAgent(ctx, req, nil)
 	if !errors.Is(err, ErrExecutionStopConfirmed) || !errors.Is(err, context.Canceled) {
 		t.Fatalf("explicit protected stop not confirmed: %v", err)
 	}
 	if completedAt == "" {
 		t.Fatal("protected stop lost captured completion time")
+	}
+	if len(observed) != 1 || observed[0] != 143 {
+		t.Fatalf("protected confirmed exit callback=%v", observed)
 	}
 	if _, err := os.Stat(stopPath); err != nil {
 		t.Fatal("exact provider stop never occurred", err)

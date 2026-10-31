@@ -1300,6 +1300,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	ctx = runauthority.WithTriggerMessage(ctx, triggerMessageID)
 	ctx = chataudience.WithReceipt(ctx, info.HumanAuthority)
+	if info.HumanAuthority != nil && runauthority.OriginIDFromContext(ctx) == "" {
+		ctx = WithHostChatWorkAdmission(ctx)
+	}
 	if err := b.resolver.CreateRun(ctx, runID, info.AgentID, chatID, info.WorkspaceID, "USER", runMeta); err != nil {
 		b.logger.Error("failed to create durable run record", "error", err)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to start a durable run"})
@@ -1327,13 +1330,18 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	var observedTerminalAfterStop bool
 	req.ObservedTerminalAfterStop = func() { observedTerminalAfterStop = true }
 	req.CapturedExit = func(at string) { capturedCompletedAt = at }
+	chatWork := b.bindHostChatWork(ctx, &req, runID)
+	defer chatWork.Stop()
 	runErr := b.orch.RunAgent(ctx, req, handler)
+	chatWork.Stop()
 	if observedTerminalAfterStop {
 		terminalCtx, terminalCancel := context.WithTimeout(context.WithoutCancel(ctx), ledgerWriteTimeout)
 		defer terminalCancel()
 		ctx = terminalCtx
 	}
+
 	updateRun := func(ctx context.Context, id, status string, exitCode *int, message *string, metadata map[string]interface{}) error {
+		ctx = chatWork.completionContext(ctx, runErr)
 		if capturedCompletedAt == "" {
 			return b.resolver.UpdateRun(ctx, id, status, exitCode, message, metadata)
 		}
@@ -1403,6 +1411,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 				if errors.Is(runErr, orchestrator.ErrHostCaptureUnconfirmed) {
 					reason = "host_capture_unconfirmed"
 				}
+				if chatWork != nil {
+					message := "host observer ended without confirmed process exit"
+					// This parks custody for protected retained-output recovery; the
+					// API refuses terminal projection until actual exit is recovered.
+					_ = updateRun(cleanCtx, runID, "FAILED", nil, &message, terminalRunMeta(startedAt, acc, nil))
+				}
 				b.logger.Warn("chat observer ended without a confirmed execution outcome; leaving the run nonterminal",
 					"chat_id", chatID, "run_id", runID, "error", runErr)
 				// End only this observer stream. Protected retained output owns
@@ -1425,7 +1439,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			var confirmedStatus string
 			var terminalErr error
 			if updater, ok := b.resolver.(RunOutcomeUpdater); ok {
-				confirmedStatus, terminalErr = updater.UpdateRunOutcome(cleanCtx, runID, "CANCELLED", nil, &cancelMsg, meta, capturedCompletedAt)
+				confirmedStatus, terminalErr = updater.UpdateRunOutcome(chatWork.completionContext(cleanCtx, runErr), runID, "CANCELLED", nil, &cancelMsg, meta, capturedCompletedAt)
 			} else {
 				// A legacy resolver can record the request but cannot attest
 				// that idempotency/work projection actually chose CANCELLED.
