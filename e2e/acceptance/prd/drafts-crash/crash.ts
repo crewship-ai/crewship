@@ -8,6 +8,7 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import type { StorageState } from "../auth"
+import { trackPage } from "../created"
 
 export const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -215,6 +216,7 @@ export async function createProject(api: APIRequestContext, workspaceId: string,
   })
   expect(res.status(), `create Project: ${(await res.text()).slice(0, 300)}`).toBe(201)
   const body = (await res.json()) as { page_id: string }
+  trackPage(workspaceId, body.page_id)
   return { slug, pageId: body.page_id }
 }
 

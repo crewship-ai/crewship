@@ -8,6 +8,7 @@ import * as fs from "node:fs"
 import { createRequire } from "node:module"
 import * as path from "node:path"
 import { fileURLToPath } from "node:url"
+import { cleanup } from "./cleanup.mjs"
 import { formatTable, parseArgs, readRows, summarize, writeSummary } from "./report.mjs"
 
 const HELP = `Usage: pnpm acceptance:prd [--origin URL] [--quick|--full] [--output DIR] [--grep RE] [--list] [-- <playwright args>]
@@ -19,6 +20,11 @@ const HELP = `Usage: pnpm acceptance:prd [--origin URL] [--quick|--full] [--outp
   --output DIR   results directory (default test-results/prd-acceptance/<mode>-<timestamp>)
   --grep RE      only scenarios/tests matching RE
   --list         list the scenarios without running them
+  --cleanup      delete leftovers of earlier runs and exit: workspaces prd-qa-* named "PRD acceptance …",
+                 and pages/Designs/Projects whose slug starts with prd- AND name with "PRD " (in the
+                 workspaces of PRD_AGENT_WORKSPACE_ID / PRD_WORKSPACE_ID). Nothing else is touched.
+  --dry-run      with --cleanup: only list what would be deleted
+  --older-than M with --cleanup: leave objects younger than M minutes (default 60)
 
 Accounts come only from the environment: PRD_OWNER_EMAIL/PRD_OWNER_PASSWORD (quick mode falls
 back to E2E_EMAIL/E2E_PASSWORD), optional PRD_MEMBER_*, PRD_READER_*, PRD_WORKSPACE_ID,
@@ -43,6 +49,19 @@ const origin = args.origin ?? process.env.PRD_ORIGIN ?? null
 if (args.mode === "full" && !origin) {
   console.error("acceptance:prd: full mode needs --origin <url> or PRD_ORIGIN")
   process.exit(2)
+}
+if (args.cleanup) {
+  const owner = { email: process.env.PRD_OWNER_EMAIL, password: process.env.PRD_OWNER_PASSWORD }
+  if (!origin || !owner.email || !owner.password) {
+    console.error("acceptance:prd: --cleanup needs --origin (or PRD_ORIGIN) and PRD_OWNER_EMAIL/PRD_OWNER_PASSWORD")
+    process.exit(2)
+  }
+  const workspaceIds = [process.env.PRD_AGENT_WORKSPACE_ID, process.env.PRD_WORKSPACE_ID].filter(Boolean)
+  console.log(`${args.dryRun ? "Dry run: " : ""}cleaning harness leftovers on ${origin}`)
+  const r = await cleanup({ origin, owner, workspaceIds, olderThanMin: args.olderThan, dryRun: args.dryRun })
+  console.log(`${r.workspacesDeleted} workspaces and ${r.pagesDeleted} pages deleted, ${r.skipped.length} skipped, ${r.failed.length} failed`)
+  for (const f of r.failed) console.error(`  failed ${f.kind} ${f.id}: HTTP ${f.status}`)
+  process.exit(r.failed.length ? 1 : 0)
 }
 const stamp = new Date().toISOString().replace(/[:.]/g, "-")
 const outputDir = path.resolve(args.output ?? process.env.PRD_OUTPUT_DIR ?? path.join(root, "test-results", "prd-acceptance", `${args.mode}-${stamp}`))

@@ -60,6 +60,30 @@ in `~/.crewship/e2e-auth/prd-acceptance-<role>-<origin hash>.json` (directory
 output directory. A wrapper that runs commands in a clean environment must
 pass these variables through explicitly.
 
+A login lives 15 minutes, and contexts that share one login share its refresh
+token: the editor rotates it, and the next context to present the old token is
+treated as a replay, which revokes the whole session (`session_revoked` for
+every holder). So global setup only checks that the accounts can sign in; each
+test signs the owner in again, and every extra context (`prd.api(role)`,
+`prd.browserContext(role)`, crashable browser profiles) gets its own login.
+
+## Cleanup
+
+Tests delete what they create: pages, Designs and Projects are registered
+(`trackPage` in `created.ts`) and removed after the test, also after a failure,
+with a fresh login; QA workspaces are deleted with everything in them. Names
+carry the prefix `PRD ` (slugs `prd-`). Leftovers of earlier or interrupted runs:
+
+```
+PRD_OWNER_EMAIL=… PRD_OWNER_PASSWORD=… PRD_AGENT_WORKSPACE_ID=… \
+  node e2e/acceptance/prd/run.mjs --origin https://host --cleanup [--dry-run] [--older-than 60]
+```
+
+It deletes only workspaces whose slug is `prd-qa-<label>-<10 hex>` AND name starts
+with `PRD acceptance `, and pages whose slug starts with `prd-` AND name with
+`PRD ` (in `PRD_AGENT_WORKSPACE_ID` / `PRD_WORKSPACE_ID`). Objects matching only
+one rule, or younger than `--older-than` minutes (default 60), are listed and kept.
+
 ## Output
 
 ```

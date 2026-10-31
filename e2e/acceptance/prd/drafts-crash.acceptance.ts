@@ -91,7 +91,7 @@ test.describe("drafts after a crash", () => {
   test(
     "Project source and comment drafts survive a hard browser crash",
     { annotation: [R.source, R.comments, R.nothingSaved, R.private] },
-    async ({ prd, request, context, playwright }) => {
+    async ({ prd, request, playwright }) => {
       // Waiting for the browser to persist the drafts can take minutes.
       test.setTimeout(Math.max(test.info().timeout, 8 * 60_000))
       const ws = await prd.qaWorkspace()
@@ -110,7 +110,7 @@ test.describe("drafts after a crash", () => {
       const viewerText = `Unsent viewer comment ${tag}`
       const projectText = `Unsent project comment ${tag}`
 
-      const profile = new CrashableProfile(playwright.chromium, prd.origin, await context.storageState(), {
+      const profile = new CrashableProfile(playwright.chromium, prd.origin, await loginStorageState(prd.origin, prd.requireAccount("owner")), {
         userId: await ownerIdentity(request),
         workspaceId: ws.id,
       })
@@ -217,7 +217,7 @@ test.describe("drafts after a crash", () => {
   test(
     "drafts survive a crash right after typing",
     { annotation: R.immediate },
-    async ({ prd, request, context, playwright }) => {
+    async ({ prd, request, playwright }) => {
       // Waiting for a localStorage commit can take up to a minute.
       test.setTimeout(Math.max(test.info().timeout, 5 * 60_000))
       const ws = await prd.qaWorkspace()
@@ -226,7 +226,7 @@ test.describe("drafts after a crash", () => {
       const tag = Date.now().toString(36)
       const MARK = `UNSENT-FAST-${tag}`
       const viewerText = `Unsent fast comment ${tag}`
-      const profile = new CrashableProfile(playwright.chromium, prd.origin, await context.storageState(), {
+      const profile = new CrashableProfile(playwright.chromium, prd.origin, await loginStorageState(prd.origin, prd.requireAccount("owner")), {
         userId: await ownerIdentity(request),
         workspaceId: ws.id,
       })
@@ -302,7 +302,7 @@ test.describe("drafts after a crash", () => {
     test(
       `${label} drafts survive a crash before the save`,
       { annotation: [nativeOffer, nativeNothingSaved, nativePrivate] },
-      async ({ prd, request, context, playwright }) => {
+      async ({ prd, request, playwright }) => {
         prd.requireFull("native Word/Sheet editors run only on a deployed origin")
         const ws = await prd.qaWorkspace()
         const available = await native.nativeAvailability(request, ws.id)
@@ -313,7 +313,8 @@ test.describe("drafts after a crash", () => {
         const other = await prd.provision("MEMBER", "PRD drafts other person")
         const otherState = await loginStorageState(prd.origin, other.account)
         const otherApi = await apiAs(prd.origin, otherState)
-        const ownerState = await context.storageState()
+        // Its own login: sharing the test context's refresh token gets the session revoked.
+        const ownerState = await loginStorageState(prd.origin, prd.requireAccount("owner"))
         const ownerId = await ownerIdentity(request)
         const r: Record<string, unknown> = { app, available }
         try {
