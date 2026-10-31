@@ -2180,6 +2180,9 @@
           "enabled": {
             "type": "boolean"
           },
+          "interactive": {
+            "$ref": "#/components/schemas/ArtifactInteractiveRuntime"
+          },
           "latest_version": {
             "format": "int64",
             "minimum": 1,

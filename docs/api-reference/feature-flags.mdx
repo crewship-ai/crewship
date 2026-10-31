@@ -51,6 +51,7 @@ created and toggled, but nothing in the server reacts to them.
 | `artifact_projects` | off | Multi-screen HTML artifact projects | `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` turns it on for every workspace regardless of the flag |
 | `artifact_dashboard_data` | off | Dashboard collection data API and its run tools | Requires `artifact_projects`; `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED=true` replaces the flag |
 | `artifact_slides` | off | Slides projections and vector PDF export | Requires `artifact_projects`; `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true` replaces the flag |
+| `artifact_interactive` | off | Interactive artifacts: a Project's own scripts run in the isolated Pages runtime and reach its data collections through a broker | Requires `artifact_projects` and `artifact_dashboard_data`; `CREWSHIP_ARTIFACT_INTERACTIVE_ENABLED=true` replaces the flag. See [Interactive artifacts](/guides/artifacts/interactive) |
 | `artifacts_design` | off | Collaborative Design artifacts over Yjs | `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true` turns it on for every workspace regardless of the flag |
 
 "Seeded default" is the `enabled` value a migration inserts; an administrator
