@@ -89,6 +89,9 @@ func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.E
 	h.outbox = r.gridcraftOutbox
 }
 func gridcraftError(w http.ResponseWriter, err error) {
+	if artifactStorageRefusal(w, err) {
+		return
+	}
 	if errors.Is(err, appengine.ErrUnauthenticated) {
 		// Same wire shape as the auth middleware gives the next request.
 		writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)

@@ -1,11 +1,13 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/mooring"
@@ -72,6 +74,9 @@ func (d *craftNativeDocumentsHTTP) bind(r *http.Request) (*http.Request, *craftN
 	return bound, entry, mooring.NewNativeStore(d.human.pages.db, cfg), profile, nil
 }
 func craftNativeDocumentError(w http.ResponseWriter, err error) {
+	if artifactStorageRefusal(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, mooring.ErrNativeDisabled):
 		replyError(w, 503, "native documents unavailable")
@@ -109,6 +114,32 @@ func (d *craftNativeDocumentsHTTP) mutateSnapshot(w http.ResponseWriter, r *http
 	if err != nil {
 		craftNativeDocumentError(w, err)
 		return
+	}
+	if operation == "save" {
+		bytes := int64(45 << 20)
+		if r.ContentLength >= 0 && r.ContentLength < bytes {
+			bytes = r.ContentLength
+		}
+		bytes += 256 << 10
+		upload, e := s.ReserveUpload(r.Context(), entry.scope, bytes)
+		if e != nil {
+			craftNativeDocumentError(w, e)
+			return
+		}
+		defer upload.Close()
+		ctx, cancel := context.WithDeadline(upload.Context(r.Context()), upload.ExpiresAt())
+		defer cancel()
+		controller := http.NewResponseController(w)
+		_ = controller.SetReadDeadline(upload.ExpiresAt())
+		defer controller.SetReadDeadline(time.Time{})
+		body := r.Body
+		stop := context.AfterFunc(ctx, func() {
+			if body != nil {
+				_ = body.Close()
+			}
+		})
+		defer stop()
+		r = r.WithContext(ctx)
 	}
 	var body craftNativeSnapshotBody
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 45<<20))

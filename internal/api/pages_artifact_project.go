@@ -92,6 +92,9 @@ func artifactProjectDecode(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 func artifactProjectError(w http.ResponseWriter, err error) {
+	if artifactStorageRefusal(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, artifacts.ErrDisabled):
 		replyError(w, 404, "artifact projects are not enabled")
@@ -251,6 +254,14 @@ func (h *PageHandler) CreateArtifactProject(w http.ResponseWriter, r *http.Reque
 		artifactProjectError(w, artifacts.ErrDisabled)
 		return
 	}
+	uploadKey := artifacts.VersionKey{WorkspaceID: WorkspaceIDFromContext(r.Context())}
+	bound, cleanup, e := artifactStorageUpload(w, r, h.artifactProjectStore(r.Context()), uploadKey, 36<<20, h.artifactCreationUploadAuthority(r, uploadKey.WorkspaceID))
+	if e != nil {
+		artifactProjectError(w, e)
+		return
+	}
+	defer cleanup()
+	r = bound
 	var p artifactProjectCreate
 	if !artifactProjectDecode(w, r, &p) {
 		return
@@ -392,6 +403,13 @@ func (h *PageHandler) PublishArtifactProject(w http.ResponseWriter, r *http.Requ
 		artifactProjectError(w, err)
 		return
 	}
+	bound, cleanup, e := artifactStorageUpload(w, r, h.artifactProjectStore(r.Context()), k, 36<<20, h.artifactProjectAuthority(r, k, true, false))
+	if e != nil {
+		artifactProjectError(w, e)
+		return
+	}
+	defer cleanup()
+	r = bound
 	var p artifactProjectPublish
 	if !artifactProjectDecode(w, r, &p) {
 		return
