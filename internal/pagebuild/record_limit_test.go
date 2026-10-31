@@ -2,6 +2,7 @@ package pagebuild
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -35,7 +36,7 @@ func TestLockBuildImageRecordMatchesDirOwner(t *testing.T) {
 	dir := t.TempDir()
 	var gotPath, gotDir string
 	saved := matchLockOwner
-	matchLockOwner = func(path, d string) error { gotPath, gotDir = path, d; return nil }
+	matchLockOwner = func(f *os.File, d string) error { gotPath, gotDir = f.Name(), d; return nil }
 	defer func() { matchLockOwner = saved }()
 	unlock, err := LockBuildImageRecord(dir)
 	if err != nil {
@@ -44,5 +45,30 @@ func TestLockBuildImageRecordMatchesDirOwner(t *testing.T) {
 	unlock()
 	if gotPath != filepath.Join(dir, BuildImageRecordLockFile) || gotDir != dir {
 		t.Fatalf("owner matched for %q in %q", gotPath, gotDir)
+	}
+}
+
+// Codex #4685 round 3: a lock path planted as a symlink must not be followed,
+// so a root `page disable` can never hand the symlink's target to the
+// directory owner.
+func TestLockBuildImageRecordRefusesSymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "shadow")
+	if err := os.WriteFile(target, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, BuildImageRecordLockFile)); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	called := false
+	saved := matchLockOwner
+	matchLockOwner = func(*os.File, string) error { called = true; return nil }
+	defer func() { matchLockOwner = saved }()
+	if unlock, err := LockBuildImageRecord(dir); err == nil {
+		unlock()
+		t.Fatal("locked through a symlink")
+	}
+	if called {
+		t.Fatal("owner matching ran on a symlinked lock path")
 	}
 }

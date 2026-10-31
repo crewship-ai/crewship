@@ -57,13 +57,21 @@ func watchChannel(ctx context.Context, client *cli.Client, channel string, onEve
 // successful subscribe (first reports the initial connection). Reading state
 // from that hook, not before connecting, closes the gap in which an
 // announcement has no subscriber.
+// watchOnce and watchReconnectBackoff are replaceable by tests.
+var (
+	watchOnce             = watchChannelOnce
+	watchReconnectBackoff = time.Second
+)
+
 func watchChannelSubscribed(ctx context.Context, client *cli.Client, channel string, onEvent func(*cli.WSMessage), onSubscribed func(first bool)) error {
-	backoff := time.Second
+	backoff := watchReconnectBackoff
 	first := true
 	for {
-		isFirst := first
-		first = false
-		err := watchChannelOnce(ctx, client, channel, onEvent, func() {
+		// Only a subscription that succeeded ends "first": a connection that
+		// failed before subscribing leaves the strict first read still to come.
+		err := watchOnce(ctx, client, channel, onEvent, func() {
+			isFirst := first
+			first = false
 			if onSubscribed != nil {
 				onSubscribed(isFirst)
 			}
