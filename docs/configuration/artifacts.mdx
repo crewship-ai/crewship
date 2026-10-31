@@ -237,6 +237,23 @@ The workbook engine and editor use `CREWSHIP_GRIDCRAFT_SERVICE_SOCKET`,
 `editor_bundles` and `editor_origin`); see
 [Environment variables](/configuration/environment).
 
+## Artifact storage limits
+
+Every artifact family (versions, proposals, Design, Data, documents, Slides, GridCraft and Mooring) counts against one
+aggregate budget: 32 GiB per workspace and 64 GiB per instance by default. When a limit is reached, writes are refused
+with `413` `artifact_storage_quota` and nothing is deleted to make room. These are not environment variables or YAML keys: an
+instance administrator sets them at runtime and the values are kept in the database.
+
+```bash
+crewship admin instance artifact-storage get
+crewship admin instance artifact-storage set --workspace-limit 16GiB --instance-limit 48GiB
+```
+
+Limits must be between 1 MiB and 1 PiB. Lowering a limit below current usage only refuses further growth. The counters are
+maintained by database triggers; after a restore, or if `get` disagrees with what is stored, rebuild them with
+`crewship admin instance artifact-storage recompute` (add `--dry-run` to preview the drift). It never deletes data. See
+[Admin API](/api-reference/admin) and [Admin CLI](/cli/admin).
+
 ## Build-time UI variables
 
 The web UI is a static export, so these variables are inlined when it is built.

@@ -154,3 +154,10 @@ it("stops and retains the original dirty frame on metadata denial without reopen
   expect(frame.hidden).toBe(true)
   expect(screen.queryByText("Saved")).toBeNull()
 })
+it("names a full artifact storage budget when the host stops with storage_full and keeps the local draft state", async () => {
+  await open()
+  await act(async () => { mocks.connect.mock.calls[0][5].state("draft"); await new Promise(resolve => setTimeout(resolve, 10)) })
+  await act(async () => { mocks.connect.mock.calls[0][5].stopped("storage_full"); await new Promise(resolve => setTimeout(resolve, 10)) })
+  expect(screen.getByRole("alert")).toHaveTextContent("Kapacita úložiště neumožňuje další uložení")
+  expect(screen.getByRole("status")).toHaveTextContent("Not saved · local draft retained")
+})

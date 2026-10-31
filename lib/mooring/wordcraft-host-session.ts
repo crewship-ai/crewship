@@ -118,7 +118,9 @@ export function connectWordCraftHost(workspaceId: string, pageId: string, openin
     socket.send(raw)
   }
   socket.onopen = () => { try { send(JSON.stringify({ type: "session_join", request_id: joinRequest, ticket: opening.ticket, versions: opening.versions })) } catch { stop("connection_unavailable") } }
-  socket.onclose = () => stop("connection_unavailable")
+  // 4009: aggregate artifact storage is full (the Design editor's code). Nothing
+  // was saved; the unsaved local draft is retained like any other stop.
+  socket.onclose = (event?: CloseEvent) => stop(event?.code === 4009 ? "storage_full" : "connection_unavailable")
   socket.onerror = () => stop("connection_unavailable")
   socket.onmessage = event => {
     if (stopped) return

@@ -51,7 +51,7 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
       // interaction and all future content delivery immediately.
       if (port) { try { send({ type: "wordcraft:stop", reason }) } catch { /* already closed */ }; port.onmessage = null; port.close(); port = undefined }
       if (frame) frame.hidden = true
-      setError("The editor is unavailable. Unconfirmed changes are not saved.")
+      setError(reason === "storage_full" ? "Kapacita úložiště neumožňuje další uložení. Vaše neuložené změny zůstávají v tomto prohlížeči." : "The editor is unavailable. Unconfirmed changes are not saved.")
     }
     const deliverBootstrap = () => {
       if (bootstrap && port) { send({ type: "wordcraft:bootstrap", ...bootstrap, display_name: displayName.current }, WORDCRAFT_BOOTSTRAP_BYTES); bootstrap = undefined }
