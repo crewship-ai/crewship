@@ -21,8 +21,10 @@ let privacyRetire:(()=>Promise<void>)|undefined
 let client:ReturnType<typeof clientRig>,journal:ReturnType<typeof journalRig>,ports:ReturnType<typeof portRig>[],portOptions:NativeEditorPortOptions[],stream:((event:"lease"|"session_retired",value:Record<string,unknown>)=>void)|undefined
 function clientRig(){return {share:vi.fn(async(r:{targetVersion:string})=>({version:r.targetVersion,durability:'node',issuedBy:'crewship',phase:'shared'})),open:vi.fn().mockResolvedValue({sessionId:"private-session",applicationId:"wordcraft"}),read:vi.fn().mockResolvedValue({version:"1",bytes:new TextEncoder().encode('{"body":[]}'),applicationId:"wordcraft",enginePin:"a".repeat(64),editorBundle:"b".repeat(64),editorURL:`https://native.example/b/${"b".repeat(64)}/index.html`,quota:{usedBytes:"12",limitBytes:"99999",warning:false,retention:"keep-all"}}),lease:vi.fn().mockResolvedValue(emptyLease),leaseAction:vi.fn(async(action:string):Promise<unknown>=>{if(action==='acquire')client.lease.mockResolvedValue(ownedLease);return ownedLease}),events:vi.fn((_signal:AbortSignal,callback:typeof stream)=>{stream=callback;return new Promise<void>(()=>{})}),reauthorize:vi.fn().mockResolvedValue(true),save:vi.fn(async(r:NativeSaveRequest)=>receipt(r)),reconcile:vi.fn(),close:vi.fn(),proposals:vi.fn().mockResolvedValue([]),proposalBytes:vi.fn(),decideProposal:vi.fn()}}
 function journalRig(){return {persist:vi.fn().mockResolvedValue(undefined),confirm:vi.fn().mockResolvedValue(undefined),recovery:vi.fn().mockResolvedValue([]),onRetire:vi.fn(()=>()=>{}),close:vi.fn().mockResolvedValue(undefined),revokeRead:vi.fn().mockResolvedValue(undefined)}}
-function portRig(){return {loaded:vi.fn(),handleWindowMessage:vi.fn(),bootstrap:vi.fn().mockResolvedValue({bytes:new TextEncoder().encode('{"body":[]}'),editorRevision:"initial",documentId:"doc"}),snapshot:vi.fn().mockResolvedValue({bytes:new TextEncoder().encode('{"body":[1]}'),editorRevision:"snapshot-1",documentId:"doc"}),validate:vi.fn().mockResolvedValue(undefined),ack:vi.fn().mockResolvedValue(true),saveFailed:vi.fn(),setReadOnly:vi.fn(async(v:boolean)=>v),close:vi.fn()}}
-beforeEach(()=>{vi.stubGlobal('crypto',webcrypto);client=clientRig();journal=journalRig();ports=[];portOptions=[];stream=undefined;privacyRetire=undefined;authSuspend=undefined;m.purge.mockResolvedValue(undefined);m.registerPrivacy.mockImplementation((_human:string,retire:()=>Promise<void>,options?:{suspend?:()=>Promise<void>})=>{privacyRetire=retire;authSuspend=options?.suspend;return vi.fn()});m.createClient.mockReturnValue(client);m.openJournal.mockResolvedValue(journal);m.createPort.mockImplementation((o:NativeEditorPortOptions)=>{const p=portRig();ports.push(p);portOptions.push(o);queueMicrotask(()=>o.onReady?.('qualified'));return p})})
+// Word's port names the engine's own revision as nativeState; most tests leave it unset.
+let rigNativeState:string|undefined
+function portRig(){const state=rigNativeState?{nativeState:rigNativeState}:{};return {loaded:vi.fn(),handleWindowMessage:vi.fn(),bootstrap:vi.fn().mockResolvedValue({bytes:new TextEncoder().encode('{"body":[]}'),editorRevision:"initial",documentId:"doc",...state}),snapshot:vi.fn().mockResolvedValue({bytes:new TextEncoder().encode('{"body":[1]}'),editorRevision:"snapshot-1",documentId:"doc",...state}),validate:vi.fn().mockResolvedValue(undefined),ack:vi.fn().mockResolvedValue(true),saveFailed:vi.fn(),setReadOnly:vi.fn(async(v:boolean)=>v),close:vi.fn()}}
+beforeEach(()=>{vi.stubGlobal('crypto',webcrypto);rigNativeState=undefined;client=clientRig();journal=journalRig();ports=[];portOptions=[];stream=undefined;privacyRetire=undefined;authSuspend=undefined;m.purge.mockResolvedValue(undefined);m.registerPrivacy.mockImplementation((_human:string,retire:()=>Promise<void>,options?:{suspend?:()=>Promise<void>})=>{privacyRetire=retire;authSuspend=options?.suspend;return vi.fn()});m.createClient.mockReturnValue(client);m.openJournal.mockResolvedValue(journal);m.createPort.mockImplementation((o:NativeEditorPortOptions)=>{const p=portRig();ports.push(p);portOptions.push(o);queueMicrotask(()=>o.onReady?.('qualified'));return p})})
 afterEach(()=>{vi.unstubAllGlobals();vi.clearAllMocks()})
 const mount=()=>render(<NativeCraftEditorHost workspaceId="w" pageId="p" humanId="human" enabled />)
 async function ready(){await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalledOnce());await waitFor(()=>expect(screen.getByRole('button',{name:'Převzít úpravy'})).toBeEnabled())}
@@ -439,9 +441,11 @@ describe('agent proposals while a person holds the editor (#4480)',()=>{
   await waitFor(()=>expect(client.read.mock.calls.length).toBeGreaterThanOrEqual(3))
  })
  // #4699: the rig's engine exports normalized bytes ({"body":[1]}) for the loaded
- // {"body":[]}. Untouched, that export is the loaded version, not a new one, so
- // accepting decides the proposal over version 1 instead of making it stale.
+ // {"body":[]}. Untouched (same engine revision as at bootstrap), that export is
+ // the loaded version, not a new one, so accepting decides the proposal over
+ // version 1 instead of making it stale.
  it('accepts over the loaded version without saving an untouched normalized document first (#4699)',async()=>{
+  rigNativeState='revision:opened'
   client.proposals.mockResolvedValue([proposal])
   mount();await ready();await acquire()
   client.decideProposal.mockResolvedValue({...proposal,state:'accepted',resultVersion:'2'})
@@ -450,10 +454,19 @@ describe('agent proposals while a person holds the editor (#4480)',()=>{
   expect(client.save).not.toHaveBeenCalled()
  })
  it('releases an untouched normalized document without writing a version (#4699)',async()=>{
+  rigNativeState='revision:opened'
   mount();await ready();await acquire()
   fireEvent.click(screen.getByRole('button',{name:'Uvolnit úpravy'}))
   await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(true))
   expect(client.save).not.toHaveBeenCalled()
+ })
+ it('still saves a Word change whose changed event has not arrived when releasing (#4699)',async()=>{
+  rigNativeState='revision:opened'
+  mount();await ready();await acquire()
+  ports.at(-1)!.snapshot.mockResolvedValue({bytes:new TextEncoder().encode('{"body":[2]}'),editorRevision:'snapshot-2',documentId:'doc',nativeState:'revision:typed'})
+  fireEvent.click(screen.getByRole('button',{name:'Uvolnit úpravy'}))
+  await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(true))
+  expect(client.save).toHaveBeenCalledOnce()
  })
  it('reports a stale proposal without changing the document',async()=>{
   client.proposals.mockResolvedValue([proposal])
