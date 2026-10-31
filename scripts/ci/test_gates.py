@@ -54,7 +54,8 @@ class GateTests(unittest.TestCase):
                 self.assertTrue(classify([path])['code'])
 
     def test_cross_language_parity_routing(self):
-        for path in ['docs/configuration/providers.mdx', 'docs/api-reference/openapi.mdx',
+        for path in ['docs/configuration/providers.mdx', 'docs/configuration/artifacts.mdx',
+                     'docs/api-reference/openapi.mdx',
                      'docs/guides/docker-socket-proxy.mdx', 'lib/crew-icons.ts',
                      'lib/colors.ts', 'lib/notification-categories.ts',
                      'components/features/admin/backups/backups-model.ts']:
