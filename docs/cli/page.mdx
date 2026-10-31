@@ -2172,6 +2172,19 @@ crewship page artifact availability
 Returns `{ "enabled": false }` when the workspace feature is disabled. The
 command uses the same authenticated workspace client as other Page commands.
 
+### `crewship page artifact storage`
+
+Read the workspace's aggregate artifact storage (`used_bytes`,
+`reserved_bytes`, `limit_bytes`, `level`, `instance_level`, `retention`).
+Workspace owners and admins only.
+
+```bash
+crewship page artifact storage
+```
+
+A save refused with `413 artifact_storage_quota` writes nothing and keeps
+every existing version.
+
 ### `crewship page artifact publish <slug>`
 
 Supply `--base-version` with the exact positive latest project version and

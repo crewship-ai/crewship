@@ -112,7 +112,10 @@ func newPageArtifactCommand() *cobra.Command {
 	availability := &cobra.Command{Use: "availability", Args: cobra.NoArgs, Short: "Read whether this workspace enables artifact projects", RunE: func(cmd *cobra.Command, _ []string) error {
 		return artifactCLIRequest(cmd, "GET", "/api/v1/pages/artifacts/availability", nil)
 	}}
-	cmd.AddCommand(reply, availability)
+	storage := &cobra.Command{Use: "storage", Args: cobra.NoArgs, Short: "Read this workspace's aggregate artifact storage usage (owners and admins)", RunE: func(cmd *cobra.Command, _ []string) error {
+		return artifactCLIRequest(cmd, "GET", "/api/v1/pages/artifacts/storage", nil)
+	}}
+	cmd.AddCommand(reply, availability, storage)
 	cmd.AddCommand(newPageArtifactCommentCommand())
 	cmd.AddCommand(newPageArtifactReconcileCommand())
 	return cmd
