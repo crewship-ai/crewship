@@ -3,7 +3,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 // Lane/storage tests use an identity cipher; actual cryptography and admission
 // are exercised in local-draft-seal and the real-browser retention tests.
 vi.mock("./local-draft-seal", () => ({
- createLocalDraftCipher: async () => ({ seal: async (text: string) => text, open: async (text: string) => text, close() {} }),
+ // The real cipher asks /pages/@<page>/draft-key, which accepts only this Page identity.
+ createLocalDraftCipher: async (scope: { page: string }) => { if (!/^[A-Za-z0-9_-]{1,128}$/.test(scope.page)) throw new Error("draft-key 400: immutable Page reference required"); return { seal: async (text: string) => text, open: async (text: string) => text, close() {} } },
  forgetLocalDraftPage() {}, isSealedLocalDraft: () => true,
  LocalDraftReadRevoked: class extends Error {},
 }))

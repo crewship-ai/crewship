@@ -8,11 +8,11 @@ vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id
 const mocks = vi.hoisted(() => ({ open: vi.fn(), connect: vi.fn(), sdk: vi.fn(), ready: vi.fn(), draft: vi.fn(), submit: vi.fn(), stop: vi.fn(), close: vi.fn() }))
 vi.mock("@/lib/mooring/wordcraft-host-session", () => ({ openWordCraftSession: mocks.open, connectWordCraftHost: mocks.connect, loadWordCraftReceiptSDK: mocks.sdk, WORDCRAFT_FRAME_BYTES: 262144, WORDCRAFT_BOOTSTRAP_BYTES: 2097152 }))
 vi.mock("@/lib/editor-lifecycle/use-leave-guard", () => ({ useLeaveGuard: vi.fn() }))
-const drafts = vi.hoisted(() => ({ store: new Map<string, string>() }))
+const drafts = vi.hoisted(() => ({ store: new Map<string, string>(), delay: 0, retired: false }))
 vi.mock("@/lib/artifact-drafts", () => ({
   artifactDraftKey: (kind: string, human: string | null, workspace: string, target: string) => human ? JSON.stringify([human, kind, workspace, target]) : null,
-  writeArtifactDraft: async (key: string, text: string) => { drafts.store.set(key, text) },
-  loadArtifactDraft: async (key: string) => drafts.store.get(key) ?? "",
+  writeArtifactDraft: async (key: string, text: string) => { if (drafts.retired) throw new Error("retired"); if (!/^[A-Za-z0-9_-]{1,128}$/.test(JSON.parse(key)[3])) throw new Error("draft-key 400: immutable Page reference required"); drafts.store.set(key, text) },
+  loadArtifactDraft: async (key: string) => { const text = drafts.store.get(key) ?? ""; if (drafts.delay) await new Promise(resolve => setTimeout(resolve, drafts.delay)); if (drafts.retired) throw new Error("retired"); return text },
   clearArtifactDraft: async (key: string) => { drafts.store.delete(key) },
   artifactDraftRevision: () => 1,
 }))
@@ -22,7 +22,7 @@ const credentialless = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototy
 const contentWindow = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "contentWindow")
 const ports: MessagePort[] = []
 beforeEach(() => {
-  vi.clearAllMocks(); drafts.store.clear()
+  vi.clearAllMocks(); drafts.store.clear(); drafts.delay = 0; drafts.retired = false
   identity.id = "human-one"; identity.status = "authenticated"
   Object.defineProperty(HTMLIFrameElement.prototype, "credentialless", { configurable: true, get() { return (this as HTMLIFrameElement).hasAttribute("credentialless") } })
   Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", { configurable: true, get: () => windowMock })
@@ -171,7 +171,7 @@ it("on storage_full keeps the editor visible, saves the submitted changes as a l
   // The stopped editor stays readable so its content can be copied.
   expect(first.frame.hidden).toBe(false)
   expect(first.frame.isConnected).toBe(true)
-  const stored = [...drafts.store.entries()]
+  const stored = [...drafts.store.entries()].filter(([key]) => JSON.parse(key)[1] === "wordcraft-pending")
   expect(stored).toHaveLength(1)
   expect(JSON.parse(stored[0][0])[1]).toBe("wordcraft-pending")
   expect(JSON.parse(stored[0][1])).toMatchObject({ format: "crewship-wordcraft-draft-v1", workspace_id: "workspace", page_id: "page", originals: ['{"type":"submit_changes","request_id":"r1"}'] })
@@ -187,4 +187,40 @@ it("other stops still hide the editor and save no draft", async () => {
   await act(async () => { mocks.connect.mock.calls[0][5].stopped("connection_unavailable"); await new Promise(resolve => setTimeout(resolve, 10)) })
   expect(t.frame.hidden).toBe(true)
   expect(drafts.store.size).toBe(0)
+})
+const draftText = (originals: string[]) => JSON.stringify({ format: "crewship-wordcraft-draft-v1", workspace_id: "workspace", page_id: "page", originals })
+it("G4 B3: a recovered draft of one person is not offered to another person after the identity changes", async () => {
+  drafts.store.set(JSON.stringify(["human-one", "wordcraft-pending", "workspace", "page"]), draftText(["secret of A"]))
+  const view = render(<WordCraftEditorHost workspaceId="workspace" pageId="page" name="Original title" />)
+  await waitFor(() => expect(screen.getByRole("group", { name: "Místní koncept" })).toBeInTheDocument())
+  identity.id = "human-two"
+  view.rerender(<WordCraftEditorHost workspaceId="workspace" pageId="page" name="Original title" />)
+  await waitFor(() => expect(screen.queryByRole("group", { name: "Místní koncept" })).toBeNull())
+  expect(screen.queryByText("Stáhnout koncept")).toBeNull()
+})
+it("G4 B4: a second storage_full stop keeps the earlier recovery draft instead of overwriting it", async () => {
+  const key = JSON.stringify(["human-one", "wordcraft-pending", "workspace", "page"])
+  drafts.store.set(key, draftText(["draft A"]))
+  await open()
+  await act(async () => { mocks.connect.mock.calls[0][5].stopped("storage_full"); await new Promise(resolve => setTimeout(resolve, 10)) })
+  expect(JSON.parse(drafts.store.get(key)!).originals).toEqual(["draft A", '{"type":"submit_changes","request_id":"r1"}'])
+})
+
+it("G4 round 2: two tabs stopping at once keep both sets of changes (cross-tab lock)", async () => {
+  let chain: Promise<unknown> = Promise.resolve()
+  Object.defineProperty(navigator, "locks", { configurable: true, value: { request: (_name: string, task: () => Promise<unknown>) => { const run = chain.then(task, task); chain = run.catch(() => {}); return run } } })
+  try {
+    drafts.delay = 15
+    mocks.connect.mockReturnValueOnce({ pendingOriginals: () => ["tab-one"], ready: mocks.ready, draft: mocks.draft, submit: mocks.submit, stop: mocks.stop, close: mocks.close })
+      .mockReturnValueOnce({ pendingOriginals: () => ["tab-two"], ready: mocks.ready, draft: mocks.draft, submit: mocks.submit, stop: mocks.stop, close: mocks.close })
+    render(<WordCraftEditorHost workspaceId="workspace" pageId="page" />)
+    render(<WordCraftEditorHost workspaceId="workspace" pageId="page" />)
+    await waitFor(() => expect(mocks.connect).toHaveBeenCalledTimes(2))
+    await act(async () => {
+      mocks.connect.mock.calls[0][5].stopped("storage_full"); mocks.connect.mock.calls[1][5].stopped("storage_full")
+      await new Promise(resolve => setTimeout(resolve, 200))
+    })
+    const primary = drafts.store.get(JSON.stringify(["human-one", "wordcraft-pending", "workspace", "page"]))!
+    expect(JSON.parse(primary).originals.sort()).toEqual(["tab-one", "tab-two"])
+  } finally { delete (navigator as { locks?: unknown }).locks }
 })
