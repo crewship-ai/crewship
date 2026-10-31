@@ -25,11 +25,14 @@ function opened(applicationId: "wordcraft" | "gridcraft", engineBytes = 3, loade
 for (const app of ["wordcraft", "gridcraft"] as const) {
   it(`${app}: open v3, release without a change -> no save`, async () => {
     const r = opened(app)
-    try { await r.controller.flush(); expect(r.requests).toHaveLength(0) } finally { await r.controller.close() }
+    try { await r.controller.flush(); expect(r.requests).toHaveLength(0); expect(r.controller.confirmedVersion()).toBe("3") } finally { await r.controller.close() }
   })
   it(`${app}: open v3, change, release -> saves`, async () => {
     const r = opened(app)
-    try { r.edit(4); await r.controller.flush(); expect(r.requests).toHaveLength(1); expect(r.requests[0].baseVersion).toBe("3") } finally { await r.controller.close() }
+    try {
+      r.edit(4); expect(r.controller.confirmedVersion()).toBeUndefined()
+      await r.controller.flush(); expect(r.requests).toHaveLength(1); expect(r.requests[0].baseVersion).toBe("3"); expect(r.controller.confirmedVersion()).toBe("4")
+    } finally { await r.controller.close() }
   })
   it(`${app}: open v3 with a restored local draft, release -> the draft is saved`, async () => {
     const r = opened(app, 9, 3)
