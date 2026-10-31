@@ -18,8 +18,12 @@ import { captureDocumentDrafts, removeCapturedDocumentDrafts, type CapturedDocum
  * persistent revisions; newer writes survive an older sign-out acknowledgement.
  */
 
-export type ArtifactDraftKind = "artifact-source" | "artifact-comment" | "artifact-viewer-comment" | "design-canvas" | "design-comment" | "wordcraft-pending"
-const KINDS: readonly ArtifactDraftKind[] = ["artifact-source", "artifact-comment", "artifact-viewer-comment", "design-canvas", "design-comment", "wordcraft-pending"]
+/** Per-stop WordCraft copies: uniqueness lives in the kind, because the draft-key endpoint accepts only the real Page id as target. */
+export type WordcraftStopKind = `wordcraft-stop-${0 | 1 | 2 | 3 | 4 | 5 | 6 | 7}`
+export const WORDCRAFT_STOP_SLOTS = 8
+export const wordcraftStopKind = (slot: number): WordcraftStopKind => `wordcraft-stop-${slot % WORDCRAFT_STOP_SLOTS}` as WordcraftStopKind
+export type ArtifactDraftKind = "artifact-source" | "artifact-comment" | "artifact-viewer-comment" | "design-canvas" | "design-comment" | "wordcraft-pending" | WordcraftStopKind
+const KINDS: readonly ArtifactDraftKind[] = ["artifact-source", "artifact-comment", "artifact-viewer-comment", "design-canvas", "design-comment", "wordcraft-pending", ...Array.from({ length: WORDCRAFT_STOP_SLOTS }, (_, slot) => wordcraftStopKind(slot))]
 export type ArtifactDraftRow = [human: string, kind: ArtifactDraftKind, workspace: string, target: string]
 type Row = ArtifactDraftRow
 export interface CapturedArtifactDraft { row: Row; revision: string | null; text?: string }

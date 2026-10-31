@@ -3,7 +3,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 // Lane/storage tests use an identity cipher; actual cryptography and admission
 // are exercised in local-draft-seal and the real-browser retention tests.
 vi.mock("./local-draft-seal", () => ({
- createLocalDraftCipher: async () => ({ seal: async (text: string) => text, open: async (text: string) => text, close() {} }),
+ // The real cipher asks /pages/@<page>/draft-key, which accepts only this Page identity.
+ createLocalDraftCipher: async (scope: { page: string }) => { if (!/^[A-Za-z0-9_-]{1,128}$/.test(scope.page)) throw new Error("draft-key 400: immutable Page reference required"); return { seal: async (text: string) => text, open: async (text: string) => text, close() {} } },
  forgetLocalDraftPage() {}, isSealedLocalDraft: () => true,
  LocalDraftReadRevoked: class extends Error {},
 }))
@@ -279,4 +280,15 @@ it("capture tolerates a localStorage getter that throws", async () => {
     expect(drafts.captureLegacyLocalDrafts()).toEqual([])
     expect(() => drafts.removeCapturedLegacyLocalDrafts([{ key: "crewship-design:alice", text: "x" }])).not.toThrow()
   } finally { if (original) Object.defineProperty(globalThis, "localStorage", original) }
+})
+
+it("G4 round 3: a per-stop WordCraft copy keeps the real Page id as its target, so the draft-key admission accepts it", async () => {
+  const store = durableStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const first = drafts.artifactDraftKey(drafts.wordcraftStopKind(3), "alice", "w", "page_1-A")!
+  const second = drafts.artifactDraftKey(drafts.wordcraftStopKind(4), "alice", "w", "page_1-A")!
+  await drafts.writeArtifactDraft(first, "one"); await drafts.writeArtifactDraft(second, "two")
+  expect(store.disk.size).toBe(2)
+  // A "~" suffix on the Page identity is refused by the same validation.
+  await expect(drafts.writeArtifactDraft(drafts.artifactDraftKey("wordcraft-pending", "alice", "w", "page_1-A~uuid")!, "x")).rejects.toThrow()
 })

@@ -11,10 +11,11 @@ vi.mock("@/lib/editor-lifecycle/use-leave-guard", () => ({ useLeaveGuard: vi.fn(
 const drafts = vi.hoisted(() => ({ store: new Map<string, string>(), delay: 0, retired: false }))
 vi.mock("@/lib/artifact-drafts", () => ({
   artifactDraftKey: (kind: string, human: string | null, workspace: string, target: string) => human ? JSON.stringify([human, kind, workspace, target]) : null,
-  writeArtifactDraft: async (key: string, text: string) => { if (drafts.retired) throw new Error("retired"); drafts.store.set(key, text) },
+  writeArtifactDraft: async (key: string, text: string) => { if (drafts.retired) throw new Error("retired"); if (!/^[A-Za-z0-9_-]{1,128}$/.test(JSON.parse(key)[3])) throw new Error("draft-key 400: immutable Page reference required"); drafts.store.set(key, text) },
   loadArtifactDraft: async (key: string) => { const text = drafts.store.get(key) ?? ""; if (drafts.delay) await new Promise(resolve => setTimeout(resolve, drafts.delay)); if (drafts.retired) throw new Error("retired"); return text },
   clearArtifactDraft: async (key: string) => { drafts.store.delete(key) },
   artifactDraftRevision: () => 1,
+  wordcraftStopKind: (slot: number) => `wordcraft-stop-${slot % 8}`,
 }))
 const digest = "b".repeat(64)
 const windowMock = { postMessage: vi.fn() }
@@ -171,7 +172,7 @@ it("on storage_full keeps the editor visible, saves the submitted changes as a l
   // The stopped editor stays readable so its content can be copied.
   expect(first.frame.hidden).toBe(false)
   expect(first.frame.isConnected).toBe(true)
-  const stored = [...drafts.store.entries()].filter(([key]) => JSON.parse(key)[3] === "page")
+  const stored = [...drafts.store.entries()].filter(([key]) => JSON.parse(key)[1] === "wordcraft-pending")
   expect(stored).toHaveLength(1)
   expect(JSON.parse(stored[0][0])[1]).toBe("wordcraft-pending")
   expect(JSON.parse(stored[0][1])).toMatchObject({ format: "crewship-wordcraft-draft-v1", workspace_id: "workspace", page_id: "page", originals: ['{"type":"submit_changes","request_id":"r1"}'] })

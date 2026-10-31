@@ -5,7 +5,7 @@ import { useSessionSafe } from "@/hooks/use-auth"
 import { useLeaveGuard } from "@/lib/editor-lifecycle/use-leave-guard"
 import { createCapabilityChannel, decodeMessage, transferEditorPort, verifyEditorHello, type CapabilityPort } from "@/lib/mooring/channel"
 import { connectWordCraftHost, loadWordCraftReceiptSDK, openWordCraftSession, WORDCRAFT_BOOTSTRAP_BYTES, WORDCRAFT_FRAME_BYTES, type WordCraftBootstrap, type WordCraftHostState } from "@/lib/mooring/wordcraft-host-session"
-import { artifactDraftKey, artifactDraftRevision, clearArtifactDraft, loadArtifactDraft, writeArtifactDraft } from "@/lib/artifact-drafts"
+import { artifactDraftKey, artifactDraftRevision, clearArtifactDraft, loadArtifactDraft, wordcraftStopKind, writeArtifactDraft } from "@/lib/artifact-drafts"
 import { editorFrameSrc } from "@/lib/workbooks/editor-client"
 import { createEditorFrame, editorFrameSupported } from "./workbook-editor-host"
 
@@ -90,11 +90,11 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
         setError(STORAGE_FULL_MESSAGE)
         const key = draftKey.current
         if (key) {
-          // 1) Admit this stop's originals at once under a key of their own,
+          // 1) Admit this stop's originals at once under a stop-slot key (a valid Page identity; uniqueness lives in the kind),
           // before any read: identity retirement drains an admitted write, and
           // another tab can never overwrite it.
           const ownText = JSON.stringify({ format: WORDCRAFT_DRAFT_FORMAT, workspace_id: workspaceId, page_id: pageId, originals })
-          const ownKey = artifactDraftKey("wordcraft-pending", humanId, workspaceId, `${pageId}~${crypto.randomUUID()}`)
+          const ownKey = artifactDraftKey(wordcraftStopKind(crypto.getRandomValues(new Uint8Array(1))[0]), humanId, workspaceId, pageId)
           const own = ownKey ? writeArtifactDraft(ownKey, ownText).then(() => true, () => false) : Promise.resolve(false)
           // 2) Merge into the shared draft under a cross-tab lock, so two tabs
           // cannot both read [A] and write [A,B] and [A,C].
