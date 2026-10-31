@@ -102,7 +102,7 @@ func TestArtifactStorageAdminRecomputeReportsDriftAndIsIdempotent(t *testing.T) 
 // instance admin, not a guest, not someone with no workspace.
 func TestArtifactStorageAdminRefusesEveryOtherCaller(t *testing.T) {
 	f := newInstanceFixture(t)
-	seedInstanceUser(t, f.db, "guest", "guest@ex.com", "ws-old", "GUEST")
+	seedInstanceUser(t, f.db, "guest", "guest@ex.com", "ws-old", "VIEWER")
 	seedInstanceUser(t, f.db, "stranger", "stranger@ex.com", "", "")
 	callers := map[string]string{
 		"owner without instance admin": mintTokenFor(t, f.db, "carol", "storcarol000000000000000"),

@@ -35,17 +35,22 @@ type adminArtifactStorageDrift struct {
 	ReservedAfter  int64 `json:"reserved_bytes_after" yaml:"reserved_bytes_after"`
 }
 
+type adminArtifactStorageWorkspaceDrift struct {
+	WorkspaceID    string `json:"workspace_id" yaml:"workspace_id"`
+	UsedBefore     int64  `json:"used_bytes_before" yaml:"used_bytes_before"`
+	UsedAfter      int64  `json:"used_bytes_after" yaml:"used_bytes_after"`
+	ReservedBefore int64  `json:"reserved_bytes_before" yaml:"reserved_bytes_before"`
+	ReservedAfter  int64  `json:"reserved_bytes_after" yaml:"reserved_bytes_after"`
+}
+
 type adminArtifactStorageRecompute struct {
-	DryRun            bool                      `json:"dry_run" yaml:"dry_run"`
-	Changed           bool                      `json:"changed" yaml:"changed"`
-	Instance          adminArtifactStorageDrift `json:"instance" yaml:"instance"`
-	WorkspacesChecked int                       `json:"workspaces_checked" yaml:"workspaces_checked"`
-	WorkspacesDrifted int                       `json:"workspaces_drifted" yaml:"workspaces_drifted"`
-	Workspaces        []struct {
-		WorkspaceID string `json:"workspace_id" yaml:"workspace_id"`
-		adminArtifactStorageDrift
-	} `json:"workspaces" yaml:"workspaces"`
-	DataDeleted bool `json:"data_deleted" yaml:"data_deleted"`
+	DryRun            bool                                 `json:"dry_run" yaml:"dry_run"`
+	Changed           bool                                 `json:"changed" yaml:"changed"`
+	Instance          adminArtifactStorageDrift            `json:"instance" yaml:"instance"`
+	WorkspacesChecked int                                  `json:"workspaces_checked" yaml:"workspaces_checked"`
+	WorkspacesDrifted int                                  `json:"workspaces_drifted" yaml:"workspaces_drifted"`
+	Workspaces        []adminArtifactStorageWorkspaceDrift `json:"workspaces" yaml:"workspaces"`
+	DataDeleted       bool                                 `json:"data_deleted" yaml:"data_deleted"`
 }
 
 // parseStorageBytes reads a byte count: plain bytes, or a number with a binary
