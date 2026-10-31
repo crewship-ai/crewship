@@ -209,7 +209,9 @@ const retired = (row: Row) => owner !== undefined && owner !== row[0]
 const retiredError = () => new Error("This browser is no longer signed in as the draft's owner.")
 let identityPurge: Promise<void> = Promise.resolve()
 
-const successfulWrites = new Map<string, { text: string; revision: string; fallback?: string; over?: string }>()
+// `over` for a fallback copy: the IndexedDB revision it supersedes, null when
+// IndexedDB held none, undefined when that could not be determined.
+const successfulWrites = new Map<string, { text: string; revision: string; fallback?: string; over?: string | null }>()
 async function persist(row: Row, text: string): Promise<void> {
   const key = JSON.stringify(row), revision = crypto.randomUUID()
   // Admission happened in writeArtifactDraft. Already admitted writes must
@@ -222,8 +224,8 @@ async function persist(row: Row, text: string): Promise<void> {
   const store = durable()
   // The IndexedDB revision a fallback copy would supersede, read before this
   // write: a revision another tab stores later is newer and must stay.
-  let over: string | undefined
-  if (text && store?.read) { try { over = (await store.read(row))?.revision } catch { /* unreadable: nothing to supersede safely */ } }
+  let over: string | null | undefined
+  if (text && store?.read) { try { over = (await store.read(row))?.revision ?? null } catch { /* unknown: the copy must not be cleared blindly */ } }
   if (store) {
     try {
       if (text) await store.put(row, sealed, revision)
@@ -429,6 +431,11 @@ export async function clearArtifactDraft(key: string, text: string, revision: nu
     // The superseded IndexedDB revision goes first (revision-guarded: a newer
     // write from another tab stays). If that fails, the newer fallback copy
     // stays too, so the older revision is never what reopening finds.
+    // An unknown superseded revision is uncertainty, not consent: removing the
+    // copy could leave an older IndexedDB revision as the recovered draft, so
+    // the copy stays. A verified read revocation still purges it
+    // (purgeLocalDraftPage), independent of this.
+    if (saved.over === undefined) { successfulWrites.delete(key); return }
     if (saved.over) await durable()?.removeCaptured([{ row, revision: saved.over }])
     try { if (localStorage.getItem(legacyKey(row)) === saved.fallback) localStorage.removeItem(legacyKey(row)) } catch { /* Unavailable storage holds nothing to remove. */ }
     successfulWrites.delete(key)

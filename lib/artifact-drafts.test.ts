@@ -286,7 +286,8 @@ it("capture tolerates a localStorage getter that throws", async () => {
 function failingStore() {
   const store = durableStore()
   store.put.mockImplementation(async () => { throw new Error("IndexedDB refused") })
-  return store
+  // Like the real IndexedDB store: a revision read that succeeds (nothing stored).
+  return Object.assign(store, { read: async (row: Row) => { const text = store.disk.get(JSON.stringify(row)); return text === undefined ? undefined : { text } } })
 }
 it("removes the localStorage fallback when a saved or discarded draft is cleared (G4 B17)", async () => {
   const drafts = await load(); drafts.setArtifactDraftStore(failingStore())
@@ -416,4 +417,33 @@ it("a failed IndexedDB delete keeps the newer fallback copy instead of resurrect
   await drafts.clearArtifactDraft(key, "newer B", drafts.artifactDraftRevision(key)).catch(() => {})
   expect(local.get("artifact-comment:alice:w:page")).toBe("newer B")
   await expect(drafts.readArtifactDraft(key)).resolves.toBe("newer B")
+})
+
+it("an unknown superseded revision keeps the fallback copy: IndexedDB A, fallback B, read and put fail, clear, reopen offers B (Codex #4690 r3)", async () => {
+  const store = revisionStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("artifact-comment", "alice", "w", "page")!
+  await drafts.writeArtifactDraft(key, "older A")
+  const read = store.read
+  store.read = async () => { throw new Error("IndexedDB read failed") }
+  store.refuse = true
+  await drafts.writeArtifactDraft(key, "newer B")
+  await drafts.clearArtifactDraft(key, "newer B", drafts.artifactDraftRevision(key))
+  // IndexedDB works again; the older revision must not be what reopening finds.
+  store.read = read; store.refuse = false
+  expect(local.get("artifact-comment:alice:w:page")).toBe("newer B")
+  const reopened = await load(); reopened.setArtifactDraftStore(store)
+  await expect(reopened.readArtifactDraft(key)).resolves.toBe("newer B")
+})
+
+it("a verified read revocation still removes a fallback copy whose superseded revision is unknown (Codex #4690 r3)", async () => {
+  const store = revisionStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("artifact-comment", "alice", "w", "page")!
+  await drafts.writeArtifactDraft(key, "older A")
+  store.read = async () => { throw new Error("IndexedDB read failed") }
+  store.refuse = true
+  await drafts.writeArtifactDraft(key, "newer B")
+  await drafts.purgeLocalDraftPage({ human: "alice", workspace: "w", page: "page" })
+  expect(local.has("artifact-comment:alice:w:page")).toBe(false)
 })
