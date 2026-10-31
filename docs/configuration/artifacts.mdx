@@ -280,6 +280,7 @@ only when its value is exactly `true`.
 |---|---|---|
 | `NEXT_PUBLIC_ARTIFACTS_LIBRARY` | off | The Artifacts library at `/artifacts`. The **Artifacts** sidebar link is always shown; with this variable it opens `/artifacts` instead of `/pages`. |
 | `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` | off | Sends the `/pages` overview to the library. Needs `NEXT_PUBLIC_ARTIFACTS_LIBRARY`. |
+| `NEXT_PUBLIC_ARTIFACTS_SERVER_CATALOG` | off | Pages the library's All view on the server (search, kind, privacy, version and folder filters, sort and paging of `GET /api/v1/pages`). Views and owner filters the server cannot express stay in the browser. Needs `NEXT_PUBLIC_ARTIFACTS_LIBRARY`. |
 | `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` | off (`false` in `.env.production`) | Artifact project cards and the side viewer in chat |
 | `NEXT_PUBLIC_CHAT_CRAFT_LEASE` | off (`false` in `.env.production`) | The Craft edit lease bar and local draft recovery in chat |
 | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` | off | Live data previews in Dashboard artifacts, inside the library or the chat and Page viewer. No data requests while off. |

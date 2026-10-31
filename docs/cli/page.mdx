@@ -121,12 +121,13 @@ authorization; no hidden private title is included.
 
 Optional catalog filters run on the server before pagination. `--query` (`-q`)
 searches Page names and slugs as plain text; it is not a query language.
-`--kind project|dashboard|page|word|sheet|slides`, `--access private|open`,
+`--kind project|dashboard|page|word|sheet|slides|design`, `--access private|open`,
 `--version-state shared|unshared|unversioned`, and `--owner me|user/<id>|crew/<slug>`
 accept repeated flags or comma-separated values. Values within one filter are ORed;
 different filters are ANDed. Owners use canonical identifiers, never display names;
 `me` means the signed-in human. `--folder <slug>` selects a folder and
-`--folder '~unfiled'` selects Pages outside folders. `--sort updated|name|kind`
+`--folder '~unfiled'` selects Pages outside folders. `--empty exclude|only|include`
+selects Pages with nothing to open yet; omitted includes them. `--sort updated|name|kind`
 orders the authorized filtered results. These flags preserve the JSON array response
 and the existing `--audience`, `--test-items`, `--archived`, `--limit`, and `--offset` options.
 

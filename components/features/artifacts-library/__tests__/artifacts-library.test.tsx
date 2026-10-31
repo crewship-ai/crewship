@@ -6,7 +6,12 @@ const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error
 vi.mock("@/hooks/use-pages", async importOriginal => ({
   ...(await importOriginal<typeof import("@/hooks/use-pages")>()),
   usePages: (...args: unknown[]) => { state.pagesArgs = args; return { pages: state.pages, loading: state.loading, error: state.error, refresh: state.refresh } },
+  usePageCatalogWindow: (_ws: string, params: URLSearchParams | null, offset: number, limit: number) => {
+    windowState.calls.push({ params: params?.toString() ?? null, offset, limit })
+    return { pages: params ? windowState.pages : [], total: params ? windowState.total : 0, loading: false, error: null }
+  },
 }))
+const windowState = vi.hoisted(() => ({ calls: [] as { params: string | null; offset: number; limit: number }[], pages: [] as PageView[], total: 0 }))
 vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-project-data", () => ({ useArtifactProjectsAvailable: () => state.projectsOn }))
 vi.mock("@/components/features/chat/artifact-context/projects/artifact-viewer-context", () => ({
   ArtifactViewerProvider: ({ children, target }: { children: React.ReactNode; target: { slug: string; tab?: string } }) =>
@@ -70,6 +75,7 @@ beforeEach(() => {
     wire({ slug: "weekly", id: "page-weekly", name: "Weekly report", panel_count: 2 } as Partial<WirePage>),
     wire({ slug: "calc", id: "page-calc", name: "Calculator", has_application: true } as Partial<WirePage>),
   ]
+  windowState.calls = []; windowState.pages = []; windowState.total = 0
   state.folders = []; state.reads = []; state.pagesArgs = []; state.mobile = false; state.readStatus = "ready"; state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.select.mockReset(); state.refresh.mockReset()
 })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
@@ -92,6 +98,34 @@ it("lists every kind with something in it, a panel Page as Page, and keeps empty
   expect(screen.queryByText("Calculator")).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: /Empty/ }))
   expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(item => item.textContent)).toEqual([expect.stringContaining("Calculator")])
+})
+
+it("without the server catalog flag, All filters the full list in the browser and never asks for a window", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
+  renderLibrary()
+  openAll()
+  expect(screen.getAllByText("Pricing site").length).toBeGreaterThan(0)
+  expect(windowState.calls.length).toBeGreaterThan(0)
+  expect(windowState.calls.every(call => call.params === null)).toBe(true)
+  expect(screen.queryByRole("navigation", { name: "Artifact pages" })).toBeNull()
+})
+
+it("with the server catalog flag, All shows the server's window, its total and pages through it", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_SERVER_CATALOG", "true")
+  windowState.pages = [wire({ slug: "server-only", id: "page-server-only", name: "Server window row", artifact_kind: "project" })]
+  windowState.total = 120
+  renderLibrary()
+  openAll()
+  expect(screen.getAllByText("Server window row").length).toBeGreaterThan(0)
+  expect(screen.queryByText("Partner brief")).toBeNull()
+  const last = () => windowState.calls[windowState.calls.length - 1]
+  expect(new URLSearchParams(last().params!).get("empty")).toBe("exclude")
+  expect(last()).toMatchObject({ offset: 0, limit: 50 })
+  const pager = screen.getByRole("navigation", { name: "Artifact pages" })
+  expect(within(pager).getByText("1–1 of 120")).toBeTruthy()
+  fireEvent.click(within(pager).getByRole("button", { name: "Next" }))
+  expect(last()).toMatchObject({ offset: 50, limit: 50 })
 })
 
 it("asks the server for archived and test-made items, which it leaves out by default", () => {

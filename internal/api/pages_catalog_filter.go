@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 	"unicode"
 )
 
@@ -79,7 +78,7 @@ func pageCatalogQueryRows(r *http.Request, index *pageIndex, rows []pageIndexRow
 	query := r.URL.Query()
 	facets := make(map[string]map[string]bool)
 	allowed := map[string]string{
-		"kind":    "project,dashboard,page,word,sheet,slides",
+		"kind":    "project,dashboard,page,word,sheet,slides,design",
 		"access":  "private,open",
 		"version": "shared,unshared,unversioned",
 	}
@@ -108,6 +107,12 @@ func pageCatalogQueryRows(r *http.Request, index *pageIndex, rows []pageIndexRow
 	if query.Has("folder") && folder != "~unfiled" && !pageCatalogToken(folder) {
 		return nil, errors.New("folder must be a slug or ~unfiled")
 	}
+	// Empty is the library's "nothing to open yet": no typed kind, no Word,
+	// Sheet or Slides storage and no panels. Omitted means include.
+	empty := query.Get("empty")
+	if empty != "" && empty != "exclude" && empty != "only" && empty != "include" {
+		return nil, errors.New("empty must be exclude, only or include")
+	}
 	sortBy := query.Get("sort")
 	if sortBy != "" && sortBy != "updated" && sortBy != "name" && sortBy != "kind" {
 		return nil, errors.New("sort must be updated, name or kind")
@@ -116,7 +121,6 @@ func pageCatalogQueryRows(r *http.Request, index *pageIndex, rows []pageIndexRow
 	type selectedRow struct {
 		row        pageIndexRow
 		kind, name string
-		updated    time.Time
 	}
 	selected := make([]selectedRow, 0, len(rows))
 	matches := func(name, value string) bool { return len(facets[name]) == 0 || facets[name][value] }
@@ -157,6 +161,9 @@ func pageCatalogQueryRows(r *http.Request, index *pageIndex, rows []pageIndexRow
 		if !matches("kind", kind) || !matches("access", access) || !matches("version", version) || !matches("owner", owner) {
 			continue
 		}
+		if isEmpty := typedKind == "" && !rec.HasWorkbook && !rec.HasSlides && !rec.HasDocument && len(row.panels) == 0; empty == "exclude" && isEmpty || empty == "only" && !isEmpty {
+			continue
+		}
 		if query.Has("folder") {
 			actual := "~unfiled"
 			if value := index.folders[rec.FolderID]; value != nil {
@@ -166,22 +173,22 @@ func pageCatalogQueryRows(r *http.Request, index *pageIndex, rows []pageIndexRow
 				continue
 			}
 		}
-		updated, _ := time.Parse(time.RFC3339Nano, rec.UpdatedAt)
-		selected = append(selected, selectedRow{row: row, kind: kind, name: strings.ToLower(rec.Name), updated: updated})
+		selected = append(selected, selectedRow{row: row, kind: kind, name: strings.ToLower(rec.Name)})
 	}
-	rank := map[string]int{"project": 0, "dashboard": 1, "page": 2, "word": 3, "sheet": 4, "slides": 5}
-	sort.Slice(selected, func(i, j int) bool {
+	// Matches LIBRARY_KINDS order in components/features/artifacts-library/library-items.ts.
+	rank := map[string]int{"project": 0, "dashboard": 1, "page": 2, "word": 3, "sheet": 4, "slides": 5, "design": 6}
+	// loadPageIndex already orders by updated_at DESC, slug ASC in SQL, so a
+	// stable sort keeps that order for "updated" and as the tie-break for name
+	// and kind. Re-parsing updated_at here would misorder datetime('now') rows.
+	sort.SliceStable(selected, func(i, j int) bool {
 		a, b := selected[i], selected[j]
-		if sortBy == "name" && a.name != b.name {
+		switch {
+		case sortBy == "name" && a.name != b.name:
 			return a.name < b.name
-		}
-		if sortBy == "kind" && rank[a.kind] != rank[b.kind] {
+		case sortBy == "kind":
 			return rank[a.kind] < rank[b.kind]
 		}
-		if !a.updated.Equal(b.updated) {
-			return a.updated.After(b.updated)
-		}
-		return a.row.rec.Slug < b.row.rec.Slug
+		return false
 	})
 	result := make([]pageIndexRow, 0, len(selected))
 	for _, entry := range selected {

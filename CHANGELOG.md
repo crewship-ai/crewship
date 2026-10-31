@@ -211,7 +211,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 - Artifact creation and publication tools now request stable element IDs so generated screens support precise element comments.
 - Version the bundled Project, Dashboard and Slides authoring packages and preserve their release in agent skill files, with immutable compiled type metadata and unchanged content versions.
 
-- **Page catalogs filter and page on the server.** Search names and slugs, combine kind, privacy, version, owner and folder filters, and choose stable ordering through the existing API and `page list` CLI. Totals and page windows include only authorized matching items; existing unpaged callers retain their array response.
+- **Page catalogs filter and page on the server.** Search names and slugs, combine kind (including Design), privacy, version, owner, folder and empty-item filters, and choose stable ordering through the existing API and `page list` CLI. The Artifacts library can page its All view on the server behind the default-off `NEXT_PUBLIC_ARTIFACTS_SERVER_CATALOG` flag. Totals and page windows include only authorized matching items; existing unpaged callers retain their array response.
 - Clear copied-command feedback timers when onboarding unmounts.
 
 - **Saved Slides pages could look empty.** Page detail and list responses now include native Slides presence and schema metadata, allowing the existing opt-in Slides viewer to recognize saved presentations.

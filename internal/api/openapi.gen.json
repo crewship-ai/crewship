@@ -127200,6 +127200,20 @@
             }
           },
           {
+            "description": "Pages with nothing to open yet: no typed kind, no Word, Sheet or Slides storage and no panels. Omitted includes them.",
+            "in": "query",
+            "name": "empty",
+            "required": false,
+            "schema": {
+              "enum": [
+                "exclude",
+                "only",
+                "include"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "description": "Exact folder slug, or ~unfiled. An omitted parameter includes every folder.",
             "in": "query",
             "name": "folder",
@@ -127222,7 +127236,8 @@
                   "page",
                   "word",
                   "sheet",
-                  "slides"
+                  "slides",
+                  "design"
                 ],
                 "type": "string"
               },
@@ -127270,7 +127285,7 @@
             }
           },
           {
-            "description": "Stable order: updated descending (default), case-folded name ascending, or library kind order. Ties use updated descending and slug ascending.",
+            "description": "Stable order: updated descending (default), case-folded name ascending, or library kind order. Ties keep the index order: updated descending, then slug ascending.",
             "in": "query",
             "name": "sort",
             "required": false,

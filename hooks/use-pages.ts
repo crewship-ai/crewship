@@ -1128,7 +1128,7 @@ function usePagesHumanIdentity() {
   return { humanId, current }
 }
 
-async function fetchJSON(url: string, signal: AbortSignal | undefined, what: string, onDenied: () => void) {
+async function fetchJSON(url: string, signal: AbortSignal | undefined, what: string, onDenied: () => void, onHeaders?: (headers: Headers) => void) {
   const res = await apiFetch(url, { signal })
   if (!res.ok) {
     // An explicit refusal invalidates earlier private metadata. Merely masking
@@ -1141,7 +1141,53 @@ async function fetchJSON(url: string, signal: AbortSignal | undefined, what: str
         : null
     throw new PagesRequestError(res.status, detail ?? `${what}: ${res.status}`)
   }
+  onHeaders?.(res.headers)
   return res.json()
+}
+
+export interface PageCatalogWindow {
+  pages: PageView[]
+  /** `X-Total-Count`: authorized rows matching every filter, before the window. */
+  total: number
+  loading: boolean
+  error: string | null
+}
+
+/**
+ * One server-filtered window of the index (#4471). `params` carries the
+ * catalog filters and sort; null leaves the hook idle and sends nothing. The
+ * key sits under `pagesKeys.all`, so realtime pushes and refreshes re-read it.
+ */
+export function usePageCatalogWindow(workspaceId: string | null | undefined, params: URLSearchParams | null, offset: number, limit: number): PageCatalogWindow {
+  const qc = useQueryClient()
+  const { humanId, current } = usePagesHumanIdentity()
+  const search = params?.toString() ?? ""
+  const queryKey = [...pagesKeys.all(workspaceId ?? ""), { view: "window" }, humanId ?? "", search, offset, limit] as const
+  const query = useQuery({
+    queryKey,
+    queryFn: async ({ signal }) => {
+      if (!humanId || current.current !== humanId) throw new PagesRequestError(401, "Current human required.")
+      const request = new URLSearchParams(search)
+      request.set("workspace_id", workspaceId!)
+      request.set("limit", String(limit))
+      request.set("offset", String(offset))
+      let total = 0
+      const body = await fetchJSON(`/api/v1/pages?${request.toString()}`, signal, "pages", () => qc.setQueryData(queryKey, { rows: [], total: 0 }),
+        headers => { total = Math.max(0, Number.parseInt(headers.get("X-Total-Count") ?? "", 10) || 0) })
+      return { rows: normalizePageList(body), total }
+    },
+    enabled: Boolean(workspaceId && humanId && params),
+    gcTime: 0,
+    retry: false,
+  })
+  const denied = !humanId || query.error instanceof PagesRequestError && [401, 403, 404].includes(query.error.status)
+  const pages = useMemo(() => (denied ? [] : query.data?.rows ?? []).map(toPageView), [query.data, denied])
+  return {
+    pages,
+    total: denied ? 0 : query.data?.total ?? 0,
+    loading: Boolean(params) && query.isPending && Boolean(workspaceId),
+    error: query.error ? (query.error as Error).message : null,
+  }
 }
 
 export interface UsePagesResult {

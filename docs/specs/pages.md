@@ -458,12 +458,14 @@ folder counts. Direct authorized reads and version history remain available.
 QA creates marked items only in a dedicated QA workspace.
 
 `GET /api/v1/pages` also accepts `q` (a plain case-insensitive substring of
-name or slug), `kind=project|dashboard|page|word|sheet|slides`,
+name or slug), `kind=project|dashboard|page|word|sheet|slides|design`,
 `access=private|open`, `version=shared|unshared|unversioned`, and canonical
 `owner=user/ID|crew/slug|me`. Each facet accepts comma-separated and repeated
 values (OR within a facet, AND between facets). `me` means the current user's
 `user/ID`, never a display label or implicit crew ownership. `folder` selects
-a folder slug or `~unfiled`. Unknown enum values and malformed owner/folder
+a folder slug or `~unfiled`. `empty=exclude|only|include` (omitted: include)
+selects Pages with no typed kind, no Word/Sheet/Slides storage and no panels,
+the library's empty items. Unknown enum values and malformed owner/folder
 values return 400. Filters narrow only rows admitted by the canonical Page
 index; kind and version use the same selected metadata as the list response.
 Legacy Word/Sheet/Slides storage without an artifact version head remains
@@ -472,8 +474,10 @@ uses shared-version metadata and never inspects an unshared latest manifest.
 
 `sort=updated|name|kind` defaults to updated descending. Name sorts by
 case-insensitive text ascending; kind follows Project, Dashboard, Page, Word,
-Sheet, Slides. Name/kind ties use updated descending, then every sort uses slug
-ascending as its final deterministic tie breaker. The response remains an
+Sheet, Slides, Design. Ties keep the index order, `updated_at` descending then
+slug ascending, so every window is deterministic. The order comes from the
+index query itself, so stored `datetime('now')` and RFC 3339 timestamps keep the
+same order as the unfiltered array. The response remains an
 array with `X-Total-Count` after all authorization and filters, before paging.
 With no `limit` or `offset`, the result remains unpaged; existing pagination
 defaults and clamps are unchanged. Filtering and sorting add no per-row queries.

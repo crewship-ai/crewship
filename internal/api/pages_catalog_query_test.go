@@ -49,7 +49,7 @@ func TestPageCatalogQueryFiltersACLBeforeCountAndPage(t *testing.T) {
 
 func TestPageCatalogQueryBadValues(t *testing.T) {
 	h, _, _, ws, owner := newPagesFixture(t)
-	for _, query := range []string{"kind=unknown", "access=owner", "version=latest", "sort=oldest", "owner=You", "owner=user/", "owner=crew/a/b", "folder=", "kind=word,,sheet"} {
+	for _, query := range []string{"empty=yes", "kind=unknown", "access=owner", "version=latest", "sort=oldest", "owner=You", "owner=user/", "owner=crew/a/b", "folder=", "kind=word,,sheet"} {
 		if _, _, status := catalogQuery(t, h, ws, owner, "OWNER", query); status != 400 {
 			t.Errorf("%s status%d want400", query, status)
 		}
@@ -57,12 +57,21 @@ func TestPageCatalogQueryBadValues(t *testing.T) {
 }
 
 func TestPageCatalogQueryProjectionAndStablePaging(t *testing.T) {
+	// loadPageIndex returns rows ordered updated_at DESC, slug ASC; with equal
+	// timestamps that is slug order, and every sort keeps it for ties.
 	index := &pageIndex{rows: []pageIndexRow{
+		{rec: pageRecord{Slug: "design", Name: "Same", OwnerUserID: "u", ArtifactContentType: "design"}},
+		{rec: pageRecord{Slug: "legacy-sheet", Name: "Same", OwnerCrewID: "c", HasWorkbook: true}, ownerCrewSlug: "ops"},
 		{rec: pageRecord{Slug: "legacy-word", Name: "Same", OwnerUserID: "u", HasDocument: true}},
 		{rec: pageRecord{Slug: "native-word", Name: "Same", OwnerUserID: "u", ArtifactContentType: "wordcraft", ArtifactSharedVersion: 2}},
 		{rec: pageRecord{Slug: "project", Name: "Same", OwnerUserID: "u", ArtifactContentType: "artifact_project"}},
-		{rec: pageRecord{Slug: "legacy-sheet", Name: "Same", OwnerCrewID: "c", HasWorkbook: true}, ownerCrewSlug: "ops"},
 	}}
+	// Panel Pages are kind page; one with no panels and no storage is empty.
+	pageRows := []pageIndexRow{
+		{rec: pageRecord{Slug: "legacy-empty", Name: "Zz", OwnerUserID: "u"}},
+		{rec: pageRecord{Slug: "panels", Name: "Zz", OwnerUserID: "u"}, panels: []*panelRecord{{}}},
+	}
+	index.rows = append(index.rows, pageRows...)
 	for _, tc := range []struct {
 		query string
 		want  []string
@@ -71,8 +80,12 @@ func TestPageCatalogQueryProjectionAndStablePaging(t *testing.T) {
 		{"kind=word,sheet&version=shared&owner=me", []string{"native-word"}},
 		{"version=unshared&kind=project", []string{"project"}},
 		{"owner=crew/ops&owner=user/other", []string{"legacy-sheet"}},
-		{"sort=kind", []string{"project", "legacy-word", "native-word", "legacy-sheet"}},
-		{"sort=name&limit=2&offset=1", []string{"legacy-word", "native-word"}},
+		{"sort=kind", []string{"project", "legacy-empty", "panels", "legacy-word", "native-word", "legacy-sheet", "design"}},
+		{"sort=name&limit=2&offset=2", []string{"legacy-word", "native-word"}},
+		{"kind=design&version=unshared", []string{"design"}},
+		{"empty=only", []string{"legacy-empty"}},
+		{"empty=exclude&kind=page", []string{"panels"}},
+		{"empty=include&kind=page", []string{"legacy-empty", "panels"}},
 	} {
 		req := httptest.NewRequest("GET", "/?"+tc.query, nil)
 		rows, _, err := pageCatalogRows(req, index, "u")
@@ -327,5 +340,66 @@ func TestPageCatalogQueryWALWriterContention(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// pages.updated_at defaults to datetime('now') ("YYYY-MM-DD HH:MM:SS"), which
+// is not RFC 3339. The filtered catalog must keep the index's SQL order for
+// those rows instead of re-deriving it, or the legacy array would reorder.
+func TestPageCatalogQueryKeepsIndexOrderForSQLiteTimestamps(t *testing.T) {
+	h, _, _, ws, owner := newPagesFixture(t)
+	for slug, updated := range map[string]string{"a-old": "2026-10-29 09:00:00", "b-new": "2026-10-29 11:00:00", "c-mid": "2026-10-29 10:00:00"} {
+		row := pagesCreate(t, h, ws, owner, slug)
+		execOrFatal(t, h.db, `UPDATE pages SET name='Same',updated_at=? WHERE id=?`, updated, row["id"])
+	}
+	want := []string{"b-new", "c-mid", "a-old"}
+	for _, query := range []string{"", "sort=updated", "sort=name", "sort=kind", "limit=3"} {
+		rows, total, status := catalogQuery(t, h, ws, owner, "OWNER", query)
+		var got []string
+		for _, row := range rows {
+			got = append(got, row.Slug)
+		}
+		if status != 200 || total != 3 || !reflect.DeepEqual(got, want) {
+			t.Errorf("%q status%d total%d got%v want%v", query, status, total, got, want)
+		}
+	}
+}
+
+// Rows in another workspace and private rows the caller cannot reach are not
+// admitted by loadPageIndex, so no filter combination counts or returns them.
+func TestPageCatalogQueryHiddenRowsNeverCounted(t *testing.T) {
+	h, _, _, ws, owner := newPagesFixture(t)
+	pagesSeedUser(t, h, ws, "catalog-member", "catalog-member@example.test", "MEMBER")
+	pagesJoinCrew(t, h, "catalog-member", "crew-lookout")
+	for _, slug := range []string{"open-plan", "private-plan"} {
+		row := pagesCreate(t, h, ws, owner, slug)
+		execOrFatal(t, h.db, `UPDATE pages SET name=?,updated_at='2026-10-29T10:00:00Z',private_audience=? WHERE id=?`, slug, slug == "private-plan", row["id"])
+	}
+	execOrFatal(t, h.db, `INSERT INTO workspaces(id,name,slug) VALUES('catalog-other','Other','catalog-other')`)
+	execOrFatal(t, h.db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at,private_audience) VALUES('catalog-other-open','catalog-other','other-plan','other-plan',?,'{}','2026-10-30T10:00:00Z','2026-10-30T10:00:00Z',0)`, owner)
+	for _, tc := range []struct {
+		query string
+		total int
+		rows  []string
+	}{
+		{"q=plan", 1, []string{"open-plan"}},
+		{"q=plan&access=private", 0, nil},
+		{"q=plan&access=open,private&limit=1&offset=1", 1, nil},
+		{"q=private&sort=name&limit=5", 0, nil},
+		{"q=other", 0, nil},
+		{"folder=~unfiled&kind=page&sort=kind", 1, []string{"open-plan"}},
+	} {
+		rows, total, status := catalogQuery(t, h, ws, "catalog-member", "MEMBER", tc.query)
+		var got []string
+		for _, row := range rows {
+			got = append(got, row.Slug)
+		}
+		if status != 200 || total != tc.total || !reflect.DeepEqual(got, tc.rows) {
+			t.Errorf("%s status%d total%d rows%v, want total%d rows%v", tc.query, status, total, got, tc.total, tc.rows)
+		}
+	}
+	// The owner reaches the private row, proving it exists and is filterable.
+	if _, total, status := catalogQuery(t, h, ws, owner, "OWNER", "q=plan&access=private"); status != 200 || total != 1 {
+		t.Fatalf("owner private total%d status%d", total, status)
 	}
 }

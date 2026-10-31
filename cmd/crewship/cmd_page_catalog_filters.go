@@ -19,7 +19,7 @@ func pageCatalogFilters(cmd *cobra.Command, query url.Values) error {
 		flag, param string
 		allowed     []string
 	}{
-		{"kind", "kind", []string{"project", "dashboard", "page", "word", "sheet", "slides"}},
+		{"kind", "kind", []string{"project", "dashboard", "page", "word", "sheet", "slides", "design"}},
 		{"access", "access", []string{"private", "open"}},
 		{"version-state", "version", []string{"shared", "unshared", "unversioned"}},
 		{"owner", "owner", nil},
@@ -61,6 +61,13 @@ func pageCatalogFilters(cmd *cobra.Command, query url.Values) error {
 			return fmt.Errorf("folder must be a slug or ~unfiled")
 		}
 		query.Set("folder", value)
+	}
+	if cmd.Flags().Changed("empty") {
+		value, _ := cmd.Flags().GetString("empty")
+		if value != "exclude" && value != "only" && value != "include" {
+			return fmt.Errorf("empty must be exclude, only or include")
+		}
+		query.Set("empty", value)
 	}
 	if cmd.Flags().Changed("sort") {
 		value, _ := cmd.Flags().GetString("sort")
