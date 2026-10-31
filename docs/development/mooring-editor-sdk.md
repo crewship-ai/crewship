@@ -1,5 +1,9 @@
 # Mooring pilot editor SDK
 
+> App authors start at [Mooring SDK v1](mooring-sdk.md): lease, save, recovery
+> and versions for Craft applications. This page documents the protocol-1
+> iframe layer underneath it.
+
 Mooring's pilot connects a personal Artifact to an isolated editor and an agent.
 It is an experimental protocol-1 integration, not an L3 collaboration claim or
 public conformance certification. The host owns authorization, persistence and
