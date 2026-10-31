@@ -254,6 +254,14 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 	}
 	retentionWindows := object(retentionProps, retentionKeys...)
 	retentionPatch := object(retentionProps)
+	artifactStorageAdmin := object(map[string]any{
+		"workspace_limit_bytes": integer(), "instance_limit_bytes": integer(), "used_bytes": integer(), "reserved_bytes": integer(),
+		"level": str(), "workspaces": integer(), "retention": str(),
+	}, "workspace_limit_bytes", "instance_limit_bytes", "used_bytes", "reserved_bytes", "level", "workspaces", "retention")
+	artifactStorageDriftProps := map[string]any{
+		"used_bytes_before": integer(), "used_bytes_after": integer(), "reserved_bytes_before": integer(), "reserved_bytes_after": integer(),
+	}
+	artifactStorageDrift := object(artifactStorageDriftProps, "used_bytes_before", "used_bytes_after", "reserved_bytes_before", "reserved_bytes_after")
 	instanceGovSettings := map[string]any{
 		"enabled": boolean(), "security_contact_user_id": str(), "deny_notify_min_risk": integer(),
 		"watch_spec": str(), "watch_presets": stringArray(), "require_second_approver": boolean(),
@@ -369,6 +377,20 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 				"problems": stringArray(), "warnings": stringArray(), "consecutive_passes": integer(), "checked_at": str(), "last_seen": str(),
 			}, "origin", "source", "proxy_check", "disabled")),
 		}, "mode")},
+		// Aggregate artifact storage: limits and instance counters, and the
+		// counter recompute (drift is reported per workspace, before and after).
+		"GET /api/v1/admin/instance/artifact-storage": {Response: artifactStorageAdmin},
+		"PUT /api/v1/admin/instance/artifact-storage": {
+			Request:  object(map[string]any{"workspace_limit_bytes": integer(), "instance_limit_bytes": integer()}),
+			Response: artifactStorageAdmin},
+		"POST /api/v1/admin/instance/artifact-storage/recompute": {
+			Request: object(map[string]any{"dry_run": boolean()}),
+			Response: object(map[string]any{
+				"dry_run": boolean(), "changed": boolean(), "workspaces_checked": integer(), "workspaces_drifted": integer(), "data_deleted": boolean(),
+				"instance": artifactStorageDrift,
+				"workspaces": array(object(withProps(artifactStorageDriftProps, map[string]any{"workspace_id": str()}),
+					"workspace_id", "used_bytes_before", "used_bytes_after", "reserved_bytes_before", "reserved_bytes_after")),
+			}, "dry_run", "changed", "instance", "workspaces_checked", "workspaces_drifted", "workspaces", "data_deleted")},
 		"GET /api/v1/admin/instance/retention": {Response: object(map[string]any{
 			"workspaces":          array(object(withProps(instanceWsRef, map[string]any{"windows": retentionWindows}), append([]string{"windows"}, instanceWsRequired...)...)),
 			"defaults":            retentionWindows,
