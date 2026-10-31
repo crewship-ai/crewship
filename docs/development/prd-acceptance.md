@@ -50,6 +50,9 @@ repository names a real host or account.
 | `PRD_AGENT_SLUG`, `PRD_AGENT_WORKSPACE_ID` | Full mode: seeded agent and the workspace it belongs to |
 | `PRD_CLI` | Path of the `crewship` CLI binary for CLI-driven scenarios (`prd.requireCli()`) |
 | `PRD_CRAFT_NATIVE` | `on` or `off`: whether the origin has a native Word/Sheet editor profile. Unset, full mode assumes `on` and quick mode reads `GET /api/v1/documents/status`. The craft-lease scenarios decide from it, never from the initialize call they check |
+| `PRD_RESTART_COMMAND` | Command that restarts the server under test, for rows that must survive a restart (`B.project.restore-restart`), e.g. `crew restart dev2`. The test waits until `/healthz` reports a new process (lower uptime). Unset and no handshake → the row fails in full mode, is skipped in quick mode. `crew` refuses to run under `crewship-heavy`, so a queued run uses `PRD_RESTART_HANDSHAKE` instead |
+| `PRD_RESTART_HANDSHAKE` | Directory for a restart done by the operator's shell: the test writes `restart.request` and waits for `restart.done`; `e2e/acceptance/prd/restart-watcher.sh <dir> <env>` answers it by running `crew restart <env>` |
+| `PRD_RESTART_NOTE_FILE` | Optional file; one line (time, reason) is appended before every restart |
 | `PRD_OUTPUT_DIR` | Results directory. The runner's `--output` sets it; default `test-results/prd-acceptance/<mode>-<timestamp>` |
 | `PRD_KEEP_WORKSPACES` | `1` keeps created QA workspaces for inspection |
 | `PRD_TRACE` | `1` keeps Playwright traces of failed tests. Off by default because traces contain request bodies, including logins |
@@ -66,6 +69,19 @@ treated as a replay, which revokes the whole session (`session_revoked` for
 every holder). So global setup only checks that the accounts can sign in; each
 test signs the owner in again, and every extra context (`prd.api(role)`,
 `prd.browserContext(role)`, crashable browser profiles) gets its own login.
+
+## Quota rows that change instance limits
+
+`quota.aggregate.workspace` changes the instance-wide workspace artifact-storage
+limit through the product CLI (`crewship admin instance artifact-storage set`,
+`PRD_CLI`, signed in as the owner with a private `HOME`). Limits are not per
+workspace: the scenario first puts its QA workspace just under the smallest
+accepted limit (1 MiB) at the normal limit, lowers the workspace limit for the
+checks only (about a minute), and restores the original value in a `finally`
+block. While it is lowered, other workspaces over 1 MiB cannot grow (nothing is
+deleted). The row's evidence records the original, lowered and restored values
+and how long the limit was lowered. Needs an instance admin owner and a native
+Word editor on the origin.
 
 ## Cleanup
 
