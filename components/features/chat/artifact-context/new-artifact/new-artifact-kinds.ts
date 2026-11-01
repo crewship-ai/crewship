@@ -24,7 +24,8 @@ const CHAT_KINDS: readonly ArtifactKindId[] = ["project", "word", "design"]
  * as planned or disabled tiles.
  */
 export function availableArtifactKinds(caps: { projects: boolean; documents: boolean; designs?: boolean }): ArtifactKind[] {
-  // The composer already checked that a signed-in person may create.
+  // The chat panel already checked that this person may create Pages: Project
+  // through the server's agent-scoped can_create, Word through page creation access.
   const full: ArtifactCapabilities = { ...NO_CAPABILITIES, ...caps, pages: true }
   return ARTIFACT_KINDS
     .filter(k => (CHAT_KINDS as readonly string[]).includes(k.key) && k.live(full))
