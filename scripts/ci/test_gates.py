@@ -5,15 +5,15 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from plan import classify, changed_paths, release_changed
-from verdict import ALWAYS, CODE, GO, PARITY, failures
+from plan import classify, changed_paths, full_matrix, release_changed
+from verdict import ALWAYS, CODE, FULL, GO, PARITY, failures
 from parity import TESTS, missing_tests
 
 
 class GateTests(unittest.TestCase):
     def test_api_bootstrap_cannot_be_missing_or_skipped_for_go_change(self):
         self.assertIn('go-race-api-template', GO)
-        plan = {'code': 'true', 'go': 'true', 'release': 'true', **{key: 'false' for key in PARITY.values()}}
+        plan = {'code': 'true', 'go': 'true', 'release': 'true', 'full': 'true', **{key: 'false' for key in PARITY.values()}}
         good = {name: {'result': 'success'} for name in ALWAYS | CODE | GO | {'release-rehearsal'}}
         good.update({name: {'result': 'skipped'} for name in PARITY})
         good['changes']['outputs'] = plan
@@ -177,7 +177,7 @@ class GateTests(unittest.TestCase):
 
     def results(self, code='true', go='true'):
         needs = {n: {'result': 'success'} for n in ALWAYS | CODE | GO}
-        needs['changes']['outputs'] = {'code': code, 'go': go, 'release': 'false', 'go_parity': 'false', 'frontend_parity': 'false', 'docs_inventory': 'false'}
+        needs['changes']['outputs'] = {'code': code, 'go': go, 'release': 'false', 'full': 'true', 'go_parity': 'false', 'frontend_parity': 'false', 'docs_inventory': 'false'}
         needs.update({name: {'result': 'skipped'} for name in PARITY})
         needs['release-rehearsal'] = {'result': 'skipped'}
         for n in CODE if code == 'false' else []:
@@ -230,6 +230,117 @@ class GateTests(unittest.TestCase):
             del needs[name]
             self.assertTrue(failures(needs))
         self.assertTrue(failures({}))
+
+    # ── #4752: expensive lanes run in the merge queue, not twice per PR ──
+    EXPENSIVE = {'go-platforms', 'go-race', 'go-race-cli-shards', 'go-race-cli',
+                 'go-race-api-template', 'go-race-api-shards', 'go-race-api',
+                 'cli-subprocess-race', 'go-shuffle', 'mooring-actual'}
+
+    def test_reduced_matrix_is_exactly_the_expensive_lanes(self):
+        self.assertEqual(FULL, self.EXPENSIVE)
+        self.assertLessEqual(FULL, GO | CODE)
+        # Representative evidence stays on every pull request.
+        for name in ['go', 'go-test', 'go-lint', 'frontend', 'frontend-test', 'frontend-test-shards',
+                     'mooring', 'binary', 'image', 'harness-pr', 'playwright-pr', 'managed-environments']:
+            self.assertNotIn(name, FULL)
+
+    def test_full_matrix_routing(self):
+        for event in ['merge_group', 'push', 'workflow_dispatch', None, 'pull_request_target']:
+            with self.subTest(event=event):
+                self.assertTrue(full_matrix(event, ['internal/api/foo.go'], []))
+        self.assertFalse(full_matrix('pull_request', ['internal/api/foo.go'], []))
+        self.assertFalse(full_matrix('pull_request', ['components/a.tsx'], ['skip-changelog']))
+        self.assertTrue(full_matrix('pull_request', ['internal/api/foo.go'], ['full-ci']))
+        for path in ['.github/workflows/ci.yml', 'scripts/ci/verdict.py', '.github/actions/setup-go-embed/action.yml',
+                     'go.mod', 'go.sum', 'pnpm-lock.yaml', 'Dockerfile']:
+            with self.subTest(path=path):
+                self.assertTrue(full_matrix('pull_request', [path], []))
+
+    def test_plan_reads_pull_request_labels(self):
+        with tempfile.TemporaryDirectory() as root:
+            def git(*args):
+                return subprocess.check_output(['git', '-C', root, *args], text=True).strip()
+            git('init', '-q')
+            git('config', 'user.name', 'CI routing test')
+            git('config', 'user.email', 'ci-routing@example.test')
+            Path(root, 'internal').mkdir()
+            Path(root, 'internal/a.go').write_text('package a\n')
+            git('add', '.')
+            git('commit', '-qm', 'base')
+            base = git('rev-parse', 'HEAD')
+            Path(root, 'internal/a.go').write_text('package a\n// change\n')
+            git('commit', '-qam', 'head')
+            head = git('rev-parse', 'HEAD')
+            for labels, expected in [([], False), ([{'name': 'ci/cd'}], False), ([{'name': 'full-ci'}], True)]:
+                event = Path(root, 'event.json')
+                event.write_text(json.dumps({'pull_request': {'base': {'sha': base}, 'head': {'sha': head}, 'labels': labels}}))
+                output = Path(root, 'out')
+                result = json.loads(subprocess.check_output(
+                    ['python3', str(Path(__file__).with_name('plan.py'))], cwd=root, text=True,
+                    env={**os.environ, 'GITHUB_EVENT_NAME': 'pull_request',
+                         'GITHUB_EVENT_PATH': str(event), 'GITHUB_OUTPUT': str(output)}))
+                self.assertIs(result['full'], expected, labels)
+                self.assertIn(f'full={str(expected).lower()}', output.read_text())
+
+    def test_pull_request_may_skip_only_the_expensive_lanes(self):
+        needs = self.results()
+        needs['changes']['outputs']['full'] = 'false'
+        for name in FULL:
+            needs[name]['result'] = 'skipped'
+        self.assertEqual(failures(needs, 'pull_request'), [])
+        # Everything outside the expensive set is still required on the PR.
+        for name in (ALWAYS | CODE | GO) - FULL:
+            for result in ['failure', 'cancelled', 'skipped', None]:
+                bad = {k: dict(v) for k, v in needs.items()}
+                bad[name]['result'] = result
+                self.assertTrue(failures(bad, 'pull_request'), (name, result))
+        # A reduced plan does not tolerate a failed expensive lane that ran.
+        for name in FULL:
+            bad = {k: dict(v) for k, v in needs.items()}
+            bad[name]['result'] = 'failure'
+            self.assertTrue(failures(bad, 'pull_request'), name)
+
+    def test_merge_queue_fails_closed_on_reduced_or_skipped_matrix(self):
+        for event in ['merge_group', 'push', 'workflow_dispatch', None]:
+            reduced = self.results()
+            reduced['changes']['outputs']['full'] = 'false'
+            for name in FULL:
+                reduced[name]['result'] = 'skipped'
+            self.assertTrue(failures(reduced, event), event)
+            for name in FULL:
+                for result in ['failure', 'cancelled', 'skipped', None]:
+                    needs = self.results()
+                    needs[name]['result'] = result
+                    self.assertTrue(failures(needs, event), (event, name, result))
+                needs = self.results()
+                del needs[name]
+                self.assertTrue(failures(needs, event), (event, name))
+            self.assertEqual(failures(self.results(), event), [])
+        for value in [None, '', 'yes']:
+            needs = self.results()
+            if value is None:
+                del needs['changes']['outputs']['full']
+            else:
+                needs['changes']['outputs']['full'] = value
+            self.assertTrue(failures(needs, 'pull_request'), value)
+            self.assertTrue(failures(needs, 'merge_group'), value)
+
+    def test_verdict_entrypoint_without_event_name_fails_closed(self):
+        # The script must not assume a pull_request when the runner omits
+        # GITHUB_EVENT_NAME: a reduced plan then fails the CI Result.
+        reduced = self.results()
+        reduced['changes']['outputs']['full'] = 'false'
+        for name in FULL:
+            reduced[name]['result'] = 'skipped'
+        script = Path(__file__).with_name('verdict.py')
+        env = {k: v for k, v in os.environ.items() if k != 'GITHUB_EVENT_NAME'}
+        for event, needs, code in [(None, reduced, 1), ('merge_group', reduced, 1),
+                                   ('pull_request', reduced, 0), (None, self.results(), 0)]:
+            run_env = dict(env, CI_NEEDS=json.dumps(needs))
+            if event:
+                run_env['GITHUB_EVENT_NAME'] = event
+            result = subprocess.run(['python3', str(script)], env=run_env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, code, (event, result.stdout))
 
 
 if __name__ == '__main__':

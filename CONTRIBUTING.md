@@ -243,6 +243,17 @@ required) must execute on `merge_group`; a planned skip must still match the
 change plan. Main pushes retain the full exact-SHA verification required by
 publication. Queueing is not permission to remove those checks.
 
+A pull request runs a lighter `CI Result`: macOS and linux-arm64 Go, the race
+detector lanes, shuffled Go tests and the all-cases Mooring conformance lane
+run only in the merge queue and on main (the set is `FULL` in
+`scripts/ci/verdict.py`). Lint, Linux Go test shards, frontend tests, browser
+subsets and static gates still run on every PR. A PR that changes CI control,
+dependency or release inputs runs the full matrix automatically; to opt any
+other PR in, add the `full-ci` label and push a commit (a re-run reuses the
+original event, so it does not see a label added later). In the queue a
+skipped or failed expensive lane fails `CI Result`, so a race or platform
+regression removes the PR from the queue rather than reaching main.
+
 A PR or merge group that changes protected CI controls also needs a visible,
 exact-SHA exception recorded through the trusted-main inventory guard. A new
 head or group SHA needs fresh review; this exception does not bypass required

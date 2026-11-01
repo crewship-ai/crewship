@@ -52,7 +52,7 @@ class WorkflowContracts(unittest.TestCase):
     def test_all_actual_mooring_lane_executes_public_build_and_every_case(self):
         ci = self.text('ci.yml')
         lane = self.job(ci, 'mooring-actual')
-        self.assertIn("if: needs.changes.outputs.code == 'true'", lane)
+        self.assertIn("if: needs.changes.outputs.code == 'true' && needs.changes.outputs.full == 'true'", lane)
         self.assertIn('./.github/actions/setup-go-embed', lane)
         self.assertIn('rustup toolchain install 1.99.1', lane)
         self.assertIn('sha256sum --check --strict', lane)
@@ -280,7 +280,7 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('go-race-api-template', re.search(r'^    needs:.*$', workers, re.M).group())
         self.assertIn('api-race-shard.py run "$SHARD_INDEX" "$SHARD_COUNT" "$timeout_s" .ci-api-template', workers)
         bootstrap = self.job(ci, 'go-race-api-template')
-        self.assertIn("if: needs.changes.outputs.go == 'true'", bootstrap)
+        self.assertIn("if: needs.changes.outputs.go == 'true' && needs.changes.outputs.full == 'true'", bootstrap)
         self.assertIn('api-race-shard.py bootstrap .ci-api-template 4600', bootstrap)
         self.assertIn('api-race-template-${{ github.sha }}', bootstrap)
         self.assertNotIn('continue-on-error:', bootstrap)
@@ -433,6 +433,36 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('needs.resolve.outputs.image', smoke)
         self.assertIn('cosign verify --certificate-identity', smoke)
         self.assertNotIn('docker pull "ghcr.io/$OWNER/crewship:nightly"', smoke)
+
+    def test_expensive_lanes_run_in_merge_queue_not_on_every_pull_request(self):
+        # #4752: the expensive matrix runs on merge_group/push (and on PRs that
+        # opt in); every other lane keeps running on every pull request.
+        from verdict import FULL
+        ci = self.text('ci.yml')
+        jobs = set(re.findall(r'^  ([a-z][\w-]*):$', ci.split('jobs:\n', 1)[1], re.M)) - {'result'}
+        self.assertLessEqual(FULL, jobs)
+        self.assertIn('full: ${{ steps.plan.outputs.full }}', self.job(ci, 'changes'))
+        gate = "needs.changes.outputs.full == 'true'"
+        for name in sorted(jobs):
+            condition = re.search(r'^    if: (.*)$', self.job(ci, name), re.M)
+            condition = condition.group(1) if condition else ''
+            with self.subTest(job=name):
+                if name in FULL:
+                    self.assertIn(gate, condition)
+                    self.assertNotIn('||', condition)
+                else:
+                    self.assertNotIn('outputs.full', condition)
+        # Branch protection requires only the aggregate; it must keep its name,
+        # always run, and judge the plan with the triggering event.
+        result = self.job(ci, 'result')
+        self.assertIn('name: CI Result', result)
+        self.assertIn('if: always()', result)
+        self.assertIn('python3 scripts/ci/verdict.py', result)
+        verdict = (ROOT / 'scripts/ci/verdict.py').read_text()
+        self.assertIn("GITHUB_EVENT_NAME", verdict)
+        triggers = ci.split('jobs:\n', 1)[0]
+        self.assertIn('merge_group:', triggers)
+        self.assertRegex(triggers, r'push:\n    branches: \[main\]')
 
 
 if __name__ == '__main__':
