@@ -25,8 +25,16 @@ export interface SingleEditorSaveOptions {
   baseVersion: string
   /** The bytes the server confirmed as `baseVersion`, exactly as loaded. Seeds
    * the unchanged-content baseline for a freshly opened editor. Never a local
-   * draft. Word's per-RPC nativeState is unknown at load, so it is not compared. */
-  loaded?: { bytes: Uint8Array }
+   * draft. Word's per-RPC nativeState is unknown at load, so it is not compared.
+   * `mountedState` is the engine's nativeState right after it was bootstrapped
+   * from exactly these bytes. An export captured before the first edit whose
+   * nativeState still equals it is the engine's rendition of this version
+   * (Word normalizes it) and is never saved as a new version, so accepting a
+   * proposal or handing the editor over stays on `baseVersion` (#4699). The
+   * engine's own revision is compared, so a `changed` event that arrives late
+   * cannot hide an edit. Without it a differing export is saved, as for a
+   * restored draft; an engine without nativeState (Sheet) is unaffected. */
+  loaded?: { bytes: Uint8Array; mountedState?: string }
   generation: string
   sessionId: string
   journal: NativeDraftJournal
@@ -54,7 +62,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   if (!Number.isFinite(idleMs) || idleMs < 1 || idleMs > 5000 || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) throw new Error("invalid_save_deadline")
   let active = true, writable = true, dirty = false, edits = 0, baseVersion = options.baseVersion
   let blocked: string | undefined, latest: Prepared | undefined, unconfirmed: Prepared | undefined
-  let confirmed: { nativeState: string | undefined; contentHash: string; version: string; seeded?: boolean } | undefined
+  let confirmed: { nativeState: string | undefined; contentHash: string; version: string; seeded?: boolean; mountedState?: string } | undefined
   let pending: { attempt: Prepared; abort: AbortController; done: Promise<void> } | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
   let preparations = Promise.resolve(), draftWrites = Promise.resolve()
@@ -85,7 +93,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   const seedVersion = options.baseVersion
   const seeding: Promise<void> = options.loaded
     ? crypto.subtle.digest("SHA-256", new Uint8Array(options.loaded.bytes)).then(digest => {
-      if (active && !confirmed) confirmed = { nativeState: undefined, seeded: true, version: seedVersion, contentHash: `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("")}` }
+      if (active && !confirmed) confirmed = { nativeState: undefined, seeded: true, mountedState: options.loaded?.mountedState, version: seedVersion, contentHash: `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("")}` }
     }, () => {})
     : Promise.resolve()
   emit("idle")
@@ -232,9 +240,11 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       // (any application, not only Word). Never create a version from them:
       // retire only the local recovery row; the RPC-bound receipt and native ACK
       // remain exclusive to the original request. A native Ctrl+S ticket always
-      // transmits, as its ACK is bound to its own RPC.
+      // transmits, as its ACK is bound to its own RPC. An untouched export of an
+      // engine mounted from the seeded bytes is that same version.
       await seeding
-      if ((autosaveToken !== undefined || hostFlush && requestId === undefined) && confirmed && (confirmed.seeded || confirmed.nativeState === attempt.nativeState) && confirmed.contentHash === attempt.draft.contentHash && confirmed.version === baseVersion) {
+      const unchanged = confirmed && (confirmed.contentHash === attempt.draft.contentHash || untouched(attempt))
+      if ((autosaveToken !== undefined || hostFlush && requestId === undefined) && confirmed && unchanged && (confirmed.seeded || confirmed.nativeState === attempt.nativeState) && confirmed.version === baseVersion) {
         const baseline = confirmed
         try { await options.journal.confirm(attempt.draft) } catch {
           if (!unavailable() && confirmed === baseline && baseVersion === baseline.version) { blocked = "storage"; emit("draft", "storage") }
@@ -274,6 +284,13 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       check()
     })
   }
+  // Still the seeded server version as the engine rendered it on mount: no
+  // receipt since, no edit before the capture and the engine's own state
+  // unchanged since bootstrap.
+  function untouched(attempt: Prepared): boolean {
+    return confirmed?.seeded === true && confirmed.mountedState !== undefined && attempt.epoch === 0 && edits === 0
+      && attempt.nativeState === confirmed.mountedState && attempt.draft.baseVersion === confirmed.version
+  }
   function revokeWrite(): Promise<boolean> {
     if (!active) return Promise.resolve(false)
     if (writeRetirement) return writeRetirement
@@ -298,7 +315,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       if (lifetime.signal.aborted) { abort(); return }
       void save().then(async () => {
         const captured = active && lastPersistedSequence >= sequence
-        if (captured && !finished) { clearTimeout(deadline); await proveLost() }
+        if (captured && !finished) { clearTimeout(deadline); await proveLost(); await retireUntouched() }
         finish(captured)
       }, () => finish(false))
     })
@@ -320,6 +337,13 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       const capture = latest?.draft
       if (active && capture && capture !== attempt.draft && capture.contentHash === attempt.draft.contentHash) await options.journal.confirm(capture)
     } catch { /* Unproven: the captured draft remains for comparison. */ }
+  }
+  // An untouched final capture equals the server version; keeping it would
+  // offer a "local draft" on every later open. Unproven, it stays for compare.
+  async function retireUntouched() {
+    const capture = latest
+    if (!active || !capture || unconfirmed || !untouched(capture)) return
+    try { await options.journal.confirm(capture.draft) } catch { /* It remains a draft to compare. */ }
   }
   function revokeRead() { stop(); unregister(); return options.journal.revokeRead() }
   return {

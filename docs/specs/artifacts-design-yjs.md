@@ -20,6 +20,7 @@ apart and meet only when the live state is saved as a version.
 | Workspace flag `artifacts_design` | off | `crewship feature-flag enable artifacts_design` |
 | Instance switch `CREWSHIP_ARTIFACTS_DESIGN_ENABLED` | unset | `true` enables Design for every workspace |
 | Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN` | off | `true` at build time shows the canvas in the Artifacts library |
+| Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE` | off | `true` at build time adds link editing and prototype playback ([Prototype links](#prototype-links)) |
 
 The Design flag is independent of `artifact_projects`. When it is off, every
 Design route answers `404`. The server also needs a `node` executable on its
@@ -90,7 +91,7 @@ connected, the server saves the live document as a version with the message
 of node changes:
 
 - `upsert` with a `node` (`id`, `type`, `name`, `x`, `y`, `width`, `height`,
-  `fill`, optional `parentId`, `text`, `src`). A new node needs its type and
+  `fill`, optional `parentId`, `text`, `src`, `linkTo`). A new node needs its type and
   full geometry; an existing node changes only the fields supplied.
 - `delete` with an `id`.
 - `reorder` with a complete `order` array of node IDs.
@@ -111,6 +112,30 @@ connected and see the result. History is never deleted.
 
 **Share** (`POST .../design/share` with `version`) pins a version for readers.
 Only the Page owner can share; an Edit grant does not allow it.
+
+## Prototype links
+
+A layer may carry `linkTo`, the ID of the screen (`frame`) that a click on the
+layer opens in prototype playback (#4449). It is a plain string field of the
+node's `Y.Map`, like `parentId`:
+
+- A document without `linkTo` is a document without links; nothing else
+  changes. Clients that predate the field keep it untouched when they edit
+  other fields, and restore copies it with the rest of the node.
+- The browser removes a link by deleting the key. REST and agent callers cannot
+  send `null`, so they send `""`, which also means "no link".
+- The server validates only that `linkTo` is a string of at most 128
+  characters. A target that does not exist or is not a screen is stored as is
+  and plays as an inert hotspot, because the target screen may be deleted at
+  any time by another person.
+- Setting a link is an edit and needs Edit access. Playback is local browser
+  state: it never sends a Yjs update, operation or awareness change of its own,
+  so Read and Comment callers can play.
+
+The server accepts `linkTo` regardless of `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE`,
+which only hides the editor controls. A server without this field refuses any
+document that contains it, so deploy the server before turning on the UI
+variable.
 
 ## Websocket
 
@@ -174,6 +199,7 @@ The CLI equivalents are the `crewship page design` commands; see the
 | Node types | `frame`, `rect`, `text`, `image` | `400` |
 | Coordinates and sizes | finite, absolute value at most 1,000,000; sizes not negative | `400` |
 | `text` / `src` / `name` | 100,000 / 2,000,000 / 2000 characters | `400` |
+| `parentId` / `linkTo` | 128 characters | `400` |
 | Operations request body | 4 MiB | `413` |
 | Comment request body (`POST .../design/comments`) | 20,000 bytes | `413` |
 | Create, snapshot, restore, share and agent request bodies | 8 KiB | `413` |
