@@ -69,7 +69,7 @@ func craftAgentStart(cmd *cobra.Command, args []string) error {
 		WholeDocument bool   `json:"whole_document" yaml:"whole_document"`
 	}{chat, message, consent}
 	response, err := c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/tasks", body)
-	return craftResponse(cmd, response, err, "")
+	return craftAgentResponse(cmd, response, err)
 }
 func craftAgentStatus(cmd *cobra.Command, args []string) error {
 	if !craftAgentIdentifier(args[0]) || !craftAgentIdentifier(args[1]) {
@@ -80,7 +80,7 @@ func craftAgentStatus(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	response, err := c.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/craft/tasks/" + pagePathEscape(args[1]))
-	return craftResponse(cmd, response, err, "")
+	return craftAgentResponse(cmd, response, err)
 }
 func craftAgentStop(cmd *cobra.Command, args []string) error {
 	if !craftAgentIdentifier(args[0]) {
@@ -91,5 +91,5 @@ func craftAgentStop(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	response, err := c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/tasks/cancel", struct{}{})
-	return craftResponse(cmd, response, err, "")
+	return craftAgentResponse(cmd, response, err)
 }

@@ -34,6 +34,9 @@ source "$HERE/lib.sh"
 
 preflight
 
+# shellcheck source=owned-escalation.sh
+source "$HERE/owned-escalation.sh"
+
 AGENT="${AGENT:-morgan}"
 CREW="${CREW:-ops}"
 CRED="HARNESS_AUDIT_$(nonce EV | tr '-' '_')"
@@ -97,19 +100,23 @@ section "3. A granted escalation is resolvable + leaves a trace (approve)"
 # ─────────────────────────────────────────────────────────────────────────────
 ESC="HARNESS_ESC_$(nonce PG | tr '-' '_')"
 info "Driving ${AGENT} to raise a credential escalation for ${ESC} ..."
-ask_agent "$AGENT" "You need a ${ESC} API token to do your job but do not have one. \
-Raise a credential escalation naming exactly ${ESC} and why." >/dev/null || true
+if ! ask_agent "$AGENT" "You need a ${ESC} API token to read the synthetic pager service's status for this authorized integration probe. Raise a CREDENTIAL escalation with metadata.name exactly ${ESC} and that read-only purpose, without a secret value. Do not contact any external service." >/dev/null; then
+  _fail "approval probe agent run completed"
+fi
 
 if have jq; then
-  detect="\"$CREWSHIP\" --server \"$SERVER\" escalation list --crew $CREW --format json 2>/dev/null | jq -e '[.[] | select(((.title//\"\")+\" \"+(.context//\"\")+\" \"+(.reason//\"\")|tostring|test(\"$ESC|credential\";\"i\")))] | length>0'"
+  detect="owned_pending_escalation '$CREW' '$AGENT' '$ESC'"
   if poll_until "escalation appears in the $CREW queue" 60 "$detect"; then
-    esc_id="$(cs escalation list --crew "$CREW" --format json 2>/dev/null | jq -r 'first(.[] | select(.status=="PENDING")) | .id // empty')"
-    if [[ -n "$esc_id" ]] && cs escalation resolve "$esc_id" --action approve --resolution "granted by audit harness" >/dev/null 2>&1; then
+    esc_id="$(owned_pending_escalation "$CREW" "$AGENT" "$ESC")"
+    if [[ -n "$esc_id" ]] && printf '%s' 'harness-placeholder-not-a-real-token' | cs escalation supply "$esc_id" >/dev/null 2>&1; then
       _pass "escalation $esc_id resolved (approve) — decision recorded, not silent"
-      still="$(cs escalation list --crew "$CREW" --format json 2>/dev/null | jq -r --arg id "$esc_id" 'first(.[] | select(.id==$id)) | .status // "gone"')"
-      if [[ "$still" != "PENDING" ]]; then _pass "resolved escalation no longer PENDING (status=$still)"; else _fail "resolved escalation no longer PENDING" "still PENDING"; fi
+      if cs escalation list --crew "$CREW" --format json | jq -e --arg id "$esc_id" 'any(.[]; .id == $id and .status == "RESOLVED" and .action == "approve")' >/dev/null; then
+        _pass "exact owned escalation records RESOLVED/approve"
+      else
+        _fail "exact owned escalation records RESOLVED/approve"
+      fi
     else
-      skip "escalation approve" "no PENDING id found this run"
+      _fail "approve the exact owned escalation" "owned request is absent, ambiguous or could not be approved"
     fi
   fi
 else
@@ -121,22 +128,21 @@ section "4. A denied escalation is recorded as such (deny path)"
 # ─────────────────────────────────────────────────────────────────────────────
 ESC2="HARNESS_ESCDENY_$(nonce DN | tr '-' '_')"
 info "Driving ${AGENT} to raise a second escalation for ${ESC2}, then DENY it …"
-ask_agent "$AGENT" "You need a ${ESC2} API token but do not have one. Raise a \
-credential escalation naming exactly ${ESC2} and why." >/dev/null || true
+if ! ask_agent "$AGENT" "You need a ${ESC2} API token to read the synthetic pager service's status for this authorized integration probe. Raise a CREDENTIAL escalation with metadata.name exactly ${ESC2} and that read-only purpose, without a secret value. Do not contact any external service." >/dev/null; then
+  _fail "denial probe agent run completed"
+fi
 if have jq; then
-  detect2="\"$CREWSHIP\" --server \"$SERVER\" escalation list --crew $CREW --format json 2>/dev/null | jq -e '[.[] | select(.status==\"PENDING\")] | length>0'"
+  detect2="owned_pending_escalation '$CREW' '$AGENT' '$ESC2'"
   if poll_until "second escalation appears (PENDING)" 60 "$detect2"; then
-    id2="$(cs escalation list --crew "$CREW" --format json 2>/dev/null | jq -r 'first(.[] | select(.status=="PENDING")) | .id // empty')"
-    # Try the deny/reject action; different builds name it deny|reject|decline.
-    denied=0
-    for act in deny reject decline; do
-      if [[ -n "$id2" ]] && cs escalation resolve "$id2" --action "$act" --resolution "denied by audit harness" >/dev/null 2>&1; then denied=1; break; fi
-    done
-    if [[ "$denied" == "1" ]]; then
-      st2="$(cs escalation list --crew "$CREW" --format json 2>/dev/null | jq -r --arg id "$id2" 'first(.[] | select(.id==$id)) | .status // "gone"')"
-      if [[ "$st2" != "PENDING" ]]; then _pass "denied escalation is off PENDING (status=$st2) — deny is recorded"; else _fail "denied escalation off PENDING" "still PENDING"; fi
+    id2="$(owned_pending_escalation "$CREW" "$AGENT" "$ESC2")"
+    if [[ -n "$id2" ]] && cs escalation resolve "$id2" --action reject --resolution "denied by audit harness" >/dev/null 2>&1; then
+      if cs escalation list --crew "$CREW" --format json | jq -e --arg id "$id2" 'any(.[]; .id == $id and .status == "RESOLVED" and .action == "reject")' >/dev/null; then
+        _pass "exact owned escalation records RESOLVED/reject"
+      else
+        _fail "exact owned escalation records RESOLVED/reject"
+      fi
     else
-      skip "escalation deny path" "no deny/reject/decline action accepted by this CLI build (resolve it manually)"
+      _fail "deny exact owned escalation" "owned request absent or resolution failed"
     fi
   fi
 else

@@ -197,6 +197,11 @@ func (f *commandProductFactory) serve(w http.ResponseWriter, r *http.Request) {
 	} else if input.Action == "outcome" {
 		outcome, err = document.store.ReconcileOriginal(r, original, actor, []byte(input.Raw))
 	}
+	if err != nil && artifactStorageRefusal(w, err) {
+		// The SQL transaction rolled back at the trigger: nothing was saved and
+		// no outcome is pending, unlike the unconfirmed case below.
+		return
+	}
 	if err != nil {
 		replyError(w, 409, "command not confirmed; reconcile original outcome before further editing")
 		return

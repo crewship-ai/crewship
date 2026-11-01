@@ -88,6 +88,7 @@ export type ArtifactErrorCode =
   | "artifact_version_conflict"
   | "artifact_anchor_mismatch"
   | "artifact_history_quota"
+  | "pages_limit"
   | "forbidden"
   | "not_found"
   | "invalid"

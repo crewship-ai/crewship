@@ -143,9 +143,10 @@ export function artifactsLibrary(): boolean {
 }
 
 /**
- * Sends the /pages overview to the Artifacts library. Only with the library
- * itself on; reference links, restricted members and single pages stay on
- * Pages. Default OFF.
+ * Makes the Artifacts library the single home: /pages and /pages/<slug> open
+ * it, and a native Word or Sheet is edited in its detail. Only with the
+ * library itself on; reference links, pinned versions, restricted members and
+ * kinds only Pages opens stay on Pages. Default OFF.
  */
 export function pagesOpenArtifacts(): boolean {
   return artifactsLibrary() && process.env.NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS === "true"
@@ -169,6 +170,15 @@ export function artifactDashboards(): boolean {
 /** Collaborative Design canvas. Default off. */
 export function artifactsDesign(): boolean {
   return process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN === "true"
+}
+
+/**
+ * Prototype playback of linked Design screens (#4449). Default off. Only has
+ * an effect together with `artifactsDesign()`; while off the editor offers no
+ * link field and no Play mode, and stored links stay inert data.
+ */
+export function artifactsDesignPrototype(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE === "true"
 }
 
 /** Read-only Design System token preview for artifacts with `design-system.json`. Default off. */

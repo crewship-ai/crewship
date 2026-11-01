@@ -6,8 +6,9 @@
 import { test as base, expect, type APIRequestContext, type Browser, type BrowserContext, type TestInfo } from "@playwright/test"
 import * as fs from "node:fs"
 import * as path from "node:path"
-import { apiAs, createQaWorkspace, deleteQaWorkspace, provisionMember, type ProvisionedMember, type QaWorkspace, type StorageState } from "./auth"
-import { outputPaths, readPrdEnv, storageStatePath, type PrdAccount, type PrdEnv, type PrdMode, type PrdRole } from "./env"
+import { apiAs, createQaWorkspace, loginStorageState, deleteQaWorkspace, provisionMember, type ProvisionedMember, type QaWorkspace, type StorageState } from "./auth"
+import { takeTrackedPages } from "./created"
+import { outputPaths, readPrdEnv, type PrdAccount, type PrdEnv, type PrdMode, type PrdRole } from "./env"
 import type { RunInfo } from "./global-setup"
 import { PRD_EVIDENCE } from "./requirements"
 import { slug } from "./report.mjs"
@@ -71,22 +72,27 @@ export class PrdScenario {
     throw new Error("full mode needs PRD_CLI for this scenario")
   }
 
-  private savedState(role: PrdRole): StorageState {
-    this.requireAccount(role)
-    return JSON.parse(fs.readFileSync(storageStatePath(this.env.origin, role), "utf8")) as StorageState
+  /**
+   * A NEW login for the role. Every context gets its own session: contexts that
+   * share one login also share its refresh token, the editor rotates it, and the
+   * next context to present the old token is treated as a replay, which revokes
+   * the whole session for everybody holding it (internal/api/nextauth.go).
+   */
+  private async freshState(role: PrdRole): Promise<StorageState> {
+    return loginStorageState(this.env.origin, this.requireAccount(role))
   }
 
   /** API context of a configured role (logged in by global setup); closed after the test. */
   async api(role: PrdRole): Promise<APIRequestContext> {
     if (role === "owner") return this.owner
-    const ctx = await apiAs(this.env.origin, this.savedState(role))
+    const ctx = await apiAs(this.env.origin, await this.freshState(role))
     this.disposers.push(() => ctx.dispose())
     return ctx
   }
 
   /** Browser context of a configured role, or of an explicit storage state; closed after the test. */
   async browserContext(who: PrdRole | StorageState): Promise<BrowserContext> {
-    const storageState = typeof who === "string" ? this.savedState(who) : who
+    const storageState = typeof who === "string" ? await this.freshState(who) : who
     const ctx = await this.browser.newContext({ baseURL: this.env.origin, storageState, viewport: { width: 1440, height: 1000 } })
     this.disposers.push(() => ctx.close())
     return ctx
@@ -141,8 +147,30 @@ export class PrdScenario {
     return file
   }
 
-  /** Internal: closes contexts and deletes the QA workspace, newest first. */
+  /** Internal: deletes the pages the test created (also after a failure), closes contexts, deletes the QA workspace. */
   async dispose(): Promise<void> {
+    const pages = takeTrackedPages()
+    if (pages.length > 0 && !this.env.workspaceId) {
+      // A fresh login: the test's own session may be revoked or expired by now.
+      // Pages inside a QA workspace go with the workspace, the others do not.
+      const qaId = this.workspace?.id
+      const own = pages.filter((p) => p.workspaceId !== qaId)
+      if (own.length > 0) {
+        let api: APIRequestContext | undefined
+        try {
+          api = await apiAs(this.env.origin, await this.freshState("owner"))
+          for (const p of own) {
+            const ref = /^[a-z0-9]{20,}$/i.test(p.ref) ? `@${p.ref}` : p.ref
+            const res = await api.delete(`/api/v1/pages/${encodeURIComponent(ref)}?workspace_id=${encodeURIComponent(p.workspaceId)}`)
+            if (res.status() >= 300 && res.status() !== 404) console.warn(`[prd] page ${p.ref} not deleted (HTTP ${res.status()})`)
+          }
+        } catch (err) {
+          console.warn(`[prd] page cleanup failed: ${String(err)}`)
+        } finally {
+          await api?.dispose()
+        }
+      }
+    }
     for (const d of this.disposers.reverse()) {
       try {
         await d()
@@ -158,6 +186,13 @@ function readRun(env: PrdEnv): RunInfo {
 }
 
 export const test = base.extend<{ prd: PrdScenario }, { prdEnv: PrdEnv; prdRun: RunInfo }>({
+  // The owner of each test signs in again instead of replaying the cookies of
+  // global setup: a login lives 15 minutes and a run lasts far longer, and a
+  // shared refresh token gets the session revoked (see freshState above).
+  storageState: async ({ prdEnv }, use) => {
+    const owner = prdEnv.accounts.owner
+    await use(owner ? await loginStorageState(prdEnv.origin, owner) : undefined)
+  },
   prdEnv: [async ({}, use) => use(readPrdEnv()), { scope: "worker" }],
   prdRun: [async ({ prdEnv }, use) => use(readRun(prdEnv)), { scope: "worker" }],
   prd: async ({ prdEnv, prdRun, browser, request }, use, testInfo) => {

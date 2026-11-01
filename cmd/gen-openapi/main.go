@@ -362,12 +362,16 @@ func buildDocument(routes []route) map[string]any {
 	for name, schema := range policyComponents {
 		schemas[name] = schema
 	}
+	_, draftKeyComponents := localDraftKeySchemaCatalog()
+	for name, schema := range draftKeyComponents {
+		schemas[name] = schema
+	}
 	_, designComponents := designSchemaCatalog()
 	for name, schema := range designComponents {
 		schemas[name] = schema
 	}
 	artifactCore := artifactProjectCoreComponents()
-	for _, name := range []string{"ArtifactProjectCreateRequest", "ArtifactProjectFileInput", "ArtifactProjectCreateResponse", "ArtifactProjectAvailability", "ArtifactProjectError", "ArtifactProjectFile", "ArtifactProjectManifest", "ArtifactProjectVersion", "ArtifactProjectQuota", "ArtifactProjectPublishRequest", "ArtifactProjectMutationResponse", "ArtifactProjectVersionRequest", "ArtifactProjectShareResponse"} {
+	for _, name := range []string{"ArtifactProjectCreateRequest", "ArtifactProjectFileInput", "ArtifactProjectCreateResponse", "ArtifactProjectAvailability", "ArtifactStorageUsage", "ArtifactProjectError", "ArtifactProjectFile", "ArtifactProjectManifest", "ArtifactProjectVersion", "ArtifactProjectQuota", "ArtifactProjectPublishRequest", "ArtifactProjectMutationResponse", "ArtifactProjectVersionRequest", "ArtifactProjectShareResponse"} {
 		schemas[name] = artifactCore[name]
 	}
 	_, artifactSlidesComponents := artifactSlidesSchemaCatalog()
@@ -735,6 +739,10 @@ func routeSchemaCatalog() map[string]DomainSchema {
 	}
 	policyRoutes, _ := artifactCreationPolicySchemaCatalog()
 	for key, schema := range policyRoutes {
+		result[key] = mergeDomainSchema(result[key], schema)
+	}
+	draftKeyRoutes, _ := localDraftKeySchemaCatalog()
+	for key, schema := range draftKeyRoutes {
 		result[key] = mergeDomainSchema(result[key], schema)
 	}
 	designRoutes, _ := designSchemaCatalog()

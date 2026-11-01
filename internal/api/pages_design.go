@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/design"
 	"github.com/crewship-ai/crewship/internal/featureflags"
+	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/pages"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
@@ -53,6 +55,9 @@ func (h *PageHandler) designStore(ctx context.Context) *artifacts.VersionStore {
 	return artifacts.NewVersionStore(h.db, artifacts.VersionOptions{Enabled: h.designEnabled(ctx), ContentType: "design"})
 }
 func designError(w http.ResponseWriter, err error) {
+	if artifactStorageRefusal(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, artifacts.ErrDisabled), errors.Is(err, sql.ErrNoRows), errors.Is(err, artifacts.ErrVersionNotFound):
 		replyError(w, 404, "design not found")
@@ -64,18 +69,21 @@ func designError(w http.ResponseWriter, err error) {
 		replyError(w, 400, "invalid Design update")
 	case errors.Is(err, artifacts.ErrVersionConflict):
 		replyError(w, 409, "Design changed; reload and reapply")
+	case errors.As(err, new(*pages.LimitError)):
+		limit, _ := pagesLimitFrom(err)
+		writePagesLimit(w, limit)
 	case errors.Is(err, artifacts.ErrVersionQuota):
 		replyError(w, 413, "Design capacity is full; existing work is retained")
 	default:
 		replyError(w, 500, "Design operation failed; changes are not acknowledged")
 	}
 }
-func (h *PageHandler) designKey(w http.ResponseWriter, r *http.Request) (artifacts.VersionKey, bool) {
+func (h *PageHandler) designKey(w http.ResponseWriter, r *http.Request) (artifacts.VersionKey, *http.Request, bool) {
 	artifactCommentHeaders(w)
 	k := artifacts.VersionKey{WorkspaceID: WorkspaceIDFromContext(r.Context())}
 	if !h.designEnabled(r.Context()) {
 		designError(w, artifacts.ErrDisabled)
-		return k, false
+		return k, r, false
 	}
 	if r.Context().Value(artifactRunKey{}) == nil {
 		required := "pages:read"
@@ -84,7 +92,7 @@ func (h *PageHandler) designKey(w http.ResponseWriter, r *http.Request) (artifac
 		}
 		if validateContentHumanCredential(r, h.pageAuthReader(r.Context()), required) != nil {
 			designError(w, errDesignAccess)
-			return k, false
+			return k, r, false
 		}
 	}
 	ref, col := r.PathValue("slug"), "slug"
@@ -93,13 +101,13 @@ func (h *PageHandler) designKey(w http.ResponseWriter, r *http.Request) (artifac
 	}
 	if h.db.QueryRowContext(r.Context(), `SELECT p.id FROM pages p JOIN artifact_design_documents d ON d.page_id=p.id AND d.workspace_id=p.workspace_id WHERE p.workspace_id=? AND p.`+col+`=?`, k.WorkspaceID, ref).Scan(&k.PageID) != nil {
 		designError(w, sql.ErrNoRows)
-		return k, false
+		return k, r, false
 	}
-	return k, true
+	return k, ensureDesignAdminAuditRequest(r, r.Method != http.MethodGet), true
 }
 
-// A websocket retains the authority epoch admitted under the writer fence.
-// Regranting an identical grant does not revive an older connection.
+// A websocket retains the authority generations admitted under the writer
+// fence. Regranting an identical grant does not revive an older connection.
 type designAdmissionKey struct{}
 type designAdmission struct{ WorkspaceID, Revision string }
 type designAuthorityStamp struct {
@@ -114,27 +122,70 @@ func (s *designAuthorityStamp) admit(actor, revision string) (string, error) {
 	s.actor, s.revision, s.initialized = actor, revision, true
 	return actor, nil
 }
+
+// designScopeKey carries the Design Page into nested authority reads, so the
+// revision is scoped to this person and this Page rather than the workspace.
+type designScopeKey struct{}
+
+func withDesignScope(ctx context.Context, k artifacts.VersionKey) context.Context {
+	return context.WithValue(ctx, designScopeKey{}, k)
+}
+
+// designAuthorityRevision is the Design session's continuity fence: the
+// author-relevant generations of the authenticated human and the Design Page
+// (mooring_authority_generations, shared with native Craft sessions). The broad
+// workspace delivery epoch is deliberately not used: it also moves when anyone
+// creates another Page, changes a grant on another Page or adds a member, which
+// retired every live Design socket in the workspace and its unconfirmed edits.
+// These generations still move for every change whose recipients include this
+// person or this Page, including revoke-then-restore. They are not an ACL; the
+// canonical Page policy, membership and credential are evaluated live.
+// SELECT-only: an absent row or a missing Design scope denies.
 func designAuthorityRevision(ctx context.Context, tx *sql.Tx, workspace string) (string, error) {
-	var revision string
-	if err := tx.QueryRowContext(ctx, `SELECT CAST(authority_revision AS TEXT) FROM workspaces WHERE id=?`, workspace).Scan(&revision); err != nil {
-		return "", err
+	k, ok := ctx.Value(designScopeKey{}).(artifacts.VersionKey)
+	u := UserFromContext(ctx)
+	if !ok || u == nil || k.WorkspaceID != workspace || k.PageID == "" {
+		return "", artifacts.ErrVersionAuthority
 	}
+	g, err := readCraftNativeGenerations(ctx, tx, mooring.EditLeaseScope{WorkspaceID: workspace, ArtifactID: k.PageID}, u.ID)
+	if err != nil {
+		return "", artifacts.ErrVersionAuthority
+	}
+	revision := g.user + "." + g.page
 	if admitted, ok := ctx.Value(designAdmissionKey{}).(designAdmission); ok && (admitted.WorkspaceID != workspace || admitted.Revision != revision) {
 		return "", artifacts.ErrVersionAuthority
 	}
 	return revision, nil
 }
 
+// A fresh (not socket-pinned) admission installs absent baseline generations,
+// only after the canonical checks allowed it. A pinned socket never creates or
+// refreshes rows, so a missing row there is uncertainty and denies.
+func designCaptureGenerations(ctx context.Context, tx *sql.Tx, k artifacts.VersionKey) error {
+	if _, pinned := ctx.Value(designAdmissionKey{}).(designAdmission); pinned {
+		return nil
+	}
+	u := UserFromContext(ctx)
+	if u == nil {
+		return artifacts.ErrVersionAuthority
+	}
+	if _, err := captureCraftNativeGenerations(ctx, tx, mooring.EditLeaseScope{WorkspaceID: k.WorkspaceID, ArtifactID: k.PageID}, u.ID); err != nil {
+		if errors.Is(err, errCraftNativeAccess) {
+			return artifacts.ErrVersionAuthority
+		}
+		return err
+	}
+	return nil
+}
+
 // Canonical Page ACLs, live credentials and membership are checked under the
-// same SQLite writer fence as every persisted update. Read/Comment never writes.
+// same SQLite writer fence as every persisted update. Read/Comment never writes
+// Design state; a fresh allowed admission may only install generation baselines.
 func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, write bool) artifacts.VersionAuthorize {
+	r = ensureDesignAdminAuditRequest(r, write)
 	var stamp designAuthorityStamp
 	return func(ctx context.Context, tx *sql.Tx) (string, error) {
-		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
-		revision, err := designAuthorityRevision(ctx, tx, k.WorkspaceID)
-		if err != nil {
-			return "", err
-		}
+		ctx = withDesignScope(context.WithValue(ctx, pageAuthReaderKey{}, tx), k)
 		if !h.designEnabled(ctx) {
 			return "", artifacts.ErrDisabled
 		}
@@ -175,6 +226,52 @@ func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, w
 		if err != nil {
 			return "", sql.ErrNoRows
 		}
+		// Workspace managers read and edit every Design under the owner's
+		// decision. Other Page families keep their existing audience rules.
+		// liveContentHumanRole already rejects restricted memberships.
+		if canRole(role, "manage") {
+			var ownerUser, ownerCrew string
+			if err := tx.QueryRowContext(ctx, `SELECT coalesce(p.owner_user_id,''),coalesce(p.owner_crew_id,'') FROM pages p JOIN artifact_design_documents d ON d.workspace_id=p.workspace_id AND d.page_id=p.id JOIN artifact_version_heads h ON h.workspace_id=p.workspace_id AND h.page_id=p.id AND h.content_type='design' WHERE p.workspace_id=? AND p.id=?`, k.WorkspaceID, k.PageID).Scan(&ownerUser, &ownerCrew); err != nil {
+				return "", err
+			}
+			// The manager role is this path's canonical check; only now may a
+			// fresh admission install its generation baselines.
+			if err := designCaptureGenerations(ctx, tx, k); err != nil {
+				return "", err
+			}
+			revision, err := designAuthorityRevision(ctx, tx, k.WorkspaceID)
+			if err != nil {
+				return "", err
+			}
+			actor := u.ID
+			if agent != nil {
+				actor = "agent:" + agent.AgentID + ":" + agent.RunID
+			}
+			if ownerUser != u.ID {
+				if err := h.recordDesignAdminAccess(ctx, tx, r, k, actor, ownerUser, ownerCrew); err != nil {
+					return "", err
+				}
+			}
+			// Audit INSERT triggers must not revoke a credential or change
+			// policy before this proof admits a delivery callback.
+			current, err := designAuthorityRevision(ctx, tx, k.WorkspaceID)
+			if err != nil {
+				return "", err
+			}
+			if current != revision {
+				return "", artifacts.ErrVersionAuthority
+			}
+			if agent == nil {
+				scope := "pages:read"
+				if write {
+					scope = "pages:write"
+				}
+				if err := validateContentHumanCredential(request, tx, scope); err != nil {
+					return "", errDesignAccess
+				}
+			}
+			return stamp.admit(actor, revision)
+		}
 		ctx = context.WithValue(ctx, ctxRole, role)
 		rec, err := h.loadPageForRead(ctx, k.WorkspaceID, "@"+k.PageID)
 		if err != nil {
@@ -192,6 +289,13 @@ func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, w
 		if write && !h.mayEditSpec(ctx, k.WorkspaceID, u.ID, role, rec) {
 			return "", errDesignAccess
 		}
+		if err = designCaptureGenerations(ctx, tx, k); err != nil {
+			return "", err
+		}
+		revision, err := designAuthorityRevision(ctx, tx, k.WorkspaceID)
+		if err != nil {
+			return "", err
+		}
 		if agent != nil {
 			return stamp.admit("agent:"+agent.AgentID+":"+agent.RunID, revision)
 		}
@@ -199,6 +303,7 @@ func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, w
 	}
 }
 func (h *PageHandler) designTx(r *http.Request, k artifacts.VersionKey, write bool, fn func(context.Context, *sql.Tx, string) error) error {
+	r = ensureDesignAdminAuditRequest(r, write)
 	return h.designAuthorizedTx(r, k, h.designAuthority(r, k, write), fn)
 }
 func (h *PageHandler) designAuthorizedTx(r *http.Request, k artifacts.VersionKey, auth artifacts.VersionAuthorize, fn func(context.Context, *sql.Tx, string) error) error {
@@ -210,7 +315,14 @@ func (h *PageHandler) designAuthorizedTx(r *http.Request, k artifacts.VersionKey
 	if _, err = tx.ExecContext(r.Context(), `UPDATE document_writer_fence SET seq=seq WHERE id=1`); err != nil {
 		return err
 	}
-	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
+	ctx := withDesignScope(context.WithValue(r.Context(), pageAuthReaderKey{}, tx), k)
+	if _, pinned := ctx.Value(designAdmissionKey{}).(designAdmission); !pinned {
+		if _, absent := designAuthorityRevision(ctx, tx, k.WorkspaceID); absent != nil {
+			// A first Feedback admission reads generations before any Design
+			// check; the canonical read check installs them only when allowed.
+			_, _ = h.designAuthority(r, k, false)(ctx, tx)
+		}
+	}
 	actor, err := auth(ctx, tx)
 	if err != nil {
 		return err
@@ -225,7 +337,11 @@ func (h *PageHandler) designAuthorizedTx(r *http.Request, k artifacts.VersionKey
 	if final != actor {
 		return artifacts.ErrVersionAuthority
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	notifyDesignAdminAudit(r)
+	return nil
 }
 func designVersionRequest(state []byte, base int64, message string) artifacts.VersionRequest {
 	return artifacts.VersionRequest{BaseVersion: base, EntryPoint: "design.yjs", Files: map[string]artifacts.VersionFile{"design.yjs": {Content: state, MediaType: "application/vnd.yjs-update"}}, Message: message}
@@ -240,8 +356,11 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 		Slug          string `json:"slug"`
 		Name          string `json:"name"`
 		CreatedByTest bool   `json:"created_by_test"`
+		SourcePageID  string `json:"source_page_id,omitempty"`
+		ExpectedHuman string `json:"expected_human,omitempty"`
+		InitialState  string `json:"initial_state,omitempty"`
 	}
-	if !designDecode(w, r, &p, 8192) {
+	if !designDecode(w, r, &p, 6<<20) {
 		return
 	}
 	spec := pages.Document{APIVersion: pages.DocumentAPIVersion, Kind: pages.DocumentKind, Metadata: pages.Metadata{Slug: p.Slug, Name: p.Name}}
@@ -258,7 +377,26 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 		designError(w, errDesignAccess)
 		return
 	} // creation is deliberate human action
-	result, err := design.Run(r.Context(), design.Request{})
+	var initial []byte
+	continuing := p.InitialState != "" || p.SourcePageID != "" || p.ExpectedHuman != ""
+	if continuing {
+		if p.ExpectedHuman != user.ID {
+			designError(w, errDesignAccess)
+			return
+		}
+		if !immutablePageReferenceID.MatchString(p.SourcePageID) || len(p.InitialState) == 0 || len(p.InitialState) > base64.StdEncoding.EncodedLen(4<<20) {
+			designError(w, artifacts.ErrVersionInvalid)
+			return
+		}
+		var err error
+		initial, err = base64.StdEncoding.Strict().DecodeString(p.InitialState)
+		if err != nil || len(initial) == 0 || len(initial) > 4<<20 {
+			designError(w, artifacts.ErrVersionInvalid)
+			return
+		}
+		r = ensureDesignAdminAuditRequest(r, true)
+	}
+	result, err := design.Run(r.Context(), design.Request{State: initial})
 	if err != nil {
 		designError(w, err)
 		return
@@ -266,7 +404,7 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 	k := artifacts.VersionKey{WorkspaceID: WorkspaceIDFromContext(r.Context()), PageID: generateCUID()}
 	raw, _ := json.Marshal(spec)
 	staged := false
-	auth := func(ctx context.Context, tx *sql.Tx) (string, error) {
+	currentCreateAuthority := func(ctx context.Context, tx *sql.Tx) (string, error) {
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
 		if !h.designEnabled(ctx) || validateContentHumanCredential(r.WithContext(ctx), tx, "pages:write") != nil {
 			return "", errDesignAccess
@@ -282,23 +420,45 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 		if !canRole(role, "create") && !HasCapability(resolveCapabilitiesFromRow(caps, role), CapabilityPageCreate) {
 			return "", errDesignAccess
 		}
+		if continuing {
+			if UserFromContext(ctx) == nil || UserFromContext(ctx).ID != p.ExpectedHuman {
+				return "", errDesignAccess
+			}
+			source := artifacts.VersionKey{WorkspaceID: k.WorkspaceID, PageID: p.SourcePageID}
+			// Fresh proof on each pass: creating this new Page legitimately
+			// advances the workspace epoch, while the source stays untouched.
+			if _, err := h.designAuthority(r, source, true)(ctx, tx); err != nil {
+				return "", err
+			}
+		}
+		return user.ID, nil
+	}
+	auth := func(ctx context.Context, tx *sql.Tx) (string, error) {
+		if _, err := currentCreateAuthority(ctx, tx); err != nil {
+			return "", err
+		}
 		if staged {
+			stamp := tsformat.Format(time.Now())
+			if _, err := tx.ExecContext(ctx, `INSERT INTO artifact_design_documents(workspace_id,page_id,state,updated_by,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(workspace_id,page_id) DO NOTHING`, k.WorkspaceID, k.PageID, result.State, user.ID, stamp); err != nil {
+				return "", err
+			}
+			// The final document write can run triggers. Recheck creation and
+			// source authority before acknowledging the exact new Page/document.
+			if _, err := currentCreateAuthority(ctx, tx); err != nil {
+				return "", err
+			}
 			var unchanged bool
-			if e = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages WHERE id=? AND workspace_id=? AND owner_user_id=? AND owner_crew_id IS NULL AND folder_id IS NULL AND slug=? AND name=? AND spec_json=? AND created_by_test=?)`, k.PageID, k.WorkspaceID, user.ID, p.Slug, p.Name, string(raw), p.CreatedByTest).Scan(&unchanged); e != nil {
-				return "", e
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pages p JOIN artifact_design_documents d ON d.page_id=p.id AND d.workspace_id=p.workspace_id WHERE p.id=? AND p.workspace_id=? AND p.owner_user_id=? AND p.owner_crew_id IS NULL AND p.folder_id IS NULL AND p.slug=? AND p.name=? AND p.spec_json=? AND p.created_by_test=? AND d.state=? AND d.updated_by=? AND d.updated_at=? AND d.revision=0 AND d.saved_revision=0)`, k.PageID, k.WorkspaceID, user.ID, p.Slug, p.Name, string(raw), p.CreatedByTest, result.State, user.ID, stamp).Scan(&unchanged); err != nil {
+				return "", err
 			}
 			if !unchanged {
 				return "", errDesignAccess
 			}
-			_, e = tx.ExecContext(ctx, `INSERT INTO artifact_design_documents(workspace_id,page_id,state,updated_by,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(workspace_id,page_id) DO NOTHING`, k.WorkspaceID, k.PageID, result.State, user.ID, tsformat.Format(time.Now()))
-			return user.ID, e
+			return user.ID, nil
 		}
-		var n int
-		if e = tx.QueryRowContext(ctx, `SELECT count(*) FROM pages WHERE workspace_id=?`, k.WorkspaceID).Scan(&n); e != nil {
+		var e error
+		if e = pages.CheckCap(ctx, tx, k.WorkspaceID); e != nil {
 			return "", e
-		}
-		if n >= pages.MaxPagesPerWorkspace {
-			return "", artifacts.ErrVersionQuota
 		}
 		stamp := tsformat.Format(time.Now())
 		if _, e = tx.ExecContext(ctx, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at,private_audience,created_by_test) VALUES(?,?,?,?,?,?,?,?,0,?)`, k.PageID, k.WorkspaceID, p.Slug, p.Name, user.ID, string(raw), stamp, stamp, p.CreatedByTest); e != nil {
@@ -318,10 +478,11 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 		designError(w, err)
 		return
 	}
+	notifyDesignAdminAudit(r)
 	writeJSON(w, 201, designCreateResponse{PageID: k.PageID, Slug: p.Slug, Version: receipt.Version})
 }
 func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
-	k, ok := h.designKey(w, r)
+	k, r, ok := h.designKey(w, r)
 	if !ok {
 		return
 	}
@@ -366,8 +527,21 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 		canEdit = e == nil
 		_, commentErr := h.designCommentAuthority(r, k)(ctx, tx)
 		canComment = commentErr == nil
+		readLive := canEdit
+		if !readLive {
+			readLive, e = h.designManagerRead(ctx, tx, k)
+			if e != nil {
+				return e
+			}
+		}
+		if !readLive {
+			if shared < 1 || selected > 0 && selected != shared {
+				return artifacts.ErrVersionNotFound
+			}
+			selected = shared
+		}
 		if selected > 0 {
-			if !canEdit && selected != shared {
+			if !readLive && selected != shared {
 				return artifacts.ErrVersionNotFound
 			}
 			var raw string
@@ -404,9 +578,21 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, designSnapshotResponse{AuthorityRevision: authorityRevision, PageID: k.PageID, Origin: origin, CanComment: canComment, Nodes: result.Nodes, Order: result.Order, CanEdit: canEdit, Version: version, LatestVersion: version, SharedVersion: shared, Actor: designActorResponse{ID: actor, Name: displayName}})
 }
+
+// A reader synchronizes only the immutable shared snapshot. Live authority
+// remains separate even when the saved head or the Yjs document moves ahead.
+func designSharedState(ctx context.Context, tx *sql.Tx, k artifacts.VersionKey) ([]byte, error) {
+	var state []byte
+	err := tx.QueryRowContext(ctx, `SELECT b.content FROM artifact_version_heads h JOIN artifact_versions v ON v.workspace_id=h.workspace_id AND v.page_id=h.page_id AND v.version=h.shared_version JOIN artifact_version_blobs b ON b.workspace_id=v.workspace_id AND b.page_id=v.page_id AND b.hash=json_extract(v.manifest_json,'$.files."design.yjs".hash') WHERE h.workspace_id=? AND h.page_id=? AND h.shared_version>0`, k.WorkspaceID, k.PageID).Scan(&state)
+	return state, err
+}
 func (h *PageHandler) designApplyLocked(r *http.Request, k artifacts.VersionKey, input design.Request) (design.Result, error) {
 	var result design.Result
 	err := h.designTx(r, k, true, func(ctx context.Context, tx *sql.Tx, actor string) error {
+		if err := artifacts.CheckStorageHeadroom(ctx, tx, 4<<20); err != nil {
+			return err
+		}
+
 		if e := tx.QueryRowContext(ctx, `SELECT state FROM artifact_design_documents WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&input.State); e != nil {
 			return e
 		}
@@ -424,7 +610,7 @@ func (h *PageHandler) designApplyLocked(r *http.Request, k artifacts.VersionKey,
 	return result, err
 }
 func (h *PageHandler) ApplyDesign(w http.ResponseWriter, r *http.Request) {
-	k, ok := h.designKey(w, r)
+	k, r, ok := h.designKey(w, r)
 	if !ok {
 		return
 	}
@@ -470,7 +656,7 @@ func (h *PageHandler) designSnapshotLocked(r *http.Request, k artifacts.VersionK
 	return receipt, err
 }
 func (h *PageHandler) SnapshotDesign(w http.ResponseWriter, r *http.Request) {
-	k, ok := h.designKey(w, r)
+	k, r, ok := h.designKey(w, r)
 	if !ok {
 		return
 	}
@@ -491,7 +677,7 @@ func (h *PageHandler) SnapshotDesign(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, receipt)
 }
 func (h *PageHandler) DesignVersions(w http.ResponseWriter, r *http.Request) {
-	k, ok := h.designKey(w, r)
+	k, r, ok := h.designKey(w, r)
 	if !ok {
 		return
 	}
@@ -502,17 +688,25 @@ func (h *PageHandler) DesignVersions(w http.ResponseWriter, r *http.Request) {
 			return "", artifacts.VersionSelection{}, e
 		}
 		_, writeErr := h.designAuthority(r, k, true)(ctx, tx)
-		return actor, artifacts.VersionSelection{SharedOnly: writeErr != nil, IncludeHistory: writeErr == nil}, nil
+		readLive := writeErr == nil
+		if !readLive {
+			readLive, e = h.designManagerRead(ctx, tx, k)
+			if e != nil {
+				return "", artifacts.VersionSelection{}, e
+			}
+		}
+		return actor, artifacts.VersionSelection{SharedOnly: !readLive, IncludeHistory: readLive}, nil
 	})
 	if err != nil {
 		designError(w, err)
 		return
 	}
+	notifyDesignAdminAudit(r)
 	writeJSON(w, 200, designVersionListResponse{Versions: view.Versions, LatestVersion: view.State.LatestVersion, SharedVersion: view.State.SharedVersion})
 }
 
 func (h *PageHandler) RestoreDesign(w http.ResponseWriter, r *http.Request) {
-	k, ok := h.designKey(w, r)
+	k, r, ok := h.designKey(w, r)
 	if !ok {
 		return
 	}
@@ -579,6 +773,11 @@ func (h *PageHandler) designVersionedMutationLocked(r *http.Request, k artifacts
 		if calls == 2 {
 			_, e = tx.ExecContext(ctx, `UPDATE artifact_design_documents SET state=?,revision=revision+1,saved_revision=revision+1,updated_by=?,updated_at=? WHERE workspace_id=? AND page_id=? AND revision=?`, result.State, actor, tsformat.Format(time.Now()), k.WorkspaceID, k.PageID, revision)
 			if e != nil {
+				return "", e
+			}
+			// The last content write can run triggers too. Recheck the original
+			// credential, policy and both audit receipts after that write.
+			if _, e = editAuth(ctx, tx); e != nil {
 				return "", e
 			}
 		}

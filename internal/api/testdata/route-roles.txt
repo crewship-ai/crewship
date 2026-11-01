@@ -164,6 +164,7 @@ POST /api/v1/admin/backups roleManage
 POST /api/v1/admin/backups/restore roleManage
 POST /api/v1/admin/backups/rotate roleManage
 POST /api/v1/admin/backups/self-test roleManage
+POST /api/v1/admin/instance/artifact-storage/recompute roleInstance
 POST /api/v1/admin/instance/backups/bundles/check roleInstance
 POST /api/v1/admin/instance/backups/bundles/pin roleInstance
 POST /api/v1/admin/instance/backups/bundles/unpin roleInstance
@@ -364,6 +365,8 @@ POST /api/v1/pages/{slug}/craft/lease/handoff roleSelf
 POST /api/v1/pages/{slug}/craft/lease/release roleSelf
 POST /api/v1/pages/{slug}/craft/lease/renew roleSelf
 POST /api/v1/pages/{slug}/craft/lease/request-handoff roleSelf
+POST /api/v1/pages/{slug}/craft/proposals/{proposalID}/accept roleSelf
+POST /api/v1/pages/{slug}/craft/proposals/{proposalID}/reject roleSelf
 POST /api/v1/pages/{slug}/craft/sessions roleSelf
 POST /api/v1/pages/{slug}/craft/sessions/reauthorize roleSelf
 POST /api/v1/pages/{slug}/craft/tasks roleSelf
@@ -377,6 +380,7 @@ POST /api/v1/pages/{slug}/design/snapshots roleInline
 POST /api/v1/pages/{slug}/document/initialize roleInline
 POST /api/v1/pages/{slug}/document/patch roleInline
 POST /api/v1/pages/{slug}/document/restore roleInline
+POST /api/v1/pages/{slug}/draft-key roleInline
 POST /api/v1/pages/{slug}/mooring/commands roleInline
 POST /api/v1/pages/{slug}/mooring/mandates roleInline
 POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId} roleCreate
@@ -470,11 +474,13 @@ POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve roleCreate
 PUT /api/v1/admin/instance/admins/{userId} roleInstance
+PUT /api/v1/admin/instance/artifact-storage roleInstance
 PUT /api/v1/admin/instance/backups/plans/{id} roleInstance
 PUT /api/v1/admin/instance/backups/settings roleInstance
 PUT /api/v1/admin/instance/backups/settings/recovery-kit roleInstance
 PUT /api/v1/admin/instance/keeper/governance roleInstance
 PUT /api/v1/admin/instance/keeper/governance/defaults roleInstance
+PUT /api/v1/admin/instance/page-limit roleInstance
 PUT /api/v1/admin/instance/retention roleInstance
 PUT /api/v1/admin/instance/retention/defaults roleInstance
 PUT /api/v1/admin/instance/workspaces/{workspaceId}/members/{userId} roleInstance

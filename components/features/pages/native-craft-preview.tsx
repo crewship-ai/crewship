@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from 'react'
+import {useRealtimeEventSafe} from '@/hooks/use-realtime'
 import {registerDocumentDraftWriter} from '@/lib/document-queue'
 import {readNativePreview,NativePreviewError,type NativePreviewSnapshot} from '@/lib/mooring/native-preview-client'
 import {createNativeEditorPort,type NativeEditorPort} from '@/lib/mooring/native-editor-port'
@@ -18,9 +19,15 @@ export function NativeCraftPreview(props:Props){
 function PreviewSession({humanId,workspaceId,pageId,retry}:Props&{retry:()=>void}){
  const mount=React.useRef<HTMLDivElement>(null)
  const [version,setVersion]=React.useState<string>(),[error,setError]=React.useState<string>()
+ const recheck=React.useRef<()=>void>(()=>{})
+ // Push: the server names only this person and this page, or no page ("re-check
+ // everything", after a membership or role change).
+ // The answer still comes from the ordinary authorised read; 30 s polling stays.
+ useRealtimeEventSafe('page.access_recheck',event=>{const id=event.payload.page_id;if(id===undefined||id===pageId)recheck.current()})
+ useRealtimeEventSafe('realtime.reconnected',()=>recheck.current())
  React.useEffect(()=>{
   const abort=new AbortController()
-  let dead=false,reading=false,port:NativeEditorPort|undefined,frame:HTMLIFrameElement|undefined,current:NativePreviewSnapshot|undefined,deadline:ReturnType<typeof setTimeout>|undefined,readDeadline:ReturnType<typeof setTimeout>|undefined,poll:ReturnType<typeof setInterval>|undefined
+  let dead=false,reading=false,again=false,port:NativeEditorPort|undefined,frame:HTMLIFrameElement|undefined,current:NativePreviewSnapshot|undefined,deadline:ReturnType<typeof setTimeout>|undefined,readDeadline:ReturnType<typeof setTimeout>|undefined,poll:ReturnType<typeof setInterval>|undefined
   const clearFrame=()=>{clearTimeout(deadline);port?.close();port=undefined;frame?.remove();frame=undefined;current=undefined}
   const fail=(cause?:unknown)=>{
    if(dead)return
@@ -62,21 +69,23 @@ function PreviewSession({humanId,workspaceId,pageId,retry}:Props&{retry:()=>void
    deadline=setTimeout(()=>fail(),20000)
   }
   async function read(){
-   if(dead||reading)return
+   if(dead)return
+   if(reading){again=true;return}
    reading=true
    readDeadline=setTimeout(()=>fail(),10000)
    try{
     const snapshot=await readNativePreview({workspaceId,pageId},abort.signal)
     if(dead||abort.signal.aborted)return
     if(!current||snapshot.version!==current.version||snapshot.enginePin!==current.enginePin||snapshot.editorBundle!==current.editorBundle||snapshot.editorURL!==current.editorURL||snapshot.applicationId!==current.applicationId){setVersion(undefined);show(snapshot)}
-   }catch(cause){fail(cause)}finally{clearTimeout(readDeadline);reading=false}
+   }catch(cause){fail(cause)}finally{clearTimeout(readDeadline);reading=false;if(again&&!dead){again=false;void read()}}
   }
   const message=(event:MessageEvent)=>port?.handleWindowMessage(event)
+  recheck.current=()=>{void read()}
   const focus=()=>{void read()}
   window.addEventListener('message',message);window.addEventListener('focus',focus);window.addEventListener('online',focus)
   poll=setInterval(()=>{void read()},30000)
   void read()
-  return()=>{dead=true;abort.abort();clearTimeout(readDeadline);clearInterval(poll);unregister();clearFrame();window.removeEventListener('message',message);window.removeEventListener('focus',focus);window.removeEventListener('online',focus)}
+  return()=>{dead=true;recheck.current=()=>{};abort.abort();clearTimeout(readDeadline);clearInterval(poll);unregister();clearFrame();window.removeEventListener('message',message);window.removeEventListener('focus',focus);window.removeEventListener('online',focus)}
  },[humanId,workspaceId,pageId])
  return <section className="flex h-full min-h-96 flex-col"><p className="p-3" role={error?'alert':'status'}>{error??(version?`Sdílený náhled · verze ${version}`:'Načítám sdílený náhled…')}</p>{error&&<button type="button" className="self-start rounded border px-3 py-2 coarse:min-h-[44px]" onClick={retry}>Znovu načíst náhled</button>}<div ref={mount} className="relative min-h-80 flex-1"/></section>
 }

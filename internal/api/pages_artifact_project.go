@@ -81,7 +81,23 @@ func (h *PageHandler) ArtifactProjectAvailability(w http.ResponseWriter, r *http
 		replyError(w, http.StatusForbidden, "current artifact project read authority required")
 		return
 	}
-	writeJSON(w, 200, artifactProjectAvailabilityResponse{Enabled: h.artifactProjectEnabled(r.Context())})
+	out := artifactProjectAvailabilityResponse{Enabled: h.artifactProjectEnabled(r.Context())}
+	if agent := strings.TrimSpace(r.URL.Query().Get("agent_id")); agent != "" {
+		ctx := r.Context()
+		workspace := WorkspaceIDFromContext(ctx)
+		var crew sql.NullString
+		err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT crew_id FROM agents WHERE id=? AND workspace_id=?`, agent, workspace).Scan(&crew)
+		allowed := err == nil && crew.Valid && h.artifactAgentPolicyAllows(ctx, workspace, crew.String)
+		out.CanCreate = new(bool)
+		switch {
+		case !allowed:
+			out.Code = artifacts.CodeCrewNotAllowed
+		case out.Enabled:
+			user := UserFromContext(ctx)
+			*out.CanCreate = user != nil && h.artifactPrincipalMayCreate(ctx, workspace, user.ID)
+		}
+	}
+	writeJSON(w, 200, out)
 }
 func (h *PageHandler) artifactProjectStore(ctx context.Context) *artifacts.VersionStore {
 	return artifacts.NewVersionStore(h.db, artifacts.VersionOptions{Enabled: h.artifactProjectEnabled(ctx)})
@@ -92,6 +108,9 @@ func artifactProjectDecode(w http.ResponseWriter, r *http.Request, v any) bool {
 }
 
 func artifactProjectError(w http.ResponseWriter, err error) {
+	if artifactStorageRefusal(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, artifacts.ErrDisabled):
 		replyError(w, 404, "artifact projects are not enabled")
@@ -107,6 +126,9 @@ func artifactProjectError(w http.ResponseWriter, err error) {
 		writeJSON(w, 409, map[string]any{"error": "This address is already in use. Choose another slug.", "code": "artifact_slug_taken"})
 	case errors.Is(err, artifacts.ErrVersionConflict):
 		writeJSON(w, 409, map[string]any{"error": "This project changed. Read the current version and compare your changes before publishing again. Your draft has not been discarded.", "code": "artifact_version_conflict"})
+	case errors.As(err, new(*pages.LimitError)):
+		limit, _ := pagesLimitFrom(err)
+		writePagesLimit(w, limit)
 	case errors.Is(err, artifacts.ErrVersionQuota):
 		writeJSON(w, 413, map[string]any{"error": "Project history quota is full. Every existing version is retained and your draft stays in this browser. Copy your source files to keep them; saving more versions is not possible until history space is available.", "code": "artifact_history_quota"})
 	case errors.Is(err, artifacts.ErrVersionInvalid):
@@ -251,6 +273,14 @@ func (h *PageHandler) CreateArtifactProject(w http.ResponseWriter, r *http.Reque
 		artifactProjectError(w, artifacts.ErrDisabled)
 		return
 	}
+	uploadKey := artifacts.VersionKey{WorkspaceID: WorkspaceIDFromContext(r.Context())}
+	bound, cleanup, e := artifactStorageUpload(w, r, h.artifactProjectStore(r.Context()), uploadKey, 36<<20, h.artifactCreationUploadAuthority(r, uploadKey.WorkspaceID))
+	if e != nil {
+		artifactProjectError(w, e)
+		return
+	}
+	defer cleanup()
+	r = bound
 	var p artifactProjectCreate
 	if !artifactProjectDecode(w, r, &p) {
 		return
@@ -323,12 +353,10 @@ func (h *PageHandler) CreateArtifactProject(w http.ResponseWriter, r *http.Reque
 		if !canRole(role, "create") && !HasCapability(resolveCapabilitiesFromRow(caps, role), CapabilityPageCreate) {
 			return "", errArtifactProjectAccess
 		}
-		var n int
-		if e = tx.QueryRowContext(ctx, `SELECT count(*) FROM pages WHERE workspace_id=?`, k.WorkspaceID).Scan(&n); e != nil {
-			return "", e
-		}
-		if !staged && n >= pages.MaxPagesPerWorkspace {
-			return "", artifacts.ErrVersionQuota
+		if !staged {
+			if e = pages.CheckCap(ctx, tx, k.WorkspaceID); e != nil {
+				return "", e
+			}
 		}
 		if staged {
 			var valid int
@@ -392,6 +420,13 @@ func (h *PageHandler) PublishArtifactProject(w http.ResponseWriter, r *http.Requ
 		artifactProjectError(w, err)
 		return
 	}
+	bound, cleanup, e := artifactStorageUpload(w, r, h.artifactProjectStore(r.Context()), k, 36<<20, h.artifactProjectAuthority(r, k, true, false))
+	if e != nil {
+		artifactProjectError(w, e)
+		return
+	}
+	defer cleanup()
+	r = bound
 	var p artifactProjectPublish
 	if !artifactProjectDecode(w, r, &p) {
 		return

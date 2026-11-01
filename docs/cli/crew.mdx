@@ -569,6 +569,7 @@ crewship crew peer-conversations backend-team --agent ava
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--limit` | `int` | `50` | Number of conversations to show (the server caps it at 100). |
+| `--offset` | `int` | `0` | Skip this many conversations; the next page is `--offset <limit>`. |
 | `--agent` | `string` | _(all agents)_ | Only conversations this agent (slug or id) asked **or** answered. Sent as the route's `agent_id` and applied before the page is cut, so `--agent ava --limit 1` is Ava's newest conversation, not the crew's newest row filtered to nothing. |
 
 **Output columns:** ID, FROM, TO, QUESTION, STATUS, ESCALATED, CREATED

@@ -150,6 +150,9 @@ func TestDesignWebsocketReaderAndDowngradedEditorCannotWrite(t *testing.T) {
 	if w := call(owner, "create", `{"slug":"board","name":"Reviewed socket"}`); w.Code != 201 {
 		t.Fatal(w.Code, w.Body)
 	}
+	if w := call(owner, "share", `{"version":1}`); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
 	user := "design-socket-reader"
 	mustExec(t, h.db, `INSERT INTO users(id,email,full_name) VALUES(?,'design-socket-reader@example.test','Socket Reader')`, user)
 	mustExec(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, generateCUID(), ws, user)

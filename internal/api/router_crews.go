@@ -494,6 +494,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/agents/{agentId}/persona", authed(wsCtx(http.HandlerFunc(persona.GetAgentPersona))))
 	r.authedMut("PUT", "/api/v1/agents/{agentId}/persona", roleCreate, persona.PutAgentPersona)
 	r.authedMut("DELETE", "/api/v1/agents/{agentId}/persona", roleCreate, persona.DeleteAgentPersona)
+	// openapi: query limit:integer
 	r.mux.Handle("GET /api/v1/agents/{agentId}/persona/history", authed(wsCtx(http.HandlerFunc(persona.GetAgentPersonaHistory))))
 	r.authedMut("POST", "/api/v1/agents/{agentId}/persona/suggest", roleCreate, persona.SuggestAgentPersona)
 	r.mux.Handle("GET /api/v1/crews/{crewId}/persona", authed(wsCtx(http.HandlerFunc(persona.GetCrewPersona))))

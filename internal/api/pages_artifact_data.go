@@ -101,6 +101,9 @@ func (h *PageHandler) artifactDataStart(w http.ResponseWriter, r *http.Request) 
 	return h.artifactProjectStart(w, r)
 }
 func artifactDataError(w http.ResponseWriter, err error) {
+	if artifactStorageRefusal(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, artifacts.ErrDataConflict):
 		writeJSON(w, 409, map[string]string{"error": "A document changed. Read its version before retrying; nothing was overwritten.", "code": "artifact_data_conflict"})
@@ -231,6 +234,13 @@ func (h *PageHandler) BatchArtifactData(w http.ResponseWriter, r *http.Request) 
 		artifactDataError(w, err)
 		return
 	}
+	bound, cleanup, e := artifactStorageUpload(w, r, h.artifactProjectStore(r.Context()), k, artifacts.MaxDataBatchBytes, h.artifactProjectOwnerAuthority(r, k))
+	if e != nil {
+		artifactDataError(w, e)
+		return
+	}
+	defer cleanup()
+	r = bound
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, artifacts.MaxDataBatchBytes))
 	if err != nil {
 		artifactDataError(w, artifacts.ErrDataQuota)

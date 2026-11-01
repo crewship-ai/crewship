@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { toPageView, type PageView, type WirePage } from "@/hooks/use-pages"
 
-const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error: null as string | null, refresh: vi.fn(), projectsOn: true, item: null as string | null, select: vi.fn(), folders: [] as { id: string; slug: string; name: string; pageCount: number }[], reads: [] as { target: { pageId: string } | null; enabled: boolean; chatId: string }[], readStatus: "ready" as string, pagesArgs: [] as unknown[], mobile: false }))
+const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error: null as string | null, refresh: vi.fn(), projectsOn: true, item: null as string | null, select: vi.fn(), folders: [] as { id: string; slug: string; name: string; pageCount: number }[], reads: [] as { target: { pageId: string } | null; enabled: boolean; chatId: string }[], readStatus: "ready" as string, pagesArgs: [] as unknown[], mobile: false, caps: {} as Record<string, boolean> }))
 vi.mock("@/hooks/use-pages", async importOriginal => ({
   ...(await importOriginal<typeof import("@/hooks/use-pages")>()),
   usePages: (...args: unknown[]) => { state.pagesArgs = args; return { pages: state.pages, loading: state.loading, error: state.error, refresh: state.refresh } },
@@ -31,11 +31,13 @@ vi.mock("@/hooks/use-user-preference", async () => {
 })
 vi.mock("@/hooks/use-page-folders", () => ({ usePageFolders: () => ({ folders: state.folders, loading: false, error: null, supported: true, refresh: vi.fn(), reread: vi.fn() }) }))
 vi.mock("@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities", () => ({
-  useArtifactCapabilities: () => ({ projects: true, dashboards: false, slides: false, documents: true, sheets: false, pages: true }),
+  useArtifactCapabilities: () => ({ projects: true, dashboards: false, slides: false, documents: true, sheets: false, pages: true, ...state.caps }),
 }))
 vi.mock("../new-artifact-dialog", () => ({
-  NewArtifactDialog: ({ defaultKind, defaultFolderSlug }: { defaultKind?: string; defaultFolderSlug?: string }) =>
-    <div role="dialog" aria-label="New artifact" data-kind={defaultKind ?? ""} data-folder={defaultFolderSlug ?? ""} />,
+  NewArtifactDialog: ({ defaultKind, defaultFolderSlug, onCreated }: { defaultKind?: string; defaultFolderSlug?: string; onCreated: (slug: string) => void }) =>
+    <div role="dialog" aria-label="New artifact" data-kind={defaultKind ?? ""} data-folder={defaultFolderSlug ?? ""}>
+      <button type="button" onClick={() => onCreated("fresh-design")}>Create</button>
+    </div>,
 }))
 vi.mock("@/components/layout/secondary-panel", async importOriginal => ({ ...(await importOriginal<typeof import("@/components/layout/secondary-panel")>()), SecondaryPanel: ({ label, children }: { label: string; children: React.ReactNode }) => <aside aria-label={label}>{children}</aside> }))
 vi.mock("@/components/features/chat/artifact-context/craft/craft-lock-bar", () => ({
@@ -68,7 +70,7 @@ beforeEach(() => {
     wire({ slug: "weekly", id: "page-weekly", name: "Weekly report", panel_count: 2 } as Partial<WirePage>),
     wire({ slug: "calc", id: "page-calc", name: "Calculator", has_application: true } as Partial<WirePage>),
   ]
-  state.folders = []; state.reads = []; state.pagesArgs = []; state.mobile = false; state.readStatus = "ready"; state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.select.mockReset(); state.refresh.mockReset()
+  state.folders = []; state.reads = []; state.pagesArgs = []; state.mobile = false; state.readStatus = "ready"; state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.caps = {}; state.select.mockReset(); state.refresh.mockReset()
 })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
@@ -117,6 +119,39 @@ it("New artifact in the bar opens the dialog in the folder being looked at", () 
   fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
   const dialog = screen.getByRole("dialog", { name: "New artifact" })
   expect([dialog.dataset.kind, dialog.dataset.folder]).toEqual(["", "sales"])
+})
+
+it("does not offer New artifact to a member who cannot create Pages, whatever the server serves (#4534)", () => {
+  // A Viewer: projects are available to read, Dashboards and Slides are built in, but no role or page.create.
+  state.caps = { projects: true, dashboards: true, slides: true, documents: true, designs: true, pages: false }
+  const view = renderLibrary()
+  expect(screen.queryByRole("button", { name: "New artifact" })).toBeNull()
+  expect(screen.queryByRole("button", { name: /^New / })).toBeNull()
+  view.unmount()
+  state.pages = []
+  renderLibrary()
+  expect(screen.getByText("No artifacts yet")).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "New artifact" })).toBeNull()
+})
+
+it("offers New artifact in the bar, on Home and in the empty state to a member who can create", () => {
+  state.caps = { projects: true, dashboards: true, slides: true, documents: true, designs: true, pages: true }
+  const view = renderLibrary()
+  expect(screen.getAllByRole("button", { name: "New artifact" })).toHaveLength(1)
+  for (const name of ["New Project", "New Dashboard", "New Slide deck"]) expect(screen.getByRole("button", { name })).toBeTruthy()
+  view.unmount()
+  state.pages = []
+  renderLibrary()
+  expect(screen.getAllByRole("button", { name: "New artifact" })).toHaveLength(2)
+})
+
+it("a just-created artifact opens by its slug, never as an ID, so it does not land on not available", () => {
+  renderLibrary()
+  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  fireEvent.click(screen.getByRole("button", { name: "Create" }))
+  // The new item is not in the list yet; the route opens it by slug and moves to its ID once it resolves.
+  expect(state.select).toHaveBeenCalledWith(null, "fresh-design")
+  expect(state.select).not.toHaveBeenCalledWith("fresh-design")
 })
 
 it("searches with operators, filters by kind with counts and switches to a table", () => {

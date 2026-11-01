@@ -104,6 +104,26 @@ func (d *craftNativeDocumentsHTTP) initialize(w http.ResponseWriter, r *http.Req
 		craftNativeDocumentError(w, err)
 		return
 	}
+	// Resolve the target before decoding the large native body. The publication
+	// transaction resolves/checks it again and cannot consume another Page's allowance.
+	recForUpload, e := m.pages.loadPageForRead(r.Context(), WorkspaceIDFromContext(r.Context()), r.PathValue("slug"))
+	if e != nil {
+		craftNativeDocumentError(w, e)
+		return
+	}
+	uploadKey := artifacts.VersionKey{WorkspaceID: WorkspaceIDFromContext(r.Context()), PageID: recForUpload.ID}
+	uploadScope := mooring.EditLeaseScope{WorkspaceID: uploadKey.WorkspaceID, ArtifactID: uploadKey.PageID}
+	authorizeUpload := func(ctx context.Context, tx *sql.Tx) (string, error) {
+		_, e := m.initializeOwnerProof(ctx, tx, source, uploadScope, true)
+		return source.UserID, e
+	}
+	bound, cleanup, e := artifactStorageUpload(w, r, artifacts.NewVersionStore(m.pages.db, artifacts.VersionOptions{Enabled: true}), uploadKey, 45<<20, authorizeUpload)
+	if e != nil {
+		craftNativeDocumentError(w, e)
+		return
+	}
+	defer cleanup()
+	r = bound
 	var body struct {
 		ApplicationID string `json:"application_id"`
 		Bytes         []byte `json:"bytes"`

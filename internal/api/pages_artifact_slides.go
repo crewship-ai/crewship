@@ -176,6 +176,9 @@ func (h *PageHandler) ExportArtifactSlidesPDF(w http.ResponseWriter, r *http.Req
 
 func artifactSlidesError(w http.ResponseWriter, err error) {
 	artifactCommentHeaders(w)
+	if artifactStorageRefusal(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, artifacts.ErrSlidesArtifactUnsupported), errors.Is(err, slidespdf.ErrUnsupported), errors.Is(err, slidespdf.ErrInvalidDeck):
 		writeJSON(w, 422, map[string]string{"error": "This content is outside the supported Slides profile.", "code": "artifact_slides_unsupported"})

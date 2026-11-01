@@ -104,6 +104,11 @@ func (m *craftNativeAgentManager) authorizeStoppedLease(ctx context.Context, tx 
 }
 
 func (m *craftNativeAgentManager) retireStoppedLease(ctx context.Context, p *craftNativeAgentStoppedProof) error {
+	defer func() {
+		if p != nil {
+			m.clearClosedProposalCandidates(p.entry)
+		}
+	}() // registered before rollback: never takes callMu under the SQL writer
 	tx, err := m.writer(ctx)
 	if err != nil {
 		return err

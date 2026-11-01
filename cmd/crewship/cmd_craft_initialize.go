@@ -37,10 +37,13 @@ func craftInitialize(cmd *cobra.Command, args []string) error {
 	}{"wordcraft", native}
 	response, err := c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/initialize", body)
 	if err != nil {
-		return fmt.Errorf("native initialization request failed")
+		return craftTransportError("native initialization request failed")
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 201 {
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			return craftHTTPError(response, "")
+		}
 		return fmt.Errorf("native initialization HTTP %d", response.StatusCode)
 	}
 	return craftUseAdmission(cmd, args, c, response, true)

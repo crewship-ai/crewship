@@ -16,6 +16,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/provider/bbolt"
 	"github.com/crewship-ai/crewship/internal/runoutput"
+	"github.com/crewship-ai/crewship/internal/ws"
 )
 
 // The production observer launches os.Executable. This test-only private mode
@@ -30,12 +31,13 @@ func init() {
 		TestFixture    bool   `json:"test_fixture"`
 		Delay          bool   `json:"delay"`
 		CompletionPath string `json:"completion_path"`
+		StopPath       string `json:"stop_path"`
 	}
 	parseErr := json.Unmarshal(input.Authority, &fixture)
 	if err != nil || parseErr != nil || !fixture.TestFixture {
 		os.Exit(125)
 	}
-	_, err = runoutput.CaptureHost(context.Background(), input, runAgentHostExecutor{delay: fixture.Delay})
+	_, err = runoutput.CaptureHost(context.Background(), input, runAgentHostExecutor{delay: fixture.Delay, stopPath: fixture.StopPath})
 	if err != nil {
 		os.Exit(125)
 	}
@@ -48,7 +50,10 @@ func init() {
 	os.Exit(0)
 }
 
-type runAgentHostExecutor struct{ delay bool }
+type runAgentHostExecutor struct {
+	delay    bool
+	stopPath string
+}
 
 func runAgentHostOutputRoot(t *testing.T) string {
 	t.Helper()
@@ -67,6 +72,21 @@ func runAgentHostOutputRoot(t *testing.T) string {
 
 func (e runAgentHostExecutor) Start(context.Context, runoutput.HostCommand) (*runoutput.HostExecution, error) {
 
+	if e.stopPath != "" {
+		reader, writer := io.Pipe()
+		go func() {
+			_, _ = io.WriteString(writer, `{"type":"content_block_delta","delta":{"type":"text_delta","text":"working"}}`+"\n")
+			for {
+				if _, err := os.Stat(e.stopPath); err == nil {
+					break
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			_ = writer.Close()
+		}()
+		return &runoutput.HostExecution{ID: "host-heavy-exec", Stdout: reader, Stderr: io.NopCloser(strings.NewReader(""))}, nil
+	}
+
 	stdout := `{"type":"result","subtype":"success","is_error":false,"result":"complete","usage":{"input_tokens":5,"output_tokens":2}}` + "\n"
 	var reader io.ReadCloser = io.NopCloser(strings.NewReader(stdout))
 	if e.delay {
@@ -76,8 +96,25 @@ func (e runAgentHostExecutor) Start(context.Context, runoutput.HostCommand) (*ru
 	}
 	return &runoutput.HostExecution{ID: "host-heavy-exec", Stdout: reader, Stderr: io.NopCloser(strings.NewReader(`{"type":"result","is_error":true}` + "\n"))}, nil
 }
-func (runAgentHostExecutor) Inspect(context.Context, string) (bool, int, error) { return false, 0, nil }
-func (runAgentHostExecutor) Stop(context.Context, string) error {
+func (e runAgentHostExecutor) Inspect(_ context.Context, id string) (bool, int, error) {
+	if id != "host-heavy-exec" {
+		return false, 0, errors.New("wrong execution identity")
+	}
+	if e.stopPath != "" {
+		if _, err := os.Stat(e.stopPath); err != nil {
+			return true, 0, nil
+		}
+		return false, 143, nil
+	}
+	return false, 0, nil
+}
+func (e runAgentHostExecutor) Stop(_ context.Context, id string) error {
+	if id != "host-heavy-exec" {
+		return errors.New("wrong execution identity")
+	}
+	if e.stopPath != "" {
+		return os.WriteFile(e.stopPath, []byte("stop"), 0600)
+	}
 	return errors.New("fixture should complete naturally")
 }
 
@@ -86,6 +123,7 @@ type runAgentHostProvider struct {
 	prepared       []provider.ExecConfig
 	delay          bool
 	completionPath string
+	stopPath       string
 }
 
 func (*runAgentHostProvider) SupportsHostCapture() bool { return true }
@@ -96,13 +134,19 @@ func (*runAgentHostProvider) QualifyHostCapture(context.Context, string) (bool, 
 func (p *runAgentHostProvider) PrepareHostCapture(_ context.Context, cfg provider.ExecConfig, _ string, _ []string) (string, json.RawMessage, error) {
 	p.prepared = append(p.prepared, cfg)
 	fixture := map[string]any{"test_fixture": true, "delay": p.delay}
+	if p.stopPath != "" {
+		fixture["stop_path"] = p.stopPath
+	}
 	if p.completionPath != "" {
 		fixture["completion_path"] = p.completionPath
 	}
 	authority, _ := json.Marshal(fixture)
 	return "unix:///synthetic-test-only", authority, nil
 }
-func (*runAgentHostProvider) RestoreHostCapture(runoutput.HostInput, string) (runoutput.HostExecutor, io.Closer, error) {
+func (p *runAgentHostProvider) RestoreHostCapture(runoutput.HostInput, string) (runoutput.HostExecutor, io.Closer, error) {
+	if p.stopPath != "" {
+		return runAgentHostExecutor{stopPath: p.stopPath}, io.NopCloser(strings.NewReader("")), nil
+	}
 	return nil, nil, errors.New("completed fixture must not restore")
 }
 
@@ -276,5 +320,58 @@ func awaitRunAgentHostFixtureCompletion(t *testing.T, completionPath string, dea
 		case <-limit.C:
 			t.Fatal("capture helper did not finish filesystem writes")
 		}
+	}
+}
+
+func TestHostRunAgentExplicitStopRequiresRetainedTerminal(t *testing.T) {
+	requireProtectedHostTestUID(t)
+	state, err := bbolt.New(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer state.Close()
+	stopPath := filepath.Join(t.TempDir(), "stop-exact-exec")
+	completion := filepath.Join(t.TempDir(), "complete")
+	defer func() {
+		_ = os.WriteFile(stopPath, []byte("cleanup"), 0600)
+		awaitRunAgentHostFixtureCompletion(t, completion, time.Now().Add(3*time.Second))
+	}()
+	p := &runAgentHostProvider{covContainer: covNewRunContainer(covRunOpts{}), stopPath: stopPath, completionPath: completion}
+	o := New(p, state, covQuietLogger())
+	o.ipcToken = "fixture-key"
+	o.SetHostOutputRoot(runAgentHostOutputRoot(t))
+	req := covRunReq()
+	req.RunID = "host-explicit-stop"
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+	req.OnExecStarted = func(string) { cancel(ws.ErrExplicitStopRequested) }
+	var completedAt string
+	req.CapturedExit = func(at string) { completedAt = at }
+	err = o.RunAgent(ctx, req, nil)
+	if !errors.Is(err, ErrExecutionStopConfirmed) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("explicit protected stop not confirmed: %v", err)
+	}
+	if completedAt == "" {
+		t.Fatal("protected stop lost captured completion time")
+	}
+	if _, err := os.Stat(stopPath); err != nil {
+		t.Fatal("exact provider stop never occurred", err)
+	}
+	if _, held := o.detachedHoldRunID(req.AgentID); held {
+		t.Fatal("confirmed stop retained occupancy")
+	}
+	if _, _, found := runHomeLocation(req.RunID); found {
+		t.Fatal("confirmed stop retained HOME")
+	}
+	awaitRunAgentHostFixtureCompletion(t, completion, time.Now().Add(3*time.Second))
+	raw, _ := state.Get(t.Context(), "agent_runs", req.RunID)
+	var run RunState
+	_ = json.Unmarshal(raw, &run)
+	if run.Status != "cancelled" {
+		t.Fatalf("stop state=%s", run.Status)
+	}
+	snapshot, err := o.ReadRetainedRunResult(t.Context(), run)
+	if err != nil || !snapshot.Complete || snapshot.Result.ExitCode != 143 || snapshot.Result.Reason != "exited" {
+		t.Fatalf("authoritative terminal missing: %+v %v", snapshot, err)
 	}
 }

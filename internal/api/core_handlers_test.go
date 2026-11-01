@@ -2462,8 +2462,8 @@ func TestRunHandler_List(t *testing.T) {
 	}
 	var pg runListResponse
 	json.Unmarshal(rrPg.Body.Bytes(), &pg)
-	if pg.Pagination.Page != 1 || pg.Pagination.Limit != 50 {
-		t.Errorf("clamping: page=%d limit=%d, want 1/50", pg.Pagination.Page, pg.Pagination.Limit)
+	if pg.Pagination.Page != 1 || pg.Pagination.Limit != 100 {
+		t.Errorf("clamping: page=%d limit=%d, want 1/100", pg.Pagination.Page, pg.Pagination.Limit)
 	}
 }
 

@@ -6,7 +6,7 @@ tag: Experimental
 ---
 
 ```sh
-crewship chat decision list <chat-id> [--limit 100] [--cursor <opaque-next-cursor>]
+crewship chat decision list <chat-id> [--limit 100] [--cursor <opaque-next-cursor>] [--watch]
 crewship chat decision show <chat-id> escalation <source-id>
 crewship chat decision answer <chat-id> escalation <source-id> --expected-version <version> --idempotency-key <stable-key> --text 'The information requested'
 crewship chat decision answer <chat-id> waitpoint <source-id> --expected-version <version> --idempotency-key <stable-key> --action-id <declared-action> --values-json '{"count": 3, "confirmed": true}'
@@ -32,3 +32,9 @@ Form-less boolean workflow waitpoints accept `--action approve` or `--action
 reject`, with no `--action-id`, `--values-json` or `--text`. The API equivalent
 uses that action, an empty `values` object and no `action_id`. Typed workflow
 forms continue to require their declared action ID and typed field values.
+
+## `crewship chat decision list`
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `--watch` | `false` | Print the list, then print it again whenever the chat's cards change. The CLI subscribes to `chat-hints:<chat-id>` — the invalidation channel the web chat listens on, which carries no data — and re-reads through the same authorized route. Ctrl-C ends it with exit 0. |

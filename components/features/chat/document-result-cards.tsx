@@ -4,6 +4,7 @@ import { ExternalLink, FileText } from "lucide-react"
 import { useDocumentChatResults, DocumentChatResultsError } from "@/hooks/use-document-chat-results"
 import { Button } from "@/components/ui/button"
 import type { ViewerTarget } from "./artifact-viewer/types"
+import { chatItemHref } from "./artifact-context/artifacts-href"
 
 interface DocumentResultCardsProps {
   workspaceId: string
@@ -24,7 +25,7 @@ export function DocumentResultCards({ workspaceId, chatId, isStreaming, currentU
   return <section aria-label="Saved documents from this conversation" className="mx-auto my-4 w-full max-w-3xl space-y-3">
     <h3 className="text-sm font-medium">Saved documents</h3>
     {query.error && <p role="status" className="text-xs text-muted-foreground">Saved documents could not refresh. Showing the last authorized results.</p>}
-    <div className="grid gap-3 sm:grid-cols-2">{(expanded ? results : results.slice(0, 3)).map(result => <a key={result.page_id} href={`/pages?${new URLSearchParams({ ref: result.page_id, workspace_id: workspaceId })}`} target="_blank" rel="noopener noreferrer" className="group flex min-w-0 gap-3 rounded-xl border bg-card p-4 transition-colors hover:bg-accent coarse:min-h-[44px]" aria-label={`Open document ${result.title}`} onClick={event => {
+    <div className="grid gap-3 sm:grid-cols-2">{(expanded ? results : results.slice(0, 3)).map(result => <a key={result.page_id} href={chatItemHref(workspaceId, result.page_id, `/pages?${new URLSearchParams({ ref: result.page_id, workspace_id: workspaceId })}`)} target="_blank" rel="noopener noreferrer" className="group flex min-w-0 gap-3 rounded-xl border bg-card p-4 transition-colors hover:bg-accent coarse:min-h-[44px]" aria-label={`Open document ${result.title}`} onClick={event => {
       if (!onOpenDocument || event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
       event.preventDefault()
       onOpenDocument({ workspaceId, pageId: result.page_id, type: "document", mode: "latest" }, event.currentTarget)

@@ -5,15 +5,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 )
 
 // Artifacts use the same authenticated Page transport as the editor. A conflict
-// is returned unchanged; the CLI never rereads and silently overwrites a head.
+// is returned unchanged; the CLI never silently overwrites a head. After a lost
+// publish reply it only reads base+1 to confirm its own save (reconcile).
 func newPageArtifactCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "artifact", Short: "Create, version and discuss a multi-screen Page artifact"}
 	cmd.AddCommand(newArtifactDataCommand())
@@ -44,6 +47,9 @@ func newPageArtifactCommand() *cobra.Command {
 					return fmt.Errorf("--base-version must be the exact positive latest version; use create for a new project")
 				}
 				body["base_version"] = base
+				if os.Getenv("CREWSHIP_AGENT_TOKEN") == "" {
+					return artifactPublishHuman(cmd, args[0], base, body)
+				}
 			}
 			return artifactCLIRequest(cmd, "POST", endpoint, body)
 		}}
@@ -106,10 +112,19 @@ func newPageArtifactCommand() *cobra.Command {
 	reply.Flags().String("text", "", "Describe the change or ask for a fresh selection")
 	reply.Flags().Int64("version", 0, "Version addressed by this reply")
 	availability := &cobra.Command{Use: "availability", Args: cobra.NoArgs, Short: "Read whether this workspace enables artifact projects", RunE: func(cmd *cobra.Command, _ []string) error {
-		return artifactCLIRequest(cmd, "GET", "/api/v1/pages/artifacts/availability", nil)
+		path := "/api/v1/pages/artifacts/availability"
+		if agent, _ := cmd.Flags().GetString("agent"); strings.TrimSpace(agent) != "" {
+			path += "?agent_id=" + url.QueryEscape(strings.TrimSpace(agent))
+		}
+		return artifactCLIRequest(cmd, "GET", path, nil)
 	}}
-	cmd.AddCommand(reply, availability)
+	availability.Flags().String("agent", "", "Agent ID: also report whether this agent's crew may create artifact projects (can_create)")
+	storage := &cobra.Command{Use: "storage", Args: cobra.NoArgs, Short: "Read this workspace's aggregate artifact storage usage (owners and admins)", RunE: func(cmd *cobra.Command, _ []string) error {
+		return artifactCLIRequest(cmd, "GET", "/api/v1/pages/artifacts/storage", nil)
+	}}
+	cmd.AddCommand(reply, availability, storage)
 	cmd.AddCommand(newPageArtifactCommentCommand())
+	cmd.AddCommand(newPageArtifactReconcileCommand())
 	return cmd
 }
 

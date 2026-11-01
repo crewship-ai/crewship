@@ -177,6 +177,10 @@ export type RealtimeEventType =
   // cells}` and NO cell content: an open editor reads the revision through
   // the commits feed under its own current access.
   | "session_closed"
+  // "Re-check your access to this page": sent on the person's own `user:{id}`
+  // channel when a grant on a native Craft page changes. Payload is
+  // `{ page_id }` only; the receiver re-reads under its own authority.
+  | "page.access_recheck"
   | "mooring.committed"
   | "workbook.committed"
   // Feed-relevant journal rows forwarded by the journal→WS bridge
@@ -330,6 +334,7 @@ export const VALID_REALTIME_TYPES: Set<string> = new Set([
   "page.action.dispatched",
   // Live workbook push on `page:{pageId}`; revision numbers only.
   "session_closed",
+  "page.access_recheck",
   "mooring.committed",
   "workbook.committed",
   // Journal entries forwarded by the journal→WS bridge on the opt-in

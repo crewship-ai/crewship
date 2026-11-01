@@ -36,20 +36,20 @@ quotes each label as shown, with its English meaning.
 ## Create a Word document or a Sheet
 
 1. Open **Artifacts** and choose **New artifact**.
-2. Select **Word document**, type a **Name**, pick a **Folder** (or leave
-   **Unfiled**), and keep **Start with: Blank**.
-3. Choose **Create and edit**. The new document opens in the Artifacts
-   detail view.
+2. Select **Word document** or **Sheet**, type a **Name**, pick a
+   **Folder** (or leave **Unfiled**), and keep **Start with: Blank**.
+3. Choose **Create and edit**. The new document or workbook opens in the
+   Artifacts detail view.
 
-**A Sheet can't be created from Artifacts in this release:** **Sheet** is
-listed under **Coming** in this dialog. **Word document** is offered only when
-the instance's document service is available; otherwise it is listed under
-**Coming** too. Check `crewship doc status`: native Word requires
-`wordcraft_native: true`. If only the separate Docs service is available,
-this dialog creates a Docs document instead; follow
-[Document save state](/guides/document-drafts). A native profile alone does
-not make this library tile available in the current UI; use **New Doc** in
-the older view when that view is available.
+**Sheet** is offered only when the instance advertises the native GridCraft
+profile: `crewship doc status` must report `gridcraft_native: true`. Without
+it, **Sheet** is listed under **Coming** in this dialog. **Word document** is
+offered only when the instance's document service is available; otherwise it
+is listed under **Coming** too. Native Word requires `wordcraft_native: true`.
+If only the separate Docs service is available, this dialog creates a Docs
+document instead; follow [Document save state](/guides/document-drafts). A
+native profile alone does not make the Word tile available in the current UI;
+use **New Doc** in the older view when that view is available.
 
 The older Pages view still has a **New Doc** button whose **Format** field
 offers **Word** and **Sheet**. It opens at `/pages` on your Crewship address
@@ -114,7 +114,11 @@ old lease read as free.
 ### Release editing
 
 Choose **Uvolnit úpravy** (Release editing). The editor saves your last
-change first, then switches to read-only and the bar shows **Volné**. If that
+change first, then switches to read-only and the bar shows **Volné**. If you
+changed nothing since you took over, no new version is written, even though
+the Word editor rewrites a document into its own form when it opens it. The
+same holds for a handoff and for accepting an agent's proposal, so a proposal
+made over the version you opened still applies. If that
 final save can't be confirmed, nothing is released, and you see *Výsledek akce
 nebyl potvrzen. Koncept zůstává zachován.* ("The result of the action was not
 confirmed. The draft is kept.").

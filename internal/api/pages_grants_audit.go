@@ -196,9 +196,17 @@ func (h *PageHandler) commitPageGrantMutation(ctx context.Context, tx *sql.Tx, r
 		}
 		return err
 	}
+	var recheck []string
+	if rec.NativeCraftApplication != "" {
+		recheck, err = nativeCraftRecheckUsers(ctx, tx, changes[0].entry.WorkspaceID, changes)
+		if err != nil {
+			return err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	h.publishNativeCraftAccessRecheck(rec.ID, recheck)
 	if rec.HasWorkbook && h.hub != nil {
 		h.hub.RecheckWorkbookAccess(ctx, rec.ID, closedUsers)
 	}

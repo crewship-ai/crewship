@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"text/tabwriter"
@@ -18,6 +20,37 @@ import (
 var routineStepOverrideCmd = &cobra.Command{
 	Use:   "step-override",
 	Short: "Override a step's prompt/model without bumping the routine version",
+	Long: `Override one step's prompt and/or model without bumping the routine
+version. The override applies from the next run; clearing it reverts the
+step to its authored prompt and model. Setting or clearing requires MANAGER
+or above; listing is open to every workspace member.
+
+Examples:
+  crewship routine step-override set pr-review extract --model smart
+  crewship routine step-override set pr-review extract --prompt "Extract entities as JSON"
+  crewship routine step-override list pr-review -f json
+  crewship routine step-override clear pr-review extract`,
+}
+
+// stepOverrideWriteResult mirrors the {"ok":true,"step_id":...} answer of
+// the PUT and DELETE override endpoints, with the routine slug added so a
+// script reading -f json output knows which routine it refers to.
+type stepOverrideWriteResult struct {
+	OK     bool   `json:"ok" yaml:"ok"`
+	Slug   string `json:"slug" yaml:"slug"`
+	StepID string `json:"step_id" yaml:"step_id"`
+}
+
+// A 2xx with no body (204 from an older or proxied server) still means the
+// write landed, so it reports success for the requested step rather than
+// failing a change that already applied.
+func decodeStepOverrideWrite(resp *http.Response, slug, stepID string) (stepOverrideWriteResult, error) {
+	out := stepOverrideWriteResult{OK: true, Slug: slug, StepID: stepID}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil && !errors.Is(err, io.EOF) {
+		return out, fmt.Errorf("decode response: %w", err)
+	}
+	out.Slug = slug
+	return out, nil
 }
 
 var routineStepOverrideSetCmd = &cobra.Command{
@@ -48,8 +81,13 @@ var routineStepOverrideSetCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		fmt.Printf("Override set for step %q of %q (applies on next run, no version bump).\n", args[1], args[0])
-		return nil
+		out, err := decodeStepOverrideWrite(resp, args[0], args[1])
+		if err != nil {
+			return err
+		}
+		return resolvedFormatter(cmd).AutoHuman(out, func() {
+			fmt.Printf("Override set for step %q of %q (applies on next run, no version bump).\n", args[1], args[0])
+		})
 	},
 }
 
@@ -76,8 +114,13 @@ var routineStepOverrideClearCmd = &cobra.Command{
 		if err := cli.CheckError(resp); err != nil {
 			return err
 		}
-		fmt.Printf("Override cleared for step %q of %q.\n", args[1], args[0])
-		return nil
+		out, err := decodeStepOverrideWrite(resp, args[0], args[1])
+		if err != nil {
+			return err
+		}
+		return resolvedFormatter(cmd).AutoHuman(out, func() {
+			fmt.Printf("Override cleared for step %q of %q.\n", args[1], args[0])
+		})
 	},
 }
 

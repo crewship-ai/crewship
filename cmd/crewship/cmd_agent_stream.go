@@ -31,8 +31,12 @@ type collectResult struct {
 	Text      string
 	StreamErr string
 	GotDone   bool
-	ReadErr   error
-	TimedOut  bool
+	Cancelled bool
+	// StopEndedUnconfirmed: a stop was requested, a done followed, and the
+	// server never acknowledged the request (errStopEndedUnconfirmed).
+	StopEndedUnconfirmed bool
+	ReadErr              error
+	TimedOut             bool
 	// Busy is set when the server bounced the send off the per-agent run
 	// lock (#2269): the agent already had a live run, this message was
 	// never persisted and nothing ran. Distinct from StreamErr because the
@@ -55,7 +59,11 @@ type collectResult struct {
 // goroutine on a blocked send forever (the caller's socket Close unblocks
 // ReadMessage, not a channel send). The goroutine then exits after at
 // most one more ReadMessage.
-func collectAgentStream(src chatEventSource, timeout time.Duration) collectResult {
+func collectAgentStream(src chatEventSource, timeout time.Duration, stops ...*runStop) collectResult {
+	var cancellation *runStop
+	if len(stops) > 0 {
+		cancellation = stops[0]
+	}
 	type wsRead struct {
 		msg *cli.WSMessage
 		err error
@@ -87,8 +95,15 @@ func collectAgentStream(src chatEventSource, timeout time.Duration) collectResul
 	var res collectResult
 	var fullText []byte
 	var wait provisioningWait
+	// legacy fires when a done followed an unacknowledged stop request: the
+	// server may predate cancel confirmation (see errStopEndedUnconfirmed).
+	var legacy <-chan time.Time
 	for {
 		select {
+		case <-legacy:
+			res.StopEndedUnconfirmed = true
+			res.Text = string(fullText)
+			return res
 		case <-deadline:
 			res.TimedOut = true
 			res.Text = string(fullText)
@@ -98,6 +113,20 @@ func collectAgentStream(src chatEventSource, timeout time.Duration) collectResul
 				res.ReadErr = r.err
 				res.Text = string(fullText)
 				return res
+			}
+			if cancellation.wasRequested() {
+				if cancellation.noteAccepted(r.msg) {
+					legacy = nil
+					continue
+				}
+				if matched, cancelled := cancellationResult(r.msg, cancellation.chatID, cancellation.requestID); matched {
+					res.Cancelled = cancelled
+					if !cancelled {
+						res.StreamErr = "stop was not confirmed: server found no cancelled run"
+					}
+					res.Text = string(fullText)
+					return res
+				}
 			}
 			event, err := cli.ParseChatEvent(r.msg)
 			if err != nil || event == nil {
@@ -124,7 +153,23 @@ func collectAgentStream(src chatEventSource, timeout time.Duration) collectResul
 				if wait.deferredDone() {
 					continue // the deferral's done; the replayed run follows
 				}
+				if cancellation.wasRequested() {
+					// Never a confirmation by itself. Against a server that
+					// has not acknowledged the request, wait briefly for its
+					// answer and then degrade explicitly.
+					cancellation.noteDone()
+					if cancellation.endedUnconfirmed() && legacy == nil {
+						legacy = time.After(stopResultGrace)
+					}
+					continue
+				}
 				res.GotDone = true
+				res.Text = string(fullText)
+				return res
+			case "ask_submission_error":
+				// A refused ask form: sender-only, unsaved, and never followed
+				// by a done — terminal for this send exactly like agent_busy.
+				res.StreamErr = sanitizeTerminal("form refused: " + askSubmissionErrorText(event.Content, event.Metadata))
 				res.Text = string(fullText)
 				return res
 			case wsproto.AgentBusyEventType:

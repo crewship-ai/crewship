@@ -3,9 +3,11 @@
 import { existsSync } from "node:fs"
 import { buildSync } from "esbuild"
 import { chromium } from "@playwright/test"
+import { installLocalDraftKeyFixture } from "@/lib/local-draft-seal.test-support"
 import { expect, it } from "vitest"
 
 type DocumentWriterFixture = {
+  confirmed?: number
   human: string
   auth: ReturnType<typeof import("@/hooks/use-auth").useAuth>
   editor: ReturnType<typeof import("@/hooks/use-page-document").usePageDocument>
@@ -35,8 +37,10 @@ const source=documentSchema.create({type:'doc',content:[{type:'paragraph',attrs:
 const state={page_id:'p',schema:3,rev:1,epoch:'epoch',generation:1,incarnation:'generation',snapshot:documentSchema.snapshot(source),snapshotRev:1,updates:[],blocks:[],content:{type:'doc'},outline:[],can_write:true,can_comment:false,can_resolve:false};
 // Keep this single-tab fixture mounted so its post-sign-out IDB rows can be observed.
 window.BroadcastChannel=undefined;
-const f=window.documentErasureFixture={human:'alice',auth:null,editor:null,pause:false,putStarted:false,abortCount:0,purgeStarted:false,done:false,holdSession:false,sessionStarted:false};
-window.fetch=async url=>{
+window.confirm=()=>{f.confirmed=(f.confirmed||0)+1;return true};const f=window.documentErasureFixture={human:'alice',auth:null,editor:null,pause:false,putStarted:false,abortCount:0,purgeStarted:false,done:false,holdSession:false,sessionStarted:false};
+const draftNetwork=window.fetch.bind(window);
+window.fetch=async(url,init)=>{
+ if(String(url).includes("/draft-key?"))return draftNetwork(url,init);
  const path=String(url);
  if(path.includes('/api/auth/session')){
   const response=Response.json({user:{id:f.human,name:f.human,email:f.human+'@example.test'},expires:'2099-01-01'});
@@ -73,12 +77,13 @@ f.rows=()=>new Promise((resolve,reject)=>{
 `
 
 it.skipIf(!existsSync(chromium.executablePath())).each(["coalesced sign-out", "in-flight sign-out", "identity replacement", "stale session refresh", "stuck sign-out"])(
-  "retires the real document writer before erasure: %s", async scenario => {
+  "drains the real document writer and retains revisions not confirmed for deletion: %s", async scenario => {
     const { outputFiles } = buildSync({ stdin: { contents: fixture, loader: "tsx", resolveDir: process.cwd() }, bundle: true, write: false, platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"test"' } })
     const browser = await chromium.launch({ headless: true })
     try {
       const page = await browser.newPage()
       await page.route("https://document-writer.test/**", route => route.fulfill({ body: '<div id="root"></div>', contentType: "text/html" }))
+      await installLocalDraftKeyFixture(page)
       await page.goto("https://document-writer.test")
       await page.addScriptTag({ content: outputFiles[0].text })
       await page.waitForFunction(() => window.documentErasureFixture.editor?.state?.rev === 1 && window.documentErasureFixture.editor?.durability === "confirmed")
@@ -98,7 +103,7 @@ it.skipIf(!existsSync(chromium.executablePath())).each(["coalesced sign-out", "i
       if (paused && scenario !== "stuck sign-out") {
         // Let the auth response settle while the first actual IDB transaction is
         // paused, then add another batch. It must never follow the final purge.
-        await page.waitForTimeout(50)
+        await page.waitForFunction(() => window.documentErasureFixture.purgeStarted)
         await page.evaluate(() => { const f = window.documentErasureFixture; f.edit(); f.pause = false })
       }
       await page.waitForFunction(() => window.documentErasureFixture.done, undefined, { timeout: 6000 })
@@ -115,10 +120,31 @@ it.skipIf(!existsSync(chromium.executablePath())).each(["coalesced sign-out", "i
         await page.evaluate(async () => { const f = window.documentErasureFixture; f.releaseSession(); await f.staleRefresh })
         expect(await page.evaluate(() => window.documentErasureFixture.auth.session)).toBeNull()
       }
-      await page.waitForTimeout(350)
-      const owners = await page.evaluate(() => window.documentErasureFixture.rows())
-      expect(owners).not.toContain("alice")
-      expect(owners).toEqual(scenario === "identity replacement" ? ["bob"] : [])
+      // Wait on observable fixture state, never a fixed sleep: under CI load a
+      // timed pause races the draft write and the purge. A scenario that never
+      // reaches its end state still fails, by the waitForFunction timeout.
+      // page.waitForFunction does not await an async predicate, so poll the fixture.
+      const settle = { timeout: 15_000, intervals: [25, 50, 100, 250] }
+      const readRows = () => page.evaluate(() => window.documentErasureFixture.rows())
+      if (scenario === "stuck sign-out") await page.getByRole("alertdialog").waitFor({ timeout: settle.timeout })
+      else if (scenario === "coalesced sign-out") {
+        // Never a silent loss: the user confirmed deletion, the unconfirmed
+        // revision is retained, or (storage too slow under load) the recovery
+        // screen keeps the editor and asks to retry (#4702).
+        await expect.poll(async () => (await page.evaluate(() => window.documentErasureFixture.confirmed ?? 0)) > 0 || (await readRows()).includes("alice") || (await page.getByRole("alertdialog").count()) === 1, settle).toBe(true)
+      } else if (scenario === "identity replacement") {
+        await expect.poll(async () => { const o = await readRows(); return o.includes("alice") && o.includes("bob") }, settle).toBe(true)
+      } else await expect.poll(async () => (await readRows()).includes("alice"), settle).toBe(true)
+      const owners = await readRows()
+      if (scenario === "stuck sign-out") {
+        expect(await page.getByRole("alertdialog").count()).toBe(1)
+        expect(await page.evaluate(() => window.documentErasureFixture.editor.doc.isDestroyed)).toBe(false)
+      } else {
+        if(scenario==="coalesced sign-out" && !owners.includes("alice") && await page.getByRole("alertdialog").count()===1) { console.log("[4702] coalesced sign-out: recovery screen shown"); expect(await page.evaluate(()=>window.documentErasureFixture.editor.doc.isDestroyed)).toBe(false) }
+        else if(scenario==="coalesced sign-out" && !owners.includes("alice")) expect(await page.evaluate(()=>window.documentErasureFixture.confirmed??0)).toBeGreaterThan(0)
+        else expect(owners).toContain("alice")
+        if(scenario === "identity replacement") expect(owners).toContain("bob")
+      }
     } finally { await browser.close() }
   }, 30_000,
 )

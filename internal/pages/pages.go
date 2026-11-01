@@ -40,9 +40,10 @@ const (
 	// MaxPanelsPerPage — beyond this nobody reads the page anyway.
 	MaxPanelsPerPage = 24
 
-	// MaxPagesPerWorkspace is soft and admin-raisable; it exists to stop an
-	// agent loop producing thousands.
-	MaxPagesPerWorkspace = 100
+	// DefaultMaxPagesPerWorkspace is the page cap until an instance
+	// administrator sets another (instance_page_limits, see cap.go); it exists
+	// to stop an agent loop producing thousands.
+	DefaultMaxPagesPerWorkspace = 100
 
 	// MaxVersionsPerPage — every save is a version and rollback needs a target,
 	// but the history is not the product.

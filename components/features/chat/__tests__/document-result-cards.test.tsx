@@ -149,3 +149,11 @@ it("hides the old workspace card while the next workspace query is pending", asy
   expect(screen.queryByText("Finished plan")).toBeNull()
   expect(open).not.toHaveBeenCalled()
 })
+it("opens the saved document in Artifacts, not Pages, with the library on", async () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
+  try {
+    mount()
+    const link = await screen.findByRole("link", { name: "Open document Finished plan" })
+    expect(link.getAttribute("href")).toBe("/artifacts/saved-doc?workspace_id=ws+%2F%26")
+  } finally { vi.unstubAllEnvs() }
+})

@@ -244,18 +244,20 @@ function OpenInPages({ workspaceId, item }: { workspaceId: string; item: Library
  * viewer uses. It never opens an editor, a CRDT or a lease, and writes nothing;
  * editing stays in the Craft editor behind the lock bar.
  */
-function WordPreview({ workspaceId, item }: { workspaceId: string; item: LibraryItem }) {
+function WordPreview({ workspaceId, item, onStatus }: { workspaceId: string; item: LibraryItem; onStatus?: (status: string) => void }) {
   const userId = useSessionSafe()?.data?.user?.id ?? null
   const target = useMemo(() => item.pageId ? { workspaceId, pageId: item.pageId, type: "document" as const, mode: "latest" as const } : null, [workspaceId, item.pageId])
   // chatId and activationKey only scope the read; the library is its own scope, one per opened item.
   const { read } = useDocumentViewerRead({ workspaceId, chatId: "artifacts-library", currentUserId: userId, activationKey: `library:${item.slug}`, target, enabled: target !== null })
+  useEffect(() => { onStatus?.(read.status) }, [onStatus, read.status])
   if (read.status === "loading") return <div aria-busy="true" className="h-40 animate-pulse rounded-card border bg-muted/40" />
   if (read.status !== "ready") return <p role="status" className="rounded-card border border-dashed p-4 text-sm text-muted-foreground">
     {read.status === "denied" ? "You can't read this document."
       // A Word without a version head is from the old editor, which this environment no longer runs.
       : !item.native ? "This document is from an older version of the editor and does not open here. Nothing was changed."
         : read.status === "unavailable" ? "The document service is not answering right now, so there is no preview. Nothing was changed."
-          : "The document preview could not be loaded. Open in Pages shows it."}
+          // Behind the single-home switch /pages/<slug> sends a native Word back here, so it names no Pages.
+          : pagesOpenArtifacts() ? "The document preview could not be loaded. Nothing was changed." : "The document preview could not be loaded. Open in Pages shows it."}
   </p>
   return <div className="bg-card">
     <DocumentReadonly schema={read.content.schema} content={read.content.content} accessibleLabel={`${item.name}, saved version`} />
@@ -326,6 +328,12 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
   // one Craft editor and its lease; /pages/<slug> sends it back here, so the
   // detail no longer links out to Pages for it.
   const nativeEditor = pagesOpenArtifacts() && item.native && (item.kind === "word" || item.kind === "sheet") && Boolean(item.pageId)
+  // An old-editor Word opens on Pages only in the old editor, which reads the
+  // same saved document as the preview here. Behind the switch the link stays
+  // only once that read succeeds; otherwise Pages would show nothing usable.
+  const [legacyRead, setLegacyRead] = useState<string>()
+  const legacyWord = item.kind === "word" && !item.native
+  const pagesOpensIt = !(pagesOpenArtifacts() && legacyWord && legacyRead !== "ready")
   const target = useMemo(() => ({ slug: item.slug, tab: "preview" as const }), [item.slug])
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
@@ -350,7 +358,7 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
         <h1 className="truncate text-xl font-semibold">{item.name}</h1>
         <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><KindBadge kind={item.kind} /><StateChips item={item} /><span>{meta(item)}</span></p>
       </div>
-      {item.kind !== "design" && !nativeEditor && <OpenInPages workspaceId={workspaceId} item={item} />}
+      {item.kind !== "design" && !nativeEditor && pagesOpensIt && <OpenInPages workspaceId={workspaceId} item={item} />}
     </header>}
     {dialog === "share" && <ShareDialog workspaceId={workspaceId} item={item} open onOpenChange={open => { if (!open) setDialog(null) }} />}
     {dialog === "move" && <MoveToFolderDialog workspaceId={workspaceId} item={item} folders={folders} open
@@ -361,14 +369,15 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
         <div className="flex min-h-[520px] flex-1 overflow-hidden rounded-card border"><ArtifactViewerPanel variant="library" /></div>
       </ArtifactViewerProvider>
       : pageContent ? <ArtifactPageContent workspaceId={workspaceId} pageId={item.pageId!} onBack={onBack} />
+      // Without the editor here there is none on Pages either: /pages/craft/editor asks the same
+      // availability, so the fallback offers no Edit that opens it, only the saved version.
       : nativeEditor ? <ArtifactNativeEditor workspaceId={workspaceId} pageId={item.pageId!} fallback={<>
-        {item.kind === "word" && <WordLockBar workspaceId={workspaceId} pageId={item.pageId!} />}
         {item.kind === "word" && !item.empty && <WordPreview workspaceId={workspaceId} item={item} />}
       </>} />
       : item.native && item.kind === "word" && item.pageId ? <WordLockBar workspaceId={workspaceId} pageId={item.pageId} />
         : null}
     {!projectPreview && item.native && item.kind === "word" && item.pageId && <LockLostDraft workspaceId={workspaceId} slug={"@" + item.pageId} />}
-    {!nativeEditor && item.kind === "word" && !item.empty && item.pageId && <WordPreview workspaceId={workspaceId} item={item} />}
+    {!nativeEditor && item.kind === "word" && !item.empty && item.pageId && <WordPreview workspaceId={workspaceId} item={item} onStatus={legacyWord ? setLegacyRead : undefined} />}
     {/* An old-editor Word has nowhere to edit it; its notice says so on its own. A native editor here needs no pointer to Pages. */}
     {!inline && !nativeEditor && item.kind !== "project" && item.kind !== "design" && !(item.kind === "word" && !item.native) && <p className="text-sm text-muted-foreground">
       {DETAIL_HINT[item.kind] ?? "Open in Pages shows it with everything it contains."}
@@ -666,8 +675,9 @@ export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanoni
       </>}
     </div>
     {folderSettings && <FolderSettingsDialog workspaceId={workspaceId} folder={folderSettings} open onOpenChange={open => { if (!open) setFolderSettings(null) }} />}
+    {/* A just-created artifact is not in the list yet: it opens by slug and the route moves to its ID once it resolves. */}
     {newKind !== undefined && <NewArtifactDialog workspaceId={workspaceId} open onOpenChange={open => { if (!open) setNewKind(undefined) }}
       defaultKind={newKind ?? undefined} defaultFolderSlug={filters.folder || undefined}
-      onCreated={slug => { setNewKind(undefined); refresh(); if (slug) onSelect(slug) }} />}
+      onCreated={slug => { setNewKind(undefined); refresh(); if (slug) onSelect(null, slug) }} />}
   </div>
 }

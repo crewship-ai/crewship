@@ -2544,10 +2544,16 @@ is enabled.
 
 **Auth:** authenticated workspace member; CLI credentials require `pages:read`.
 **Request:** no body. Select the workspace with `workspace_id` or `X-Workspace-ID`.
+Optional `agent_id` scopes the answer to that agent's crew.
 **Response:** JSON `{ "enabled": false }`, or `true` for an enabled workspace.
+With `agent_id` it also carries `can_create`: `false` with
+`"code": "artifact_crew_not_allowed"` when the agent is unknown or its crew is
+outside the workspace artifact-creation policy, otherwise `true` for a member
+who may create Pages. A send refused for that reason emits a chat `error` event
+with the same `code` and starts no run.
 **Statuses:** 200 success, 401 invalid authentication, 403 unavailable workspace
 or read scope, 500 internal failure. Availability grants no write authority.
-CLI: `crewship page artifact availability`.
+CLI: `crewship page artifact availability [--agent <id>]`.
 
 ### POST /api/v1/pages/artifacts
 
@@ -2682,20 +2688,43 @@ commands are `page artifact comments`, `comment`, `reply`, `restore` and `share`
 
 ## Collaborative Design (disabled by default)
 
-The server `artifacts_design` feature enables standard Yjs sync and awareness.
+Every route below answers 404 unless Design is enabled: either the server
+environment variable `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true` or the
+workspace-scoped `artifacts_design` feature flag (seeded off). The browser
+editor additionally needs the build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN=true`.
+The flag enables standard Yjs sync and awareness.
 Slugs and immutable `@page_id` references use existing workspace Page grants.
 Nodes have stable IDs and types `frame`, `rect`, `text` or `image`. Live content
 is separate from retained snapshots; awareness is transient and never grants
 write permission. CLI equivalents are under `crewship page design`.
 
+Request bodies are closed JSON objects: unknown fields, duplicate keys, `null`
+values and trailing JSON are rejected with 400. A body over the route limit
+(8 KiB for create, snapshot, restore, share and agent; 20,000 bytes for a
+comment; 4 MiB for operations) is rejected with 413. Every Yjs step runs in a
+short-lived Node subprocess with a 5-second timeout; a missing `node` binary or
+a timeout answers 503 and nothing is acknowledged.
+
+**Persistence.** Each Design Page has one live Yjs head of at most 4 MiB
+encoded. An accepted websocket update is written to that live head immediately.
+Every successful `operations` or `restore` call also commits a new retained
+version in the same transaction. Websocket edits become a retained version
+through an explicit snapshot or, while an editor's socket is open, through an
+automatic snapshot (message `Automatic Design checkpoint`) once the live head
+has been unchanged for about 10 seconds. Retained history uses the shared
+artifact history quota (256 MiB per Page); exceeding it answers 413 and keeps
+existing versions.
+
 ### `POST /api/v1/pages/design`
 
 **Auth:** authenticated human with current Page creation permission and CLI
-`pages:write` scope. **Request:** JSON `{slug,name}` and workspace selection.
-**Response:** HTTP 201 `{page_id,slug,version}` for an empty Design Page and its
-initial retained version. **Statuses:** 201 created, 400 invalid input, 401
-unauthenticated, 403 missing authority, 404 disabled, 409 occupied slug, 413
-capacity, 500 persistence failure, 503 unavailable engine.
+`pages:write` scope; an agent run cannot create a Design. **Request:** JSON
+`{slug,name,created_by_test?}` and workspace selection; `name` is required and
+at most 200 bytes. **Response:** HTTP 201 `{page_id,slug,version}` for an empty
+Design Page and its initial retained version. **Statuses:** 201 created, 400
+invalid input, 401 unauthenticated, 403 missing authority, 404 disabled, 409
+occupied slug, 413 body too large or the workspace already has 100 Pages, 500
+persistence failure, 503 unavailable engine.
 
 ### `GET /api/v1/pages/{slug}/design`
 
@@ -2706,8 +2735,10 @@ readers see the live canvas. **Response:** `{page_id,nodes,order,can_edit,
 can_comment,version,latest_version,shared_version,authority_revision,actor,origin}`.
 `authority_revision` is an opaque string; a fresh authorized read establishes
 a new connection after rights change. `origin` is null unless available to
-the authorized editor. **Statuses:** 200 success, 400
-invalid version, 401 unauthenticated, 403 invalid scope, 404 disabled or missing
+the authorized editor. When `version` is supplied, the current
+handler reports the selected snapshot in both `version` and `latest_version`;
+use `GET .../design/versions` for the latest retained version. **Statuses:**
+200 success, 400 invalid version, 401 unauthenticated, 403 invalid scope, 404 disabled or missing
 accessible content, 500 internal failure, 503 unavailable engine.
 
 ### `POST /api/v1/pages/{slug}/design/operations`
@@ -2717,11 +2748,20 @@ need their original live run and exact selected-Page mandate. **Request:**
 `{operations:[...],message?}`. An upsert has `{op:"upsert",node:{id,...}}`; delete
 has `{op:"delete",id}`; reorder has `{op:"reorder",order:[ids]}`. Partial upserts
 preserve other fields. New nodes need type and finite geometry; supported string
-fields are `name`, `parentId`, `fill`, `text` and `src`. **Response:** committed
+fields are `name`, `parentId`, `fill`, `text` and `src`. Any other node field is
+rejected. Geometry (`x`, `y`, `width`, `height`) must be numbers within
+±1,000,000 and sizes must not be negative. String limits are `id` and
+`parentId` 128, `type` 16, `name` 2,000, `fill` 256, `text` 100,000 and `src`
+2,000,000 characters. Reorder replaces the whole order and may name only
+existing nodes; delete also removes the node from the order. One request
+carries 1–500 operations, and the result may hold at most 2,000 nodes, 4,000
+order entries and 4 MiB of encoded Yjs state; breaking these engine limits is a
+400, not a 413. A `message` is at most 4,096 bytes. **Response:** committed
 `{nodes,order,version}`. Works without an open browser. **Statuses:** 200 success,
 400 invalid update, 401 unauthenticated, 403 no current Edit authority, 404
-unavailable Page, 409 concurrent head, 413 capacity, 500 persistence failure,
-503 engine unavailable. Failed publication preserves the previous live head.
+unavailable Page, 409 concurrent head, 413 body over 4 MiB or history quota,
+500 persistence failure, 503 engine unavailable. Failed publication preserves
+the previous live head.
 
 ### `POST /api/v1/pages/{slug}/design/snapshots`
 
@@ -2753,17 +2793,21 @@ failure, 503 engine unavailable.
 
 **Auth:** current Page read and CLI `pages:read`. **Request:** no body.
 **Response:** `{comments:[...]}` with exact version, stable node selector,
-quoted text, feedback, task status and authorized replies. Readers see only
-feedback and replies for the shared pin. **Statuses:** 200 success, 401
+quoted text, feedback, task status and authorized replies, oldest first and at
+most 500 comments. Readers see only feedback and replies for the shared pin.
+**Statuses:** 200 success, 401
 unauthenticated, 403 invalid scope, 404 unavailable Page, 500 internal failure.
 
 ### `POST /api/v1/pages/{slug}/design/comments`
 
 **Auth:** current Page feedback authority and CLI `pages:write`; Read and Produce
 never grant comment permission. **Request:** `{version,path:"design.json",
-selector,quote,text,send_to_agent}`. The selector is a stable node ID; an optional
-empty quote skips text matching. The node and quote are checked against the
-latest retained version, never unsaved live state. Canonical Comment grants
+selector,quote,text,send_to_agent}`. The selector is a stable node ID of at most
+128 bytes; an optional empty quote skips matching, otherwise the quote (at most
+2,000 bytes) must equal the node's `text` or `name`. `text` is required,
+non-blank and at most 10,000 bytes. `version` must equal the
+latest retained version, and the node and quote are checked against it, never
+unsaved live state. Canonical Comment grants
 allow feedback when that shared grant feature is installed; `send_to_agent`
 additionally requires Edit. **Response:** HTTP 201 stored comment and
 optional pending task. Queuing is not proof of agent delivery. **Statuses:**
@@ -2793,10 +2837,19 @@ replaces a fresh message intent and exact live-run mandate. **Statuses:**
 
 **Auth:** authenticated current Page reader with same-origin browser
 credentials or CLI `pages:read`; every update additionally checks current Edit
-permission under the database writer fence. **Request:** WebSocket upgrade;
-binary standard y-protocols sync and awareness messages only. **Response:**
-HTTP 101 followed by standard binary frames. Read clients may send presence and
-sync requests, never document updates. Revocation blocks writes and stops
+permission under the database writer fence. A browser `Origin` header must
+match the request host. **Request:** WebSocket upgrade; optional
+`authority_revision` query parameter from the latest `GET .../design` must
+still match the workspace authority revision or the upgrade is refused with
+403. Binary standard y-protocols sync and awareness messages only, at most
+4 MiB per frame; a text frame closes the socket. **Response:** HTTP 101
+followed by standard binary frames. Editors receive a sync step 1 on connect.
+Read clients may send presence and sync requests, never document updates. The
+host replaces `user.name` and `user.id` in awareness state with the
+authenticated actor, and allows one awareness client ID per connection. The
+server pings every 20 seconds and closes a socket that answers no ping
+within 60 seconds or whose outbound queue overflows. Authority is rechecked every 2
+seconds and before each delivered frame; revocation blocks writes and stops
 content delivery on the old socket. **Statuses:** 101 upgraded, 400 malformed
 upgrade, 401 unauthenticated, 403 invalid origin or scope, 404 unavailable Page,
 500 internal failure, 503 engine unavailable. Invalid protocol messages or

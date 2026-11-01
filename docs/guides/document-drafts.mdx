@@ -24,3 +24,17 @@ The browser copy holds private text, so it is deleted rather than kept for later
 
 - **Access lost.** When the server answers 401, 403 or 404 for the document, the copy of that document (for you, in that workspace) is deleted from the browser together with what is on screen. Download an unsent draft before closing the tab if you still need it; after this point it cannot be recovered.
 - **Sign-out, session expiry or a different user signing in.** Copies of other users are deleted, and every copy is deleted on sign-out or when the session ends. Unsent edits that were only stored in this browser are lost, so confirm that the status line says **Confirmed by server** before you sign out on a shared computer.
+
+## Artifact source and comment drafts
+
+An artifact project keeps two kinds of unsent work in this browser: the Project source you are editing (offered back as **Restore source draft**) and the text of an unsent comment in the project page or the artifact viewer. They are kept per person, workspace and project, and another person signed in on the same browser never sees them.
+
+Each change is written to the browser's IndexedDB storage and counts as kept only after the browser has flushed it to disk, so the draft survives a closed tab and a browser that is killed right after typing. Drafts stored by an older version of Crewship in the browser's local storage are moved over the first time they are read.
+
+While a kept source draft is offered back, **Edit source** is not available: choose **Restore source draft** or **Discard it** first, so starting a fresh edit never replaces the kept draft. If the browser cannot read its storage, the page says so and offers **Check again**; editing anyway may replace a draft kept there. A failed read never deletes a stored comment draft. Edits typed after **Save project** was pressed stay in the editor and in the browser after that save succeeds; save them again.
+
+These drafts follow the same deletion rules as the Document copy above: signing out, an expired session or a sign-out in another tab deletes every artifact draft in the browser, and a different user signing in deletes the drafts of everyone else. A change typed in an open tab after that point is not stored. Save or copy your source before you sign out on a shared computer.
+
+## Design canvas and comment drafts
+
+The Design canvas keeps your unsaved canvas and an unsent Design comment in this browser's local storage, per person, workspace and Page. Signing out, an expired session, a sign-out in another tab or a different user signing in deletes them under the same rules as the artifact drafts, including drafts saved by older versions under the Page's address. When the server answers 403 or 404 for the Page, both drafts of that Page are deleted. A dropped connection or losing edit rights while you can still open the Page keeps them.

@@ -935,21 +935,12 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	// §10b.3: pages per workspace is a soft, admin-raisable cap that exists to
 	// stop an agent loop producing thousands.
-	var count int
-	if err := h.db.QueryRowContext(r.Context(),
-		`SELECT COUNT(*) FROM pages WHERE workspace_id = ?`, wsID).Scan(&count); err != nil {
-		replyInternalError(w, h.logger, "count pages", err)
-		return
-	}
-	if count >= pages.MaxPagesPerWorkspace {
-		writeRejection(w, pageRejection{
-			Kind:    "cap",
-			Message: fmt.Sprintf("this workspace holds %d pages; the limit is %d", count, pages.MaxPagesPerWorkspace),
-			Detail: map[string]any{
-				"pages_existing": count,
-				"pages_limit":    pages.MaxPagesPerWorkspace,
-			},
-		})
+	if err := pages.CheckCap(r.Context(), h.db, wsID); err != nil {
+		if limit, ok := pagesLimitFrom(err); ok {
+			writePagesLimit(w, limit)
+			return
+		}
+		replyInternalError(w, h.logger, "check page limit", err)
 		return
 	}
 

@@ -40,15 +40,16 @@ Every command exits with a classified code, so scripts and agents can branch on 
 |------|---------|
 | `0` | Success |
 | `1` | Unclassified error |
-| `2` | Validation failure (HTTP 400 / 422, or a missing precondition such as no workspace set) |
+| `2` | Validation failure (HTTP 400 / 422, or a missing precondition such as no workspace set). Also a full artifact version history (HTTP 413 `artifact_history_quota`): nothing was saved. |
 | `3` | Not found (HTTP 404, or a client-side lookup miss — an agent/crew/workspace slug or resource name that doesn't resolve) |
 | `4` | Auth failure (HTTP 401 / 403, not logged in, token-host mismatch) |
 | `5` | Conflict (HTTP 409) |
 | `6` | Rate-limited (HTTP 429) |
 | `7` | Server error (HTTP 5xx) |
 | `8` | Network failure — the request never produced a response |
+| `9` | Agent busy — the agent already has a live run, so the message was neither delivered nor stored. Retry once the run ends. |
 
-`crewship wait` keeps its own run-outcome codes (0 completed / 1 failed / 2 cancelled / 3 timeout / 4 connection error) — those describe the *run's* terminal state, not a command failure. See the [Wait page](/cli/wait).
+`crewship wait` keeps its own run-outcome codes (0 completed / 1 failed / 2 cancelled / 3 timeout / 4 connection error) — those describe the *run's* terminal state, not a command failure. See the [Wait page](/cli/wait). `crewship chat stop --wait` and a signal-stopped `crewship run` exit `10` when the run ended but the server did not confirm the stop (a server that predates cancel confirmation) — see [chat stop](/cli/chat).
 
 When the output format is `json`, `ndjson`, or `yaml`, errors are emitted on **stderr** as a structured envelope in that same format (stdout stays reserved for success output):
 

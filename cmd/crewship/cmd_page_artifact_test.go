@@ -21,6 +21,11 @@ func TestPageArtifactPublishPreservesManifestCAS(t *testing.T) {
 		}
 		return 409, []byte(`{"error":"artifact changed; keep your draft","latest_version":8}`), "application/json"
 	})
+	// A 409 may be the echo of a first attempt whose reply was lost, so the CLI
+	// reads version 8 once. Someone else's version 8 keeps the conflict as is.
+	stub.OnGet("/api/v1/pages/demo/artifact", func(r *http.Request, _ []byte) (int, []byte, string) {
+		return 200, []byte(`{"manifest":{"version":8,"entrypoint":"index.html","files":[{"path":"index.html","content":"<h1>Theirs</h1>","media_type":"text/html"}]}}`), "application/json"
+	})
 	file := pageBundleFile(t, `{"entrypoint":"index.html","files":[{"path":"index.html","content":"<h1>Draft</h1>","media_type":"text/html"}]}`)
 	cmd := newPageArtifactCommand()
 	cmd.PersistentPreRun = rootCmd.PersistentPreRun
@@ -90,6 +95,27 @@ func TestPageArtifactAvailabilityUsesAuthenticatedWorkspaceTransport(t *testing.
 	}
 	if len(stub.CallsFor("GET", route)) != 1 {
 		t.Fatal("availability did not use the authenticated Page client")
+	}
+}
+
+func TestPageArtifactAvailabilityAgentFlagScopesTheQuery(t *testing.T) {
+	stub := pageStub(t)
+	route := "/api/v1/pages/artifacts/availability"
+	stub.OnGet(route, func(r *http.Request, _ []byte) (int, []byte, string) {
+		if got := r.URL.Query().Get("agent_id"); got != "agent 1" {
+			t.Errorf("agent_id = %q", got)
+		}
+		return 200, []byte(`{"enabled":true,"can_create":false,"code":"artifact_crew_not_allowed"}`), "application/json"
+	})
+	cmd := newPageArtifactCommand()
+	cmd.PersistentPreRun = rootCmd.PersistentPreRun
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"availability", "--agent", "agent 1"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.CallsFor("GET", route)) != 1 {
+		t.Fatal("scoped availability was not requested")
 	}
 }
 

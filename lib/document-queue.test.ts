@@ -1,7 +1,7 @@
 // @vitest-environment node
 // Browser storage boundary: real IndexedDB transactions, no storage mock.
-import { existsSync, readFileSync } from "node:fs"
-import { transformSync } from "esbuild"
+import { existsSync } from "node:fs"
+import { buildSync } from "esbuild"
 import { chromium } from "@playwright/test"
 import { expect, it } from "vitest"
 
@@ -11,12 +11,14 @@ it.skipIf(!existsSync(chromium.executablePath()))("isolates durable drafts by hu
  const browser=await chromium.launch({headless:true})
  try{
   const page=await browser.newPage()
-  await page.route("http://document-queue.test/**",route=>route.fulfill({body:"<!doctype html><title>Document journal</title>",contentType:"text/html"}))
-  await page.goto("http://document-queue.test")
-  const source=readFileSync(`${process.cwd()}/lib/document-queue.ts`,"utf8")
-  const {code}=transformSync(source,{loader:"ts",format:"iife",globalName:"documentQueue"})
-  await page.addScriptTag({content:code})
+  await page.route("https://document-queue.test/**",route=>route.fulfill({body:"<!doctype html><title>Document journal</title>",contentType:"text/html"}))
+  await page.goto("https://document-queue.test")
+  const {outputFiles}=buildSync({entryPoints:[`${process.cwd()}/lib/document-queue.ts`],bundle:true,write:false,platform:"browser",format:"iife",globalName:"documentQueue"})
+  await page.addScriptTag({content:outputFiles[0].text})
   const result=await page.evaluate(async()=>{
+   // This case verifies the supported non-exclusive fallback's row isolation.
+   // Real Web Locks refuse the second writer (covered by the custody tests).
+   Object.defineProperty(navigator,"locks",{value:undefined,configurable:true})
    const {openDocumentDrafts}= (window as unknown as {documentQueue: typeof import("./document-queue")}).documentQueue
    const original=await openDocumentDrafts("alice","workspace","page")
    const draft={id:"mutation",update:"exact-update",attempted:true,schema:3,epoch:"original-grant",snapshot:"draft",baselineRev:4,request:{id:"mutation",update:"exact-update",schema:3,epoch:"original-grant",kind:"human",page_id:"page"}}
@@ -34,8 +36,9 @@ it.skipIf(!existsSync(chromium.executablePath()))("isolates durable drafts by hu
    await same.remove("mutation")
    const remaining=await same.load()
    same.close();tab.close();unrelated.forEach(store=>store.close())
-   return {reloaded,others,remaining}
+   return {reloaded,others,remaining,exclusive:same.exclusive}
   })
+  expect(result.exclusive).toBe(false)
   expect(result.reloaded).toHaveLength(1)
   expect(result.reloaded[0].request?.epoch).toBe("original-grant")
   expect(result.others).toEqual([[],[],[]])

@@ -1,0 +1,16 @@
+{
+  "dsl_version": "1.0",
+  "name": "failure",
+  "description": "Explicit integration harness prerequisite; not part of the demo seed.",
+  "steps": [
+    {
+      "id": "missing",
+      "type": "transform",
+      "transform": {
+        "input": "1",
+        "expression": ".missing"
+      }
+    }
+  ],
+  "agentless": true
+}

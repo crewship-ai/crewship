@@ -44,6 +44,7 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"mode": str(), "status": str(), "message_count": integer(), "started_at": str(),
 		"ended_at": nullable(str()), "created_at": str(), "origin": nullable(str()),
 		"last_activity_at": str(), "unread_count": integer(),
+		"visibility": str(), "created_by_caller": boolean(),
 	})
 	message := object(map[string]any{
 		"id": str(), "session_id": str(), "role": str(), "content": str(),

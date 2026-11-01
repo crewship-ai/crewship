@@ -2,15 +2,29 @@
 
 import { useEffect, useRef, useState, type PointerEvent } from "react"
 import dynamic from "next/dynamic"
-import { Frame, ImagePlus, MousePointer2, Plus, Save, Square, Trash2, Type } from "lucide-react"
+import { Download, Frame, ImagePlus, MousePointer2, Play, Plus, Save, Square, Trash2, Type } from "lucide-react"
+import * as Y from "yjs"
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { useSessionSafe } from "@/hooks/use-auth"
-import { artifactsDesign } from "@/lib/feature-flags"
+import { artifactDraftKey, loadArtifactDraft, writeArtifactDraft, clearArtifactDraft, artifactDraftRevision } from "@/lib/artifact-drafts"
+import { artifactsDesign, artifactsDesignPrototype } from "@/lib/feature-flags"
 import { Button } from "@/components/ui/button"
+import { CreateSurface, CreateSurfaceBody, CreateSurfaceField, CreateSurfaceFooter, CreateSurfaceHeader } from "@/components/layout/create-surface"
+import { apiFetch } from "@/lib/api-fetch"
 import { Input } from "@/components/ui/input"
 import { useDesign } from "./use-design"
 import { readablePeerFill } from "./peer-colors"
-import { removeDesignNode, safeImageSource, upsertDesignNode, type DesignNode, type DesignNodeType } from "./design-document"
+import { designLinkTarget, designScreenOf, removeDesignNode, safeImageSource, setDesignNodeLink, upsertDesignNode, type DesignNode, type DesignNodeType } from "./design-document"
+import { DesignNodeShape } from "./design-node-shape"
+import { DesignPrototypePlayer } from "./design-prototype-player"
+
+function encodedDesignState(doc: Y.Doc,maxBytes=Infinity) {
+ const state=Y.encodeStateAsUpdate(doc)
+ if(state.byteLength>maxBytes)throw new Error("Canvas exceeds the new Design size limit")
+ let binary=""
+ for(let index=0;index<state.length;index+=8192) binary+=String.fromCharCode(...state.subarray(index,index+8192))
+ return btoa(binary)
+}
 
 const DesignAccessDialog = dynamic(() => import("./design-access-dialog").then(module => module.DesignAccessDialog), { ssr: false })
 
@@ -20,18 +34,44 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
  const design = useDesign(workspaceId, slug, version)
  const session = useSessionSafe()
  const commentPageId = design.query.data?.page_id
- const commentKey = session?.data?.user?.id && commentPageId ? `design-comment:v2:${session.data.user.id}:${workspaceId}:${commentPageId}` : null
- const [draft, setDraft] = useState("")
+ const commentKey = artifactDraftKey("design-comment", session?.data?.user?.id, workspaceId, !design.query.isError ? commentPageId : null)
+ const [draftState, setDraftState] = useState<{ key: string | null; text: string }>({ key: null, text: "" })
+ const draft = draftState.key === commentKey ? draftState.text : ""
+ const currentDraft = useRef({ key: commentKey, text: draft }); currentDraft.current = { key: commentKey, text: draft }
  const [delivery, setDelivery] = useState<Record<string, string>>({})
  const [commentError, setCommentError] = useState("")
+ const [downloadError, setDownloadError] = useState("")
+ const [continueOpen,setContinueOpen]=useState(false)
+ const [continueName,setContinueName]=useState("")
+ const [continueSlug,setContinueSlug]=useState("")
+ const [continueError,setContinueError]=useState("")
+ const [continuing,setContinuing]=useState(false)
+ const [continued,setContinued]=useState<{scope:string;page:string}|null>(null)
+ const continueEpoch=useRef(0)
+ const human=session?.data?.user?.id
+ const continueScope=JSON.stringify([human,workspaceId,commentPageId])
+ useEffect(()=>{continueEpoch.current++;setContinueOpen(false);setContinuing(false);setContinued(null);setContinueError("");return()=>{continueEpoch.current++}},[continueScope])
  const agent = useArtifactAgentDispatch(workspaceId, design.query.data?.page_id, design.query.data?.origin, Boolean(design.query.data?.can_edit && !design.query.isError), "design")
- useEffect(() => { try { setDraft(commentKey ? localStorage.getItem(commentKey) ?? "" : "") } catch { /* Draft remains in the open editor. */ } }, [commentKey])
- const changeDraft = (value: string) => { setDraft(value); if (commentKey) { try { localStorage.setItem(commentKey, value) } catch { /* Draft remains in the open editor. */ } } }
+ useEffect(() => {
+  let active = true
+  if (commentKey) void loadArtifactDraft(commentKey).then(text => { if (active) setDraftState({ key: commentKey, text }) }, () => { if (active) setCommentError("Private draft could not be opened. Your stored copy is retained; reconnect and reopen.") })
+  return () => { active = false }
+ }, [commentKey])
+ const changeDraft = (value: string) => {
+  if (!commentKey || draftState.key !== commentKey) return
+  setDraftState({ key: commentKey, text: value })
+  void writeArtifactDraft(commentKey, value).catch(() => setCommentError("Draft storage failed. Keep this tab open."))
+ }
  const [selectedId, setSelectedId] = useState<string | null>(null)
  const [agentChat, setAgentChat] = useState("")
  const [imageURL, setImageURL] = useState("")
  const [panel, setPanel] = useState<"properties" | "history">("properties")
  const canvas = useRef<SVGSVGElement>(null)
+ const prototype = artifactsDesignPrototype()
+ const [playing, setPlaying] = useState<string | null>(null)
+ const playButton = useRef<HTMLButtonElement>(null)
+ const wasPlaying = useRef(false)
+ useEffect(() => { if (wasPlaying.current && !playing) playButton.current?.focus(); wasPlaying.current = Boolean(playing) }, [playing])
  const drag = useRef<{ id: string; startX: number; startY: number; x: number; y: number } | null>(null)
  const selected = design.nodes.find(node => node.id === selectedId)
  const frames = design.nodes.filter(node => node.type === "frame")
@@ -86,7 +126,15 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
   upsertDesignNode(design.doc, { id: drag.current.id, x: Math.round(drag.current.x + cursor.x - drag.current.startX), y: Math.round(drag.current.y + cursor.y - drag.current.startY) })
  }
  const endDrag = () => { drag.current = null }
+ // Links are edited only through the live document, and only by editors.
+ const setLink = (target: string) => { if (selected && design.doc && design.editable) setDesignNodeLink(design.doc, selected.id, target || null) }
+ const play = () => {
+  const start = selected ? designScreenOf(design.nodes, selected) : undefined
+  const first = start ?? frames[0]?.id
+  if (prototype && first) setPlaying(first)
+ }
  if (!artifactsDesign()) return <p className="p-6" role="status">Design is not enabled.</p>
+ if (design.readRevoked) return <p className="p-6" role="alert">Page read access was removed. The local draft has been deleted where this browser could reach it.</p>
  if (design.query.isError) return <p className="p-6 text-destructive" role="alert">{design.query.error.message}</p>
  if (!design.query.data) return <p className="p-6" role="status">Opening Design…</p>
  const width = Math.max(1200, ...design.nodes.map(node => position(node).x + (Number(node.width) || 0) + 100))
@@ -94,13 +142,54 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
  const data = design.query.data
  const failure = design.save.error ?? design.restore.error ?? design.share.error ?? design.comment.error ?? design.connectAgent.error
  const viewedVersion = version ?? data.latest_version ?? data.version
+ const historyFull = Boolean(data.can_edit && [design.save.error, design.restore.error].some(error => (error as (Error & { status?: number }) | null)?.status === 413))
+ const downloadDraft = () => {
+  if (!design.doc || version) return
+  setDownloadError("")
+  let url: string | undefined
+  try {
+   const draftFile = { format: "crewship-design-draft-v1", workspace_id: workspaceId, page_id: data.page_id, base_version: viewedVersion, nodes: design.nodes, yjs_state: encodedDesignState(design.doc), feedback_draft: { text: draft, node_id: selectedId } }
+   url = URL.createObjectURL(new Blob([JSON.stringify(draftFile)], { type: "application/json" }))
+   const anchor = document.createElement("a")
+   anchor.href = url
+   anchor.download = `design-${data.page_id}-draft.json`
+   document.body.appendChild(anchor)
+   try { anchor.click() } finally { anchor.remove() }
+  } catch {
+   setDownloadError("The draft download could not start. Your work remains in this editor.")
+  } finally {
+   if (url) {
+    const revoke = URL.revokeObjectURL.bind(URL)
+    const downloadedURL = url
+    setTimeout(() => revoke(downloadedURL), 0)
+   }
+  }
+ }
+ const continueDesign=async()=>{
+  if(!human||!commentPageId||!design.doc||!data.can_edit||version||!continueName.trim()||continuing)return
+  const epoch=++continueEpoch.current
+  setContinuing(true);setContinueError("")
+  try{
+   const response=await apiFetch(`/api/v1/pages/design?workspace_id=${encodeURIComponent(workspaceId)}`,{method:"POST",skipRefresh:true,headers:{"Content-Type":"application/json"},body:JSON.stringify({name:continueName.trim(),slug:continueSlug,expected_human:human,source_page_id:commentPageId,initial_state:encodedDesignState(design.doc,4*1024*1024)})})
+   if(response.status!==201)throw new Error("copy refused")
+   const created:unknown=await response.json()
+   if(!created||typeof created!=="object"||!("page_id" in created)||typeof created.page_id!=="string"||!/^[A-Za-z0-9_-]{1,128}$/.test(created.page_id)||!("version" in created)||created.version!==1)throw new Error("copy not confirmed")
+   if(continueEpoch.current!==epoch)return
+   setContinued({scope:continueScope,page:created.page_id});setContinueOpen(false)
+  }catch{if(continueEpoch.current===epoch)setContinueError("The new Design could not be confirmed. Your canvas and unsent feedback remain here.")}
+  finally{if(continueEpoch.current===epoch)setContinuing(false)}
+ }
  const sendComment = async () => {
-  if (!selected || !draft.trim()) return
+  if (!selected || !draft.trim() || !commentKey || draftState.key !== commentKey) return
+  const submitted = { key: commentKey, text: draft, revision: artifactDraftRevision(commentKey) }
   setCommentError("")
   try {
    const checkpoint = design.editable ? await design.save.mutateAsync("Checkpoint before feedback") : undefined
    const posted = await design.comment.mutateAsync({ version: checkpoint?.version ?? viewedVersion, path: "design.json", selector: selected.id, quote: String(selected.text ?? selected.name ?? "").length <= 2000 ? String(selected.text ?? selected.name ?? "") : "", text: draft.trim(), send_to_agent: Boolean(data?.origin && data?.can_edit) })
-   changeDraft("")
+   if (currentDraft.current.key === submitted.key && currentDraft.current.text === submitted.text && artifactDraftRevision(submitted.key) === submitted.revision) {
+    void clearArtifactDraft(submitted.key, submitted.text, submitted.revision).catch(() => setCommentError("Comment saved; local draft cleanup failed."))
+    setDraftState({ key: submitted.key, text: "" })
+   }
    if (data?.origin && data?.can_edit) {
     setDelivery(previous => ({ ...previous, [posted.id]: "Sending to agent…" }))
     const accepted = await agent.dispatch(posted)
@@ -112,14 +201,18 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
   <header className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
    <Frame className="size-5" aria-hidden="true" />
    <h1 className="mr-auto truncate font-semibold">{slug} <span className="ml-2 text-xs font-normal text-muted-foreground">Design</span></h1>
-   <span role="status" className="text-xs text-muted-foreground">{version ? `Version ${version}` : design.connection === "connected" ? design.dirty ? "Live · changes saved as you work" : "Live · up to date" : design.connection === "denied" ? "Access changed · reopen to continue" : design.connection === "rejected" ? "The server refused changes made in this browser (too large or invalid) · they will not sync" : design.connection === "connecting" ? "Connecting…" : "Offline · changes kept in this browser"}</span>
+   <span role="status" className="text-xs text-muted-foreground">{version ? `Version ${version}` : historyFull ? "History full · changes kept in this browser" : design.connection === "connected" ? design.dirty ? "Live · changes saved as you work" : "Live · up to date" : design.connection === "denied" ? "Access changed · reopen to continue" : design.connection === "rejected" ? "The server refused changes made in this browser (too large or invalid) · they will not sync" : design.connection === "connecting" ? "Connecting…" : "Offline · changes kept in this browser"}</span>
    {!design.editable && <span className="rounded bg-muted px-2 py-1 text-xs">{version ? "History" : "Read only"}</span>}
    <div className="flex -space-x-1" aria-label="People on this canvas">{design.peers.map(peer => <span key={peer.clientId} title={peer.name} className="flex size-7 items-center justify-center rounded-full border-2 border-background text-xs font-medium text-white" style={{ backgroundColor: readablePeerFill(peer.color) }}>{peer.name.slice(0, 2).toUpperCase()}</span>)}</div>
+   {prototype && frames.length > 0 && <Button ref={playButton} variant="outline" onClick={play}><Play className="size-4" />Play</Button>}
    <Button variant="outline" onClick={() => setAccessOpen(true)}>Access</Button>
    <Button variant="outline" onClick={() => setPanel(panel === "history" ? "properties" : "history")}>History{viewedVersion ? ` · v${viewedVersion}` : ""}</Button>
    {design.editable && <Button disabled={design.save.isPending || design.connection !== "connected"} onClick={() => design.save.mutate("Saved from Design editor")}><Save className="size-4" /> Save version</Button>}
   </header>
-  {failure && <p role="alert" className="border-b px-4 py-2 text-sm text-destructive">{failure.message}</p>}
+  {historyFull && <div role="alert" className="space-y-2 border-b px-4 py-3 text-sm"><p><b>History capacity is full.</b> Another version could not be saved. Existing versions are retained and your pending work stays in this browser.</p><p>Download your local canvas and unsent feedback as a draft file to keep a copy. History is not deleted automatically.</p>{version && <Button variant="outline" onClick={() => setVersion(undefined)}>Return to live canvas</Button>}<Button variant="outline" disabled={!design.doc || Boolean(version)} onClick={downloadDraft}><Download className="size-4" />Download draft</Button><Button variant="outline" disabled={!design.doc||Boolean(version)||!human||continuing} onClick={()=>{setContinueName(`${slug} (continued)`);setContinueSlug(`design-${crypto.randomUUID().replaceAll("-","").slice(0,24)}`);setContinueError("");setContinueOpen(true)}}>Continue in a new Design</Button>{downloadError && <p className="text-destructive">{downloadError}</p>}</div>}
+  {continued?.scope===continueScope&&<div role="status" className="border-b px-4 py-3 text-sm"><p>A new Design contains the copied canvas. This original canvas, its history and your unsent feedback remain here.</p><a className="underline" href={`/artifacts/${encodeURIComponent(continued.page)}?workspace_id=${encodeURIComponent(workspaceId)}`} target="_blank" rel="noopener noreferrer">Open new Design</a></div>}
+  {failure && !historyFull && <p role="alert" className="border-b px-4 py-2 text-sm text-destructive">{failure.message}</p>}
+  {design.connection==="quota"&&!historyFull&&<p role="alert" className="border-b px-4 py-2 text-sm">Storage capacity is full. Your changes are kept in this browser and nothing was deleted. Save a version to open the recovery choices.</p>}
   {design.draftError && <p role="alert" className="border-b px-4 py-2 text-sm">Browser draft storage is unavailable or full. Keep this window open until connected and save a version.</p>}
   <div className="flex min-h-0 flex-1 flex-col md:flex-row">
    <aside className="flex max-h-40 shrink-0 flex-col overflow-auto border-b md:max-h-none md:w-48 md:border-b-0 md:border-r" aria-label="Layers">
@@ -142,10 +235,9 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
       {[...frames, ...design.nodes.filter(node => node.type !== "frame")].map(node => {
        const { x, y } = position(node)
        const w = Math.max(1, Number(node.width) || 1), h = Math.max(1, Number(node.height) || 1)
-       const image = node.type === "image" ? safeImageSource(node.src) : undefined
        return <g key={node.id} data-design-node={node.id} data-node-type={node.type} data-node-name={node.name} transform={`translate(${x},${y})`} onPointerDown={event => beginDrag(event, node)} style={{ cursor: design.editable ? "move" : "pointer" }}>
         {node.type === "frame" && <text x="0" y="-10" fontSize="12" fill="currentColor" className="text-muted-foreground">{node.name || "Screen"}</text>}
-        {node.type === "text" ? <><rect width={w} height={h} fill="transparent" /><text x="0" y="22" fill={node.fill || "#172554"} fontSize="20" fontFamily="system-ui, sans-serif">{String(node.text ?? "").split("\n").map((line, index) => <tspan key={index} x="0" dy={index ? "1.3em" : "0"}>{line}</tspan>)}</text></> : node.type === "image" ? image ? <image href={image} width={w} height={h} preserveAspectRatio="xMidYMid slice" /> : <><rect width={w} height={h} fill="#e2e8f0" rx="4" /><text x="12" y="28" fill="#64748b" fontSize="14">Set an image URL in Properties</text></> : <rect width={w} height={h} fill={node.fill || "#ffffff"} rx={node.type === "frame" ? 0 : 6} stroke={node.type === "frame" ? "#cbd5e1" : "none"} />}
+        <DesignNodeShape node={node} width={w} height={h} />
         {selectedId === node.id && <rect width={w} height={h} fill="none" stroke="#2563eb" strokeWidth="2" pointerEvents="none" />}
        </g>
       })}
@@ -169,6 +261,10 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
       {selected.type === "text" && <Field label="Text"><textarea aria-label="Text content" maxLength={100000} className="min-h-24 w-full rounded border bg-background p-2 text-sm" value={selected.text ?? ""} disabled={!design.editable} onChange={event => patch({ text: event.target.value })} /></Field>}
       {selected.type === "image" && <Field label="Image URL"><Input aria-label="Image URL" placeholder="https://…" value={selected.src ?? ""} disabled={!design.editable} onChange={event => { setImageURL(event.target.value); patch({ src: event.target.value }) }} /><p className="mt-1 text-xs text-muted-foreground">HTTPS image or embedded PNG, JPEG, WebP, GIF.</p></Field>}
       {selected.type !== "frame" && <Field label="Screen"><select aria-label="Parent screen" className="h-9 w-full rounded border bg-background px-2 text-sm coarse:h-[44px]" value={selected.parentId ?? ""} disabled={!design.editable} onChange={event => patch({ parentId: event.target.value })}><option value="">On canvas</option>{frames.map(frame => <option key={frame.id} value={frame.id}>{frame.name || "Screen"}</option>)}</select></Field>}
+      {prototype && selected.type !== "frame" && (() => {
+       const link = designLinkTarget(design.nodes, selected)
+       return <Field label="Link to screen"><select aria-label="Link to screen" className="h-9 w-full rounded border bg-background px-2 text-sm coarse:h-[44px]" value={link.kind === "none" ? "" : link.kind === "screen" ? link.screen.id : link.target} disabled={!design.editable} onChange={event => setLink(event.target.value)}><option value="">No link</option>{frames.map(frame => <option key={frame.id} value={frame.id}>{frame.name || "Screen"}</option>)}{link.kind === "missing" && <option value={link.target} disabled>Deleted screen</option>}</select>{link.kind === "missing" && <p className="mt-1 text-xs text-warn">The linked screen was deleted. In Play this layer does nothing{design.editable ? "; choose another screen or No link." : "."}</p>}{link.kind !== "missing" && <p className="mt-1 text-xs text-muted-foreground">In Play, clicking this layer opens the screen.</p>}</Field>
+      })()}
       {design.editable && <Button variant="ghost" className="w-full text-destructive" onClick={() => { if (design.doc) removeDesignNode(design.doc, selected.id); setSelectedId(null) }}><Trash2 className="size-4" />Delete {selected.type === "frame" ? "screen and layers" : "layer"}</Button>}
      </div> : <p className="text-sm text-muted-foreground">Select a screen or layer to see its properties.{design.editable && " Add your first screen using the toolbar."}</p>}
     </>}
@@ -183,7 +279,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
      {data.origin && <a className="mb-3 inline-block text-xs underline" href={`/chat/${encodeURIComponent(data.origin.chat_id)}?workspace_id=${encodeURIComponent(workspaceId)}`}>Open agent chat</a>}
      {data.can_comment !== false && (data.can_comment || data.can_edit) && <div className="mb-4 space-y-2">
       <p className="text-xs text-muted-foreground">{selected ? `On ${selected.name || selected.type}` : "Select a layer on the canvas to leave precise feedback."}</p>
-      <textarea aria-label="Comment for agent" className="min-h-20 w-full rounded border bg-background p-2 text-sm" placeholder="What should change?" value={draft} onChange={event => changeDraft(event.target.value)} />
+      <textarea disabled={!commentKey || draftState.key !== commentKey} aria-label="Comment for agent" className="min-h-20 w-full rounded border bg-background p-2 text-sm" placeholder="What should change?" value={draft} onChange={event => changeDraft(event.target.value)} />
       <Button size="sm" disabled={!selected || !draft.trim() || design.comment.isPending || design.save.isPending} onClick={() => { void sendComment() }}>{data.origin && data.can_edit ? "Send to agent" : "Save comment"}</Button>
       {commentError && <p role="alert" className="text-xs text-destructive">{commentError}</p>}
      </div>}
@@ -196,6 +292,8 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
     </div>
    </aside>
   </div>
+  <CreateSurface open={continueOpen} onOpenChange={setContinueOpen} size="sm" onSubmit={()=>{if(!continuing&&continueName.trim())void continueDesign()}}><CreateSurfaceHeader title="Continue in a new Design" description="Create a copy of this canvas with fresh history. The original canvas and unsent feedback stay in this tab." onClose={()=>setContinueOpen(false)} /><CreateSurfaceBody><CreateSurfaceField label="New Design name" htmlFor="continued-design-name"><Input id="continued-design-name" value={continueName} maxLength={200} onChange={event=>setContinueName(event.target.value)} /></CreateSurfaceField>{continueError&&<p role="alert" className="text-destructive">{continueError}</p>}</CreateSurfaceBody><CreateSurfaceFooter onCancel={()=>setContinueOpen(false)} guardCancel={false} primaryLabel={continuing?"Creating…":"Create new Design"} onPrimary={()=>{void continueDesign()}} primaryDisabled={continuing||!continueName.trim()} /></CreateSurface>
+  {prototype && playing && <DesignPrototypePlayer key={playing} nodes={design.nodes} startScreenId={playing} onClose={() => setPlaying(null)} />}
   {accessOpen && <DesignAccessDialog workspaceId={workspaceId} slug={slug} onClose={() => setAccessOpen(false)} />}
  </section>
 }

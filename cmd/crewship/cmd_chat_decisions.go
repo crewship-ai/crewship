@@ -98,6 +98,7 @@ func newChatDecisionCommand() *cobra.Command {
 		if name == "list" {
 			cmd.Flags().Int("limit", 100, "Maximum source cards per page (1–100)")
 			cmd.Flags().String("cursor", "", "Opaque next_cursor from the preceding page")
+			addChatHintsWatch(cmd)
 		}
 		if name == "answer" {
 			cmd.Flags().String("expected-version", "", "Opaque reviewed source version")

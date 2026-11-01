@@ -63,10 +63,13 @@ const EntryPageProduceDenied journal.EntryType = "page.produce_denied"
 // it to guess what; this says which limit, what was attempted, and what the
 // ceiling is, in fields a script can branch on and a message a human can read.
 type pageRejection struct {
-	Rejected bool           `json:"rejected"`
-	Kind     string         `json:"kind"`
-	Detail   map[string]any `json:"detail,omitempty"`
-	Message  string         `json:"message,omitempty"`
+	Rejected bool   `json:"rejected"`
+	Kind     string `json:"kind"`
+	// Code is the stable machine code of the refusal, set where a client
+	// branches on it (pages_limit). Additive.
+	Code    string         `json:"code,omitempty"`
+	Detail  map[string]any `json:"detail,omitempty"`
+	Message string         `json:"message,omitempty"`
 	// Error repeats Message under the key every generic client reads
 	// (lib/api-error.ts apiErrorMessage, internal/cli CheckError), so a
 	// refusal shows its sentence instead of "Request failed (HTTP 422)" or

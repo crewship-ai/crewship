@@ -166,6 +166,19 @@ refused. Read responses include a `quota` object with `used_bytes`,
 and a reader limited to the shared version gets `shared-version-only`.
 Non-owners receive zero usage/limit values.
 
+Every artifact family also shares one workspace and instance storage budget.
+When that is full, writes answer `413 artifact_storage_quota`, nothing is
+written and every existing version is kept. `quota.storage_level` warns in
+advance (`near`, `critical`, `full`) without byte counts. Workspace owners and
+admins read the byte counts from `GET /api/v1/pages/artifacts/storage`:
+
+```json
+{"used_bytes": 734003200, "reserved_bytes": 0, "limit_bytes": 34359738368, "level": "none", "instance_level": "none", "retention": "keep-all"}
+```
+
+Too many concurrent uploads answer `503 artifact_storage_busy` with
+`Retry-After`; retry the same request.
+
 ## Route families
 
 ### Projects
@@ -173,6 +186,7 @@ Non-owners receive zero usage/limit values.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/v1/pages/artifacts/availability` | Whether projects are enabled for this workspace |
+| GET | `/api/v1/pages/artifacts/storage` | Aggregate artifact storage usage for the workspace (owners and admins only) |
 | POST | `/api/v1/pages/artifacts` | Create a private project with its first version |
 | GET | `/api/v1/pages/{slug}/artifact` | Current version, files and quota |
 | GET | `/api/v1/pages/{slug}/artifact/versions` | Same view including version history |
@@ -282,6 +296,7 @@ status for those.
 | 409 | `artifact_data_conflict` | A Dashboard document's `ifVersion` is stale |
 | 409 | — | Design: "Design changed; reload and reapply". Craft: "native editor lease changed" or "native document or lease changed; keep the local draft" |
 | 413 | `artifact_history_quota` | Project history or version size limit reached |
+| 422 | `pages_limit` | The workspace has reached its page limit; creating a project or Design is refused and nothing is created. The `error` sentence states the limit |
 | 413 | — | Design: "Design capacity is full". Craft: "native history quota reached" |
 | 413 | `artifact_data_quota` | A Dashboard limit was exceeded |
 | 413 | `artifact_slides_limit` | The Slides export is too large |

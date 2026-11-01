@@ -294,6 +294,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 
 	// Runs (require workspace context)
 	runs := NewRunHandler(r.db, r.logger)
+	// openapi: query limit:integer
 	r.mux.Handle("GET /api/v1/runs", authed(wsCtx(http.HandlerFunc(runs.List))))
 	// Fleet operations aggregate. Registered as a literal path so Go's mux
 	// prefers it over the {id} wildcard below (literal wins over pattern).
@@ -338,6 +339,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// surface for the /missions/[id]/timeline UI.
 	ch := NewCartographerHandler(r.db, r.logger)
 	ch.SetJournal(r.Journal())
+	// openapi: query limit:integer
 	r.mux.Handle("GET /api/v1/missions/{missionId}/checkpoints", authed(wsCtx(http.HandlerFunc(ch.List))))
 	r.authedMut("POST", "/api/v1/missions/{missionId}/checkpoints", roleCreate, ch.Create)
 	r.mux.Handle("GET /api/v1/checkpoints/{id}", authed(wsCtx(http.HandlerFunc(ch.Get))))
@@ -456,8 +458,9 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.mux.Handle("GET /api/v1/paymaster/spend/by-mission/{missionId}", authed(wsCtx(http.HandlerFunc(ph.SpendByMission))))
 	// TopSpenders discards parseWindow's second return (`since, _ :=`), so
 	// ?until is parsed and then ignored. Declaring it would advertise a filter
-	// that does not filter; ?limit is read inline and already inferred.
-	// openapi: query range:string since:string
+	// that does not filter. parsePagination supplies ?limit; its offset
+	// result is also discarded, so only limit is declared here.
+	// openapi: query range:string since:string limit:integer
 	r.mux.Handle("GET /api/v1/paymaster/top-spenders", authed(wsCtx(http.HandlerFunc(ph.TopSpenders))))
 	// openapi: query range:string since:string until:string
 	r.mux.Handle("GET /api/v1/paymaster/subscriptions", authed(wsCtx(http.HandlerFunc(ph.SubscriptionUsage))))
@@ -811,6 +814,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	evH.SetJournal(r.Journal())
 	r.authedMut("POST", "/api/v1/eval/replay", roleManage, evH.Replay)
 	r.authedMut("POST", "/api/v1/eval/regression", roleManage, evH.Regression)
+	// openapi: query limit:integer
 	r.mux.Handle("GET /api/v1/eval/runs", authed(wsCtx(http.HandlerFunc(evH.ListRuns))))
 	r.mux.Handle("GET /api/v1/eval/runs/{id}", authed(wsCtx(http.HandlerFunc(evH.GetRun))))
 
