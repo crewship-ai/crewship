@@ -383,7 +383,7 @@ func buildDocument(routes []route) map[string]any {
 		schemas[name] = schema
 	}
 	artifactFeedback := artifactProjectFeedbackComponents()
-	for _, name := range []string{"ArtifactProjectOrigin", "ArtifactProjectReply", "ArtifactProjectComment", "ArtifactProjectSnapshot", "ArtifactProjectRetentionPreview", "ArtifactProjectCommentRequest", "ArtifactProjectReplyRequest"} {
+	for _, name := range []string{"ArtifactProjectOrigin", "ArtifactProjectReply", "ArtifactProjectComment", "ArtifactProjectSnapshot", "ArtifactProjectRetentionPreview", "ArtifactProjectCommentRequest", "ArtifactProjectReplyRequest", "ArtifactInteractiveRuntime"} {
 		schemas[name] = artifactFeedback[name]
 	}
 	_, providerLoginComponents := providerLoginSchemaCatalog()

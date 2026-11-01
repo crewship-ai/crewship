@@ -144,7 +144,7 @@ Every call returns a promise. A refused call rejects with an `Error` whose
 |---|---|
 | `crewship.data.get(collection)` | `{collection, documents}`. Each document has `id`, `version`, `value` (a JSON object), `updated_at` and `source_label` (**You**, **Agent**, **Contributor** or **Former contributor**). |
 | `crewship.data.list()` | `{collections: [{name, documents}]}` for the declared collections that hold data. |
-| `crewship.data.batch(collection, documents)` | Writes 1–50 documents `{id, ifVersion, value}` all or nothing, then returns the collection as `get` does. Use the `version` you read as `ifVersion`, or `0` for a new document. |
+| `crewship.data.batch(collection, documents)` | Writes 1–50 documents `{id, ifVersion, value}` all or nothing, then returns the written documents with their new versions (not the rest of the collection; call `get` for that). Use the `version` you read as `ifVersion`, or `0` for a new document. |
 | `crewship.viewer()` | `{name}`: the viewer's display name. Nothing else about the viewer reaches the page. |
 
 There is no delete; write a value such as `{"done": true}` instead.

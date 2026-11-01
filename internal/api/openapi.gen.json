@@ -1548,6 +1548,30 @@
         ],
         "type": "object"
       },
+      "ArtifactInteractiveRuntime": {
+        "additionalProperties": false,
+        "properties": {
+          "collections": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "development_same_origin": {
+            "type": "boolean"
+          },
+          "runtime_url": {
+            "description": "Fixed Pages runtime bootstrap on a separate site where the Project's scripts run, or empty when this server has no isolating runtime origin for the request host.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "runtime_url",
+          "development_same_origin",
+          "collections"
+        ],
+        "type": "object"
+      },
       "ArtifactProjectAvailability": {
         "additionalProperties": false,
         "properties": {
