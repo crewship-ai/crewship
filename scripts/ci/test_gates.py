@@ -325,6 +325,23 @@ class GateTests(unittest.TestCase):
             self.assertTrue(failures(needs, 'pull_request'), value)
             self.assertTrue(failures(needs, 'merge_group'), value)
 
+    def test_verdict_entrypoint_without_event_name_fails_closed(self):
+        # The script must not assume a pull_request when the runner omits
+        # GITHUB_EVENT_NAME: a reduced plan then fails the CI Result.
+        reduced = self.results()
+        reduced['changes']['outputs']['full'] = 'false'
+        for name in FULL:
+            reduced[name]['result'] = 'skipped'
+        script = Path(__file__).with_name('verdict.py')
+        env = {k: v for k, v in os.environ.items() if k != 'GITHUB_EVENT_NAME'}
+        for event, needs, code in [(None, reduced, 1), ('merge_group', reduced, 1),
+                                   ('pull_request', reduced, 0), (None, self.results(), 0)]:
+            run_env = dict(env, CI_NEEDS=json.dumps(needs))
+            if event:
+                run_env['GITHUB_EVENT_NAME'] = event
+            result = subprocess.run(['python3', str(script)], env=run_env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, code, (event, result.stdout))
+
 
 if __name__ == '__main__':
     unittest.main()
