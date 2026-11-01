@@ -7500,6 +7500,11 @@
             "minLength": 1,
             "type": "string"
           },
+          "linkTo": {
+            "description": "Prototype link: ID of the screen (frame) a click on this layer opens in Play mode. Empty string clears it. A target that no longer exists is kept and plays as an inert hotspot.",
+            "maxLength": 128,
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -7564,6 +7569,11 @@
           "id": {
             "maxLength": 128,
             "minLength": 1,
+            "type": "string"
+          },
+          "linkTo": {
+            "description": "Prototype link: ID of the screen (frame) a click on this layer opens in Play mode. Empty string clears it. A target that no longer exists is kept and plays as an inert hotspot.",
+            "maxLength": 128,
             "type": "string"
           },
           "name": {

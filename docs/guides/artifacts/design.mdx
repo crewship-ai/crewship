@@ -33,6 +33,10 @@ An operator can instead set `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true` in the
 server environment. That turns the server side on for every workspace on the
 instance, regardless of the workspace flag.
 
+Prototype playback of linked screens has its own build-time variable,
+`NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE=true`, on top of the two switches above;
+see [Play a prototype](#play-a-prototype).
+
 The `artifacts_design` flag is independent of `artifact_projects`, the flag for
 Project artifacts. You can turn Design on without Projects.
 
@@ -129,6 +133,56 @@ Every change goes to the other people on the canvas as you make it. The editor
 also keeps a copy of your unsaved canvas in this browser, so a crash or a lost
 connection does not discard it. If browser storage is full or blocked, the
 editor says so; keep the window open until it is connected and save a version.
+
+## Play a prototype
+
+<Note>
+  Prototype playback is off by default. It appears only in a web UI built with
+  both `NEXT_PUBLIC_ARTIFACTS_DESIGN=true` and
+  `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE=true`. Without the second variable
+  the editor shows no **Play** button and no **Link to screen** field, and links
+  already stored on a canvas are kept but do nothing.
+</Note>
+
+You can link a layer on one screen to another screen and click through the
+screens as a prototype.
+
+**Link a layer to a screen** (needs **write** access):
+
+1. Select a rectangle, text or image layer, for example a **Next** button on
+   **Screen 1**.
+2. In **Properties**, choose the target in **Link to screen**, for example
+   **Screen 2**.
+3. To remove the link, choose **No link**.
+
+The link is part of the canvas: other people see it immediately, it is saved in
+versions, and **Restore** brings back the links of that version. Screens cannot
+be linked themselves; link a layer inside the screen. People with **read** or
+**Comment** access see the link but cannot change it.
+
+**Play the prototype** (any access level, including **read**):
+
+1. Optionally select a screen or a layer inside it to start there. Without a
+   selection, playback starts on the first screen.
+2. Click **Play** in the header. The screen opens on its own, without the
+   editor around it.
+3. Click a linked layer, or move to it with **Tab** and press **Enter** or
+   **Space**, to open its target screen.
+4. Click **Back** to return to the previous screen.
+5. Press **Esc** or click **Exit** to leave playback. Focus returns to **Play**.
+
+Playback only shows the canvas. Nothing you click in it changes the Design,
+creates a version or is seen by other people.
+
+If a layer links to a screen that was deleted, **Link to screen** shows
+**Deleted screen** and the hint *The linked screen was deleted*. In playback the
+layer has a dashed outline, clicking it does nothing, and the bar above the
+screen says that the linked screen was deleted. Choose another target or
+**No link** to fix it. If the screen you are viewing is deleted while you play,
+playback says so; go **Back** or **Exit**.
+
+Agents and the CLI set the same link with the `linkTo` node field; see
+[Command line](#command-line).
 
 ## Save versions
 
@@ -290,3 +344,14 @@ The same actions are available from the CLI under `crewship page design`:
 `create`, `get`, `versions`, `apply`, `snapshot`, `restore`, `share`,
 `comments`, `comment`, `agent` and `watch`. Run
 `crewship page design --help` for the details.
+
+A prototype link is the optional `linkTo` field of a layer: the ID of the
+target screen. `""` removes it. For example, link the layer `next` to the screen
+`checkout`:
+
+```bash
+echo '{"operations":[{"op":"upsert","node":{"id":"next","linkTo":"checkout"}}],"message":"Link Next to Checkout"}' \
+  | crewship page design apply checkout-flow --file -
+```
+
+Agents use the same field in `design_apply`.
