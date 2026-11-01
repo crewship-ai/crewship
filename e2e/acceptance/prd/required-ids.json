@@ -118,6 +118,30 @@
       "origin": "craft"
     },
     {
+      "id": "A.craft.agent.word.lease",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.agent.word.one-version",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.agent.word.visible",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.agent.sheet.lease",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.agent.sheet.one-version",
+      "origin": "craft"
+    },
+    {
+      "id": "A.craft.agent.sheet.visible",
+      "origin": "craft"
+    },
+    {
       "id": "A.resilience.outage.word",
       "origin": "craft"
     },
