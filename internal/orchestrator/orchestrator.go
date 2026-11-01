@@ -222,8 +222,8 @@ type AgentRunRequest struct {
 	// this run wait on it.
 	OnExecStarted func(execID string)
 
-	// OnExecTerminal reports an inspected natural process exit, never an inferred
-	// status from an error or an observation timeout.
+	// OnExecTerminal reports an inspected process exit, including a confirmed
+	// stop, never an inferred status from an error or an observation timeout.
 	OnExecTerminal func(exitCode int)
 
 	// MemoryBinding is the seam the memory Ledger Store.Write plugs into
@@ -470,6 +470,10 @@ type RunOutputState struct {
 	// RetainedResult is observed terminal evidence, not acknowledgement of
 	// output projection. Status cannot become successful until replay commits.
 	RetainedResult *runoutput.Snapshot `json:"retained_result,omitempty"`
+	// Unprojected records why an ended retained run was settled without its
+	// output: its ownership could never be verified. It is not a projection
+	// acknowledgement, and the output is never replayed after it is set.
+	Unprojected string `json:"unprojected,omitempty"`
 }
 
 // AgentEvent is a streaming event emitted during an agent run, such as text

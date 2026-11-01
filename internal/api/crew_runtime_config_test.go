@@ -249,6 +249,14 @@ func TestEnsureProvisioned_NoProvisionNeeded(t *testing.T) {
 // *devcontainer.FeatureDownloader, and the default declares two features
 // (common-utils, claude-code), so an actual resolve would panic rather than
 // fail cleanly.
+// provisionJobFlipDelay is how long the fake in-flight job stays "running"
+// before the test completes it. EnsureProvisioned must reach EnqueueForCrew
+// (crew-image check plus a DB read) while the job is still running so the
+// AlreadyRunning fast path holds; if the flip lands first, a real build starts
+// and fails without a feature downloader. 20 ms lost that race on a loaded
+// linux-arm64 runner under -race (2026-11-01); the poll timeout is 5 s.
+const provisionJobFlipDelay = 500 * time.Millisecond
+
 func TestEnsureProvisioned_NoConfigNeedsProvisioning(t *testing.T) {
 	h := newTestProvisioningHandler(t)
 	h.provisioner = testProvisioner()
@@ -263,7 +271,7 @@ func TestEnsureProvisioned_NoConfigNeedsProvisioning(t *testing.T) {
 	h.mu.Unlock()
 
 	go func() {
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(provisionJobFlipDelay)
 		h.mu.Lock()
 		h.jobs[crewID].Status = "completed"
 		h.mu.Unlock()
@@ -308,7 +316,7 @@ func TestEnsureProvisioned_WaitsForCompletion(t *testing.T) {
 	h.mu.Unlock()
 
 	go func() {
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(provisionJobFlipDelay)
 		h.mu.Lock()
 		h.jobs[crewID].Status = "completed"
 		h.mu.Unlock()

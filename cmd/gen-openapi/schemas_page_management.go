@@ -35,7 +35,7 @@ func pageManagementSchemas(subject map[string]any) (map[string]any, map[string]a
 	change := object(map[string]any{"subject_type": text, "subject_id": text, "label": text, "before": pageManagementPermissionsSchema(), "after": pageManagementPermissionsSchema()}, "subject_type", "subject_id", "before", "after")
 	move := object(map[string]any{
 		"dry_run": boolean, "page_id": text, "page": text, "pages_version": responseVersion,
-		"from_folder": map[string]any{"oneOf": []any{folder, map[string]any{"type": "null"}}}, "to_folder": folder,
+		"from_folder": map[string]any{"oneOf": []any{folder, nullOnlySchema()}}, "to_folder": folder,
 		"before": snapshot, "after": snapshot, "changes": array(change), "changed": boolean, "review_token": text,
 	}, "dry_run", "page_id", "page", "pages_version", "from_folder", "to_folder", "before", "after", "changes", "changed")
 	return request, response, move

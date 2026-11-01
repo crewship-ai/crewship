@@ -153,6 +153,11 @@ func (m *craftNativeAgentManager) checkOriginalGrant(ctx context.Context, tx *sq
 	if err != nil || instruction != g.Instruction {
 		return errCraftNativeAgentDenied
 	}
+	// Rechecked on every agent write: excluding the crew or disabling the
+	// policy stops a task already running (#4681).
+	if !m.human.pages.artifactAgentPolicyAllows(context.WithValue(ctx, pageAuthReaderKey{}, tx), g.Scope.WorkspaceID, g.CrewID) {
+		return errCraftNativeAgentDenied
+	}
 	epochs, err := craftNativeAgentEpochs(ctx, tx, g, false)
 	if err != nil || epochs != g.Epochs {
 		return errCraftNativeAgentDenied

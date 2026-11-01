@@ -32,6 +32,20 @@ GO_PARITY_INPUTS = {
 FRONTEND_PARITY_INPUTS = set(FRONTEND_DOC_TESTS)
 
 
+# Expensive lanes (verdict.FULL: macOS/arm64, race, shuffle, all actual
+# Mooring cases) run in the merge queue and on main, not twice per PR (#4752).
+# A pull request still runs them when it changes CI control, dependency or
+# release inputs, or carries this label when its run is created (labels
+# added later need a new push: re-runs reuse the original event payload).
+FULL_CI_LABEL = 'full-ci'
+
+
+def full_matrix(event_name, paths, labels):
+    if event_name != 'pull_request':
+        return True
+    return release_changed(paths) or FULL_CI_LABEL in labels
+
+
 def changed_paths(base, head):
     # Rename detection can hide a deleted runtime input behind its new docs
     # path. Emit both paths so routing retains the source-side requirements.
@@ -44,6 +58,9 @@ def classify(paths):
     code = go = False
     for path in paths:
         if (path.startswith('docs/') and PurePosixPath(path).suffix.lower() in DOC_EXTENSIONS) or path in DOC_ROOT_FILES:
+            continue
+        # Release-note fragments (#4751) are CHANGELOG.md prose split per PR.
+        if PurePosixPath(path).parent == PurePosixPath('changelog.d') and path.endswith('.md'):
             continue
         code = True
         if path.startswith(('app/', 'components/', 'hooks/', 'lib/', 'stores/', 'public/', 'e2e/')) or path in {'next.config.ts', 'tsconfig.json', 'vitest.config.ts', 'postcss.config.mjs', 'eslint.config.mjs'}:
@@ -78,8 +95,11 @@ def main():
         result = classify(paths)
         result['release'] = release_changed(paths)
     else:
-        result = classify(['unknown/full-suite'])
+        paths = ['unknown/full-suite']
+        result = classify(paths)
         result['release'] = name == 'workflow_dispatch'
+    labels = [label.get('name') for label in event.get('pull_request', {}).get('labels', [])]
+    result['full'] = full_matrix(name, paths, labels)
     with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
         for key, value in result.items():
             print(f'{key}={str(value).lower()}', file=out)

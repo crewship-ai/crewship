@@ -5,13 +5,15 @@
 ## Changelog entries
 
 `RELEASING.md` cuts release notes from `CHANGELOG.md`'s
-`## [Unreleased]` section. That makes a missing entry not untidiness but
+`## [Unreleased]` section, after collecting the `changelog.d/` fragments into
+it. That makes a missing entry not untidiness but
 a release note that does not exist — and a change nobody is told about.
 
 **A PR that touches `internal/api/`, `internal/orchestrator/`,
 `internal/harbormaster/`, `cmd/crewship/`, `app/`, `components/`, `lib/`,
-`hooks/` or `stores/` must add an entry under `## [Unreleased]`.** The
-**Changelog Guard** workflow enforces it. The three frontend trees at the
+`hooks/` or `stores/` must add a release note: a new fragment
+`changelog.d/<PR-number>-<slug>.md` (preferred) or an entry under
+`## [Unreleased]`.** The **Changelog Guard** workflow enforces it. The three frontend trees at the
 end are peer top-level trees, not sub-directories of `app/` and
 `components/`, and they carry as much user-visible behaviour: a chat or
 socket fix lands in `hooks/use-chat.ts`, retry and error copy in
@@ -29,6 +31,21 @@ blank line at the bottom, is not a release note and no longer passes. What
 it still cannot judge is entry *quality*; `- fix bug` satisfies it. The
 guard buys the reviewer that conversation, it does not replace them.
 
+**Fragments (#4751).** Every PR writing at the top of `## [Unreleased]`
+made any two queued PRs conflict there, so queued PRs were re-merged and
+re-run through full CI. A fragment is its own file and cannot conflict. The
+guard accepts a fragment only when the PR *adds* it, directly inside
+`changelog.d/`, as a `.md` file other than `README.md`, with at least one
+non-whitespace character; it diffs from the same merge base, so a fragment
+another PR merged to `main` meanwhile is not counted. Editing or deleting an
+existing fragment is not a release note, the same rule as an edit outside
+`## [Unreleased]`; a PR that deletes or renames a fragment gets no credit for
+fragments it adds unless it also changes `## [Unreleased]` (the release PR
+that collects them), and a symlinked fragment never counts. Fragments do not bypass the missing-heading check. At
+release time `scripts/changelog-collect.py` moves them into
+`## [Unreleased]` (see `RELEASING.md`); its behaviour is pinned in the same
+test script. The format is in `changelog.d/README.md`.
+
 The guard's own logic is unit-tested by
 `scripts/changelog-guard-test.sh`, which extracts the step's script
 verbatim from the workflow and runs it against a throwaway repository —
@@ -44,7 +61,7 @@ PRs merged in one window with no trace anywhere — the #2086 audit found
 fifteen of them and the backfill turned up three more — including a
 breaking credential-model change across 117 files.
 
-Write the entry the way the file already does — lead with the
+Write the entry (in a fragment or the file) the way the file already does — lead with the
 **user-visible symptom in bold**, then what was actually wrong and what
 changed. Mark a change that can break a working setup with
 `⚠️ **Behaviour change:**` and say plainly what used to succeed and now
