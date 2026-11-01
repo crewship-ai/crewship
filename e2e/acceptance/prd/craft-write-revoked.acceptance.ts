@@ -8,7 +8,7 @@
 // Full mode only: it drives the real editor of a deployed origin.
 import { captureAdmission, peerApi, requireNative, traceCraft, type CraftCall } from "./craft-lease/helpers"
 import { APPLICATIONS, NativePage } from "./craft-lease/native"
-import { headText, inspectDrafts, placeCaret, typedMarkers, typeLines, waitForDraftOffer, type Typing } from "./craft-session/draft"
+import { headText, inspectDrafts, placeCaret, newTyping, typedMarkers, typeLines, waitForDraftOffer } from "./craft-session/draft"
 import * as editor from "./drafts-crash/native"
 import { expect, prdRequirement, test } from "./fixtures"
 
@@ -65,15 +65,15 @@ for (const { application, label } of APPLICATIONS) {
           // The person keeps typing and, in the middle of it, the owner
           // withdraws the write right. Nothing is saved before the right goes.
           await placeCaret(page, application, 6)
-          const progress: Typing = { typed: 0 }
+          const progress = newTyping()
           const typing = typeLines(page, WORK, 8, 40, 120, progress)
           await page.waitForTimeout(1_600)
-          // Every line typed while the right was still there must be in the draft.
-          const typedBefore = typedMarkers(WORK, progress.typed)
-          expect(typedBefore.length, "lines were typed before the right was withdrawn").toBeGreaterThan(0)
+          expect(progress.accepted.length, "lines were typed before the right was withdrawn").toBeGreaterThan(0)
           const revokedAt = Date.now()
           await doc.revoke(request, peer.userId, "write")
           await typing
+          // Every line the editor took (also after the request, until it turned read-only) must be in the draft.
+          const typedBefore = typedMarkers(WORK, progress.accepted)
           await expect(page.getByRole("button", { name: "Uvolnit úpravy", exact: true }), "the editor is no longer the person's to edit").toHaveCount(0, { timeout: READ_ONLY_WITHIN_MS })
           // The editor ends the write session: "Pouze čtení", or "Editor odpojen · koncept zachován"
           // when the server closes the editor's event stream because the authority changed.
@@ -81,7 +81,7 @@ for (const { application, label } of APPLICATIONS) {
           const readOnlyAfterMs = Date.now() - revokedAt
           const offeredRows = await waitForDraftOffer(page, READ_ONLY_WITHIN_MS)
           const drafts = await inspectDrafts(page, typedBefore)
-          expect(drafts.hasMarker.some(Boolean), `the offered draft holds all ${typedBefore.length} lines typed before the right was withdrawn`).toBe(true)
+          expect(drafts.hasMarker.some(Boolean), `the offered draft holds all ${typedBefore.length} lines the editor took`).toBe(true)
           const shots: Record<string, Buffer> = { "peer-read-only.png": await page.screenshot({ fullPage: true }) }
 
           // The server takes no further write from the person and nothing was saved.
@@ -126,7 +126,7 @@ for (const { application, label } of APPLICATIONS) {
             leaseAfterRevocation: view && { mine: view.mine, can_write: view.can_write, can_edit: view.can_edit },
             offered: offeredRows,
             draftHasWork: drafts.hasMarker,
-            typedBeforeRevocation: typedBefore.length,
+            acceptedLines: progress.accepted, typingStoppedBy: progress.stoppedBy ?? null,
             lateWrite: late.status(),
             reacquire: reacquire.status(),
             versionUnchanged: before.version,

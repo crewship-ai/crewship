@@ -8,7 +8,7 @@
 // Full mode only. The restart is the operator's command, PRD_RESTART_COMMAND or PRD_RESTART_HANDSHAKE
 // (see craft-session/restart.ts); the row fails without it. Run these rows
 // serially and only when needed: a restart interrupts everyone on the instance.
-import { holdsAll, inspectDrafts, placeCaret, saveByAutosaveOrKey, typedMarkers, typeLines, type Typing } from "./craft-session/draft"
+import { holdsAll, inspectDrafts, newTyping, placeCaret, saveByAutosaveOrKey, typedMarkers, typeLines } from "./craft-session/draft"
 import { restartServer } from "./craft-session/restart"
 import { expect, prdRequirement, test } from "./fixtures"
 import { disposeActors, isolatedActor } from "./outage-lostack/actor"
@@ -41,19 +41,19 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
       // Unsaved work needs continuous typing (the editor saves 300 ms after the
       // last keystroke). The person keeps typing while the server restarts.
       await placeCaret(page, app, 5)
-      const progress: Typing = { typed: 0 }
+      const progress = newTyping()
       const typing = typeLines(page, M.M2, 40, 40, 120, progress)
       await page.waitForTimeout(2_500)
       const headBefore = await N.readHead(request, ref)
       expect(headBefore.text).toContain(M.M1)
       expect(headBefore.text, "the typing is not saved yet").not.toContain(`${M.M2}-0`)
       const savesBefore = ops.filter((o) => o.kind === "save").length
-      // Every line typed before the restart was taken by a live editor: all of
-      // them must survive, saved or in the draft, not just the first one.
-      const unsaved = typedMarkers(M.M2, progress.typed)
-      expect(unsaved.length, "lines were typed before the restart").toBeGreaterThan(0)
+      expect(progress.accepted.length, "lines were typed before the restart").toBeGreaterThan(0)
       const restart = await restartServer(prd.origin, `row A.resilience.restart.${label.toLowerCase()}`)
       const typedLines = await typing
+      // Every line the editor took (also while the restart was in flight) must
+      // survive, saved or in the draft, not just the first one.
+      const unsaved = typedMarkers(M.M2, progress.accepted)
 
       // What the open editor does on its own after the server is back.
       const timeline: Awaited<ReturnType<typeof N.uiState>>[] = []
@@ -66,7 +66,7 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
       const headAfter = await N.readHead(request, ref)
       expect(headAfter.text, "the work saved before the restart survived it").toContain(M.M1)
       const savedByEditor = headAfter.text.includes(`${M.M2}-0`)
-      if (savedByEditor) expect(holdsAll(headAfter.text, unsaved), `the editor saved every line typed before the restart (${unsaved.length})`).toBe(true)
+      if (savedByEditor) expect(holdsAll(headAfter.text, unsaved), `the editor saved every line it took (${unsaved.length})`).toBe(true)
 
       // The disconnected editor still offers the unsaved work: look into it.
       const draftsInSession = savedByEditor ? null : await inspectDrafts(page, unsaved)
@@ -87,9 +87,9 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
       const drafts = savedByEditor ? null : await inspectDrafts(page, unsaved)
       if (!savedByEditor) {
         expect(draftsInSession!.rows.length, `the unsaved work is offered as a draft in the open editor (ui ${JSON.stringify(timeline.at(-1))})`).toBeGreaterThan(0)
-        expect(draftsInSession!.hasMarker.some(Boolean), `the draft offered in the open editor holds all ${unsaved.length} lines typed before the restart`).toBe(true)
+        expect(draftsInSession!.hasMarker.some(Boolean), `the draft offered in the open editor holds all ${unsaved.length} lines the editor took`).toBe(true)
         expect(drafts!.rows.length, `the unsaved work is offered again after the reload (ui ${JSON.stringify(reopened)})`).toBeGreaterThan(0)
-        expect(drafts!.hasMarker.some(Boolean), `the draft offered after the reload holds all ${unsaved.length} lines typed before the restart`).toBe(true)
+        expect(drafts!.hasMarker.some(Boolean), `the draft offered after the reload holds all ${unsaved.length} lines the editor took`).toBe(true)
       }
 
       // The editor works again: type, save once.
@@ -110,7 +110,7 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
       await prd.evidence("result.json", {
         appSha: prd.appSha, app, pageId: ref.pageId, restart, initVersion: ref.initVersion,
         baselineSaved: v0, headBefore: { version: headBefore.version, hash: headBefore.hash },
-        typedLines, typedBeforeRestart: unsaved.length, timelineAfterRestart: timeline.slice(-3), savesWithoutPerson: savesWithoutPerson.length,
+        typedLines, acceptedLines: progress.accepted, typingStoppedBy: progress.stoppedBy ?? null, timelineAfterRestart: timeline.slice(-3), savesWithoutPerson: savesWithoutPerson.length,
         headAfterRestart: { version: headAfter.version, hash: headAfter.hash, savedByEditor },
         draftsInSession, reopened, drafts, afterReopen: { version: headReopened.version },
         savedAfterRestart: v1 ?? null, final: { version: fin.version, hash: fin.hash, ...Object.fromEntries(Object.entries(M).map(([k, v]) => [k, fin.text.includes(v)])) },

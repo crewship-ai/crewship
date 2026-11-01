@@ -17,15 +17,34 @@ export interface DraftOffer {
   serverHasMarker: boolean[]
 }
 
-/** Progress of a typeLines() stream: how many lines (text + Enter) were typed so far. */
+/**
+ * Progress of a typeLines() stream. `typed` counts lines (text + Enter) sent;
+ * `accepted` lists the lines the editor provably took: its status showed it
+ * editable both before and after the line ("Pouze čtení" or "odpojen" means
+ * it no longer takes input). Every accepted line must survive, saved or in
+ * the draft, including lines typed while a restart or handoff was in flight.
+ */
 export interface Typing {
   typed: number
+  accepted: number[]
+  /** The status text that ended the stream, if the editor stopped taking input. */
+  stoppedBy?: string
 }
 
-/** The markers typeLines() writes for its first `n` lines: `${prefix}-0` … `${prefix}-${n - 1}`. */
-export function typedMarkers(prefix: string, n: number): string[] {
-  return Array.from({ length: n }, (_, i) => `${prefix}-${i}`)
+export const newTyping = (): Typing => ({ typed: 0, accepted: [] })
+
+/** The markers of the given typeLines() lines: `${prefix}-${i}`. */
+export function typedMarkers(prefix: string, lines: number[]): string[] {
+  return lines.map((i) => `${prefix}-${i}`)
 }
+
+const NOT_EDITABLE = /Pouze čtení|odpojen/
+const editorStatus = (page: Page) =>
+  page
+    .getByRole("status")
+    .first()
+    .innerText({ timeout: 200 })
+    .catch(() => null)
 
 /** Does `text` hold every marker as a whole line number (`X-1` is not satisfied by `X-10`). */
 export function holdsAll(text: string, markers: string[]): boolean {
@@ -109,16 +128,30 @@ export async function placeCaret(page: Page, app: "wordcraft" | "gridcraft", row
   await settle()
 }
 
-/** Types `${prefix}-0`, `${prefix}-1`, ... each followed by Enter, without ever pausing for autosave. */
-export async function typeLines(page: Page, prefix: string, lines: number, delay = 40, gapMs = 120, progress: Typing = { typed: 0 }): Promise<number> {
+/**
+ * Types `${prefix}-0`, `${prefix}-1`, ... each followed by Enter, without ever
+ * pausing for autosave, and records in `progress` which lines the editor took.
+ * Stops once the editor reports it no longer takes input.
+ */
+export async function typeLines(page: Page, prefix: string, lines: number, delay = 40, gapMs = 120, progress: Typing = newTyping()): Promise<number> {
   // A gap at or above the 300 ms autosave delay would let every line save.
   if (gapMs >= 300 || delay >= 300) throw new Error(`typeLines gaps must stay below the 300 ms autosave delay (delay ${delay}, gap ${gapMs})`)
   try {
+    let before = await editorStatus(page)
     for (let i = 0; i < lines; i++) {
+      if (before === null || NOT_EDITABLE.test(before)) {
+        progress.stoppedBy = before ?? "no status"
+        break
+      }
       await page.keyboard.type(`${prefix}-${i}`, { delay })
       await page.keyboard.press("Enter")
       progress.typed++
-      await page.waitForTimeout(gapMs)
+      const started = Date.now()
+      const after = await editorStatus(page)
+      // A line during which the editor turned read-only is ambiguous: not required.
+      if (after !== null && !NOT_EDITABLE.test(after)) progress.accepted.push(i)
+      before = after
+      await page.waitForTimeout(Math.max(0, gapMs - (Date.now() - started)))
     }
   } catch {
     // The page went away (restart, retired editor): what was typed so far counts.
