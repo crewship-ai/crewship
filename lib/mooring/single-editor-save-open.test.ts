@@ -14,7 +14,7 @@ function opened(applicationId: "wordcraft" | "gridcraft", engineBytes = 3, loade
   const requests: NativeSaveRequest[] = [], states: NativeSaveState[] = []
   const controller = createSingleEditorSave({ workspaceId: "w", pageId: "p", applicationId, enginePin: "engine", baseVersion: "3", generation: "1", sessionId: "s", idleMs: 5,
     loaded: { bytes: new Uint8Array([loadedBytes]) },
-    journal: { async persist() {}, async confirm() {}, async recovery() { return [] }, onRetire() { return () => {} }, async close() {}, async revokeRead() {} },
+    journal: { async persist() {}, async confirm() {}, async recovery() { return [] }, onRetire() { return () => {} }, async close() {}, async revokeRead() {}, async discardRecovered() {} },
     engine: { async snapshot(_s, id) { captures++; return { bytes: new Uint8Array([value]), editorRevision: id ?? `rpc:${captures}`, ...(applicationId === "wordcraft" ? { nativeState: `state:${captures}` } : {}) } }, async validate() {} },
     transport: { async save(r) { requests.push(r); return receipt(r) }, async reconcile(r) { return receipt(r) } },
     onState(s) { states.push(s) }, timeoutMs: 1000,
@@ -59,7 +59,7 @@ function mounted(applicationId: "wordcraft" | "gridcraft") {
   const mountedState = applicationId === "wordcraft" ? "revision:5" : undefined
   const controller = createSingleEditorSave({ workspaceId: "w", pageId: "p", applicationId, enginePin: "engine", baseVersion: "3", generation: "1", sessionId: "s", idleMs: 5,
     loaded: { bytes: new Uint8Array([3]), ...(mountedState ? { mountedState } : {}) },
-    journal: { async persist() {}, async confirm(d) { confirmed.push(d.bytes[0]) }, async recovery() { return [] }, onRetire() { return () => {} }, async close() {}, async revokeRead() {} },
+    journal: { async persist() {}, async confirm(d) { confirmed.push(d.bytes[0]) }, async recovery() { return [] }, onRetire() { return () => {} }, async close() {}, async revokeRead() {}, async discardRecovered() {} },
     engine: { async snapshot(_s, id) { const hook = during; during = undefined; hook?.(); return { bytes: new Uint8Array([value]), editorRevision: id ?? `rpc:${value}`, ...state() } }, async validate() {} },
     transport: { async save(r) { requests.push(r); return receipt(r) }, async reconcile(r) { return receipt(r) } },
     onState() {}, timeoutMs: 1000,

@@ -198,7 +198,7 @@ async function freshCipher(key: string, row: Row) {
 
 // One lane per draft: writes are ordered and coalesced (latest value wins), so
 // typing never queues more than one strict transaction behind the running one.
-interface Lane { next: string; scheduled?: Promise<void>; tail: Promise<void>; failed?: boolean }
+interface Lane { next: string; scheduled?: Promise<void>; tail: Promise<void>; failed?: boolean; merging?: number }
 const lanes = new Map<string, Lane>()
 const writes = new Map<string, number>()
 
@@ -258,8 +258,69 @@ function queueArtifactDraft(key: string, text: string, admitted = false): Promis
     return persist(row, current.next)
   })
   current.scheduled = scheduled
-  current.tail = scheduled.then(() => { current.failed = false }, () => { current.failed = true }).then(() => { if (!current.scheduled && !current.failed && lanes.get(key) === current) lanes.delete(key) })
+  current.tail = scheduled.then(() => { current.failed = false }, () => { current.failed = true }).then(() => { if (!current.scheduled && !current.failed && !current.merging && lanes.get(key) === current) lanes.delete(key) })
   return scheduled
+}
+
+/** The stored text, read inside the draft's own lane (no lane wait, no
+ * migration write). A failed read rejects: the caller must not merge into an
+ * assumed-empty draft. Uses the cipher this page already admitted. */
+async function readInLane(key: string, row: Row): Promise<string> {
+  const store = durable()
+  const record = store ? (store.read ? await store.read(row) : await store.get(row).then(text => text === undefined ? undefined : { text, revision: undefined })) : undefined
+  const legacy = legacyGet(row), raw = legacy ?? record?.text
+  if (raw === undefined) return ""
+  if (!isSealedLocalDraft(raw)) return raw
+  try { return await (await cipherFor(key, row)).open(raw, row[1]) }
+  catch (error) {
+    // An identity change that began after this merge was admitted blocks
+    // every plaintext read (beginLocalDraftIdentity), so the deferred open
+    // fails. When the stored row is exactly the revision this tab itself last
+    // stored or loaded, its text is already in this tab's RAM: merge into it
+    // rather than lose the stop's originals. Any other row stays unreadable.
+    const known = successfulWrites.get(key)
+    if (!(error instanceof LocalDraftReadRevoked) && retired(row) && legacy === undefined && known && record?.revision !== undefined && known.revision === record.revision) return known.text
+    throw error
+  }
+}
+
+/**
+ * Read-modify-write of one draft, admitted at the call like a write: an
+ * identity change that begins later waits for it (its lane tail), so the
+ * person who stopped keeps the result and the next person never receives it.
+ * The read runs at execution time under a cross-tab Web Lock, so a late
+ * result never overwrites a newer draft. Resolves with the stored text ("" for
+ * a caller retired by an identity change); rejects when nothing durable was
+ * stored.
+ */
+export function mergeArtifactDraft(key: string, merge: (existing: string) => string): Promise<string> {
+  const row = parse(key)
+  if (!row) return Promise.reject(new Error("Invalid artifact draft key."))
+  if (retired(row)) return Promise.reject(retiredError())
+  writes.set(key, (writes.get(key) ?? 0) + 1)
+  let lane = lanes.get(key)
+  if (!lane) { lane = { next: "", tail: Promise.resolve() }; lanes.set(key, lane) }
+  const current = lane
+  current.merging = (current.merging ?? 0) + 1
+  const before = Promise.all([current.scheduled ?? Promise.resolve(), current.tail]).catch(() => {})
+  const task = async () => {
+    const text = merge(await readInLane(key, row))
+    await persist(row, text)
+    // The merge is now the lane's latest durable value: an older failed write
+    // must not be retried over it when the lane retires. A write queued after
+    // this merge keeps its own (newer) value.
+    current.failed = false
+    if (!current.scheduled) current.next = text
+    // A caller retired by an identity change gets no plaintext back.
+    return retired(row) ? "" : text
+  }
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks
+  const run = before.then(() => locks ? locks.request(`crewship-artifact-draft:${key}`, task) : task())
+  current.tail = run.then(() => {}, () => {}).then(() => {
+    current.merging! -= 1
+    if (!current.scheduled && !current.failed && !current.merging && lanes.get(key) === current) lanes.delete(key)
+  })
+  return run
 }
 
 export function writeArtifactDraft(key: string, text: string): Promise<void> { return queueArtifactDraft(key, text) }

@@ -5,7 +5,7 @@ import { useSessionSafe } from "@/hooks/use-auth"
 import { useLeaveGuard } from "@/lib/editor-lifecycle/use-leave-guard"
 import { createCapabilityChannel, decodeMessage, transferEditorPort, verifyEditorHello, type CapabilityPort } from "@/lib/mooring/channel"
 import { connectWordCraftHost, loadWordCraftReceiptSDK, openWordCraftSession, WORDCRAFT_BOOTSTRAP_BYTES, WORDCRAFT_FRAME_BYTES, type WordCraftBootstrap, type WordCraftHostState } from "@/lib/mooring/wordcraft-host-session"
-import { artifactDraftKey, artifactDraftRevision, clearArtifactDraft, loadArtifactDraft, writeArtifactDraft } from "@/lib/artifact-drafts"
+import { artifactDraftKey, artifactDraftRevision, clearArtifactDraft, loadArtifactDraft, mergeArtifactDraft } from "@/lib/artifact-drafts"
 import { editorFrameSrc } from "@/lib/workbooks/editor-client"
 import { createEditorFrame, editorFrameSupported } from "./workbook-editor-host"
 
@@ -35,6 +35,8 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
   // A draft kept by an earlier storage-full stop is offered again on reopen.
   React.useEffect(() => {
     const key = artifactDraftKey("wordcraft-pending", humanId, workspaceId, pageId)
+    // A draft belongs to one person: never keep another person's plaintext.
+    setRecovered("")
     if (!key) return
     let active = true
     void loadArtifactDraft(key).then(text => { if (active && text) setRecovered(text) }, () => { /* unreadable: keep the stored copy */ })
@@ -88,8 +90,21 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
         setError(STORAGE_FULL_MESSAGE)
         const key = draftKey.current
         if (key) {
-          const text = JSON.stringify({ format: WORDCRAFT_DRAFT_FORMAT, workspace_id: workspaceId, page_id: pageId, originals })
-          void writeArtifactDraft(key, text).then(() => { if (!abort.signal.aborted) setRecovered(text) }, () => setError(`${STORAGE_FULL_MESSAGE} Místní koncept se nepodařilo uložit; obsah zůstává viditelný v editoru.`))
+          // Admitted now, merged inside the draft's lane under a cross-tab
+          // lock: an identity change waits for it, and two tabs cannot both
+          // read [A] and write [A,B] and [A,C].
+          const merged = mergeArtifactDraft(key, existing => {
+            let kept: string[] = []
+            if (existing) {
+              const parsed = (() => { try { return JSON.parse(existing) } catch { return null } })()
+              if (!parsed || parsed.format !== WORDCRAFT_DRAFT_FORMAT || !Array.isArray(parsed.originals) || !parsed.originals.every((item: unknown) => typeof item === "string")) throw new Error("existing_draft_unreadable")
+              kept = parsed.originals
+            }
+            return JSON.stringify({ format: WORDCRAFT_DRAFT_FORMAT, workspace_id: workspaceId, page_id: pageId, originals: [...kept, ...originals.filter(original => !kept.includes(original))] })
+          })
+          merged.then(text => { if (!abort.signal.aborted) setRecovered(text) }, () => {
+            if (!abort.signal.aborted) setError(`${STORAGE_FULL_MESSAGE} Místní koncept se nepodařilo uložit; obsah zůstává viditelný v editoru.`)
+          })
         }
         return
       }

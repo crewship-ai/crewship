@@ -3,7 +3,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 // Lane/storage tests use an identity cipher; actual cryptography and admission
 // are exercised in local-draft-seal and the real-browser retention tests.
 vi.mock("./local-draft-seal", () => ({
- createLocalDraftCipher: async () => ({ seal: async (text: string) => text, open: async (text: string) => text, close() {} }),
+ // The real cipher asks /pages/@<page>/draft-key, which accepts only this Page identity.
+ createLocalDraftCipher: async (scope: { page: string }) => { if (!/^[A-Za-z0-9_-]{1,128}$/.test(scope.page)) throw new Error("draft-key 400: immutable Page reference required"); return { seal: async (text: string) => text, open: async (text: string) => text, close() {} } },
  forgetLocalDraftPage() {}, isSealedLocalDraft: () => true,
  LocalDraftReadRevoked: class extends Error {},
 }))
@@ -279,4 +280,21 @@ it("capture tolerates a localStorage getter that throws", async () => {
     expect(drafts.captureLegacyLocalDrafts()).toEqual([])
     expect(() => drafts.removeCapturedLegacyLocalDrafts([{ key: "crewship-design:alice", text: "x" }])).not.toThrow()
   } finally { if (original) Object.defineProperty(globalThis, "localStorage", original) }
+})
+
+it("G4 r4 blocker 2: an older failed write never overwrites a later successful merge when the lane retires", async () => {
+  const store = durableStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("wordcraft-pending", "alice", "w", "page_1")!
+  store.disk.set(key, "BASE")
+  // The write fails everywhere (IndexedDB and the localStorage fallback): the lane keeps it as failed.
+  store.put.mockImplementationOnce(async () => { throw new Error("quota") })
+  vi.mocked(localStorage.setItem).mockImplementationOnce(() => { throw new Error("quota") })
+  await expect(drafts.writeArtifactDraft(key, "OLD")).rejects.toThrow()
+  // Storage recovered: a stop merges its originals into the stored draft.
+  await expect(drafts.mergeArtifactDraft(key, existing => `${existing}+NEW`)).resolves.toBe("BASE+NEW")
+  expect(store.disk.get(key)).toBe("BASE+NEW")
+  // Identity retirement must not replay the older failed value over the merge.
+  await drafts.suspendOtherArtifactDrafts("bob")
+  expect(store.disk.get(key)).toBe("BASE+NEW")
 })

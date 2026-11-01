@@ -15,7 +15,7 @@ function fixture(timeoutMs = 10_000) {
   const onReceipt = vi.fn(), confirm = vi.fn(async (draft: NativeDraft) => { if (stored?.editorRevision === draft.editorRevision) stored = undefined })
   const send = vi.fn(async (r: NativeSaveRequest): Promise<unknown> => receipt(r))
   const controller = createSingleEditorSave({ workspaceId: "w", pageId: "p", applicationId: "wordcraft", enginePin: "engine", baseVersion: "1", generation: "1", sessionId: "session", idleMs: 5,
-    journal: { async persist(d) { stored = d }, confirm, async recovery() { return [] }, onRetire() { return () => {} }, async close() {}, async revokeRead() {} },
+    journal: { async persist(d) { stored = d }, confirm, async recovery() { return [] }, onRetire() { return () => {} }, async close() {}, async revokeRead() {}, async discardRecovered() {} },
     engine: { async snapshot(_signal, id) { captures++; onSnapshot?.(); return { bytes: new Uint8Array([value]), editorRevision: id ?? `rpc:${captures}`, nativeState } }, async validate() {} },
     transport: { async save(r) { requests.push(r); return send(r) } }, onState(state) { states.push(state) }, onReceipt, timeoutMs,
   })

@@ -10,11 +10,14 @@ export interface NativeDraft {
   editorRevision: string
   bytes: Uint8Array
 }
-export interface NativeRecovery { draft: NativeDraft; actions: readonly ["compare", "copy"] }
+export interface NativeRecovery { draft: NativeDraft; actions: readonly ["compare", "copy"]; /** Journal row this recovery was read from; only `discardRecovered` uses it. */ source?: { id: string; snapshot: string } }
 export interface NativeDraftJournal {
   persist(draft: NativeDraft): Promise<void>
   confirm: (draft: NativeDraft) => Promise<void>
   recovery(): Promise<NativeRecovery[]>
+  /** Removes the exact stored row a recovery was read from (an earlier mount's
+   * draft). `confirm` only retires this mount's own row. */
+  discardRecovered(recovery: NativeRecovery): Promise<void>
   onRetire(listener: () => void): () => void
   close(): Promise<void>
   revokeRead(): Promise<void>
@@ -107,6 +110,15 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
       const snapshot = encode(draft)
       return enqueue(async () => { if (current === snapshot) { await journal.remove(id); current = undefined } })
     },
+    discardRecovered(recovery) {
+      const source = recovery.source
+      if (!source || source.id === id) return Promise.resolve()
+      return enqueue(async () => {
+        if (!journal.exclusive) return
+        const row = (await journal.load()).find(candidate => candidate.id === source.id)
+        if (row && row.snapshot === source.snapshot) await journal.remove(row.id)
+      })
+    },
     recovery() {
       return enqueue(async () => {
         if (!journal.exclusive) return []
@@ -114,7 +126,7 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
         for (const row of await journal.load()) {
           if (row.id === id || row.schema !== 1 || row.epoch !== "native-v1") continue
           const draft = decode(row.snapshot)
-          if (draft?.applicationId === scope.applicationId) recovered.push({ draft, actions: ["compare", "copy"] })
+          if (draft?.applicationId === scope.applicationId) recovered.push({ draft, actions: ["compare", "copy"], source: { id: row.id, snapshot: row.snapshot } })
         }
         return recovered
       })

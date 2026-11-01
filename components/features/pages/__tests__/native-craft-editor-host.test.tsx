@@ -20,7 +20,7 @@ let authSuspend:(()=>Promise<void>)|undefined
 let privacyRetire:(()=>Promise<void>)|undefined
 let client:ReturnType<typeof clientRig>,journal:ReturnType<typeof journalRig>,ports:ReturnType<typeof portRig>[],portOptions:NativeEditorPortOptions[],stream:((event:"lease"|"session_retired",value:Record<string,unknown>)=>void)|undefined
 function clientRig(){return {share:vi.fn(async(r:{targetVersion:string})=>({version:r.targetVersion,durability:'node',issuedBy:'crewship',phase:'shared'})),open:vi.fn().mockResolvedValue({sessionId:"private-session",applicationId:"wordcraft"}),read:vi.fn().mockResolvedValue({version:"1",bytes:new TextEncoder().encode('{"body":[]}'),applicationId:"wordcraft",enginePin:"a".repeat(64),editorBundle:"b".repeat(64),editorURL:`https://native.example/b/${"b".repeat(64)}/index.html`,quota:{usedBytes:"12",limitBytes:"99999",warning:false,retention:"keep-all"}}),lease:vi.fn().mockResolvedValue(emptyLease),leaseAction:vi.fn(async(action:string):Promise<unknown>=>{if(action==='acquire')client.lease.mockResolvedValue(ownedLease);return ownedLease}),events:vi.fn((_signal:AbortSignal,callback:typeof stream)=>{stream=callback;return new Promise<void>(()=>{})}),reauthorize:vi.fn().mockResolvedValue(true),save:vi.fn(async(r:NativeSaveRequest)=>receipt(r)),reconcile:vi.fn(),close:vi.fn(),proposals:vi.fn().mockResolvedValue([]),proposalBytes:vi.fn(),decideProposal:vi.fn()}}
-function journalRig(){return {persist:vi.fn().mockResolvedValue(undefined),confirm:vi.fn().mockResolvedValue(undefined),recovery:vi.fn().mockResolvedValue([]),onRetire:vi.fn(()=>()=>{}),close:vi.fn().mockResolvedValue(undefined),revokeRead:vi.fn().mockResolvedValue(undefined)}}
+function journalRig(){return {persist:vi.fn().mockResolvedValue(undefined),confirm:vi.fn().mockResolvedValue(undefined),discardRecovered:vi.fn().mockResolvedValue(undefined),recovery:vi.fn().mockResolvedValue([]),onRetire:vi.fn(()=>()=>{}),close:vi.fn().mockResolvedValue(undefined),revokeRead:vi.fn().mockResolvedValue(undefined)}}
 // Word's port names the engine's own revision as nativeState; most tests leave it unset.
 // Bootstrap and an untouched snapshot export the same normalized bytes, as the real port requires.
 let rigNativeState:string|undefined
@@ -193,7 +193,7 @@ describe('native Word host authority and persistence',()=>{
  it('a late old observer privacy event uses the closed custody fence and cannot purge a fresh writer',async()=>{mount();await ready();await acquire();const oldJournal=journal,oldStream=stream,oldPrivacy=privacyRetire!;oldJournal.close.mockImplementation(async()=>{oldJournal.revokeRead.mockRejectedValue(Error('closed_journal_scope_purge_forbidden'))});act(()=>stream?.('lease',{...ownedLease,mine:false,can_write:false}));await waitFor(()=>expect(oldJournal.close).toHaveBeenCalled());const freshJournal=journalRig();journal=freshJournal;client=clientRig();m.createClient.mockReturnValue(client);m.openJournal.mockResolvedValue(freshJournal);const fresh=mount();await waitFor(()=>expect(within(fresh.container).getByRole('button',{name:'Převzít úpravy'})).toBeEnabled());fireEvent.click(within(fresh.container).getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(freshJournal.recovery).toHaveBeenCalled());await waitFor(()=>expect(ports.at(-1)!.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)));const freshFrame=fresh.container.querySelector('iframe');act(()=>oldStream?.('session_retired',{delivery:'stopped',draft:'purge',reason:'read_revoked'}));await waitFor(()=>expect(oldJournal.revokeRead).toHaveBeenCalledOnce());await expect(oldPrivacy()).rejects.toThrow('closed_journal_scope_purge_forbidden');expect(m.purge).not.toHaveBeenCalled();expect(freshJournal.revokeRead).not.toHaveBeenCalled();expect(freshJournal.close).not.toHaveBeenCalled();expect(fresh.container.querySelector('iframe')).toBe(freshFrame);expect(freshFrame).not.toHaveAttribute('inert')})
  it('refuses a mismatched application snapshot before mounting executable content',async()=>{client.open.mockResolvedValueOnce({sessionId:'private-session',applicationId:'gridcraft'});mount();await screen.findByRole('alert');expect(document.querySelector('iframe')).toBeNull();expect(m.openJournal).not.toHaveBeenCalled()})
  it('never unlocks or saves without exclusive durable draft storage',async()=>{m.openJournal.mockRejectedValueOnce(Error('storage unavailable'));mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await screen.findByRole('alert');expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);expect(client.save).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()})
- it('retires a recovered draft whose bytes the server already holds instead of offering it',async()=>{const same={applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'0',editorRevision:'lost-ack',bytes:new TextEncoder().encode('{"body":[]}')},other={...same,editorRevision:'later',bytes:new Uint8Array([99])};journal.recovery.mockResolvedValueOnce([{draft:same,actions:['compare','copy']},{draft:other,actions:['compare','copy']}]);mount();await ready();await acquire();await waitFor(()=>expect(journal.confirm).toHaveBeenCalledWith(same));expect(journal.confirm).not.toHaveBeenCalledWith(other);expect(screen.getAllByRole('button',{name:'Porovnat'})).toHaveLength(1);expect(client.save).not.toHaveBeenCalled()})
+ it('retires a recovered draft whose bytes the server already holds instead of offering it',async()=>{const same={applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'0',editorRevision:'lost-ack',bytes:new TextEncoder().encode('{"body":[]}')},other={...same,editorRevision:'later',bytes:new Uint8Array([99])};journal.recovery.mockResolvedValueOnce([{draft:same,actions:['compare','copy']},{draft:other,actions:['compare','copy']}]);mount();await ready();await acquire();await waitFor(()=>expect(journal.discardRecovered).toHaveBeenCalledWith(expect.objectContaining({draft:same})));expect(journal.discardRecovered).not.toHaveBeenCalledWith(expect.objectContaining({draft:other}));expect(screen.getAllByRole('button',{name:'Porovnat'})).toHaveLength(1);expect(client.save).not.toHaveBeenCalled()})
  it('reconciles the lost save before closing the client when the connection retires',async()=>{mount();await ready();await acquire();client.save.mockImplementationOnce(()=>new Promise(()=>{}));client.reconcile.mockImplementation(async(r:NativeSaveRequest)=>receipt(r));act(()=>portOptions.at(-1)!.onChanged('pending','doc'));await waitFor(()=>expect(client.save).toHaveBeenCalledOnce());act(()=>stream?.('session_retired',{delivery:'stopped',reason:'session_closed'}));await waitFor(()=>expect(client.close).toHaveBeenCalled());expect(client.reconcile).toHaveBeenCalled();expect(client.reconcile.mock.invocationCallOrder[0]).toBeLessThan(client.close.mock.invocationCallOrder[0])})
  it('offers old local recovery only for compare or copy and never publishes it on mount or acquire',async()=>{journal.recovery.mockResolvedValueOnce([{draft:{applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'1',editorRevision:'old',bytes:new Uint8Array([99])},actions:['compare','copy']}]);mount();await ready();expect(m.openJournal).not.toHaveBeenCalled();await acquire();await screen.findByRole('button',{name:'Porovnat'});expect(screen.getByRole('button',{name:'Kopie konceptu'})).toBeInTheDocument();expect(client.save).not.toHaveBeenCalled();expect(journal.persist).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'Porovnat'}));const server=await screen.findByRole('textbox',{name:'Serverová verze'});expect(server).toHaveAttribute('readonly');expect(screen.getByRole('textbox',{name:'Místní koncept'})).toHaveAttribute('readonly');expect(server).toHaveValue('{\"body\":[]}');expect(client.save).not.toHaveBeenCalled()})
  it('does not send a whole version when native engine validation fails',async()=>{mount();await ready();await acquire();ports.at(-1)!.validate.mockRejectedValueOnce(Error('invalid engine state'));act(()=>portOptions.at(-1)!.onChanged('r2','doc'));await waitFor(()=>expect(ports.at(-1)!.validate).toHaveBeenCalledOnce());await screen.findByText('Neuložený koncept');expect(client.save).not.toHaveBeenCalled();expect(screen.queryByText('Uloženo')).not.toBeInTheDocument()})
@@ -503,5 +503,66 @@ describe('full native history',()=>{
   fireEvent.click(screen.getByRole('button',{name:'Stáhnout koncept'}))
   await waitFor(()=>expect(click).toHaveBeenCalledOnce())
   expect(journal.revokeRead).not.toHaveBeenCalled();expect(document.querySelector('iframe')).not.toBeNull()
+ })
+})
+
+describe('unchanged-content transfer (G4 B1/B2)',()=>{
+ const baseBytes=()=>new TextEncoder().encode('{"body":[]}')
+ it('B1: releases custody when the editor content is identical to the loaded version',async()=>{
+  mount();await ready();await acquire()
+  ports.at(-1)!.snapshot.mockResolvedValue({bytes:baseBytes(),editorRevision:'same',documentId:'doc'})
+  fireEvent.click(screen.getByRole('button',{name:'Uvolnit úpravy'}))
+  await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(true))
+  expect(client.save).not.toHaveBeenCalled()
+ })
+ it('B1: publishes the loaded version when nothing changed',async()=>{
+  mount();await ready();await acquire()
+  ports.at(-1)!.snapshot.mockResolvedValue({bytes:baseBytes(),editorRevision:'same',documentId:'doc'})
+  fireEvent.click(screen.getByRole('button',{name:'Publikovat náhled'}))
+  await waitFor(()=>expect(client.share).toHaveBeenCalledOnce())
+  expect(client.share.mock.calls[0][0]).toMatchObject({baseVersion:'1',targetVersion:'1'})
+  expect(client.save).not.toHaveBeenCalled()
+ })
+ it('B2: releases after an already confirmed autosave when the bytes are unchanged',async()=>{
+  mount();await ready();await acquire();const p=ports.at(-1)!
+  act(()=>portOptions.at(-1)!.onChanged('edit','doc'))
+  await screen.findByText('Uloženo');expect(client.save).toHaveBeenCalledOnce()
+  fireEvent.click(screen.getByRole('button',{name:'Uvolnit úpravy'}))
+  await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(true))
+  expect(client.save).toHaveBeenCalledOnce();expect(p.ack).toHaveBeenCalledOnce()
+ })
+ it('B2: publishes the confirmed version after an autosave when the bytes are unchanged',async()=>{
+  mount();await ready();await acquire()
+  act(()=>portOptions.at(-1)!.onChanged('edit','doc'))
+  await screen.findByText('Uloženo')
+  fireEvent.click(screen.getByRole('button',{name:'Publikovat náhled'}))
+  await waitFor(()=>expect(client.share).toHaveBeenCalledOnce())
+  expect(client.share.mock.calls[0][0]).toMatchObject({baseVersion:'2',targetVersion:'2'})
+  expect(client.save).toHaveBeenCalledOnce()
+ })
+ it('B1: hands off custody on unchanged content without saving',async()=>{
+  mount();await ready();await acquire()
+  ports.at(-1)!.snapshot.mockResolvedValue({bytes:baseBytes(),editorRevision:'same',documentId:'doc'})
+  client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:{actor_id:'user:other',display_name:'Jana',kind:'human'},generation:'9007199254740996'});return emptyLease})
+  act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}))
+  fireEvent.click(await screen.findByRole('button',{name:'Předat uživateli Jana'}))
+  await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(true))
+  expect(client.save).not.toHaveBeenCalled()
+ })
+ it('B1: accepts an agent proposal on unchanged content without saving first',async()=>{
+  const proposal={id:'ncp_0123456789abcdef01234567',authorName:'Jamie',baseVersion:'1',summary:'Nadpis',createdAt:'2026-10-29T17:00:00Z',state:'open' as const}
+  client.proposals.mockResolvedValue([proposal])
+  mount();await ready();await screen.findByText('Jamie připravil návrh nad verzí 1');await acquire()
+  ports.at(-1)!.snapshot.mockResolvedValue({bytes:baseBytes(),editorRevision:'same',documentId:'doc'})
+  client.decideProposal.mockResolvedValue({...proposal,state:'accepted',resultVersion:'2'})
+  fireEvent.click(await screen.findByRole('button',{name:'Přijmout'}))
+  await waitFor(()=>expect(client.decideProposal).toHaveBeenCalledWith(proposal.id,'accept','9007199254740995',expect.any(AbortSignal)))
+  expect(client.save).not.toHaveBeenCalled()
+ })
+ it('B20: a recovered draft with the server bytes is retired from storage, not just the current row',async()=>{
+  const same={applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'0',editorRevision:'lost-ack',bytes:baseBytes()}
+  journal.recovery.mockResolvedValueOnce([{draft:same,actions:['compare','copy']}])
+  mount();await ready();await acquire()
+  await waitFor(()=>expect(journal.discardRecovered).toHaveBeenCalledWith(expect.objectContaining({draft:same})))
  })
 })
