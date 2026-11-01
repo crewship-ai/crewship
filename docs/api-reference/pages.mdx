@@ -2779,6 +2779,28 @@ history; readers receive only their authorized shared snapshot. **Statuses:**
 200 success, 401 unauthenticated, 403 invalid scope, 404 unavailable Page or
 shared content, 500 internal failure.
 
+### `GET /api/v1/pages/{slug}/design/export`
+
+**Auth:** current Page read access and CLI `pages:read` scope, decided exactly
+as for `GET .../design`: Edit access (owner, Edit grant) and workspace
+managers may export any retained version; Read and Comment audiences only the
+shared version. **Request:** no body; optional `format` (only `html`) and
+optional positive `version`. Without `version` an editor exports the latest
+retained version and a shared-only reader the shared version; the live canvas
+is never exported. **Response:** `text/html; charset=utf-8` attachment named
+`<slug>-design-v<N>.html`, with `X-Crewship-Design-Version: <N>` and the
+policy `default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox`.
+The file is one HTML document with every screen as a section, absolutely
+positioned layers, escaped text, raster `data:` images embedded and other
+image sources left out, prototype links as `<a href="#screen-N">` and no
+script. The same version always exports to the same bytes. A workspace
+manager's export of someone else's Design is audited as
+`design.workspace_admin_accessed` with operation `export`. **Statuses:** 200
+success, 400 invalid `version`, unsupported `format` or unknown parameter, 401
+unauthenticated, 403 invalid scope, 404 disabled, missing or unauthorized
+version (the same answer as `GET .../design`), 413 file over 8 MiB (code
+`design_export_limit`), 500 internal failure, 503 unavailable engine.
+
 ### `POST /api/v1/pages/{slug}/design/restore`
 
 **Auth:** current Page Edit and CLI `pages:write`; an agent also needs its exact

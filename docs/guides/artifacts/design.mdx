@@ -35,7 +35,9 @@ instance, regardless of the workspace flag.
 
 Prototype playback of linked screens has its own build-time variable,
 `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE=true`, on top of the two switches above;
-see [Play a prototype](#play-a-prototype).
+see [Play a prototype](#play-a-prototype). The **Export HTML** button likewise
+needs `NEXT_PUBLIC_ARTIFACTS_DESIGN_EXPORT=true`; see
+[Export a version as HTML](#export-a-version-as-html).
 
 The `artifacts_design` flag is independent of `artifact_projects`, the flag for
 Project artifacts. You can turn Design on without Projects.
@@ -184,6 +186,51 @@ playback says so; go **Back** or **Exit**.
 Agents and the CLI set the same link with the `linkTo` node field; see
 [Command line](#command-line).
 
+## Export a version as HTML
+
+<Note>
+  The **Export HTML** button is off by default. It appears only in a web UI
+  built with `NEXT_PUBLIC_ARTIFACTS_DESIGN_EXPORT=true`. The export itself is
+  part of Design on the server, so `crewship page design export` works whenever
+  Design is on.
+</Note>
+
+**Export HTML** in the editor header downloads one saved version as a single
+HTML file that you can open in any browser, attach to an email or archive.
+
+- The file holds every screen of that version, one below the other, with a
+  list of screens at the top. Layers keep their position and size.
+- A layer with a prototype link becomes a link to its target screen in the same
+  file, so you can click through the flow. A link to a deleted screen is shown
+  with a dashed outline and goes nowhere.
+- Images stored in the Design (uploaded as `data:` images) are embedded.
+  Images that point to a web address are left out and shown as
+  **Image not included**, because the file never loads anything from the
+  network.
+- The file contains no scripts. Text is shown exactly as typed, never as markup.
+
+The file name and its header say which version it is, for example
+`checkout-design-v3.html` and **Design version 3**. What is exported:
+
+| You are | Without choosing a version | Viewing an older version in **History** |
+|---|---|---|
+| Owner, editor or workspace administrator | The latest saved version | That version |
+| Read or Comment access | The shared version | — (you see only the shared version) |
+
+Only saved versions are exported, never the live canvas. If you have just made
+changes, click **Save version** first. A workspace administrator who exports
+someone else's Design is recorded in the audit log.
+
+An export larger than 8 MiB is refused with **Design export exceeds the 8 MiB
+file limit**; remove or shrink embedded images, or split the Design.
+
+From the command line:
+
+```bash
+crewship page design export checkout                 # writes checkout-design-v<N>.html
+crewship page design export checkout --version 2 -o checkout-v2.html
+```
+
 ## Save versions
 
 The live canvas and its versions are separate. A version is a fixed copy of the
@@ -321,6 +368,7 @@ person who connected the chat.
 | `Design capacity is full; existing work is retained` | The Design's version history is full, or the workspace has reached its limit of pages and artifacts. Nothing was lost. | Delete artifacts you no longer need, or ask an administrator. |
 | `current Design edit permission required` | You lack edit access, or you tried to share or connect a chat without being the owner. | Ask the owner for **write** access. |
 | `design not found` | The Design does not exist, you cannot see it, or `artifacts_design` is off for the workspace. | Check the address, your access and the flag. |
+| `Design export exceeds the 8 MiB file limit` | The exported HTML file would be larger than 8 MiB, mostly because of embedded images. | Shrink or remove embedded images, or split the Design. |
 | `Design engine is unavailable; changes are not acknowledged` | The server could not process the canvas. | Keep the window open and try again; your changes stay in the browser. |
 
 ## Limits
@@ -329,12 +377,13 @@ person who connected the chat.
   256 MiB.
 - The browser copy of an unsaved canvas is kept only up to 2 MiB.
 - A workspace holds at most 100 pages and artifacts in total.
+- An exported HTML file can be at most 8 MiB.
 
 ## Command line
 
 The same actions are available from the CLI under `crewship page design`:
 `create`, `get`, `versions`, `apply`, `snapshot`, `restore`, `share`,
-`comments`, `comment`, `agent` and `watch`. Run
+`comments`, `comment`, `agent`, `watch` and `export`. Run
 `crewship page design --help` for the details.
 
 A prototype link is the optional `linkTo` field of a layer: the ID of the

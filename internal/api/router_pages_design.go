@@ -10,6 +10,8 @@ func (r *Router) registerDesignRoutes() {
 	r.mux.Handle("GET /api/v1/pages/{slug}/design", authed(wsCtx(http.HandlerFunc(r.pages.GetDesign))))
 	// openapi: responses 200,401,403,404,500
 	r.mux.Handle("GET /api/v1/pages/{slug}/design/versions", authed(wsCtx(http.HandlerFunc(r.pages.DesignVersions))))
+	// openapi: responses 200,400,401,403,404,413,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/design/export", authed(wsCtx(http.HandlerFunc(r.pages.ExportDesign))))
 	// openapi: responses 101,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/design/ws", authed(wsCtx(http.HandlerFunc(r.pages.DesignWebsocket))))
 	// openapi: responses 200,400,401,403,404,409,413,500,503
