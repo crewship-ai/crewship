@@ -45,6 +45,9 @@ def classify(paths):
     for path in paths:
         if (path.startswith('docs/') and PurePosixPath(path).suffix.lower() in DOC_EXTENSIONS) or path in DOC_ROOT_FILES:
             continue
+        # Release-note fragments (#4751) are CHANGELOG.md prose split per PR.
+        if PurePosixPath(path).parent == PurePosixPath('changelog.d') and path.endswith('.md'):
+            continue
         code = True
         if path.startswith(('app/', 'components/', 'hooks/', 'lib/', 'stores/', 'public/', 'e2e/')) or path in {'next.config.ts', 'tsconfig.json', 'vitest.config.ts', 'postcss.config.mjs', 'eslint.config.mjs'}:
             continue

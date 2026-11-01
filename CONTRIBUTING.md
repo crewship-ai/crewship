@@ -192,14 +192,20 @@ CI calls the image workflow and its final verdict requires the image job.
 ## Changelog entries
 
 `RELEASING.md` cuts release notes from `CHANGELOG.md`'s `## [Unreleased]`
-section. That makes a missing entry not untidiness but a release note that
-does not exist — and a change nobody is told about.
+section, after collecting the per-PR fragments in `changelog.d/` into it. That
+makes a missing entry not untidiness but a release note that does not exist —
+and a change nobody is told about.
 
 **A PR that touches `internal/api/`, `internal/orchestrator/`,
 `internal/harbormaster/`, `cmd/crewship/`, `app/`, `components/`, `lib/`,
-`hooks/` or `stores/` must add an entry under `## [Unreleased]`.** The
-**Changelog Guard** workflow enforces it; test files inside those trees don't
-count as user-visible, and Dependabot is exempt by actor.
+`hooks/` or `stores/` must add a release note.** Add it as a new fragment,
+`changelog.d/<PR-number>-<slug>.md`, holding the bullet you would otherwise
+write under `## [Unreleased]` (see [changelog.d/README.md](changelog.d/README.md)).
+Prefer the fragment: every PR editing the top of `## [Unreleased]` makes queued
+PRs conflict there, separate files do not. An entry written directly under
+`## [Unreleased]` still counts. The **Changelog Guard** workflow enforces it;
+test files inside those trees don't count as user-visible, and Dependabot is
+exempt by actor.
 
 Write the entry the way the file already does — lead with the **user-visible
 symptom in bold**, then what was actually wrong and what changed. Mark a

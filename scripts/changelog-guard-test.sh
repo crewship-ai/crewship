@@ -86,7 +86,7 @@ git init -q -b main "$FIXTURE"
 git -C "$FIXTURE" config user.email guard@test.invalid
 git -C "$FIXTURE" config user.name "Guard Test"
 
-mkdir -p "$FIXTURE"/{internal/api,cmd/crewship,app,components/__tests__,lib,hooks/__tests__,stores,docs}
+mkdir -p "$FIXTURE"/{internal/api,cmd/crewship,app,components/__tests__,lib,hooks/__tests__,stores,docs,changelog.d}
 for f in \
   README.md docs/guide.mdx \
   internal/api/handler.go internal/api/handler_test.go \
@@ -95,7 +95,8 @@ for f in \
   components/thing.tsx components/__tests__/thing.test.tsx \
   lib/api-error.ts \
   hooks/use-chat.ts hooks/__tests__/use-chat.test.tsx \
-  stores/session.ts
+  stores/session.ts \
+  changelog.d/README.md
 do
   echo "base" > "$FIXTURE/$f"
 done
@@ -178,6 +179,16 @@ append_blank_line() { printf '\n' >> "$FIXTURE/CHANGELOG.md"; }
 break_unreleased_heading() {
   sed -i 's/^## \[Unreleased\]$/## [0.2.0] — 2026-02-02/' "$FIXTURE/CHANGELOG.md"
 }
+
+# A release note written as its own fragment file (#4751). A fragment holds the
+# same bullet the PR would otherwise have put under `## [Unreleased]`; queued
+# PRs each add a different file, so they no longer conflict on one heading.
+add_fragment() {
+  mkdir -p "$(dirname "$FIXTURE/$1")"
+  printf '%s' "$2" > "$FIXTURE/$1"
+}
+FRAGMENT_TEXT='- **A new unreleased entry, as a fragment.** What changed and why.
+'
 
 GUARD_OUT=""
 GUARD_RC=0
@@ -278,6 +289,63 @@ do
   expect "${pair#*:}" 1 main someone false
 done
 
+
+# ---------------------------------------------------------------------------
+# Fragments (changelog.d/) — #4751
+# ---------------------------------------------------------------------------
+# Every PR used to write at the top of `## [Unreleased]`, so any two queued PRs
+# conflicted there. A new non-empty `changelog.d/<n>-<slug>.md` is the
+# conflict-free alternative; RELEASING.md collects fragments into the section.
+echo "fragments:"
+
+scenario; touch_file components/thing.tsx
+add_fragment changelog.d/4751-fragment.md "$FRAGMENT_TEXT"; commit_pr
+expect "a user-visible PR with a new changelog.d fragment passes" 0 main someone false
+
+scenario; touch_file components/thing.tsx
+add_fragment changelog.d/4751-empty.md ""; commit_pr
+expect "an empty fragment is not a release note" 1 main someone false
+if printf '%s\n' "$GUARD_OUT" | grep -q "changelog.d/4751-empty.md"; then
+  pass "…and the error names the empty fragment"
+else
+  fail "…and the error must name the empty fragment rather than claim nothing was written"
+fi
+
+scenario; touch_file components/thing.tsx
+add_fragment changelog.d/4751-blank.md "$(printf ' \n\t\n  ')"; commit_pr
+expect "a whitespace-only fragment is not a release note" 1 main someone false
+
+scenario; touch_file components/thing.tsx
+add_fragment changelog.d/4751-blank.md "$(printf ' \n\t\n  ')"
+add_fragment changelog.d/4751-good.md "$FRAGMENT_TEXT"; commit_pr
+expect "…but a real fragment next to an empty one still passes" 0 main someone false
+
+scenario; touch_file components/thing.tsx
+add_fragment docs/changelog.d/4751-elsewhere.md "$FRAGMENT_TEXT"; commit_pr
+expect "a fragment outside the top-level changelog.d is ignored" 1 main someone false
+
+scenario; touch_file components/thing.tsx
+add_fragment changelog.d/nested/4751-deep.md "$FRAGMENT_TEXT"; commit_pr
+expect "a fragment in a changelog.d subdirectory is ignored" 1 main someone false
+
+scenario; touch_file components/thing.tsx
+add_fragment changelog.d/4751-note.txt "$FRAGMENT_TEXT"; commit_pr
+expect "a non-.md file in changelog.d is ignored" 1 main someone false
+
+scenario; touch_file components/thing.tsx; touch_file changelog.d/README.md; commit_pr
+expect "editing changelog.d/README.md is not a release note" 1 main someone false
+
+scenario; touch_file components/thing.tsx; add_fragment changelog.d/4751-empty.md ""; commit_pr
+expect "the skip-changelog label still clears a PR with an empty fragment" 0 main someone true
+
+scenario; touch_file components/thing.tsx; add_unreleased_entry
+add_fragment changelog.d/4751-fragment.md "$FRAGMENT_TEXT"; commit_pr
+expect "a fragment and an ## [Unreleased] edit together pass" 0 main someone false
+
+scenario; touch_file components/thing.tsx; break_unreleased_heading
+add_fragment changelog.d/4751-fragment.md "$FRAGMENT_TEXT"; commit_pr
+expect "a fragment does not paper over a missing ## [Unreleased] heading" 1 main someone false
+
 # ---------------------------------------------------------------------------
 # The guard must not fail open
 # ---------------------------------------------------------------------------
@@ -297,6 +365,10 @@ fi
 # diff that never ran.
 scenario; touch_file components/thing.tsx; add_unreleased_entry; commit_pr
 expect "a broken base ref fails even when CHANGELOG.md is touched" nonzero nonexistent-branch someone false
+
+scenario; touch_file components/thing.tsx
+add_fragment changelog.d/4751-fragment.md "$FRAGMENT_TEXT"; commit_pr
+expect "a broken base ref fails even when a fragment is added" nonzero nonexistent-branch someone false
 
 # ---------------------------------------------------------------------------
 # The base branch moves under an open PR
@@ -336,6 +408,133 @@ scenario_at "$BASE_COMMIT"; touch_file components/thing.tsx; commit_pr
 git -C "$FIXTURE" checkout -q -B mergeref "$BASE_COMMIT"
 git -C "$FIXTURE" merge -q --no-ff -m "Merge pr into main" pr
 expect "the pull/N/merge ref does not count main's entries as the PR's" 1 main someone false
+
+# The same two shapes for fragments: a fragment another PR merged to main is
+# not this PR's release note, and neither is editing or deleting one that is
+# already there.
+git -C "$FIXTURE" checkout -q -B mainfrag "$(git -C "$FIXTURE" rev-parse refs/remotes/origin/main)"
+add_fragment changelog.d/4700-someone-else.md "- **Someone else's fragment.** Not ours.
+"
+git -C "$FIXTURE" add -A
+git -C "$FIXTURE" commit -qm "another PR merged, with its fragment"
+git -C "$FIXTURE" update-ref refs/remotes/origin/main "$(git -C "$FIXTURE" rev-parse mainfrag)"
+
+scenario_at "$BASE_COMMIT"; touch_file components/thing.tsx; commit_pr
+git -C "$FIXTURE" checkout -q -B mergeref refs/remotes/origin/main
+git -C "$FIXTURE" merge -q --no-ff -m "Merge pr into main" pr
+expect "a fragment merged to main by another PR is not this PR's entry" 1 main someone false
+
+scenario; touch_file components/thing.tsx; touch_file changelog.d/4700-someone-else.md; commit_pr
+expect "editing an existing fragment is not a new release note" 1 main someone false
+
+scenario; touch_file components/thing.tsx; remove_file changelog.d/4700-someone-else.md; commit_pr
+expect "deleting an existing fragment is not a release note" 1 main someone false
+
+# ---------------------------------------------------------------------------
+# Release-time collection: scripts/changelog-collect.py
+# ---------------------------------------------------------------------------
+# The other half of the fragment mechanism. A fragment the guard accepted but
+# the release never collected would be a release note that does not exist —
+# the exact failure this guard was written for — so the collector is pinned
+# here, in the suite CI already runs.
+echo "collect fragments into CHANGELOG.md:"
+
+COLLECT="$SCRIPT_DIR/changelog-collect.py"
+CROOT="$(mktemp -d)"
+trap 'rm -rf "$FIXTURE" "$CROOT"' EXIT
+
+collect_fixture() {
+  rm -rf "$CROOT"; mkdir -p "$CROOT/changelog.d/nested"
+  cat > "$CROOT/CHANGELOG.md" <<'CL'
+# Changelog
+
+## [Unreleased]
+
+- **Existing entry.** Stays below the collected ones.
+
+## [0.1.0] — 2026-01-01
+
+- **Shipped.** Untouched.
+CL
+  echo "Fragment format notes." > "$CROOT/changelog.d/README.md"
+  echo "- **Nested, not a fragment.**" > "$CROOT/changelog.d/nested/1-x.md"
+  echo "- **Not markdown.**" > "$CROOT/changelog.d/2-x.txt"
+  printf -- '- **Older fix (#90).** Details.\n' > "$CROOT/changelog.d/90-older.md"
+  printf -- '- **Newer fix (#4751).** Details.\n- **Second bullet of the same PR.**\n\n' > "$CROOT/changelog.d/4751-newer.md"
+}
+
+collect_fixture
+if out="$(python3 -I "$COLLECT" --root "$CROOT" 2>&1)"; then
+  pass "collect exits 0"
+else
+  fail "collect exits 0"; printf '%s\n' "$out" | sed 's/^/       | /'
+fi
+want='# Changelog
+
+## [Unreleased]
+
+- **Newer fix (#4751).** Details.
+- **Second bullet of the same PR.**
+- **Older fix (#90).** Details.
+
+- **Existing entry.** Stays below the collected ones.
+
+## [0.1.0] — 2026-01-01
+
+- **Shipped.** Untouched.'
+if [ "$(cat "$CROOT/CHANGELOG.md" 2>/dev/null)" = "$want" ]; then
+  pass "fragments land at the top of ## [Unreleased], newest number first"
+else
+  fail "fragments land at the top of ## [Unreleased], newest number first"
+  diff <(printf '%s\n' "$want") "$CROOT/CHANGELOG.md" | sed 's/^/       | /'
+fi
+if [ ! -e "$CROOT/changelog.d/90-older.md" ] && [ ! -e "$CROOT/changelog.d/4751-newer.md" ]; then
+  pass "collected fragments are removed"
+else
+  fail "collected fragments are removed"
+fi
+if [ -e "$CROOT/changelog.d/README.md" ] && [ -e "$CROOT/changelog.d/nested/1-x.md" ] \
+   && [ -e "$CROOT/changelog.d/2-x.txt" ]; then
+  pass "README, nested files and non-.md files are left alone"
+else
+  fail "README, nested files and non-.md files are left alone"
+fi
+
+before="$(cat "$CROOT/CHANGELOG.md")"
+if python3 -I "$COLLECT" --root "$CROOT" >/dev/null 2>&1 && [ "$(cat "$CROOT/CHANGELOG.md")" = "$before" ]; then
+  pass "a second run with no fragments changes nothing"
+else
+  fail "a second run with no fragments changes nothing"
+fi
+
+collect_fixture
+python3 -I "$COLLECT" --root "$CROOT" --dry-run >/dev/null 2>&1
+if [ -e "$CROOT/changelog.d/90-older.md" ] && ! grep -q "Older fix" "$CROOT/CHANGELOG.md"; then
+  pass "--dry-run changes no file"
+else
+  fail "--dry-run changes no file"
+fi
+
+# Refusals leave everything as it was: a half-collected release is worse than
+# none.
+collect_fixture; printf ' \n\t\n' > "$CROOT/changelog.d/91-empty.md"
+before="$(cat "$CROOT/CHANGELOG.md")"
+if python3 -I "$COLLECT" --root "$CROOT" >/dev/null 2>&1; then
+  fail "an empty fragment makes collect refuse"
+elif [ "$(cat "$CROOT/CHANGELOG.md")" = "$before" ] && [ -e "$CROOT/changelog.d/90-older.md" ]; then
+  pass "an empty fragment makes collect refuse, changing nothing"
+else
+  fail "an empty fragment makes collect refuse, changing nothing"
+fi
+
+collect_fixture; sed -i 's/^## \[Unreleased\]$/## [0.2.0]/' "$CROOT/CHANGELOG.md"
+if python3 -I "$COLLECT" --root "$CROOT" >/dev/null 2>&1; then
+  fail "a CHANGELOG.md without ## [Unreleased] makes collect refuse"
+elif [ -e "$CROOT/changelog.d/90-older.md" ]; then
+  pass "a CHANGELOG.md without ## [Unreleased] makes collect refuse, keeping fragments"
+else
+  fail "a CHANGELOG.md without ## [Unreleased] makes collect refuse, keeping fragments"
+fi
 
 echo
 if [ "$FAILURES" -ne 0 ]; then
