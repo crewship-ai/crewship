@@ -13,12 +13,11 @@ import (
 // start-up alone must not be reported as an unavailable engine: the real
 // engine runs behind a node that needs 6 s before it even begins.
 func TestRunToleratesSlowColdStartWithinDefaultBudget(t *testing.T) {
-	if testing.Short() {
-		t.Skip("waits for a deliberately slow start")
-	}
+	// No skip: the sibling engine tests already require node, and a skipped
+	// test would read as a pass (scripts/skip-budget.sh).
 	node, err := exec.LookPath("node")
 	if err != nil {
-		t.Skip("node unavailable")
+		t.Fatalf("node is required by the design engine tests: %v", err)
 	}
 	dir := t.TempDir()
 	slow := "#!/bin/sh\nsleep 6\nexec " + node + " \"$@\"\n"
