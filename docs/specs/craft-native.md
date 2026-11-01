@@ -193,7 +193,13 @@ admission reads the current version, shows the same read-only editor a
 non-holder sees and offers the captured draft for compare or copy. A refused
 fresh admission ends in the ordinary disconnected state with the draft kept;
 it is not retried. A later read loss on the fresh admission stops delivery
-like any other (`draft: "purge"`). Comment-only access is not native read
+like any other (`draft: "purge"`). That purge also erases the draft row the
+retired write journal persisted, even though that journal is already closed:
+a closed handle still refuses a Page-wide purge (it must never erase a fresh
+mount's draft), so it deletes exactly its own row by its full key
+(`eraseOwnRow`). Work still in flight from the replaced admission, such as a
+pending document read, is ignored when it completes and never stops the
+fresh read-only view. Comment-only access is not native read
 access, so an Edit to Comment downgrade follows the read-loss path.
 
 Original expired or revoked credentials never regain an old admission. Explicit

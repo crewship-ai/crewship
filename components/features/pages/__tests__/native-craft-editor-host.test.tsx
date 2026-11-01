@@ -20,7 +20,7 @@ let authSuspend:(()=>Promise<void>)|undefined
 let privacyRetire:(()=>Promise<void>)|undefined
 let client:ReturnType<typeof clientRig>,journal:ReturnType<typeof journalRig>,ports:ReturnType<typeof portRig>[],portOptions:NativeEditorPortOptions[],stream:((event:"lease"|"session_retired",value:Record<string,unknown>)=>void)|undefined
 function clientRig(){return {share:vi.fn(async(r:{targetVersion:string})=>({version:r.targetVersion,durability:'node',issuedBy:'crewship',phase:'shared'})),open:vi.fn().mockResolvedValue({sessionId:"private-session",applicationId:"wordcraft"}),read:vi.fn().mockResolvedValue({version:"1",bytes:new TextEncoder().encode('{"body":[]}'),applicationId:"wordcraft",enginePin:"a".repeat(64),editorBundle:"b".repeat(64),editorURL:`https://native.example/b/${"b".repeat(64)}/index.html`,quota:{usedBytes:"12",limitBytes:"99999",warning:false,retention:"keep-all"}}),lease:vi.fn().mockResolvedValue(emptyLease),leaseAction:vi.fn(async(action:string):Promise<unknown>=>{if(action==='acquire')client.lease.mockResolvedValue(ownedLease);return ownedLease}),events:vi.fn((_signal:AbortSignal,callback:typeof stream)=>{stream=callback;return new Promise<void>(()=>{})}),reauthorize:vi.fn().mockResolvedValue(true),save:vi.fn(async(r:NativeSaveRequest)=>receipt(r)),reconcile:vi.fn(),close:vi.fn(),proposals:vi.fn().mockResolvedValue([]),proposalBytes:vi.fn(),decideProposal:vi.fn()}}
-function journalRig(){return {persist:vi.fn().mockResolvedValue(undefined),confirm:vi.fn().mockResolvedValue(undefined),recovery:vi.fn().mockResolvedValue([]),onRetire:vi.fn(()=>()=>{}),close:vi.fn().mockResolvedValue(undefined),revokeRead:vi.fn().mockResolvedValue(undefined)}}
+function journalRig(){return {persist:vi.fn().mockResolvedValue(undefined),confirm:vi.fn().mockResolvedValue(undefined),recovery:vi.fn().mockResolvedValue([]),onRetire:vi.fn(()=>()=>{}),close:vi.fn().mockResolvedValue(undefined),revokeRead:vi.fn().mockResolvedValue(undefined),eraseOwnRow:vi.fn().mockResolvedValue(undefined)}}
 function portRig(){return {loaded:vi.fn(),handleWindowMessage:vi.fn(),bootstrap:vi.fn().mockResolvedValue({bytes:new TextEncoder().encode('{"body":[]}'),editorRevision:"initial",documentId:"doc"}),snapshot:vi.fn().mockResolvedValue({bytes:new TextEncoder().encode('{"body":[1]}'),editorRevision:"snapshot-1",documentId:"doc"}),validate:vi.fn().mockResolvedValue(undefined),ack:vi.fn().mockResolvedValue(true),saveFailed:vi.fn(),setReadOnly:vi.fn(async(v:boolean)=>v),close:vi.fn()}}
 beforeEach(()=>{vi.stubGlobal('crypto',webcrypto);client=clientRig();journal=journalRig();ports=[];portOptions=[];stream=undefined;privacyRetire=undefined;authSuspend=undefined;m.purge.mockResolvedValue(undefined);m.registerPrivacy.mockImplementation((_human:string,retire:()=>Promise<void>,options?:{suspend?:()=>Promise<void>})=>{privacyRetire=retire;authSuspend=options?.suspend;return vi.fn()});m.createClient.mockReturnValue(client);m.openJournal.mockResolvedValue(journal);m.createPort.mockImplementation((o:NativeEditorPortOptions)=>{const p=portRig();ports.push(p);portOptions.push(o);queueMicrotask(()=>o.onReady?.('qualified'));return p})})
 afterEach(()=>{vi.unstubAllGlobals();vi.clearAllMocks()})
@@ -187,7 +187,7 @@ describe('native Word host authority and persistence',()=>{
  it('late lease or ACK callbacks and an unregistered old privacy callback cannot revive or purge a fresh mount',async()=>{const first=mount();await ready();await acquire();const p=ports.at(-1)!,oldPrivacy=privacyRetire!,oldOptions=portOptions.at(-1)!,frame=document.querySelector('iframe');act(()=>oldOptions.onError('native_port_closed'));await screen.findByText('Zachycení posledních změn nebylo potvrzeno');act(()=>{stream?.('lease',ownedLease);oldOptions.onReady?.('late');oldOptions.onChanged('late-revision','doc')});expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveAttribute('inert');expect(p.setReadOnly.mock.calls.filter(c=>c[0]===false)).toHaveLength(1);first.unmount();expect(m.registerPrivacy.mock.results[0].value).toHaveBeenCalledOnce();mount();await waitFor(()=>expect(ports.at(-1)!.bootstrap).toHaveBeenCalled());const fresh=document.querySelector('iframe');await act(async()=>oldPrivacy());expect(document.querySelector('iframe')).toBe(fresh);expect(journal.revokeRead).not.toHaveBeenCalled();expect(m.purge).not.toHaveBeenCalled()})
  it('detaches bootstrap failures that never acquired a writable journal',async()=>{const boot=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>();m.createPort.mockImplementationOnce((o:NativeEditorPortOptions)=>{const p=portRig();p.bootstrap.mockReturnValueOnce(boot.promise);ports.push(p);portOptions.push(o);queueMicrotask(()=>o.onReady?.('qualified'));return p});mount();await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled());act(()=>portOptions[0].onError('bootstrap_failure'));expect(document.querySelector('iframe')).toBeNull();expect(m.openJournal).not.toHaveBeenCalled();expect(client.close).toHaveBeenCalled();expect(screen.queryByText('Zachycení posledních změn nebylo potvrzeno')).not.toBeInTheDocument()})
  it('reuses the same pending privacy barrier until exact journal purge finishes',async()=>{mount();await ready();await acquire();const purge=deferred<void>();journal.revokeRead.mockReturnValueOnce(purge.promise);let first!:Promise<void>,second!:Promise<void>;act(()=>{first=privacyRetire!();second=privacyRetire!()});expect(first).toBe(second);let finished=false;void second.then(()=>{finished=true});await act(async()=>Promise.resolve());expect(finished).toBe(false);expect(journal.revokeRead).toHaveBeenCalledOnce();await act(async()=>{purge.resolve();await second});expect(finished).toBe(true)})
- it('a late old observer privacy event uses the closed custody fence and cannot purge a fresh writer',async()=>{mount();await ready();await acquire();const oldJournal=journal,oldStream=stream,oldPrivacy=privacyRetire!;oldJournal.close.mockImplementation(async()=>{oldJournal.revokeRead.mockRejectedValue(Error('closed_journal_scope_purge_forbidden'))});act(()=>stream?.('lease',{...ownedLease,mine:false,can_write:false}));await waitFor(()=>expect(oldJournal.close).toHaveBeenCalled());const freshJournal=journalRig();journal=freshJournal;client=clientRig();m.createClient.mockReturnValue(client);m.openJournal.mockResolvedValue(freshJournal);const fresh=mount();await waitFor(()=>expect(within(fresh.container).getByRole('button',{name:'Převzít úpravy'})).toBeEnabled());fireEvent.click(within(fresh.container).getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(freshJournal.recovery).toHaveBeenCalled());await waitFor(()=>expect(ports.at(-1)!.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)));const freshFrame=fresh.container.querySelector('iframe');act(()=>oldStream?.('session_retired',{delivery:'stopped',draft:'purge',reason:'read_revoked'}));await waitFor(()=>expect(oldJournal.revokeRead).toHaveBeenCalledOnce());await expect(oldPrivacy()).rejects.toThrow('closed_journal_scope_purge_forbidden');expect(m.purge).not.toHaveBeenCalled();expect(freshJournal.revokeRead).not.toHaveBeenCalled();expect(freshJournal.close).not.toHaveBeenCalled();expect(fresh.container.querySelector('iframe')).toBe(freshFrame);expect(freshFrame).not.toHaveAttribute('inert')})
+ it('a late old observer privacy event uses the closed custody fence and cannot purge a fresh writer',async()=>{mount();await ready();await acquire();const oldJournal=journal,oldStream=stream,oldPrivacy=privacyRetire!;oldJournal.close.mockImplementation(async()=>{oldJournal.revokeRead.mockRejectedValue(Error('closed_journal_scope_purge_forbidden'))});act(()=>stream?.('lease',{...ownedLease,mine:false,can_write:false}));await waitFor(()=>expect(oldJournal.close).toHaveBeenCalled());const freshJournal=journalRig();journal=freshJournal;client=clientRig();m.createClient.mockReturnValue(client);m.openJournal.mockResolvedValue(freshJournal);const fresh=mount();await waitFor(()=>expect(within(fresh.container).getByRole('button',{name:'Převzít úpravy'})).toBeEnabled());fireEvent.click(within(fresh.container).getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(freshJournal.recovery).toHaveBeenCalled());await waitFor(()=>expect(ports.at(-1)!.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)));const freshFrame=fresh.container.querySelector('iframe');act(()=>oldStream?.('session_retired',{delivery:'stopped',draft:'purge',reason:'read_revoked'}));await waitFor(()=>expect(oldJournal.revokeRead).toHaveBeenCalledOnce());await expect(oldPrivacy()).resolves.toBeUndefined();expect(oldJournal.eraseOwnRow).toHaveBeenCalledOnce();expect(m.purge).not.toHaveBeenCalled();expect(freshJournal.revokeRead).not.toHaveBeenCalled();expect(freshJournal.eraseOwnRow).not.toHaveBeenCalled();expect(freshJournal.close).not.toHaveBeenCalled();expect(fresh.container.querySelector('iframe')).toBe(freshFrame);expect(freshFrame).not.toHaveAttribute('inert')})
  it('refuses a mismatched application snapshot before mounting executable content',async()=>{client.open.mockResolvedValueOnce({sessionId:'private-session',applicationId:'gridcraft'});mount();await screen.findByRole('alert');expect(document.querySelector('iframe')).toBeNull();expect(m.openJournal).not.toHaveBeenCalled()})
  it('never unlocks or saves without exclusive durable draft storage',async()=>{m.openJournal.mockRejectedValueOnce(Error('storage unavailable'));mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await screen.findByRole('alert');expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);expect(client.save).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()})
  it('retires a recovered draft whose bytes the server already holds instead of offering it',async()=>{const same={applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'0',editorRevision:'lost-ack',bytes:new TextEncoder().encode('{"body":[]}')},other={...same,editorRevision:'later',bytes:new Uint8Array([99])};journal.recovery.mockResolvedValueOnce([{draft:same,actions:['compare','copy']},{draft:other,actions:['compare','copy']}]);mount();await ready();await acquire();await waitFor(()=>expect(journal.confirm).toHaveBeenCalledWith(same));expect(journal.confirm).not.toHaveBeenCalledWith(other);expect(screen.getAllByRole('button',{name:'Porovnat'})).toHaveLength(1);expect(client.save).not.toHaveBeenCalled()})
@@ -364,6 +364,54 @@ describe('write access removed while read access remains (#4348)',()=>{
   await screen.findByText('Editor odpojen · koncept zachován')
   expect(document.querySelector('iframe')).toBeNull();expect(second.open).toHaveBeenCalledOnce();expect(second.read).not.toHaveBeenCalled();expect(m.createClient).toHaveBeenCalledTimes(2)
   expect(journal.revokeRead).not.toHaveBeenCalled()
+ })
+ it('erases the persisted draft row on read revoke after write revoke closed its journal',async()=>{
+  // Storage-backed rig: a closed handle refuses everything, exactly like the
+  // real journal's closed-mount fence, so only a real purge removes the row.
+  const storage=new Map<string,unknown>();let closed=false
+  journal.persist.mockImplementation(async(draft:unknown)=>{if(closed)throw Error('journal_closed');storage.set('native:mount-1',draft)})
+  journal.confirm.mockImplementation(async()=>{if(closed)throw Error('journal_closed');storage.delete('native:mount-1')})
+  journal.close.mockImplementation(async()=>{closed=true})
+  journal.revokeRead.mockImplementation(async()=>{if(closed)throw Error('closed_journal_scope_purge_forbidden');storage.clear()})
+  // Valid after close, and only for this mount's own row.
+  journal.eraseOwnRow.mockImplementation(async()=>{storage.delete('native:mount-1')})
+  storage.set('native:other-tab',{})
+  mount();await ready();await acquire()
+  const second=clientRig(),writer=ports.length;second.lease.mockResolvedValue(readerLease);m.createClient.mockReturnValueOnce(second)
+  act(()=>portOptions.at(-1)!.onChanged('unsaved-before-revoke','doc'))
+  act(()=>stream?.('session_retired',writeRevoked))
+  await waitFor(()=>expect(ports.length).toBe(writer+1))
+  await waitFor(()=>expect(second.events).toHaveBeenCalledOnce())
+  expect(closed).toBe(true);expect(storage.has('native:mount-1')).toBe(true)
+  act(()=>stream?.('session_retired',{delivery:'stopped',draft:'purge',reason:'authority_changed'}))
+  await waitFor(()=>expect(document.querySelector('iframe')).toBeNull())
+  await waitFor(()=>expect(storage.has('native:mount-1')).toBe(false))
+  expect(m.purge).not.toHaveBeenCalled();expect(storage.has('native:other-tab')).toBe(true)
+  await waitFor(()=>expect(privacyRetire).toBeDefined());await expect(privacyRetire!()).resolves.toBeUndefined()
+  expect(screen.queryByText('Vymazání místního konceptu nebylo potvrzeno.')).not.toBeInTheDocument()
+  expect(screen.getByRole('status')).toHaveTextContent('Přístup ke čtení byl odebrán')
+ })
+ it('never lets a read from the replaced admission stop the fresh read-only view',async()=>{
+  mount();await ready()
+  let failOld!:(cause:unknown)=>void
+  const first=client,oldRead=new Promise<never>((_,reject)=>{failOld=reject})
+  first.read.mockReturnValueOnce(oldRead)
+  act(()=>stream?.('lease',{...emptyLease}))
+  await waitFor(()=>expect(first.read).toHaveBeenCalledTimes(2))
+  const second=clientRig(),before=ports.length;second.lease.mockResolvedValue(readerLease);m.createClient.mockReturnValueOnce(second)
+  act(()=>stream?.('session_retired',writeRevoked))
+  await waitFor(()=>expect(ports.length).toBe(before+1))
+  await waitFor(()=>expect(second.events).toHaveBeenCalledOnce())
+  // The closed old client now fails its pending GET (ready() throws).
+  await act(async()=>{failOld(Error('native_session_closed'));await Promise.resolve()})
+  await act(async()=>{await new Promise(r=>setTimeout(r,0))})
+  expect(screen.queryByText(/Editor odpojen/)).not.toBeInTheDocument()
+  expect(second.close).not.toHaveBeenCalled()
+  expect(document.querySelectorAll('iframe')).toHaveLength(1)
+  // The fresh admission still refreshes on its own lease events.
+  act(()=>stream?.('lease',{...readerLease}))
+  await waitFor(()=>expect(second.read).toHaveBeenCalledTimes(2))
+  expect(screen.queryByText(/Editor odpojen/)).not.toBeInTheDocument()
  })
  it('keeps disconnecting for any other retirement reason',async()=>{
   mount();await ready();await acquire()
