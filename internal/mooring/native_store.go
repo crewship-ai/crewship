@@ -37,6 +37,9 @@ type NativeStore struct {
 	db       *sql.DB
 	config   NativeStoreConfig
 	versions *artifacts.VersionStore
+	// afterProposalBase is a test seam: it runs between choosing an acceptance
+	// base and publishing, where a concurrent save can land.
+	afterProposalBase func()
 }
 
 // DefaultNativeHistoryBytes is a visible byte budget, never a version-count cap.

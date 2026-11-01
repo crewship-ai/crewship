@@ -271,11 +271,15 @@ test.describe("project", () => {
         const seeded = agents.find((a) => a.slug === agent.slug)
         const name = seeded?.name
         expect(name, `agent ${agent.slug} in PRD_AGENT_WORKSPACE_ID`).toBeTruthy()
+        // Only runs this test started count: the agent workspace is shared, and an
+        // unrelated run of the same agent may stay RUNNING for days. A run without
+        // a creation time still counts.
+        let runsSince = Number.POSITIVE_INFINITY
         const runningRuns = async () => {
           const res = await request.get(`/api/v1/agents/${encodeURIComponent(seeded?.id ?? "")}/runs?${wsQuery(wsId)}`)
           expect(res.status(), "agent runs").toBe(200)
           const runs = (await res.json()) as Array<{ id: string; status: string; chat_id?: string | null; created_at?: string }>
-          return runs.filter((r) => r.status === "RUNNING" || r.status === "PENDING" || r.status === "QUEUED")
+          return runs.filter((r) => (r.status === "RUNNING" || r.status === "PENDING" || r.status === "QUEUED") && !(Date.parse(r.created_at ?? "") < runsSince))
         }
         await pinWorkspace(context, wsId)
 
@@ -317,6 +321,8 @@ test.describe("project", () => {
           `index.html: <h1 id="artifact-hero-heading">${V1}</h1>; menu.html: a list of three coffees with prices; kontakt.html: an address and an email. ` +
           `Give the main elements stable artifact- IDs. Publish it and reply with the slug and version number.`
         const sentAt = new Date().toISOString()
+        // A minute of slack for the server clock.
+        runsSince = Date.parse(sentAt) - 60_000
         // The agent may still be busy with an earlier run; try again for a few minutes.
         for (let attempt = 0; ; attempt++) {
           await selectProject()

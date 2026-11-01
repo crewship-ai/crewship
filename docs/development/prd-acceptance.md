@@ -102,7 +102,7 @@ one rule, or younger than `--older-than` minutes (default 60), are listed and ke
 
 ## Agent workspace
 
-The scenarios that need a real agent (`A.craft.proposal.*`, `B.design.agent-*`, `B.project.agent-*`)
+The scenarios that need a real agent (`A.craft.proposal.*`, `A.craft.agent.*`, `B.design.agent-*`, `B.project.agent-*`)
 cannot run in a disposable `prd-qa-*` workspace. An agent's model login is a
 credential owned by one workspace; `crewship credential` has no way to share it
 into another workspace, and copying its value would mean handling a secret the
