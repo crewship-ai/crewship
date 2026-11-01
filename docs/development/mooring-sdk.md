@@ -126,14 +126,18 @@ save, local recovery offers with *Porovnat* and *Kopírovat*, and version
 history with restore.
 
 No typed text is closed or overwritten before it is durable. `close()` sends
-the final save, or journals the text when the save is not confirmed, and
-resolves `false` when neither succeeded. When custody is lost (or a restore
+the final save, or journals the text when the save is not confirmed. It
+resolves `durable`, or `local-copy` when neither succeeded (the view then stays
+usable so the copy can still be stored or discarded), or `revoked`. When custody is lost (or a restore
 finishes) and no journal can persist the unsaved text, NoteCraft does not load
 the server version over it: the note stays editable as a local copy, the
 status shows *Koncept zůstává v tomto editoru* and the alert says the text
 exists only in this window. *Znovu uchovat koncept* retries the journal;
 *Zahodit místní kopii* discards it deliberately. A read revocation is the
-exception: the SDK purges the draft and nothing is kept.
+exception on every path (close, custody loss, restore, transfer): the SDK
+stops the lifecycle and purges its journal, NoteCraft purges once more through
+a fresh handle, removes the text from the note, the offers and memory, and
+never makes a local copy. `close()` then resolves `revoked`.
 
 ```sh
 crewship-heavy pnpm exec vitest run examples/mooring/notecraft lib/mooring/sdk

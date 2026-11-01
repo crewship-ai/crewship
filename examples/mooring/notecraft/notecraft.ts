@@ -4,7 +4,7 @@
  * compare/copy, and version history with restore. The host supplies the
  * authorized transport and the private journal; NoteCraft owns only its UI. */
 import {
-  compareRecovery, createLeaseActions, createLeaseState, createSingleEditorSave, createVersionHistory, describeLease, ownsLease, recoveryOffers, saveLabel, saveSettled,
+  compareRecovery, createLeaseActions, createLeaseState, createSingleEditorSave, createVersionHistory, describeLease, ownsLease, recoveryOffers, SaveError, saveLabel, saveSettled,
   type LeaseCustody, type LeaseTransport, type LeaseView, type RecoveryComparison, type RecoveryDraft, type RecoveryJournal, type RecoveryOffer, type SaveController, type SaveRequest, type SaveState, type VersionsTransport,
 } from "../../../lib/mooring/sdk"
 
@@ -25,6 +25,12 @@ export interface NoteCraftHost {
   openJournal(): Promise<RecoveryJournal>
 }
 export const NOTECRAFT_APPLICATION = "notecraft"
+/** `durable`: every typed text is saved or journaled. `local-copy`: some text
+ * exists only in this window (the view stays usable to store or discard it).
+ * `revoked`: the SDK ended the lifecycle (read access removed, or the host
+ * retired the journal at sign-out); this view keeps no text and no copy. */
+export type NoteCraftCloseResult = "durable" | "local-copy" | "revoked"
+const readRevokedError = (error: unknown) => error instanceof SaveError && error.reason === "read_revoked"
 const MAX_NOTE_BYTES = 256 * 1024
 const encode = (text: string) => new TextEncoder().encode(text)
 const decode = (bytes: Uint8Array) => new TextDecoder("utf-8", { fatal: true }).decode(bytes)
@@ -47,6 +53,13 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
   let server: { version: string; bytes: Uint8Array } = { version: "1", bytes: new Uint8Array() }
   let editing: { controller: SaveController; generation: string; state: SaveState } | undefined
   let edits = 0, tickets = 0, busy = false, closing = false
+  /** Read access was removed: the SDK purged the private journal, so this
+   * view keeps no text at all, in the DOM, in memory or as a local copy. */
+  let readRevoked = false, sawReadRevoke = false
+  /** Controllers NoteCraft closes itself; any other `stopped` is the SDK's
+   * read revocation (or a retired journal), never a local-copy case. */
+  const selfClosed = new WeakSet<SaveController>()
+  const closeController = (c: SaveController) => { selfClosed.add(c); return c.close() }
   /** Text no journal could store durably. It stays in the note, editable, and
    * nothing loads over it until it is stored or deliberately discarded. */
   let localCopy: { generation: string; baseVersion: string } | undefined
@@ -54,15 +67,48 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
 
   function fail(message: string) { alert.hidden = false; alert.textContent = localCopy && message !== LOCAL_COPY_ONLY ? `${message} ${LOCAL_COPY_ONLY}` : message }
   async function run(task: () => Promise<void>, message: string) {
-    if (busy || closing || signal.aborted) return
+    if (busy || closing || readRevoked || signal.aborted) return
     busy = true; alert.hidden = true; render()
-    try { await task() } catch { fail(message); await refresh().catch(() => {}) } finally { busy = false; render() }
+    try { await task() } catch (error) {
+      if (readRevoked || readRevokedError(error)) { wipe(readRevoked ? sawReadRevoke : true); return }
+      fail(message); await refresh().catch(() => {})
+    } finally { busy = false; render() }
+  }
+  /** The lifecycle ended without NoteCraft closing it. On a read revocation
+   * (`purge`) every copy of the text leaves this view, the lifecycle's SDK
+   * revokeRead purges its journal, and a fresh handle purges again. A journal
+   * retired for another reason (sign-out, session expiry) keeps its rows for
+   * the host, but this view still keeps no copy. Never a local copy. */
+  function wipe(purge = true) {
+    if (readRevoked) return
+    readRevoked = true; sawReadRevoke ||= purge
+    const controller = editing?.controller
+    editing = undefined; localCopy = undefined; stray = undefined
+    server = { version: server.version, bytes: new Uint8Array() }
+    note.value = ""; note.readOnly = true
+    $("offers").replaceChildren(); $("recovery").hidden = true; $("compare").textContent = ""
+    $<HTMLTextAreaElement>("copy").value = ""; $("versions").replaceChildren()
+    alert.hidden = false
+    alert.textContent = sawReadRevoke ? "Přístup ke čtení byl odebrán. Text byl z tohoto okna odstraněn." : "Úpravy byly ukončeny. Text byl z tohoto okna odstraněn."
+    lifetime.abort()
+    if (sawReadRevoke) {
+      if (controller) void controller.revokeRead().catch(() => {})
+      void host.openJournal().then(journal => journal.revokeRead()).catch(() => {})
+    }
+    render()
   }
   function button(label: string, onClick: () => void) {
     const b = document.createElement("button"); b.type = "button"; b.textContent = label; b.addEventListener("click", onClick); return b
   }
   function render() {
     const view = lease.current
+    if (readRevoked) {
+      $("lease").textContent = "Pouze čtení"; $("lease-actions").replaceChildren()
+      status.textContent = sawReadRevoke ? "Přístup ke čtení byl odebrán" : "Úpravy ukončeny"
+      $("keep-retry").hidden = $("keep-discard").hidden = true
+      $<HTMLButtonElement>("save-now").disabled = true; $("reconcile").hidden = true
+      return
+    }
     if (view) {
       const c = describeLease(view, host.mayEdit)
       $("lease").textContent = c.label + (c.readOnly ? " · Pouze čtení" : "") + (c.draftKeptReadOnly ? " · Pouze čtení · místní koncept zachován" : "")
@@ -88,7 +134,7 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
   const retired = (e: typeof editing) => !!e && (e.state.phase === "read-only" || e.state.phase === "stopped")
   async function startEditing(generation: string) {
     const journal = await host.openJournal()
-    if (signal.aborted) { await journal.close(); return }
+    if (signal.aborted || readRevoked) { await journal.close(); return }
     edits = 0
     let self: SaveController | undefined
     const controller = self = createSingleEditorSave({
@@ -98,10 +144,15 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
         snapshot: async () => ({ bytes: encode(note.value), editorRevision: `note:${generation}:${edits}` }),
         validate: async draft => { if (draft.bytes.byteLength > MAX_NOTE_BYTES) throw new Error("note_too_large"); decode(draft.bytes) },
       },
-      transport: host.document,
+      // Note a read revocation before the SDK stops the lifecycle on it.
+      transport: {
+        save: (request, s) => host.document.save(request, s).catch(error => { if (readRevokedError(error)) sawReadRevoke = true; throw error }),
+        reconcile: (request, s) => host.document.reconcile(request, s).catch(error => { if (readRevokedError(error)) sawReadRevoke = true; throw error }),
+      },
       onState: state => {
         if (!editing || editing.controller !== self) return
         editing.state = state
+        if (state.phase === "stopped" && !selfClosed.has(self)) { wipe(sawReadRevoke); return }
         if (retired(editing)) note.readOnly = true
         render()
       },
@@ -120,11 +171,12 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
     // `stopped` is a read revocation or a retired journal: the SDK already
     // purged the private draft, so nothing may be kept locally.
     const purged = current.state.phase === "stopped"
-    await current.controller.close().catch(() => {})
-    editing = undefined
+    await closeController(current.controller).catch(() => {})
+    if (editing === current) editing = undefined
     const base = server.version
-    if (purged) { stray = undefined; await load(); return }
+    if (purged || readRevoked) { wipe(sawReadRevoke); return }
     const latest = await host.document.read(signal)
+    if (readRevoked) return
     const unsaved = !clean && text !== decode(latest.bytes)
     // The lifecycle's journal holds a captured draft; otherwise store it now,
     // and never load the server version over text no journal holds.
@@ -140,11 +192,18 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
    * On failure the text becomes the editable local copy and the alert says it
    * exists only in this window. */
   async function preserve(text: string, generation: string, baseVersion: string, label: string): Promise<boolean> {
+    if (readRevoked) return false
     const draft: RecoveryDraft = { applicationId: NOTECRAFT_APPLICATION, enginePin: host.scope.enginePin, sessionId: host.scope.sessionId, generation, baseVersion, editorRevision: "local", bytes: encode(text) }
     try {
       const journal = await host.openJournal()
-      try { await journal.persist(draft) } finally { await journal.close().catch(() => {}) }
+      try {
+        if (readRevoked) return false
+        await journal.persist(draft)
+      } finally { await journal.close().catch(() => {}) }
+      // Revoked while writing: the purge below erases this row too.
+      if (readRevoked) { if (sawReadRevoke) void host.openJournal().then(j => j.revokeRead()).catch(() => {}); return false }
     } catch {
+      if (readRevoked) return false
       localCopy = { generation, baseVersion }
       note.value = text; note.readOnly = false
       fail(LOCAL_COPY_ONLY); render()
@@ -215,17 +274,20 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
     // The note is confirmed at `base` right now; freeze it before any await.
     const before = note.value
     note.readOnly = true
-    await current.controller.close()
+    await closeController(current.controller)
     editing = undefined
     render()
     let kept = true
     try { await history.restore(target, { base, generation: current.generation }, signal) }
-    finally { kept = await keepStray(before, current.generation, base) }
+    catch (error) { if (readRevokedError(error)) wipe(true); throw error }
+    finally { if (!readRevoked) kept = await keepStray(before, current.generation, base) }
+    if (readRevoked) return
     if (kept) { await load(); await startEditing(current.generation) }
     render(); await listVersions()
   }
 
   note.addEventListener("input", () => {
+    if (readRevoked) { note.value = ""; return }
     if (localCopy) return // the note itself is the local copy
     if (editing && !retired(editing) && !closing) { edits++; editing.controller.edited() } else stray = note.value
   })
@@ -246,10 +308,12 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
     await refresh()
   })()
   /** Captures pending input before closing: the final save, else a journal
-   * row. Resolves false when some text exists only in this window (the note
-   * and the alert keep it); the host must not discard the view silently. */
-  let closed: Promise<boolean> | undefined
-  async function closeOnce(): Promise<boolean> {
+   * row. `local-copy` means some text exists only in this window (the note and
+   * the alert keep it) and the host must not discard the view silently;
+   * `revoked` means read access was removed and the text was wiped. */
+  let closed: Promise<NoteCraftCloseResult> | undefined
+  async function closeOnce(): Promise<NoteCraftCloseResult> {
+    if (readRevoked) return "revoked"
     closing = true; note.readOnly = true
     const current = editing
     let durable = true
@@ -259,17 +323,23 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
         try { await current.controller.flush() } catch { durable = await current.controller.revokeWrite().catch(() => false) }
       }
     }
-    if (current) await current.controller.close().catch(() => {})
+    if (current) await closeController(current.controller).catch(() => {})
     editing = undefined
+    // A read revoke during the final flush stopped the lifecycle and purged its
+    // journal (wipe() ran from its `stopped` state): never a local copy.
+    if (readRevoked) return "revoked"
     if (durable) durable = await keepStray(decode(server.bytes), current?.generation ?? lease.current?.generation ?? "1", server.version)
     else if (current && !localCopy) { localCopy = { generation: current.generation, baseVersion: server.version }; note.readOnly = false; fail(LOCAL_COPY_ONLY); render() }
-    lifetime.abort()
-    return durable && !localCopy
+    if (readRevoked) return "revoked"
+    if (durable && !localCopy) { lifetime.abort(); return "durable" }
+    // The view stays usable so the local copy can still be stored or discarded.
+    closing = false; closed = undefined; render()
+    return "local-copy"
   }
   return {
     ready,
     refresh: () => run(refresh, "Stav úprav se nepodařilo načíst."),
-    /** See closeOnce: true only when no typed text exists solely in this window. */
-    close(): Promise<boolean> { return closed ??= closeOnce() },
+    /** See closeOnce and NoteCraftCloseResult. */
+    close(): Promise<NoteCraftCloseResult> { return closed ??= closeOnce() },
   }
 }
