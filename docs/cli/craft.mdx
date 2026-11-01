@@ -16,6 +16,7 @@ existing explicit native Page and its qualified startup profile.
 ```bash
 crewship craft availability <page>
 crewship craft preview <page>
+crewship craft versions <page>
 crewship craft connect <page>
 ```
 
@@ -58,6 +59,7 @@ refusal bodies can describe a private runtime, but exit with the same codes.
 | `reauthorize` | `POST /api/v1/pages/{slug}/craft/sessions/reauthorize` |
 | `watch` | `GET /api/v1/pages/{slug}/craft/events` |
 | `read` | `GET /api/v1/pages/{slug}/craft/document` |
+| `versions` | `GET /api/v1/pages/{slug}/craft/document/versions` |
 | `save` | `POST /api/v1/pages/{slug}/craft/document/save` |
 | `import` | `POST /api/v1/pages/{slug}/craft/document/import` |
 | `restore` | `POST /api/v1/pages/{slug}/craft/document/restore` |
@@ -77,6 +79,52 @@ refusal bodies can describe a private runtime, but exit with the same codes.
 {"action":"proposals"}
 {"action":"accept-proposal","proposal_id":"ncp_0123456789abcdef01234567","generation":"9007199254740993"}
 ```
+
+### Version history
+
+`crewship craft versions <page>` opens one native admission
+(`POST /api/v1/pages/{slug}/craft/sessions`), reads
+`GET /api/v1/pages/{slug}/craft/document/versions` under it and exits. It never
+acquires the lease and never writes; the private session token is not printed.
+Inside `connect`, the `versions` action reads the same listing on the open
+connection.
+
+The listing needs the same rights as `read`: a reader may list, a comment-only
+person or a non-member gets the same refusal as `read` (`403`, exit code `4`).
+While the workspace feature flag `craft_version_history` is off (the default),
+the route answers `404` (exit code `3`).
+
+```bash
+crewship craft versions @PAGE_ID --format json
+```
+
+```json
+{
+  "currentVersion": "3",
+  "truncated": false,
+  "versions": [
+    {"version": "3", "createdAt": "2026-10-31T10:00:00Z", "author": {"actorId": "user:USER_ID", "kind": "human", "displayName": "Pavel"}, "restoredFrom": "1", "current": true},
+    {"version": "2", "createdAt": "2026-10-31T09:00:00Z", "author": {"actorId": "agent:AGENT_ID", "kind": "agent", "displayName": "Drafting Agent"}, "current": false},
+    {"version": "1", "createdAt": "2026-10-31T08:00:00Z", "author": {"actorId": "user:USER_ID", "kind": "human", "displayName": "Pavel"}, "current": false}
+  ]
+}
+```
+
+Versions are newest first; `current` marks the head. At most 200 entries are
+returned; `truncated: true` means older versions exist and remain restorable.
+Entries carry no document bytes.
+
+To restore, use the `restore` action inside `connect` while holding the lease.
+It is the fenced write a save uses (current generation, `baseVersion` equal to
+the latest version) and appends `baseVersion + 1` with the target's content;
+nothing is deleted:
+
+```json
+{"action":"restore","snapshot":{"workspaceId":"WORKSPACE","pageId":"PAGE","applicationId":"wordcraft","enginePin":"ENGINE_PIN","sessionId":"PUBLIC_SESSION_ID","generation":"1","baseVersion":"3","targetVersion":"1"}}
+```
+
+A stale generation, a moved-on `baseVersion` or a missing lease answers `409`
+(exit code `5`); without edit rights the answer is `403`.
 
 ### Agent proposals
 

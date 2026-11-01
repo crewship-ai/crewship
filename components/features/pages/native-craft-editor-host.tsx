@@ -13,6 +13,8 @@ import {createSingleEditorSave,type NativeSaveState} from "@/lib/mooring/single-
 import {createEditorFrame,editorFrameSupported} from "./workbook-editor-host"
 import {downloadNativeExport} from "@/lib/mooring/native-export-download"
 import {NativeCraftLeaseBar,type NativeCraftLeaseAction,type NativeCraftLeaseView} from "./native-craft-lease-bar"
+import {NativeCraftVersionHistory} from "./native-craft-version-history"
+import type {NativeVersionList} from "@/lib/mooring/native-versions"
 
 interface Lease extends NativeCraftLeaseView {expires_at: string|null}
 const vacant:Lease={can_edit:false,holder:null,mine:false,generation:null,can_write:false,acquired_at:null,expires_at:null,handoff_requested_by:[]}
@@ -78,6 +80,7 @@ interface Runtime {enginePin:string;port:NativeEditorPort;frame:HTMLIFrameElemen
 export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}:Props){
  const publishPreview=React.useRef<()=>void>(()=>{}),[publishedVersion,setPublishedVersion]=React.useState<string>()
  const stopAgent=React.useRef<()=>void>(()=>{})
+ const history=React.useRef<{load:(signal:AbortSignal)=>Promise<NativeVersionList|null>;restore:(version:string)=>void}>({load:async()=>null,restore:()=>{}}),[historyKey,setHistoryKey]=React.useState(0)
  const [proposals,setProposals]=React.useState<NativeProposal[]>([]),decide=React.useRef<(id:string,decision:'accept'|'reject')=>void>(()=>{}),compareProposal=React.useRef<(proposal:NativeProposal)=>void>(()=>{})
  const [quotaFull,setQuotaFull]=React.useState(false),downloadDraft=React.useRef<()=>void>(()=>{})
  const compare=React.useRef<(draft:NativeDraft)=>void>(()=>{}),reconcile=React.useRef<()=>void>(()=>{}),[uncertain,setUncertain]=React.useState(false)
@@ -176,7 +179,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    frame.setAttribute('allow','clipboard-write *')
    mount.current?.append(frame)
    if(!frame.contentWindow){frame.remove();throw Error('isolated_editor_unavailable')}
-   frame.title=snapshot.applicationId==='gridcraft'?'GridCraft editor':'WordCraft editor';setApplicationId(snapshot.applicationId);setQuota(snapshot.quota)
+   frame.title=snapshot.applicationId==='gridcraft'?'GridCraft editor':'WordCraft editor';setApplicationId(snapshot.applicationId);setQuota(snapshot.quota);setHistoryKey(n=>n+1)
    let resolve!:(r:Runtime)=>void,reject!:(e:Error)=>void
    const ready=new Promise<Runtime>((done,fail)=>{resolve=done;reject=fail})
    const timer=setTimeout(()=>{reject(Error('native_bootstrap_timeout'));if(r&&live(r))stop('Editor se bezpečně nepřipojil. Koncept nebyl označen jako uložený.')},20000)
@@ -409,6 +412,23 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    }catch{if(!dead)setError('Publikování náhledu nebylo potvrzeno. Dokument i místní koncept zůstávají zachovány.')}
    finally{transition=false;if(live(r)){if(r.writable&&owns(viewNow,r.generation))resumeViewing(r);setBusy(false)}}
   })()}
+  // Restore is the existing fenced write under this holder's generation and
+  // confirmed base version; the reopened editor then starts from the new head.
+  history.current={load:signal=>client.versions(signal),restore:target=>{void(async()=>{
+   const r=current
+   if(dead||networkRetired||transition||!r?.ready||viewNow.can_edit!==true||!owns(viewNow,r.generation)||!r.writable)return
+   transition=true;setBusy(true);setError(undefined)
+   try{
+    if(!await flushBeforeTransfer(r)||!r.ackedVersion||!owns(viewNow,r.generation))throw Error('restore_save_unconfirmed')
+    await client.restore({workspaceId,pageId,applicationId:sessionApplication!,enginePin:r.enginePin,sessionId,generation:r.generation,baseVersion:r.ackedVersion,targetVersion:target},lifetime.signal)
+    if(!await retireWrite(r))return
+    transition=false;await acquire()
+   }catch{
+    if(dead)return
+    if(r.writable&&owns(viewNow,r.generation)&&r.phase?.phase!=='read-only')resumeViewing(r)
+    setError('Obnovení verze nebylo potvrzeno. Dokument i místní koncept zůstávají zachovány.')
+   }finally{transition=false;if(!dead){setBusy(false);setHistoryKey(n=>n+1)}}
+  })()}}
   control.current=(action,body)=>{
    if(dead||networkRetired||transition||viewNow.can_edit!==true||!current?.ready)return
    transition=true;setBusy(true);setError(undefined)
@@ -450,7 +470,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     void observeLease(value).catch(()=>stop('Aktuální přístup nelze potvrdit. Koncept zachován.'))
    }).catch(()=>{if(!dead)void retireConnection('Spojení přerušeno. Zápis není potvrzen.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})
   })().catch(()=>{if(!dead)stop('Dokument nelze bezpečně otevřít.')})
-  return()=>{unregisterPrivacy();window.removeEventListener('message',windowMessage);control.current=()=>{};publishPreview.current=()=>{};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};stop('Editor uzavřen · koncept zachován',true)}
+  return()=>{unregisterPrivacy();window.removeEventListener('message',windowMessage);control.current=()=>{};publishPreview.current=()=>{};history.current={load:async()=>null,restore:()=>{}};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};stop('Editor uzavřen · koncept zachován',true)}
  },[enabled,humanId,workspaceId,pageId])
  function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`${draft.applicationId}-recovery.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
  if(!enabled)return <p className="p-6">Nativní editor není zapnutý.</p>
@@ -461,6 +481,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   {!connectionRetired&&view.can_edit===true&&ownsEditor&&<Button variant="outline" disabled={busy} onClick={()=>publishPreview.current()}>Publikovat náhled</Button>}
   {publishedVersion&&<p className="px-3 py-2">Sdílený náhled · verze {publishedVersion}</p>}
   <div role="status" className="px-3 py-2"><span>{label}</span>{savedVersion&&<span> · verze {savedVersion}</span>}{quota&&<span className="ml-3 text-muted-foreground">Historie {quota.usedBytes} / {quota.limitBytes} B{quota.warning?' · blíží se limit':''}</span>}</div>
+  {historyKey>0&&!connectionRetired&&<NativeCraftVersionHistory load={signal=>history.current.load(signal)} refreshKey={`${historyKey}:${savedVersion??''}`} canRestore={view.can_edit===true&&ownsEditor} restoreHint={view.can_edit===true?'Pro obnovení verze převezměte úpravy.':'Obnovit verzi může jen ten, kdo dokument právě upravuje.'} pending={busy} onRestore={version=>history.current.restore(version)}/>}
   {quotaFull&&<div role="alert" className="space-y-2 border-y px-3 py-2"><p><b>Kapacita úložiště neumožňuje další uložení.</b> Další verze se neuloží. Všechny dosavadní verze zůstávají a vaše neuložené změny jsou v tomto prohlížeči.</p><p className="text-sm text-muted-foreground">Navýšení ani mazání historie aplikace zatím nenabízí. Práci si stáhněte jako soubor koncept nebo exportem z editoru; koncept se nabídne i po znovuotevření.</p><Button variant="outline" onClick={()=>downloadDraft.current()}>Stáhnout koncept</Button></div>}
   {uncertain&&<Button variant="outline" onClick={()=>reconcile.current()}>Ověřit výsledek</Button>}
   {error&&<p role="alert" className="px-3 py-2">{error}{mismatch&&error===mismatch.message&&<> <a className="underline" href={mismatch.address+window.location.pathname+window.location.search+window.location.hash} rel="noopener noreferrer">Otevřít na {mismatch.address}</a></>}</p>}

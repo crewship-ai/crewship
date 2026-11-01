@@ -97,3 +97,34 @@ func TestCraftCLINativeDocumentPreservesFiveMiBAndRejectsForeignSession(t *testi
 		t.Fatal("accepted native bytes above32MiB")
 	}
 }
+
+func TestCraftCLIVersionsUsesBoundSessionAndNeverPrintsIt(t *testing.T) {
+	stub := pageStub(t)
+	base := "/api/v1/pages/health/craft"
+	secret := strings.Repeat("d", 64)
+	stub.OnPost(base+"/sessions", func(*http.Request, []byte) (int, []byte, string) {
+		return 201, []byte(`{"session_token":"` + secret + `","session_id":"public-history-session","application_id":"wordcraft"}`), "application/json"
+	})
+	stub.OnGet(base+"/document/versions", func(r *http.Request, _ []byte) (int, []byte, string) {
+		if r.Header.Get("X-Craft-Session") != secret {
+			t.Error("unbound version listing")
+		}
+		return 200, []byte(`{"currentVersion":"2","truncated":false,"versions":[{"version":"2","createdAt":"2026-10-31T10:00:00Z","author":{"actorId":"agent:a","kind":"agent","displayName":"Agent"},"current":true},{"version":"1","createdAt":"2026-10-30T10:00:00Z","author":{"actorId":"user:u","kind":"human","displayName":"Pavel"},"current":false}]}`), "application/json"
+	})
+	out, err := runPageCLI(t, "", "craft", "versions", "health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, secret) || strings.Contains(out, "session_token") || !strings.Contains(out, "currentVersion") {
+		t.Fatalf("versions output: %s", out)
+	}
+	if _, err = runPageCLI(t, `{"action":"versions"}`+"\n", "craft", "connect", "health"); err != nil {
+		t.Fatal(err)
+	}
+	if got := len(stub.CallsFor("GET", base+"/document/versions")); got != 2 {
+		t.Fatalf("version listings %d, want 2", got)
+	}
+	if len(stub.CallsFor("POST", base+"/document/restore")) != 0 {
+		t.Fatal("listing wrote")
+	}
+}

@@ -253,6 +253,7 @@ documented in [`crewship craft`](/cli/craft).
 | POST | `/api/v1/pages/{slug}/craft/initialize` | Create the first version of an empty document |
 | GET | `/api/v1/pages/{slug}/craft/preview` | Read-only preview of the shared version |
 | GET | `/api/v1/pages/{slug}/craft/document` | Document bytes, version and quota |
+| GET | `/api/v1/pages/{slug}/craft/document/versions` | Version history, newest first (needs the `craft_version_history` workspace flag) |
 | POST | `/api/v1/pages/{slug}/craft/document/save` | Save a new version |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Import a file as a new version |
 | POST | `/api/v1/pages/{slug}/craft/document/restore` | Restore an old version |

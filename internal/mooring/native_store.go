@@ -221,6 +221,16 @@ func (s *NativeStore) Read(ctx context.Context, k EditLeaseScope) (artifacts.Ver
 	}
 	return s.versions.Read(ctx, nativeVersionKey(k), s.authority(k, nil, "read"))
 }
+
+// Versions lists the saved native versions, newest first, under exactly the
+// live Read authority and immutable profile check of Read. It is metadata only:
+// no document bytes, and never a write or lease side effect.
+func (s *NativeStore) Versions(ctx context.Context, k EditLeaseScope) ([]artifacts.VersionInfo, error) {
+	if err := s.ready(); err != nil {
+		return nil, err
+	}
+	return s.versions.Versions(ctx, nativeVersionKey(k), s.authority(k, nil, "read"))
+}
 func (s *NativeStore) Restore(ctx context.Context, l EditLease, base, target int64) (artifacts.VersionReceipt, error) {
 	if err := s.ready(); err != nil {
 		return artifacts.VersionReceipt{}, err
