@@ -17,7 +17,8 @@ imports it yet, so no existing path changes behavior.
 import { createLeaseActions, createSingleEditorSave, recoveryOffers, createVersionHistory } from "@/lib/mooring/sdk"
 ```
 
-`lib/mooring/index.ts` re-exports the same surface. Code that runs inside the
+`lib/mooring/index.ts` re-exports the same surface and is therefore host-side:
+it pulls in the private draft journal and the admitted transport. Code that runs inside the
 isolated editor iframe imports only `lib/mooring/sdk/editor`, which has no
 Crewship authentication, HTTP, storage or UI dependencies (a test enforces this).
 
@@ -123,6 +124,16 @@ that imports only `lib/mooring/sdk`. It shows *Upravuje X*, request/hand-off
 and release, a truthful save status with *Ověřit výsledek* for an uncertain
 save, local recovery offers with *Porovnat* and *Kopírovat*, and version
 history with restore.
+
+No typed text is closed or overwritten before it is durable. `close()` sends
+the final save, or journals the text when the save is not confirmed, and
+resolves `false` when neither succeeded. When custody is lost (or a restore
+finishes) and no journal can persist the unsaved text, NoteCraft does not load
+the server version over it: the note stays editable as a local copy, the
+status shows *Koncept zůstává v tomto editoru* and the alert says the text
+exists only in this window. *Znovu uchovat koncept* retries the journal;
+*Zahodit místní kopii* discards it deliberately. A read revocation is the
+exception: the SDK purges the draft and nothing is kept.
 
 ```sh
 crewship-heavy pnpm exec vitest run examples/mooring/notecraft lib/mooring/sdk

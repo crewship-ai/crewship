@@ -3,7 +3,7 @@
 import { webcrypto } from "node:crypto"
 import { fireEvent, within } from "@testing-library/dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { RecoveryDraft } from "../../../lib/mooring/sdk"
+import type { RecoveryDraft, RecoveryJournal } from "../../../lib/mooring/sdk"
 import { createFakeCraftServer, memoryJournal } from "./fake-server"
 import { mountNoteCraft } from "./notecraft"
 
@@ -13,11 +13,11 @@ const alice = { actor_id: "u-alice", display_name: "Alice", kind: "human" as con
 const bob = { actor_id: "u-bob", display_name: "Bob", kind: "human" as const }
 let tabs = 0
 
-function open(server: ReturnType<typeof createFakeCraftServer>, actor: typeof alice, rows = new Map<string, RecoveryDraft>(), mayEdit = true) {
+function open(server: ReturnType<typeof createFakeCraftServer>, actor: typeof alice, rows = new Map<string, RecoveryDraft>(), mayEdit = true, openJournal = async (): Promise<RecoveryJournal> => memoryJournal(rows)) {
   const root = document.createElement("div")
   document.body.append(root)
   const client = server.connect(actor)
-  const app = mountNoteCraft(root, { scope: { workspaceId: "w", pageId: "p", sessionId: `tab-${++tabs}`, enginePin: "pin" }, mayEdit, document: client, versions: client.versions, openJournal: async () => memoryJournal(rows) })
+  const app = mountNoteCraft(root, { scope: { workspaceId: "w", pageId: "p", sessionId: `tab-${++tabs}`, enginePin: "pin" }, mayEdit, document: client, versions: client.versions, openJournal })
   const q = within(root)
   const note = q.getByLabelText<HTMLTextAreaElement>("Poznámka")
   return {
@@ -210,5 +210,124 @@ describe("NoteCraft reference application", () => {
     await vi.waitFor(() => expect(reloaded.q.getByText(/Místní koncept nad verzí 1/)).toBeTruthy())
     reloaded.click("Kopírovat")
     expect(reloaded.q.getByLabelText<HTMLTextAreaElement>("Kopie konceptu").value).toBe("Alice late")
+  })
+
+  it("flushes text typed right before close, so a remount shows it", async () => {
+    const server = createFakeCraftServer("start"), rows = new Map<string, RecoveryDraft>()
+    const a = open(server, alice, rows)
+    await editing(a)
+    a.type("last words") // closed before the 300 ms autosave fires
+    const durable = await a.app.close()
+    expect(server.text()).toBe("last words")
+    expect(durable).toBe(true)
+    const reopened = open(server, alice, rows)
+    await reopened.app.ready
+    await vi.waitFor(() => expect(reopened.note.value).toBe("last words"))
+  })
+
+  it("journals text typed right before close when the save cannot be confirmed", async () => {
+    const server = createFakeCraftServer("start"), rows = new Map<string, RecoveryDraft>()
+    const a = open(server, alice, rows)
+    await editing(a)
+    vi.spyOn(a.client, "save").mockRejectedValue(new Error("network"))
+    a.type("offline words")
+    const durable = await a.app.close()
+    expect(server.text()).toBe("start")
+    expect([...rows.values()].map(row => new TextDecoder().decode(row.bytes))).toEqual(["offline words"])
+    expect(durable).toBe(true)
+    const reopened = open(server, alice, rows)
+    await reopened.app.ready
+    await vi.waitFor(() => expect(reopened.q.getByText(/Místní koncept nad verzí 1/)).toBeTruthy())
+    reopened.click("Kopírovat")
+    expect(reopened.q.getByLabelText<HTMLTextAreaElement>("Kopie konceptu").value).toBe("offline words")
+  })
+
+  it("keeps unsaved text editable and says so when custody is lost and the journal cannot persist", async () => {
+    const server = createFakeCraftServer("start"), rows = new Map<string, RecoveryDraft>()
+    let failing = false
+    const journal = async (): Promise<RecoveryJournal> => {
+      const real = memoryJournal(rows)
+      return { ...real, persist: draft => failing ? Promise.reject(new Error("quota")) : real.persist(draft) }
+    }
+    const a = open(server, alice, rows, true, journal)
+    await editing(a)
+    failing = true
+    server.takeOver(bob)
+    a.type("Alice late")
+    await vi.waitFor(() => expect(a.status()).toBe("Koncept zůstává v tomto editoru"))
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.lease()).toBe("Upravuje Bob"))
+    // Never overwritten by the server version, never silently closed.
+    expect(a.note).toMatchObject({ value: "Alice late", readOnly: false })
+    expect(a.q.getByRole("alert")).toMatchObject({ hidden: false })
+    expect(a.q.getByRole("alert").textContent).toMatch(/jen v tomto okně/)
+    expect(a.status()).toBe("Koncept zůstává v tomto editoru")
+    expect(rows.size).toBe(0)
+    a.type("Alice later")
+    // A later lease change neither starts editing over the copy nor reloads it.
+    await server.connect(bob).leaseAction("release", { generation: server.generation }, new AbortController().signal)
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.lease()).toBe("Volné"))
+    expect(a.note).toMatchObject({ value: "Alice later", readOnly: false })
+    await expect(a.app.close()).resolves.toBe(false)
+    expect(a.note.value).toBe("Alice later")
+  })
+
+  it("stores the local copy once the journal recovers, then shows the server version", async () => {
+    const server = createFakeCraftServer("start"), rows = new Map<string, RecoveryDraft>()
+    let failing = false
+    const journal = async (): Promise<RecoveryJournal> => {
+      const real = memoryJournal(rows)
+      return { ...real, persist: draft => failing ? Promise.reject(new Error("quota")) : real.persist(draft) }
+    }
+    const a = open(server, alice, rows, true, journal)
+    await editing(a)
+    failing = true
+    server.takeOver(bob)
+    a.type("Alice late")
+    await vi.waitFor(() => expect(a.status()).toBe("Koncept zůstává v tomto editoru"))
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.q.getByRole("alert").hidden).toBe(false))
+    const retry = a.q.getByRole<HTMLButtonElement>("button", { name: "Znovu uchovat koncept" })
+    a.click("Znovu uchovat koncept")
+    expect(retry.disabled).toBe(true)
+    await vi.waitFor(() => expect(retry.disabled).toBe(false))
+    expect(a.q.getByRole("alert").textContent).toMatch(/jen v tomto okně/)
+    expect(a.note).toMatchObject({ value: "Alice late", readOnly: false })
+    failing = false
+    a.click("Znovu uchovat koncept")
+    await vi.waitFor(() => expect(a.note).toMatchObject({ value: "start", readOnly: true }))
+    expect(a.q.queryByRole("button", { name: "Znovu uchovat koncept" })).toBeNull()
+    const reopened = open(server, alice, rows)
+    await reopened.app.ready
+    await vi.waitFor(() => expect(reopened.q.getByText(/Místní koncept nad verzí 1/)).toBeTruthy())
+    reopened.click("Kopírovat")
+    expect(reopened.q.getByLabelText<HTMLTextAreaElement>("Kopie konceptu").value).toBe("Alice late")
+  })
+
+  it("keeps text typed during a restore as a local copy when the journal cannot persist", async () => {
+    const server = createFakeCraftServer("first"), rows = new Map<string, RecoveryDraft>()
+    let failing = false
+    const journal = async (): Promise<RecoveryJournal> => {
+      const real = memoryJournal(rows)
+      return { ...real, persist: draft => failing ? Promise.reject(new Error("quota")) : real.persist(draft) }
+    }
+    const a = open(server, alice, rows, true, journal)
+    await editing(a)
+    await saved(a, "second")
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.q.getByRole("button", { name: "Obnovit verzi 1" })).toBeTruthy())
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const restore = a.client.versions.restore
+    const delayed = vi.spyOn(a.client.versions, "restore").mockImplementation(async (...args) => { await gate; return restore(...args) })
+    a.click("Obnovit verzi 1")
+    await vi.waitFor(() => expect(delayed).toHaveBeenCalled())
+    failing = true
+    a.type("typed during restore")
+    release()
+    await vi.waitFor(() => expect(a.q.getByText("Verze 3 · aktuální · obnoveno z 1")).toBeTruthy())
+    expect(a.note).toMatchObject({ value: "typed during restore", readOnly: false })
+    expect(a.q.getByRole("alert").textContent).toMatch(/jen v tomto okně/)
   })
 })
