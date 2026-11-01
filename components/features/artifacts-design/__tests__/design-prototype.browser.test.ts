@@ -50,7 +50,7 @@ it.skipIf(!existsSync(chromium.executablePath()))("plays three linked screens A 
   await player.getByRole("button", { name: "Continue: open Screen C" }).focus()
   await page.keyboard.press("Enter")
   await player.getByRole("heading", { name: "Screen C" }).waitFor()
-  await player.getByRole("button", { name: "Back" }).click()
+  await player.getByRole("button", { name: "Back", exact: true }).click()
   await player.getByRole("heading", { name: "Screen B" }).waitFor()
   await page.keyboard.press("Escape")
   expect(await page.getByRole("dialog", { name: "Prototype playback" }).count()).toBe(0)
