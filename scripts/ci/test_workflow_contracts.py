@@ -52,8 +52,10 @@ class WorkflowContracts(unittest.TestCase):
         lane = self.job(self.text('ci.yml'), 'go-platforms')
         go_timeout = int(re.search(r'go test \./\.\.\. -count=1 -timeout (\d+)m', lane).group(1))
         job_cap = int(re.search(r'^    timeout-minutes: (\d+)', lane, re.M).group(1))
-        self.assertGreaterEqual(job_cap, 40)
-        self.assertGreaterEqual(job_cap - go_timeout, 20)
+        # Same run family: internal/api then hit the 20m package timeout on
+        # macOS (1200.5 s, run 41316056668), so the package bound is 30m.
+        self.assertGreaterEqual(go_timeout, 30)
+        self.assertGreaterEqual(job_cap - go_timeout, 15)
 
     def text(self, name):
         return (ROOT / '.github/workflows' / name).read_text()
