@@ -1873,11 +1873,12 @@ jobs:
   # go-package-shard.py proves the partitions cover `go list ./...` exactly
   # once; costs only decide placement.
   #
-  # 25 → 30 and `-timeout 15m` → 18m, the same budget as go-shuffle (#4740).
+  # 25 → 30 and `-timeout 15m` → 20m, with go-shuffle 18m → 20m (#4740).
   # internal/api is one binary whose tests run almost serially: 871–900 s in
   # runs 41262691789, 41264884565 and 41267941716 (sum of its top-level
   # tests 899 s over 8,264 tests), so 15m failed at random with nothing
-  # failing. Overhead ~3m + 18m leaves 9m of daylight under the job cap.
+  # failing, and shuffle's 18m had only ~2m of margin. Measured overhead
+  # 2m39s–3m07s + 20m leaves ~7m of daylight under the 30m job cap.
   go-test:
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.go == 'true'
@@ -1898,7 +1899,7 @@ jobs:
       - name: Go test (package partition)
         env:
           SHARD_INDEX: ${{ matrix.shard }}
-        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -timeout 18m
+        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -timeout 20m
 
   go-shuffle:
     needs: [merge-conflict-markers, changes]
@@ -1919,6 +1920,9 @@ jobs:
     # internal/database under a shuffled order ran past 900s (run
     # 34854262908) once two more migrations were in. 2m33s + 18m = 20m33s
     # keeps 9m27s under this cap.
+    #
+    # 18m → 20m with #4740: internal/api alone reached ~16m here (job 18m58s
+    # in run 41264884565). Overhead up to 3m07s + 20m keeps ~7m of daylight.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1942,7 +1946,7 @@ jobs:
         # cover `go list ./...` exactly once.
         env:
           SHARD_INDEX: ${{ matrix.shard }}
-        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -shuffle=on -timeout 18m
+        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -shuffle=on -timeout 20m
 
   # ── Go: race detector ──
   #
