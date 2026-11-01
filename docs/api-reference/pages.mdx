@@ -2531,6 +2531,25 @@ The index accepts `audience=personal` for explicitly private Pages owned by the 
 
 Optional `limit` and `offset` apply after authorization and audience filtering. The default limit is 100 when either paging parameter is present, the maximum is 500, and negative offsets become zero. With neither paging parameter the existing unpaged JSON array is preserved. `crewship api request GET /api/v1/pages --query audience=personal --query limit=20 --format json` requests a personal catalog page.
 
+The same index supports literal case-insensitive `q` search over names and slugs;
+`kind=project|dashboard|page|word|sheet|slides|design`, `access=private|open`,
+`version=shared|unshared|unversioned`, and canonical `owner=user/ID|crew/slug|me`
+facets. Repeat a facet or separate values with commas for OR; different facets
+are combined with AND. `folder` selects an exact slug or `~unfiled`. `empty=exclude|only|include`
+selects Pages with nothing to open yet (no typed kind, no Word, Sheet or Slides
+storage and no panels); omitted includes them.
+`sort=updated|name|kind` keeps the index order (most recent update, then slug)
+for ties, so every window is deterministic. Invalid facet values return 400.
+Filters and the `X-Total-Count` are evaluated only over authorized rows before
+paging; filtering a shared Project's kind cannot reveal its private latest kind.
+OWNER custody reads audit every private candidate consumed by these predicates,
+including when the filter or page window returns nothing. Classification,
+counting and the existing audit postconditions share one transaction; an
+unavailable audit releases neither rows nor a count. Audience, Test and Archive
+visibility are applied before selecting those audit candidates.
+The response remains an array. These filters do not expose lease or comment
+queue state, or change Page access.
+
 The private-chat document composer shows the target personal space and its audience before submission. This view and label do not publish a Document, change its audience, enable shared-chat creation, or provide a work-folder sharing operation.
 
 ## Artifact project creation
