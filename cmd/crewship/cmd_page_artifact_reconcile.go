@@ -41,6 +41,43 @@ type artifactReconcileResult struct {
 
 var errArtifactSuccessorAbsent = errors.New("successor version absent")
 
+// errArtifactSuccessorUnknown means the successor read returned 404 although
+// newer versions exist (an Edit user cannot read history), so absence is not
+// proven.
+var errArtifactSuccessorUnknown = errors.New("successor version outcome unknown")
+
+// artifactLatestVersion reads the page artifact's latest version. It reports
+// the latest only when the caller may write: a reader is served the shared
+// version in its place, which says nothing about newer saves.
+func artifactLatestVersion(client *cli.Client, slug string) (int64, error) {
+	resp, err := client.Get("/api/v1/pages/" + pagePathEscape(slug) + "/artifact")
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if err := pageCheckError(resp); err != nil {
+		return 0, err
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, (9<<20)+1))
+	if err != nil {
+		return 0, fmt.Errorf("read artifact: %w", err)
+	}
+	if len(raw) > 9<<20 {
+		return 0, fmt.Errorf("artifact response exceeds limit")
+	}
+	var snapshot struct {
+		CanWrite      bool  `json:"can_write" yaml:"can_write"`
+		LatestVersion int64 `json:"latest_version" yaml:"latest_version"`
+	}
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		return 0, fmt.Errorf("decode artifact: %w", err)
+	}
+	if !snapshot.CanWrite || snapshot.LatestVersion < 1 {
+		return 0, errors.New("your access no longer includes the latest version (the read returned the shared version), so absence cannot be proven; ask the owner, then confirm before publishing again")
+	}
+	return snapshot.LatestVersion, nil
+}
+
 // errArtifactSuccessorDiffers means base+1 exists with other content: some
 // other save took that version. The caller's save was not applied as sent.
 var errArtifactSuccessorDiffers = errors.New("successor version differs")
@@ -84,6 +121,16 @@ func artifactReconcile(client *cli.Client, slug string, base int64, local map[st
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound {
+		// 404 is not proof of absence: the server also answers 404 to an
+		// editor asking for a historical version. Absence is proven only when
+		// the latest version is not newer than the base.
+		latest, err := artifactLatestVersion(client, slug)
+		if err != nil {
+			return result, fmt.Errorf("version %d returned 404 and the latest version could not be read: %w", base+1, err)
+		}
+		if latest > base {
+			return result, fmt.Errorf("%w: latest is version %d, but version %d is not readable with your access, so the save may have been applied", errArtifactSuccessorUnknown, latest, base+1)
+		}
 		return result, errArtifactSuccessorAbsent
 	}
 	if err := pageCheckError(resp); err != nil {

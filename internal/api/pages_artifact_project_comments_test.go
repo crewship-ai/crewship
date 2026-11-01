@@ -121,3 +121,48 @@ func TestArtifactReplyRunWithoutCommentTarget(t *testing.T) {
 		t.Fatalf("answer not recorded: %s/%d", status, replies)
 	}
 }
+
+// B15 (G4): with 500 comments already stored, the comment just created must
+// still be listed (the newest 500, oldest first), or `--wait` cannot find it.
+func TestArtifactCommentListKeepsNewestWhenOverCap(t *testing.T) {
+	h, page, owner, _, call := commentGrantFixture(t, "comment")
+	var ws string
+	if err := h.db.QueryRow(`SELECT workspace_id FROM pages WHERE id=?`, page).Scan(&ws); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 500; i++ {
+		mustExec(t, h.db, `INSERT INTO artifact_project_comments(id,workspace_id,page_id,version,path,selector,quote,text,author,created_at) VALUES(?,?,?,2,'index.html','#hero','Private two','old',?,?)`,
+			fmt.Sprintf("old-%03d", i), ws, page, owner, fmt.Sprintf("2020-01-01T00:00:00.%03dZ", i))
+	}
+	created := call(owner, "POST", "three-screens/artifact/comments", `{"version":2,"path":"index.html","selector":"#hero","quote":"Private two","text":"newest"}`)
+	if created.Code != 201 {
+		t.Fatalf("create %d %s", created.Code, created.Body)
+	}
+	var made struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &made); err != nil || made.ID == "" {
+		t.Fatalf("created comment: %v %s", err, created.Body)
+	}
+	got := call(owner, "GET", "three-screens/artifact/comments?version=2", "")
+	if got.Code != 200 {
+		t.Fatalf("list %d %s", got.Code, got.Body)
+	}
+	var listing struct {
+		Comments []struct {
+			ID string `json:"id"`
+		} `json:"comments"`
+	}
+	if err := json.Unmarshal(got.Body.Bytes(), &listing); err != nil {
+		t.Fatal(err)
+	}
+	if len(listing.Comments) != 500 {
+		t.Fatalf("listed %d comments, want the 500 newest", len(listing.Comments))
+	}
+	if last := listing.Comments[len(listing.Comments)-1].ID; last != made.ID {
+		t.Fatalf("last listed comment = %q, want the newest %q", last, made.ID)
+	}
+	if first := listing.Comments[0].ID; first != "old-001" {
+		t.Fatalf("first listed comment = %q, want old-001 (oldest of the newest 500)", first)
+	}
+}
