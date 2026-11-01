@@ -14,7 +14,10 @@ any two queued PRs conflict there (#4751); separate files cannot.
   can now fail. No heading.
 - **Guard:** the Changelog Guard accepts a new non-empty fragment in place of
   an `## [Unreleased]` edit. An empty or whitespace-only fragment does not
-  count, and editing or deleting an existing fragment is not a release note.
+  count, nor does a symlink, and editing, deleting or renaming an existing
+  fragment is not a release note (a PR that deletes one gets no credit for
+  fragments it adds, unless it also changes `## [Unreleased]`, as the release
+  PR does).
 - **Release:** `python3 scripts/changelog-collect.py` moves every fragment to
   the top of `## [Unreleased]` (highest number first) and deletes the files —
   see `RELEASING.md`.

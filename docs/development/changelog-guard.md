@@ -39,7 +39,9 @@ guard accepts a fragment only when the PR *adds* it, directly inside
 non-whitespace character; it diffs from the same merge base, so a fragment
 another PR merged to `main` meanwhile is not counted. Editing or deleting an
 existing fragment is not a release note, the same rule as an edit outside
-`## [Unreleased]`. Fragments do not bypass the missing-heading check. At
+`## [Unreleased]`; a PR that deletes or renames a fragment gets no credit for
+fragments it adds unless it also changes `## [Unreleased]` (the release PR
+that collects them), and a symlinked fragment never counts. Fragments do not bypass the missing-heading check. At
 release time `scripts/changelog-collect.py` moves them into
 `## [Unreleased]` (see `RELEASING.md`); its behaviour is pinned in the same
 test script. The format is in `changelog.d/README.md`.

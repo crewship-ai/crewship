@@ -430,6 +430,37 @@ expect "editing an existing fragment is not a new release note" 1 main someone f
 scenario; touch_file components/thing.tsx; remove_file changelog.d/4700-someone-else.md; commit_pr
 expect "deleting an existing fragment is not a release note" 1 main someone false
 
+# Renaming is a delete plus an add under `--no-renames`, so the "added" file
+# would otherwise pass as a brand-new note. A PR that removes any fragment gets
+# no credit for fragments it adds — unless it also changes ## [Unreleased],
+# which is the release PR collecting fragments into the file.
+scenario; touch_file components/thing.tsx
+git -C "$FIXTURE" mv changelog.d/4700-someone-else.md changelog.d/4751-renamed.md; commit_pr
+expect "renaming an existing fragment is not a new release note" 1 main someone false
+
+scenario; touch_file components/thing.tsx; remove_file changelog.d/4700-someone-else.md
+add_fragment changelog.d/4751-fragment.md "$FRAGMENT_TEXT"; commit_pr
+expect "a new fragment does not count while the PR deletes another" 1 main someone false
+if printf '%s\n' "$GUARD_OUT" | grep -q "changelog.d/4700-someone-else.md"; then
+  pass "…and the error names the deleted fragment"
+else
+  fail "…and the error must name the deleted fragment"
+fi
+
+scenario; touch_file components/thing.tsx; remove_file changelog.d/4700-someone-else.md
+add_unreleased_entry; commit_pr
+expect "the release collect shape (fragments deleted, ## [Unreleased] changed) passes" 0 main someone false
+
+# A symlink's blob is its target path, which is never empty — so without a
+# mode check any link, dangling or not, reads as a written release note.
+scenario; touch_file components/thing.tsx
+ln -s README.md "$FIXTURE/changelog.d/4751-link.md"; commit_pr
+expect "a symlinked fragment is not a release note" 1 main someone false
+
+scenario; touch_file components/thing.tsx
+ln -s does-not-exist.md "$FIXTURE/changelog.d/4751-dangling.md"; commit_pr
+expect "a dangling symlinked fragment is not a release note" 1 main someone false
+
 # ---------------------------------------------------------------------------
 # Release-time collection: scripts/changelog-collect.py
 # ---------------------------------------------------------------------------
@@ -535,6 +566,32 @@ elif [ -e "$CROOT/changelog.d/90-older.md" ]; then
 else
   fail "a CHANGELOG.md without ## [Unreleased] makes collect refuse, keeping fragments"
 fi
+
+# collect_refuses <label>: collect must exit non-zero, without a Python
+# traceback, leaving CHANGELOG.md and the regular fragments untouched.
+collect_refuses() {
+  local before out rc
+  before="$(cat "$CROOT/CHANGELOG.md")"
+  out="$(python3 -I "$COLLECT" --root "$CROOT" 2>&1)"; rc=$?
+  if [ "$rc" -eq 0 ]; then
+    fail "$1 (collect exited 0)"
+  elif printf '%s\n' "$out" | grep -q "Traceback"; then
+    fail "$1 (collect crashed with a traceback)"; printf '%s\n' "$out" | sed 's/^/       | /'
+  elif [ "$(cat "$CROOT/CHANGELOG.md")" != "$before" ] || [ ! -e "$CROOT/changelog.d/90-older.md" ]; then
+    fail "$1 (collect changed files before refusing)"
+  else
+    pass "$1"
+  fi
+}
+
+collect_fixture; ln -s 90-older.md "$CROOT/changelog.d/92-link.md"
+collect_refuses "a symlinked fragment makes collect refuse, changing nothing"
+
+collect_fixture; ln -s does-not-exist.md "$CROOT/changelog.d/93-dangling.md"
+collect_refuses "a dangling symlinked fragment makes collect refuse, changing nothing"
+
+collect_fixture; printf -- '- **Latin-1 \xe9.**\n' > "$CROOT/changelog.d/94-latin1.md"
+collect_refuses "a non-UTF-8 fragment makes collect refuse cleanly, changing nothing"
 
 echo
 if [ "$FAILURES" -ne 0 ]; then

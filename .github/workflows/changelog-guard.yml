@@ -281,8 +281,30 @@ jobs:
           # plus an add of the new path rather than vanishing from `A`. The
           # diff is from the merge base, so fragments other PRs merged into
           # main while this one was open are not counted as this PR's.
-          # A fragment that is empty or whitespace-only is not a release note.
+          # A fragment that is empty or whitespace-only is not a release note,
+          # and neither is anything but a regular file: a symlink's blob is its
+          # target path, never empty, so a link (dangling or not) would read as
+          # a written note — `git ls-tree` mode must be 100644 or 100755.
+          #
+          # A PR that DELETES a fragment gets no credit for the ones it adds:
+          # under `--no-renames` a renamed fragment is a delete plus an add, so
+          # without this rule renaming someone else's note passes as a new one.
+          # The legitimate deleter is the release PR running
+          # `scripts/changelog-collect.py`; it also changes `## [Unreleased]`
+          # and so has already passed above.
           # Bare assignments, so `set -e` kills the step on a git error.
+          deleted_raw="$(git diff --no-renames --name-only --diff-filter=D \
+              "$merge_base" HEAD -- 'changelog.d')"
+          deleted_fragments=()
+          if [ -n "$deleted_raw" ]; then
+            while IFS= read -r f; do
+              case "$f" in
+                changelog.d/README.md|changelog.d/*/*) ;;
+                changelog.d/*.md) deleted_fragments+=("$f") ;;
+              esac
+            done <<< "$deleted_raw"
+          fi
+
           fragments_raw="$(git diff --no-renames --name-only --diff-filter=A \
               "$merge_base" HEAD -- 'changelog.d')"
           fragment_candidates=()
@@ -297,6 +319,14 @@ jobs:
               changelog.d/*.md) ;;
               *) continue ;;
             esac
+            fragment_entry="$(git ls-tree HEAD -- "$f")"
+            case "$fragment_entry" in
+              "100644 blob "*|"100755 blob "*) ;;
+              *)
+                empty_fragments+=("$f (not a regular file)")
+                continue
+                ;;
+            esac
             fragment_body="$(git show "HEAD:$f")"
             if [[ "$fragment_body" =~ [^[:space:]] ]]; then
               fragments+=("$f")
@@ -305,7 +335,7 @@ jobs:
             fi
           done
 
-          if [ "${#fragments[@]}" -gt 0 ]; then
+          if [ "${#fragments[@]}" -gt 0 ] && [ "${#deleted_fragments[@]}" -eq 0 ]; then
             echo "Changelog fragment added by this PR: ${fragments[*]} ✓"
             exit 0
           fi
@@ -315,9 +345,15 @@ jobs:
             exit 0
           fi
 
+          if [ "${#deleted_fragments[@]}" -gt 0 ]; then
+            echo "::error::This PR deletes or renames changelog fragments: ${deleted_fragments[*]}"
+            echo "::error::A fragment added next to that is not counted (a rename would pass as a new note). Restore them, or, when collecting a release, change '## [Unreleased]' as RELEASING.md describes."
+            exit 1
+          fi
+
           if [ "${#empty_fragments[@]}" -gt 0 ]; then
-            echo "::error::This PR adds an empty changelog fragment: ${empty_fragments[*]}"
-            echo "::error::Write the release note in it (a bullet, as in CHANGELOG.md) — an empty file collects into nothing."
+            echo "::error::This PR adds an empty or non-regular changelog fragment: ${empty_fragments[*]}"
+            echo "::error::Write the release note in a regular file (a bullet, as in CHANGELOG.md) — an empty file or a symlink is not a release note."
             exit 1
           fi
 

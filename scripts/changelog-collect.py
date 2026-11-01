@@ -9,11 +9,13 @@ collected fragment files. See RELEASING.md.
 
 Fragments are the *.md files directly inside changelog.d/, except README.md.
 The script refuses, changing nothing, when CHANGELOG.md has no
-## [Unreleased] heading or a fragment is empty.
+## [Unreleased] heading, or a fragment is empty, not valid UTF-8, or not a
+regular file (a symlink, dangling or not, is never followed).
 
 Usage: python3 scripts/changelog-collect.py [--root DIR] [--dry-run]
 """
 import argparse
+import os
 from pathlib import Path
 import re
 import sys
@@ -28,11 +30,22 @@ def fragment_key(path):
 
 
 def fragments(root):
+    """Return the fragment paths; raise ValueError on a non-regular one."""
     directory = root / 'changelog.d'
     if not directory.is_dir():
         return []
-    found = [p for p in directory.iterdir()
-             if p.is_file() and p.suffix == '.md' and p.name != 'README.md']
+    found = []
+    for path in directory.iterdir():
+        if path.suffix != '.md' or path.name == 'README.md':
+            continue
+        # is_symlink first: is_file() follows links and is False for a
+        # dangling one, so either check alone would follow or skip it.
+        if path.is_symlink() or not path.is_file():
+            if path.is_dir() and not path.is_symlink():
+                continue
+            raise ValueError(f'{path.relative_to(root)} is not a regular file; '
+                             'replace it with the release note itself')
+        found.append(path)
     return sorted(found, key=fragment_key)
 
 
@@ -56,23 +69,22 @@ def main(argv=None):
     root = Path(args.root)
     changelog_path = root / 'CHANGELOG.md'
 
-    paths = fragments(root)
-    if not paths:
-        print('No changelog fragments to collect.', file=sys.stderr)
-        return 0
-
-    notes = []
-    for path in paths:
-        text = path.read_text(encoding='utf-8').strip()
-        if not text:
-            print(f'error: {path.relative_to(root)} is empty; write its release note or delete it',
-                  file=sys.stderr)
-            return 1
-        notes.append(text)
-
     try:
+        paths = fragments(root)
+        if not paths:
+            print('No changelog fragments to collect.', file=sys.stderr)
+            return 0
+        notes = []
+        for path in paths:
+            try:
+                text = path.read_text(encoding='utf-8').strip()
+            except UnicodeDecodeError:
+                raise ValueError(f'{path.relative_to(root)} is not valid UTF-8') from None
+            if not text:
+                raise ValueError(f'{path.relative_to(root)} is empty; write its release note or delete it')
+            notes.append(text)
         result = collect(changelog_path.read_text(encoding='utf-8'), notes)
-    except ValueError as err:
+    except (ValueError, OSError) as err:
         print(f'error: {err}', file=sys.stderr)
         return 1
 
@@ -80,10 +92,16 @@ def main(argv=None):
         sys.stdout.write(result)
         return 0
 
-    changelog_path.write_text(result, encoding='utf-8')
+    # Stage the new file first, then remove the fragments, then swap it in
+    # atomically: a failure before the swap leaves CHANGELOG.md untouched, and
+    # no state has the notes both in CHANGELOG.md and still in changelog.d/,
+    # so a rerun cannot duplicate entries. git still holds any removed file.
+    staged = changelog_path.with_name(changelog_path.name + '.collect-tmp')
+    staged.write_text(result, encoding='utf-8')
     for path in paths:
         path.unlink()
         print(f'collected {path.relative_to(root)}', file=sys.stderr)
+    os.replace(staged, changelog_path)
     return 0
 
 
