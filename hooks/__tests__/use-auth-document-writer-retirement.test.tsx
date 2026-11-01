@@ -103,7 +103,7 @@ it.skipIf(!existsSync(chromium.executablePath())).each(["coalesced sign-out", "i
       if (paused && scenario !== "stuck sign-out") {
         // Let the auth response settle while the first actual IDB transaction is
         // paused, then add another batch. It must never follow the final purge.
-        await page.waitForTimeout(50)
+        await page.waitForFunction(() => window.documentErasureFixture.purgeStarted)
         await page.evaluate(() => { const f = window.documentErasureFixture; f.edit(); f.pause = false })
       }
       await page.waitForFunction(() => window.documentErasureFixture.done, undefined, { timeout: 6000 })
@@ -120,13 +120,28 @@ it.skipIf(!existsSync(chromium.executablePath())).each(["coalesced sign-out", "i
         await page.evaluate(async () => { const f = window.documentErasureFixture; f.releaseSession(); await f.staleRefresh })
         expect(await page.evaluate(() => window.documentErasureFixture.auth.session)).toBeNull()
       }
-      await page.waitForTimeout(350)
-      const owners = await page.evaluate(() => window.documentErasureFixture.rows())
+      // Wait on observable fixture state, never a fixed sleep: under CI load a
+      // timed pause races the draft write and the purge. A scenario that never
+      // reaches its end state still fails, by the waitForFunction timeout.
+      // page.waitForFunction does not await an async predicate, so poll the fixture.
+      const settle = { timeout: 15_000, intervals: [25, 50, 100, 250] }
+      const readRows = () => page.evaluate(() => window.documentErasureFixture.rows())
+      if (scenario === "stuck sign-out") await page.getByRole("alertdialog").waitFor({ timeout: settle.timeout })
+      else if (scenario === "coalesced sign-out") {
+        // Never a silent loss: the user confirmed deletion, the unconfirmed
+        // revision is retained, or (storage too slow under load) the recovery
+        // screen keeps the editor and asks to retry (#4702).
+        await expect.poll(async () => (await page.evaluate(() => window.documentErasureFixture.confirmed ?? 0)) > 0 || (await readRows()).includes("alice") || (await page.getByRole("alertdialog").count()) === 1, settle).toBe(true)
+      } else if (scenario === "identity replacement") {
+        await expect.poll(async () => { const o = await readRows(); return o.includes("alice") && o.includes("bob") }, settle).toBe(true)
+      } else await expect.poll(async () => (await readRows()).includes("alice"), settle).toBe(true)
+      const owners = await readRows()
       if (scenario === "stuck sign-out") {
         expect(await page.getByRole("alertdialog").count()).toBe(1)
         expect(await page.evaluate(() => window.documentErasureFixture.editor.doc.isDestroyed)).toBe(false)
       } else {
-        if(scenario==="coalesced sign-out" && !owners.includes("alice")) expect(await page.evaluate(()=>window.documentErasureFixture.confirmed??0)).toBeGreaterThan(0)
+        if(scenario==="coalesced sign-out" && !owners.includes("alice") && await page.getByRole("alertdialog").count()===1) { console.log("[4702] coalesced sign-out: recovery screen shown"); expect(await page.evaluate(()=>window.documentErasureFixture.editor.doc.isDestroyed)).toBe(false) }
+        else if(scenario==="coalesced sign-out" && !owners.includes("alice")) expect(await page.evaluate(()=>window.documentErasureFixture.confirmed??0)).toBeGreaterThan(0)
         else expect(owners).toContain("alice")
         if(scenario === "identity replacement") expect(owners).toContain("bob")
       }

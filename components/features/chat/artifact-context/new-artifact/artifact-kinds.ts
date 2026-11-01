@@ -33,7 +33,7 @@ export interface ArtifactCapabilities {
   documents: boolean
   /** GridCraft workbook creation is switched on for the workspace. */
   sheets: boolean
-  /** The caller may create Pages at all (role or page.create). */
+  /** The caller may create Pages at all (role or page.create). Every kind needs it, agent-made ones too. */
   pages: boolean
 }
 
@@ -72,15 +72,16 @@ export const ARTIFACT_KINDS: readonly ArtifactKindEntry[] = [
     description: "Screens that link together", viewer: "Screens · Select · Compare", make: "agent",
     placeholder: "Pricing site", templates: ["Pricing site", "Sign-up flow", "Landing page", "Status page"], uploadExtensions: [],
     starterPrompts: ["A three-screen pricing site: plans, compare, FAQ", "A sign-up flow with a confirmation screen"],
-    // Only an agent makes a project, through the explicit project-creation intent.
-    live: caps => caps.projects,
+    // Only an agent makes a project, through the explicit project-creation intent;
+    // the server admits it only for a person who may create Pages (#4534).
+    live: caps => caps.pages && caps.projects,
   },
   {
     key: "dashboard", drafted: true, family: "web", accent: "teal", label: "Dashboard", plural: "Dashboards", icon: LayoutDashboard,
     description: "Numbers and tables agents keep current", viewer: "Live data with sources", make: "agent",
     placeholder: "Sales pipeline", templates: ["Sales pipeline", "Support SLA", "Cash flow", "Release health"], uploadExtensions: [],
     starterPrompts: ["Sales pipeline by stage with owners", "Support SLA for this week"],
-    live: caps => caps.projects && caps.dashboards,
+    live: caps => caps.pages && caps.projects && caps.dashboards,
   },
   {
     key: "page", drafted: false, family: "web", accent: "slate", label: "Page", newLabel: "Page with panels", plural: "Pages", icon: PanelsTopLeft,
@@ -109,7 +110,7 @@ export const ARTIFACT_KINDS: readonly ArtifactKindEntry[] = [
     placeholder: "Quarterly review", templates: ["Quarterly review", "Project update", "Pitch"], uploadExtensions: [],
     starterPrompts: ["A six-slide quarterly review: results, risks, next steps", "A short project update for the team"],
     // An agent makes a deck like a project; the viewer renders it once the Slides flag is on.
-    live: caps => caps.projects && caps.slides,
+    live: caps => caps.pages && caps.projects && caps.slides,
   },
   {
     key: "design", drafted: false, family: "document", accent: "rose", label: "Design", plural: "Designs", icon: Frame,
