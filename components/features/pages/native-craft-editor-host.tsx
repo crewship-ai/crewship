@@ -72,7 +72,7 @@ async function retireCommitted(journal:NativeDraftJournal,rows:NativeRecovery[],
  }
  return kept
 }
-interface Runtime {enginePin:string;port:NativeEditorPort;frame:HTMLIFrameElement;abort:AbortController;version:string;generation:string;ready:boolean;writable:boolean;nativeReadOnly:boolean;coordinator?:Coordinator;journal?:NativeDraftJournal;phase?:NativeSaveState;ackedVersion?:string;receiptAck?:Promise<boolean>;receiptVersion?:string;lastAck?:Promise<boolean>;lastAckVersion?:string;edit:number;blocked:boolean;capture?:NativeDraft;retiring?:Promise<boolean>;retirementFinished?:boolean}
+interface Runtime {enginePin:string;port:NativeEditorPort;frame:HTMLIFrameElement;abort:AbortController;version:string;generation:string;ready:boolean;writable:boolean;nativeReadOnly:boolean;coordinator?:Coordinator;journal?:NativeDraftJournal;phase?:NativeSaveState;ackedVersion?:string;receiptAck?:Promise<boolean>;receiptVersion?:string;lastAck?:Promise<boolean>;lastAckVersion?:string;edit:number;blocked:boolean;capture?:NativeDraft;retiring?:Promise<boolean>;retirementFinished?:boolean;mountedState?:string}
 
 /** One authenticated client/session owns both lease controls and the isolated full Craft editor. */
 export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}:Props){
@@ -202,7 +202,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     onChanged(){if(r&&live(r)&&r.ready&&r.writable&&!r.blocked){r.edit++;r.ackedVersion=undefined;r.coordinator?.edited();display(r)}},
     onSaveRequest(request){if(r&&live(r)&&r.writable&&!r.blocked&&r.coordinator){r.ackedVersion=undefined;void r.coordinator.save(request.requestId).catch(()=>{if(r&&live(r)){if(request.requestId)r.port.saveFailed(request.requestId,'Uložení nebylo potvrzeno.');display(r)}})}},
     onError(){clearTimeout(timer);reject(Error('native_lifecycle_failure'));if(r&&live(r))failNative(r,'Spojení s editorem skončilo. Poslední změny nejsou potvrzené; původní editor zůstává uzamčený.')},
-    onReady(){if(!r||!live(r))return;void port.bootstrap(snapshot.bytes,abort.signal).then(()=>{if(r&&live(r)){r.ready=true;clearTimeout(timer);display(r);resolve(r)}}).catch(()=>{clearTimeout(timer);reject(Error('native_bootstrap_failed'));if(r&&live(r))stop('Dokument nelze bezpečně otevřít.')})},
+    onReady(){if(!r||!live(r))return;void port.bootstrap(snapshot.bytes,abort.signal).then(mounted=>{if(r&&live(r)){r.mountedState=mounted?.nativeState;r.ready=true;clearTimeout(timer);display(r);resolve(r)}}).catch(()=>{clearTimeout(timer);reject(Error('native_bootstrap_failed'));if(r&&live(r))stop('Dokument nelze bezpečně otevřít.')})},
    })}catch(cause){clearTimeout(timer);frame.remove();throw cause}
    r={enginePin:snapshot.enginePin,port,frame,abort,version:snapshot.version,generation,ready:false,writable:false,nativeReadOnly:true,edit:0,blocked:false};current=r
    return ready
@@ -349,7 +349,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(!live(r)){await journal.close();return}
    if(!owns(finalProof,r.generation)){await journal.close();r.journal=undefined;throw Error('lease_not_current')}
    viewNow=finalProof;setView(finalProof)
-   const coordinator=createSingleEditorSave({workspaceId,pageId,applicationId:snapshot.applicationId,enginePin:snapshot.enginePin,baseVersion:snapshot.version,loaded:{bytes:snapshot.bytes},generation:r.generation,sessionId,journal:wrapJournal(journal,r),engine:{snapshot:(signal,id)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.snapshot(signal,id),validate:(draft,signal)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.validate(draft,signal)},transport:client,
+   const coordinator=createSingleEditorSave({workspaceId,pageId,applicationId:snapshot.applicationId,enginePin:snapshot.enginePin,baseVersion:snapshot.version,loaded:{bytes:snapshot.bytes,...(r.mountedState?{mountedState:r.mountedState}:{})},generation:r.generation,sessionId,journal:wrapJournal(journal,r),engine:{snapshot:(signal,id)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.snapshot(signal,id),validate:(draft,signal)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.validate(draft,signal)},transport:client,
     onState(state){r.phase=state;display(r);if(state.phase==='read-only'&&r.writable&&!transition){r.writable=false;freezeInput(r);queueMicrotask(()=>{if(live(r))void retireWrite(r).catch(()=>stop('Zápis byl zastaven; přístup editoru se nepotvrdil.'))})}},
     onReceipt(receipt){
      const edit=r.edit
