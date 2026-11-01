@@ -257,9 +257,10 @@ row's scenario paths plus `sharedPaths` from `required-ids.json`
 (API handlers and their authorization and sharing checks, server and
 websocket layers, pages, Design, artifacts, backup, saving, drafts,
 migrations, runtime config, the release profile). The diff must be empty and the engine pins (`engines.from`,
-`engines.rc`) present and equal. Rows marked `alwaysRerun` (save, lease, soak,
-roundtrip, outage, lost-ack, durability, work-kept, conflict, restart,
-write-revoked, stale) never carry over. The origin, result and mode checks
+`engines.rc`) present and equal. Rows marked `alwaysRerun` never carry over: every
+row on the `craft` origin (each drives the native lease or save path that
+#4658 and #4662 changed, including `A.lock` and the agent edit rows) and, on
+Artifacts, save, durability, work-kept, conflict and restart rows. The origin, result and mode checks
 apply to the carried row itself.
 Run the gate from a checkout that has both SHAs.
 

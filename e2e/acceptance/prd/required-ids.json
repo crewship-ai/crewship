@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Required PRD A+B acceptance IDs (G3 of the validation brief). Row origin is a key (craft, artifacts); the canonical URLs are supplied at run time with --origin-map or PRD_RC_ORIGINS because deployment hostnames are not published. sharedPaths are added to every carryover diff; alwaysRerun rows (save, lease, soak, roundtrip, outage, lost-ack, durability, work-kept, conflict, restart, write-revoked, stale) must run on the RC; manualChecks must all be true in a manual record.",
+  "description": "Required PRD A+B acceptance IDs (G3 of the validation brief). Row origin is a key (craft, artifacts); the canonical URLs are supplied at run time with --origin-map or PRD_RC_ORIGINS because deployment hostnames are not published. sharedPaths are added to every carryover diff; alwaysRerun rows (every craft-origin row, since each drives the native lease or save path, plus save, lease, soak, roundtrip, outage, lost-ack, durability, work-kept, conflict, restart, write-revoked, stale) must run on the RC; manualChecks must all be true in a manual record.",
   "sharedPaths": [
     "internal/ws",
     "internal/backup",
@@ -119,31 +119,38 @@
     },
     {
       "id": "A.lock",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.agent.free-edit-word",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.agent.free-edit-sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.word.agent-409",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.word.compare",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.word.accept",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.word.reject",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.word.stale",
@@ -152,19 +159,23 @@
     },
     {
       "id": "A.craft.proposal.sheet.agent-409",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.sheet.compare",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.sheet.accept",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.sheet.reject",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.sheet.stale",
@@ -173,35 +184,43 @@
     },
     {
       "id": "A.craft.proposal.admission",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.reader-403",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.agent.word.lease",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.agent.word.one-version",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.agent.word.visible",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.agent.sheet.lease",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.agent.sheet.one-version",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.agent.sheet.visible",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.resilience.outage.word",
@@ -245,11 +264,13 @@
     },
     {
       "id": "A.craft.read-revoked",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.read-revoked-sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "B.project.agent-screens",
@@ -348,11 +369,13 @@
     },
     {
       "id": "quota.native.visible",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "quota.native.full",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "quota.aggregate.workspace",
@@ -391,19 +414,23 @@
     },
     {
       "id": "drafts.crash.native-offer",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "drafts.crash.native-offer-sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "drafts.crash.native-private",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "drafts.crash.native-private-sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "drafts.identity-switch",

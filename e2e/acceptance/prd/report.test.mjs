@@ -272,8 +272,11 @@ test("gate: shipped required-ids.json marks save rows, hour checklists and share
   const real = loadRequired(new URL("./required-ids.json", import.meta.url).pathname, `craft=${CRAFT},artifacts=${ART}`)
   assert.ok((real.sharedPaths ?? []).length > 0)
   for (const p of ["internal/database/migrations", "internal/mooring", "lib/mooring", ".env.production"]) assert.ok(real.sharedPaths.includes(p), p)
-  const save = /save|roundtrip|soak|\.lease\.|outage|lost-ack|durability|work-kept|conflict|session\.hour|restart|write-revoked|stale/
+  const save = /save|roundtrip|soak|\.lease(\.|-|$)|^A\.lock$|outage|lost-ack|durability|work-kept|conflict|session\.hour|restart|write-revoked|stale/
   for (const x of real.rows.filter((r) => save.test(r.id))) assert.equal(x.alwaysRerun, true, x.id)
+  // Every Craft row drives the native lease or save path (#4658, #4662): none carries over.
+  for (const x of real.rows.filter((r) => r.origin === "craft")) assert.equal(x.alwaysRerun, true, x.id)
+  for (const id of ["A.lock", "A.craft.agent.word.lease", "A.craft.agent.sheet.lease", "A.craft.agent.free-edit-word"]) assert.equal(real.rows.find((r) => r.id === id)?.alwaysRerun, true, id)
   for (const id of ["A.craft.session.hour-word", "A.craft.session.hour-sheet"]) {
     const r = real.rows.find((x) => x.id === id)
     for (const c of ["enter", "font", "styles", "table", "image", "reload", "restart", "content-after-restart"]) assert.ok(r.manualChecks?.includes(c), `${id} ${c}`)
