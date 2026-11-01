@@ -129,7 +129,13 @@ crewship agent create --name Jamie --slug prd-agent --crew agents --workspace pr
 crewship credential create --type AI_CLI_TOKEN ... --workspace prd-agent-home   # the one manual step
 crewship credential assign <credential> prd-agent --workspace prd-agent-home
 crewship agent credential-readiness prd-agent --workspace prd-agent-home        # must say ready
+crewship workspace artifact-policy show --workspace prd-agent-home              # note "version"
+crewship workspace artifact-policy set --workspace prd-agent-home \
+  --base-version <version> --enabled=true --crew-id <agents crew id>
 ```
+
+The agent artifact policy must be enabled and list the agent's crew: Project,
+Design and native Craft agent rows are refused with `403` without it.
 
 Add the existing member (`PRD_MEMBER_*`) to that workspace, then run with
 `PRD_AGENT_SLUG=prd-agent PRD_AGENT_WORKSPACE_ID=<its id>`. Design must be

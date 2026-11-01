@@ -151,7 +151,8 @@ not executed or saved. Start never automatically retries or follows redirects.
 The agent's crew must be on the enabled
 [agent artifact policy](/cli/artifacts#agent-publishing-policy); otherwise start
 answers `403` and nothing is queued. Removing the crew or disabling the policy
-stops a running task at its next write.
+stops a running task at its next step: any agent tool call (including reads),
+dispatch or confirmation.
 
 ### crewship craft task status
 
