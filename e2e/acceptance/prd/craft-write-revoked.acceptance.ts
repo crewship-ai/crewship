@@ -8,7 +8,7 @@
 // Full mode only: it drives the real editor of a deployed origin.
 import { captureAdmission, peerApi, requireNative, traceCraft, type CraftCall } from "./craft-lease/helpers"
 import { APPLICATIONS, NativePage } from "./craft-lease/native"
-import { headText, inspectDrafts, placeCaret, typeLines, waitForDraftOffer } from "./craft-session/draft"
+import { headText, inspectDrafts, placeCaret, typedMarkers, typeLines, waitForDraftOffer, type Typing } from "./craft-session/draft"
 import * as editor from "./drafts-crash/native"
 import { expect, prdRequirement, test } from "./fixtures"
 
@@ -65,8 +65,12 @@ for (const { application, label } of APPLICATIONS) {
           // The person keeps typing and, in the middle of it, the owner
           // withdraws the write right. Nothing is saved before the right goes.
           await placeCaret(page, application, 6)
-          const typing = typeLines(page, WORK, 8)
+          const progress: Typing = { typed: 0 }
+          const typing = typeLines(page, WORK, 8, 40, 120, progress)
           await page.waitForTimeout(1_600)
+          // Every line typed while the right was still there must be in the draft.
+          const typedBefore = typedMarkers(WORK, progress.typed)
+          expect(typedBefore.length, "lines were typed before the right was withdrawn").toBeGreaterThan(0)
           const revokedAt = Date.now()
           await doc.revoke(request, peer.userId, "write")
           await typing
@@ -76,8 +80,8 @@ for (const { application, label } of APPLICATIONS) {
           await expect(page.getByRole("status").filter({ hasText: /Pouze čtení|Editor odpojen/ }).first()).toBeVisible({ timeout: READ_ONLY_WITHIN_MS })
           const readOnlyAfterMs = Date.now() - revokedAt
           const offeredRows = await waitForDraftOffer(page, READ_ONLY_WITHIN_MS)
-          const drafts = await inspectDrafts(page, `${WORK}-0`)
-          expect(drafts.hasMarker.some(Boolean), "the offered draft holds the unsaved work").toBe(true)
+          const drafts = await inspectDrafts(page, typedBefore)
+          expect(drafts.hasMarker.some(Boolean), `the offered draft holds all ${typedBefore.length} lines typed before the right was withdrawn`).toBe(true)
           const shots: Record<string, Buffer> = { "peer-read-only.png": await page.screenshot({ fullPage: true }) }
 
           // The server takes no further write from the person and nothing was saved.
@@ -111,8 +115,8 @@ for (const { application, label } of APPLICATIONS) {
           await editor.takeButton(page).click({ timeout: 90_000 })
           await page.getByRole("status").filter({ hasText: "Připraveno k úpravám" }).first().waitFor({ timeout: 60_000 })
           await waitForDraftOffer(page, 60_000)
-          const regained = await inspectDrafts(page, `${WORK}-0`)
-          expect(regained.hasMarker.some(Boolean), "after the right returns the draft is offered again").toBe(true)
+          const regained = await inspectDrafts(page, typedBefore)
+          expect(regained.hasMarker.some(Boolean), "after the right returns the draft with every line is offered again").toBe(true)
           expect((await headText(request, doc)).text, "nothing was saved automatically").not.toContain(`${WORK}-0`)
           shots["peer-draft-after-regrant.png"] = await page.screenshot({ fullPage: true })
 
@@ -122,6 +126,7 @@ for (const { application, label } of APPLICATIONS) {
             leaseAfterRevocation: view && { mine: view.mine, can_write: view.can_write, can_edit: view.can_edit },
             offered: offeredRows,
             draftHasWork: drafts.hasMarker,
+            typedBeforeRevocation: typedBefore.length,
             lateWrite: late.status(),
             reacquire: reacquire.status(),
             versionUnchanged: before.version,

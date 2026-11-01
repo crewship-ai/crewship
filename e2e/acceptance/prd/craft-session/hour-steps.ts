@@ -6,7 +6,7 @@ import { readFacts } from "../craft-lease/sheet-workbook"
 import { captureAdmission, traceCraft, type CraftCall } from "../craft-lease/helpers"
 import type { PrdScenario } from "../fixtures"
 import * as N from "../outage-lostack/native"
-import { inspectDrafts, placeCaret, saveByAutosaveOrKey, typeLines } from "./draft"
+import { holdsAll, inspectDrafts, placeCaret, saveByAutosaveOrKey, typedMarkers, typeLines, type Typing } from "./draft"
 import { present, sha256, wordFacts } from "./facts"
 import type { RestartRecord } from "./restart"
 
@@ -172,13 +172,17 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   const unsaved = `PRDUNSAVED${tag}`
   f = await N.frameOf(page, d.app)
   await placeCaret(page, d.app, 200)
-  const typing = typeLines(page, unsaved, 40, 40, 400)
+  const progress: Typing = { typed: 0 }
+  const typing = typeLines(page, unsaved, 40, 40, 120, progress)
   await page.waitForTimeout(2_500)
   const before = await readHeadText(api, ref)
   hashes.beforeRestart = before.hash
   if (before.text.includes(`${unsaved}-0`)) failures.push("the typing was saved before the restart; there was no unsaved work to lose")
   failures.push(...d.verify(before.text, saved, "before the restart"))
   const savesBefore = ops.filter((o) => o.kind === "save").length
+  // All lines typed before the restart must survive (saved or in the draft), not just the first.
+  const typedBefore = typedMarkers(unsaved, progress.typed)
+  if (typedBefore.length === 0) failures.push("no line was typed before the restart")
   note("restart")
   restart = await input.restart(`half time of the ${minutes}-minute session`)
   note("server back")
@@ -197,10 +201,11 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   hashes.afterRestart = after.hash
   failures.push(...d.verify(after.text, saved, "after the restart"))
   const savedByEditor = after.text.includes(`${unsaved}-0`)
+  if (savedByEditor && !holdsAll(after.text, typedBefore)) failures.push(`the editor saved only part of the ${typedBefore.length} lines typed before the restart`)
   if (!savedByEditor && sentByEditor.some((o) => o.status === 200)) failures.push("the editor saved after the restart although the draft is not on the server")
 
   // The disconnected editor still offers the unsaved typing: look into it before leaving.
-  const draftsInSession = savedByEditor ? null : await inspectDrafts(page, `${unsaved}-0`).catch((e) => ({ rows: [] as string[], hasMarker: [] as boolean[], serverHasMarker: [] as boolean[], error: String(e).slice(0, 200) }))
+  const draftsInSession = savedByEditor ? null : await inspectDrafts(page, typedBefore.length ? typedBefore : [`${unsaved}-0`]).catch((e) => ({ rows: [] as string[], hasMarker: [] as boolean[], serverHasMarker: [] as boolean[], error: String(e).slice(0, 200) }))
   // The person reloads (after the editor's lease has run out): the document
   // opens, takes the editor again, and a draft is offered again (a draft is
   // never imported into a read-only view).
@@ -217,15 +222,15 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   f = await N.acquire(page, d.app)
   note("editing again")
   await N.pause(1_500)
-  const drafts = savedByEditor ? null : await inspectDrafts(page, `${unsaved}-0`)
+  const drafts = savedByEditor ? null : await inspectDrafts(page, typedBefore.length ? typedBefore : [`${unsaved}-0`])
   const offered = Boolean(draftsInSession?.hasMarker.some(Boolean) || drafts?.hasMarker.some(Boolean))
-  if (!savedByEditor && !offered) failures.push(`after the restart the unsaved typing is neither saved nor offered as a draft (in the old editor: ${JSON.stringify(draftsInSession)}; after the reload: ${JSON.stringify(drafts)}; ui ${JSON.stringify(reopened)})`)
-  if (!savedByEditor && !drafts?.hasMarker.some(Boolean)) failures.push("after the reload and taking the editor the draft is not offered again")
+  if (!savedByEditor && !offered) failures.push(`after the restart the ${typedBefore.length} lines typed before it are neither saved nor all offered as a draft (in the old editor: ${JSON.stringify(draftsInSession)}; after the reload: ${JSON.stringify(drafts)}; ui ${JSON.stringify(reopened)})`)
+  if (!savedByEditor && !drafts?.hasMarker.some(Boolean)) failures.push("after the reload and taking the editor the draft with every line is not offered again")
   const reloaded = await readHeadText(api, ref)
   hashes.afterReload = reloaded.hash
   if (reloaded.hash !== after.hash) failures.push("reloading the editor changed the saved document")
   failures.push(...d.verify(reloaded.text, saved, "after the reload"))
-  afterRestart = { typedLines, timeline: timeline.slice(-3), sentByEditor: sentByEditor.length, savedByEditor, draftsInSession, reopened, drafts, version: reloaded.version }
+  afterRestart = { typedLines, typedBeforeRestart: typedBefore.length, timeline: timeline.slice(-3), sentByEditor: sentByEditor.length, savedByEditor, draftsInSession, reopened, drafts, version: reloaded.version }
   note("reloaded, editor reopened")
 
   // Second half on the reloaded editor.

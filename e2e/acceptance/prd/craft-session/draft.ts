@@ -11,20 +11,39 @@ import { pause, status } from "../outage-lostack/native"
 export interface DraftOffer {
   /** The offered rows, e.g. "Místní koncept · verze 3". */
   rows: string[]
-  /** For each offered row: does the draft text contain the marker. */
+  /** For each offered row: does the draft text contain every marker. */
   hasMarker: boolean[]
-  /** Does the server's version shown beside the draft contain the marker. */
+  /** Does the server's version shown beside the draft contain every marker. */
   serverHasMarker: boolean[]
 }
 
+/** Progress of a typeLines() stream: how many lines (text + Enter) were typed so far. */
+export interface Typing {
+  typed: number
+}
+
+/** The markers typeLines() writes for its first `n` lines: `${prefix}-0` … `${prefix}-${n - 1}`. */
+export function typedMarkers(prefix: string, n: number): string[] {
+  return Array.from({ length: n }, (_, i) => `${prefix}-${i}`)
+}
+
+/** Does `text` hold every marker as a whole line number (`X-1` is not satisfied by `X-10`). */
+export function holdsAll(text: string, markers: string[]): boolean {
+  const escape = (m: string) => m.replace(/[.*+?^$()|[\]\\{}]/g, "\\$&")
+  return markers.every((m) => new RegExp(escape(m) + "(?!\\d)").test(text))
+}
+
 /**
- * Looks into every offered draft and reports whether `marker` is in it. While
+ * Looks into every offered draft and reports whether every marker is in it
+ * (pass all lines typed before the disturbance, so a partly lost draft fails). While
  * the editor is connected "Porovnat" shows the draft beside the server version.
  * An editor whose connection was ended (a revoked right, a restart) cannot read
  * the server version, so the comparison never opens; the draft is then taken
  * out with "Kopie konceptu" (a file download), which needs no server.
  */
-export async function inspectDrafts(page: Page, marker: string): Promise<DraftOffer> {
+export async function inspectDrafts(page: Page, marker: string | string[]): Promise<DraftOffer> {
+  const markers = typeof marker === "string" ? [marker] : marker
+  if (markers.length === 0) throw new Error("inspectDrafts needs at least one marker")
   const rows = (await recoveryRows(page).allInnerTexts()).map((r) => r.trim())
   const hasMarker: boolean[] = []
   const serverHasMarker: boolean[] = []
@@ -34,15 +53,15 @@ export async function inspectDrafts(page: Page, marker: string): Promise<DraftOf
     const serverBox = page.locator('textarea[aria-label="Serverová verze"]')
     const opened = await serverBox.waitFor({ timeout: 10_000 }).then(() => true, () => false)
     if (opened) {
-      serverHasMarker.push((await serverBox.inputValue()).includes(marker))
-      hasMarker.push((await page.locator('textarea[aria-label="Místní koncept"]').inputValue()).includes(marker))
+      serverHasMarker.push(holdsAll(await serverBox.inputValue(), markers))
+      hasMarker.push(holdsAll(await page.locator('textarea[aria-label="Místní koncept"]').inputValue(), markers))
       await page.getByRole("button", { name: "Zavřít porovnání", exact: true }).click()
     } else {
       const download = page.waitForEvent("download", { timeout: 20_000 })
       await row.getByRole("button", { name: "Kopie konceptu", exact: true }).click()
       const file = await (await download).path()
       serverHasMarker.push(false)
-      hasMarker.push((await readFile(file, "utf8")).includes(marker))
+      hasMarker.push(holdsAll(await readFile(file, "utf8"), markers))
     }
   }
   return { rows, hasMarker, serverHasMarker }
@@ -91,19 +110,20 @@ export async function placeCaret(page: Page, app: "wordcraft" | "gridcraft", row
 }
 
 /** Types `${prefix}-0`, `${prefix}-1`, ... each followed by Enter, without ever pausing for autosave. */
-export async function typeLines(page: Page, prefix: string, lines: number, delay = 40, gapMs = 120): Promise<number> {
-  let typed = 0
+export async function typeLines(page: Page, prefix: string, lines: number, delay = 40, gapMs = 120, progress: Typing = { typed: 0 }): Promise<number> {
+  // A gap at or above the 300 ms autosave delay would let every line save.
+  if (gapMs >= 300 || delay >= 300) throw new Error(`typeLines gaps must stay below the 300 ms autosave delay (delay ${delay}, gap ${gapMs})`)
   try {
     for (let i = 0; i < lines; i++) {
       await page.keyboard.type(`${prefix}-${i}`, { delay })
       await page.keyboard.press("Enter")
-      typed++
+      progress.typed++
       await page.waitForTimeout(gapMs)
     }
   } catch {
     // The page went away (restart, retired editor): what was typed so far counts.
   }
-  return typed
+  return progress.typed
 }
 
 /** Waits for "Uloženo · verze N" with N newer than `after` (the label of an older save stays on screen). */

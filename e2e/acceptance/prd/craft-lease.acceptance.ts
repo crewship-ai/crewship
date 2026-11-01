@@ -10,7 +10,7 @@
 import { loginStorageState } from "./auth"
 import { captureAdmission, isCraft, nativeProfile, PEER_NAME, peerApi, requireNative, traceCraft, type CraftCall } from "./craft-lease/helpers"
 import { APPLICATIONS, NativePage, sessionUserId, type Admission, type LeaseView } from "./craft-lease/native"
-import { headText, inspectDrafts, placeCaret, typeLines, waitForDraftOffer } from "./craft-session/draft"
+import { headText, inspectDrafts, placeCaret, typedMarkers, typeLines, waitForDraftOffer, type Typing } from "./craft-session/draft"
 import * as editor from "./drafts-crash/native"
 import { expect, prdRequirement, test } from "./fixtures"
 
@@ -280,8 +280,12 @@ for (const { application, label } of APPLICATIONS) {
           // flushing: the peer's request is handed over by a call that does not
           // go through the editor.
           await placeCaret(page, application, 7)
-          const typing = typeLines(page, LATE, 8)
+          const progress: Typing = { typed: 0 }
+          const typing = typeLines(page, LATE, 8, 40, 120, progress)
           await page.waitForTimeout(1_600)
+          // Every line typed before the custody moved must be in the draft.
+          const typedBefore = typedMarkers(LATE, progress.typed)
+          expect(typedBefore.length, "lines were typed before the handoff").toBeGreaterThan(0)
           const observer = await doc.session(peerCtx)
           const ask = await doc.leaseOp(peerCtx, observer, "request-handoff")
           expect(ask.status()).toBe(201)
@@ -302,8 +306,8 @@ for (const { application, label } of APPLICATIONS) {
           expect(after.text).not.toContain(`${LATE}-0`)
           const editorSaves = trail.filter((c) => c.path === "craft/document/save" && c.status === 200).length - savesBefore
           expect(editorSaves, "the editor saved nothing under the retired generation").toBe(0)
-          const kept = await inspectDrafts(page, `${LATE}-0`)
-          expect(kept.hasMarker.some(Boolean), "the offered draft holds the unsaved work").toBe(true)
+          const kept = await inspectDrafts(page, typedBefore)
+          expect(kept.hasMarker.some(Boolean), `the offered draft holds all ${typedBefore.length} lines typed before the handoff`).toBe(true)
           const shots: Record<string, Buffer> = { "owner-draft-offered.png": await page.screenshot({ fullPage: true }) }
 
           // After a reload the draft is offered again once the owner takes the
@@ -317,13 +321,13 @@ for (const { application, label } of APPLICATIONS) {
           await editor.takeButton(page).click()
           await page.getByRole("status").filter({ hasText: "Připraveno k úpravám" }).first().waitFor({ timeout: 60_000 })
           await waitForDraftOffer(page, 60_000)
-          const reloaded = await inspectDrafts(page, `${LATE}-0`)
-          expect(reloaded.hasMarker.some(Boolean), "the draft is still offered after a reload").toBe(true)
+          const reloaded = await inspectDrafts(page, typedBefore)
+          expect(reloaded.hasMarker.some(Boolean), "the draft with every line is still offered after a reload").toBe(true)
           expect((await headText(request, doc)).text, "the reload saved nothing").not.toContain(`${LATE}-0`)
 
           await prd.evidence("result.json", {
             application, mode: prd.mode, appSha: prd.appSha, workspaceId: ws.id, pageId: doc.pageId,
-            lateWrite: late.status(), versionUnchanged: after.version, draftOffered: offered, draftHasWork: kept.hasMarker, afterReload: reloaded.rows,
+            lateWrite: late.status(), versionUnchanged: after.version, draftOffered: offered, draftHasWork: kept.hasMarker, typedBeforeHandoff: typedBefore.length, afterReload: reloaded.rows,
           })
           for (const [name, png] of Object.entries(shots)) await prd.evidence(name, png)
           passed = true
