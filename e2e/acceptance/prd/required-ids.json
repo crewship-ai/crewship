@@ -436,5 +436,10 @@
       "id": "drafts.identity-switch",
       "origin": "artifacts"
     }
+  ],
+  "diagnostic": [
+    "harness.reach",
+    "harness.identity",
+    "harness.full-inputs"
   ]
 }
