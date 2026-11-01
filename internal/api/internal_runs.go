@@ -36,6 +36,7 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID             string                     `json:"workspace_id"`
 		TriggerType             string                     `json:"trigger_type"`
 		Metadata                json.RawMessage            `json:"metadata"`
+		HostChatWork            bool                       `json:"host_chat_work,omitempty"`
 		HumanAuthority          *chataudience.Receipt      `json:"human_authority"`
 		TriggerMessageID        string                     `json:"trigger_message_id"`
 		ChatOriginID            string                     `json:"chat_origin_id"`
@@ -147,10 +148,36 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if body.HostChatWork && (body.HumanAuthority == nil || body.TriggerType != "USER" || body.ChatOriginID != "" || InternalTokenWorkspaceFromContext(r.Context()) != "" || InternalTokenCrewFromContext(r.Context()) != "") {
+		replyError(w, 403, "host human chat execution required")
+		return
+	}
+
 	if h.rejectRecoveredStopWrite(w, r, body.WorkspaceID, body.AgentID, body.ID) {
 		return
 	}
 
+	// A current host-human turn must hold the same fenced ledger attempt as
+	// other legitimate executors before the acknowledgement permits launch.
+	var hostChatManaged, hostChatFresh bool
+	startCommitted := false
+	if body.HostChatWork {
+		var ok bool
+		hostChatManaged, hostChatFresh, ok = h.beginHostChatWork(w, r, work.HostChatRequest{RunID: body.ID, WorkspaceID: body.WorkspaceID, AgentID: body.AgentID, CrewID: agentCrewID, ChatID: body.ChatID, UserID: body.HumanAuthority.UserID, TriggerMessageID: body.TriggerMessageID})
+		if !ok {
+			return
+		}
+		defer func() {
+			if hostChatFresh && !startCommitted {
+				cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				message := "host run start was not acknowledged"
+				if err := work.NewStore(h.db).FinishHostChat(cleanup, body.ID, work.HostChatResult{Status: "FAILED", Result: work.RunResult{ErrorMessage: &message}}); err != nil {
+					h.logger.Error("retain unconfirmed chat admission", "run_id", body.ID, "error", err)
+				}
+			}
+		}()
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	// Persist run.started FIRST — this is the source of truth for runs
@@ -259,6 +286,8 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	startCommitted = true
+
 	// Now flip the agent to RUNNING. Failure is debug-only because the
 	// run trace already exists — recoverOrphanedRuns will clean up.
 	if _, err := h.db.ExecContext(r.Context(),
@@ -288,7 +317,15 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 			})
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]string{"id": body.ID, "status": "RUNNING"})
+	receipt := map[string]string{"id": body.ID, "status": "RUNNING"}
+	if body.HostChatWork {
+		if hostChatManaged {
+			receipt["host_chat_work"] = "v1"
+		} else {
+			receipt["host_chat_work"] = "external"
+		}
+	}
+	writeJSON(w, http.StatusCreated, receipt)
 }
 
 // UpdateRun records the terminal state of an agent run by emitting
@@ -303,11 +340,12 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("runId")
 	var body struct {
-		CompletedAt  string          `json:"completed_at,omitempty"`
-		Status       string          `json:"status"`
-		ExitCode     *int            `json:"exit_code"`
-		ErrorMessage *string         `json:"error_message"`
-		Metadata     json.RawMessage `json:"metadata"`
+		CompletedAt   string            `json:"completed_at,omitempty"`
+		Status        string            `json:"status"`
+		ExitCode      *int              `json:"exit_code"`
+		ErrorMessage  *string           `json:"error_message"`
+		Metadata      json.RawMessage   `json:"metadata"`
+		HostChatProof *hostChatRunProof `json:"host_chat_proof,omitempty"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON")
@@ -363,6 +401,10 @@ func (h *InternalHandler) UpdateRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.rejectRecoveredStopWrite(w, r, workspaceID, agentID, runID) {
+		return
+	}
+
+	if h.applyHostChatWorkProof(w, r, runID, body.Status, startedTS, body.CompletedAt, body.ExitCode, body.ErrorMessage, body.Metadata, body.HostChatProof) {
 		return
 	}
 
