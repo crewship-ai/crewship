@@ -221,6 +221,17 @@ func (s *NativeStore) Read(ctx context.Context, k EditLeaseScope) (artifacts.Ver
 	}
 	return s.versions.Read(ctx, nativeVersionKey(k), s.authority(k, nil, "read"))
 }
+
+// Versions lists at most limit saved native versions, newest first, under
+// exactly the live Read authority and immutable profile check of Read. The
+// bound is applied in SQL. It is metadata only: no document bytes, and never a
+// write or lease side effect.
+func (s *NativeStore) Versions(ctx context.Context, k EditLeaseScope, limit int) ([]artifacts.VersionInfo, bool, error) {
+	if err := s.ready(); err != nil {
+		return nil, false, err
+	}
+	return s.versions.RecentVersions(ctx, nativeVersionKey(k), limit, s.authority(k, nil, "read"))
+}
 func (s *NativeStore) Restore(ctx context.Context, l EditLease, base, target int64) (artifacts.VersionReceipt, error) {
 	if err := s.ready(); err != nil {
 		return artifacts.VersionReceipt{}, err

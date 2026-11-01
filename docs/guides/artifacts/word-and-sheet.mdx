@@ -1,6 +1,6 @@
 ---
 title: "Word and Sheet editing"
-description: "Edit a native Word document or Sheet one person at a time: take over editing, ask for a handoff, follow an agent task, and recover a draft after a crash or a full history."
+description: "Edit a native Word document or Sheet one person at a time: take over editing, ask for a handoff, follow an agent task, browse and restore versions, and recover a draft after a crash or a full history."
 icon: "file-pen"
 stability: experimental
 tag: Experimental
@@ -33,7 +33,9 @@ save becomes a new **version**.
   `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true`. The lock bar in the library and in chat
   needs `NEXT_PUBLIC_CHAT_CRAFT_LEASE=true`; the default production build sets it
   to `false`. The editor page itself needs no build flag.
-- No workspace feature flag applies.
+- **Version history** (list and restore) also needs the workspace feature
+  flag `craft_version_history`, which is off by default. See
+  [Version history and restore](#version-history-and-restore).
 
 The native editor's own controls are in Czech in this release. This guide
 quotes each label as shown, with its English meaning.
@@ -232,6 +234,60 @@ Readers see only the version you publish.
 
 Publishing selects an already saved version. If the save can't be confirmed
 first, nothing is published, and the editor says so.
+
+## Version history and restore
+
+Every confirmed save is a version. The history lists them all, newest first,
+and restoring one never deletes anything: it saves the old content again as a
+new version on top.
+
+<Note>
+The history is off by default. An instance administrator defines the flag
+once with `crewship feature-flag create --key craft_version_history`; a
+workspace owner or admin then turns it on for that workspace with
+`crewship feature-flag enable craft_version_history`. The native instance
+switch above is still required.
+</Note>
+
+### See the versions
+
+1. Open the native Word document or Sheet in **Artifacts** (`/artifacts/<id>`).
+2. Choose **Historie verzí (N)** (Version history) above the editor. People
+   who read the document without the editor find it above the shared preview
+   or the read-only detail.
+3. Each row shows **Verze N** (Version N), when it was saved and who saved it:
+   a person by name, an agent as *name* **(agent)**. The version the editor
+   opens is marked **aktuální** (current). A restored version adds
+   *obnovena z verze M* ("restored from version M").
+
+Anyone who can read the document sees the list. People with comment-only
+access, and people outside the workspace, don't. The list shows the latest
+200 versions; older ones stay stored, and the panel says so.
+
+### Restore an older version
+
+You need edit rights **and** the lease in this editor.
+
+1. Choose **Převzít úpravy** (Take over editing) if you don't hold the lease
+   yet. Until then, **Obnovit** (Restore) is disabled and the panel says
+   *Pro obnovení verze převezměte úpravy.* ("Take over editing to restore a
+   version."). Readers always see it disabled.
+2. In **Historie verzí**, choose **Obnovit** next to the version you want.
+3. Confirm with **Obnovit jako novou verzi** (Restore as a new version), or
+   **Zrušit** (Cancel).
+4. The editor saves your last change first, then stores the old content as a
+   new version, N+1, and reopens on it. The list now shows that version as
+   **aktuální**, with *obnovena z verze M*. All earlier versions are still
+   listed.
+
+The restore uses the same checks as a save: your lease, its generation and
+the version you last saw. If someone else changed the document or the lease
+moved on, nothing is restored and the editor shows *Obnovení verze nebylo
+potvrzeno. Dokument i místní koncept zůstávají zachovány.* ("The restore was
+not confirmed. The document and the local draft are kept.").
+
+From the CLI, `crewship craft versions <page>` lists the same history; see
+[Craft commands](/cli/craft#version-history).
 
 ## When the connection drops or the browser crashes
 

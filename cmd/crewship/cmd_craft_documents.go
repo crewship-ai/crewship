@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -99,4 +100,46 @@ type craftShareSelection struct {
 	Generation    string `json:"generation" yaml:"generation"`
 	BaseVersion   string `json:"baseVersion" yaml:"baseVersion"`
 	TargetVersion string `json:"targetVersion" yaml:"targetVersion"`
+}
+
+// craftNativeVersionsLimit bounds one history listing (the server returns at
+// most 200 entries, metadata only).
+const craftNativeVersionsLimit = 1 << 20
+
+// craftVersions opens one process-local native admission, reads the version
+// list under it and exits. It never acquires a lease and never writes; the
+// private session token is never printed.
+func craftVersions(cmd *cobra.Command, args []string) error {
+	c, e := pageClient()
+	if e != nil {
+		return e
+	}
+	c = c.WithContext(cmd.Context())
+	httpClient := *c.HTTPClient
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	c.HTTPClient = &httpClient
+	r, e := c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/sessions", struct{}{})
+	if e != nil {
+		return craftTransportError("native session request failed")
+	}
+	defer r.Body.Close()
+	if r.StatusCode != 201 {
+		if r.StatusCode < 200 || r.StatusCode >= 300 {
+			return craftHTTPError(r, "")
+		}
+		return fmt.Errorf("native session HTTP %d", r.StatusCode)
+	}
+	raw, e := craftReadJSON(r.Body)
+	if e != nil {
+		return e
+	}
+	var admission struct {
+		Token string `json:"session_token"`
+		ID    string `json:"session_id"`
+	}
+	if e = json.Unmarshal(raw, &admission); e != nil || !craftDocumentDigest(admission.Token) || admission.ID == "" || admission.ID == admission.Token {
+		return fmt.Errorf("invalid native session response")
+	}
+	response, e := c.WithHeader("X-Craft-Session", admission.Token).Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/craft/document/versions")
+	return craftResponseLimit(cmd, response, e, admission.Token, craftNativeVersionsLimit)
 }

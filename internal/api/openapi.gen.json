@@ -15429,6 +15429,95 @@
         ],
         "type": "object"
       },
+      "NativeCraftVersion": {
+        "additionalProperties": false,
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/NativeCraftVersionAuthor"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "current": {
+            "description": "True only for the newest version, the one the editor opens.",
+            "type": "boolean"
+          },
+          "restoredFrom": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "createdAt",
+          "author",
+          "current"
+        ],
+        "type": "object"
+      },
+      "NativeCraftVersionAuthor": {
+        "additionalProperties": false,
+        "properties": {
+          "actorId": {
+            "description": "Recorded actor, `user:\u003cid\u003e`, `agent:\u003cid\u003e` or a system actor.",
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "human",
+              "agent",
+              "system"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "actorId",
+          "kind",
+          "displayName"
+        ],
+        "type": "object"
+      },
+      "NativeCraftVersionList": {
+        "additionalProperties": false,
+        "properties": {
+          "currentVersion": {
+            "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
+            "maxLength": 19,
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "type": "string"
+          },
+          "truncated": {
+            "description": "True when older versions exist beyond this listing. They stay stored and restorable.",
+            "type": "boolean"
+          },
+          "versions": {
+            "description": "Newest first. Metadata only; never document bytes.",
+            "items": {
+              "$ref": "#/components/schemas/NativeCraftVersion"
+            },
+            "maxItems": 200,
+            "type": "array"
+          }
+        },
+        "required": [
+          "currentVersion",
+          "versions",
+          "truncated"
+        ],
+        "type": "object"
+      },
       "NativeDocumentProvenance": {
         "properties": {
           "artifacts": {
@@ -135914,6 +136003,195 @@
           "pages"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/craft/document/versions": {
+      "get": {
+        "description": "List the saved versions of a native Word or Sheet document, newest first, with time, author (person or agent) and the current version marked. Requires the private `X-Craft-Session` admission and current Page Read rights, exactly like Read Craft document; a reader may list but only the lease holder may restore through Restore Craft document. Answers 404 while the `craft_version_history` workspace feature flag is off.",
+        "operationId": "get_api_v1_pages_slug_craft_document_versions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Private original-human admission for this exact Page; sessionId in JSON is the distinct public connection ID.",
+            "in": "header",
+            "name": "X-Craft-Session",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NativeCraftVersionList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List Craft document versions",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/pages/{slug}/craft/events": {

@@ -28,6 +28,7 @@ func newCraftCommand() *cobra.Command {
 		return craftResponse(cmd, r, e, "")
 	}})
 	craft.AddCommand(&cobra.Command{Use: "preview <page>", Args: cobra.ExactArgs(1), Short: "Read only the published native preview without opening an editor session", RunE: craftPreview})
+	craft.AddCommand(&cobra.Command{Use: "versions <page>", Args: cobra.ExactArgs(1), Short: "List saved native versions, newest first; read-only (restore through connect)", RunE: craftVersions})
 	craft.AddCommand(&cobra.Command{Use: "connect <page>", Args: cobra.ExactArgs(1), Short: "Read bounded NDJSON actions; watch keeps the lease stream alive", RunE: craftConnect})
 	initialize := &cobra.Command{Use: "initialize <page>", Args: cobra.ExactArgs(1), Short: "Initialize an existing empty owned Page as Word native; keep its admission in this process", RunE: craftInitialize}
 	initialize.Flags().String("file", "", "Native Word document file (or - for stdin, without subsequent actions)")
@@ -165,6 +166,8 @@ func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http
 			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/document/restore", a.Snapshot)
 		case "reconcile":
 			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/document/reconcile", a.Snapshot)
+		case "versions":
+			r, e = c.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/craft/document/versions")
 		case "status":
 			r, e = c.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/craft/lease")
 		case "acquire":
@@ -200,6 +203,8 @@ func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http
 		limit := int64(64 << 10)
 		if a.Action == "read" || a.Action == "proposal" {
 			limit = craftNativeJSONLimit
+		} else if a.Action == "versions" {
+			limit = craftNativeVersionsLimit
 		}
 		if e = craftResponseLimit(cmd, r, e, token, limit); e != nil {
 			if craftLeaseAction(a.Action) {
@@ -260,7 +265,7 @@ func craftEmit(cmd *cobra.Command, raw json.RawMessage, secret string) error {
 	}
 	formatter := resolvedFormatter(cmd)
 	formatter.Writer = cmd.OutOrStdout()
-	if cmd.Name() == "availability" {
+	if cmd.Name() == "availability" || cmd.Name() == "versions" {
 		return formatter.Machine(clean(value))
 	}
 	return formatter.WriteStreamRow(clean(value))
