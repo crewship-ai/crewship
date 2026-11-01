@@ -561,9 +561,16 @@ export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanoni
   const serverPage = serverWindow.key === serverKey ? serverWindow.page : 0
   const catalogWindow = usePageCatalogWindow(workspaceId, serverParams, serverPage * SERVER_PAGE_SIZE, SERVER_PAGE_SIZE)
   const windowItems = useMemo(() => {
-    const base = libraryItems(catalogWindow.pages)
+    const base = libraryItems(catalogWindow.pages, { keepOrder: true })
     return withLibraryState(base, sharing.libraryState(base))
   }, [catalogWindow.pages, sharing])
+  // A write can shrink the total under the current offset (archive the only
+  // item on the last page): move to the last page that still has rows.
+  const lastServerPage = Math.max(0, Math.ceil(catalogWindow.total / SERVER_PAGE_SIZE) - 1)
+  const pastEnd = serverParams !== null && !catalogWindow.loading && !catalogWindow.error && serverPage > lastServerPage
+  useEffect(() => {
+    if (pastEnd) setServerWindow({ key: serverKey, page: lastServerPage })
+  }, [pastEnd, serverKey, lastServerPage])
   const [group, setGroup] = useState<GroupKey>("none")
   const [layout, setLayout] = useState<Layout>("list")
   const [newKind, setNewKind] = useState<ArtifactKindKey | null | undefined>(undefined)
@@ -666,8 +673,8 @@ export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanoni
           {entry.label && <h2 className="text-xs font-semibold text-muted-foreground">{entry.label} <span className="tabular-nums">{entry.items.length}</span></h2>}
           <ItemsView items={entry.items} layout={layout} onOpen={pick} selection={layout === "list" && (!mobile || selecting || picked.size > 0) ? selection : undefined} peeked={peeked?.slug} />
         </section>)}
-      {serverParams && total > SERVER_PAGE_SIZE && <nav aria-label="Artifact pages" className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-        <span className="tabular-nums">{first + 1}–{first + shown.length} of {total}</span>
+      {serverParams && (total > SERVER_PAGE_SIZE || serverPage > 0) && <nav aria-label="Artifact pages" className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
+        <span className="tabular-nums">{shown.length ? `${first + 1}–${first + shown.length}` : "None"} of {total}</span>
         <Button type="button" size="sm" variant="outline" disabled={serverPage === 0} onClick={() => setServerWindow({ key: serverKey, page: serverPage - 1 })}>Previous</Button>
         <Button type="button" size="sm" variant="outline" disabled={first + SERVER_PAGE_SIZE >= total} onClick={() => setServerWindow({ key: serverKey, page: serverPage + 1 })}>Next</Button>
       </nav>}

@@ -128,6 +128,39 @@ it("with the server catalog flag, All shows the server's window, its total and p
   expect(last()).toMatchObject({ offset: 50, limit: 50 })
 })
 
+const serverOn = () => { vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true"); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_SERVER_CATALOG", "true") }
+const listedNames = () => within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(row => within(row).getByRole("heading").textContent)
+
+it.each([
+  ["name", [wire({ slug: "alpha", id: "page-alpha", name: "Alpha", artifact_kind: "word", updated_at: "2026-10-20T10:00:00Z" }), wire({ slug: "zulu", id: "page-zulu", name: "Zulu", artifact_kind: "word", updated_at: "2026-10-30T10:00:00Z" })], ["Alpha", "Zulu"]],
+  ["kind", [wire({ slug: "deck", id: "page-deck", name: "Older project", artifact_kind: "project", updated_at: "2026-10-20T10:00:00Z" }), wire({ slug: "memo", id: "page-memo", name: "Newer word", artifact_kind: "word", updated_at: "2026-10-30T10:00:00Z" })], ["Older project", "Newer word"]],
+] as const)("a server window keeps the server's %s order, never re-sorted by update time", (sort, pages, want) => {
+  serverOn()
+  windowState.pages = [...pages]
+  windowState.total = 2
+  renderLibrary()
+  openAll()
+  fireEvent.change(screen.getByRole("combobox", { name: "Sort" }), { target: { value: sort } })
+  fireEvent.click(screen.getByRole("radio", { name: "Gallery" }))
+  expect(new URLSearchParams(windowState.calls[windowState.calls.length - 1].params!).get("sort")).toBe(sort)
+  expect(listedNames()).toEqual(want)
+})
+
+it("moves to the last page when the total shrinks under the current offset, so nothing becomes unreachable", () => {
+  serverOn()
+  windowState.pages = [wire({ slug: "last", id: "page-last", name: "Last one", artifact_kind: "project" })]
+  windowState.total = 51
+  const view = renderLibrary()
+  openAll()
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Artifact pages" })).getByRole("button", { name: "Next" }))
+  expect(windowState.calls[windowState.calls.length - 1]).toMatchObject({ offset: 50 })
+  // The last item was archived: the same offset now reads nothing, and only 50 remain.
+  windowState.pages = []
+  windowState.total = 50
+  view.rerender(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
+  expect(windowState.calls[windowState.calls.length - 1]).toMatchObject({ offset: 0 })
+})
+
 it("asks the server for archived and test-made items, which it leaves out by default", () => {
   renderLibrary()
   // Without them the Archive and Test items views stay empty against the real API (#4444).

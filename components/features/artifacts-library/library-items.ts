@@ -71,8 +71,11 @@ function ownerOf(page: PageView): string | null {
   return page.reach?.includes("owner") ? "You" : null
 }
 
-/** Every Page the caller can read, typed or not; `visibleItems` decides what the default views show. */
-export function libraryItems(pages: PageView[]): LibraryItem[] {
+/**
+ * Every Page the caller can read, typed or not; `visibleItems` decides what the default views show.
+ * `keepOrder` is for a server window, which is already sorted by the chosen key.
+ */
+export function libraryItems(pages: PageView[], options: { keepOrder?: boolean } = {}): LibraryItem[] {
   const items: LibraryItem[] = pages.map(page => {
     const kind = kindOf(page)
     const typedKind = page.artifactKind
@@ -94,6 +97,7 @@ export function libraryItems(pages: PageView[]): LibraryItem[] {
       ...(typeof page.pagesVersion === "number" ? { pagesVersion: page.pagesVersion } : {}),
     }
   })
+  if (options.keepOrder) return items
   // The server already orders by last edit; keep a stable newest-first order if it did not.
   return items.sort((a, b) => (b.updatedAt?.getTime() ?? 0) - (a.updatedAt?.getTime() ?? 0))
 }
