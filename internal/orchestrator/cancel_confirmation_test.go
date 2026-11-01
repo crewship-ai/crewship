@@ -59,6 +59,8 @@ func TestRunAgentCancellationKeepsOwnershipWhenHostStopIsUnconfirmed(t *testing.
 	o.SetDetachedExecMonitoring(time.Millisecond, time.Hour)
 	req := covRunReq()
 	req.RunID = "cancel-unconfirmed-original"
+	terminalObserved := false
+	req.OnExecTerminal = func(int) { terminalObserved = true }
 	req.Credentials = []Credential{{Type: "SECRET", EnvVarName: "QA_TOKEN", PlainValue: "synthetic"}}
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
@@ -66,6 +68,9 @@ func TestRunAgentCancellationKeepsOwnershipWhenHostStopIsUnconfirmed(t *testing.
 	err := o.RunAgent(ctx, req, nil)
 	if !errors.Is(err, ErrDetachedStillRunning) || errors.Is(err, ErrExecutionStopConfirmed) {
 		t.Fatalf("unconfirmed cancellation misreported: %v", err)
+	}
+	if terminalObserved {
+		t.Fatal("uncertain stop manufactured terminal proof")
 	}
 	if got := covRunStatus(t, state, req.RunID); got != "running" {
 		t.Fatalf("unconfirmed run became terminal %s", got)
@@ -98,12 +103,17 @@ func TestRunAgentCancellationDoesNotConfirmNaturalLegacyExit(t *testing.T) {
 			o := New(c, state, covQuietLogger())
 			req := covRunReq()
 			req.RunID = "legacy-cancel-exit-" + fmt.Sprint(code)
+			var observed []int
+			req.OnExecTerminal = func(exit int) { observed = append(observed, exit) }
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(nil)
 			req.OnExecStarted = func(string) { cancel(ws.ErrExplicitStopRequested) }
 			err := o.RunAgent(ctx, req, nil)
 			if got := errors.Is(err, ErrExecutionStopConfirmed); got != (code == 143) {
 				t.Fatalf("exit%d cancellation=%v err=%v", code, got, err)
+			}
+			if len(observed) != 1 || observed[0] != code {
+				t.Fatalf("actual exit callback=%v want [%d]", observed, code)
 			}
 			wantStatus := map[int]string{0: "completed", 1: "error", 143: "cancelled"}[code]
 			if got := covRunStatus(t, state, req.RunID); got != wantStatus {

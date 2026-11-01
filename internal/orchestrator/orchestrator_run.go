@@ -1146,6 +1146,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 		snapshot, stopErr := o.confirmProtectedRunStop(stopCtx, RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID, Managed: req.managedLaunch != nil}, protectedRun)
 		stopCancel()
 		if stopErr == nil && (snapshot.Result.ExitCode == 143 || snapshot.Result.ExitCode == 137) {
+			if req.OnExecTerminal != nil {
+				req.OnExecTerminal(snapshot.Result.ExitCode)
+			}
 			if req.CapturedExit != nil {
 				req.CapturedExit(snapshot.Result.CompletedAt)
 			}
@@ -1209,6 +1212,9 @@ func (o *Orchestrator) runAgent(ctx context.Context, req AgentRunRequest, handle
 			return fmt.Errorf("%w: cancellation did not confirm exact execution stop: %v", ErrDetachedStillRunning, stopErr)
 		}
 		if stoppedExit == 143 || stoppedExit == 137 {
+			if req.OnExecTerminal != nil {
+				req.OnExecTerminal(stoppedExit)
+			}
 			o.failRun(cleanCtx, req, runState.ID, "cancelled")
 			o.loggerForRun(req).Info("run cancelled", "agent_id", req.AgentID, "exec_id", result.ExecID)
 			// Close the Crow's Nest exec.command block and flip the Watch
