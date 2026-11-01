@@ -36,11 +36,17 @@ func artifactProjectFeedbackComponents() map[string]any {
 	}, "id", "version", "path", "selector", "quote", "text", "author", "created_at", "status", "replies", "delivery_retryable")
 	schemas["ArtifactProjectSnapshot"] = object(map[string]any{
 		"artifact_kind": map[string]any{"type": "string", "enum": []string{"slides"}},
+		"interactive":   ref("ArtifactInteractiveRuntime"),
 		"page_id":       str(), "name": str(), "slug": str(), "origin": map[string]any{"oneOf": []any{ref("ArtifactProjectOrigin"), map[string]any{"type": "null"}}},
 		"enabled": boolean(), "can_write": boolean(), "can_share": boolean(), "can_restore": boolean(), "can_send_to_agent": boolean(), "can_comment": boolean(), "latest_version": integer(1), "shared_version": integer(0), "manifest": ref("ArtifactProjectManifest"),
 		"versions": array(ref("ArtifactProjectVersion")), "quota": ref("ArtifactProjectQuota"), "comments": array(ref("ArtifactProjectComment")),
 		"retention_preview": ref("ArtifactProjectRetentionPreview"),
 	}, "page_id", "name", "slug", "origin", "enabled", "can_write", "can_share", "can_restore", "can_send_to_agent", "can_comment", "latest_version", "shared_version", "manifest", "versions", "quota", "comments")
+	schemas["ArtifactInteractiveRuntime"] = object(map[string]any{
+		"runtime_url":             map[string]any{"type": "string", "description": "Fixed Pages runtime bootstrap on a separate site where the Project's scripts run, or empty when this server has no isolating runtime origin for the request host."},
+		"development_same_origin": boolean(),
+		"collections":             array(str()),
+	}, "runtime_url", "development_same_origin", "collections")
 	schemas["ArtifactProjectRetentionPreview"] = map[string]any{
 		"type": "object", "additionalProperties": false,
 		"description": "Owner-only dry run of the proposed history rule. Nothing listed in would_thin is deleted; retention stays keep-all.",

@@ -44,6 +44,9 @@ Workspace flags for Artifacts (all default off; turn on per workspace with
   artifact_dashboard_data    Dashboard datasets; also needs artifact_projects
   artifact_slides            Slides views and PDF export; also needs
                              artifact_projects
+  artifact_interactive       Project scripts in the isolated runtime with
+                             shared data; also needs artifact_projects and
+                             artifact_dashboard_data
   artifacts_design           Design artifacts
   gridcraft_editor           live workbook editing; also needs the server
                              to run the workbook engine with a qualified
@@ -54,10 +57,11 @@ Workspace flags for Artifacts (all default off; turn on per workspace with
                              the two enable switches the server refuses to
                              start. Restart the server after changing them
 
-An operator can force the first four on for every workspace with the server
+An operator can force the first five on for every workspace with the server
 environment variables CREWSHIP_ARTIFACT_PROJECTS_ENABLED,
-CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED, CREWSHIP_ARTIFACT_SLIDES_ENABLED
-and CREWSHIP_ARTIFACTS_DESIGN_ENABLED set to "true"; "list" does not show that.
+CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED, CREWSHIP_ARTIFACT_SLIDES_ENABLED,
+CREWSHIP_ARTIFACT_INTERACTIVE_ENABLED and CREWSHIP_ARTIFACTS_DESIGN_ENABLED
+set to "true"; "list" does not show that.
 
 The web screens for these artifacts also need build-time switches of the web
 app, set to "true" when the web app is built (default off, rebuild required;
