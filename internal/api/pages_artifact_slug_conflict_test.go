@@ -31,7 +31,7 @@ func TestArtifactProjectCreateOccupiedSlugHasStableErrorAndPreservesProject(t *t
 		t.Fatalf("publish lost its CAS classification: %d %s", cas.Code, cas.Body)
 	}
 	after := call(owner, "GET", "three-screens/artifact", "")
-	if after.Code != 200 || after.Body.String() != before.Body.String() {
+	if after.Code != 200 || !sameArtifactRead(t, before.Body.Bytes(), after.Body.Bytes()) {
 		t.Fatalf("collision changed project: %d %s", after.Code, after.Body)
 	}
 	var count int
@@ -41,4 +41,22 @@ func TestArtifactProjectCreateOccupiedSlugHasStableErrorAndPreservesProject(t *t
 	if err := h.db.QueryRow(`SELECT count(*) FROM artifact_versions WHERE workspace_id=?`, ws).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("collision left version: %d %v", count, err)
 	}
+}
+
+// sameArtifactRead compares two artifact reads, ignoring the retention preview's
+// evaluation time: it has second resolution, so two reads can straddle a second.
+func sameArtifactRead(t *testing.T, before, after []byte) bool {
+	t.Helper()
+	normalize := func(raw []byte) string {
+		var read map[string]any
+		if err := json.Unmarshal(raw, &read); err != nil {
+			t.Fatalf("artifact read is not JSON: %v %s", err, raw)
+		}
+		if preview, ok := read["retention_preview"].(map[string]any); ok {
+			delete(preview, "evaluated_at")
+		}
+		out, _ := json.Marshal(read)
+		return string(out)
+	}
+	return normalize(before) == normalize(after)
 }
