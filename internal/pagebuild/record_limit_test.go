@@ -58,7 +58,7 @@ func TestLockBuildImageRecordRefusesSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(target, filepath.Join(dir, BuildImageRecordLockFile)); err != nil {
-		t.Skip("symlinks unavailable:", err)
+		t.Fatal("create the planted lock symlink:", err)
 	}
 	called := false
 	saved := matchLockOwner
