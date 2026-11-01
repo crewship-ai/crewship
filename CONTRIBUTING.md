@@ -192,14 +192,20 @@ CI calls the image workflow and its final verdict requires the image job.
 ## Changelog entries
 
 `RELEASING.md` cuts release notes from `CHANGELOG.md`'s `## [Unreleased]`
-section. That makes a missing entry not untidiness but a release note that
-does not exist — and a change nobody is told about.
+section, after collecting the per-PR fragments in `changelog.d/` into it. That
+makes a missing entry not untidiness but a release note that does not exist —
+and a change nobody is told about.
 
 **A PR that touches `internal/api/`, `internal/orchestrator/`,
 `internal/harbormaster/`, `cmd/crewship/`, `app/`, `components/`, `lib/`,
-`hooks/` or `stores/` must add an entry under `## [Unreleased]`.** The
-**Changelog Guard** workflow enforces it; test files inside those trees don't
-count as user-visible, and Dependabot is exempt by actor.
+`hooks/` or `stores/` must add a release note.** Add it as a new fragment,
+`changelog.d/<PR-number>-<slug>.md`, holding the bullet you would otherwise
+write under `## [Unreleased]` (see [changelog.d/README.md](changelog.d/README.md)).
+Prefer the fragment: every PR editing the top of `## [Unreleased]` makes queued
+PRs conflict there, separate files do not. An entry written directly under
+`## [Unreleased]` still counts. The **Changelog Guard** workflow enforces it;
+test files inside those trees don't count as user-visible, and Dependabot is
+exempt by actor.
 
 Write the entry the way the file already does — lead with the **user-visible
 symptom in bold**, then what was actually wrong and what changed. Mark a
@@ -242,6 +248,17 @@ to be up to date with main before they enter the queue.
 required) must execute on `merge_group`; a planned skip must still match the
 change plan. Main pushes retain the full exact-SHA verification required by
 publication. Queueing is not permission to remove those checks.
+
+A pull request runs a lighter `CI Result`: macOS and linux-arm64 Go, the race
+detector lanes, shuffled Go tests and the all-cases Mooring conformance lane
+run only in the merge queue and on main (the set is `FULL` in
+`scripts/ci/verdict.py`). Lint, Linux Go test shards, frontend tests, browser
+subsets and static gates still run on every PR. A PR that changes CI control,
+dependency or release inputs runs the full matrix automatically; to opt any
+other PR in, add the `full-ci` label and push a commit (a re-run reuses the
+original event, so it does not see a label added later). In the queue a
+skipped or failed expensive lane fails `CI Result`, so a race or platform
+regression removes the PR from the queue rather than reaching main.
 
 A PR or merge group that changes protected CI controls also needs a visible,
 exact-SHA exception recorded through the trusted-main inventory guard. A new
