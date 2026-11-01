@@ -219,6 +219,8 @@ func TestDesignWebsocketCloseCodes(t *testing.T) {
 		{"protocol", errDesignProtocol, websocket.CloseProtocolError},
 		{"rate", errDesignRateLimited, designCloseRateLimited},
 		{"engine unavailable", design.ErrUnavailable, websocket.CloseInternalServerErr},
+		{"engine startup timeout", &design.TimeoutError{Phase: design.PhaseStartup, Budget: design.DefaultStartupTimeout}, websocket.CloseInternalServerErr},
+		{"engine work timeout", &design.TimeoutError{Phase: design.PhaseWork, Budget: design.DefaultWorkTimeout}, websocket.CloseInternalServerErr},
 		{"database busy", errors.New("database is locked"), websocket.CloseInternalServerErr},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
