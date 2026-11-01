@@ -114,6 +114,31 @@ func MigrateSkipping(ctx context.Context, db *sql.DB, logger *slog.Logger, skipN
 	return applyRegistry(ctx, db, keep, logger)
 }
 
+// MigrateBefore applies every migration ordered before the one named and
+// nothing after it: the database exactly as an older release left it. That is
+// the honest fixture for testing how a migration treats existing rows — seed
+// the rows, then call Migrate as a real upgrade would.
+//
+// MigrateSkipping is the wrong tool for that: it also applies every LATER
+// migration, building a schema no release ever had, so the first later
+// migration that reads the skipped one's columns breaks the fixture.
+//
+// NOT a production entry point. Refuses an unknown name, like MigrateSkipping.
+func MigrateBefore(ctx context.Context, db *sql.DB, logger *slog.Logger, name string) error {
+	if migrationRegistryErr != nil {
+		return fmt.Errorf("migration registry is invalid, refusing to migrate: %w", migrationRegistryErr)
+	}
+	if err := ensureMigrationsTable(ctx, db); err != nil {
+		return err
+	}
+	for i, m := range migrations {
+		if m.name == name {
+			return applyRegistry(ctx, db, migrations[:i], logger)
+		}
+	}
+	return fmt.Errorf("no migration is named %q — refusing to build a fixture that stops nowhere", name)
+}
+
 // applyRegistry applies one ordered set of migrations, skipping the ones
 // already recorded and deferring the post-deployment ones. Separated from
 // Migrate so it can be exercised with a synthetic registry — the alternative
