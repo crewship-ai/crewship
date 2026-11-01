@@ -11,7 +11,7 @@ function fixture(applicationId: "wordcraft" | "gridcraft", lose = false) {
   let value = 1, captures = 0, lost = lose
   const requests: NativeSaveRequest[] = [], states: NativeSaveState[] = []
   const controller = createSingleEditorSave({ workspaceId: "w", pageId: "p", applicationId, enginePin: "engine", baseVersion: "1", generation: "1", sessionId: "session", idleMs: 5,
-    journal: { async persist() {}, async confirm() {}, async recovery() { return [] }, onRetire() { return () => {} }, async close() {}, async revokeRead() {} },
+    journal: { async persist() {}, async confirm() {}, async recovery() { return [] }, onRetire() { return () => {} }, async close() {}, async revokeRead() {}, async discardRecovered() {} },
     engine: { async snapshot(_s, id) { captures++; return { bytes: new Uint8Array([value]), editorRevision: id ?? `rpc:${captures}`, ...(applicationId === "wordcraft" ? { nativeState: "state:1" } : {}) } }, async validate() {} },
     transport: {
       async save(r) { requests.push(r); if (lost) { lost = false; throw new Error("net") } return receipt(r) },
