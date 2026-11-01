@@ -470,6 +470,10 @@ type RunOutputState struct {
 	// RetainedResult is observed terminal evidence, not acknowledgement of
 	// output projection. Status cannot become successful until replay commits.
 	RetainedResult *runoutput.Snapshot `json:"retained_result,omitempty"`
+	// Unprojected records why an ended retained run was settled without its
+	// output: its ownership could never be verified. It is not a projection
+	// acknowledgement, and the output is never replayed after it is set.
+	Unprojected string `json:"unprojected,omitempty"`
 }
 
 // AgentEvent is a streaming event emitted during an agent run, such as text
