@@ -30,6 +30,19 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('await chromium.launch(', tests)
         self.assertIn('frontend-test-shards', self.job(ci, 'frontend-test'))
 
+    def test_go_package_partitions_keep_the_measured_budget_and_daylight(self):
+        # internal/api is one ~900 s binary (#4740). Both partitioned suites run
+        # it, so neither may drop back under that, and Go's own timeout must
+        # fire with at least 5 minutes left before the job cap (see the
+        # daylight rule in ci.yml) so a timeout names the running test.
+        ci = self.text('ci.yml')
+        for name in ('go-test', 'go-shuffle'):
+            lane = self.job(ci, name)
+            go_timeout = int(re.search(r'go-package-shard\.py run .*-timeout (\d+)m', lane).group(1))
+            job_cap = int(re.search(r'^    timeout-minutes: (\d+)', lane, re.M).group(1))
+            self.assertGreaterEqual(go_timeout, 18, name)
+            self.assertGreaterEqual(job_cap - go_timeout, 3 + 5, name)
+
     def text(self, name):
         return (ROOT / '.github/workflows' / name).read_text()
 

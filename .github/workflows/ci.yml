@@ -1872,6 +1872,12 @@ jobs:
   # cost) so it no longer runs after vet and four builds in one job.
   # go-package-shard.py proves the partitions cover `go list ./...` exactly
   # once; costs only decide placement.
+  #
+  # 25 → 30 and `-timeout 15m` → 18m, the same budget as go-shuffle (#4740).
+  # internal/api is one binary whose tests run almost serially: 871–900 s in
+  # runs 41262691789, 41264884565 and 41267941716 (sum of its top-level
+  # tests 899 s over 8,264 tests), so 15m failed at random with nothing
+  # failing. Overhead ~3m + 18m leaves 9m of daylight under the job cap.
   go-test:
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.go == 'true'
@@ -1881,7 +1887,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [0, 1, 2]
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1892,7 +1898,7 @@ jobs:
       - name: Go test (package partition)
         env:
           SHARD_INDEX: ${{ matrix.shard }}
-        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -timeout 15m
+        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -timeout 18m
 
   go-shuffle:
     needs: [merge-conflict-markers, changes]
