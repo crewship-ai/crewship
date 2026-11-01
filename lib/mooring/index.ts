@@ -1,8 +1,7 @@
-/** Mooring pilot browser SDK. No Crewship auth, HTTP or UI dependencies. */
-export { createEditorSDK, durableReceipt } from "./editor-sdk"
-export type { DocumentState, DurableReceipt, EditorEnvironment, EditorSDKOptions, SaveStatus } from "./editor-sdk"
-export { MOORING_PROTOCOL, MOORING_FRAME_ATTRIBUTES, verifyEditorHello, transferEditorPort, createCapabilityChannel, capabilityPort } from "./channel"
-export type { CapabilityPort, CapabilityWindow, WindowEnvelope } from "./channel"
-export { parseRevisionPush } from "./revision"
-export { createBrowserEditorEnvironment, helloAfterLoad } from "./editor-connection"
-export type { NativeEditorSDKOptions } from "./native-profile"
+/** Mooring SDK entry (docs/development/mooring-sdk.md). The in-frame editor
+ * surface, `./sdk/editor`, has no Crewship auth, HTTP or UI dependencies; an
+ * isolated editor bundle imports that module directly. The lease, save,
+ * recovery and versions modules are host-side and wrap the host's admitted
+ * transport and private draft journal. */
+export * from "./sdk"
+export type { SaveStatus } from "./editor-sdk"

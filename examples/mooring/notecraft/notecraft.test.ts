@@ -1,0 +1,454 @@
+/** NoteCraft over the real Mooring SDK. Only the server and the journal are
+ * in-memory doubles (./fake-server.ts) that apply the server's fences. */
+import { webcrypto } from "node:crypto"
+import { fireEvent, within } from "@testing-library/dom"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { SaveError, type RecoveryDraft, type RecoveryJournal } from "../../../lib/mooring/sdk"
+import { createFakeCraftServer, memoryJournal } from "./fake-server"
+import { mountNoteCraft } from "./notecraft"
+
+beforeEach(() => { vi.stubGlobal("crypto", webcrypto); document.body.innerHTML = "" })
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
+const alice = { actor_id: "u-alice", display_name: "Alice", kind: "human" as const }
+const bob = { actor_id: "u-bob", display_name: "Bob", kind: "human" as const }
+let tabs = 0
+
+function open(server: ReturnType<typeof createFakeCraftServer>, actor: typeof alice, rows = new Map<string, RecoveryDraft>(), mayEdit = true, openJournal = async (): Promise<RecoveryJournal> => memoryJournal(rows)) {
+  const root = document.createElement("div")
+  document.body.append(root)
+  const client = server.connect(actor)
+  const app = mountNoteCraft(root, { scope: { workspaceId: "w", pageId: "p", sessionId: `tab-${++tabs}`, enginePin: "pin" }, mayEdit, document: client, versions: client.versions, openJournal })
+  const q = within(root)
+  const note = q.getByLabelText<HTMLTextAreaElement>("Poznámka")
+  return {
+    app, q, client, note,
+    lease: () => q.getByRole("toolbar").querySelector("[data-lease]")!.textContent,
+    status: () => q.getByRole("status").textContent,
+    type(text: string) { note.value = text; fireEvent.input(note) },
+    click: (name: string | RegExp) => fireEvent.click(q.getByRole("button", { name })),
+  }
+}
+async function editing(tab: ReturnType<typeof open>, name = "Alice") {
+  await tab.app.ready
+  tab.click("Převzít úpravy")
+  await vi.waitFor(() => { expect(tab.lease()).toBe(`Upravuje ${name}`); expect(tab.note.readOnly).toBe(false) })
+}
+async function saved(tab: ReturnType<typeof open>, text: string) {
+  tab.type(text)
+  await vi.waitFor(() => expect(tab.status()).toBe("Uloženo"))
+}
+
+describe("NoteCraft reference application", () => {
+  it("shows who edits and reports Saved only after the server confirmed", async () => {
+    const server = createFakeCraftServer("ahoj")
+    const a = open(server, alice)
+    await a.app.ready
+    expect(a.lease()).toBe("Volné")
+    expect(a.note).toMatchObject({ value: "ahoj", readOnly: true })
+    expect(a.status()).toBe("Pouze čtení")
+    await editing(a)
+    a.type("ahoj světe")
+    expect(a.status()).toBe("Neuložený koncept")
+    await vi.waitFor(() => expect(a.status()).toBe("Uloženo"))
+    expect(server.text()).toBe("ahoj světe")
+    expect(server.head).toBe("2")
+  })
+
+  it("requests a hand-off, saves the holder's last words, then moves custody", async () => {
+    const server = createFakeCraftServer("")
+    const a = open(server, alice)
+    await editing(a)
+    a.type("Alice final")
+    const b = open(server, bob)
+    await b.app.ready
+    expect(b.lease()).toBe("Upravuje Alice")
+    expect(b.q.queryByRole("button", { name: "Převzít úpravy" })).toBeNull()
+    b.click("Požádat o předání")
+    await vi.waitFor(async () => { await a.app.refresh(); expect(a.q.getByRole("button", { name: "Předat uživateli Bob" })).toBeTruthy() })
+    expect(server.generation).toBe("1")
+    a.click("Předat uživateli Bob")
+    await vi.waitFor(() => expect(a.lease()).toBe("Upravuje Bob"))
+    expect(server.text()).toBe("Alice final")
+    expect(server.generation).toBe("2")
+    expect(a.note.readOnly).toBe(true)
+    expect(a.status()).toBe("Pouze čtení")
+    await b.app.refresh()
+    await vi.waitFor(() => expect(b.note).toMatchObject({ value: "Alice final", readOnly: false }))
+    await saved(b, "Bob now")
+    expect(server.text()).toBe("Bob now")
+  })
+
+  it("refuses a write at a stale generation and keeps the draft for compare/copy only", async () => {
+    const server = createFakeCraftServer("start")
+    const a = open(server, alice)
+    await editing(a)
+    server.takeOver(bob) // Alice's lease expired and Bob took custody
+    a.type("Alice late")
+    await vi.waitFor(() => expect(a.status()).toBe("Koncept zůstává v tomto editoru"))
+    expect(server.head).toBe("1")
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.lease()).toBe("Upravuje Bob"))
+    expect(a.note).toMatchObject({ value: "start", readOnly: true })
+    const recovery = within(a.q.getByRole("heading", { name: "Místní koncepty" }).parentElement!)
+    expect(recovery.getByText(/Váš neuložený koncept nad verzí 1/)).toBeTruthy()
+    expect(recovery.queryByRole("button", { name: /uložit|obnovit/i })).toBeNull()
+    fireEvent.click(recovery.getByRole("button", { name: "Porovnat" }))
+    await vi.waitFor(() => expect(a.q.getByText("Liší se od serverové verze 1")).toBeTruthy())
+    fireEvent.click(recovery.getByRole("button", { name: "Kopírovat" }))
+    expect(a.q.getByLabelText<HTMLTextAreaElement>("Kopie konceptu").value).toBe("Alice late")
+    await new Promise(resolve => setTimeout(resolve, 700))
+    expect(server.head).toBe("1")
+    expect(server.text()).toBe("start")
+  })
+
+  it("offers a crashed tab's unconfirmed draft after reload and never saves it", async () => {
+    const server = createFakeCraftServer("server text"), rows = new Map<string, RecoveryDraft>()
+    const crashed = open(server, alice, rows)
+    await editing(crashed)
+    vi.spyOn(crashed.client, "save").mockRejectedValue(new Error("network"))
+    crashed.type("unsaved words")
+    await vi.waitFor(() => expect(crashed.status()).toBe("Výsledek nepotvrzen"))
+    expect(crashed.q.getByRole("button", { name: "Ověřit výsledek" }).hidden).toBe(false)
+    // The tab dies without closing; a new tab of the same person opens.
+    const reopened = open(server, alice, rows)
+    await reopened.app.ready
+    await vi.waitFor(() => expect(reopened.note.readOnly).toBe(false))
+    expect(reopened.note.value).toBe("server text")
+    expect(reopened.q.getByText(/Místní koncept nad verzí 1/)).toBeTruthy()
+    reopened.click("Porovnat")
+    await vi.waitFor(() => expect(reopened.q.getByText("Liší se od serverové verze 1")).toBeTruthy())
+    reopened.click("Kopírovat")
+    expect(reopened.q.getByLabelText<HTMLTextAreaElement>("Kopie konceptu").value).toBe("unsaved words")
+    await new Promise(resolve => setTimeout(resolve, 700))
+    expect(server.head).toBe("1")
+  })
+
+  it("lists versions and restores as a new version", async () => {
+    const server = createFakeCraftServer("first")
+    const a = open(server, alice)
+    await editing(a)
+    await saved(a, "second")
+    await saved(a, "third")
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.q.getByText("Verze 3 · aktuální")).toBeTruthy())
+    a.click("Obnovit verzi 1")
+    await vi.waitFor(() => expect(a.q.getByText("Verze 4 · aktuální · obnoveno z 1")).toBeTruthy())
+    expect(server.text()).toBe("first")
+    expect(server.text("3")).toBe("third")
+    expect(a.note).toMatchObject({ value: "first", readOnly: false })
+    await saved(a, "after restore")
+    expect(server.head).toBe("5")
+  })
+
+  it("stays read-only without an edit right", async () => {
+    const server = createFakeCraftServer("x")
+    const viewer = open(server, bob, new Map(), false)
+    await viewer.app.ready
+    expect(viewer.lease()).toBe("Volné · Pouze čtení")
+    expect(viewer.q.queryAllByRole("button", { name: /Převzít|Požádat|Uvolnit|Předat|Obnovit/ })).toHaveLength(0)
+    expect(viewer.note.readOnly).toBe(true)
+  })
+
+  it("never loses text typed while a restore is pending", async () => {
+    const server = createFakeCraftServer("first")
+    const a = open(server, alice)
+    await editing(a)
+    await saved(a, "second")
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.q.getByRole("button", { name: "Obnovit verzi 1" })).toBeTruthy())
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const restore = a.client.versions.restore
+    const delayed = vi.spyOn(a.client.versions, "restore").mockImplementation(async (...args) => { await gate; return restore(...args) })
+    a.click("Obnovit verzi 1")
+    await vi.waitFor(() => expect(delayed).toHaveBeenCalled())
+    expect(a.note.readOnly).toBe(true)
+    a.type("typed during restore") // e.g. a programmatic write past readonly
+    release()
+    await vi.waitFor(() => expect(a.q.getByText("Verze 3 · aktuální · obnoveno z 1")).toBeTruthy())
+    expect(a.q.getByRole("alert").hidden).toBe(false)
+    a.click("Kopírovat")
+    expect(a.q.getByLabelText<HTMLTextAreaElement>("Kopie konceptu").value).toBe("typed during restore")
+    expect(server.text()).toBe("first")
+  })
+
+  it("restores a working editor when a hand-off fails after local revocation", async () => {
+    const server = createFakeCraftServer("")
+    const a = open(server, alice)
+    await editing(a)
+    const b = open(server, bob)
+    await b.app.ready
+    b.click("Požádat o předání")
+    await vi.waitFor(async () => { await a.app.refresh(); expect(a.q.getByRole("button", { name: "Předat uživateli Bob" })).toBeTruthy() })
+    vi.spyOn(a.client, "leaseAction").mockRejectedValueOnce(new Error("network"))
+    a.click("Předat uživateli Bob")
+    await vi.waitFor(() => expect(a.q.getByRole("alert").hidden).toBe(false))
+    expect(server.generation).toBe("1")
+    expect(a.lease()).toBe("Upravuje Alice")
+    await vi.waitFor(() => expect(a.note.readOnly).toBe(false))
+    await saved(a, "after failure")
+    expect(server.text()).toBe("after failure")
+  })
+
+  it("keeps an offered draft from lost custody after reacquiring and saving other text", async () => {
+    const server = createFakeCraftServer("start"), rows = new Map<string, RecoveryDraft>()
+    const a = open(server, alice, rows)
+    await editing(a)
+    server.takeOver(bob)
+    a.type("Alice late")
+    await vi.waitFor(() => expect(a.status()).toBe("Koncept zůstává v tomto editoru"))
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.lease()).toBe("Upravuje Bob"))
+    await server.connect(bob).leaseAction("release", { generation: server.generation }, new AbortController().signal)
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.lease()).toBe("Volné"))
+    await editing(a)
+    await saved(a, "Alice again")
+    expect(server.text()).toBe("Alice again")
+    const reloaded = open(server, alice, rows)
+    await reloaded.app.ready
+    await vi.waitFor(() => expect(reloaded.q.getByText(/Místní koncept nad verzí 1/)).toBeTruthy())
+    reloaded.click("Kopírovat")
+    expect(reloaded.q.getByLabelText<HTMLTextAreaElement>("Kopie konceptu").value).toBe("Alice late")
+  })
+
+  it("flushes text typed right before close, so a remount shows it", async () => {
+    const server = createFakeCraftServer("start"), rows = new Map<string, RecoveryDraft>()
+    const a = open(server, alice, rows)
+    await editing(a)
+    a.type("last words") // closed before the 300 ms autosave fires
+    const durable = await a.app.close()
+    expect(server.text()).toBe("last words")
+    expect(durable).toBe("durable")
+    const reopened = open(server, alice, rows)
+    await reopened.app.ready
+    await vi.waitFor(() => expect(reopened.note.value).toBe("last words"))
+  })
+
+  it("journals text typed right before close when the save cannot be confirmed", async () => {
+    const server = createFakeCraftServer("start"), rows = new Map<string, RecoveryDraft>()
+    const a = open(server, alice, rows)
+    await editing(a)
+    vi.spyOn(a.client, "save").mockRejectedValue(new Error("network"))
+    a.type("offline words")
+    const durable = await a.app.close()
+    expect(server.text()).toBe("start")
+    expect([...rows.values()].map(row => new TextDecoder().decode(row.bytes))).toEqual(["offline words"])
+    expect(durable).toBe("durable")
+    const reopened = open(server, alice, rows)
+    await reopened.app.ready
+    await vi.waitFor(() => expect(reopened.q.getByText(/Místní koncept nad verzí 1/)).toBeTruthy())
+    reopened.click("Kopírovat")
+    expect(reopened.q.getByLabelText<HTMLTextAreaElement>("Kopie konceptu").value).toBe("offline words")
+  })
+
+  it("keeps unsaved text editable and says so when custody is lost and the journal cannot persist", async () => {
+    const server = createFakeCraftServer("start"), rows = new Map<string, RecoveryDraft>()
+    let failing = false
+    const journal = async (): Promise<RecoveryJournal> => {
+      const real = memoryJournal(rows)
+      return { ...real, persist: draft => failing ? Promise.reject(new Error("quota")) : real.persist(draft) }
+    }
+    const a = open(server, alice, rows, true, journal)
+    await editing(a)
+    failing = true
+    server.takeOver(bob)
+    a.type("Alice late")
+    await vi.waitFor(() => expect(a.status()).toBe("Koncept zůstává v tomto editoru"))
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.lease()).toBe("Upravuje Bob"))
+    // Never overwritten by the server version, never silently closed.
+    expect(a.note).toMatchObject({ value: "Alice late", readOnly: false })
+    expect(a.q.getByRole("alert")).toMatchObject({ hidden: false })
+    expect(a.q.getByRole("alert").textContent).toMatch(/jen v tomto okně/)
+    expect(a.status()).toBe("Koncept zůstává v tomto editoru")
+    expect(rows.size).toBe(0)
+    a.type("Alice later")
+    // A later lease change neither starts editing over the copy nor reloads it.
+    await server.connect(bob).leaseAction("release", { generation: server.generation }, new AbortController().signal)
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.lease()).toBe("Volné"))
+    expect(a.note).toMatchObject({ value: "Alice later", readOnly: false })
+    await expect(a.app.close()).resolves.toBe("local-copy")
+    expect(a.note.value).toBe("Alice later")
+  })
+
+  it("stores the local copy once the journal recovers, then shows the server version", async () => {
+    const server = createFakeCraftServer("start"), rows = new Map<string, RecoveryDraft>()
+    let failing = false
+    const journal = async (): Promise<RecoveryJournal> => {
+      const real = memoryJournal(rows)
+      return { ...real, persist: draft => failing ? Promise.reject(new Error("quota")) : real.persist(draft) }
+    }
+    const a = open(server, alice, rows, true, journal)
+    await editing(a)
+    failing = true
+    server.takeOver(bob)
+    a.type("Alice late")
+    await vi.waitFor(() => expect(a.status()).toBe("Koncept zůstává v tomto editoru"))
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.q.getByRole("alert").hidden).toBe(false))
+    const retry = a.q.getByRole<HTMLButtonElement>("button", { name: "Znovu uchovat koncept" })
+    a.click("Znovu uchovat koncept")
+    expect(retry.disabled).toBe(true)
+    await vi.waitFor(() => expect(retry.disabled).toBe(false))
+    expect(a.q.getByRole("alert").textContent).toMatch(/jen v tomto okně/)
+    expect(a.note).toMatchObject({ value: "Alice late", readOnly: false })
+    failing = false
+    a.click("Znovu uchovat koncept")
+    await vi.waitFor(() => expect(a.note).toMatchObject({ value: "start", readOnly: true }))
+    expect(a.q.queryByRole("button", { name: "Znovu uchovat koncept" })).toBeNull()
+    const reopened = open(server, alice, rows)
+    await reopened.app.ready
+    await vi.waitFor(() => expect(reopened.q.getByText(/Místní koncept nad verzí 1/)).toBeTruthy())
+    reopened.click("Kopírovat")
+    expect(reopened.q.getByLabelText<HTMLTextAreaElement>("Kopie konceptu").value).toBe("Alice late")
+  })
+
+  it("keeps text typed during a restore as a local copy when the journal cannot persist", async () => {
+    const server = createFakeCraftServer("first"), rows = new Map<string, RecoveryDraft>()
+    let failing = false
+    const journal = async (): Promise<RecoveryJournal> => {
+      const real = memoryJournal(rows)
+      return { ...real, persist: draft => failing ? Promise.reject(new Error("quota")) : real.persist(draft) }
+    }
+    const a = open(server, alice, rows, true, journal)
+    await editing(a)
+    await saved(a, "second")
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.q.getByRole("button", { name: "Obnovit verzi 1" })).toBeTruthy())
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const restore = a.client.versions.restore
+    const delayed = vi.spyOn(a.client.versions, "restore").mockImplementation(async (...args) => { await gate; return restore(...args) })
+    a.click("Obnovit verzi 1")
+    await vi.waitFor(() => expect(delayed).toHaveBeenCalled())
+    failing = true
+    a.type("typed during restore")
+    release()
+    await vi.waitFor(() => expect(a.q.getByText("Verze 3 · aktuální · obnoveno z 1")).toBeTruthy())
+    expect(a.note).toMatchObject({ value: "typed during restore", readOnly: false })
+    expect(a.q.getByRole("alert").textContent).toMatch(/jen v tomto okně/)
+  })
+
+  const shown = () => [...document.querySelectorAll("textarea")].map(t => t.value).join("\n") + document.body.textContent
+  const stored = (rows: Map<string, RecoveryDraft>) => [...rows.values()].map(row => new TextDecoder().decode(row.bytes)).join("\n")
+
+  it("a read revoke during the final close flush wipes the text and keeps no local copy", async () => {
+    const server = createFakeCraftServer("start"), rows = new Map<string, RecoveryDraft>()
+    const a = open(server, alice, rows)
+    await editing(a)
+    vi.spyOn(a.client, "save").mockRejectedValue(new SaveError("read_revoked"))
+    a.type("secret words")
+    const result = await a.app.close()
+    expect(a.note).toMatchObject({ value: "", readOnly: true })
+    expect(shown()).not.toContain("secret words")
+    expect(stored(rows)).not.toContain("secret words")
+    expect(a.q.queryByRole("button", { name: "Znovu uchovat koncept" })).toBeNull()
+    expect(result).toBe("revoked")
+    a.type("typed after revoke")
+    expect(stored(rows)).toBe("")
+  })
+
+  it("a read revoke ending a restore never stores or shows the text typed meanwhile", async () => {
+    const server = createFakeCraftServer("first"), rows = new Map<string, RecoveryDraft>()
+    const a = open(server, alice, rows)
+    await editing(a)
+    await saved(a, "second")
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.q.getByRole("button", { name: "Obnovit verzi 1" })).toBeTruthy())
+    let refuse!: () => void
+    const gate = new Promise<void>(resolve => { refuse = resolve })
+    const delayed = vi.spyOn(a.client.versions, "restore").mockImplementation(async () => { await gate; throw new SaveError("read_revoked") })
+    a.click("Obnovit verzi 1")
+    await vi.waitFor(() => expect(delayed).toHaveBeenCalled())
+    a.type("typed during restore")
+    refuse()
+    await vi.waitFor(() => expect(a.status()).toBe("Přístup ke čtení byl odebrán"))
+    expect(a.note).toMatchObject({ value: "", readOnly: true })
+    expect(shown()).not.toContain("typed during restore")
+    expect(shown()).not.toContain("second")
+    expect(stored(rows)).toBe("")
+    expect(a.q.queryByRole("button", { name: "Znovu uchovat koncept" })).toBeNull()
+  })
+
+  it("a read revoke reported during custody loss wipes the note even when the journal cannot persist", async () => {
+    const server = createFakeCraftServer("start"), rows = new Map<string, RecoveryDraft>()
+    let failing = false
+    const journal = async (): Promise<RecoveryJournal> => {
+      const real = memoryJournal(rows)
+      return { ...real, persist: draft => failing ? Promise.reject(new Error("quota")) : real.persist(draft) }
+    }
+    const a = open(server, alice, rows, true, journal)
+    await editing(a)
+    failing = true
+    server.takeOver(bob)
+    a.type("secret words")
+    await vi.waitFor(() => expect(a.status()).toBe("Koncept zůstává v tomto editoru"))
+    vi.spyOn(a.client, "lease").mockRejectedValue(new SaveError("read_revoked"))
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.status()).toBe("Přístup ke čtení byl odebrán"))
+    expect(a.note).toMatchObject({ value: "", readOnly: true })
+    expect(shown()).not.toContain("secret words")
+    expect(stored(rows)).toBe("")
+    expect(a.q.queryByRole("button", { name: "Znovu uchovat koncept" })).toBeNull()
+    await expect(a.app.close()).resolves.toBe("revoked")
+  })
+
+  it("after close reports a local copy, the copy can still be stored and close then succeeds", async () => {
+    const server = createFakeCraftServer("start"), rows = new Map<string, RecoveryDraft>()
+    let failing = false
+    const journal = async (): Promise<RecoveryJournal> => {
+      const real = memoryJournal(rows)
+      return { ...real, persist: draft => failing ? Promise.reject(new Error("quota")) : real.persist(draft) }
+    }
+    const a = open(server, alice, rows, true, journal)
+    await editing(a)
+    failing = true
+    vi.spyOn(a.client, "save").mockRejectedValue(new Error("network"))
+    a.type("offline words")
+    await expect(a.app.close()).resolves.toBe("local-copy")
+    expect(a.note).toMatchObject({ value: "offline words", readOnly: false })
+    failing = false
+    const retry = a.q.getByRole<HTMLButtonElement>("button", { name: "Znovu uchovat koncept" })
+    a.click("Znovu uchovat koncept")
+    await vi.waitFor(() => expect(stored(rows)).toContain("offline words"))
+    await vi.waitFor(() => expect(retry.hidden).toBe(true))
+    await expect(a.app.close()).resolves.toBe("durable")
+  })
+
+  it("a read-revoked reconcile of an unconfirmed save during close wipes the text, never durable", async () => {
+    const server = createFakeCraftServer("start"), rows = new Map<string, RecoveryDraft>()
+    const a = open(server, alice, rows)
+    await editing(a)
+    vi.spyOn(a.client, "save").mockRejectedValue(new Error("network"))
+    vi.spyOn(a.client, "reconcile").mockRejectedValue(new SaveError("read_revoked"))
+    a.type("secret words")
+    await vi.waitFor(() => expect(a.status()).toBe("Výsledek nepotvrzen"))
+    const result = await a.app.close()
+    expect(a.note).toMatchObject({ value: "", readOnly: true })
+    expect(shown()).not.toContain("secret words")
+    expect(stored(rows)).toBe("")
+    expect(result).toBe("revoked")
+  })
+
+  it("a read revoke reported by the refresh after a failed transfer wipes the text", async () => {
+    const server = createFakeCraftServer(""), rows = new Map<string, RecoveryDraft>()
+    const a = open(server, alice, rows)
+    await editing(a)
+    const b = open(server, bob)
+    await b.app.ready
+    b.click("Požádat o předání")
+    await vi.waitFor(async () => { await a.app.refresh(); expect(a.q.getByRole("button", { name: "Předat uživateli Bob" })).toBeTruthy() })
+    await saved(a, "secret words")
+    vi.spyOn(a.client, "leaseAction").mockRejectedValueOnce(new Error("network"))
+    vi.spyOn(a.client, "lease").mockRejectedValue(new SaveError("read_revoked"))
+    a.click("Předat uživateli Bob")
+    await vi.waitFor(() => expect(a.status()).toBe("Přístup ke čtení byl odebrán"))
+    expect(a.note).toMatchObject({ value: "", readOnly: true })
+    expect(shown()).not.toContain("secret words")
+    expect(stored(rows)).toBe("")
+    await expect(a.app.close()).resolves.toBe("revoked")
+  })
+})
+

@@ -1,12 +1,22 @@
 # Mooring pilot editor SDK
 
+> App authors start at [Mooring SDK v1](mooring-sdk.md): lease, save, recovery
+> and versions for Craft applications. This page documents the protocol-1
+> iframe layer underneath it.
+
 Mooring's pilot connects a personal Artifact to an isolated editor and an agent.
 It is an experimental protocol-1 integration, not an L3 collaboration claim or
 public conformance certification. The host owns authorization, persistence and
 receipts; the editor receives neither a Crewship credential nor an HTTP client.
 
-The TypeScript SDK entrypoint is `lib/mooring/index.ts`. It has no React,
-Crewship authentication or server dependencies. `channel.ts` supplies the common
+The in-frame TypeScript entrypoint is `lib/mooring/sdk/editor.ts`. It has no
+React, Crewship authentication, HTTP, storage or server dependencies, and an
+isolated editor bundle imports only that module. The root entrypoint
+`lib/mooring/index.ts` is host-side: it also re-exports the lease, save,
+recovery and versions modules, which pull in the private draft journal
+(protected IndexedDB storage bound to the signed-in person) and the host's
+admitted transport, so it must not be bundled into an editor frame.
+`channel.ts` supplies the common
 opaque-frame handshake, protocol and package-pin checks, private MessagePort
 transfer, bounded JSON messages and frame isolation attributes. GridCraft's
 existing bridge uses that same channel implementation. Its cell reconciliation,
