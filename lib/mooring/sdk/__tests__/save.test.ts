@@ -90,7 +90,7 @@ describe("Mooring SDK save lifecycle", () => {
   })
 
   it("labels every phase and treats only clean saved or idle as settled", () => {
-    const all: Record<SavePhase, true> = { idle: true, dirty: true, saving: true, saved: true, draft: true, uncertain: true, "read-only": true, stopped: true }
+    const all: Record<SavePhase, true> = { idle: true, dirty: true, saving: true, saved: true, draft: true, uncertain: true, "read-only": true, stopped: true, revoked: true }
     expect([...SAVE_PHASES].sort()).toEqual(Object.keys(all).sort())
     for (const phase of SAVE_PHASES) expect(saveLabel({ phase, dirty: false })).toBeTruthy()
     expect(SAVE_PHASES.filter(phase => saveSettled({ phase, dirty: false }))).toEqual(["idle", "saved"])

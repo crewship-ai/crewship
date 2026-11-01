@@ -13,7 +13,8 @@ export class NativeSaveError extends Error {
   constructor(readonly reason: NativeSaveFailure) { super(reason) }
 }
 export interface NativeSaveState {
-  phase: "idle" | "dirty" | "saving" | "saved" | "draft" | "uncertain" | "read-only" | "stopped"
+  /** `revoked` is terminal: read access was removed, the journal is purged. */
+  phase: "idle" | "dirty" | "saving" | "saved" | "draft" | "uncertain" | "read-only" | "stopped" | "revoked"
   dirty: boolean
   reason?: string
 }
@@ -62,12 +63,13 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   let preparingCount = 0
   let nextPreparation = 0, lastFailedPreparation = 0, nextAutosave = 0
   let writeRetirement: Promise<boolean> | undefined
+  let readRevocation: Promise<void> | undefined
   const lifetime = new AbortController()
   let lastState: NativeSaveState = { phase: "idle", dirty: false }
   const stateWaiters = new Set<() => void>()
   const notifyStateWaiters = () => { for (const check of [...stateWaiters]) check() }
   const emit = (phase: NativeSaveState["phase"], reason?: string) => {
-    if (!active && phase !== "stopped") return
+    if (!active && phase !== "stopped" && phase !== "revoked") return
     lastState = { phase, dirty, ...(reason ? { reason } : {}) }
     try { options.onState({ ...lastState }) } catch { /* UI observers cannot alter persistence or privacy fences. */ }
     notifyStateWaiters()
@@ -79,6 +81,8 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     emit("stopped")
   }
   const unregister = options.journal.onRetire(stop)
+  const readRevokedError = (error: unknown) => error instanceof NativeSaveError && error.reason === "read_revoked"
+  const retiredError = () => readRevocation ? new NativeSaveError("read_revoked") : new Error("native_session_retired")
   // Seed the baseline from the confirmed server bytes (same SHA-256 as a save).
   // A later receipt replaces it; a normalized or restored-draft capture hashes
   // differently, so it simply never matches and is saved.
@@ -142,10 +146,11 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       if (!active || !writable || pending !== operation) return
       await settle(result, attempt)
     } catch (error) {
+      // A read revocation wins over every other fence, also after write retired.
+      if (readRevokedError(error)) { await revokeRead().catch(() => {}); return }
       if (!active || !writable || pending !== operation) return
       if (error instanceof NativeSaveError) {
         blocked = error.reason
-        if (error.reason === "read_revoked") { await revokeRead(); return }
         if (error.reason === "write_revoked") { revokeWrite(); return }
         emit("draft", error.reason)
       } else { unconfirmed = attempt; emit("uncertain", "unconfirmed") }
@@ -209,15 +214,16 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     const ready = preparing.finally(() => { preparingCount-- })
     preparations = ready.then(() => {}, () => {})
     const sending = ready.then(async attempt => {
-      if (!attempt || !active) { if (manual) throw new Error(active ? "native_snapshot_failed" : "native_session_retired"); return }
+      if (!attempt || !active) { if (manual) throw active ? new Error("native_snapshot_failed") : retiredError(); return }
       // A manual ticket owns this exact prepared snapshot. Wait for the bounded
       // transport, but never replay a queued ticket after an unknown ACK.
-      const unavailable = () => !active ? "native_session_retired" : !writable ? "write_revoked" : blocked ?? (unconfirmed ? "unconfirmed" : pending ? "pending" : undefined)
+      const unavailable = () => readRevocation ? "read_revoked" : !active ? "native_session_retired" : !writable ? "write_revoked" : blocked ?? (unconfirmed ? "unconfirmed" : pending ? "pending" : undefined)
+      const refused = (reason: string) => reason === "read_revoked" ? new NativeSaveError("read_revoked") : new Error(reason)
       for (;;) {
         if (manual) while (pending && active && writable && !blocked && !unconfirmed) await pending.done
         if (unavailable()) {
           emit(!writable ? "read-only" : unconfirmed ? "uncertain" : "draft", blocked)
-          if (manual) throw new Error(unavailable())
+          if (manual) throw refused(unavailable()!)
           return
         }
         if (attempt.draft.baseVersion === baseVersion) break
@@ -249,7 +255,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         return
       }
       await transmit(attempt, false)
-      if (manual && unavailable()) throw new Error(unavailable())
+      if (manual && unavailable()) throw refused(unavailable()!)
     })
     return manual ? sending.finally(() => { manualCount--; scheduleIfNeeded(); notifyStateWaiters() }) : sending
   }
@@ -263,7 +269,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         if (error) reject(error); else resolve()
       }
       const check = () => {
-        if (!active || lifetime.signal.aborted) { finish(new Error("native_session_retired")); return }
+        if (!active || lifetime.signal.aborted) { finish(retiredError()); return }
         if (!writable || blocked || unconfirmed || lastState.phase === "uncertain" || lastState.phase === "read-only" || lastState.phase === "stopped" || lastState.phase === "draft" && lastState.reason) {
           finish(new Error(!writable ? "write_revoked" : blocked ?? (unconfirmed ? "unconfirmed" : lastState.reason ?? "native_save_unconfirmed"))); return
         }
@@ -274,6 +280,8 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       check()
     })
   }
+  // One barrier per lifecycle. A capture never counts once read was revoked:
+  // the barrier resolves false then, and a revoked lifecycle is inactive.
   function revokeWrite(): Promise<boolean> {
     if (!active) return Promise.resolve(false)
     if (writeRetirement) return writeRetirement
@@ -299,7 +307,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       void save().then(async () => {
         const captured = active && lastPersistedSequence >= sequence
         if (captured && !finished) { clearTimeout(deadline); await proveLost() }
-        finish(captured)
+        finish(captured && active && !readRevocation)
       }, () => finish(false))
     })
     emit("read-only", "write_revoked")
@@ -319,9 +327,24 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       await options.journal.confirm(attempt.draft)
       const capture = latest?.draft
       if (active && capture && capture !== attempt.draft && capture.contentHash === attempt.draft.contentHash) await options.journal.confirm(capture)
-    } catch { /* Unproven: the captured draft remains for comparison. */ }
+    } catch (error) {
+      // Unproven: the captured draft remains for comparison, unless read was revoked.
+      if (readRevokedError(error)) await revokeRead().catch(() => {})
+    }
   }
-  function revokeRead() { stop(); unregister(); return options.journal.revokeRead() }
+  /** The single read-revocation path, whichever call learned of it (save,
+   * reconcile, proveLost, the host): stop, purge the journal, and emit the
+   * terminal `revoked` state exactly once. */
+  function revokeRead(): Promise<void> {
+    if (readRevocation) return readRevocation
+    active = false; writable = false; dirty = false; blocked = "read_revoked"
+    clearTimeout(timer); lifetime.abort(); pending?.abort.abort()
+    latest = undefined; unconfirmed = undefined; confirmed = undefined
+    unregister()
+    readRevocation = options.journal.revokeRead()
+    emit("revoked", "read_revoked")
+    return readRevocation
+  }
   return {
     edited() { if (!active) return; edits++; dirty = true; emit(writable ? "dirty" : "read-only"); schedule() },
     save: (requestId?: string) => save(requestId),

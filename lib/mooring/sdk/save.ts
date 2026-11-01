@@ -17,7 +17,7 @@ export type {
 
 export type SavePhase = NativeSaveState["phase"]
 export type SaveController = ReturnType<typeof import("../single-editor-save").createSingleEditorSave>
-export const SAVE_PHASES: readonly SavePhase[] = Object.freeze(["idle", "dirty", "saving", "saved", "draft", "uncertain", "read-only", "stopped"] as const)
+export const SAVE_PHASES: readonly SavePhase[] = Object.freeze(["idle", "dirty", "saving", "saved", "draft", "uncertain", "read-only", "stopped", "revoked"] as const)
 
 /** Default Czech labels, matching the native Craft host. Only `saved` with no
  * dirty input may be shown as saved; every other phase keeps the draft. */
@@ -29,6 +29,7 @@ export function saveLabel(state: NativeSaveState): string {
     case "draft": return state.reason ? "Koncept zůstává v tomto editoru" : "Neuložený koncept"
     case "read-only": return "Pouze čtení"
     case "stopped": return "Úpravy ukončeny"
+    case "revoked": return "Přístup ke čtení byl odebrán"
     case "idle": return "Připraveno k úpravám"
     default: return "Neuložený koncept"
   }

@@ -58,12 +58,18 @@ SDK carries requests and validates replies; it never grants anything.
    `openRecoveryJournal` (one row per journal). Never share a journal between
    lifecycles: a later lifecycle would overwrite, then confirm away, a draft
    retained from an earlier lost custody. A lifecycle that revoked writing
-   (phase `read-only` or `stopped`) is never reused; make the input read-only
+   (phase `read-only`, `stopped` or `revoked`) is never reused; make the input read-only
    and start a fresh lifecycle if the server still reports your lease. Freeze
    input before any await that ends a lifecycle (restore, hand-off). Call `edited()` on input; the lifecycle
    autosaves after idle, journals every capture before sending it, and reports
    phases: `idle`, `dirty`, `saving`, `saved`, `draft`, `uncertain`,
-   `read-only`, `stopped`. `saveLabel(state)` gives the default Czech labels.
+   `read-only`, `stopped`, `revoked`. `saveLabel(state)` gives the default Czech labels.
+   `revoked` (reason `read_revoked`) is terminal and emitted exactly once,
+   whichever call learned of the read revocation (save, reconcile, the lost-reply
+   proof inside `revokeWrite`, or the host's `revokeRead()`): the lifecycle stops
+   and purges its journal. Afterwards `revokeWrite()` resolves `false` and
+   `flush()`/`save()` reject with `SaveError("read_revoked")`. Remove the text
+   from the view on this state; never keep a local copy.
 5. **Hand off or release.** `handOff(view, requestId, custody)` /
    `release(view, custody)` confirm the final save, revoke local writing and
    capture a durable draft, ask the server, then prove the old generation is
@@ -134,10 +140,12 @@ the server version over it: the note stays editable as a local copy, the
 status shows *Koncept zůstává v tomto editoru* and the alert says the text
 exists only in this window. *Znovu uchovat koncept* retries the journal;
 *Zahodit místní kopii* discards it deliberately. A read revocation is the
-exception on every path (close, custody loss, restore, transfer): the SDK
-stops the lifecycle and purges its journal, NoteCraft purges once more through
-a fresh handle, removes the text from the note, the offers and memory, and
-never makes a local copy. `close()` then resolves `revoked`.
+exception on every path (close, custody loss, restore, transfer). NoteCraft
+handles it in one place, `terminate`, reached from the SDK's `revoked` state
+and from its own guarded document, lease and version calls (`run()` never
+swallows `read_revoked`). It purges once more through a fresh handle, removes
+the text from the note, the offers and memory, and never makes a local copy.
+`close()` then resolves `revoked`.
 
 ```sh
 crewship-heavy pnpm exec vitest run examples/mooring/notecraft lib/mooring/sdk
