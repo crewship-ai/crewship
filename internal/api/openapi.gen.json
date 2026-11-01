@@ -133684,7 +133684,7 @@
         "x-crewship-read-only": true
       },
       "post": {
-        "description": "Atomically upsert up to 50 documents. `base_version` must equal the latest code version and each document's `ifVersion` must equal its stored version (0 for a new document); any mismatch returns 409 and nothing is written. Owner only, or the agent run acting for the owner. Exceeding a dataset limit returns 413 `artifact_data_quota`.",
+        "description": "Atomically upsert up to 50 documents. `base_version` must equal the latest code version and each document's `ifVersion` must equal its stored version (0 for a new document); any mismatch returns 409 and nothing is written. Allowed for the owner, the agent run acting for the owner, and a human with a current Edit share; Read and Comment shares get 403 and callers who cannot see the Dashboard get 404. Exceeding a dataset limit returns 413 `artifact_data_quota`.",
         "operationId": "post_api_v1_pages_slug_artifact_data_collection",
         "parameters": [
           {
