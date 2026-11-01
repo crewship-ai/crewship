@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -54,6 +55,15 @@ func (h *PageHandler) designEnabled(ctx context.Context) bool {
 func (h *PageHandler) designStore(ctx context.Context) *artifacts.VersionStore {
 	return artifacts.NewVersionStore(h.db, artifacts.VersionOptions{Enabled: h.designEnabled(ctx), ContentType: "design"})
 }
+
+// logDesignEngineUnavailable keeps the engine's phase (startup or work) and
+// budget in the server log; clients only see the stable 503 message.
+func logDesignEngineUnavailable(err error) {
+	if errors.Is(err, design.ErrUnavailable) {
+		slog.Warn("design engine unavailable", "error", err.Error())
+	}
+}
+
 func designError(w http.ResponseWriter, err error) {
 	if artifactStorageRefusal(w, err) {
 		return
@@ -64,6 +74,7 @@ func designError(w http.ResponseWriter, err error) {
 	case errors.Is(err, errDesignAccess), errors.Is(err, artifacts.ErrVersionAuthority):
 		replyError(w, 403, "current Design edit permission required")
 	case errors.Is(err, design.ErrUnavailable):
+		logDesignEngineUnavailable(err)
 		replyError(w, 503, "Design engine is unavailable; changes are not acknowledged")
 	case errors.Is(err, design.ErrInvalid), errors.Is(err, artifacts.ErrVersionInvalid):
 		replyError(w, 400, "invalid Design update")

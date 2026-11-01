@@ -38,7 +38,12 @@ message `Create Design`.
 ## How a change is applied
 
 Every change runs through a short-lived Yjs engine that has no database,
-network or credentials and runs for at most five seconds. The engine applies
+network or credentials. It has two separate budgets: up to 15 seconds to start
+(node and the Yjs bundle loading, which measured 27-31 ms idle and at most
+306 ms under 4x CPU oversubscription) and then up to five seconds for the
+change itself. When either budget runs out the process is killed and the
+change is refused as `503 Design engine is unavailable`; the server log names
+the phase (`startup` or `work`) that ran out. The engine applies
 the change to the live state and validates the whole resulting document (see
 [Limits](#limits)). Every database transaction below starts behind the shared
 writer fence and checks the caller's current credentials, workspace membership
