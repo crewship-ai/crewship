@@ -35,6 +35,9 @@ export function WordCraftEditorHost({ workspaceId, pageId, name, onDirtyChange, 
   // A draft kept by an earlier storage-full stop is offered again on reopen.
   React.useEffect(() => {
     const key = artifactDraftKey("wordcraft-pending", humanId, workspaceId, pageId)
+    // A draft belongs to one person and one Page: never keep showing another
+    // identity's or Page's recovered plaintext.
+    setRecovered("")
     if (!key) return
     let active = true
     void loadArtifactDraft(key).then(text => { if (active && text) setRecovered(text) }, () => { /* unreadable: keep the stored copy */ })
