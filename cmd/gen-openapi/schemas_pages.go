@@ -102,7 +102,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"color": map[string]any{"type": "string", "description": "A crew palette key (blue, emerald, violet, amber, rose, cyan, lime, fuchsia), or empty."},
 	})
 	folderOnPage := map[string]any{
-		"folder": map[string]any{"oneOf": []any{folderRef, map[string]any{"type": "null"}},
+		"folder": map[string]any{"oneOf": []any{folderRef, nullOnlySchema()},
 			"description": "The folder this page is filed in, or null when unfiled. Always sent, never omitted."},
 		"pages_version": map[string]any{"type": "integer",
 			"description": "Changes with every change to the page's folder membership. A move or removal carries it as its fence and is refused with 409 when it is stale."},
