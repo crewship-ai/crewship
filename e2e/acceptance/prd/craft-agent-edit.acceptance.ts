@@ -67,7 +67,21 @@ test.describe("craft agent edit", () => {
           const events = (st.events ?? []).map((e) => ({ operation: e.operation, status: e.status, holder_kind: e.holder_kind, error: e.error }))
           const has = app === "wordcraft" ? wordText(after.doc).includes(marker) : sheetCell(after.doc, 1, 1) === marker
 
+          // The editors draw on a canvas, so the check is on what the reloaded
+          // editor itself fetched to render: its own document read.
+          const editorRead = page.waitForResponse(
+            (res) => res.request().method() === "GET" && /\/craft\/document\?/.test(res.url()),
+            { timeout: 90_000 },
+          )
           await page.reload()
+          const loaded = await editorRead
+          const loadedBody = (await loaded.json().catch(() => ({}))) as { version?: string | number; bytes?: string }
+          const loadedDoc = JSON.parse(Buffer.from(loadedBody.bytes ?? "", "base64").toString("utf8") || "{}") as Record<string, unknown>
+          const shown = {
+            status: loaded.status(),
+            version: String(loadedBody.version),
+            hasMarker: app === "wordcraft" ? wordText(loadedDoc).includes(marker) : sheetCell(loadedDoc, 1, 1) === marker,
+          }
           await page.getByRole("status").filter({ hasText: "Pouze čtení" }).waitFor({ timeout: 90_000 })
           const alerts = await page
             .getByRole("alert")
@@ -87,6 +101,7 @@ test.describe("craft agent edit", () => {
               after: after.version,
               hasMarker: has,
               leaseAfter: leaseAfter.body.holder ?? null,
+              editorLoaded: shown,
               uiAlerts: alerts,
               draftOffered,
             }),
@@ -101,8 +116,12 @@ test.describe("craft agent edit", () => {
           expect(String(st.last_committed_receipt?.version), "the task's receipt names that version").toBe(after.version)
           expect(st.last_committed_receipt?.contentHash, "the receipt hash is the saved bytes").toBe(after.hash)
           expect(leaseAfter.body.holder ?? null, "nobody holds the editor after the task").toBeNull()
+          expect(shown.status, "the reloaded editor reads the document").toBe(200)
+          expect(shown.version, "the reloaded editor renders the agent's version").toBe(after.version)
+          expect(shown.hasMarker, "the document the editor renders carries the agent's change").toBe(true)
+          // Secondary: nothing in the reloaded editor competes with that version.
           expect(draftOffered, "the reloaded editor offers no draft").toBe(0)
-          expect(alerts.join(" | "), "the reloaded editor shows no conflict").not.toMatch(/konflikt|změnil/i)
+          expect(alerts.filter((a) => a.trim()).join(" | "), "the reloaded editor shows no alert").toBe("")
         } finally {
           await page.goto("about:blank").catch(() => {})
           const status = await deletePage(request, agent.workspaceId, doc.pageId)
