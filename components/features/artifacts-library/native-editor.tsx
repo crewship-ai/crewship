@@ -6,7 +6,7 @@ import { useSessionSafe } from "@/hooks/use-auth"
 import { apiFetch } from "@/lib/api-fetch"
 import { NativeCraftEditorHost } from "@/components/features/pages/native-craft-editor-host"
 import { NativeCraftPreview } from "@/components/features/pages/native-craft-preview"
-import { NativeCraftReaderHistory } from "@/components/features/pages/native-craft-version-history"
+import { NativeCraftReaderHistory } from "@/components/features/pages/native-craft-reader-history"
 
 type State = "loading" | "enabled" | "preview" | "readonly" | "disabled" | "error"
 
@@ -48,7 +48,7 @@ export function ArtifactNativeEditor({ workspaceId, pageId, fallback }: { worksp
     <NativeCraftEditorHost key={scope} workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled />
   </div>
   if (state === "preview") return <div className="flex min-h-[520px] flex-1 flex-col overflow-hidden rounded-card border">
-    <NativeCraftReaderHistory key={scope} workspaceId={workspaceId} pageId={pageId} />
+    <NativeCraftReaderHistory key={scope} humanId={humanId} workspaceId={workspaceId} pageId={pageId} />
     <NativeCraftPreview key={scope} humanId={humanId} workspaceId={workspaceId} pageId={pageId} />
   </div>
   return <>
@@ -58,7 +58,7 @@ export function ArtifactNativeEditor({ workspaceId, pageId, fallback }: { worksp
     </p> : <p role="status" className="text-sm text-muted-foreground">
       {state === "readonly" ? "You can read this document but not edit it." : "Editing is not available here right now."}
     </p>}
-    {state === "readonly" && <NativeCraftReaderHistory key={scope} workspaceId={workspaceId} pageId={pageId} />}
+    {state === "readonly" && <NativeCraftReaderHistory key={scope} humanId={humanId} workspaceId={workspaceId} pageId={pageId} />}
     {fallback}
   </>
 }

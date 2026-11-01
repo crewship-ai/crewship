@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -252,5 +253,24 @@ func TestCraftNativeVersionsRestoreIsFencedAndAppends(t *testing.T) {
 		if got.Versions[2].Author.ActorID != "user:"+f.userID || got.Versions[0].Author.ActorID != "user:"+f.userID {
 			t.Fatalf("restore author: %+v", got.Versions)
 		}
+	}
+}
+
+func TestCraftNativeVersionsListIsBoundedWithTruncation(t *testing.T) {
+	f, _, d, owner, token, _, _ := craftNativeDocumentsFixture(t)
+	craftNativeEnableVersionHistory(t, f.db, true)
+	store := artifacts.NewVersionStore(f.db, artifacts.VersionOptions{Enabled: true, ContentType: "wordcraft"})
+	for base := int64(1); base < 205; base++ {
+		if _, err := store.Apply(t.Context(), artifacts.VersionKey{WorkspaceID: f.wsID, PageID: "native-page"}, artifacts.VersionRequest{BaseVersion: base, EntryPoint: "document.json", Files: map[string]artifacts.VersionFile{"document.json": {Content: []byte(`{"v":` + strconv.FormatInt(base+1, 10) + `}`), MediaType: "application/json"}}}, func(context.Context, *sql.Tx) (string, error) { return "user:" + f.userID, nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := craftNativeVersionsCall(d, owner, token)
+	if list.Code != 200 {
+		t.Fatal(list.Code, list.Body)
+	}
+	body := decodeCraftNativeVersions(t, list)
+	if len(body.Versions) != craftNativeVersionsLimit || !body.Truncated || body.CurrentVersion != "205" || body.Versions[0].Version != "205" || body.Versions[craftNativeVersionsLimit-1].Version != "6" {
+		t.Fatalf("bounded listing: %d truncated %v current %s last %s", len(body.Versions), body.Truncated, body.CurrentVersion, body.Versions[len(body.Versions)-1].Version)
 	}
 }

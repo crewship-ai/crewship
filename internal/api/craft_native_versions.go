@@ -12,8 +12,8 @@ import (
 // Sheet version history. An undefined flag is off.
 const CraftVersionHistoryFlag = "craft_version_history"
 
-// craftNativeVersionsLimit bounds one listing; older versions stay stored and
-// restorable, the response only says it was truncated.
+// craftNativeVersionsLimit bounds one listing in SQL; older versions stay
+// stored and restorable, the response only says it was truncated.
 const craftNativeVersionsLimit = 200
 
 type craftNativeVersionAuthorResponse struct {
@@ -53,15 +53,12 @@ func (d *craftNativeDocumentsHTTP) listVersions(w http.ResponseWriter, r *http.R
 		replyError(w, 404, "native version history is not enabled")
 		return
 	}
-	versions, err := s.Versions(r.Context(), entry.scope)
+	versions, truncated, err := s.Versions(r.Context(), entry.scope, craftNativeVersionsLimit)
 	if err != nil {
 		craftNativeDocumentError(w, err)
 		return
 	}
-	out := craftNativeVersionsResponse{Versions: make([]craftNativeVersionResponse, 0, min(len(versions), craftNativeVersionsLimit))}
-	if len(versions) > craftNativeVersionsLimit {
-		versions, out.Truncated = versions[:craftNativeVersionsLimit], true
-	}
+	out := craftNativeVersionsResponse{Versions: make([]craftNativeVersionResponse, 0, len(versions)), Truncated: truncated}
 	names := map[string]craftNativeVersionAuthorResponse{}
 	for i, v := range versions {
 		author, ok := names[v.Actor]

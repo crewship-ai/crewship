@@ -2,9 +2,7 @@
 
 import * as React from "react"
 import { Button } from "@/components/ui/button"
-import { apiFetch } from "@/lib/api-fetch"
-import { createNativeDocumentClient } from "@/lib/mooring/native-document-client"
-import { CRAFT_VERSION_HISTORY_FLAG, nativeFlagEnabled, type NativeVersion, type NativeVersionList } from "@/lib/mooring/native-versions"
+import type { NativeVersion, NativeVersionList } from "@/lib/mooring/native-versions"
 
 export interface NativeCraftVersionHistoryProps {
   /** Loads the listing under the caller's native admission. Null hides the panel (flag off). */
@@ -44,7 +42,7 @@ export function NativeCraftVersionHistory({ load, refreshKey, canRestore, restor
     const abort = new AbortController()
     setFailed(false)
     // A loader that throws synchronously is a failed load, never a failed render.
-    void Promise.resolve().then(() => loader.current(abort.signal)).then(value => { if (!abort.signal.aborted) setList(value) }, () => { if (!abort.signal.aborted) setFailed(true) })
+    void Promise.resolve().then(() => loader.current(abort.signal)).then(value => { if (!abort.signal.aborted) setList(value) }, () => { if (!abort.signal.aborted) { setList(undefined); setConfirm(undefined); setFailed(true) } })
     return () => abort.abort()
   }, [refreshKey])
   React.useEffect(() => { if (!canRestore) setConfirm(undefined) }, [canRestore])
@@ -76,25 +74,4 @@ export function NativeCraftVersionHistory({ load, refreshKey, canRestore, restor
       {list.truncated && <p className="py-1 text-muted-foreground">Zobrazeno je posledních {count} verzí. Starší verze zůstávají uložené.</p>}
     </>}
   </section>
-}
-
-/**
- * The history for a person who reads the document without the editor (the
- * Artifacts preview or read-only detail). It checks the workspace flag first,
- * and only then opens its own native admission, read-only: it never acquires
- * the lease and offers no restore.
- */
-export function NativeCraftReaderHistory({ workspaceId, pageId }: { workspaceId: string; pageId: string }) {
-  const client = React.useMemo(() => createNativeDocumentClient({ workspaceId, pageId }), [workspaceId, pageId])
-  React.useEffect(() => () => client.close(), [client])
-  const opened = React.useRef<Promise<unknown>>(undefined)
-  const load = React.useCallback(async (signal: AbortSignal) => {
-    const response = await apiFetch(`/api/v1/feature-flags?${new URLSearchParams({ workspace_id: workspaceId })}`, { cache: "no-store", signal })
-    if (!response.ok || !nativeFlagEnabled(await response.json(), CRAFT_VERSION_HISTORY_FLAG)) return null
-    opened.current ??= client.open(signal)
-    // No Read right (for example comment-only): there is no history to show.
-    try { await opened.current } catch { opened.current = undefined; return null }
-    return client.versions(signal)
-  }, [client, workspaceId])
-  return <NativeCraftVersionHistory key={`${workspaceId}/${pageId}`} load={load} canRestore={false} restoreHint="Obnovit verzi může jen ten, kdo dokument právě upravuje." />
 }
