@@ -164,6 +164,13 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     uses: ./.github/workflows/pr-image-build.yml
 
+  # ── PR-light matrix (#4752) ──
+  # `full` is false only on a pull_request that does not change CI control,
+  # dependency or release inputs and was created without the `full-ci` label.
+  # Then the expensive lanes in verdict.FULL (macOS/arm64, race, shuffle, all
+  # actual Mooring cases) skip: the merge queue runs them before anything
+  # reaches main, and CI Result rejects a reduced plan on any other event.
+  # To opt a PR in, add `full-ci` and push (re-runs reuse the old payload).
   changes:
     name: CI change plan
     runs-on: ubuntu-latest
@@ -175,6 +182,7 @@ jobs:
       go_parity: ${{ steps.plan.outputs.go_parity }}
       frontend_parity: ${{ steps.plan.outputs.frontend_parity }}
       docs_inventory: ${{ steps.plan.outputs.docs_inventory }}
+      full: ${{ steps.plan.outputs.full }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -1339,7 +1347,7 @@ jobs:
   mooring-actual:
     name: Mooring ALL actual native SQL and HTTP/WS cases
     needs: [merge-conflict-markers, changes]
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -1872,6 +1880,13 @@ jobs:
   # cost) so it no longer runs after vet and four builds in one job.
   # go-package-shard.py proves the partitions cover `go list ./...` exactly
   # once; costs only decide placement.
+  #
+  # 25 → 30 and `-timeout 15m` → 20m, with go-shuffle 18m → 20m (#4740).
+  # internal/api is one binary whose tests run almost serially: 871–900 s in
+  # runs 41262691789, 41264884565 and 41267941716 (sum of its top-level
+  # tests 899 s over 8,264 tests), so 15m failed at random with nothing
+  # failing, and shuffle's 18m had only ~2m of margin. Measured overhead
+  # 2m39s–3m07s + 20m leaves ~7m of daylight under the 30m job cap.
   go-test:
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.go == 'true'
@@ -1881,7 +1896,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [0, 1, 2]
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1892,11 +1907,11 @@ jobs:
       - name: Go test (package partition)
         env:
           SHARD_INDEX: ${{ matrix.shard }}
-        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -timeout 15m
+        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -timeout 20m
 
   go-shuffle:
     needs: [merge-conflict-markers, changes]
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.full == 'true'
     name: Go Shuffle (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
     strategy:
@@ -1913,6 +1928,9 @@ jobs:
     # internal/database under a shuffled order ran past 900s (run
     # 34854262908) once two more migrations were in. 2m33s + 18m = 20m33s
     # keeps 9m27s under this cap.
+    #
+    # 18m → 20m with #4740: internal/api alone reached ~16m here (job 18m58s
+    # in run 41264884565). Overhead up to 3m07s + 20m keeps ~7m of daylight.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1936,7 +1954,7 @@ jobs:
         # cover `go list ./...` exactly once.
         env:
           SHARD_INDEX: ${{ matrix.shard }}
-        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -shuffle=on -timeout 18m
+        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -shuffle=on -timeout 20m
 
   # ── Go: race detector ──
   #
@@ -2124,7 +2142,7 @@ jobs:
   cli-subprocess-race:
     name: CLI subprocess race boundaries
     needs: [merge-conflict-markers, changes]
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -2158,7 +2176,7 @@ jobs:
   # keeps full-package order-dependence coverage.
   go-race-cli-shards:
     needs: [merge-conflict-markers, changes]
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.full == 'true'
     name: Go Race (CLI shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
     strategy:
@@ -2203,7 +2221,7 @@ jobs:
 
   go-race-cli:
     needs: [changes, go-race-cli-shards]
-    if: always() && needs.changes.outputs.go == 'true'
+    if: always() && needs.changes.outputs.go == 'true' && needs.changes.outputs.full == 'true'
     name: Go Race (CLI)
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -2232,7 +2250,7 @@ jobs:
 
   go-race:
     needs: [merge-conflict-markers, changes]
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.full == 'true'
     name: Go Race (shard ${{ matrix.shard }})
     strategy:
       fail-fast: false
@@ -2302,7 +2320,7 @@ jobs:
   # counts this job's actual package elapsed time, including all migration work.
   go-race-api-template:
     needs: [merge-conflict-markers, changes]
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.full == 'true'
     name: Go Race (internal/api template)
     runs-on: ubuntu-latest
     timeout-minutes: 85
@@ -2327,7 +2345,7 @@ jobs:
 
   go-race-api-shards:
     needs: [merge-conflict-markers, changes, go-race-api-template]
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.full == 'true'
     name: Go Race (internal/api shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
     strategy:
@@ -2379,7 +2397,7 @@ jobs:
 
   go-race-api:
     needs: [changes, go-race-api-template, go-race-api-shards]
-    if: always() && needs.changes.outputs.go == 'true'
+    if: always() && needs.changes.outputs.go == 'true' && needs.changes.outputs.full == 'true'
     name: Go Race (internal/api)
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -2426,7 +2444,7 @@ jobs:
 
   go-platforms:
     needs: [merge-conflict-markers, changes]
-    if: needs.changes.outputs.go == 'true'
+    if: needs.changes.outputs.go == 'true' && needs.changes.outputs.full == 'true'
     name: Go (${{ matrix.name }})
     runs-on: ${{ matrix.runner }}
     #
@@ -2441,7 +2459,12 @@ jobs:
     # comment above warns about: a bound that works on a quiet machine and is
     # decided by a busy one (#1998, item 3). 30 restores the ≥5 min of daylight
     # the `go` job's invariant asks for.
-    timeout-minutes: 30
+    # 45 since 2026-11-01: `go test ./...` here is unpartitioned, and on a busy
+    # macOS runner internal/api alone took 1146-1200 s; the 30m cap cancelled a
+    # run whose packages had all passed, and the 20m package timeout then fired
+    # at 1200.5 s. Package timeout 30m, job cap 45m (this lane runs only in the
+    # merge queue and on main, #4752).
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -2463,10 +2486,10 @@ jobs:
         run: go build ./cmd/crewship
 
       - name: Go test
-        # -short would defeat the purpose; run the full suite. 20m test
-        # timeout mirrors the amd64 job's headroom — macOS runners are
-        # slower than ubuntu for the SQLite-heavy internal/api package.
-        run: go test ./... -count=1 -timeout 20m
+        # -short would defeat the purpose; run the full suite. 30m test
+        # timeout: macOS runners are much slower than ubuntu for the
+        # SQLite-heavy internal/api package (1200 s observed 2026-11-01).
+        run: go test ./... -count=1 -timeout 30m
 
   # ── Go lint: golangci-lint ──
   go-lint:

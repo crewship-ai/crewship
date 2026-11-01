@@ -1,11 +1,11 @@
 {
   "version": 1,
   "protected_files": {
-    ".github/workflows/ci.yml": "afabc8a9f63a36677fc2720348f4423a57aa97455e949bfd8be72de95b76fa0f",
+    ".github/workflows/ci.yml": "7a8cb0824b3895f6ee776195231c34aab106b50a02af8b546ff9598c9aa9aca6",
     ".github/workflows/security.yml": "c33ba55a4650e15787eca0ea994de968fcf74fa0a0b61eb68211ff133b8fd505",
     ".github/workflows/codeql.yml": "08ba82c71afd5cf02aa224e9f26c543469bfe8bf3417c1e51d7eb76ae095c8bf",
-    "scripts/ci/plan.py": "4383e14ede409fff4077013342dd7acb6146d8808ea376c53e4a0202ba1514aa",
-    "scripts/ci/verdict.py": "2bf759eef9aeb9f8dfebc46151f723eee6203fe28d87013eacb17cb18bdc4b1a"
+    "scripts/ci/plan.py": "246b2f92739a9640fdcf477c11091a3fce08954b8480790741bbc44b86a4c837",
+    "scripts/ci/verdict.py": "8ebc9e4df4b2cdd222049baba89f722d5e478918d7118023591e173c0da62d3c"
   },
   "workflows": {
     ".github/workflows/ci.yml": {
