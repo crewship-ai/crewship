@@ -307,6 +307,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // generation is still current; any newer refresh or settle bumps it and
     // re-arms both listeners, so no path can leave them stuck (#4714).
     let redirectingGen = -1
+    // A pending unreachable-backend probe (timer or the online event) reuses
+    // the current generation; left armed it could settle a live session under
+    // the leaving handler's generation and keep both listeners disarmed.
+    const cancelUnreachableProbe = () => { clearTimeout(unreachableTimer.current); unreachableTimer.current = undefined }
     const goLoginExpired = async (reason?: string) => {
       if (redirectingGen === refreshGen.current) return
       // A path the app has no page for shows the not-found state, signed in
@@ -317,6 +321,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (!isKnownAppPath(window.location.pathname)) return
       const gen = ++refreshGen.current
       redirectingGen = gen
+      cancelUnreachableProbe()
       purgeOtherE2Recovery(null)
       try { await preserveDraftsForIdentity(null) }
       catch { setDraftRecovery({ retry: async () => { if (redirectingGen === gen) redirectingGen = -1; await goLoginExpired(reason) } }); return }
@@ -349,6 +354,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (human && currentHuman && human !== currentHuman) return
       const gen = ++refreshGen.current
       redirectingGen = gen
+      cancelUnreachableProbe()
       purgeOtherE2Recovery(null)
       try { await preserveDraftsForIdentity(null) }
       catch { setDraftRecovery({ retry: async () => { if (redirectingGen === gen) redirectingGen = -1; await goLoginSignedOutElsewhere(human) } }); return }

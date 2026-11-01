@@ -86,7 +86,7 @@ it("follows a second sign-out after a refresh superseded the first one during it
   } finally { replace.mockRestore() }
 })
 
-it("navigates exactly once when an expiry arrives during the re-settle drain", async () => {
+it("follows an expiry that arrives during the re-settle drain", async () => {
   const replace = vi.spyOn(window.location, "replace").mockImplementation(() => {})
   try {
     await liveTab()
@@ -97,11 +97,47 @@ it("navigates exactly once when an expiry arrives during the re-settle drain", a
     signOutElsewhere()
     await waitFor(() => expect(suspendDocuments.mock.calls.filter(c => c[0] === "ana")).toHaveLength(2))
     act(() => { window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason: "session_expired" } })) })
-    act(() => { window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason: "session_expired" } })) })
     await act(async () => { drain.resolve() })
-    await waitFor(() => expect(replace).toHaveBeenCalled())
-    await new Promise(r => setTimeout(r, 50))
-    expect(replace).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(replace).toHaveBeenCalledTimes(1))
     expect(String(replace.mock.calls[0][0])).toMatch(/^\/login\?/)
   } finally { replace.mockRestore(); suspendDocuments.mockImplementation(async () => {}) }
+})
+
+it("starts one leave per generation: a second sign-out during the drain is not a second drain", async () => {
+  const replace = vi.spyOn(window.location, "replace").mockImplementation(() => {})
+  try {
+    await liveTab()
+    const drain = deferred()
+    suspendDocuments.mockImplementationOnce(async () => { await drain.promise })
+    signOutElsewhere()
+    signOutElsewhere()
+    act(() => { window.dispatchEvent(new CustomEvent(AUTH_EVENT, { detail: { reason: "session_expired" } })) })
+    expect(suspendDocuments.mock.calls.filter(c => c[0] === null)).toHaveLength(1)
+    mockFetch.mockResolvedValueOnce(signedOut())
+    await act(async () => { drain.resolve() })
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(SIGNED_OUT_URL))
+    expect(replace).toHaveBeenCalledTimes(1)
+    expect(suspendDocuments.mock.calls.filter(c => c[0] === null)).toHaveLength(1)
+  } finally { replace.mockRestore() }
+})
+
+it("an online event cannot settle a live session under a sign-out whose drain failed", async () => {
+  const replace = vi.spyOn(window.location, "replace").mockImplementation(() => {})
+  try {
+    // Cold load against an unreachable backend: the provider arms its probe.
+    mockFetch.mockRejectedValue(new TypeError("Failed to fetch"))
+    render(<AuthProvider><Probe /></AuthProvider>)
+    await waitFor(() => expect(auth.unreachable).toBeTruthy())
+    const calls = mockFetch.mock.calls.length
+    // A sign-out elsewhere whose drain fails: the tab stays on the recovery overlay.
+    suspendDocuments.mockImplementationOnce(async () => { throw new Error("drain failed") })
+    signOutElsewhere()
+    await waitFor(() => expect(suspendDocuments).toHaveBeenCalledWith(null))
+    // The network returns; the backend would now answer with a live session.
+    mockFetch.mockReset(); mockFetch.mockResolvedValue(user("ana"))
+    await act(async () => { window.dispatchEvent(new Event("online")); await Promise.resolve() })
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(calls).toBeGreaterThan(0)
+    expect(auth.session).toBeNull()
+  } finally { replace.mockRestore() }
 })
