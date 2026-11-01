@@ -2394,8 +2394,8 @@ accept only `slug` and the required positive `version`, without an output path.
 
 Design requires the server `artifacts_design` feature. Commands use current Page
 permissions. Agent runs use the original scoped MCP capability for read, apply,
-snapshot, versions and restore; human-only operations never fall back from an
-agent token to a saved human profile.
+snapshot, versions and restore; human-only operations (create, watch, export)
+never fall back from an agent token to a saved human profile.
 
 ### `crewship page design create <slug>`
 
@@ -2504,6 +2504,30 @@ read; a changed revision is refused (exit `4`) instead of replaying the canvas.
 ```bash
 crewship page design watch checkout --count 1
 crewship page design watch checkout --authority-revision 42
+```
+
+### `crewship page design export <slug>`
+
+Export every screen of one retained version as a single self-contained HTML
+file: inline styles, embedded `data:` images, no scripts and no network
+access, with prototype links as in-page links between screens. The live canvas
+is never exported. Optional `--version` selects a positive retained version;
+without it an editor gets the latest saved version and a Read or Comment
+audience the shared version. Another version answers `404` (exit `3`), exactly
+like `page design get`. `--as` names the file type and accepts only `html`
+(the default); the global `-f` still formats the receipt.
+
+`-o`/`--out` names the output file (default: the server's file name, such as
+`checkout-design-v3.html`, in the current directory). The file is written
+atomically and standard output carries a JSON receipt (`path`, `media_type`,
+`version`, `byte_length`, `sha256`). `--out -` writes the HTML to standard
+output instead. An export over 8 MiB answers `413` with code
+`design_export_limit`. Live agent runs cannot export; the command requires
+human authentication.
+
+```bash
+crewship page design export checkout
+crewship page design export checkout --version 3 -o checkout.html
 ```
 
 ### `crewship page draft-key <@page-id>`

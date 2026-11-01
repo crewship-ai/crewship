@@ -17,6 +17,7 @@ import { readablePeerFill } from "./peer-colors"
 import { designLinkTarget, designScreenOf, removeDesignNode, safeImageSource, setDesignNodeLink, upsertDesignNode, type DesignNode, type DesignNodeType } from "./design-document"
 import { DesignNodeShape } from "./design-node-shape"
 import { DesignPrototypePlayer } from "./design-prototype-player"
+import { DesignExportButton } from "./design-export-button"
 
 function encodedDesignState(doc: Y.Doc,maxBytes=Infinity) {
  const state=Y.encodeStateAsUpdate(doc)
@@ -207,6 +208,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
    {prototype && frames.length > 0 && <Button ref={playButton} variant="outline" onClick={play}><Play className="size-4" />Play</Button>}
    <Button variant="outline" onClick={() => setAccessOpen(true)}>Access</Button>
    <Button variant="outline" onClick={() => setPanel(panel === "history" ? "properties" : "history")}>History{viewedVersion ? ` · v${viewedVersion}` : ""}</Button>
+   <DesignExportButton workspaceId={workspaceId} pageId={data.page_id} version={viewedVersion} />
    {design.editable && <Button disabled={design.save.isPending || design.connection !== "connected"} onClick={() => design.save.mutate("Saved from Design editor")}><Save className="size-4" /> Save version</Button>}
   </header>
   {historyFull && <div role="alert" className="space-y-2 border-b px-4 py-3 text-sm"><p><b>History capacity is full.</b> Another version could not be saved. Existing versions are retained and your pending work stays in this browser.</p><p>Download your local canvas and unsent feedback as a draft file to keep a copy. History is not deleted automatically.</p>{version && <Button variant="outline" onClick={() => setVersion(undefined)}>Return to live canvas</Button>}<Button variant="outline" disabled={!design.doc || Boolean(version)} onClick={downloadDraft}><Download className="size-4" />Download draft</Button><Button variant="outline" disabled={!design.doc||Boolean(version)||!human||continuing} onClick={()=>{setContinueName(`${slug} (continued)`);setContinueSlug(`design-${crypto.randomUUID().replaceAll("-","").slice(0,24)}`);setContinueError("");setContinueOpen(true)}}>Continue in a new Design</Button>{downloadError && <p className="text-destructive">{downloadError}</p>}</div>}

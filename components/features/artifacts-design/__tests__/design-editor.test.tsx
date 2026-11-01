@@ -29,6 +29,18 @@ vi.mock("../use-design", () => ({ useDesign: () => {
 beforeEach(() => { copying.real=false;copying.send.mockReset(); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true"); state.editable = true; state.pageId = "old-private-page"; state.user = false; state.peerColor = "#2563eb"; state.saveError = null; state.restoreError = null; state.doc = new Y.Doc() })
 afterEach(() => { cleanup(); state.doc?.destroy(); vi.unstubAllEnvs();vi.unstubAllGlobals() })
 describe("Design editor controls", () => {
+ it("offers Export HTML only with its flag, for the saved version, to editors and readers", () => {
+  const view = render(<DesignEditor workspaceId="workspace" slug="shop" />)
+  expect(screen.queryByRole("button", { name: /Export HTML/ })).not.toBeInTheDocument()
+  view.unmount()
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN_EXPORT", "true")
+  for (const editable of [true, false]) {
+   state.editable = editable
+   const shown = render(<DesignEditor workspaceId="workspace" slug="shop" />)
+   expect(screen.getByRole("button", { name: "Export HTML (version 1)" })).toHaveAttribute("title", expect.stringContaining("Unsaved live changes are not included"))
+   shown.unmount()
+  }
+ })
  it("clears private unsent feedback when the same slug resolves to a new Page", async () => {
   state.user = true
   const view = render(<DesignEditor workspaceId="workspace" slug="same-slug" />)

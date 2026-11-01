@@ -139407,6 +139407,163 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/pages/{slug}/design/export": {
+      "get": {
+        "description": "Download one immutable Design version as a self-contained HTML file (inline CSS, embedded data: images, no script, no network) with prototype links as in-page anchors. Access matches Get Design: editors and workspace managers may export any retained version (default: latest), Read/Comment audiences only the shared version. An export over 8 MiB returns 413 `design_export_limit`. Requires the `artifacts_design` feature flag.",
+        "operationId": "get_api_v1_pages_slug_design_export",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug; the workspace header is also accepted.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Export format. Only html exists; omitted means html.",
+            "in": "query",
+            "name": "format",
+            "required": false,
+            "schema": {
+              "enum": [
+                "html"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Retained version to export. Edit and workspace-manager callers may choose any retained version and default to the latest; Read/Comment audiences may export only the shared version, which is also their default. The live canvas is never exported.",
+            "in": "query",
+            "name": "version",
+            "required": false,
+            "schema": {
+              "format": "int64",
+              "maximum": 9007199254740991,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "description": "One self-contained HTML document of the selected immutable version: every screen as a section, absolutely positioned layers, escaped text, embedded raster data: images, prototype links as in-page anchors, no script and no network references. Deterministic per version.",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Export Design as HTML",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/pages/{slug}/design/operations": {
       "post": {
         "description": "Apply up to 500 typed operations (upsert, delete, reorder) to the live canvas and publish the result as a new version in one transaction. A concurrent change returns 409. Requires edit rights.",

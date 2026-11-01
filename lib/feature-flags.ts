@@ -181,6 +181,15 @@ export function artifactsDesignPrototype(): boolean {
   return process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE === "true"
 }
 
+/**
+ * "Export HTML" in the Design editor (#4449). Default off. Only has an effect
+ * together with `artifactsDesign()`. The server export route itself follows the
+ * Design workspace flag; this only hides the button.
+ */
+export function artifactsDesignExport(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN_EXPORT === "true"
+}
+
 /** Read-only Design System token preview for artifacts with `design-system.json`. Default off. */
 export function artifactDesignSystem(): boolean {
   return process.env.NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM === "true"
