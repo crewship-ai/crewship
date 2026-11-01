@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/cli"
 )
 
 func TestIsPermanentSSEError(t *testing.T) {
@@ -124,6 +126,7 @@ func TestTruncateString(t *testing.T) {
 // (those are private to the cli package) — instead we assert two known
 // distinct severities map to different tokens.
 func TestSeverityColor(t *testing.T) {
+	pinColourTokens(t)
 	// Each entry should map to a distinct, non-empty colour token; the
 	// "unknown" branch falls through to gray (same as info).
 	pairs := map[string]struct{}{}
@@ -143,6 +146,25 @@ func TestSeverityColor(t *testing.T) {
 	if severityColor("warn") == severityColor("error") {
 		t.Errorf("warn and error should map to distinct colours")
 	}
+}
+
+// pinColourTokens restores the ANSI tokens severityColor maps to. Any test
+// that runs rootCmd calls cli.InitColors, which blanks every token for the
+// rest of the process because test stdout is not a terminal; under -shuffle
+// TestSeverityColor then saw only empty tokens (#4718).
+func pinColourTokens(t *testing.T) {
+	t.Helper()
+	tokens := []*string{&cli.Red, &cli.Yellow, &cli.Cyan, &cli.Gray}
+	saved := make([]string, len(tokens))
+	for i, token := range tokens {
+		saved[i] = *token
+	}
+	cli.Red, cli.Yellow, cli.Cyan, cli.Gray = "\033[31m", "\033[33m", "\033[36m", "\033[90m"
+	t.Cleanup(func() {
+		for i, token := range tokens {
+			*token = saved[i]
+		}
+	})
 }
 
 // TestValidateCSV exercises the small client-side enum gate. The intent

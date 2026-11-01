@@ -43,7 +43,6 @@ test.describe("project", () => {
     "element comment is answered by a new version",
     {
       annotation: [
-        prdRequirement("B.project.screens", "A Project has three linked screens that open in the preview"),
         prdRequirement("B.project.element-comment", "A comment is anchored to the selected element and answered by a new version"),
       ],
     },
