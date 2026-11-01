@@ -505,3 +505,26 @@ describe('full native history',()=>{
   expect(journal.revokeRead).not.toHaveBeenCalled();expect(document.querySelector('iframe')).not.toBeNull()
  })
 })
+
+describe('write and read revoked together while a lost save is reconciled',()=>{
+ // The native client never reports read_revoked (a refused bearer maps to write_revoked);
+ // read loss reaches the host as session_retired draft:purge. It purges the journal the
+ // coordinator still holds while proveLost waits on reconcile.
+ it('a read-loss event during write retirement purges the captured draft through the coordinator',async()=>{
+  mount();await ready();await acquire()
+  client.save.mockImplementationOnce(()=>new Promise(()=>{}))
+  const reconciling=deferred<unknown>();client.reconcile.mockImplementationOnce(()=>reconciling.promise)
+  act(()=>portOptions.at(-1)!.onChanged('pending','doc'))
+  await waitFor(()=>expect(client.save).toHaveBeenCalledOnce())
+  act(()=>stream?.('lease',{...ownedLease,mine:false,can_write:false}))
+  await waitFor(()=>expect(client.reconcile).toHaveBeenCalledOnce())
+  expect(journal.persist).toHaveBeenCalledTimes(2)
+  act(()=>stream?.('session_retired',{delivery:'stopped',draft:'purge',reason:'authority_changed'}))
+  await waitFor(()=>expect(journal.revokeRead).toHaveBeenCalledOnce())
+  expect(document.querySelector('iframe')).toBeNull()
+  expect(journal.close.mock.invocationCallOrder.every(order=>order>journal.revokeRead.mock.invocationCallOrder[0])).toBe(true)
+  await act(async()=>{reconciling.resolve(Promise.reject(new NativeSaveError('write_revoked')));await Promise.resolve()})
+  expect(journal.revokeRead).toHaveBeenCalledOnce();expect(client.save).toHaveBeenCalledOnce()
+  expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
+ })
+})
