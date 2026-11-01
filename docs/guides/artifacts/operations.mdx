@@ -31,7 +31,7 @@ UI when it is built.
 | Project (multi-screen HTML) | `artifact_projects` | `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` | `NEXT_PUBLIC_ARTIFACTS_LIBRARY`, `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` |
 | Dashboard data | `artifact_dashboard_data` (needs Project) | `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED=true` | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` |
 | Slides | `artifact_slides` (needs Project) | `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true` | `NEXT_PUBLIC_ARTIFACT_SLIDES` |
-| Design | `artifacts_design` | `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true` | `NEXT_PUBLIC_ARTIFACTS_DESIGN` |
+| Design | `artifacts_design` | `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true` | `NEXT_PUBLIC_ARTIFACTS_DESIGN`; prototype playback also `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE` |
 | Live workbook editing | `gridcraft_editor` | `CREWSHIP_GRIDCRAFT_ENABLED` and `CREWSHIP_GRIDCRAFT_EDITOR_ENABLED` are both **required**, not an override | — |
 
 The library variable is needed for the library across kinds. Dashboard and
@@ -142,9 +142,10 @@ operation limits, set with `CREWSHIP_DOCUMENTS_MAX_DOCUMENTS_PER_WORKSPACE`,
 ### Artifacts per workspace
 
 An artifact is stored as a page record, so it counts toward the limit of 100
-pages per workspace. Creating a Project or Design in a full workspace returns
-`413` with the same code as a full history (`artifact_history_quota`, or
-"Design capacity is full").
+pages per workspace by default (an instance administrator changes it with
+`crewship admin instance page-limit set`). Creating a Project or Design in a full workspace returns
+`422` with code `pages_limit`, not the `413` of a full history
+(`artifact_history_quota`, or "Design capacity is full").
 
 ## Checking usage
 

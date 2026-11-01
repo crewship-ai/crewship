@@ -33,6 +33,10 @@ An operator can instead set `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true` in the
 server environment. That turns the server side on for every workspace on the
 instance, regardless of the workspace flag.
 
+Prototype playback of linked screens has its own build-time variable,
+`NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE=true`, on top of the two switches above;
+see [Play a prototype](#play-a-prototype).
+
 The `artifacts_design` flag is independent of `artifact_projects`, the flag for
 Project artifacts. You can turn Design on without Projects.
 
@@ -130,6 +134,56 @@ also keeps a copy of your unsaved canvas in this browser, so a crash or a lost
 connection does not discard it. If browser storage is full or blocked, the
 editor says so; keep the window open until it is connected and save a version.
 
+## Play a prototype
+
+<Note>
+  Prototype playback is off by default. It appears only in a web UI built with
+  both `NEXT_PUBLIC_ARTIFACTS_DESIGN=true` and
+  `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE=true`. Without the second variable
+  the editor shows no **Play** button and no **Link to screen** field, and links
+  already stored on a canvas are kept but do nothing.
+</Note>
+
+You can link a layer on one screen to another screen and click through the
+screens as a prototype.
+
+**Link a layer to a screen** (needs **write** access):
+
+1. Select a rectangle, text or image layer, for example a **Next** button on
+   **Screen 1**.
+2. In **Properties**, choose the target in **Link to screen**, for example
+   **Screen 2**.
+3. To remove the link, choose **No link**.
+
+The link is part of the canvas: other people see it immediately, it is saved in
+versions, and **Restore** brings back the links of that version. Screens cannot
+be linked themselves; link a layer inside the screen. People with **read** or
+**Comment** access see the link but cannot change it.
+
+**Play the prototype** (any access level, including **read**):
+
+1. Optionally select a screen or a layer inside it to start there. Without a
+   selection, playback starts on the first screen.
+2. Click **Play** in the header. The screen opens on its own, without the
+   editor around it.
+3. Click a linked layer, or move to it with **Tab** and press **Enter** or
+   **Space**, to open its target screen.
+4. Click **Back** to return to the previous screen.
+5. Press **Esc** or click **Exit** to leave playback. Focus returns to **Play**.
+
+Playback only shows the canvas. Nothing you click in it changes the Design,
+creates a version or is seen by other people.
+
+If a layer links to a screen that was deleted, **Link to screen** shows
+**Deleted screen** and the hint *The linked screen was deleted*. In playback the
+layer has a dashed outline, clicking it does nothing, and the bar above the
+screen says that the linked screen was deleted. Choose another target or
+**No link** to fix it. If the screen you are viewing is deleted while you play,
+playback says so; go **Back** or **Exit**.
+
+Agents and the CLI set the same link with the `linkTo` node field; see
+[Command line](#command-line).
+
 ## Save versions
 
 The live canvas and its versions are separate. A version is a fixed copy of the
@@ -195,9 +249,9 @@ the Design:
    - **write** can change the canvas, save versions and restore them.
 4. To remove access, click **Revoke** next to the grant.
 
-Only the owner or a workspace administrator can change access. Changes take
-effect immediately: a person whose access is removed is disconnected from the
-canvas. Grants for agents do not give an agent permission to run tasks; that is
+Only the owner or a workspace administrator can change access. Changes apply
+to new requests immediately. A person whose access is removed is disconnected
+from the open canvas within a few seconds. Grants for agents do not give an agent permission to run tasks; that is
 controlled separately.
 
 ## What a reader sees
@@ -229,6 +283,14 @@ draft stays in this browser if you close the Design.
 
 The owner can connect one of their private agent chats. Comments then go to
 that agent, which changes the canvas and answers in the comment.
+
+Before you start, a workspace owner or admin must allow the agent's crew in the
+[agent publishing policy](/cli/artifacts#agent-publishing-policy): the policy
+must be enabled and list the crew. Otherwise sending is refused with "This
+agent's crew is not allowed to create artifact projects in this workspace"
+(the wording says projects, but the check also covers Designs). Give the agent
+the `crewship-design` skill as well; see
+[Give the agent its playbook](/guides/artifacts#give-the-agent-its-playbook).
 
 1. Open the private chat with the agent you want to use. Its address has the
    form `/chat/<agent>?session=<chat-id>`. Copy the value of the `session`
@@ -264,7 +326,7 @@ person who connected the chat.
 | Message | What happened | What to do |
 |---|---|---|
 | `Design changed; reload and reapply` | Someone else changed or saved the canvas between reading and writing it, or a comment points at a version that is no longer the latest. | Reload the Design and repeat the change or comment. |
-| `Design capacity is full; existing work is retained` | The Design's version history is full, or the workspace has reached its limit of pages and artifacts. Nothing was lost. | Delete artifacts you no longer need, or ask an administrator. |
+| `Design capacity is full; existing work is retained` | This Design's version history is full, or the workspace or server artifact storage budget is used up. Nothing was lost. | Delete artifacts you no longer need (this frees storage budget, not this Design's history) or ask an administrator to raise the limit. A workspace at its page limit answers `pages_limit` instead. |
 | `current Design edit permission required` | You lack edit access, or you tried to share or connect a chat without being the owner. | Ask the owner for **write** access. |
 | `design not found` | The Design does not exist, you cannot see it, or `artifacts_design` is off for the workspace. | Check the address, your access and the flag. |
 | `Design engine is unavailable; changes are not acknowledged` | The server could not process the canvas. | Keep the window open and try again; your changes stay in the browser. |
@@ -282,3 +344,14 @@ The same actions are available from the CLI under `crewship page design`:
 `create`, `get`, `versions`, `apply`, `snapshot`, `restore`, `share`,
 `comments`, `comment`, `agent` and `watch`. Run
 `crewship page design --help` for the details.
+
+A prototype link is the optional `linkTo` field of a layer: the ID of the
+target screen. `""` removes it. For example, link the layer `next` to the screen
+`checkout`:
+
+```bash
+echo '{"operations":[{"op":"upsert","node":{"id":"next","linkTo":"checkout"}}],"message":"Link Next to Checkout"}' \
+  | crewship page design apply checkout-flow --file -
+```
+
+Agents use the same field in `design_apply`.

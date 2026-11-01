@@ -16,6 +16,17 @@ import (
 
 func seedHostOutput(t *testing.T, s *Server, runID string, output ...string) orchestrator.RunState {
 	t.Helper()
+	text := "first\nsecond"
+	if len(output) > 0 {
+		text = output[0]
+	}
+	return seedHostOutputWith(t, s, runID, text, true)
+}
+
+// seedHostOutputWith leaves the source without a terminal record when
+// finished is false: the execution is still running as far as it shows.
+func seedHostOutputWith(t *testing.T, s *Server, runID, text string, finished bool) orchestrator.RunState {
+	t.Helper()
 	if uid := os.Geteuid(); os.Getenv("CREWSHIP_HOST_CAPTURE_REQUIRE_UNPRIVILEGED") == "1" && (uid == 0 || uid == 1001 || uid == 1002) {
 		t.Fatal("required capture qualification needs distinct unprivileged host UID")
 	}
@@ -54,15 +65,13 @@ func seedHostOutput(t *testing.T, s *Server, runID string, output ...string) orc
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := "first\nsecond"
-	if len(output) > 0 {
-		text = output[0]
-	}
 	if _, err := store.Write("stdout", []byte(text)); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Finish(0, "exited"); err != nil {
-		t.Fatal(err)
+	if finished {
+		if err := store.Finish(0, "exited"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)

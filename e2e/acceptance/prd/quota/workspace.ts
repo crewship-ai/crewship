@@ -23,6 +23,13 @@ export class SharedWorkspace {
   api: APIRequestContext | null = null
   workspace: QaWorkspace | null = null
   private created = false
+  private pages: string[] = []
+
+  /** Pages of this group: they go with a QA workspace the group created, or are
+   * deleted when the group closes in an existing PRD_WORKSPACE_ID. */
+  keep = (pageId: string): void => {
+    this.pages.push(pageId)
+  }
 
   async open(label: string): Promise<{ api: APIRequestContext; workspace: QaWorkspace }> {
     const env = readPrdEnv()
@@ -53,6 +60,17 @@ export class SharedWorkspace {
           await api.dispose()
         }
         if (status >= 300) console.warn(`[prd] QA workspace ${this.workspace.id} not deleted (HTTP ${status})`)
+      } else if (this.workspace && !this.created && this.pages.length > 0) {
+        const env = readPrdEnv()
+        const api = await playwrightRequest.newContext({ baseURL: env.origin, storageState: await ownerLogin() })
+        try {
+          for (const id of this.pages.splice(0).reverse()) {
+            const res = await api.delete(`/api/v1/pages/${encodeURIComponent(`@${id}`)}?workspace_id=${encodeURIComponent(this.workspace.id)}`)
+            if (res.status() >= 300 && res.status() !== 404) console.warn(`[prd] page ${id} not deleted (HTTP ${res.status()})`)
+          }
+        } finally {
+          await api.dispose()
+        }
       }
     } finally {
       await this.api?.dispose()

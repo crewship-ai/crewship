@@ -157,10 +157,37 @@ Identical file contents are stored once per project. The owner's project
 response carries `quota` with `used_bytes`, `limit_bytes` and `warning`, which
 turns true at 80 % of the limit. A save that would exceed the history limit
 returns `413` with code `artifact_history_quota` and keeps every existing
-version; keep your local draft. A direct creation at the 100-Page workspace
-limit also returns `413 artifact_history_quota`; that refusal need not mean
-an existing project’s history is full. Other readers see a `quota` that names only
+version; keep your local draft. A creation at the workspace page limit (100
+by default) returns `422` with code `pages_limit` instead; it says nothing about an
+existing project’s history. Other readers see a `quota` that names only
 their retention (`latest-version-only` or `shared-version-only`).
+
+## Give the agent its playbook
+
+The server installs Crewship's artifact playbooks into the skill catalog when
+it starts. It does not attach them to agents. Assign the one that matches the
+work to each agent that should do it; the skill is written into the agent's
+workspace when its next run starts.
+
+| Skill | Use it for |
+|---|---|
+| `crewship-artifacts` | Project, Dashboard and Slides artifacts, plus edits to an existing Design canvas |
+| `crewship-design` | Design canvases edited from node comments the owner sends to a connected chat |
+| `crewship-craft` | Native Word and Sheet documents changed in a whole-document task |
+
+```bash
+crewship skill assign crewship-artifacts <agent-slug>
+crewship skill assign crewship-design --to-crew <crew-slug>
+```
+
+The tools still need their workspace flags. For Project, Dashboard, Slides
+and Design the agent's crew must also be on the
+[workspace artifact policy](/cli/artifacts#agent-publishing-policy) allowlist;
+native Word and Sheet tasks do not check that policy yet
+([#4681](https://github.com/crewship-ai/crewship/issues/4681)). Design needs
+the owner's connected chat and Craft the owner's task. The playbook only tells
+the agent how to use them.
+See [`crewship skill assign`](/cli/skill#crewship-skill-assign).
 
 ## Choose a workflow
 

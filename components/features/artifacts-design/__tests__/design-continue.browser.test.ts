@@ -22,7 +22,7 @@ it.skipIf(!existsSync(chromium.executablePath()))("continues a full-history canv
    createRoot(document.getElementById("root")).render(<DesignEditor workspaceId="ws" slug="original"/>);
   ` },
   bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic",
-  define: { "process.env.NODE_ENV": '"production"', "process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN": '"true"' },
+  define: { "process.env.NODE_ENV": '"production"', "process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN": '"true"', "process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE": '"false"' },
   plugins: [{ name: "editor-fixtures", setup(builder) {
    builder.onResolve({ filter: /^(next\/dynamic|@\/hooks\/(use-auth|use-artifact-agent-dispatch)|\.\/use-design)$/ }, args => ({ path: args.path, namespace: "fixture" }))
    builder.onLoad({ filter: /.*/, namespace: "fixture" }, args => ({ contents:

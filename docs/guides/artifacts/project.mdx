@@ -98,8 +98,8 @@ a screen. The entry file comes first, then the others in file-name order.
 - A screen is named after its `<title>` when every screen has a different title
   of at most 24 characters. Otherwise it is named after the file, so
   `detail.html` shows as **Detail** and `faq.html` as **FAQ**.
-- Up to four screens show as buttons. With more, a narrow window shows a
-  **Screen** drop-down instead.
+- Up to four screens show as buttons. With more, a viewer narrower than
+  448 px shows a **Screen** drop-down instead.
 - Links between screens work inside the preview. Clicking
   `<a href="settings.html">` on one screen opens the **Settings** screen.
   Links to anything outside the Project do nothing.
@@ -300,7 +300,9 @@ does not check it):
   selection instead of guessing.
 
 Limits per Project: up to 256 files and 32 MiB per version, and 256 MiB of
-history in total. The viewer warns before the history is full.
+history in total. The viewer warns before the history is full. An agent saves
+a version in one tool call of at most 1 MiB, so a version it writes is smaller
+than the 32 MiB per-version limit.
 
 ## Who sees what
 

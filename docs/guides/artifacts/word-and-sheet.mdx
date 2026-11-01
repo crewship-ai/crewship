@@ -22,7 +22,13 @@ save becomes a new **version**.
   ("The native editor is not enabled"). The separate Docs backend may still
   offer Word creation.
 - **Agent tasks** also need `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true` on the
-  server.
+  server, and the workspace's agent artifact policy must be enabled and list the
+  agent's crew (a workspace admin can check it with
+  `crewship workspace artifact-policy show`). Whole-document consent works only
+  inside that policy: a task for an agent of an unlisted crew, or under a
+  disabled policy, is refused with `403`, and a running task stops at its next
+  step (any agent tool call, dispatch or confirmation) once the crew is removed
+  or the policy is turned off.
 - **Build-time UI flags:** the Artifacts library needs
   `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true`. The lock bar in the library and in chat
   needs `NEXT_PUBLIC_CHAT_CRAFT_LEASE=true`; the default production build sets it
@@ -114,7 +120,11 @@ old lease read as free.
 ### Release editing
 
 Choose **Uvolnit úpravy** (Release editing). The editor saves your last
-change first, then switches to read-only and the bar shows **Volné**. If that
+change first, then switches to read-only and the bar shows **Volné**. If you
+changed nothing since you took over, no new version is written, even though
+the Word editor rewrites a document into its own form when it opens it. The
+same holds for a handoff and for accepting an agent's proposal, so a proposal
+made over the version you opened still applies. If that
 final save can't be confirmed, nothing is released, and you see *Výsledek akce
 nebyl potvrzen. Koncept zůstává zachován.* ("The result of the action was not
 confirmed. The draft is kept.").
