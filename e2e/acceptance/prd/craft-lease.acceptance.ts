@@ -7,63 +7,34 @@
 // server runs with a native editor profile, and otherwise proves that the
 // endpoints fail closed. Full mode additionally drives two real browsers
 // through the editor's lease bar on a deployed instance with native bundles.
-import type { APIRequestContext, Page, Response } from "@playwright/test"
-import { apiAs, loginStorageState } from "./auth"
+import { loginStorageState } from "./auth"
+import { captureAdmission, isCraft, nativeProfile, PEER_NAME, peerApi, requireNative, traceCraft, type CraftCall } from "./craft-lease/helpers"
 import { APPLICATIONS, NativePage, sessionUserId, type Admission, type LeaseView } from "./craft-lease/native"
-import { expect, prdRequirement, test, type PrdScenario } from "./fixtures"
+import { expect, prdRequirement, test } from "./fixtures"
 
+/**
+ * Requirements per application. Word keeps the original ids; Sheet has its own
+ * "-sheet" rows so the table shows each editor separately.
+ */
 const REQ = {
-  holder: prdRequirement("A.craft.lease.holder", "Word/Sheet: everyone sees who holds the editor (\"Upravuje X\"); a second person cannot take it"),
-  handoff: prdRequirement("A.craft.lease.handoff", "Word/Sheet: custody passes only through request and handoff; the new holder can save"),
-  stale: prdRequirement("A.craft.lease.stale-generation", "Word/Sheet: a write under a retired generation is refused (409) and the document stays unchanged"),
-  disabled: prdRequirement("A.craft.lease.fail-closed", "Without a native editor profile no lease or native document is ever granted"),
-}
-
-const PEER_NAME = "PRD Lease Peer"
-
-/**
- * Whether the server under test has a native Word/Sheet editor profile,
- * decided before and independently of initialize(), which is one of the calls
- * A.craft.lease.fail-closed checks. PRD_CRAFT_NATIVE=on|off states it
- * explicitly; full mode always requires the profile; otherwise quick mode reads
- * the configuration-derived flag of GET /api/v1/documents/status.
- */
-async function nativeProfile(prd: PrdScenario, owner: APIRequestContext, doc: NativePage): Promise<boolean> {
-  const declared = process.env.PRD_CRAFT_NATIVE?.trim().toLowerCase()
-  if (declared === "on") return true
-  if (declared === "off") return false
-  if (declared) throw new Error(`PRD_CRAFT_NATIVE must be "on" or "off", got ${JSON.stringify(declared)}`)
-  if (prd.mode === "full") return true
-  return doc.profileAdvertised(owner)
-}
-
-/**
- * Initializes the document as native. Skips (quick) or fails (full) when the
- * server has no native editor profile; once a profile is known to exist,
- * initialize must succeed.
- */
-async function requireNative(prd: PrdScenario, owner: APIRequestContext, doc: NativePage): Promise<void> {
-  const profile = await nativeProfile(prd, owner, doc)
-  test.skip(!profile && prd.mode === "quick", "server runs without a native Word/Sheet editor profile (CREWSHIP_CRAFT_NATIVE_*)")
-  expect(profile, "full mode needs an origin with native Word/Sheet editors enabled").toBe(true)
-  expect(await doc.initialize(owner), "initialize on a server with a native editor profile").toBe(true)
-  const availability = await doc.availability(owner)
-  expect(availability.enabled && availability.can_edit, "the owner may edit the new native document").toBe(true)
-}
-
-async function peerApi(prd: PrdScenario, cleanup: Array<() => Promise<void>>) {
-  const peer = await prd.provision("MEMBER", PEER_NAME)
-  const state = await loginStorageState(prd.origin, peer.account)
-  const api = await apiAs(prd.origin, state)
-  cleanup.push(() => api.dispose())
-  return { peer, state, api }
-}
+  wordcraft: {
+    holder: prdRequirement("A.craft.lease.holder", "Word: everyone sees who holds the editor (\"Upravuje X\"); a second person cannot take it"),
+    handoff: prdRequirement("A.craft.lease.handoff", "Word: custody passes only through request and handoff; the new holder can save"),
+    stale: prdRequirement("A.craft.lease.stale-generation", "Word: a write under a retired generation is refused (409) and the document stays unchanged"),
+  },
+  gridcraft: {
+    holder: prdRequirement("A.craft.lease.holder-sheet", "Sheet: everyone sees who holds the editor (\"Upravuje X\"); a second person cannot take it"),
+    handoff: prdRequirement("A.craft.lease.handoff-sheet", "Sheet: custody passes only through request and handoff; the new holder can save"),
+    stale: prdRequirement("A.craft.lease.stale-generation-sheet", "Sheet: a write under a retired generation is refused (409) and the document stays unchanged"),
+  },
+} as const
+const REQ_DISABLED = prdRequirement("A.craft.lease.fail-closed", "Without a native editor profile no lease or native document is ever granted")
 
 for (const { application, label } of APPLICATIONS) {
   test.describe(`${label} lease`, () => {
     test(
       `${label}: holder, handoff and stale generation over the editor API`,
-      { annotation: [REQ.holder, REQ.handoff, REQ.stale] },
+      { annotation: [REQ[application].holder, REQ[application].handoff, REQ[application].stale] },
       async ({ prd, request }) => {
         const cleanup: Array<() => Promise<void>> = []
         try {
@@ -170,7 +141,7 @@ for (const { application, label } of APPLICATIONS) {
 
     test(
       `${label}: two people hand the editor over in the browser`,
-      { annotation: [REQ.holder, REQ.handoff, REQ.stale] },
+      { annotation: [REQ[application].holder, REQ[application].handoff, REQ[application].stale] },
       async ({ prd, request }) => {
         prd.requireFull("needs the deployed native editor bundles")
         const cleanup: Array<() => Promise<void>> = []
@@ -268,7 +239,7 @@ for (const { application, label } of APPLICATIONS) {
 
 test(
   "native editor off: lease and document endpoints fail closed",
-  { annotation: REQ.disabled },
+  { annotation: REQ_DISABLED },
   async ({ prd, request }) => {
     const ws = await prd.qaWorkspace()
     const doc = await NativePage.create(request, ws.id, "wordcraft", "PRD lease disabled")
@@ -295,45 +266,3 @@ test(
     await prd.evidence("result.json", { mode: prd.mode, appSha: prd.appSha, availability, initialize: init.status(), session: session.status(), acquire: acquire.status(), document: read.status() })
   },
 )
-
-interface CraftCall {
-  at: string
-  who: string
-  method: string
-  path: string
-  status: number | string
-}
-
-/** Records every native editor call of a page (method, path, status; no headers or bodies). */
-function traceCraft(page: Page, who: string, trail: CraftCall[]): void {
-  const path = (url: string) => new URL(url).pathname.replace(/^\/api\/v1\/pages\/[^/]+\/craft\//, "craft/")
-  const keep = (url: string) => new URL(url).pathname.includes("/craft/")
-  page.on("response", (r) => {
-    if (keep(r.url())) trail.push({ at: new Date().toISOString(), who, method: r.request().method(), path: path(r.url()), status: r.status() })
-  })
-  page.on("requestfailed", (r) => {
-    if (keep(r.url())) trail.push({ at: new Date().toISOString(), who, method: r.method(), path: path(r.url()), status: `failed: ${r.failure()?.errorText ?? "?"}` })
-  })
-  page.on("requestfinished", (r) => {
-    if (keep(r.url()) && path(r.url()) === "craft/events") trail.push({ at: new Date().toISOString(), who, method: r.method(), path: "craft/events", status: "stream ended" })
-  })
-}
-
-function isCraft(r: Response, path: string): boolean {
-  return r.request().method() === "POST" && new URL(r.url()).pathname.endsWith(`/craft/${path}`)
-}
-
-/** Remembers the latest native admission the editor in `page` received (memory only). */
-function captureAdmission(page: Page): { current(): Admission | null } {
-  let latest: Admission | null = null
-  page.on("response", (r) => {
-    if (!isCraft(r, "sessions") || r.status() !== 201) return
-    void r
-      .json()
-      .then((b: { session_token?: string; session_id?: string }) => {
-        if (b.session_token && b.session_id) latest = { token: b.session_token, sessionId: b.session_id }
-      })
-      .catch(() => {})
-  })
-  return { current: () => latest }
-}

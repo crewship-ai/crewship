@@ -2,6 +2,7 @@
 // people, driven through the same REST routes the CLI (`crewship page design …`)
 // and the agent's design_* tools use. Scenario-local; not a shared harness API.
 import { expect, type APIRequestContext, type BrowserContext, type Page } from "@playwright/test"
+import { trackPage } from "../created"
 
 export interface DesignNode {
   id: string
@@ -73,6 +74,7 @@ export async function enableDesign(api: APIRequestContext, workspaceId: string):
 export async function createDesign(api: APIRequestContext, workspaceId: string, slug: string, name: string): Promise<DesignState & { slug: string }> {
   const res = await api.post(scoped("/api/v1/pages/design", workspaceId), { data: { slug, name } })
   expect([200, 201], `create Design: ${(await res.text()).slice(0, 300)}`).toContain(res.status())
+  trackPage(workspaceId, slug)
   const state = await getDesign(api, workspaceId, slug)
   return { ...state, slug }
 }

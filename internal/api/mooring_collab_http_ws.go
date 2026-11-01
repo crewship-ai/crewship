@@ -5,12 +5,14 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strconv"
 	"sync/atomic"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/mooring"
 	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
 	"github.com/gorilla/websocket"
@@ -601,7 +603,41 @@ func (c *collaborationHTTPConnection) checkpoint(raw []byte) error {
 	return c.recordObservedCheckpoint(delivered)
 }
 func (d *collaborationHTTPDocument) submit(ctx context.Context, q protocol.SessionSubmitBatch) (protocol.SessionCommitResult, error) {
-	return d.committer.submit(ctx, q)
+	result, err := d.committer.submit(ctx, q)
+	d.refuseStorageFull(err)
+	return result, err
+}
+
+// collaborationCloseStorageFull is the Design socket's storage-full close code,
+// shared so every live editor reports the same condition.
+const collaborationCloseStorageFull = designCloseStorageFull
+
+// refuseStorageFull tells every browser socket of this document, before the
+// session ends, that the write failed because aggregate artifact storage is
+// full. The SQL transaction rolled back, so nothing was saved and all existing
+// history is kept. The private runtime protocol has no error reply for a
+// submit, and a shared session's submit is not tied to one connection (every socket
+// is informed because the session ends for all of them), so the unchanged teardown follows; the clients keep their local work.
+func (d *collaborationHTTPDocument) refuseStorageFull(err error) bool {
+	if d == nil || !errors.Is(artifacts.StorageBudgetError(err), artifacts.ErrStorageQuota) {
+		return false
+	}
+	d.mu.Lock()
+	connections := make([]*collaborationHTTPConnection, 0, len(d.connections))
+	for _, c := range d.connections {
+		connections = append(connections, c)
+	}
+	d.mu.Unlock()
+	frame := websocket.FormatCloseMessage(collaborationCloseStorageFull, "Artifact storage capacity full")
+	for _, c := range connections {
+		c.mu.Lock()
+		ws := c.socket
+		c.mu.Unlock()
+		if ws != nil {
+			_ = ws.WriteControl(websocket.CloseMessage, frame, time.Now().Add(time.Second))
+		}
+	}
+	return true
 }
 func (d *collaborationHTTPDocument) status(ctx context.Context, q protocol.SessionStatusRequest) (protocol.SessionStatusResult, error) {
 	var empty protocol.SessionStatusResult

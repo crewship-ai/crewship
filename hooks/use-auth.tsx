@@ -178,6 +178,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [session, setSession] = useState<AuthSession | null>(null)
   const [status, setStatus] = useState<AuthStatus>("loading")
   const [draftAdmission, setDraftAdmission] = useState(0)
+  // Last admitted identity transition. Only a tree a person used can hold their
+  // drafts or editors, so only a change after one remounts it.
+  const admitted = useRef<{ generation: number; human: string | null } | null>(null)
   const [draftRecovery, setDraftRecovery] = useState<{ retry: () => Promise<void> } | null>(null)
   const [draftRetrying, setDraftRetrying] = useState(false)
   const retryDraftTransition = useRef<() => Promise<void>>(async () => {})
@@ -204,7 +207,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try { admission = await preserveDraftsForIdentity(next?.user.id ?? null) }
     catch { if (gen === refreshGen.current) setDraftRecovery({ retry: () => retryDraftTransition.current() }); return }
     if (gen !== refreshGen.current) return
-    setDraftAdmission(admission); setDraftRecovery(null)
+    // The cold load and signed-out pages hold nothing of a person, so admitting
+    // one there keeps the tree (and anything typed meanwhile) mounted.
+    if (admitted.current?.human && admitted.current.generation !== admission) setDraftAdmission(admission)
+    admitted.current = { generation: admission, human: next?.user.id ?? null }
+    setDraftRecovery(null)
     setUnreachable(null)
     sessionRef.current = next
     statusRef.current = next ? "authenticated" : "unauthenticated"
@@ -296,20 +303,30 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     if (typeof window === "undefined") return
 
-    let redirected = false
+    // The generation this tab is leaving under. A handler returns while that
+    // generation is still current; any newer refresh or settle bumps it and
+    // re-arms both listeners, so no path can leave them stuck (#4714).
+    let redirectingGen = -1
+    // A pending unreachable-backend probe (timer or the online event) reuses
+    // the current generation; left armed it could settle a live session under
+    // the leaving handler's generation and keep both listeners disarmed.
+    const cancelUnreachableProbe = () => { clearTimeout(unreachableTimer.current); unreachableTimer.current = undefined }
     const goLoginExpired = async (reason?: string) => {
-      if (redirected) return
+      if (redirectingGen === refreshGen.current) return
       // A path the app has no page for shows the not-found state, signed in
       // or not (app/(dashboard)/layout.tsx). The static-export backend serves
       // the dashboard there, whose first requests answer 401 for a visitor
       // without a session — that is not an expired session, and the login
       // page is not where an unknown link should lead.
       if (!isKnownAppPath(window.location.pathname)) return
-      redirected = true
       const gen = ++refreshGen.current
+      redirectingGen = gen
+      cancelUnreachableProbe()
       purgeOtherE2Recovery(null)
       try { await preserveDraftsForIdentity(null) }
-      catch { setDraftRecovery({ retry: async () => { redirected = false; await goLoginExpired(reason) } }); return }
+      catch { setDraftRecovery({ retry: async () => { if (redirectingGen === gen) redirectingGen = -1; await goLoginExpired(reason) } }); return }
+      // Superseded by a newer refresh: this tab stays and, the generation
+      // having moved, still follows a later sign-out or expiry (#4705).
       if (gen !== refreshGen.current) return
       const { pathname, search } = window.location
       const currentPath = pathname + search
@@ -332,20 +349,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
       window.location.replace(`/login?${params.toString()}`)
     }
     const goLoginSignedOutElsewhere = async (human?: string) => {
-      if (redirected) return
+      if (redirectingGen === refreshGen.current) return
       const currentHuman = sessionRef.current?.user.id
       if (human && currentHuman && human !== currentHuman) return
-      redirected = true
       const gen = ++refreshGen.current
+      redirectingGen = gen
+      cancelUnreachableProbe()
       purgeOtherE2Recovery(null)
       try { await preserveDraftsForIdentity(null) }
-      catch { setDraftRecovery({ retry: async () => { redirected = false; await goLoginSignedOutElsewhere(human) } }); return }
+      catch { setDraftRecovery({ retry: async () => { if (redirectingGen === gen) redirectingGen = -1; await goLoginSignedOutElsewhere(human) } }); return }
       if (gen !== refreshGen.current) return
       // The sender deletes only its captured revisions with CAS. A delayed
       // message never authorizes deleting this tab's newer recovery rows.
       const latest = await fetchSession()
       if (gen !== refreshGen.current) return
-      if (latest.kind === "settled" && latest.session) { await settle(latest.session, gen); return }
+      // Still signed in: the tab stays and keeps listening (#4705). The settle
+      // keeps this generation, so leaving is disarmed explicitly.
+      if (latest.kind === "settled" && latest.session) { redirectingGen = -1; await settle(latest.session, gen); return }
       window.location.replace(SIGNED_OUT_URL)
     }
 
@@ -479,6 +499,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
         if (gen !== refreshGen.current) return false
         sessionRef.current = null; statusRef.current = "unauthenticated"
+        admitted.current = { generation: admission, human: null }
         setSession(null); setStatus("unauthenticated"); setDraftAdmission(admission); setDraftRecovery(null)
         broadcastSignOut(signingOutHuman)
         return true

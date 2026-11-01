@@ -411,7 +411,8 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	e.tool.currentAttempt = attempt
 	// Renew only while this exact authenticated HTTP apply remains alive. The
 	// normal 15s lease and every run/original-human fence remain unchanged.
-	active, cancel := context.WithTimeout(ctx, 65*time.Second)
+	renewal, cancel := context.WithTimeout(ctx, 65*time.Second)
+	active := renewal
 	done := make(chan struct{})
 	finish := beginBackgroundWork()
 	go func() {
@@ -421,10 +422,10 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 		defer ticker.Stop()
 		for {
 			select {
-			case <-active.Done():
+			case <-renewal.Done():
 				return
 			case <-ticker.C:
-				if _, err := m.human.leases.Renew(active, attempt.lease); err != nil {
+				if _, err := m.human.leases.Renew(renewal, attempt.lease); err != nil {
 					cancel()
 					return
 				}
@@ -432,6 +433,15 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 		}
 	}()
 	defer func() { cancel(); <-done }()
+	upload, err := store.ReserveUpload(active, e.grant.Scope, (32<<20)+(256<<10))
+	if err != nil {
+		// Refused before the engine ran: nothing was attempted, so the same
+		// request ID must stay retryable.
+		forgetNativeAgentAttempt(e, input.RequestID, attempt)
+		return zero, err
+	}
+	defer upload.Close()
+	active = upload.Context(active)
 	candidate, err := m.config.AgentApply(active, profile, native, input.Commands)
 	if err != nil {
 		return zero, err
@@ -457,6 +467,17 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 	e.tool.uncertainAttempt = nil
 	e.tool.uncertain = false
 	return receipt, nil
+}
+
+// forgetNativeAgentAttempt drops a request recorded before storage admission
+// when admission refused it, so a retry runs from the start.
+func forgetNativeAgentAttempt(e *craftNativeAgentEntry, requestID string, attempt *craftNativeAgentToolAttempt) {
+	if e.tool.requests[requestID] == attempt {
+		delete(e.tool.requests, requestID)
+	}
+	if e.tool.currentAttempt == attempt {
+		e.tool.currentAttempt = nil
+	}
 }
 
 // proposeTool prepares a complete candidate over the exact read base without
@@ -508,6 +529,14 @@ func (m *craftNativeAgentManager) proposeTool(ctx context.Context, e *craftNativ
 	e.tool.currentAttempt = attempt
 	active, cancel := context.WithTimeout(ctx, 65*time.Second)
 	defer cancel()
+	upload, err := store.ReserveUpload(active, e.grant.Scope, (32<<20)+(256<<10))
+	if err != nil {
+		forgetNativeAgentAttempt(e, input.RequestID, attempt)
+		return mooring.NativeProposal{}, err
+	}
+	defer upload.Close()
+	active = upload.Context(active)
+	ctx = upload.Context(ctx)
 	candidate, err := m.config.AgentApply(active, profile, native, input.Commands)
 	if err != nil {
 		attempt.proposalErr = err

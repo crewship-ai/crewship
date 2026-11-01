@@ -25,9 +25,10 @@ type NativeStoreConfig struct {
 	Authorize                                               NativeAuthorize
 	// Validate must invoke the exact pinned application engine, outside the SQL
 	// writer. It must reject lossy import/repair warnings, not silently normalize.
-	Validate         func(context.Context, []byte) error
-	MaxHistoryBytes  int64
-	MaxProposalBytes int64 // trusted per-Page retained proposal budget, separate from human history
+	Validate                 func(context.Context, []byte) error
+	MaxHistoryBytes          int64
+	MaxProposalBytes         int64 // trusted per-Page retained proposal budget, separate from human history
+	MaxWorkspaceHistoryBytes int64 // aggregate workspace ceiling shared by every artifact family
 }
 
 // NativeStore wraps the existing manifest VersionStore. It owns no parallel
@@ -36,6 +37,9 @@ type NativeStore struct {
 	db       *sql.DB
 	config   NativeStoreConfig
 	versions *artifacts.VersionStore
+	// afterProposalBase is a test seam: it runs between choosing an acceptance
+	// base and publishing, where a concurrent save can land.
+	afterProposalBase func()
 }
 
 // DefaultNativeHistoryBytes is a visible byte budget, never a version-count cap.
@@ -53,7 +57,7 @@ func NewNativeStore(db *sql.DB, c NativeStoreConfig) *NativeStore {
 	if c.MaxHistoryBytes <= 0 {
 		c.MaxHistoryBytes = DefaultNativeHistoryBytes
 	}
-	return &NativeStore{db: db, config: c, versions: artifacts.NewVersionStore(db, artifacts.VersionOptions{Enabled: c.Enabled, ContentType: c.Application, MaxHistoryBytes: c.MaxHistoryBytes})}
+	return &NativeStore{db: db, config: c, versions: artifacts.NewVersionStore(db, artifacts.VersionOptions{Enabled: c.Enabled, ContentType: c.Application, MaxHistoryBytes: c.MaxHistoryBytes, MaxWorkspaceHistoryBytes: c.MaxWorkspaceHistoryBytes})}
 }
 func nativeHex(value string, n int) bool {
 	if len(value) != n {
@@ -278,4 +282,13 @@ func (s *NativeStore) Share(ctx context.Context, l EditLease, base, target int64
 		}
 		return actor, nil
 	})
+}
+
+// ReserveUpload is storage admission only; publication still checks the exact
+// original credential, profile and current lease in its own transaction.
+func (s *NativeStore) ReserveUpload(ctx context.Context, k EditLeaseScope, bytes int64) (*artifacts.StorageUpload, error) {
+	if err := s.ready(); err != nil {
+		return nil, err
+	}
+	return s.versions.ReserveUpload(ctx, nativeVersionKey(k), bytes, s.authority(k, nil, "write"))
 }

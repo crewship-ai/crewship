@@ -18,8 +18,8 @@ export function useArtifactCapabilities(workspaceId: string): ArtifactCapabiliti
     designs: artifactsDesign(),
     slides: artifactSlides(),
     documents: documents.data === true || Boolean(documents.wordcraftSDKPrefix) || documents.wordcraftCommands,
-    // A blank workbook cannot be typed into until something imports into it,
-    // and the browser has no import yet: Sheet stays listed, not offered.
-    sheets: false,
+    // Sheet is offered only when the server advertises the native GridCraft
+    // profile (gridcraft_native); unconfirmed or failed reads withdraw it.
+    sheets: documents.gridcraftNative === true,
   }
 }

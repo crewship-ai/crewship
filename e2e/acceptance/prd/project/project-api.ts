@@ -4,6 +4,7 @@
 // origin, workspace and accounts come from the harness.
 import { expect, type APIRequestContext, type BrowserContext, type FrameLocator, type Page } from "@playwright/test"
 import { randomUUID } from "node:crypto"
+import { trackPage } from "../created"
 
 export interface ProjectFile {
   path: string
@@ -97,6 +98,7 @@ export async function createProject(api: APIRequestContext, workspaceId: string,
     data: { slug, name: `PRD project ${slug.slice(-10)}`, entrypoint: "index.html", files, message: "Three linked screens" },
   })
   expect(res.status(), `create project: ${await body(res)}`).toBe(201)
+  trackPage(workspaceId, slug)
   return snapshot(api, workspaceId, slug)
 }
 

@@ -33,6 +33,7 @@ variable is on shows nothing until the server reports the feature available.
 | Dashboard with live data | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`; also `NEXT_PUBLIC_ARTIFACTS_LIBRARY` for the library route | `artifact_projects` and `artifact_dashboard_data` | — |
 | Slides artifact preview and PDF export | `NEXT_PUBLIC_ARTIFACT_SLIDES` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`; also `NEXT_PUBLIC_ARTIFACTS_LIBRARY` for the library route | `artifact_projects` and `artifact_slides` | — |
 | Design canvas | `NEXT_PUBLIC_ARTIFACTS_DESIGN` | `artifacts_design` | — |
+| Design prototype playback (**Play**, **Link to screen**) | `NEXT_PUBLIC_ARTIFACTS_DESIGN` and `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE` | `artifacts_design` | — |
 | Craft edit lease bar and draft recovery in chat | `NEXT_PUBLIC_CHAT_CRAFT_LEASE` | — | `craft_native.enabled` with a Word or Sheet profile |
 | Native Craft Word or Sheet editor at `/pages/craft/editor` and **New Doc** for native documents | — | — | `craft_native.enabled` with a qualified profile for that application |
 | Creating a Word document (Docs) | — | — | `documents.enabled` |
@@ -237,6 +238,38 @@ The workbook engine and editor use `CREWSHIP_GRIDCRAFT_SERVICE_SOCKET`,
 `editor_bundles` and `editor_origin`); see
 [Environment variables](/configuration/environment).
 
+## Page limit
+
+A workspace may hold at most 100 pages by default (archived pages count). Pages, Designs, artifact projects, Documents and
+Workbooks all check the same limit and, when it is reached, refuse with `422` `pages_limit` and a message that states the
+limit. It is not an environment variable or YAML key: an instance administrator sets it at runtime (10 to 10000) and the
+value is kept in the database. Lowering it never deletes pages; it only blocks new ones.
+
+```bash
+crewship admin instance page-limit get
+crewship admin instance page-limit set 250
+```
+
+Pages marked as test items (`created_by_test`) still count toward the limit; excluding them is a possible follow-up. See
+[Admin API](/api-reference/admin) and [Admin CLI](/cli/admin).
+
+## Artifact storage limits
+
+Every artifact family (versions, proposals, Design, Data, documents, Slides, GridCraft and Mooring) counts against one
+aggregate budget: 32 GiB per workspace and 64 GiB per instance by default. When a limit is reached, writes are refused
+with `413` `artifact_storage_quota` and nothing is deleted to make room. These are not environment variables or YAML keys: an
+instance administrator sets them at runtime and the values are kept in the database.
+
+```bash
+crewship admin instance artifact-storage get
+crewship admin instance artifact-storage set --workspace-limit 16GiB --instance-limit 48GiB
+```
+
+Limits must be between 1 MiB and 1 PiB. Lowering a limit below current usage only refuses further growth. The counters are
+maintained by database triggers; after a restore, or if `get` disagrees with what is stored, rebuild them with
+`crewship admin instance artifact-storage recompute` (add `--dry-run` to preview the drift). It never deletes data. See
+[Admin API](/api-reference/admin) and [Admin CLI](/cli/admin).
+
 ## Build-time UI variables
 
 The web UI is a static export, so these variables are inlined when it is built.
@@ -253,6 +286,7 @@ only when its value is exactly `true`.
 | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` | off | Live data previews in Dashboard artifacts, inside the library or the chat and Page viewer. No data requests while off. |
 | `NEXT_PUBLIC_ARTIFACT_SLIDES` | off | Slides previews of artifact versions, inside the library or the chat and Page viewer |
 | `NEXT_PUBLIC_ARTIFACTS_DESIGN` | off | The Design canvas |
+| `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE` | off | Prototype playback of linked Design screens: the **Play** button and the **Link to screen** field. Needs `NEXT_PUBLIC_ARTIFACTS_DESIGN`. |
 | `NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM` | off | Read-only Design System token preview in the artifact viewer |
 | `NEXT_PUBLIC_SLIDES_EDITOR` | off | The native Slides editor on a Page that has Slides. Edits stay a local draft. |
 | `NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS` | off | Development only. Leave off: the server does not serve the revert and proposal endpoints this client calls. |
@@ -305,6 +339,20 @@ crewship page artifact availability
 
 ```json
 { "enabled": true }
+```
+
+Add `--agent <id>` (query `agent_id`) to ask whether that agent's crew may
+create artifact projects under the workspace artifact-creation policy. The
+answer then also carries `can_create`; a crew outside the policy returns
+`can_create: false` with `code: "artifact_crew_not_allowed"`, and the chat
+composer hides Project creation for that agent:
+
+```bash
+crewship page artifact availability --agent <agent-id>
+```
+
+```json
+{ "enabled": true, "can_create": false, "code": "artifact_crew_not_allowed" }
 ```
 
 Ask which document engines the instance serves (`GET /api/v1/documents/status`):

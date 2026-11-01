@@ -51,10 +51,29 @@ const R = {
   nothingSaved: prdRequirement("drafts.crash.nothing-saved", "After a crash nothing is saved or posted automatically"),
   private: prdRequirement("drafts.crash.private", "Another user sees none of the crashed drafts"),
   immediate: prdRequirement("drafts.crash.immediate", "Browser killed right after typing: the Project source and viewer comment drafts are still restored"),
-  nativeOffer: prdRequirement("drafts.crash.native-offer", "Word/Sheet: after a crash before the save the unsent draft is offered with a comparison"),
-  nativeNothingSaved: prdRequirement("drafts.crash.native-nothing-saved", "Word/Sheet: after a crash nothing is saved automatically"),
-  nativePrivate: prdRequirement("drafts.crash.native-private", "Word/Sheet: another user sees no crashed draft"),
 }
+
+/**
+ * The native editors the crash scenario covers. Word keeps the original
+ * requirement ids; Sheet has its own "-sheet" rows so a Sheet-only regression
+ * is visible in the table.
+ */
+const NATIVE_APPS = [
+  {
+    app: "wordcraft" as native.NativeApp,
+    label: "Word",
+    nativeOffer: prdRequirement("drafts.crash.native-offer", "Word: after a crash before the save the unsent draft is offered with a comparison"),
+    nativeNothingSaved: prdRequirement("drafts.crash.native-nothing-saved", "Word: after a crash nothing is saved automatically"),
+    nativePrivate: prdRequirement("drafts.crash.native-private", "Word: another user sees no crashed draft"),
+  },
+  {
+    app: "gridcraft" as native.NativeApp,
+    label: "Sheet",
+    nativeOffer: prdRequirement("drafts.crash.native-offer-sheet", "Sheet: after a crash before the save the unsent draft is offered with a comparison"),
+    nativeNothingSaved: prdRequirement("drafts.crash.native-nothing-saved-sheet", "Sheet: after a crash nothing is saved automatically"),
+    nativePrivate: prdRequirement("drafts.crash.native-private-sheet", "Sheet: another user sees no crashed draft"),
+  },
+] as const
 
 /** Mutations of the Project or its comments; a crash recovery must not send any. */
 const projectWrites = (traffic: Traffic, since: number) =>
@@ -72,7 +91,7 @@ test.describe("drafts after a crash", () => {
   test(
     "Project source and comment drafts survive a hard browser crash",
     { annotation: [R.source, R.comments, R.nothingSaved, R.private] },
-    async ({ prd, request, context, playwright }) => {
+    async ({ prd, request, playwright }) => {
       // Waiting for the browser to persist the drafts can take minutes.
       test.setTimeout(Math.max(test.info().timeout, 8 * 60_000))
       const ws = await prd.qaWorkspace()
@@ -91,7 +110,7 @@ test.describe("drafts after a crash", () => {
       const viewerText = `Unsent viewer comment ${tag}`
       const projectText = `Unsent project comment ${tag}`
 
-      const profile = new CrashableProfile(playwright.chromium, prd.origin, await context.storageState(), {
+      const profile = new CrashableProfile(playwright.chromium, prd.origin, await loginStorageState(prd.origin, prd.requireAccount("owner")), {
         userId: await ownerIdentity(request),
         workspaceId: ws.id,
       })
@@ -198,7 +217,7 @@ test.describe("drafts after a crash", () => {
   test(
     "drafts survive a crash right after typing",
     { annotation: R.immediate },
-    async ({ prd, request, context, playwright }) => {
+    async ({ prd, request, playwright }) => {
       // Waiting for a localStorage commit can take up to a minute.
       test.setTimeout(Math.max(test.info().timeout, 5 * 60_000))
       const ws = await prd.qaWorkspace()
@@ -207,7 +226,7 @@ test.describe("drafts after a crash", () => {
       const tag = Date.now().toString(36)
       const MARK = `UNSENT-FAST-${tag}`
       const viewerText = `Unsent fast comment ${tag}`
-      const profile = new CrashableProfile(playwright.chromium, prd.origin, await context.storageState(), {
+      const profile = new CrashableProfile(playwright.chromium, prd.origin, await loginStorageState(prd.origin, prd.requireAccount("owner")), {
         userId: await ownerIdentity(request),
         workspaceId: ws.id,
       })
@@ -279,40 +298,40 @@ test.describe("drafts after a crash", () => {
     },
   )
 
-  test(
-    "Word and Sheet drafts survive a crash before the save",
-    { annotation: [R.nativeOffer, R.nativeNothingSaved, R.nativePrivate] },
-    async ({ prd, request, context, playwright }) => {
-      prd.requireFull("native Word/Sheet editors run only on a deployed origin")
-      const ws = await prd.qaWorkspace()
-      const available = await native.nativeAvailability(request, ws.id)
-      test.skip(!available.wordcraft || !available.gridcraft, `origin offers no native Word/Sheet editor (documents/status ${available.status}, word ${available.wordcraft}, sheet ${available.gridcraft})`)
-      // A minute for each lease to expire after the crash, plus two editors.
-      test.setTimeout(Math.max(test.info().timeout, 15 * 60_000))
+  for (const { app, label, nativeOffer, nativeNothingSaved, nativePrivate } of NATIVE_APPS) {
+    test(
+      `${label} drafts survive a crash before the save`,
+      { annotation: [nativeOffer, nativeNothingSaved, nativePrivate] },
+      async ({ prd, request, playwright }) => {
+        prd.requireFull("native Word/Sheet editors run only on a deployed origin")
+        const ws = await prd.qaWorkspace()
+        const available = await native.nativeAvailability(request, ws.id)
+        test.skip(!available[app], `origin offers no native ${label} editor (documents/status ${available.status}, ${app} ${available[app]})`)
+        // A minute for the lease to expire after the crash, plus the editor.
+        test.setTimeout(Math.max(test.info().timeout, 10 * 60_000))
 
-      const other = await prd.provision("MEMBER", "PRD drafts other person")
-      const otherState = await loginStorageState(prd.origin, other.account)
-      const otherApi = await apiAs(prd.origin, otherState)
-      const ownerState = await context.storageState()
-      const ownerId = await ownerIdentity(request)
-      const results: Record<string, unknown> = { available }
-      try {
-        // All access changes happen before any editor opens: a permission
-        // change in the workspace retires open native editor sessions.
-        const pages: Partial<Record<native.NativeApp, { pageId: string; tag: string }>> = {}
-        for (const app of ["wordcraft", "gridcraft"] as const) {
+        const other = await prd.provision("MEMBER", "PRD drafts other person")
+        const otherState = await loginStorageState(prd.origin, other.account)
+        const otherApi = await apiAs(prd.origin, otherState)
+        // Its own login: sharing the test context's refresh token gets the session revoked.
+        const ownerState = await loginStorageState(prd.origin, prd.requireAccount("owner"))
+        const ownerId = await ownerIdentity(request)
+        const r: Record<string, unknown> = { app, available }
+        try {
+          // All access changes happen before the editor opens: a permission
+          // change in the workspace retires open native editor sessions.
           const tag = Math.random().toString(36).slice(2, 6)
           const created = await native.createNative(request, ws.id, app, tag)
-          const grantStatus = await grantPage(request, ws.id, created.pageId, other.userId, "read")
-          expect(grantStatus, `${app}: grant the other person read access`).toBeLessThan(300)
-          pages[app] = { pageId: created.pageId, tag }
-          results[app] = { pageId: created.pageId, grantStatus }
-        }
-        await pause(5000)
-        for (const app of ["wordcraft", "gridcraft"] as const) {
-          const r = results[app] as Record<string, unknown>
-          const { tag } = pages[app]!
-          const created = pages[app]!
+          // Write, not read: a Read person never opens the live editor (the entry
+          // mounts the shared preview, which exists only once a version is
+          // published), so "sees no draft" would be checked against a page
+          // that cannot show one. As with the Project test above, the person
+          // gets real access to the live editor so the check is meaningful.
+          const grantStatus = await grantPage(request, ws.id, created.pageId, other.userId, "write")
+          expect(grantStatus, `${app}: grant the other person write access`).toBeLessThan(300)
+          r.pageId = created.pageId
+          r.grantStatus = grantStatus
+          await pause(5000)
           const MC1 = `MC1saved${tag}`
           const MC2 = `MC2crash${tag}`
 
@@ -401,11 +420,11 @@ test.describe("drafts after a crash", () => {
           } finally {
             await profile.dispose()
           }
+        } finally {
+          await prd.evidence(`native-drafts-crash-${app}.json`, r)
+          await otherApi.dispose()
         }
-      } finally {
-        await prd.evidence("native-drafts-crash.json", results)
-        await otherApi.dispose()
-      }
-    },
-  )
+      },
+    )
+  }
 })

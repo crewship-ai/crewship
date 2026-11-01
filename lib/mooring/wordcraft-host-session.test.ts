@@ -16,7 +16,7 @@ class Socket {
   readyState = 1
   sent: string[] = []
   onopen: (() => void) | null = null
-  onclose: (() => void) | null = null
+  onclose: ((event?: { code: number }) => void) | null = null
   onerror: (() => void) | null = null
   onmessage: ((event: { data: string }) => void) | null = null
   constructor(readonly url: string) { Socket.current = this }
@@ -215,6 +215,17 @@ describe("authenticated authorization continuity", () => {
       expect(socket.sent).toEqual(frames)
       expect(callbacks.bootstrap).toHaveBeenCalledTimes(1)
     } finally { host.close() }
+  })
+})
+
+describe("aggregate artifact storage refusal", () => {
+  it.each([[4009, "storage_full"], [1006, "connection_unavailable"], [undefined, "connection_unavailable"]])("close code %s stops with %s and keeps the local draft", (code, reason) => {
+    const { host, socket, callbacks } = rig()
+    host.draft(); host.submit(submit("A"))
+    socket.onclose?.(code === undefined ? undefined : { code })
+    expect(callbacks.stopped).toHaveBeenCalledWith(reason)
+    expect(callbacks.state).toHaveBeenLastCalledWith("unsaved-draft")
+    host.close()
   })
 })
 

@@ -151,6 +151,25 @@ func (r *Router) registerAdminRoutes() {
 	// openapi: responses 200,401,403
 	r.authedInstance("GET", "/api/v1/admin/instance/workbook-editor", r.workbookEditorStatus)
 
+	// Admin › Artifact storage: the aggregate workspace and instance limits,
+	// and a recompute of the trigger-maintained counters from the source
+	// tables (dry_run previews the drift). Nothing here deletes data.
+	as := &ArtifactStorageAdminHandler{r: r}
+	// openapi: responses 200,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/artifact-storage", as.Get)
+	// openapi: responses 200,400,401,403,500
+	r.authedInstance("PUT", "/api/v1/admin/instance/artifact-storage", as.Put)
+	// openapi: responses 200,400,401,403,500
+	r.authedInstance("POST", "/api/v1/admin/instance/artifact-storage/recompute", as.Recompute)
+
+	// Admin › Page limit: the maximum number of pages per workspace. Lowering
+	// it only blocks new pages; nothing is deleted.
+	pl := &PageLimitAdminHandler{r: r}
+	// openapi: responses 200,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/page-limit", pl.Get)
+	// openapi: responses 200,400,401,403,500
+	r.authedInstance("PUT", "/api/v1/admin/instance/page-limit", pl.Put)
+
 	// Admin › Data retention: how long every workspace keeps each kind of
 	// data, set for one, several or every existing workspace (dry_run
 	// previews what the next sweep would delete), the fixed instance limits,

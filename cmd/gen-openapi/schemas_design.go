@@ -34,6 +34,7 @@ func designSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"id": id(), "type": map[string]any{"type": "string", "enum": []string{"frame", "rect", "text", "image"}},
 		"name": str(), "parentId": str(), "x": geometry(false), "y": geometry(false), "width": geometry(true), "height": geometry(true),
 		"fill": str(), "text": text(100000), "src": text(2000000),
+		"linkTo": map[string]any{"type": "string", "maxLength": 128, "description": "Prototype link: ID of the screen (frame) a click on this layer opens in Play mode. Empty string clears it. A target that no longer exists is kept and plays as an inert hotspot."},
 	}
 	node := object(nodeProps, "id", "type", "x", "y", "width", "height")
 	// The Yjs map may preserve extension fields; this is not a generic request

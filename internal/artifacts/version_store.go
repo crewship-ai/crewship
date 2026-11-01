@@ -38,6 +38,7 @@ type VersionOptions struct {
 	ContentType                      string
 	Enabled                          bool
 	MaxHistoryBytes, MaxVersionBytes int64
+	MaxWorkspaceHistoryBytes         int64
 	MaxFiles                         int
 	WarningPercent                   int
 }
@@ -81,6 +82,12 @@ type VersionQuota struct {
 	// Level is none, near, critical or full (see quotaLevel); omitted when the
 	// quota is withheld. Warning stays true from near upwards for older clients.
 	Level string `json:"level,omitempty"`
+
+	// StorageLevel is the coarse aggregate (workspace and instance) capacity
+	// level. It never carries byte counts of other Pages; owners read those
+	// through the workspace storage endpoint. Omitted when withheld.
+	StorageLevel string                `json:"storage_level,omitempty"`
+	Storage      AggregateStorageQuota `json:"-"`
 }
 type VersionState struct {
 	LatestVersion int64           `json:"latest_version"`
@@ -112,6 +119,13 @@ func NewVersionStore(db *sql.DB, opts VersionOptions) *VersionStore {
 	return &VersionStore{db, opts}
 }
 func (s *VersionStore) transaction(ctx context.Context, k VersionKey, a VersionAuthorize, fn func(*sql.Tx, string) error) error {
+	return s.transactionScope(ctx, k, a, fn, false, false)
+}
+func (s *VersionStore) writeTransaction(ctx context.Context, k VersionKey, a VersionAuthorize, fn func(*sql.Tx, string) error) error {
+	return s.transactionScope(ctx, k, a, fn, false, true)
+}
+func (s *VersionStore) transactionScope(ctx context.Context, k VersionKey, a VersionAuthorize, fn func(*sql.Tx, string) error, allowNewPage, consume bool) (result error) {
+	defer func() { result = StorageBudgetError(result) }()
 	if s == nil || s.db == nil || !s.opts.Enabled {
 		return ErrDisabled
 	}
@@ -120,7 +134,7 @@ func (s *VersionStore) transaction(ctx context.Context, k VersionKey, a VersionA
 	default:
 		return fmt.Errorf("%w: unsupported content family", ErrVersionInvalid)
 	}
-	if k.WorkspaceID == "" || k.PageID == "" || a == nil {
+	if k.WorkspaceID == "" || k.PageID == "" && !allowNewPage || a == nil {
 		return fmt.Errorf("%w: page, workspace and authority required", ErrVersionInvalid)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -139,6 +153,11 @@ func (s *VersionStore) transaction(ctx context.Context, k VersionKey, a VersionA
 	if _, err = tx.ExecContext(ctx, `UPDATE document_writer_fence SET seq=seq WHERE id=1`); err != nil {
 		return err
 	}
+	if s.opts.MaxWorkspaceHistoryBytes > 0 {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO artifact_storage_workspaces(workspace_id,max_bytes) VALUES(?,?) ON CONFLICT(workspace_id) DO UPDATE SET max_bytes=excluded.max_bytes`, k.WorkspaceID, s.opts.MaxWorkspaceHistoryBytes); err != nil {
+			return err
+		}
+	}
 	actor, err := a(ctx, tx)
 	if err != nil {
 		return err
@@ -150,7 +169,7 @@ func (s *VersionStore) transaction(ctx context.Context, k VersionKey, a VersionA
 	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM pages WHERE id=? AND workspace_id=?`, k.PageID, k.WorkspaceID).Scan(&exists); err != nil {
 		return err
 	}
-	if exists != 1 {
+	if k.PageID != "" && exists != 1 {
 		return ErrVersionNotFound
 	}
 	var installedType string
@@ -161,8 +180,17 @@ func (s *VersionStore) transaction(ctx context.Context, k VersionKey, a VersionA
 	if err == nil && installedType != s.opts.ContentType {
 		return ErrVersionContentType
 	}
+
+	if consume {
+		if err = ConsumeStorageUpload(ctx, tx, k); err != nil {
+			return err
+		}
+		if err = CheckStorageHeadroom(ctx, tx, 32<<20); err != nil {
+			return err
+		}
+	}
 	if err = fn(tx, actor); err != nil {
-		return err
+		return StorageBudgetError(err)
 	}
 	finalActor, err := a(ctx, tx)
 	if err != nil {
@@ -186,8 +214,12 @@ func (s *VersionStore) quota(ctx context.Context, tx *sql.Tx, k VersionKey) (q V
 	// Native proposals have a separate retained budget. They cannot consume
 	// the human's version allowance or make Read/View/Save scan candidates.
 	err = tx.QueryRowContext(ctx, `SELECT coalesce((SELECT sum(length(content)) FROM artifact_version_blobs WHERE workspace_id=? AND page_id=?),0)+coalesce((SELECT sum(length(CAST(manifest_json AS BLOB))+length(CAST(message AS BLOB))+length(CAST(actor AS BLOB))+length(created_at)+128) FROM artifact_versions WHERE workspace_id=? AND page_id=?),0)`, k.WorkspaceID, k.PageID, k.WorkspaceID, k.PageID).Scan(&q.UsedBytes)
+	if err == nil {
+		q.Storage, err = storageQuota(ctx, tx, k.WorkspaceID)
+	}
+	q.StorageLevel = q.Storage.Level(s.opts.WarningPercent)
 	q.Level = quotaLevel(q.UsedBytes, q.LimitBytes, s.opts.WarningPercent)
-	q.Warning = q.Level != "" && q.Level != QuotaLevelNone
+	q.Warning = q.Level != "" && q.Level != QuotaLevelNone || q.StorageLevel != "" && q.StorageLevel != QuotaLevelNone
 	return
 }
 func (s *VersionStore) Read(ctx context.Context, k VersionKey, a VersionAuthorize) (out VersionState, err error) {
@@ -255,7 +287,7 @@ func readVersion(ctx context.Context, tx *sql.Tx, k VersionKey, version int64) (
 	return
 }
 func (s *VersionStore) Apply(ctx context.Context, k VersionKey, r VersionRequest, a VersionAuthorize) (out VersionReceipt, err error) {
-	err = s.transaction(ctx, k, a, func(tx *sql.Tx, actor string) error {
+	err = s.writeTransaction(ctx, k, a, func(tx *sql.Tx, actor string) error {
 		var e error
 		out, e = s.publish(ctx, tx, k, r, actor, 0)
 		return e
@@ -333,7 +365,7 @@ func (s *VersionStore) publish(ctx context.Context, tx *sql.Tx, k VersionKey, r 
 	return VersionReceipt{version, actor}, err
 }
 func (s *VersionStore) Restore(ctx context.Context, k VersionKey, base, target int64, a VersionAuthorize) (out VersionReceipt, err error) {
-	err = s.transaction(ctx, k, a, func(tx *sql.Tx, actor string) error {
+	err = s.writeTransaction(ctx, k, a, func(tx *sql.Tx, actor string) error {
 		m, e := readVersion(ctx, tx, k, target)
 		if e != nil {
 			return e

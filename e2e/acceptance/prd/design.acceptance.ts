@@ -30,6 +30,7 @@ import {
 } from "./design/canvas"
 import type { BrowserContext, Page } from "@playwright/test"
 import type { PrdScenario } from "./fixtures"
+import { capacityHint, trackPage } from "./created"
 
 /**
  * The owner in a fresh session of its own. The fixture's owner cookies are
@@ -224,8 +225,10 @@ test.describe("design", () => {
       let pageId = ""
       let granted = false
       try {
+        trackPage(wsId, slug)
         const res = await request.post(scoped("/api/v1/pages/design", wsId), { data: { slug, name: `PRD design agent ${slug}`, created_by_test: true } })
-        expect(res.status(), `Design must be enabled in PRD_AGENT_WORKSPACE_ID: ${(await res.text()).slice(0, 200)}`).toBeLessThan(300)
+        const created = (await res.text()).slice(0, 200)
+        expect(res.status(), `Design must be enabled in PRD_AGENT_WORKSPACE_ID: ${created}${capacityHint(res.status(), created)}`).toBeLessThan(300)
         pageId = (await getDesign(request, wsId, slug)).page_id
         report.design = { slug, pageId }
 

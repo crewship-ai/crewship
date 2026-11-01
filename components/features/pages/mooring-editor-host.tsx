@@ -12,6 +12,8 @@ import { editorFrameSrc } from "@/lib/workbooks/editor-client"
 import { createEditorFrame, editorFrameSupported } from "./workbook-editor-host"
 
 /** Manifest-driven application host. App IDs never select executable host code. */
+const STORAGE_FULL_MESSAGE = "Kapacita úložiště neumožňuje další uložení. Vaše neuložené změny zůstávají v tomto prohlížeči."
+
 export function MooringEditorHost({ workspaceId, pageId, name, onDirtyChange }: { workspaceId: string; pageId: string; name?: string; onDirtyChange?: (value: boolean) => void }) {
   const mount = React.useRef<HTMLDivElement>(null)
   const [label, setLabel] = React.useState("Opening editor…")
@@ -107,6 +109,12 @@ export function MooringEditorHost({ workspaceId, pageId, name, onDirtyChange }: 
         const { response, body } = await call("/commands", { method: "POST", headers: { "content-type": "application/json" }, body: writing.body })
         if (dead || controller.signal.aborted || pending !== writing) return
         if (!response.ok) {
+          if (response.status === 413 && record(body) && body.code === "artifact_storage_quota") {
+            // Nothing was saved and every confirmed revision is kept; the editor retains this draft.
+            pending = undefined; draft = true
+            send({ type: "rejected", seq: writing.seq, message: STORAGE_FULL_MESSAGE })
+            setError(STORAGE_FULL_MESSAGE); update(); return
+          }
           if (response.status >= 500 || response.status === 429) throw new Error("The server has not confirmed this change. Reconnecting will retry it safely.")
           pending = undefined; draft = true
           send({ type: "rejected", seq: writing.seq, message: "Change refused; your draft is preserved. Review the confirmed content and save again." })

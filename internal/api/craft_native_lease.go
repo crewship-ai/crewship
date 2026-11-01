@@ -90,6 +90,9 @@ func (m *craftNativeHTTP) availability(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, craftNativeAvailabilityResponse{Enabled: enabled, CanEdit: canEdit, PreviewEnabled: previewEnabled, AgentsEnabled: agentsEnabled})
 }
 func craftNativeHTTPError(w http.ResponseWriter, err error) {
+	if artifactStorageRefusal(w, err) {
+		return
+	}
 	if errors.Is(err, mooring.ErrEditLeaseBusy) || errors.Is(err, mooring.ErrEditLeaseStale) {
 		replyError(w, 409, "native editor lease changed")
 		return

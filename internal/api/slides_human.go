@@ -108,6 +108,9 @@ func (h *slidesHumanHTTP) authorize(r *http.Request, key slides.Key, initialize 
 	}
 }
 func slidesHumanError(w http.ResponseWriter, err error) {
+	if artifactStorageRefusal(w, err) {
+		return
+	}
 	code, message := 500, "Slides authority failed"
 	switch {
 	case errors.Is(err, errSlidesHumanAccess):

@@ -5,6 +5,7 @@ import { createHash } from "node:crypto"
 import * as fs from "node:fs"
 import type { APIRequestContext, APIResponse } from "@playwright/test"
 import { emptyGridCraftNativeDocument } from "../../../../lib/mooring/gridcraft-empty"
+import { trackPage } from "../created"
 
 // lib/mooring/wordcraft-native-create.ts imports this JSON, which Playwright's
 // ESM loader cannot import without an attribute; read it the same way instead.
@@ -97,6 +98,7 @@ export class NativePage {
       data: { name, slug, panels: [], allow_empty: true },
     })
     const body = await json<{ id: string }>(res, 201, "create page")
+    trackPage(workspaceId, body.id)
     return new NativePage(workspaceId, body.id, application)
   }
 
@@ -161,6 +163,15 @@ export class NativePage {
     return api.post(this.url(`lease/${op}`), { data: body, headers: { "X-Craft-Session": a.token } })
   }
 
+  /**
+   * The editor's event stream (SSE). Playwright buffers a response until it
+   * ends, so this resolves only when the server closes the stream; a stream
+   * that never stops rejects at `timeoutMs`.
+   */
+  eventsRaw(api: APIRequestContext, a: Admission, timeoutMs: number): Promise<APIResponse> {
+    return api.get(this.url("events"), { headers: { "X-Craft-Session": a.token, Accept: "text/event-stream" }, timeout: timeoutMs })
+  }
+
   documentRaw(api: APIRequestContext, a: Admission): Promise<APIResponse> {
     return api.get(this.url("document"), { headers: { "X-Craft-Session": a.token, "Cache-Control": "no-cache" } })
   }
@@ -197,12 +208,70 @@ export class NativePage {
     })
   }
 
+  /** The shared preview (GET .../craft/preview) as a Read/Comment person gets it, without an admission. */
+  previewRaw(api: APIRequestContext): Promise<APIResponse> {
+    return api.get(this.url("preview"))
+  }
+
+  /**
+   * Publishes the current committed version as the shared preview, as the
+   * editor's "Publikovat náhled" does: the holder takes custody, shares the
+   * head version and releases. Read and Comment people see only this version.
+   */
+  async publishPreview(owner: APIRequestContext): Promise<string> {
+    const admission = await this.session(owner)
+    const head = await this.document(owner, admission)
+    const lease = await json<LeaseView>(await this.leaseOp(owner, admission, "acquire"), 200, "acquire custody for publication")
+    if (!lease.generation) throw new Error("acquire returned no generation")
+    const res = await owner.post(this.url("document/share"), {
+      headers: { "X-Craft-Session": admission.token },
+      data: {
+        workspaceId: this.workspaceId,
+        pageId: this.pageId,
+        applicationId: this.application,
+        enginePin: head.enginePin,
+        sessionId: admission.sessionId,
+        generation: lease.generation,
+        baseVersion: head.version,
+        targetVersion: head.version,
+      },
+    })
+    await json(res, 200, "publish shared preview")
+    await this.leaseOp(owner, admission, "release", { generation: lease.generation }).catch(() => {})
+    return head.version
+  }
+
   async grant(owner: APIRequestContext, userId: string, level: "read" | "comment" | "write"): Promise<void> {
     const res = await owner.put(`/api/v1/pages/${encodeURIComponent("@" + this.pageId)}/grants?${new URLSearchParams({ workspace_id: this.workspaceId })}`, {
       data: { subject_type: "user", subject: userId, level },
     })
     await json(res, 200, `grant ${level}`)
   }
+
+  /** Withdraws a grant (DELETE .../grants), as the share dialog does. */
+  async revoke(owner: APIRequestContext, userId: string, level: "read" | "comment" | "write"): Promise<void> {
+    const q = new URLSearchParams({ workspace_id: this.workspaceId, subject_type: "user", subject: userId, level })
+    const res = await owner.delete(`/api/v1/pages/${encodeURIComponent("@" + this.pageId)}/grants?${q}`)
+    if (res.status() >= 300) throw new Error(`revoke ${level}: HTTP ${res.status()} ${(await res.text()).slice(0, 300)}`)
+  }
+}
+
+/** Parses a buffered text/event-stream body into its events, in order. */
+export function parseEvents(body: string): Array<{ event: string; data: unknown }> {
+  const out: Array<{ event: string; data: unknown }> = []
+  for (const block of body.split(/\n\n+/)) {
+    const event = /^event: (.+)$/m.exec(block)?.[1]
+    const data = /^data: (.+)$/m.exec(block)?.[1]
+    if (!event) continue
+    let parsed: unknown = data
+    try {
+      parsed = data === undefined ? undefined : JSON.parse(data)
+    } catch {
+      // keep the raw text
+    }
+    out.push({ event, data: parsed })
+  }
+  return out
 }
 
 /** Id of the person behind a session (Auth.js session endpoint). */

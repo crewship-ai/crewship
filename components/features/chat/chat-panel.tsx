@@ -1,5 +1,6 @@
 "use client"
 
+import { ARTIFACT_CREW_NOT_ALLOWED } from "@/lib/artifact-refusal"
 import { useArtifactProjectAvailability } from "@/hooks/use-artifact-project-availability"
 
 import Link from "next/link"
@@ -73,6 +74,7 @@ import { DocumentResultCards } from "./document-result-cards"
 import type { ViewerTarget } from "./artifact-viewer/types"
 import { SavedDocumentPanel } from "./artifacts/saved-document-panel"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
+import { usePageCreationAccess } from "@/hooks/use-page-creation-access"
 import { ArtifactContextCards, type OpenLinked } from "./artifact-context/artifact-context-cards"
 import { ArtifactLibraryHost } from "./artifact-context/artifact-library-host"
 import { LinkedArtifactPanel, type LinkedActive } from "./artifact-context/linked-artifact-panel"
@@ -360,7 +362,9 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   const session = useSession()
   const currentUserId = session.data?.user?.id ?? null
   const documentsAvailability = useDocumentsAvailability(currentUserId ? workspaceId ?? "" : "")
-  const artifactProjectAvailable = useArtifactProjectAvailability(currentUserId ? workspaceId ?? "" : "")
+  // The server admits a chat-created document only for a role or page.create (#4534).
+  const mayCreatePages = usePageCreationAccess(workspaceId ?? "")
+  const artifactProjectAvailable = useArtifactProjectAvailability(currentUserId ? workspaceId ?? "" : "", agentId)
   const artifactScope = JSON.stringify([currentUserId, workspaceId, agentId, sessionId])
   const artifactContextNonce = useRef(0)
   const [artifactContext, setArtifactContext] = useState<{ id: number; text: string; scope: string } | null>(null)
@@ -399,6 +403,18 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
       category: "chat",
     }, () => soundScopeRef.current === soundIdentity)
   }, [soundScope, soundIdentity, sessionId, sessionKind, requestHistoryReload])
+
+  // The server refused a Project send because this agent's crew is outside the
+  // workspace policy (a race or a policy change after availability was read).
+  // The composer restores the typed message and names the reason; Project stays
+  // hidden for this agent until the panel is remounted.
+  const [sendRefusal, setSendRefusal] = useState<{ id: number; code: string } | null>(null)
+  const [crewRefusedAgent, setCrewRefusedAgent] = useState<string | null>(null)
+  const handleSendRefused = useCallback((reason: string) => {
+    if (reason !== ARTIFACT_CREW_NOT_ALLOWED) return
+    setCrewRefusedAgent(agentId)
+    setSendRefusal(previous => ({ id: (previous?.id ?? 0) + 1, code: reason }))
+  }, [agentId])
 
   // The server's echo of our own message is what spends a targeted-edit intent (set once the artifact composer state exists).
   const artifactEchoRef = useRef<(content: string, metadata?: Record<string, unknown>) => void>(() => {})
@@ -464,6 +480,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
     onStreamReset: requestHistoryReload,
     onReplyCompleted: onAgentReplyCompleted,
     onOwnMessageSaved: handleOwnMessageSaved,
+    onSendRefused: handleSendRefused,
   })
   // A send on a just-created row has to wait for the socket the trusted
   // profile turns on: realtime stays off while the profile is pending, so the
@@ -1601,8 +1618,9 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
           agentId={agentId}
           sessionId={sessionId}
           agentName={agentName}
-          documentCreationEnabled={documentsAvailability.data === true && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
-          artifactCreationEnabled={artifactProjectAvailable && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
+          documentCreationEnabled={documentsAvailability.data === true && mayCreatePages && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
+          artifactCreationEnabled={artifactProjectAvailable && crewRefusedAgent !== agentId && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
+          sendRefusal={sendRefusal}
           variant="mobile"
           mentionMembers={mentionMembers}
           isStreaming={isStreaming}
@@ -1741,8 +1759,9 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
           agentId={agentId}
           sessionId={sessionId}
           agentName={agentName}
-          documentCreationEnabled={documentsAvailability.data === true && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
-          artifactCreationEnabled={artifactProjectAvailable && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
+          documentCreationEnabled={documentsAvailability.data === true && mayCreatePages && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
+          artifactCreationEnabled={artifactProjectAvailable && crewRefusedAgent !== agentId && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
+          sendRefusal={sendRefusal}
           variant="desktop"
           isStreaming={isStreaming}
           connectionStatus={connectionStatus}

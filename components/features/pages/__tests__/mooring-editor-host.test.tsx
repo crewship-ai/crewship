@@ -182,3 +182,22 @@ it("keeps an access refusal terminal when the startup deadline later expires", a
     expect(document.querySelector("iframe")).toBeNull()
   } finally { vi.useRealTimers() }
 })
+it("names a full artifact storage budget, keeps the local draft and does not reload over it", async () => {
+  const t = await open()
+  answer = async () => Response.json({ error: "Workspace artifact storage is full.", code: "artifact_storage_quota", retention: "keep-all" }, { status: 413 })
+  await t.send({ type: "command", seq: 1, base_rev: 1, generation: 1, command: "custom", arguments: { any: "mine" } })
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("Kapacita úložiště neumožňuje další uložení"))
+  expect(t.messages.some(message => message.type === "rejected" && message.seq === 1 && String(message.message).includes("Kapacita úložiště neumožňuje další uložení"))).toBe(true)
+  expect(t.messages.some(message => message.type === "ack")).toBe(false)
+  expect(screen.getByRole("status")).toHaveTextContent("Not saved")
+  expect(t.dirty).toHaveBeenLastCalledWith(true)
+  // The refusal is not an access loss: the editor stays mounted with its draft.
+  expect(document.querySelector("iframe")).toBe(t.frame)
+})
+it("does not mistake an unrelated 413 for a storage refusal", async () => {
+  const t = await open()
+  answer = async () => Response.json({ error: "command request too large" }, { status: 413 })
+  await t.send({ type: "command", seq: 1, base_rev: 1, generation: 1, command: "custom", arguments: { any: "mine" } })
+  await waitFor(() => expect(t.messages.some(message => message.type === "rejected" && String(message.message).startsWith("Change refused"))).toBe(true))
+  expect(t.messages.some(message => String(message.message ?? "").includes("Kapacita"))).toBe(false)
+})

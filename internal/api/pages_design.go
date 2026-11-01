@@ -55,6 +55,9 @@ func (h *PageHandler) designStore(ctx context.Context) *artifacts.VersionStore {
 	return artifacts.NewVersionStore(h.db, artifacts.VersionOptions{Enabled: h.designEnabled(ctx), ContentType: "design"})
 }
 func designError(w http.ResponseWriter, err error) {
+	if artifactStorageRefusal(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, artifacts.ErrDisabled), errors.Is(err, sql.ErrNoRows), errors.Is(err, artifacts.ErrVersionNotFound):
 		replyError(w, 404, "design not found")
@@ -66,6 +69,9 @@ func designError(w http.ResponseWriter, err error) {
 		replyError(w, 400, "invalid Design update")
 	case errors.Is(err, artifacts.ErrVersionConflict):
 		replyError(w, 409, "Design changed; reload and reapply")
+	case errors.As(err, new(*pages.LimitError)):
+		limit, _ := pagesLimitFrom(err)
+		writePagesLimit(w, limit)
 	case errors.Is(err, artifacts.ErrVersionQuota):
 		replyError(w, 413, "Design capacity is full; existing work is retained")
 	default:
@@ -451,12 +457,8 @@ func (h *PageHandler) CreateDesign(w http.ResponseWriter, r *http.Request) {
 			return user.ID, nil
 		}
 		var e error
-		var n int
-		if e = tx.QueryRowContext(ctx, `SELECT count(*) FROM pages WHERE workspace_id=?`, k.WorkspaceID).Scan(&n); e != nil {
+		if e = pages.CheckCap(ctx, tx, k.WorkspaceID); e != nil {
 			return "", e
-		}
-		if n >= pages.MaxPagesPerWorkspace {
-			return "", artifacts.ErrVersionQuota
 		}
 		stamp := tsformat.Format(time.Now())
 		if _, e = tx.ExecContext(ctx, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at,private_audience,created_by_test) VALUES(?,?,?,?,?,?,?,?,0,?)`, k.PageID, k.WorkspaceID, p.Slug, p.Name, user.ID, string(raw), stamp, stamp, p.CreatedByTest); e != nil {
@@ -587,6 +589,10 @@ func designSharedState(ctx context.Context, tx *sql.Tx, k artifacts.VersionKey) 
 func (h *PageHandler) designApplyLocked(r *http.Request, k artifacts.VersionKey, input design.Request) (design.Result, error) {
 	var result design.Result
 	err := h.designTx(r, k, true, func(ctx context.Context, tx *sql.Tx, actor string) error {
+		if err := artifacts.CheckStorageHeadroom(ctx, tx, 4<<20); err != nil {
+			return err
+		}
+
 		if e := tx.QueryRowContext(ctx, `SELECT state FROM artifact_design_documents WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&input.State); e != nil {
 			return e
 		}

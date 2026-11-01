@@ -23,7 +23,6 @@ import {
 } from "@/components/layout/create-surface"
 import { pagesKeys, usePages, type PageView } from "@/hooks/use-pages"
 import { usePageFolderMutations, usePageFolders, type PageFolderView } from "@/hooks/use-page-folders"
-import { createWorkbook } from "@/lib/workbooks/create"
 import { useWordDocumentCreation } from "@/components/features/pages/use-word-document-creation"
 import {
   artifactKindOfPage,
@@ -134,13 +133,8 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
   const duplicate = trimmed && kind ? pages.find(p => artifactKindOfPage(p) === kind.key && (p.folder?.slug ?? "") === (folder?.slug ?? "") && p.name.trim().toLowerCase() === trimmed.toLowerCase()) : undefined
 
   const create = useMutation<Created, Error, ArtifactKindEntry>({ mutationFn: async k => {
-    if (k.key === "word") return word.create.mutateAsync({ name: trimmed, slug: freeSlug(trimmed, "document", pages) })
-    if (k.key === "sheet") {
-      const made = await createWorkbook(workspaceId, { name: trimmed, slug: freeSlug(trimmed, "sheet", pages) })
-      await client.invalidateQueries({ queryKey: pagesKeys.all(workspaceId) })
-      // A new workbook Page has never moved; 0 is the column default.
-      return { slug: made.slug, pagesVersion: 0 }
-    }
+    if (k.key === "word") return word.create.mutateAsync({ name: trimmed, slug: freeSlug(trimmed, "document", pages), format: word.wordFormat })
+    if (k.key === "sheet") return word.create.mutateAsync({ name: trimmed, slug: freeSlug(trimmed, "sheet", pages), format: "sheet" })
     const intent = pageIntent.current ??= { slug: freeSlug(trimmed, k.key === "design" ? "design" : "page", pages) }
     if (intent.created) return intent.created
     if (intent.uncertain) throw new Error("Page creation could not be confirmed. Check the library before starting again.")
@@ -188,8 +182,8 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
 
   const canSubmit = Boolean(kind) && !busy && (created ? true
     : handoff ? start === "tmpl" || Boolean(prompt.trim() || trimmed)
-    : Boolean(trimmed) && (kind?.key !== "word" || (word.allowed && word.formatAvailable)))
-  const primaryLabel = created ? "Open it" : handoff ? "Continue in chat" : busy ? "Creating…" : word.retrying && kind?.key === "word" ? "Retry initialization" : kind?.make === "panels" ? "Create page" : "Create and edit"
+    : Boolean(trimmed) && (kind?.key !== "word" || (word.allowed && word.wordFormatAvailable)) && (kind?.key !== "sheet" || (word.allowed && word.availability.gridcraftNative === true)))
+  const primaryLabel = created ? "Open it" : handoff ? "Continue in chat" : busy ? "Creating…" : word.retrying && (kind?.key === "word" || kind?.key === "sheet") ? "Retry initialization" : kind?.make === "panels" ? "Create page" : "Create and edit"
   const refusal = created ? `${created.name} was created but not put in ${created.folder}: ${created.error}` : create.error?.message ?? null
 
   return <CreateSurface open size="lg" onOpenChange={next => { if (!next) close() }} onSubmit={() => { if (canSubmit) void submit() }} ariaLabel="New artifact">

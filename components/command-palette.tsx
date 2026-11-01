@@ -660,7 +660,7 @@ export function CommandPalette({ open, onOpenChange, initialQuery }: CommandPale
       apiFetch(`/api/v1/workspaces/${ws}/members`, opts),
       apiFetch(`/api/v1/integrations?${qs}`, opts),
       // No `limit`: the page index is unpaginated and complete by contract
-      // (pages.MaxPagesPerWorkspace caps a workspace at 100), so the palette
+      // (the instance page limit, 100 by default, caps a workspace), so the palette
       // searches every page the caller reaches. Metadata only — no panel
       // payloads, no application source.
       apiFetch(`/api/v1/pages?${qs}`, opts),
