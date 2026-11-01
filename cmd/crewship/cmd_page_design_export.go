@@ -40,6 +40,8 @@ carries a JSON receipt (path, media_type, version, byte_length, sha256).
 		if os.Getenv("CREWSHIP_AGENT_TOKEN") != "" {
 			return errors.New("Design export requires human authentication; live agents read Design through design_get")
 		}
+		// --out - streams the HTML itself; every other run prints only the receipt.
+		formatter := resolvedFormatter(cmd)
 		as, _ := cmd.Flags().GetString("as")
 		if as != "html" {
 			return cli.WithExitCode(fmt.Errorf("--as must be html; no other Design export format exists"), cli.ExitValidation)
@@ -110,7 +112,7 @@ carries a JSON receipt (path, media_type, version, byte_length, sha256).
 		if err != nil {
 			return err
 		}
-		return pageEmitMachine(resolvedFormatter(cmd), receipt, "{}")
+		return pageEmitMachine(formatter, receipt, "{}")
 	}}
 	cmd.Flags().String("as", "html", "Export file type; only html is available")
 	cmd.Flags().Int64("version", 0, "Retained version to export; 0 exports the latest version you may read")
