@@ -43,6 +43,18 @@ class WorkflowContracts(unittest.TestCase):
             self.assertGreaterEqual(go_timeout, 20, name)
             self.assertGreaterEqual(job_cap - go_timeout, 3 + 5, name)  # measured overhead ≤ 3m07s
 
+    def test_go_platforms_cap_covers_the_unpartitioned_macos_suite(self):
+        # go-platforms runs `go test ./...` unpartitioned on macOS/arm64. On
+        # 2026-11-01 internal/api alone took 1146 s there and the job was
+        # cancelled at its 30m cap with every package passing (run
+        # 41313229101). The cap must leave room for setup plus the slowest
+        # package chain, not only for one package's -timeout.
+        lane = self.job(self.text('ci.yml'), 'go-platforms')
+        go_timeout = int(re.search(r'go test \./\.\.\. -count=1 -timeout (\d+)m', lane).group(1))
+        job_cap = int(re.search(r'^    timeout-minutes: (\d+)', lane, re.M).group(1))
+        self.assertGreaterEqual(job_cap, 40)
+        self.assertGreaterEqual(job_cap - go_timeout, 20)
+
     def text(self, name):
         return (ROOT / '.github/workflows' / name).read_text()
 
