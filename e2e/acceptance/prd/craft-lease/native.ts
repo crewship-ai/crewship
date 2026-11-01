@@ -5,6 +5,7 @@ import { createHash } from "node:crypto"
 import * as fs from "node:fs"
 import type { APIRequestContext, APIResponse } from "@playwright/test"
 import { emptyGridCraftNativeDocument } from "../../../../lib/mooring/gridcraft-empty"
+import { trackPage } from "../created"
 
 // lib/mooring/wordcraft-native-create.ts imports this JSON, which Playwright's
 // ESM loader cannot import without an attribute; read it the same way instead.
@@ -97,6 +98,7 @@ export class NativePage {
       data: { name, slug, panels: [], allow_empty: true },
     })
     const body = await json<{ id: string }>(res, 201, "create page")
+    trackPage(workspaceId, body.id)
     return new NativePage(workspaceId, body.id, application)
   }
 
@@ -204,6 +206,39 @@ export class NativePage {
         bytes: o.bytes.toString("base64"),
       },
     })
+  }
+
+  /** The shared preview (GET .../craft/preview) as a Read/Comment person gets it, without an admission. */
+  previewRaw(api: APIRequestContext): Promise<APIResponse> {
+    return api.get(this.url("preview"))
+  }
+
+  /**
+   * Publishes the current committed version as the shared preview, as the
+   * editor's "Publikovat náhled" does: the holder takes custody, shares the
+   * head version and releases. Read and Comment people see only this version.
+   */
+  async publishPreview(owner: APIRequestContext): Promise<string> {
+    const admission = await this.session(owner)
+    const head = await this.document(owner, admission)
+    const lease = await json<LeaseView>(await this.leaseOp(owner, admission, "acquire"), 200, "acquire custody for publication")
+    if (!lease.generation) throw new Error("acquire returned no generation")
+    const res = await owner.post(this.url("document/share"), {
+      headers: { "X-Craft-Session": admission.token },
+      data: {
+        workspaceId: this.workspaceId,
+        pageId: this.pageId,
+        applicationId: this.application,
+        enginePin: head.enginePin,
+        sessionId: admission.sessionId,
+        generation: lease.generation,
+        baseVersion: head.version,
+        targetVersion: head.version,
+      },
+    })
+    await json(res, 200, "publish shared preview")
+    await this.leaseOp(owner, admission, "release", { generation: lease.generation }).catch(() => {})
+    return head.version
   }
 
   async grant(owner: APIRequestContext, userId: string, level: "read" | "comment" | "write"): Promise<void> {

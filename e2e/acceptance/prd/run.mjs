@@ -8,7 +8,8 @@ import * as fs from "node:fs"
 import { createRequire } from "node:module"
 import * as path from "node:path"
 import { fileURLToPath } from "node:url"
-import { formatTable, parseArgs, readRows, summarize, writeSummary } from "./report.mjs"
+import { cleanup } from "./cleanup.mjs"
+import { evaluateRequired, formatGate, formatTable, loadRequired, manualToRows, parseArgs, readRows, readRunRows, summarize, writeSummary, DEFAULT_REQUIRED } from "./report.mjs"
 
 const HELP = `Usage: pnpm acceptance:prd [--origin URL] [--quick|--full] [--output DIR] [--grep RE] [--list] [-- <playwright args>]
 
@@ -19,6 +20,17 @@ const HELP = `Usage: pnpm acceptance:prd [--origin URL] [--quick|--full] [--outp
   --output DIR   results directory (default test-results/prd-acceptance/<mode>-<timestamp>)
   --grep RE      only scenarios/tests matching RE
   --list         list the scenarios without running them
+  --rc SHA       RC gate: fail unless every ID in required-ids.json passed in full mode on this app SHA
+                 and its canonical origin (rows of this run plus --merge and --manual)
+  --merge PATH   with --rc: earlier run directory or summary.json to merge (repeatable)
+  --manual FILE  with --rc: manual-rows.json (id, result, appSha, evidence, recordedAt)
+  --origin-map M with --rc: canonical origins, craft=URL,artifacts=URL (or $PRD_RC_ORIGINS)
+  --required F   with --rc: required-ids file (default required-ids.json)
+  --cleanup      delete leftovers of earlier runs and exit: workspaces prd-qa-* named "PRD acceptance …",
+                 and pages/Designs/Projects whose slug starts with prd- AND name with "PRD " (in the
+                 workspaces of PRD_AGENT_WORKSPACE_ID / PRD_WORKSPACE_ID). Nothing else is touched.
+  --dry-run      with --cleanup: only list what would be deleted
+  --older-than M with --cleanup: leave objects younger than M minutes (default 60)
 
 Accounts come only from the environment: PRD_OWNER_EMAIL/PRD_OWNER_PASSWORD (quick mode falls
 back to E2E_EMAIL/E2E_PASSWORD), optional PRD_MEMBER_*, PRD_READER_*, PRD_WORKSPACE_ID,
@@ -43,6 +55,19 @@ const origin = args.origin ?? process.env.PRD_ORIGIN ?? null
 if (args.mode === "full" && !origin) {
   console.error("acceptance:prd: full mode needs --origin <url> or PRD_ORIGIN")
   process.exit(2)
+}
+if (args.cleanup) {
+  const owner = { email: process.env.PRD_OWNER_EMAIL, password: process.env.PRD_OWNER_PASSWORD }
+  if (!origin || !owner.email || !owner.password) {
+    console.error("acceptance:prd: --cleanup needs --origin (or PRD_ORIGIN) and PRD_OWNER_EMAIL/PRD_OWNER_PASSWORD")
+    process.exit(2)
+  }
+  const workspaceIds = [process.env.PRD_AGENT_WORKSPACE_ID, process.env.PRD_WORKSPACE_ID].filter(Boolean)
+  console.log(`${args.dryRun ? "Dry run: " : ""}cleaning harness leftovers on ${origin}`)
+  const r = await cleanup({ origin, owner, workspaceIds, olderThanMin: args.olderThan, dryRun: args.dryRun })
+  console.log(`${r.workspacesDeleted} workspaces and ${r.pagesDeleted} pages deleted, ${r.skipped.length} skipped, ${r.failed.length} failed`)
+  for (const f of r.failed) console.error(`  failed ${f.kind} ${f.id}: HTTP ${f.status}`)
+  process.exit(r.failed.length ? 1 : 0)
 }
 const stamp = new Date().toISOString().replace(/[:.]/g, "-")
 const outputDir = path.resolve(args.output ?? process.env.PRD_OUTPUT_DIR ?? path.join(root, "test-results", "prd-acceptance", `${args.mode}-${stamp}`))
@@ -74,4 +99,15 @@ console.log(`\nPRD acceptance (${args.mode}) — origin ${run?.origin ?? origin 
 console.log(rows.length ? formatTable(rows) : "No result rows were recorded (global setup failed or nothing matched).")
 console.log(`\n${summary.passed} passed, ${summary.failed} failed, ${summary.skipped} skipped. Evidence: ${outputDir}`)
 
-process.exit(child.status === 0 && summary.ok ? 0 : 1)
+let gateOk = true
+if (args.rc) {
+  const required = loadRequired(args.required ?? DEFAULT_REQUIRED, args.originMap)
+  const all = [...rows, ...args.merge.flatMap(readRunRows)]
+  if (args.manual) all.push(...manualToRows(JSON.parse(fs.readFileSync(args.manual, "utf8")), required))
+  const gate = evaluateRequired(all, required, { rc: args.rc })
+  fs.writeFileSync(path.join(outputDir, "rc-gate.json"), JSON.stringify(gate, null, 2) + "\n")
+  console.log(`\n${formatGate(gate)}`)
+  gateOk = gate.ok
+}
+
+process.exit(child.status === 0 && summary.ok && gateOk ? 0 : 1)

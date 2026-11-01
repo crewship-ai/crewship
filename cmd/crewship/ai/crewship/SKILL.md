@@ -234,6 +234,10 @@ next to `error`; Design and Craft errors carry only the message.
   version or explain the conflict and ask. Never just raise `base_version` or
   `ifVersion` and resend. `artifact_slug_taken` means choose another slug;
   `artifact_anchor_mismatch` means ask for a fresh selection.
+- **422 `pages_limit`**: the workspace holds as many pages as its limit allows
+  and nothing was created. Tell the person; an instance administrator can raise
+  the limit (`crewship admin instance page-limit set`). Do not delete or archive
+  pages to make room.
 - **413, storage full** (`artifact_history_quota`, `artifact_data_quota`,
   `Design capacity is full`, Craft `native history quota reached`): existing
   versions are kept. Stop writing, keep your candidate, and tell the person;

@@ -21,11 +21,12 @@ export class ArtifactRequestError extends Error {
   }
 }
 
-const CODES: ArtifactErrorCode[] = ["artifact_version_conflict", "artifact_anchor_mismatch", "artifact_history_quota", "forbidden", "not_found", "invalid", "unavailable"]
+const CODES: ArtifactErrorCode[] = ["artifact_version_conflict", "artifact_anchor_mismatch", "artifact_history_quota", "pages_limit", "forbidden", "not_found", "invalid", "unavailable"]
 const GENERIC: Record<ArtifactErrorCode, string> = {
   artifact_version_conflict: "A newer version exists. Reload to see it.",
   artifact_anchor_mismatch: "The selected element changed. Pick it again.",
   artifact_history_quota: "Version history is full.",
+  pages_limit: "This workspace has reached its page limit. Nothing was created.",
   forbidden: "You do not have access to this artifact.",
   not_found: "This artifact is not available.",
   invalid: "The request was not accepted.",

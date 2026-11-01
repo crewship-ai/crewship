@@ -41,7 +41,7 @@ repository names a real host or account.
 
 | Variable | Meaning |
 | --- | --- |
-| `PRD_ORIGIN` | Origin under test (`https://host[:port]`, no path). `--origin` sets it |
+| `PRD_ORIGIN` | Origin under test (`https://host[:port]`, no path). `--origin` sets it. Browser scenarios that open the native Word/Sheet editor must use the instance's configured public origin: the editor iframe is allowed only there by the CSP `frame-src`, so on `http://localhost:<port>` or any other host name the editor shows "Editor se bezpečně nepřipojil" |
 | `PRD_MODE` | `quick` or `full`. The runner sets it from `--quick` / `--full` / `--origin` |
 | `PRD_OWNER_EMAIL`, `PRD_OWNER_PASSWORD` | Required. Workspace owner able to create workspaces. Quick mode falls back to `E2E_EMAIL` / `E2E_PASSWORD` |
 | `PRD_MEMBER_EMAIL`, `PRD_MEMBER_PASSWORD` | Optional existing second person |
@@ -50,6 +50,9 @@ repository names a real host or account.
 | `PRD_AGENT_SLUG`, `PRD_AGENT_WORKSPACE_ID` | Full mode: seeded agent and the workspace it belongs to |
 | `PRD_CLI` | Path of the `crewship` CLI binary for CLI-driven scenarios (`prd.requireCli()`) |
 | `PRD_CRAFT_NATIVE` | `on` or `off`: whether the origin has a native Word/Sheet editor profile. Unset, full mode assumes `on` and quick mode reads `GET /api/v1/documents/status`. The craft-lease scenarios decide from it, never from the initialize call they check |
+| `PRD_RESTART_COMMAND` | Command that restarts the server under test, for rows that must survive a restart (`B.project.restore-restart`), e.g. `crew restart dev2`. The test waits until `/healthz` reports a new process (lower uptime). Unset and no handshake → the row fails in full mode, is skipped in quick mode. `crew` refuses to run under `crewship-heavy`, so a queued run uses `PRD_RESTART_HANDSHAKE` instead |
+| `PRD_RESTART_HANDSHAKE` | Directory for a restart done by the operator's shell: the test writes `restart.request` and waits for `restart.done`; `e2e/acceptance/prd/restart-watcher.sh <dir> <env>` answers it by running `crew restart <env>` |
+| `PRD_RESTART_NOTE_FILE` | Optional file; one line (time, reason) is appended before every restart |
 | `PRD_OUTPUT_DIR` | Results directory. The runner's `--output` sets it; default `test-results/prd-acceptance/<mode>-<timestamp>` |
 | `PRD_KEEP_WORKSPACES` | `1` keeps created QA workspaces for inspection |
 | `PRD_TRACE` | `1` keeps Playwright traces of failed tests. Off by default because traces contain request bodies, including logins |
@@ -59,6 +62,78 @@ in `~/.crewship/e2e-auth/prd-acceptance-<role>-<origin hash>.json` (directory
 0700, file 0600) next to the other e2e cookie jars. Cookies never go into the
 output directory. A wrapper that runs commands in a clean environment must
 pass these variables through explicitly.
+
+A login lives 15 minutes, and contexts that share one login share its refresh
+token: the editor rotates it, and the next context to present the old token is
+treated as a replay, which revokes the whole session (`session_revoked` for
+every holder). So global setup only checks that the accounts can sign in; each
+test signs the owner in again, and every extra context (`prd.api(role)`,
+`prd.browserContext(role)`, crashable browser profiles) gets its own login.
+
+## Quota rows that change instance limits
+
+`quota.aggregate.workspace` changes the instance-wide workspace artifact-storage
+limit through the product CLI (`crewship admin instance artifact-storage set`,
+`PRD_CLI`, signed in as the owner with a private `HOME`). Limits are not per
+workspace: the scenario first puts its QA workspace just under the smallest
+accepted limit (1 MiB) at the normal limit, lowers the workspace limit for the
+checks only (about a minute), and restores the original value in a `finally`
+block. While it is lowered, other workspaces over 1 MiB cannot grow (nothing is
+deleted). The row's evidence records the original, lowered and restored values
+and how long the limit was lowered. Needs an instance admin owner and a native
+Word editor on the origin.
+
+## Cleanup
+
+Tests delete what they create: pages, Designs and Projects are registered
+(`trackPage` in `created.ts`) and removed after the test, also after a failure,
+with a fresh login; QA workspaces are deleted with everything in them. Names
+carry the prefix `PRD ` (slugs `prd-`). Leftovers of earlier or interrupted runs:
+
+```
+PRD_OWNER_EMAIL=… PRD_OWNER_PASSWORD=… PRD_AGENT_WORKSPACE_ID=… \
+  node e2e/acceptance/prd/run.mjs --origin https://host --cleanup [--dry-run] [--older-than 60]
+```
+
+It deletes only workspaces whose slug is `prd-qa-<label>-<10 hex>` AND name starts
+with `PRD acceptance `, and pages whose slug starts with `prd-` AND name with
+`PRD ` (in `PRD_AGENT_WORKSPACE_ID` / `PRD_WORKSPACE_ID`). Objects matching only
+one rule, or younger than `--older-than` minutes (default 60), are listed and kept.
+
+## Agent workspace
+
+The scenarios that need a real agent (`A.craft.proposal.*`, `A.craft.agent.*`, `B.design.agent-*`, `B.project.agent-*`)
+cannot run in a disposable `prd-qa-*` workspace. An agent's model login is a
+credential owned by one workspace; `crewship credential` has no way to share it
+into another workspace, and copying its value would mean handling a secret the
+harness must never see. A new workspace's agent therefore has no credential
+(`crewship agent credential-readiness` says so) and its first run fails. So the
+agent, its chat and the pages it works on live in `PRD_AGENT_WORKSPACE_ID`,
+which on the dev instances is the shared demo workspace.
+
+That workspace has the caps of any workspace: 100 pages (HTTP 422 on create) and
+the Project/Design history budget (HTTP 413, or the agent answering that "the
+artifact history quota is full"). When other work fills it, these rows fail on
+capacity, not on the product; the failure messages say so. The harness never
+deletes pages it did not create.
+
+To make the rows independent of the demo workspace, an operator creates one
+dedicated agent workspace once (the credential step is the only one that needs
+the secret, so it is a person's job, not the harness's):
+
+```
+crewship workspace create --name "PRD agent home" --slug prd-agent-home   # not named "PRD acceptance ...": the harness cleanup deletes those
+crewship crew create --name agents --workspace prd-agent-home
+crewship agent create --name Jamie --slug prd-agent --crew agents --workspace prd-agent-home \
+  --llm-provider ANTHROPIC --llm-model claude-haiku-4-5
+crewship credential create --type AI_CLI_TOKEN ... --workspace prd-agent-home   # the one manual step
+crewship credential assign <credential> prd-agent --workspace prd-agent-home
+crewship agent credential-readiness prd-agent --workspace prd-agent-home        # must say ready
+```
+
+Add the existing member (`PRD_MEMBER_*`) to that workspace, then run with
+`PRD_AGENT_SLUG=prd-agent PRD_AGENT_WORKSPACE_ID=<its id>`. Design must be
+enabled there.
 
 ## Output
 
@@ -148,3 +223,47 @@ and an isolated `HOME`, and record its output as evidence.
 
 Unit tests for the runner's table and arguments:
 `node --test e2e/acceptance/prd/report.test.mjs`.
+
+## RC gate: required IDs
+
+`pnpm acceptance:prd` alone reports only what ran, so a scenario nobody wrote
+shows nothing. The RC gate closes that hole. [`required-ids.json`](../../e2e/acceptance/prd/required-ids.json)
+lists every ID the release must prove (PRD §7 and §0), including IDs whose tests
+do not exist yet; those are reported as `missing`, which is a failure. Each row
+names its canonical origin as a key: `craft` (Word and Sheet editor scenarios) or
+`artifacts` (Projects, Design, quota, drafts). The URLs are not stored in the
+public repository; pass them with `--origin-map craft=<url>,artifacts=<url>` or
+`PRD_RC_ORIGINS`. The gate refuses to run without them. Adding a scenario means
+adding its ID here in the same change.
+
+A required ID passes only when its latest row has result `passed`, `mode=full`,
+the canonical origin and an `appSha` equal to the release candidate. Exceptions:
+
+- `A.craft.lease.fail-closed` may be `skipped` (servers with a native editor only).
+- Rows marked `allowManual` (`A.craft.session.hour-*`) may be `mode=manual` with
+  a link to the recording in `evidence`; without it the row fails.
+
+Several runs assemble one RC. Per ID the latest row on the RC SHA wins; a row
+on another SHA counts only when none exists on the RC, and then fails as `appSha`.
+
+```sh
+# gate the run just made
+pnpm acceptance:prd --origin <craft url> --rc <SHA> \
+  --origin-map craft=<url>,artifacts=<url> --merge <earlier run dir> --manual manual-rows.json
+
+# merge existing runs only, no browser
+node e2e/acceptance/prd/report.mjs --rc <SHA> --origin-map craft=<url>,artifacts=<url> \
+  --merge runs/craft --merge runs/artifacts --manual manual-rows.json --output close-ab/rc-<SHA>
+```
+
+`--merge` takes a run directory or a `summary.json` and may repeat. The gate
+prints each problem (`missing`, `result`, `mode`, `origin`, `appSha`,
+`evidence`) with its ID and exits non-zero (2 for bad arguments), and writes
+`rc-gate.json` (and `rc-gate.md` with `report.mjs --output`).
+
+`manual-rows.json` is an array; the origin defaults to the row's canonical one:
+
+```json
+[{ "id": "A.craft.session.hour-word", "result": "passed", "appSha": "<SHA>",
+   "evidence": "https://…/recording", "recordedAt": "2026-10-31T10:00:00Z" }]
+```

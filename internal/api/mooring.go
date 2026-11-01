@@ -155,8 +155,11 @@ func (m *mooringHTTP) create(w http.ResponseWriter, r *http.Request) {
 		mooringError(w, mooring.ErrConflict)
 		return
 	}
-	var count int
-	if e = tx.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM pages WHERE workspace_id=?`, ws).Scan(&count); e != nil || count >= pages.MaxPagesPerWorkspace {
+	if e = pages.CheckCap(r.Context(), tx, ws); e != nil {
+		if limit, ok := pagesLimitFrom(e); ok {
+			writePagesLimit(w, limit)
+			return
+		}
 		mooringError(w, mooring.ErrConflict)
 		return
 	}

@@ -6,13 +6,19 @@
 // the three screens and answers the comment through the public API, as the
 // agent's tools would. Full mode adds the real seeded agent: it creates the
 // screens from a chat message and publishes v2 from an element comment.
-// Server restart persistence is not covered (the suite never restarts a slot).
+// The "agent creates ... publishes v2" test is the chat-first path
+// (B.project.from-chat): it starts in the browser chat, the person opens the
+// Project in /artifacts, comments there and the agent answers with a new
+// version. The quick "element comment" test creates its Project through the
+// API and does not start in the chat. Concurrent saves and the server restart
+// are in project-rows.acceptance.ts.
 import { loginStorageState } from "./auth"
 import { expect, prdRequirement, test } from "./fixtures"
 import {
   HERO, SCREENS, commentOnHero, createProject, deletePage, enableProjects, grantRead, heroOf, historyRow, linkedScreens, openHistory,
   FatalWait, openProject, pinWorkspace, preview, projectSlug, publish, reply, snapshot, threeScreens, trySnapshot, waitFor, wsQuery,
 } from "./project/project-api"
+import { trackPage } from "./created"
 
 const V1 = "Welcome to the PRD cafe"
 const V2 = "Welcome to the PRD cafe, open 8-18"
@@ -244,6 +250,7 @@ test.describe("project", () => {
         prdRequirement("B.project.agent-screens", "A real agent creates a Project with three linked screens from chat"),
         prdRequirement("B.project.agent-version", "A comment on an element sends the agent to publish a new version"),
         prdRequirement("B.project.agent-restore", "The agent's earlier version can be restored as a new version after reload"),
+        prdRequirement("B.project.from-chat", "From the browser chat: the person asks the agent for 3 screens, opens the Project in Artifacts, comments on an element, the agent publishes a new version"),
       ],
     },
     async ({ prd, page, request, context }) => {
@@ -254,6 +261,8 @@ test.describe("project", () => {
       const slug = projectSlug("prd-agent-project")
       const token = slug.slice(-6)
       const evidence: Record<string, unknown> = { mode: prd.mode, appSha: prd.appSha, agent: agent.slug, slug }
+      // The agent creates this project; remove it even if the test fails.
+      trackPage(wsId, slug)
       try {
         const list = await request.get(`/api/v1/agents?${wsQuery(wsId)}`)
         expect(list.status()).toBe(200)
@@ -262,29 +271,61 @@ test.describe("project", () => {
         const seeded = agents.find((a) => a.slug === agent.slug)
         const name = seeded?.name
         expect(name, `agent ${agent.slug} in PRD_AGENT_WORKSPACE_ID`).toBeTruthy()
+        // Only runs this test started count: the agent workspace is shared, and an
+        // unrelated run of the same agent may stay RUNNING for days. A run without
+        // a creation time still counts.
+        let runsSince = Number.POSITIVE_INFINITY
         const runningRuns = async () => {
           const res = await request.get(`/api/v1/agents/${encodeURIComponent(seeded?.id ?? "")}/runs?${wsQuery(wsId)}`)
           expect(res.status(), "agent runs").toBe(200)
           const runs = (await res.json()) as Array<{ id: string; status: string; chat_id?: string | null; created_at?: string }>
-          return runs.filter((r) => r.status === "RUNNING" || r.status === "PENDING" || r.status === "QUEUED")
+          return runs.filter((r) => (r.status === "RUNNING" || r.status === "PENDING" || r.status === "QUEUED") && !(Date.parse(r.created_at ?? "") < runsSince))
         }
         await pinWorkspace(context, wsId)
 
         // 1. A chat message with "Create artifact project" on.
         await page.goto(`/chat?agent=${encodeURIComponent(agent.slug)}&${wsQuery(wsId)}`)
         await page.getByRole("button", { name: `New session with ${name}` }).first().click()
-        const create = page.getByRole("button", { name: "Create artifact project" })
-        await expect(create).toBeEnabled({ timeout: 60_000 })
+        // With NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS the composer has a "+ > New artifact"
+        // menu and a removable "New Project" chip; without it the old toggle button.
+        // Detect which one this build renders instead of assuming.
+        const toggle = page.getByRole("button", { name: "Create artifact project" })
+        const menu = page.getByRole("button", { name: "New artifact", exact: true })
+        const chip = page.getByRole("button", { name: "Remove New Project" })
+        const control = await waitFor("a project creation control in the composer", 60_000, 1_000, async () => {
+          if (await menu.isVisible()) return "menu" as const
+          if (await toggle.isVisible()) return "toggle" as const
+          return null
+        })
+        evidence.composerControl = control
+        await expect(control === "menu" ? menu : toggle).toBeEnabled({ timeout: 60_000 })
+        const selectProject = async () => {
+          if (control === "toggle") {
+            if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click()
+            await expect(toggle).toHaveAttribute("aria-pressed", "true")
+            return
+          }
+          if (!(await chip.isVisible())) {
+            await menu.click()
+            const panel = page.getByRole("dialog", { name: "New artifact" })
+            await panel.getByRole("button", { name: /^Project/ }).first().click()
+            await panel.getByRole("list", { name: "Project starter prompts" }).getByRole("button").first().click()
+          }
+          // The consent chip: private project, sharing needs approval.
+          await expect(chip).toBeVisible()
+          await expect(page.getByText("Private project · Sharing requires your approval")).toBeVisible()
+        }
         const prompt =
           `Create an artifact Project named "PRD project ${token}" with slug ${slug} and exactly three linked HTML screens: ` +
           `index.html (entrypoint), menu.html and kontakt.html. Every screen has a <nav> with relative links to the other two screens. ` +
           `index.html: <h1 id="artifact-hero-heading">${V1}</h1>; menu.html: a list of three coffees with prices; kontakt.html: an address and an email. ` +
           `Give the main elements stable artifact- IDs. Publish it and reply with the slug and version number.`
         const sentAt = new Date().toISOString()
+        // A minute of slack for the server clock.
+        runsSince = Date.parse(sentAt) - 60_000
         // The agent may still be busy with an earlier run; try again for a few minutes.
         for (let attempt = 0; ; attempt++) {
-          if ((await create.getAttribute("aria-pressed")) !== "true") await create.click()
-          await expect(create).toHaveAttribute("aria-pressed", "true")
+          await selectProject()
           await page.locator("textarea").last().fill(prompt)
           const busyBefore = await page.getByText("The agent is busy with another run right now").count()
           await page.getByRole("button", { name: "Submit" }).click()

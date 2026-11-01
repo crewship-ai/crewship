@@ -194,13 +194,12 @@ func (h *PageHandler) CreateDocumentAgent(w http.ResponseWriter, r *http.Request
 		writeJSON(w, 200, result)
 		return
 	}
-	var count int
-	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM pages WHERE workspace_id=?`, a.WorkspaceID).Scan(&count); err != nil {
-		replyInternalError(w, h.logger, "count document Pages", err)
-		return
-	}
-	if count >= pages.MaxPagesPerWorkspace {
-		replyError(w, 409, "workspace page limit reached")
+	if err = pages.CheckCap(ctx, tx, a.WorkspaceID); err != nil {
+		if limit, ok := pagesLimitFrom(err); ok {
+			writePagesLimit(w, limit)
+			return
+		}
+		replyInternalError(w, h.logger, "check page limit", err)
 		return
 	}
 	spec, err := json.Marshal(pageSpec)
