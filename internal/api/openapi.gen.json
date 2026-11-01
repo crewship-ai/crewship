@@ -133406,7 +133406,7 @@
     },
     "/api/v1/pages/{slug}/artifact/data": {
       "get": {
-        "description": "List the data collections declared by `dashboard.json` in code `version`, with their document counts and sizes. The owner may pass any version, an editor the latest version and other readers only the shared version. Requires the `artifact_projects` and `artifact_dashboard_data` feature flags.",
+        "description": "List the data collections declared by `dashboard.json` in code `version`, with their document counts and sizes. A declared collection that has never been written to is not listed. The owner may pass any version, an editor the latest version and other readers only the shared version. Requires the `artifact_projects` and `artifact_dashboard_data` feature flags.",
         "operationId": "get_api_v1_pages_slug_artifact_data",
         "parameters": [
           {
