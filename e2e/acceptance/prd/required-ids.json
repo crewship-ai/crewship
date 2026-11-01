@@ -1,185 +1,276 @@
 {
   "version": 1,
-  "description": "Required PRD A+B acceptance IDs (G3 of the validation brief). Row origin is a key (craft, artifacts); the canonical URLs are supplied at run time with --origin-map or PRD_RC_ORIGINS because deployment hostnames are not published.",
+  "description": "Required PRD A+B acceptance IDs (G3 of the validation brief). Row origin is a key (craft, artifacts); the canonical URLs are supplied at run time with --origin-map or PRD_RC_ORIGINS because deployment hostnames are not published. sharedPaths are added to every carryover diff; alwaysRerun rows (every craft-origin row, since each drives the native lease or save path, plus save, lease, soak, roundtrip, outage, lost-ack, durability, work-kept, conflict, restart, write-revoked, stale) must run on the RC; manualChecks must all be true in a manual record.",
+  "sharedPaths": [
+    "internal/ws",
+    "internal/backup",
+    "internal/artifacts",
+    "internal/design",
+    "internal/pages",
+    "internal/server",
+    "internal/api",
+    "internal/access",
+    "internal/admission",
+    "internal/auth",
+    "internal/policy",
+    "internal/writerlease",
+    "internal/mooring",
+    "internal/mooringassets",
+    "internal/documents",
+    "internal/quota",
+    "internal/config",
+    "internal/editororigin",
+    "internal/database/migrations",
+    "lib/mooring",
+    "lib/artifact-drafts.ts",
+    "lib/local-draft-seal.ts",
+    "lib/protected-document-drafts.ts",
+    ".env.production",
+    "schemas/wordcraft"
+  ],
   "rows": [
     {
       "id": "A.craft.roundtrip.rich",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.sheet.data-roundtrip",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.soak.saves-2000",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.soak.saves-2000-sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.session.hour-word",
       "origin": "craft",
-      "allowManual": true
+      "allowManual": true,
+      "alwaysRerun": true,
+      "manualChecks": [
+        "enter",
+        "font",
+        "styles",
+        "table",
+        "image",
+        "reload",
+        "restart",
+        "content-after-restart"
+      ]
     },
     {
       "id": "A.craft.session.hour-sheet",
       "origin": "craft",
-      "allowManual": true
+      "allowManual": true,
+      "alwaysRerun": true,
+      "manualChecks": [
+        "enter",
+        "font",
+        "styles",
+        "table",
+        "image",
+        "reload",
+        "restart",
+        "content-after-restart"
+      ]
     },
     {
       "id": "A.craft.lease.holder",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.lease.holder-sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.lease.handoff",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.lease.handoff-sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.lease.stale-generation",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.lease.stale-generation-sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.lease.fail-closed",
       "origin": "craft",
-      "allowSkipped": true
+      "allowSkipped": true,
+      "alwaysRerun": true
     },
     {
       "id": "A.lock",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.agent.free-edit-word",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.agent.free-edit-sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.word.agent-409",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.word.compare",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.word.accept",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.word.reject",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.word.stale",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.sheet.agent-409",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.sheet.compare",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.sheet.accept",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.sheet.reject",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.sheet.stale",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.admission",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.proposal.reader-403",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.agent.word.lease",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.agent.word.one-version",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.agent.word.visible",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.agent.sheet.lease",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.agent.sheet.one-version",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.agent.sheet.visible",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.resilience.outage.word",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.resilience.lost-ack.word",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.write-revoked-word",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.resilience.restart.word",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.resilience.outage.sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.resilience.lost-ack.sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.write-revoked-sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.resilience.restart.sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.read-revoked",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "A.craft.read-revoked-sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "B.project.agent-screens",
@@ -203,7 +294,8 @@
     },
     {
       "id": "B.project.conflict",
-      "origin": "artifacts"
+      "origin": "artifacts",
+      "alwaysRerun": true
     },
     {
       "id": "B.project.restore",
@@ -215,19 +307,23 @@
     },
     {
       "id": "B.project.restore-restart",
-      "origin": "artifacts"
+      "origin": "artifacts",
+      "alwaysRerun": true
     },
     {
       "id": "B.durability.outage",
-      "origin": "artifacts"
+      "origin": "artifacts",
+      "alwaysRerun": true
     },
     {
       "id": "B.durability.lost-ack",
-      "origin": "artifacts"
+      "origin": "artifacts",
+      "alwaysRerun": true
     },
     {
       "id": "B.durability.lost-ack.contract",
-      "origin": "artifacts"
+      "origin": "artifacts",
+      "alwaysRerun": true
     },
     {
       "id": "B.design.two-humans",
@@ -235,7 +331,8 @@
     },
     {
       "id": "B.design.save-reload",
-      "origin": "artifacts"
+      "origin": "artifacts",
+      "alwaysRerun": true
     },
     {
       "id": "B.design.agent-live",
@@ -267,15 +364,18 @@
     },
     {
       "id": "quota.project.work-kept",
-      "origin": "artifacts"
+      "origin": "artifacts",
+      "alwaysRerun": true
     },
     {
       "id": "quota.native.visible",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "quota.native.full",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "quota.aggregate.workspace",
@@ -291,7 +391,8 @@
     },
     {
       "id": "drafts.crash.nothing-saved",
-      "origin": "artifacts"
+      "origin": "artifacts",
+      "alwaysRerun": true
     },
     {
       "id": "drafts.crash.private",
@@ -303,27 +404,33 @@
     },
     {
       "id": "drafts.crash.native-nothing-saved",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "drafts.crash.native-nothing-saved-sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "drafts.crash.native-offer",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "drafts.crash.native-offer-sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "drafts.crash.native-private",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "drafts.crash.native-private-sheet",
-      "origin": "craft"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "drafts.identity-switch",
