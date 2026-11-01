@@ -281,3 +281,20 @@ it("capture tolerates a localStorage getter that throws", async () => {
     expect(() => drafts.removeCapturedLegacyLocalDrafts([{ key: "crewship-design:alice", text: "x" }])).not.toThrow()
   } finally { if (original) Object.defineProperty(globalThis, "localStorage", original) }
 })
+
+it("G4 r4 blocker 2: an older failed write never overwrites a later successful merge when the lane retires", async () => {
+  const store = durableStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("wordcraft-pending", "alice", "w", "page_1")!
+  store.disk.set(key, "BASE")
+  // The write fails everywhere (IndexedDB and the localStorage fallback): the lane keeps it as failed.
+  store.put.mockImplementationOnce(async () => { throw new Error("quota") })
+  vi.mocked(localStorage.setItem).mockImplementationOnce(() => { throw new Error("quota") })
+  await expect(drafts.writeArtifactDraft(key, "OLD")).rejects.toThrow()
+  // Storage recovered: a stop merges its originals into the stored draft.
+  await expect(drafts.mergeArtifactDraft(key, existing => `${existing}+NEW`)).resolves.toBe("BASE+NEW")
+  expect(store.disk.get(key)).toBe("BASE+NEW")
+  // Identity retirement must not replay the older failed value over the merge.
+  await drafts.suspendOtherArtifactDrafts("bob")
+  expect(store.disk.get(key)).toBe("BASE+NEW")
+})
