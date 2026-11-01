@@ -16,21 +16,25 @@ func TestCurrentMonthStart(t *testing.T) {
 	}
 }
 
+// budgetTestNow is a fixed clock for the spend meter tests. The queries
+// take monthStart explicitly and have no upper bound, so a wall clock only
+// added a failure window: in the first hours of a month, "now minus N
+// hours" fell into the previous month and the in-month rows were missed.
+var budgetTestNow = time.Date(2026, 7, 24, 15, 30, 0, 0, time.UTC)
+
 func TestRunStore_MonthlySpendByPipeline(t *testing.T) {
 	db := openResumeTestDB(t)
 	defer db.Close()
 	runs := NewRunStore(db)
-	now := time.Now().UTC()
+	now := budgetTestNow
 	monthStart := CurrentMonthStart(now)
 
 	// In-month spend for two pipelines.
 	seedDigestRun(t, db, "run_1", "ws_b", "routine-a", "completed", 5.0, now.Add(-1*time.Hour))
 	seedDigestRun(t, db, "run_2", "ws_b", "routine-a", "completed", 2.5, now.Add(-2*time.Hour))
 	seedDigestRun(t, db, "run_3", "ws_b", "routine-b", "completed", 1.0, now.Add(-3*time.Hour))
-	// Before this month — must not count (only if monthStart isn't day 1..2).
-	if now.Day() > 1 {
-		seedDigestRun(t, db, "run_old", "ws_b", "routine-a", "completed", 999.0, monthStart.Add(-24*time.Hour))
-	}
+	// Before this month — must not count.
+	seedDigestRun(t, db, "run_old", "ws_b", "routine-a", "completed", 999.0, monthStart.Add(-24*time.Hour))
 	// Different workspace — must not leak.
 	seedDigestRun(t, db, "run_other", "ws_other", "routine-a", "completed", 50.0, now.Add(-1*time.Hour))
 
@@ -53,7 +57,7 @@ func TestRunStore_MonthlySpendForPipeline(t *testing.T) {
 	db := openResumeTestDB(t)
 	defer db.Close()
 	runs := NewRunStore(db)
-	now := time.Now().UTC()
+	now := budgetTestNow
 	monthStart := CurrentMonthStart(now)
 
 	seedDigestRun(t, db, "run_1", "ws_c", "routine-a", "completed", 3.0, now.Add(-1*time.Hour))
