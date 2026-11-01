@@ -30,6 +30,33 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('await chromium.launch(', tests)
         self.assertIn('frontend-test-shards', self.job(ci, 'frontend-test'))
 
+    def test_go_package_partitions_keep_the_measured_budget_and_daylight(self):
+        # internal/api is one ~900 s binary (#4740). Both partitioned suites run
+        # it, so neither may drop back under 20m, and Go's own timeout must
+        # fire with at least 5 minutes left before the job cap (see the
+        # daylight rule in ci.yml) so a timeout names the running test.
+        ci = self.text('ci.yml')
+        for name in ('go-test', 'go-shuffle'):
+            lane = self.job(ci, name)
+            go_timeout = int(re.search(r'go-package-shard\.py run .*-timeout (\d+)m', lane).group(1))
+            job_cap = int(re.search(r'^    timeout-minutes: (\d+)', lane, re.M).group(1))
+            self.assertGreaterEqual(go_timeout, 20, name)
+            self.assertGreaterEqual(job_cap - go_timeout, 3 + 5, name)  # measured overhead ≤ 3m07s
+
+    def test_go_platforms_cap_covers_the_unpartitioned_macos_suite(self):
+        # go-platforms runs `go test ./...` unpartitioned on macOS/arm64. On
+        # 2026-11-01 internal/api alone took 1146 s there and the job was
+        # cancelled at its 30m cap with every package passing (run
+        # 41313229101). The cap must leave room for setup plus the slowest
+        # package chain, not only for one package's -timeout.
+        lane = self.job(self.text('ci.yml'), 'go-platforms')
+        go_timeout = int(re.search(r'go test \./\.\.\. -count=1 -timeout (\d+)m', lane).group(1))
+        job_cap = int(re.search(r'^    timeout-minutes: (\d+)', lane, re.M).group(1))
+        # Same run family: internal/api then hit the 20m package timeout on
+        # macOS (1200.5 s, run 41316056668), so the package bound is 30m.
+        self.assertGreaterEqual(go_timeout, 30)
+        self.assertGreaterEqual(job_cap - go_timeout, 15)
+
     def text(self, name):
         return (ROOT / '.github/workflows' / name).read_text()
 
@@ -39,7 +66,7 @@ class WorkflowContracts(unittest.TestCase):
     def test_all_actual_mooring_lane_executes_public_build_and_every_case(self):
         ci = self.text('ci.yml')
         lane = self.job(ci, 'mooring-actual')
-        self.assertIn("if: needs.changes.outputs.code == 'true'", lane)
+        self.assertIn("if: needs.changes.outputs.code == 'true' && needs.changes.outputs.full == 'true'", lane)
         self.assertIn('./.github/actions/setup-go-embed', lane)
         self.assertIn('rustup toolchain install 1.99.1', lane)
         self.assertIn('sha256sum --check --strict', lane)
@@ -267,7 +294,7 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('go-race-api-template', re.search(r'^    needs:.*$', workers, re.M).group())
         self.assertIn('api-race-shard.py run "$SHARD_INDEX" "$SHARD_COUNT" "$timeout_s" .ci-api-template', workers)
         bootstrap = self.job(ci, 'go-race-api-template')
-        self.assertIn("if: needs.changes.outputs.go == 'true'", bootstrap)
+        self.assertIn("if: needs.changes.outputs.go == 'true' && needs.changes.outputs.full == 'true'", bootstrap)
         self.assertIn('api-race-shard.py bootstrap .ci-api-template 4600', bootstrap)
         self.assertIn('api-race-template-${{ github.sha }}', bootstrap)
         self.assertNotIn('continue-on-error:', bootstrap)
@@ -420,6 +447,36 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('needs.resolve.outputs.image', smoke)
         self.assertIn('cosign verify --certificate-identity', smoke)
         self.assertNotIn('docker pull "ghcr.io/$OWNER/crewship:nightly"', smoke)
+
+    def test_expensive_lanes_run_in_merge_queue_not_on_every_pull_request(self):
+        # #4752: the expensive matrix runs on merge_group/push (and on PRs that
+        # opt in); every other lane keeps running on every pull request.
+        from verdict import FULL
+        ci = self.text('ci.yml')
+        jobs = set(re.findall(r'^  ([a-z][\w-]*):$', ci.split('jobs:\n', 1)[1], re.M)) - {'result'}
+        self.assertLessEqual(FULL, jobs)
+        self.assertIn('full: ${{ steps.plan.outputs.full }}', self.job(ci, 'changes'))
+        gate = "needs.changes.outputs.full == 'true'"
+        for name in sorted(jobs):
+            condition = re.search(r'^    if: (.*)$', self.job(ci, name), re.M)
+            condition = condition.group(1) if condition else ''
+            with self.subTest(job=name):
+                if name in FULL:
+                    self.assertIn(gate, condition)
+                    self.assertNotIn('||', condition)
+                else:
+                    self.assertNotIn('outputs.full', condition)
+        # Branch protection requires only the aggregate; it must keep its name,
+        # always run, and judge the plan with the triggering event.
+        result = self.job(ci, 'result')
+        self.assertIn('name: CI Result', result)
+        self.assertIn('if: always()', result)
+        self.assertIn('python3 scripts/ci/verdict.py', result)
+        verdict = (ROOT / 'scripts/ci/verdict.py').read_text()
+        self.assertIn("GITHUB_EVENT_NAME", verdict)
+        triggers = ci.split('jobs:\n', 1)[0]
+        self.assertIn('merge_group:', triggers)
+        self.assertRegex(triggers, r'push:\n    branches: \[main\]')
 
 
 if __name__ == '__main__':

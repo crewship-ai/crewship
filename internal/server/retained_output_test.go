@@ -37,7 +37,11 @@ func seedHostOutputWith(t *testing.T, s *Server, runID, text string, finished bo
 	}
 	// A private sibling under sticky /tmp also works inside the resource
 	// wrapper, whose build TMPDIR has deliberately shared ancestors.
-	root, err := os.MkdirTemp("/tmp", "crewship-retained-server-")
+	base := os.Getenv("CREWSHIP_HOST_CAPTURE_TEST_TMPDIR")
+	if base == "" {
+		base = "/tmp"
+	}
+	root, err := os.MkdirTemp(base, "crewship-retained-server-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,5 +287,80 @@ func TestRetainedOutputRefusesConflictingExitAfterTerminalPruning(t *testing.T) 
 	}
 	if current.Status != "running" || current.Output.Acknowledged {
 		t.Fatalf("conflicting source settled: %+v", current)
+	}
+}
+
+// A normal host chat observer may return before protected output completes.
+// Only the real replay/analysis/projector path (not another caller finish)
+// may consume that later exit, on the SAME attempt and generation.
+func TestHostChatRetainedOutputSettlesSameAttemptAfterUnknownReturn(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('retained-ws','Recovery','retained-ws')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('retained-agent','retained-ws','Agent','retained','RUNNING')`)
+	store := work.NewStore(s.db)
+	request := work.HostChatRequest{RunID: "msg_host_chat_retained", WorkspaceID: "retained-ws", AgentID: "retained-agent", ChatID: "chat", UserID: "user", TriggerMessageID: "message"}
+	admitted, _, err := store.BeginHostChat(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = store.HostChatPhase(t.Context(), request.RunID, "request"); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.FinishHostChat(t.Context(), request.RunID, work.HostChatResult{Status: "FAILED", Result: work.RunResult{Metadata: map[string]any{"partial": true}}}); err != nil {
+		t.Fatal(err)
+	}
+	run := seedHostOutput(t, s, request.RunID, `{"type":"result","subtype":"success","is_error":false,"result":"late answer"}`+"\n")
+	run.Output.Adapter = "CLAUDE_CODE"
+	raw, err := json.Marshal(run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.state.Set(t.Context(), "agent_runs", run.ID, raw); err != nil {
+		t.Fatal(err)
+	}
+	foreign := run
+	foreign.WorkspaceID = "foreign"
+	if err = s.projectRetainedOutput(t.Context(), foreign); err == nil {
+		t.Fatal("mismatched protected ownership accepted")
+	}
+	before, _, err := store.RunProjection(t.Context(), run.ID)
+	if err != nil || before.Ready {
+		t.Fatalf("unknown prematurely terminal: %+v %v", before, err)
+	}
+	next := request
+	next.RunID = "msg_next_chat"
+	next.TriggerMessageID = "next-message"
+	if _, _, err = store.BeginHostChat(t.Context(), next); !errors.Is(err, work.ErrNoWork) {
+		t.Fatalf("unknown custody released: %v", err)
+	}
+	if err = s.projectRetainedOutput(t.Context(), run); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.projectRetainedOutput(t.Context(), run); err != nil {
+		t.Fatalf("duplicate protected replay: %v", err)
+	}
+	after, _, err := store.RunProjection(t.Context(), run.ID)
+	if err != nil || !after.Ready || after.Status != "COMPLETED" || after.Result.ExitCode == nil || *after.Result.ExitCode != 0 || after.Result.CompletedAt == "" {
+		t.Fatalf("actual protected completion: %+v %v", after, err)
+	}
+	binding, _, err := store.HostChatAttempt(t.Context(), run.ID)
+	if err != nil || binding.Generation != admitted.Generation || binding.WorkID != admitted.Item.ID || binding.State != work.StateSucceeded {
+		t.Fatalf("recovery changed attempt ownership: %+v %v", binding, err)
+	}
+	var terminals int
+	if err = s.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE trace_id=? AND entry_type='run.completed'`, run.ID).Scan(&terminals); err != nil || terminals != 1 {
+		t.Fatalf("terminal receipts=%d err=%v", terminals, err)
+	}
+	// Once authoritative capture is projected, a caller cannot replace its exit.
+	wrong := 17
+	if err = store.FinishHostChat(t.Context(), run.ID, work.HostChatResult{Status: "FAILED", ObservedExit: &wrong}); err != nil {
+		t.Fatal(err)
+	}
+	again, _, err := store.RunProjection(t.Context(), run.ID)
+	if err != nil || again.Status != after.Status || again.Result.CompletedAt != after.Result.CompletedAt || *again.Result.ExitCode != 0 {
+		t.Fatalf("caller replaced protected facts: %+v %v", again, err)
+	}
+	if _, _, err = store.BeginHostChat(t.Context(), next); err != nil {
+		t.Fatalf("actual protected successful exit kept capacity: %v", err)
 	}
 }
