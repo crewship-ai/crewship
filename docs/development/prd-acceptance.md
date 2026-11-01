@@ -288,7 +288,14 @@ A scenario driven through the CLI uses the same structure: take the binary from
 and an isolated `HOME`, and record its output as evidence.
 
 Unit tests for the runner's table and arguments:
-`node --test e2e/acceptance/prd/report.test.mjs`.
+`node --test e2e/acceptance/prd/report.test.mjs`. The same file checks the
+IDs statically (`emitted-ids.mjs` reads the `prdRequirement(...)` calls of the
+spec sources): every ID a spec emits must be in `required-ids.json`, either
+as a row or under `diagnostic` (the `harness.*` smoke rows, which the RC gate
+does not count); every required ID must be emitted by exactly one call; and a
+`${...}` placeholder in an ID must be one of the known Word/Sheet loop
+variables in `PLACEHOLDERS`. A renamed or forgotten row therefore fails in CI,
+not as `missing` on the RC.
 
 ## RC gate: required IDs
 

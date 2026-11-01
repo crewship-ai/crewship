@@ -5,6 +5,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { test } from "node:test"
 import { parseOriginMap, evaluateRequired, formatGate, loadRequired, manualToRows, formatTable, parseArgs, readRows, resultOf, summarize, writeSummary } from "./report.mjs"
+import { idCoverageProblems, scanEmittedIds } from "./emitted-ids.mjs"
 
 const row = (over = {}) => ({
   requirement: "B.project.version",
@@ -198,6 +199,33 @@ test("gate: formatGate lists every problem; shipped required-ids.json is well fo
   for (const id of ["B.project.from-chat", "A.lock", "quota.aggregate.workspace", "drafts.identity-switch", "A.craft.session.hour-word"]) assert.ok(ids.includes(id), id)
   assert.equal(ids.filter((i) => i.startsWith("drafts.crash.")).length, 11)
   for (const x of real.rows) assert.ok(real.origins[x.origin], x.id)
+})
+
+test("ids: every required ID has exactly one emitting scenario and every emitted ID is required or diagnostic", () => {
+  const real = loadRequired(new URL("./required-ids.json", import.meta.url).pathname, `craft=${CRAFT},artifacts=${ART}`)
+  const scan = scanEmittedIds()
+  assert.ok(scan.emitted.size > 50, `scanned ${scan.emitted.size} IDs`)
+  assert.deepEqual(idCoverageProblems(scan, real), [])
+})
+
+test("ids: the coverage check reports unknown, missing, duplicate and unresolved IDs", () => {
+  const scan = {
+    emitted: new Map([
+      ["A.one", ["a.acceptance.ts"]],
+      ["A.extra", ["a.acceptance.ts"]],
+      ["A.twice", ["a.acceptance.ts", "b.acceptance.ts"]],
+      ["harness.reach", ["smoke.acceptance.ts"]],
+    ]),
+    unresolved: [{ file: "c.acceptance.ts", id: "A.${app}.x" }],
+  }
+  const problems = idCoverageProblems(scan, { rows: [{ id: "A.one" }, { id: "A.twice" }, { id: "A.gone" }], diagnostic: ["harness.reach", "harness.ghost"] })
+  assert.deepEqual(problems.sort(), [
+    "diagnostic ID nobody emits: harness.ghost",
+    "emitted more than once: A.twice (a.acceptance.ts, b.acceptance.ts)",
+    "no emitting scenario: A.gone",
+    "not required: A.extra (a.acceptance.ts)",
+    "unresolved: A.${app}.x in c.acceptance.ts",
+  ])
 })
 
 test("parseArgs: --rc, --manual, --merge, --required", () => {

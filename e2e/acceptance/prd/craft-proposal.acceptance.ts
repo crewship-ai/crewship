@@ -119,7 +119,7 @@ test.describe("craft proposal", () => {
     {
       annotation: [
         prdRequirement(
-          "A.craft.lease.held-409",
+          "A.lock",
           "While a person holds the editor, another writer's acquire gets 409 and the lease names the human holder (Word and Sheet)",
         ),
         prdRequirement("A.craft.proposal.reader-403", "A reader can list proposals but cannot accept or reject them (403); the document is unchanged"),
