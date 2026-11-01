@@ -33,6 +33,12 @@ class GateTests(unittest.TestCase):
             (['pnpm-lock.yaml'], {'code': True, 'go': True}),
             (['.github/workflows/ci.yml'], {'code': True, 'go': True}),
             (['new-runtime/config.toml'], {'code': True, 'go': True}),
+            # Release-note fragments are prose like CHANGELOG.md (#4751); only
+            # top-level .md files count, anything else there is unknown input.
+            (['changelog.d/4751-fragments.md'], {'code': False, 'go': False}),
+            (['components/button.tsx', 'changelog.d/4751-fragments.md'], {'code': True, 'go': False}),
+            (['changelog.d/nested/4751-fragments.md'], {'code': True, 'go': True}),
+            (['changelog.d/4751-fragments.sh'], {'code': True, 'go': True}),
         ]:
             with self.subTest(paths=paths):
                 self.assertEqual(classify(paths), {'docs_inventory': False, **expected, 'go_parity': False, 'frontend_parity': False})
