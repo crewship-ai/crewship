@@ -178,6 +178,30 @@ membership revision and the original credential are still checked live on
 every operation and stream heartbeat. A fresh read admission is separate from
 reacquisition.
 
+`session_retired` carries `reason: "write_revoked"` (with `draft: "retain"`)
+only when, at retirement, the same original credential still passes the Page
+read check and the Page write check is explicitly denied. Every other
+retirement keeps `reason: "authority_changed"`. The reason is advisory text for
+the person; it authorizes nothing (#4348). The retired admission, its token and
+its lease generation stay dead: every write path (save, import, restore,
+reconcile, share, lease mutations, proposal acceptance) refuses it, and a later
+re-grant does not revive it. On `write_revoked` the browser retires local
+writing exactly as on lease loss (input frozen, the unsaved buffer captured to
+the private journal, never sent), closes the old client and requests one fresh
+admission, which the server grants only after a fresh read check. That
+admission reads the current version, shows the same read-only editor a
+non-holder sees and offers the captured draft for compare or copy. A refused
+fresh admission ends in the ordinary disconnected state with the draft kept;
+it is not retried. A later read loss on the fresh admission stops delivery
+like any other (`draft: "purge"`). That purge also erases the draft row the
+retired write journal persisted, even though that journal is already closed:
+a closed handle still refuses a Page-wide purge (it must never erase a fresh
+mount's draft), so it deletes exactly its own row by its full key
+(`eraseOwnRow`). Work still in flight from the replaced admission, such as a
+pending document read, is ignored when it completes and never stops the
+fresh read-only view. Comment-only access is not native read
+access, so an Edit to Comment downgrade follows the read-loss path.
+
 Original expired or revoked credentials never regain an old admission. Explicit
 reauthorization accepts only a separately authenticated newer expiry for the same
 still-live identity and epoch. It never extends an already exhausted boot-time

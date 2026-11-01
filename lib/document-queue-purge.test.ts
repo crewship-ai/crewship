@@ -35,6 +35,30 @@ it.skipIf(!existsSync(chromium.executablePath()))("purges a Page's rows, then ot
   } finally { await browser.close() }
 })
 
+it.skipIf(!existsSync(chromium.executablePath()))("removes exactly one row by its full key, without the Page lock (#4348)", async () => {
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage()
+    await page.route("https://document-queue.test/**", route => route.fulfill({ body: "<!doctype html><title>Document journal</title>", contentType: "text/html" }))
+    await page.goto("https://document-queue.test")
+    const { outputFiles } = buildSync({ entryPoints: [`${process.cwd()}/lib/document-queue.ts`], bundle: true, write: false, platform: "browser", format: "iife", globalName: "documentQueue" })
+    await page.addScriptTag({ content: outputFiles[0].text })
+    const result = await page.evaluate(async () => {
+      const q = (window as unknown as { documentQueue: typeof import("./document-queue") }).documentQueue
+      const draft = (id: string) => ({ id, update: "", attempted: true, schema: 1, epoch: "native-v1", snapshot: "private text" })
+      const store = await q.openDocumentDrafts("alice", "w", "p1")
+      await store.put(draft("native:old")); await store.put(draft("native:fresh"))
+      const other = await q.openDocumentDrafts("alice", "w", "p2"); await other.put(draft("native:old")); other.close()
+      // The fresh mount still holds its store (and the Page lock) open.
+      await q.removeDocumentDraftRow("alice", "w", "p1", { schema: 1, epoch: "native-v1", id: "native:old" })
+      const ids = async (pageId: string) => { const s = await q.openDocumentDrafts("alice", "w", pageId); try { return (await s.load()).map(row => row.id) } finally { s.close() } }
+      store.close()
+      return { p1: await ids("p1"), p2: await ids("p2") }
+    })
+    expect(result).toEqual({ p1: ["native:fresh"], p2: ["native:old"] })
+  } finally { await browser.close() }
+})
+
 it("closes an IndexedDB connection that opens after the purge deadline", async () => {
   const { vi } = await import("vitest")
   const { purgeDocumentDrafts, STORAGE_OPEN_TIMEOUT_MS } = await import("./document-queue")

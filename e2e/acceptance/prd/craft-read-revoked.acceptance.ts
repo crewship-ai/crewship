@@ -10,13 +10,20 @@
 // A Read person is shown the read-only shared preview of the published version
 // (not the live editor), so the browser test publishes one first.
 import { peerApi, requireNative, traceCraft, type CraftCall } from "./craft-lease/helpers"
-import { APPLICATIONS, NativePage, parseEvents, sessionUserId } from "./craft-lease/native"
+import { APPLICATIONS, NativePage, emptyDocument, parseEvents, sessionUserId } from "./craft-lease/native"
 import { pause } from "./drafts-crash/crash"
 import { expect, prdRequirement, test } from "./fixtures"
 
 const REQ = {
   wordcraft: prdRequirement("A.craft.read-revoked", "Word: when a reader loses read access the event stream stops, no content is delivered and the editor shows it"),
   gridcraft: prdRequirement("A.craft.read-revoked-sheet", "Sheet: when a reader loses read access the event stream stops, no content is delivered and the editor shows it"),
+} as const
+// #4348: losing only write keeps read. The writer admission is retired with
+// reason write_revoked and draft retain; only a FRESH admission reads, and it
+// cannot write or reuse the old lease generation.
+const WRITE_REQ = {
+  wordcraft: prdRequirement("A.craft.write-revoked-word", "Word: when an editor loses only write access the session retires its write authority and a fresh admission reads read-only"),
+  gridcraft: prdRequirement("A.craft.write-revoked-sheet", "Sheet: when an editor loses only write access the session retires its write authority and a fresh admission reads read-only"),
 } as const
 
 // The server rechecks authority on a 5 s tick; leave generous slack.
@@ -91,6 +98,62 @@ for (const { application, label } of APPLICATIONS) {
           const ownerSession = await doc.session(request)
           expect((await doc.document(request, ownerSession)).bytes, "the owner still reads the document").toBe(open.bytes)
           await prd.evidence("result.json", log)
+        } finally {
+          for (const c of cleanup.reverse()) await c().catch(() => {})
+        }
+      },
+    )
+
+    test(
+      `${label}: revoking only write retires the writer and leaves a fresh read-only admission (API)`,
+      { annotation: WRITE_REQ[application] },
+      async ({ prd, request }) => {
+        const cleanup: Array<() => Promise<void>> = []
+        try {
+          const ws = await prd.qaWorkspace()
+          const doc = await NativePage.create(request, ws.id, application, `PRD write revoked ${label}`)
+          await requireNative(prd, request, doc)
+          const { peer, api: editorApi } = await peerApi(prd, cleanup)
+          await doc.grant(request, peer.userId, "write")
+
+          // The editor holds the lease and its stream is live.
+          const admission = await doc.session(editorApi)
+          const head = await doc.document(editorApi, admission)
+          const acquired = await doc.leaseOp(editorApi, admission, "acquire")
+          expect(acquired.status(), "the editor takes the lease").toBe(200)
+          const generation = ((await acquired.json()) as { generation: string }).generation
+          const startedAt = Date.now()
+          const outcome = doc.eventsRaw(editorApi, admission, STOP_WITHIN_MS).then(
+            (res) => ({ res }),
+            (error: unknown) => ({ error: String(error).slice(0, 300) }),
+          )
+          await pause(1500)
+          await doc.grant(request, peer.userId, "read")
+          await doc.revoke(request, peer.userId, "write")
+          const ended = await outcome
+          if ("error" in ended) throw new Error(ended.error)
+          const events = parseEvents(await ended.res.text())
+          expect(events.at(-1)?.event, "the writer admission is retired").toBe("session_retired")
+          expect(events.at(-1)?.data, "read remains, so the draft stays and the reason is given").toMatchObject({ delivery: "stopped", reason: "write_revoked", draft: "retain" })
+          const stoppedAfterMs = Date.now() - startedAt
+
+          // No write path of the old admission works any more.
+          const save = await doc.save(editorApi, admission, { generation, baseVersion: head.version, enginePin: head.enginePin, bytes: emptyDocument(application), editorRevision: "1:1:1" })
+          expect([403, 409], "old admission save after the write revoke").toContain(save.status())
+          expect((await doc.leaseOp(editorApi, admission, "renew", { generation })).status(), "old admission renew").toBeGreaterThanOrEqual(400)
+
+          // A fresh admission reads the current document, read-only.
+          const fresh = await doc.session(editorApi)
+          const reread = await doc.document(editorApi, fresh)
+          expect(reread.version, "the fresh admission reads the current version").toBe(head.version)
+          const view = await doc.lease(editorApi, fresh)
+          expect(view.can_edit, "the fresh admission cannot edit").toBe(false)
+          expect(view.can_write).toBe(false)
+          expect((await doc.leaseOp(editorApi, fresh, "acquire")).status(), "the fresh admission cannot take the lease").toBe(403)
+          const reused = await doc.save(editorApi, fresh, { generation, baseVersion: head.version, enginePin: head.enginePin, bytes: emptyDocument(application), editorRevision: "1:2:1" })
+          expect([403, 409], "the fresh admission cannot reuse the old generation").toContain(reused.status())
+          expect((await doc.document(request, await doc.session(request))).version, "nothing was written").toBe(head.version)
+          await prd.evidence("write-revoked.json", { application, mode: prd.mode, appSha: prd.appSha, workspaceId: ws.id, pageId: doc.pageId, stoppedAfterMs, save: save.status(), reused: reused.status() })
         } finally {
           for (const c of cleanup.reverse()) await c().catch(() => {})
         }

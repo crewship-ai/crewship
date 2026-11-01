@@ -1,5 +1,5 @@
 import { openProtectedDocumentDrafts as openDocumentDrafts } from "../protected-document-drafts"
-import { DocumentStorageError, purgeDocumentDrafts, registerDocumentDraftWriter } from "../document-queue"
+import { DocumentStorageError, purgeDocumentDrafts, registerDocumentDraftWriter, removeDocumentDraftRow } from "../document-queue"
 
 export interface NativeDraft {
   applicationId: string
@@ -18,6 +18,10 @@ export interface NativeDraftJournal {
   onRetire(listener: () => void): () => void
   close(): Promise<void>
   revokeRead(): Promise<void>
+  /** Erases only this mount's own persisted row, also after close (#4348).
+   * Unlike `revokeRead`, it never touches another mount's rows, so a closed
+   * handle may use it on a read revocation. */
+  eraseOwnRow?(): Promise<void>
 }
 // Raw native payload matches the server limit; base64 and journal metadata use a larger encoded budget.
 const MAX_NATIVE_BYTES = 32 * 1024 * 1024
@@ -125,6 +129,10 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
       return () => { listeners.delete(listener) }
     },
     close,
+    eraseOwnRow() {
+      // Writes already queued finish first; a retired handle accepts no more.
+      return retire().then(() => removeDocumentDraftRow(scope.human, scope.workspace, scope.page, { schema: 1, epoch: "native-v1", id })).then(() => { current = undefined }).finally(closeStore)
+    },
     revokeRead() {
       if (purged) return purged
       // An old closed mount has no live admission to erase a fresh mount.

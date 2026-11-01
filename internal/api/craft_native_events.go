@@ -50,16 +50,23 @@ func (m *craftNativeHTTP) events(w http.ResponseWriter, r *http.Request) {
 		return controller.Flush() == nil
 	}
 	retire := func() {
-		draft := "retain"
+		draft, reason := "retain", "authority_changed"
 		tx, e := m.pages.db.BeginTx(r.Context(), nil)
 		if e == nil {
 			_, e = m.pageAuthority(r.Context(), tx, entry.source, entry.scope, false)
-			_ = tx.Rollback()
 			if errors.Is(e, errCraftNativeAccess) || errors.Is(e, errContentCredentialNotCurrent) || errors.Is(e, errContentCredentialScope) || errors.Is(e, sql.ErrNoRows) {
 				draft = "purge"
+			} else if e == nil {
+				// Read still holds but Page write is explicitly denied (#4348). The
+				// reason only lets the client explain itself and ask for a FRESH read
+				// admission; this admission and its lease generation stay retired.
+				if _, denied := m.pageAuthority(r.Context(), tx, entry.source, entry.scope, true); errors.Is(denied, errCraftNativeAccess) {
+					reason = "write_revoked"
+				}
 			}
+			_ = tx.Rollback()
 		}
-		send("session_retired", map[string]any{"delivery": "stopped", "reason": "authority_changed", "draft": draft})
+		send("session_retired", map[string]any{"delivery": "stopped", "reason": reason, "draft": draft})
 	}
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()

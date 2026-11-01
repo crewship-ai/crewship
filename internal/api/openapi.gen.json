@@ -135886,7 +135886,7 @@
             "content": {
               "text/event-stream": {
                 "schema": {
-                  "description": "SSE event: lease with NativeCraftLease JSON, or session_retired with delivery=stopped, reason=authority_changed and draft=retain|purge. Generic auth failures do not imply draft purge.",
+                  "description": "SSE event: lease with NativeCraftLease JSON, or session_retired with delivery=stopped, reason=authority_changed|write_revoked and draft=retain|purge; write_revoked (always with draft=retain) means read remains and write was removed, and the client may request a fresh read admission. Generic auth failures do not imply draft purge.",
                   "type": "string"
                 }
               }
