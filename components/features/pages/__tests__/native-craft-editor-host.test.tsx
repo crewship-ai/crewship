@@ -714,4 +714,26 @@ describe('native host lease expiry re-verification',()=>{
    await waitFor(()=>expect(p.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal)))
   }finally{vi.useRealTimers()}
  })
+ it('retires write when the re-verification never answers',async()=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   client.leaseAction.mockImplementation(async(action:string)=>{if(action==='acquire')client.lease.mockImplementation(async()=>soon());return soon()})
+   mount();await ready();await acquire()
+   const p=ports.at(-1)!;client.lease.mockImplementation(()=>new Promise(()=>{}))
+   await act(async()=>{await vi.advanceTimersByTimeAsync(16_000)})
+   expect(p.setReadOnly).not.toHaveBeenCalledWith(true,expect.anything())
+   await act(async()=>{await vi.advanceTimersByTimeAsync(6_000)})
+   await waitFor(()=>expect(p.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal)))
+  }finally{vi.useRealTimers()}
+ })
+ it('retires write when the re-verification reply is malformed',async()=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   client.leaseAction.mockImplementation(async(action:string)=>{if(action==='acquire')client.lease.mockImplementation(async()=>soon());return soon()})
+   mount();await ready();await acquire()
+   const p=ports.at(-1)!;client.lease.mockResolvedValue({mine:'yes'})
+   await act(async()=>{await vi.advanceTimersByTimeAsync(16_000)})
+   await waitFor(()=>expect(p.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal)))
+  }finally{vi.useRealTimers()}
+ })
 })

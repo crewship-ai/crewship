@@ -27,6 +27,8 @@ function leaseView(raw:unknown):Lease {
  if(raw.mine&&(!raw.holder||!raw.generation))throw Error('invalid_lease')
  return raw as unknown as Lease
 }
+/** How long a lapsed cached lease may wait for the server's confirmation before write is retired. */
+const RECHECK_MS=5_000
 function holds(view:Lease,generation?:string):boolean{return view.can_edit===true&&view.mine&&view.can_write&&view.generation!==null&&(!generation||view.generation===generation)}
 function owns(view:Lease,generation?:string):boolean{return holds(view,generation)&&typeof view.expires_at==='string'&&Date.parse(view.expires_at)>Date.now()}
 /** The server selects the approved bundle. No query, credentials or alternative executable path is accepted. */
@@ -484,14 +486,16 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    const own=client
    // The server renews a human holder while this stream is open, but a stalled
    // renderer can read those renewals late. A lapsed cached expiry alone asks the
-   // server once; loss, an invalid reply or a failed check still retires write.
-   let rechecking=false
+   // server once; loss, an invalid reply, a failed check or no answer within
+   // RECHECK_MS still retires write.
+   let recheckSince=0
    leaseWatch=setInterval(()=>{
-    const r=current;if(!r?.writable||owns(viewNow,r.generation)||rechecking)return
+    const r=current;if(!r?.writable||owns(viewNow,r.generation))return
     const retire=()=>void retireWrite(r).catch(()=>stop('Platnost úprav skončila. Koncept zůstává zachován.'))
+    if(recheckSince){if(Date.now()-recheckSince>=RECHECK_MS)retire();return}
     if(!holds(viewNow,r.generation)){retire();return}
-    rechecking=true
-    void own.lease(lifetime.signal).then(raw=>{if(dead||client!==own||!r.writable)return;const next=leaseView(raw);if(!owns(next,r.generation)){retire();return}viewNow=next;setView(next)}).catch(()=>{if(!dead&&client===own&&r.writable)retire()}).finally(()=>{rechecking=false})
+    const since=Date.now();recheckSince=since
+    void own.lease(lifetime.signal).then(raw=>{if(dead||client!==own||!r.writable)return;const next=leaseView(raw);if(!owns(next,r.generation)){retire();return}viewNow=next;setView(next)}).catch(()=>{if(!dead&&client===own&&r.writable)retire()}).finally(()=>{if(recheckSince===since)recheckSince=0})
    },1000)
    reauthorize=setInterval(()=>{void own.reauthorize(lifetime.signal).catch(()=>{if(!dead&&client===own)void retireConnection('Spojení bylo ukončeno. Koncept zůstává zachován.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})},30000)
    void own.events(lifetime.signal,(event,value)=>{
