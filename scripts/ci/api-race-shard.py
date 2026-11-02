@@ -289,10 +289,15 @@ def report(directory, count, baseline, bootstrap_directory=None):
     with open(os.environ.get('GITHUB_STEP_SUMMARY', os.devnull), 'a') as output:
         output.write(summary)
     if seconds > alarm:
-        main_push = os.environ.get('GITHUB_EVENT_NAME') == 'push'
-        print(f'::{"error" if main_push else "warning"}::API race combined duration exceeds '
+        # Only a pull_request run may merely warn: it is advisory, and the
+        # change still has to pass the merge queue. The merge group runs the
+        # same full suite main would, so a regression must stop there, before
+        # it lands; #4647 slipped in because the queue only warned. Any other
+        # or missing event name fails closed.
+        enforce = os.environ.get('GITHUB_EVENT_NAME') != 'pull_request'
+        print(f'::{"error" if enforce else "warning"}::API race combined duration exceeds '
               'the erosion alarm; re-measure from green main runs before changing the budget.')
-        return int(main_push)
+        return int(enforce)
     return 0
 
 

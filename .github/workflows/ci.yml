@@ -2243,7 +2243,7 @@ jobs:
         # migration behind sync.Once), so the sum is not the unsplit runtime:
         # 3 partitions summed 2064.6s on PR run 37475371053 (unsplit main:
         # 878.8s). Baseline 2100 in that metric; the 1.6x alarm warns on PRs
-        # and fails on main pushes, as for internal/api.
+        # and fails in the merge queue and on main pushes, as for internal/api.
         env:
           RACE_SHARD_PACKAGE: github.com/crewship-ai/crewship/cmd/crewship
         run: python3 scripts/ci/api-race-shard.py report .ci-cli-shards 3 2100
