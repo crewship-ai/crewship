@@ -187,6 +187,15 @@ test("gate: rows from several runs merge, latest per ID wins, no rc means any si
   assert.throws(() => evaluateRequired(good(), required, {}), /--rc/)
 })
 
+test("gate: a manual walkthrough replaces the skipped automated row of its ID (#4767)", () => {
+  const skippedAuto = row({ requirement: "A.hour", origin: CRAFT, appSha: RC, test: "hour in the browser", result: "skipped", reason: "manual walkthrough", finishedAt: "2026-11-02T10:00:00.000Z" })
+  const walk = manualToRows([{ id: "A.hour", result: "passed", appSha: RC, evidence: "https://rec.test/v/1", recordedAt: "2026-11-02T12:00:00Z" }], required)
+  const all = good().filter((x) => x.requirement !== "A.hour").concat(skippedAuto, walk)
+  assert.deepEqual(kinds(evaluateRequired(all, required, { rc: RC })), [])
+  const failedWalk = manualToRows([{ id: "A.hour", result: "failed", appSha: RC, evidence: "https://rec.test/v/2", recordedAt: "2026-11-02T13:00:00Z" }], required)
+  assert.deepEqual(kinds(evaluateRequired([...all, ...failedWalk], required, { rc: RC })), ["A.hour:result"])
+})
+
 test("gate: manual rows are converted and recordedAt orders them", () => {
   const rows = manualToRows([{ id: "A.hour", result: "passed", appSha: RC, evidence: "https://rec.test/v/1", recordedAt: "2026-10-31T10:00:00Z" }], required)
   assert.equal(rows[0].mode, "manual")

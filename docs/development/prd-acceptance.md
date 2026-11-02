@@ -315,7 +315,8 @@ public repository; pass them with `--origin-map craft=<url>,artifacts=<url>` or
 `PRD_RC_ORIGINS`. The gate refuses to run without them. Adding a scenario means
 adding its ID here in the same change.
 
-A required ID passes only when its latest row has result `passed`, `mode=full`,
+A required ID passes only when the latest row of every test that emits it has
+result `passed`, `mode=full`,
 the canonical origin and an `appSha` equal to the release candidate. Exceptions:
 
 - `A.craft.lease.fail-closed` may be `skipped` (servers with a native editor only).
@@ -326,7 +327,10 @@ the canonical origin and an `appSha` equal to the release candidate. Exceptions:
   ID accepts a manual record.
 - Evidence from an older SHA counts only through `--carryover` (below).
 
-Several runs assemble one RC. Per ID the latest row on the RC SHA wins; a row
+Several runs assemble one RC. Per ID and test the latest row on the RC SHA wins
+(a rerun supersedes that test's earlier attempt) and the ID takes the worst of
+its tests, so a later passing test never hides a failed one; a manual record
+replaces the automated rows of its ID. A row
 on another SHA counts only when none exists on the RC, and then fails as `appSha`
 unless a carryover record covers it.
 

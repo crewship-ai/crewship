@@ -249,7 +249,8 @@ export function gitDiffStat(from, to, paths) {
  * Checks merged rows against the required list. Per ID and test the latest
  * row on the RC SHA wins (a rerun supersedes that test's earlier attempt), and
  * the ID takes the worst of its tests, so a later passing test never hides a
- * failed one (#4767); rows on other SHAs only count when no row
+ * failed one (#4767); a manual record replaces the automated rows of its ID.
+ * Rows on other SHAs only count when no row
  * on the RC exists, and then fail as "appSha" unless a carryover record
  * covers them. A carried row keeps the SHA it was proven on and gets
  * `carriedFrom` with the diff against the RC over its scenario paths plus the
@@ -276,7 +277,10 @@ export function evaluateRequired(rows, required, opts) {
     const mine = rows.filter((r) => r.requirement === req.id)
     const onRc = mine.filter((r) => shaMatches(r.appSha, rc))
     const pool = onRc.length ? onRc : mine
-    let row = pick(pool)
+    // A manual record replaces the automated rows of its ID (a full run emits
+    // A.craft.session.hour-* as skipped and the walkthrough supplies the result).
+    const manual = pool.filter((r) => r.mode === "manual")
+    let row = pick(manual.length ? manual : pool)
     const fail = (kind, detail) => problems.push({ id: req.id, kind, detail })
     if (!row) {
       fail("missing", "no result row recorded")
