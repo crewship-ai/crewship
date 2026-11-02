@@ -50,7 +50,8 @@ repository names a real host or account.
 | `PRD_AGENT_SLUG`, `PRD_AGENT_WORKSPACE_ID` | Full mode: seeded agent and the workspace it belongs to |
 | `PRD_CLI` | Path of the `crewship` CLI binary for CLI-driven scenarios (`prd.requireCli()`) |
 | `PRD_CRAFT_NATIVE` | `on` or `off`: whether the origin has a native Word/Sheet editor profile. Unset, full mode assumes `on` and quick mode reads `GET /api/v1/documents/status`. The craft-lease scenarios decide from it, never from the initialize call they check |
-| `PRD_RESTART_COMMAND` | Command that restarts the server under test, for rows that must survive a restart (`B.project.restore-restart`), e.g. `crew restart dev2`. The test waits until `/healthz` reports a new process (lower uptime). Unset and no handshake → the row fails in full mode, is skipped in quick mode. `crew` refuses to run under `crewship-heavy`, so a queued run uses `PRD_RESTART_HANDSHAKE` instead |
+| `PRD_HOUR_MINUTES` | Length of the `A.craft.session.hour-word` / `-sheet` work session in minutes. Default 60, and in full mode 60 is required: a shorter run (set `PRD_HOUR_SHORT_RUN=1` to allow it while debugging) does the same work but ends red, so it can never be mistaken for the evidence |
+| `PRD_RESTART_COMMAND` | Command that restarts the server under test, for rows that must survive a restart (`B.project.restore-restart`, `A.resilience.restart.*`, `A.craft.session.hour-*`), e.g. `crew restart dev2`. The test waits until `/healthz` reports a new process (lower uptime). Unset and no handshake → the row fails in full mode, is skipped in quick mode. `crew` refuses to run under `crewship-heavy`, so a queued run uses `PRD_RESTART_HANDSHAKE` instead |
 | `PRD_RESTART_HANDSHAKE` | Directory for a restart done by the operator's shell: the test writes `restart.request` and waits for `restart.done`; `e2e/acceptance/prd/restart-watcher.sh <dir> <env>` answers it by running `crew restart <env>` |
 | `PRD_RESTART_NOTE_FILE` | Optional file; one line (time, reason) is appended before every restart |
 | `PRD_OUTPUT_DIR` | Results directory. The runner's `--output` sets it; default `test-results/prd-acceptance/<mode>-<timestamp>` |
@@ -69,6 +70,71 @@ treated as a replay, which revokes the whole session (`session_revoked` for
 every holder). So global setup only checks that the accounts can sign in; each
 test signs the owner in again, and every extra context (`prd.api(role)`,
 `prd.browserContext(role)`, crashable browser profiles) gets its own login.
+
+## Craft session rows
+
+The restart rows (`A.resilience.restart.*`, `A.craft.session.hour-*`) restart
+the server under test from inside the test, through `PRD_RESTART_COMMAND`
+(for example `crew restart dev3`) or, where that command cannot run under
+`crewship-heavy`, through `PRD_RESTART_HANDSHAKE` (a directory: the test writes
+`restart.request` and waits for `restart.done`, which a watcher in the operator's
+own shell answers); `PRD_RESTART_NOTE_FILE` gets one line before each restart.
+The restart is proven by `GET /healthz`: a new process reports a lower uptime.
+Without a command or a handshake these rows fail in full mode. Run them serially
+and only when needed: a restart interrupts everyone on the instance.
+
+`craft-hour.acceptance.ts` (`A.craft.session.hour-word`, `-sheet`) is one real
+work session in the native editor of a deployed origin, driven in a browser
+for `PRD_HOUR_MINUTES` (60). A provisioned person types continuously, presses
+Enter, changes the font and styles, inserts a table and an image (Sheet: cells
+of every data class, formulas, formats, a second sheet) and saves once a
+minute. Halfway through, with unsaved typing in the editor, the test runs
+the restart command. After the restart it checks that everything saved is
+there, that the unsaved typing is offered back as a local draft, that nothing
+was saved behind the person's back and that the editor works again after a
+reload; then it keeps working, reloads once more and checks the document a
+last time. The row's `result.json` carries the duration, the restart time and
+the SHA-256 of the final document.
+
+`craft-restart.acceptance.ts` (`A.resilience.restart.word`, `.sheet`) is the
+short form of the restart: unsaved typing, restart, reload, draft offered, no
+duplicate version, editor usable.
+
+`craft-write-revoked.acceptance.ts` (`A.craft.write-revoked-word`, `-sheet`)
+withdraws the write right of a person who holds the open editor and has unsaved
+typing: the editor turns read-only, the server refuses further writes, and the
+draft is kept and offered (also after a reload once the right returns).
+
+`craft-agent-free-edit.acceptance.ts` (`A.craft.agent.free-edit-word`, `-sheet`)
+lets the seeded agent edit a free document while a person watches it in the
+browser: the person sees "Upravuje <agent>", then the new version.
+
+### Manual walkthrough: `A.craft.session.hour-word`
+
+The Word hour is a manual row (`mode=manual`) because the Word editor is driven
+through a canvas ribbon and, on r5, drops to read-only while typing continues
+during an autosave in flight (automation reproduces it in the first cycle:
+`PRD_HOUR_WORD_AUTOMATED=1 ... --grep "Word: an hour"`; the failure evidence has
+`failure-steps.json`, the editor calls and the lease polls, which show the server
+still saw the person as holder). Procedure, on the canonical Craft origin, as a
+non-owner person in a QA workspace, recording the screen (video) for the whole hour:
+
+1. Note the app SHA (`GET /api/v1/system/version` -> `commit`) and the start time.
+2. Create a Word document, take the editor. For 30 minutes type continuously, press
+   Enter, change font and size, apply Heading 1 and bold/italic, insert a 2x2 table
+   and a picture. Press Ctrl+S about once a minute. Screenshot after the table and
+   after the picture.
+3. At minute 30, while typing a steady stream, restart the server (`crew restart dev3`,
+   one line in ROZHRANI first). Screenshot the editor right after.
+4. After the restart: check that everything saved is there, that the unsaved typing
+   is offered as "Místni koncept" (Porovnat), reload, take the editor, type, save.
+5. Work 30 more minutes, reload, and compare the document with the screenshots.
+   Compute the SHA-256 of the saved bytes (`crewship` CLI or the editor API).
+
+Manual row (same fields as the automatic ones): `id=A.craft.session.hour-word`,
+`result=passed|failed`, `appSha`, `mode=manual`, `evidence` (path of the recording and
+a notes file with the times, SHA-256 and what the document held after the restart),
+`recordedAt`.
 
 ## Quota rows that change instance limits
 
@@ -102,7 +168,7 @@ one rule, or younger than `--older-than` minutes (default 60), are listed and ke
 
 ## Agent workspace
 
-The scenarios that need a real agent (`A.craft.proposal.*`, `B.design.agent-*`, `B.project.agent-*`)
+The scenarios that need a real agent (`A.craft.proposal.*`, `A.craft.agent.*`, `B.design.agent-*`, `B.project.agent-*`)
 cannot run in a disposable `prd-qa-*` workspace. An agent's model login is a
 credential owned by one workspace; `crewship credential` has no way to share it
 into another workspace, and copying its value would mean handling a secret the
@@ -129,7 +195,13 @@ crewship agent create --name Jamie --slug prd-agent --crew agents --workspace pr
 crewship credential create --type AI_CLI_TOKEN ... --workspace prd-agent-home   # the one manual step
 crewship credential assign <credential> prd-agent --workspace prd-agent-home
 crewship agent credential-readiness prd-agent --workspace prd-agent-home        # must say ready
+crewship workspace artifact-policy show --workspace prd-agent-home              # note "version"
+crewship workspace artifact-policy set --workspace prd-agent-home \
+  --base-version <version> --enabled=true --crew-id <agents crew id>
 ```
+
+The agent artifact policy must be enabled and list the agent's crew: Project,
+Design and native Craft agent rows are refused with `403` without it.
 
 Add the existing member (`PRD_MEMBER_*`) to that workspace, then run with
 `PRD_AGENT_SLUG=prd-agent PRD_AGENT_WORKSPACE_ID=<its id>`. Design must be
@@ -222,7 +294,14 @@ A scenario driven through the CLI uses the same structure: take the binary from
 and an isolated `HOME`, and record its output as evidence.
 
 Unit tests for the runner's table and arguments:
-`node --test e2e/acceptance/prd/report.test.mjs`.
+`node --test e2e/acceptance/prd/report.test.mjs`. The same file checks the
+IDs statically (`emitted-ids.mjs` reads the `prdRequirement(...)` calls of the
+spec sources): every ID a spec emits must be in `required-ids.json`, either
+as a row or under `diagnostic` (the `harness.*` smoke rows, which the RC gate
+does not count); every required ID must be emitted by exactly one call; and a
+`${...}` placeholder in an ID must be one of the known Word/Sheet loop
+variables in `PLACEHOLDERS`. A renamed or forgotten row therefore fails in CI,
+not as `missing` on the RC.
 
 ## RC gate: required IDs
 
@@ -241,10 +320,28 @@ the canonical origin and an `appSha` equal to the release candidate. Exceptions:
 
 - `A.craft.lease.fail-closed` may be `skipped` (servers with a native editor only).
 - Rows marked `allowManual` (`A.craft.session.hour-*`) may be `mode=manual` with
-  a link to the recording in `evidence`; without it the row fails.
+  a link to the recording in `evidence` and every check of the row's
+  `manualChecks` set to `true` in `checks` (Enter, font, styles, table, image,
+  reload, restart, content after restart); otherwise the row fails. No other
+  ID accepts a manual record.
+- Evidence from an older SHA counts only through `--carryover` (below).
 
 Several runs assemble one RC. Per ID the latest row on the RC SHA wins; a row
-on another SHA counts only when none exists on the RC, and then fails as `appSha`.
+on another SHA counts only when none exists on the RC, and then fails as `appSha`
+unless a carryover record covers it.
+
+A carried row keeps the SHA it was proven on; the gate never rewrites it to the
+RC. It records `carriedFrom` with the `git diff --stat <fromSha> <RC>` over the
+row's scenario paths plus `sharedPaths` from `required-ids.json`
+(API handlers and their authorization and sharing checks, server and
+websocket layers, pages, Design, artifacts, backup, saving, drafts,
+migrations, runtime config, the release profile). The diff must be empty and the engine pins (`engines.from`,
+`engines.rc`) present and equal. Rows marked `alwaysRerun` never carry over: every
+row on the `craft` origin (each drives the native lease or save path that
+#4658 and #4662 changed, including `A.lock` and the agent edit rows) and, on
+Artifacts, save, durability, work-kept, conflict and restart rows. The origin, result and mode checks
+apply to the carried row itself.
+Run the gate from a checkout that has both SHAs.
 
 ```sh
 # gate the run just made
@@ -259,11 +356,22 @@ node e2e/acceptance/prd/report.mjs --rc <SHA> --origin-map craft=<url>,artifacts
 `--merge` takes a run directory or a `summary.json` and may repeat. The gate
 prints each problem (`missing`, `result`, `mode`, `origin`, `appSha`,
 `evidence`) with its ID and exits non-zero (2 for bad arguments), and writes
-`rc-gate.json` (and `rc-gate.md` with `report.mjs --output`).
+`rc-gate.json` (and `rc-gate.md` with `report.mjs --output`). A rejected
+carryover is reported as `carryover`.
 
 `manual-rows.json` is an array; the origin defaults to the row's canonical one:
 
 ```json
 [{ "id": "A.craft.session.hour-word", "result": "passed", "appSha": "<SHA>",
-   "evidence": "https://…/recording", "recordedAt": "2026-10-31T10:00:00Z" }]
+   "evidence": "https://…/recording", "recordedAt": "2026-10-31T10:00:00Z",
+   "checks": { "enter": true, "font": true, "styles": true, "table": true, "image": true,
+               "reload": true, "restart": true, "content-after-restart": true } }]
+```
+
+`carryover.json` is an array:
+
+```json
+[{ "id": "B.design.two-humans", "fromSha": "<evidence SHA>",
+   "paths": ["e2e/acceptance/prd/design.acceptance.ts", "internal/design"],
+   "engines": { "from": "<pins on evidence run>", "rc": "<pins on RC>" } }]
 ```

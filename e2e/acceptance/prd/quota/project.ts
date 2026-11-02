@@ -3,7 +3,6 @@
 // the message checks. Nothing here names a host or an account.
 import { expect, type APIRequestContext, type Page } from "@playwright/test"
 import { randomBytes } from "node:crypto"
-import { trackPage } from "../created"
 
 const MiB = 1 << 20
 /** Below the server's 16 MiB request-body cap, including JSON overhead. */
@@ -61,14 +60,19 @@ export const projectFiles = (slug: string, label: string) => [
   { path: "style.css", media_type: "text/css", content: "body{font-family:sans-serif}h1{color:#123456}" },
 ]
 
-export async function createProject(api: APIRequestContext, workspaceId: string): Promise<ProjectRef> {
+/**
+ * Creates a Project and hands its id to `keep`, the owner of its cleanup. The
+ * quota groups share one Project across tests, so the per-test cleanup
+ * (trackPage) must not delete it after the first test.
+ */
+export async function createProject(api: APIRequestContext, workspaceId: string, keep: (pageId: string) => void): Promise<ProjectRef> {
   const slug = `prd-quota-${Date.now().toString(36)}`
   const res = await api.post(`/api/v1/pages/artifacts?${ws(workspaceId)}`, {
     data: { slug, name: "PRD quota project", created_by_test: true, base_version: 0, entrypoint: "index.html", files: projectFiles(slug, "v1") },
   })
   expect(res.status(), `create Project: ${(await res.text()).slice(0, 300)}`).toBe(201)
   const pageId = ((await res.json()) as { page_id: string }).page_id
-  trackPage(workspaceId, pageId)
+  keep(pageId)
   return { slug, pageId }
 }
 

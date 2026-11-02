@@ -128,7 +128,8 @@ var recheckPending atomic.Int64
 const recheckMaxWaiting = 64
 
 // recheckSendTimeout caps one fan-out against a hub that stopped draining.
-const recheckSendTimeout = 5 * time.Second
+// A variable only so tests of a stopped hub do not wait it out in full.
+var recheckSendTimeout = 5 * time.Second
 
 // publishUserAccessRecheck sends payload to each user's own channel after the
 // mutation committed. The request returns at once; the sends run in a bounded

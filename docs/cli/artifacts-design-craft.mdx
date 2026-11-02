@@ -121,7 +121,8 @@ The slug must be unused in the workspace. A taken slug currently returns
 Edits are a JSON object with `operations` (1 to 500) and an optional `message`.
 An upsert carries a whole node: `id`, `type` (`frame`, `rect`, `text` or
 `image`), `name`, `x`, `y`, `width`, `height`, `fill` and optionally
-`parentId`, `text` or `src`. Delete uses `{"op":"delete","id":"<node-id>"}` and
+`parentId`, `text`, `src` or `linkTo`. `linkTo` is the ID of the screen that a
+click on the layer opens in prototype playback; `""` removes it. Delete uses `{"op":"delete","id":"<node-id>"}` and
 reorder uses `{"op":"reorder","order":["<id>", …]}`. Keep the IDs of existing
 nodes. The file may be at most 1 MiB; other top-level keys are refused before
 the request (`unknown design field "extra"`).
@@ -255,7 +256,17 @@ server returns `409 Design changed; reload and reapply`. `comments` returns
 `{"comments":[…]}` with up to 500 comments.
 
 With `--send-to-agent`, the comment is queued for the agent connected through
-`page design agent` and its `status` is `pending`.
+`page design agent` and its `status` is `pending`. The agent's crew must be
+allowed by the [workspace artifact policy](/cli/artifacts#agent-publishing-policy).
+Otherwise delivery is refused with `This agent's crew is not allowed to create
+artifact projects in this workspace`. The check applies to Design as well, even
+though the message names projects. Add `--wait` to also deliver
+the task to that connected chat and wait for the agent's answer, as the editor
+does. `--wait-timeout` (default `15m`) bounds the wait; the task stays queued
+when it runs out. Without a connected chat, `--wait` exits with code 2 and
+names the `page design agent` command. See
+[`page artifact comment --wait`](/cli/artifacts)
+for the full behavior.
 
 ### Restore a version
 

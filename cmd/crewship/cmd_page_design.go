@@ -61,7 +61,8 @@ func newPageDesignCommand() *cobra.Command {
 	}
 	apply := &cobra.Command{Use: "apply <slug>", Args: cobra.ExactArgs(1), Short: "Apply node upserts, deletions or order changes to the live Yjs document", Long: `Apply a JSON object with operations and optional message. An upsert contains a node
 with id, type (frame, rect, text, image), name, x, y, width, height, fill and optional
-parentId, text or src. Delete uses {"op":"delete","id":"node-id"}; reorder uses
+parentId, text, src or linkTo. linkTo is the ID of the screen (frame) that a click
+on this layer opens in prototype playback; "" removes the link. Delete uses {"op":"delete","id":"node-id"}; reorder uses
 {"op":"reorder","order":["frame-id","node-id"]}. Preserve IDs of existing nodes.
 The API applies these edits even when no browser has the canvas open.`, RunE: func(cmd *cobra.Command, args []string) error {
 		body, err := readDesignCLIChanges(cmd)

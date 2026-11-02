@@ -83,7 +83,7 @@ test.describe("full Project history", () => {
   const requireFullProject = async () => {
     if (!project || !full) {
       test.setTimeout(Math.max(test.info().timeout, FILL_TIMEOUT))
-      const p = await createProject(api, wsId)
+      const p = await createProject(api, wsId, shared.keep)
       const fill = await fillHistory(api, wsId, p)
       expect(fill.remaining, "the history is full to within a few hundred bytes").toBeLessThan(1024)
       project = p
@@ -94,7 +94,7 @@ test.describe("full Project history", () => {
 
   test("a further save is refused and changes nothing", { annotation: R.refused }, async ({ prd }) => {
     test.setTimeout(Math.max(test.info().timeout, FILL_TIMEOUT))
-    const p = await createProject(api, wsId)
+    const p = await createProject(api, wsId, shared.keep)
     const fill = await fillHistory(api, wsId, p)
     await prd.evidence("project-fill.json", {
       availability,

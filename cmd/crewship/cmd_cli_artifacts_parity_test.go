@@ -65,6 +65,12 @@ func paritySnapshot(version int, files string) []byte {
 	return []byte(`{"page_id":"cpagedemo","slug":"demo","manifest":{"version":` + strconv.Itoa(version) + `,"entrypoint":"index.html","files":` + files + `}}`)
 }
 
+// parityLatest is the unversioned read: latest_version is meaningful only
+// with can_write; a downgraded reader is served the shared pin instead.
+func parityLatest(latest int, canWrite bool) []byte {
+	return []byte(`{"page_id":"cpagedemo","slug":"demo","can_write":` + strconv.FormatBool(canWrite) + `,"latest_version":` + strconv.Itoa(latest) + `,"manifest":{"version":` + strconv.Itoa(latest) + `,"entrypoint":"index.html","files":[]}}`)
+}
+
 // Server order is sorted by path; the local manifest is not. Content is equal.
 const parityServerFiles = `[{"path":"index.html","content":"<h1>Draft</h1>","media_type":"text/html"},{"path":"styles.css","content":"h1{}","media_type":"text/css"}]`
 
@@ -124,7 +130,10 @@ func TestPageArtifactReconcileCommand(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := pageStub(t)
-			stub.OnGet("/api/v1/pages/demo/artifact", func(*http.Request, []byte) (int, []byte, string) {
+			stub.OnGet("/api/v1/pages/demo/artifact", func(r *http.Request, _ []byte) (int, []byte, string) {
+				if tc.status != 200 && r.URL.Query().Get("version") == "" {
+					return 200, parityLatest(7, true), "application/json" // latest == base: absence proven
+				}
 				if tc.status != 200 {
 					return tc.status, []byte(`{"error":"artifact project or selected version not found"}`), "application/json"
 				}
@@ -145,6 +154,41 @@ func TestPageArtifactReconcileCommand(t *testing.T) {
 				t.Fatal("reconcile wrote")
 			}
 		})
+	}
+}
+
+// B14 (G4): an Edit user gets 404 for a historical version, so a 404 for
+// base+1 while newer versions exist must not be reported as "not applied".
+func TestPageArtifactReconcile404WithNewerVersionIsUnknown(t *testing.T) {
+	stub := pageStub(t)
+	stub.OnGet("/api/v1/pages/demo/artifact", func(r *http.Request, _ []byte) (int, []byte, string) {
+		if r.URL.Query().Get("version") == "8" {
+			return 404, []byte(`{"error":"artifact project or selected version not found"}`), "application/json"
+		}
+		return 200, parityLatest(9, true), "application/json" // another writer published 9
+	})
+	_, err := runParityArtifact(t, newPageArtifactCommand, "reconcile", "demo", "--base-version", "7", "--file", pageBundleFile(t, parityManifest))
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if cli.ExitCodeFor(err) == cli.ExitNotFound || strings.Contains(err.Error(), "was not applied") || strings.Contains(err.Error(), "is safe") {
+		t.Fatalf("a committed save may exist but was reported as absent: %v (exit %d)", err, cli.ExitCodeFor(err))
+	}
+}
+
+// B14 (round 2): an editor downgraded to Read gets the shared pin (7) for the
+// unversioned read; that is not the latest, so absence is not proven.
+func TestPageArtifactReconcile404AfterDowngradeToReadIsUnknown(t *testing.T) {
+	stub := pageStub(t)
+	stub.OnGet("/api/v1/pages/demo/artifact", func(r *http.Request, _ []byte) (int, []byte, string) {
+		if r.URL.Query().Get("version") == "8" {
+			return 404, []byte(`{"error":"artifact project or selected version not found"}`), "application/json"
+		}
+		return 200, parityLatest(7, false), "application/json"
+	})
+	_, err := runParityArtifact(t, newPageArtifactCommand, "reconcile", "demo", "--base-version", "7", "--file", pageBundleFile(t, parityManifest))
+	if err == nil || cli.ExitCodeFor(err) == cli.ExitNotFound || strings.Contains(err.Error(), "is safe") || strings.Contains(err.Error(), "was not applied") {
+		t.Fatalf("shared pin taken for the latest version: %v", err)
 	}
 }
 

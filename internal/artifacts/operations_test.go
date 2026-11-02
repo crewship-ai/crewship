@@ -4,25 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"testing"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/documents"
 )
 
 func TestRegisteredTypedDocumentRetainsAuthorityAndMutationGuard(t *testing.T) {
 	ctx := t.Context()
-	db, err := database.Open(filepath.Join(t.TempDir(), "typed.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err = database.Migrate(ctx, db.DB, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatal(err)
-	}
+	db := durableMigratedDB(t)
+	var err error
 	for _, query := range []string{
 		`INSERT INTO users(id,email) VALUES('owner','typed@example.test')`,
 		`INSERT INTO users(id,email) VALUES('successor','typed-successor@example.test')`,

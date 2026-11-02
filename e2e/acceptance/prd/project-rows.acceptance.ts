@@ -10,6 +10,7 @@
 // nothing; the history is the same after a reload and after the server was
 // restarted (PRD_RESTART_COMMAND or PRD_RESTART_HANDSHAKE, see docs/development/prd-acceptance.md).
 import { apiAs, loginStorageState } from "./auth"
+import { trackPage } from "./created"
 import { expect, prdRequirement, test } from "./fixtures"
 import { canRestart, pause, restartServer } from "./ops"
 import { createProject as createQuotaProject, openProject as openPagesProject, sourceBox } from "./quota/project"
@@ -28,7 +29,7 @@ test.describe("project rows", () => {
     async ({ prd, request, page, browser }) => {
       const ws = await prd.qaWorkspace()
       await enableProjects(request, ws.id)
-      const project = await createQuotaProject(request, ws.id)
+      const project = await createQuotaProject(request, ws.id, (id) => trackPage(ws.id, id))
       const ownerAccount = prd.requireAccount("owner")
       // The second person: a separate session (own cookies, own browser storage).
       const second = await browser.newContext({ baseURL: prd.origin, storageState: await loginStorageState(prd.origin, ownerAccount), viewport: { width: 1440, height: 1000 } })

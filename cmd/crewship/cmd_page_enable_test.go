@@ -534,3 +534,28 @@ func TestLoadPagesServerConfig_IgnoresSidecarAndRestoresEnv(t *testing.T) {
 		t.Errorf("CREWSHIP_SKIP_SIDECAR = %q after the read, want the caller's %q", got, "0")
 	}
 }
+
+// B10 (G4): a disable that is waiting for confirmation must not overwrite an
+// enable of another version that completes meanwhile.
+func TestPageDisableKeepsEnableCommittedWhileConfirming(t *testing.T) {
+	f := &fakePageDocker{
+		images:   map[string]string{fakeCurrentID: fakeFingerprint, fakeOldID: "old"},
+		recorded: map[string]string{fakeFingerprint: fakeCurrentID, "old": fakeOldID},
+		cfg:      readyPagesConfig(),
+	}
+	f.install(t)
+	const newID = "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+	pageConfirm = func(*cobra.Command, string) error {
+		return recordPageToolsImage(f.cfg.Storage.PageProjectsPath, "newer", newID)
+	}
+	if _, _, err := runDisableForTest(t, "--yes"); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	rec, err := pagebuild.ReadBuildImageRecord(f.cfg.Storage.PageProjectsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Images["newer"].ID != newID || rec.Images["old"].ID != fakeOldID || len(rec.Images) != 2 {
+		t.Fatalf("record = %v, want the concurrent enable and the other version kept", rec.Images)
+	}
+}

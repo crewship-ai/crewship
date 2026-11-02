@@ -59,7 +59,7 @@ test.describe("aggregate artifact storage", () => {
 
         // 1. At the normal limit: a Word document and a Project that together leave less room than one more save.
         const doc = await createNative(api, ws.id, "wordcraft")
-        const project = await createProject(api, ws.id)
+        const project = await createProject(api, ws.id, shared.keep)
         const usage = async () => {
           const res = await api.get(`/api/v1/pages/artifacts/storage?workspace_id=${encodeURIComponent(ws.id)}`)
           expect(res.status(), "workspace storage usage").toBe(200)

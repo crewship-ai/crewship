@@ -135,6 +135,24 @@ crewship page artifact availability -f json
 {"enabled": true}
 ```
 
+| Flag | Description |
+|---|---|
+| `--agent <agent-id>` | Also report whether you may create an artifact project for this agent. |
+
+With `--agent`, the reply adds `can_create`. It is `true` only when artifact
+projects are enabled, the agent's crew is allowed by the
+[agent publishing policy](#agent-publishing-policy) and you may create Pages
+in the workspace. When the crew is not allowed, or the agent is not in this
+workspace, the reply also carries `"code": "artifact_crew_not_allowed"`:
+
+```bash
+crewship page artifact availability --agent <agent-id> -f json
+```
+
+```json
+{"enabled": true, "can_create": false, "code": "artifact_crew_not_allowed"}
+```
+
 ### `crewship page artifact storage`
 
 Read the workspace's aggregate artifact storage: bytes used by every artifact
@@ -356,6 +374,8 @@ the server returns `409 artifact_anchor_mismatch`.
 | `--quote <text>` | Current text of the element (required). |
 | `--text <text>` | Comment text (required). |
 | `--send-to-agent` | Also queue the comment as a task for the agent. |
+| `--wait` | With `--send-to-agent`: deliver the task to the artifact's source chat, then wait for the agent's answer. |
+| `--wait-timeout <duration>` | With `--wait`: stop waiting after this long, for example `5m` (default `15m`). The task stays queued. |
 
 ```bash
 crewship page artifact comment quarterly-review --version 3 --path index.html \
@@ -377,6 +397,30 @@ crewship page artifact comment quarterly-review --version 3 --path index.html \
 
 Queuing with `--send-to-agent` does not confirm that an agent received the
 task.
+
+`--wait` does what the viewer does after you send a comment to the agent. It
+posts the task message into the chat the artifact was created from, confirms
+that the chat saved it, then reads the comment every two seconds. Progress goes
+to stderr. When the comment becomes `answered` or `needs_clarification`, the
+command prints the comment with its replies. Run it as a person: an agent run
+cannot dispatch artifact tasks.
+
+```bash
+crewship page artifact comment quarterly-review --version 3 --path index.html \
+  --selector '#hero' --quote 'Quarterly review' --text 'Add the year to the title' \
+  --send-to-agent --wait --wait-timeout 10m
+```
+
+The comment is saved and queued before the wait starts, so a failure later on
+leaves it queued:
+
+- The artifact has no source chat: exit code 2. It was not created from an
+  agent chat.
+- The task message could not be delivered, for example because the agent is
+  busy: the command prints a `crewship run … --artifact-target` command that
+  retries the delivery.
+- The timeout passes first: the command says so and exits non-zero. Read the
+  result later with `crewship page artifact comments`.
 
 ### `crewship page artifact comments <slug>`
 

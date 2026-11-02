@@ -4,9 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"sync"
 	"testing"
 
@@ -15,14 +12,8 @@ import (
 
 func versionFixture(t *testing.T, opts VersionOptions) (*VersionStore, VersionKey, VersionAuthorize, *database.DB) {
 	t.Helper()
-	db, err := database.Open(filepath.Join(t.TempDir(), "versions.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err = database.Migrate(t.Context(), db.DB, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatal(err)
-	}
+	db := durableMigratedDB(t)
+	var err error
 	for _, q := range []string{`INSERT INTO users(id,email) VALUES('owner','owner@example.test')`, `INSERT INTO workspaces(id,name,slug) VALUES('ws','Workspace','ws')`, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('page','ws','page','Page','owner','{}')`} {
 		if _, err = db.Exec(q); err != nil {
 			t.Fatal(err)

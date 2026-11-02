@@ -10,6 +10,8 @@ import * as decoding from 'lib0/decoding'
 const nodeStringLimits = new Map([
   ['id', 128], ['type', 16], ['name', 2000], ['parentId', 128],
   ['fill', 256], ['text', 100000], ['src', 2000000],
+  // Prototype link target screen ID (#4449); "" clears it for REST and agent callers.
+  ['linkTo', 128],
 ])
 const nodeGeometryFields = new Set(['x', 'y', 'width', 'height'])
 function validateNodeFields(entries) {
