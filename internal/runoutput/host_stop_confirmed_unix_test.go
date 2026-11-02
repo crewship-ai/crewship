@@ -8,19 +8,15 @@ import (
 	"testing"
 )
 
+// stopConfirmedDir reuses the guarded host fixture (same UID rules and
+// required lane) and returns its protected run directory.
 func stopConfirmedDir(t *testing.T) string {
 	t.Helper()
-	if os.Geteuid() == 1001 || os.Geteuid() == 1002 {
-		t.Skip("protected host tests need a distinct trusted host UID")
-	}
-	root, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
+	dir := hostFixtureInput(t).Directory
+	if err := os.Mkdir(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(root, 0700); err != nil {
-		t.Fatal(err)
-	}
-	return root
+	return dir
 }
 
 func TestHostStopConfirmedIsBoundToOneExecution(t *testing.T) {

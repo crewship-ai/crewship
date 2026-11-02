@@ -106,7 +106,7 @@ func TestExactTreeStopKillsSessionAndDetachedDescendants(t *testing.T) {
 // keep running; it must still be stopped and killed, never counted as dead.
 func TestExactTreeStopKillsProcessWhoseMainThreadExited(t *testing.T) {
 	if _, err := exec.LookPath("python3"); err != nil {
-		t.Skip("python3 needed to build a process without its main thread")
+		t.Fatal("python3 is required to build a process without its main thread")
 	}
 	extra := `python3 -c 'import ctypes,threading,time; threading.Thread(target=lambda: time.sleep(300)).start(); time.sleep(0.05); ctypes.CDLL(None).pthread_exit(None)' & `
 	leader, start, pinned := startTreeFixture(t, extra, 5)
