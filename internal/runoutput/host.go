@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -482,6 +483,72 @@ func RequestHostStop(dir string) error {
 	closeErr := f.Close()
 	return errors.Join(writeErr, syncErr, closeErr, syncDir(dir))
 }
+
+// hostStopConfirmedFile records that the provider's stop of one exact
+// execution froze and killed every process left in that execution's session
+// and saw the session empty (sidecar run-stop-process), and that the provider
+// then confirmed the execution terminal. Unlike stop-requested, it is evidence
+// that nothing started by the execution's session still runs (#4774).
+const hostStopConfirmedFile = "stop-confirmed"
+
+func hostStopConfirmedContent(execID string) string {
+	return "session-empty " + execID + "\n"
+}
+
+// RecordHostStopConfirmed writes the stop-confirmed record for execID. Call it
+// only after the helper printed its session-empty receipt AND the provider
+// reported the execution itself terminal.
+func RecordHostStopConfirmed(dir, execID string) error {
+	if err := validateHostDirectory(dir); err != nil {
+		return err
+	}
+	if execID == "" || strings.ContainsAny(execID, " \n") {
+		return errors.New("invalid execution identity")
+	}
+	f, err := os.OpenFile(filepath.Join(dir, hostStopConfirmedFile), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if errors.Is(err, os.ErrExist) {
+		confirmed, readErr := HostStopConfirmed(dir, execID)
+		if readErr != nil {
+			return readErr
+		}
+		if !confirmed {
+			return errors.New("stop confirmation belongs to another execution")
+		}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	_, writeErr := f.Write([]byte(hostStopConfirmedContent(execID)))
+	syncErr := f.Sync()
+	closeErr := f.Close()
+	return errors.Join(writeErr, syncErr, closeErr, syncDir(dir))
+}
+
+// HostStopConfirmed reports whether dir holds a stop-confirmed record for
+// exactly execID. Any other content is an error, never a confirmation.
+func HostStopConfirmed(dir, execID string) (bool, error) {
+	if err := validateHostDirectory(dir); err != nil {
+		return false, err
+	}
+	f, err := os.Open(filepath.Join(dir, hostStopConfirmedFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, 257))
+	if err != nil {
+		return false, err
+	}
+	if !strings.HasPrefix(string(data), "session-empty ") || !strings.HasSuffix(string(data), "\n") {
+		return false, errors.New("invalid protected stop confirmation")
+	}
+	return execID != "" && string(data) == hostStopConfirmedContent(execID), nil
+}
+
 func HostStopRequested(dir string) (bool, error) {
 	if err := validateHostDirectory(dir); err != nil {
 		return false, err

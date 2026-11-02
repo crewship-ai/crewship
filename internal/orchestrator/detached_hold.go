@@ -170,7 +170,7 @@ func (o *Orchestrator) watchDetachedHold(h *detachedHold, poll time.Duration) {
 				var run RunState
 				terminal := false
 				if readErr == nil && json.Unmarshal(raw, &run) == nil {
-					if snapshot, err := o.ReadRetainedRunResult(ctx, run); err == nil && snapshot.Complete && snapshot.Result.Reason == "exited" {
+					if snapshot, err := o.ReadRetainedRunResult(ctx, run); err == nil && snapshot.Complete && (snapshot.Result.Reason == "exited" || o.forcedHostEndConfirmed(ctx, run, snapshot)) {
 						terminal = true
 					}
 				}

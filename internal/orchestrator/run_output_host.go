@@ -187,7 +187,7 @@ func (o *Orchestrator) probeHostRun(ctx context.Context, run RunState, stop bool
 		if snapshot.Result.Reason == "exited" {
 			return stop, nil
 		}
-		if absent, err := o.containerRuntimeAbsent(ctx, run.ContainerID); err == nil && absent {
+		if o.forcedHostEndConfirmed(ctx, run, snapshot) {
 			return stop, nil
 		}
 		if stop {
@@ -335,11 +335,8 @@ func (o *Orchestrator) AcknowledgeRetainedRunResult(ctx context.Context, run Run
 	if !actual.Complete || actual.Sequence != snapshot.Sequence || actual.Result == nil || *actual.Result != *snapshot.Result {
 		return errors.New("retained terminal acknowledgement mismatched source")
 	}
-	if snapshot.Result.Reason != "exited" {
-		absent, err := o.containerRuntimeAbsent(ctx, run.ContainerID)
-		if err != nil || !absent {
-			return fmt.Errorf("%w: forced process end lacks whole-runtime absence", ErrHostCaptureUnconfirmed)
-		}
+	if snapshot.Result.Reason != "exited" && !o.forcedHostEndConfirmed(ctx, run, snapshot) {
+		return fmt.Errorf("%w: forced process end lacks whole-runtime absence", ErrHostCaptureUnconfirmed)
 	}
 	status := ""
 	if len(authoritativeStatus) > 1 {
@@ -460,4 +457,30 @@ func (o *Orchestrator) CollectRetainedRun(ctx context.Context, run RunState, cut
 		return json.Marshal(current)
 	})
 	return err == nil, err
+}
+
+// forcedHostEndConfirmed reports whether a retained run that did not exit on
+// its own provably left nothing running. Whole-runtime absence always counts.
+// A cancelled run also counts when the provider's stop recorded that every
+// process in the execution's session was killed and the execution itself was
+// terminal (runoutput.RecordHostStopConfirmed). That receipt is bound to the
+// execution identity recorded at launch, so a shared, long-lived container no
+// longer has to disappear before a cancelled run can settle (#4774).
+func (o *Orchestrator) forcedHostEndConfirmed(ctx context.Context, run RunState, snapshot runoutput.Snapshot) bool {
+	if absent, err := o.containerRuntimeAbsent(ctx, run.ContainerID); err == nil && absent {
+		return true
+	}
+	if snapshot.Result == nil || snapshot.Result.Reason != "execution_cancelled" {
+		return false
+	}
+	directory, err := o.validatedHostRunDirectory(run)
+	if err != nil {
+		return false
+	}
+	identity, err := runoutput.ReadHostIdentity(directory)
+	if err != nil || identity.ContainerID != run.ContainerID || identity.ExecID == "" || (run.ExecID != "" && identity.ExecID != run.ExecID) {
+		return false
+	}
+	confirmed, err := runoutput.HostStopConfirmed(directory, identity.ExecID)
+	return err == nil && confirmed
 }

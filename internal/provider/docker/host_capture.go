@@ -393,5 +393,27 @@ func (e *hostCaptureExecutor) Stop(ctx context.Context, id string) error {
 	if _, err := provider.WaitExecExit(ctx, e.provider, id, 5*time.Second); err != nil {
 		return fmt.Errorf("host process terminal not confirmed: %w", err)
 	}
+	// The helper prints its receipt only after it froze and killed every
+	// process in the execution's session and a final scan found none alive.
+	// Together with the confirmed terminal exec above this is the evidence a
+	// cancelled run needs to settle without removing the shared container
+	// (#4774). Without the receipt the run keeps waiting for reattachment.
+	if hostStopReceipt(data) {
+		if err := runoutput.RecordHostStopConfirmed(e.authority.Directory, id); err != nil {
+			return fmt.Errorf("record host stop confirmation: %w", err)
+		}
+	}
 	return nil
+}
+
+// hostStopSessionEmptyReceipt must match the sidecar's sessionEmptyReceipt.
+const hostStopSessionEmptyReceipt = "crewship-run-stop-session-empty-v1"
+
+func hostStopReceipt(output []byte) bool {
+	for _, line := range bytes.Split(output, []byte("\n")) {
+		if string(bytes.TrimRight(line, "\r")) == hostStopSessionEmptyReceipt {
+			return true
+		}
+	}
+	return false
 }

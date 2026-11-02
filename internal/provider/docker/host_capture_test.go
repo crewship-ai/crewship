@@ -136,3 +136,21 @@ func TestHostCaptureControllerUIDSupport(t *testing.T) {
 		}
 	}
 }
+
+func TestHostStopReceiptRequiresTheExactReceiptLine(t *testing.T) {
+	for _, tc := range []struct {
+		out  string
+		want bool
+	}{
+		{"crewship-run-stop-session-empty-v1\n", true},
+		{"diagnostic\r\ncrewship-run-stop-session-empty-v1\r\n", true},
+		{"", false},
+		{"crewship-run-stop-session-empty-v1-extra\n", false},
+		{"prefix crewship-run-stop-session-empty-v1\n", false},
+		{"session member survived\n", false},
+	} {
+		if got := hostStopReceipt([]byte(tc.out)); got != tc.want {
+			t.Errorf("hostStopReceipt(%q)=%v want %v", tc.out, got, tc.want)
+		}
+	}
+}
