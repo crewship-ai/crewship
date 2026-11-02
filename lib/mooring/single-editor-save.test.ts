@@ -503,3 +503,40 @@ it("keeps the captured draft for comparison when the lost acknowledgement cannot
   expect(r.transport.save).toHaveBeenCalledOnce()
   await r.controller.close()
 })
+
+// Write and read revoked together: the fresh capture is journaled, then the
+// lost save's reconcile reports read loss. It takes the same purge path as a
+// save that reports read_revoked; any other reconcile error keeps the draft.
+it.each([
+  ["after an uncertain save", false],
+  ["for a save still in flight", true],
+] as const)("purges the journal when reconcile reports read_revoked during write revocation (%s)", async (_case, inFlight) => {
+  const r = rig()
+  if (inFlight) r.transport.save.mockImplementationOnce(() => new Promise(() => {}))
+  else r.transport.save.mockRejectedValueOnce(new Error("lost ACK"))
+  r.transport.reconcile.mockRejectedValueOnce(new NativeSaveError("read_revoked"))
+  if (inFlight) { void r.controller.save(); await vi.waitFor(() => expect(r.transport.save).toHaveBeenCalledOnce()) }
+  else await r.controller.save()
+  const captured = await r.controller.revokeWrite()
+  expect(r.transport.reconcile).toHaveBeenCalledOnce()
+  // The fresh capture was journaled before reconcile; read loss must erase it.
+  expect(r.journal.persist.mock.invocationCallOrder.at(-1)!).toBeLessThan(r.transport.reconcile.mock.invocationCallOrder[0])
+  expect(r.journal.revokeRead).toHaveBeenCalledOnce()
+  // A purged capture is no capture: the host must not hand it off or list it.
+  expect(captured).toBe(false)
+  expect(r.journal.confirm).not.toHaveBeenCalled()
+  expect(r.transport.save).toHaveBeenCalledOnce()
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "stopped" }))
+  await r.controller.close()
+})
+
+it("a write refusal from reconcile during write revocation keeps the captured draft", async () => {
+  const r = rig()
+  r.transport.save.mockRejectedValueOnce(new Error("lost ACK"))
+  r.transport.reconcile.mockRejectedValueOnce(new NativeSaveError("write_revoked"))
+  await r.controller.save()
+  await expect(r.controller.revokeWrite()).resolves.toBe(true)
+  expect(r.journal.revokeRead).not.toHaveBeenCalled()
+  expect(r.journal.confirm).not.toHaveBeenCalled()
+  await r.controller.close()
+})
