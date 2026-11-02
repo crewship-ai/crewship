@@ -685,3 +685,33 @@ describe('write and read revoked together while a lost save is reconciled',()=>{
   expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
  })
 })
+
+// The server renews a human holder's lease while the event stream is open. A
+// stalled renderer can read those renewals late, so a lapsed cached expiry asks
+// the server once before write is retired (#4801).
+describe('native host lease expiry re-verification',()=>{
+ const soon=()=>({...ownedLease,expires_at:new Date(Date.now()+15_000).toISOString()})
+ for(const server of ['renewed','lost'] as const)it(`${server==='renewed'?'keeps':'retires'} write when the cached expiry lapses and the server ${server==='renewed'?'still confirms':'no longer confirms'} custody`,async()=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   client.leaseAction.mockImplementation(async(action:string)=>{if(action==='acquire')client.lease.mockImplementation(async()=>soon());return soon()})
+   mount();await ready();await acquire()
+   const p=ports.at(-1)!,checks=client.lease.mock.calls.length
+   if(server==='lost')client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:{actor_id:'user:other',display_name:'Jana',kind:'human'},generation:'9007199254740996'})
+   await act(async()=>{await vi.advanceTimersByTimeAsync(16_000)})
+   await waitFor(()=>expect(client.lease.mock.calls.length).toBeGreaterThan(checks))
+   if(server==='renewed'){await act(async()=>{await vi.advanceTimersByTimeAsync(2_000)});expect(p.setReadOnly).not.toHaveBeenCalledWith(true,expect.anything());expect(screen.getByRole('button',{name:'Uvolnit úpravy'})).toBeInTheDocument()}
+   else await waitFor(()=>expect(p.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal)))
+  }finally{vi.useRealTimers()}
+ })
+ it('retires write when the re-verification itself fails',async()=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   client.leaseAction.mockImplementation(async(action:string)=>{if(action==='acquire')client.lease.mockImplementation(async()=>soon());return soon()})
+   mount();await ready();await acquire()
+   const p=ports.at(-1)!;client.lease.mockRejectedValue(Error('offline'))
+   await act(async()=>{await vi.advanceTimersByTimeAsync(16_000)})
+   await waitFor(()=>expect(p.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal)))
+  }finally{vi.useRealTimers()}
+ })
+})
