@@ -143,6 +143,18 @@ test("gate: skipped fails except on the allowed row; failed always fails", () =>
   assert.deepEqual(kinds(evaluateRequired(f, required, { rc: RC })), ["A.skip:result"])
 })
 
+test("gate: every test of an ID must pass; a later passing test cannot hide a failed one (#4767)", () => {
+  const two = [
+    ...good().filter((x) => x.requirement !== "A.one"),
+    row({ requirement: "A.one", origin: CRAFT, appSha: RC, test: "api", result: "failed", finishedAt: "2026-11-02T10:00:00.000Z" }),
+    row({ requirement: "A.one", origin: CRAFT, appSha: RC, test: "browser", result: "passed", finishedAt: "2026-11-02T10:05:00.000Z" }),
+  ]
+  assert.deepEqual(kinds(evaluateRequired(two, required, { rc: RC })), ["A.one:result"])
+  // A rerun of the same test still supersedes its own earlier attempt.
+  const rerun = [...two, row({ requirement: "A.one", origin: CRAFT, appSha: RC, test: "api", result: "passed", finishedAt: "2026-11-02T10:10:00.000Z" })]
+  assert.equal(evaluateRequired(rerun, required, { rc: RC }).ok, true)
+})
+
 test("gate: wrong appSha fails; a row on the RC wins over an older row on another SHA", () => {
   const bad = good().map((x) => (x.requirement === "B.one" ? { ...x, appSha: "b".repeat(40) } : x))
   assert.deepEqual(kinds(evaluateRequired(bad, required, { rc: RC })), ["B.one:appSha"])
