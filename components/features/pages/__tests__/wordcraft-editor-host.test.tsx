@@ -188,3 +188,28 @@ it("other stops still hide the editor and save no draft", async () => {
   expect(t.frame.hidden).toBe(true)
   expect(drafts.store.size).toBe(0)
 })
+const draftText = (originals: string[]) => JSON.stringify({ format: "crewship-wordcraft-draft-v1", workspace_id: "workspace", page_id: "page", originals })
+it("G4 B3: a recovered draft of one person is not offered to another person after the identity changes", async () => {
+  drafts.store.set(JSON.stringify(["human-one", "wordcraft-pending", "workspace", "page"]), draftText(["secret of A"]))
+  const view = render(<WordCraftEditorHost workspaceId="workspace" pageId="page" name="Original title" />)
+  await waitFor(() => expect(screen.getByRole("group", { name: "Místní koncept" })).toBeInTheDocument())
+  identity.id = "human-two"
+  view.rerender(<WordCraftEditorHost workspaceId="workspace" pageId="page" name="Original title" />)
+  await waitFor(() => expect(screen.queryByRole("group", { name: "Místní koncept" })).toBeNull())
+  expect(screen.queryByText("Stáhnout koncept")).toBeNull()
+})
+it("G4 B3: a recovered draft is no longer offered after sign-out", async () => {
+  drafts.store.set(JSON.stringify(["human-one", "wordcraft-pending", "workspace", "page"]), draftText(["secret of A"]))
+  const view = render(<WordCraftEditorHost workspaceId="workspace" pageId="page" name="Original title" />)
+  await waitFor(() => expect(screen.getByRole("group", { name: "Místní koncept" })).toBeInTheDocument())
+  identity.status = "unauthenticated"
+  view.rerender(<WordCraftEditorHost workspaceId="workspace" pageId="page" name="Original title" />)
+  await waitFor(() => expect(screen.queryByRole("group", { name: "Místní koncept" })).toBeNull())
+})
+it("G4 B3: a recovered draft of one Page is not offered on another Page", async () => {
+  drafts.store.set(JSON.stringify(["human-one", "wordcraft-pending", "workspace", "page"]), draftText(["draft of page"]))
+  const view = render(<WordCraftEditorHost workspaceId="workspace" pageId="page" name="Original title" />)
+  await waitFor(() => expect(screen.getByRole("group", { name: "Místní koncept" })).toBeInTheDocument())
+  view.rerender(<WordCraftEditorHost workspaceId="workspace" pageId="other-page" name="Original title" />)
+  await waitFor(() => expect(screen.queryByRole("group", { name: "Místní koncept" })).toBeNull())
+})
