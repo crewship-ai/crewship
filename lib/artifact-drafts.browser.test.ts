@@ -12,7 +12,7 @@ const executable = chromium.executablePath()
 
 /** A real Chromium process on a persistent profile, so the test can SIGKILL it. */
 async function launch(profile: string): Promise<{ child: ChildProcess; endpoint: string }> {
-  const child = spawn(executable, ["--headless=new", "--no-sandbox", "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] })
+  const child = spawn(executable, ["--headless=new", "--no-sandbox", "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"], detached: true })
   const endpoint = await new Promise<string>((resolve, reject) => {
     let output = ""
     const timer = setTimeout(() => reject(new Error(`Chromium did not start: ${output}`)), 15000)
@@ -26,12 +26,19 @@ async function launch(profile: string): Promise<{ child: ChildProcess; endpoint:
   return { child, endpoint }
 }
 
-/** SIGKILL and wait for exit, so nothing still writes to the profile when it is removed (#4772). */
+/**
+ * SIGKILL Chromium's whole process group and wait until it is gone. Killing
+ * only the parent left its helper processes writing to the profile, so the
+ * cleanup failed with ENOTEMPTY (#4772).
+ */
 async function kill(child: ChildProcess) {
-  if (child.exitCode !== null || child.signalCode !== null) return
-  const exited = new Promise(resolve => child.once("exit", resolve))
-  child.kill("SIGKILL")
-  await exited
+  const group = -child.pid!
+  try { process.kill(group, "SIGKILL") } catch { return }
+  for (let i = 0; i < 100; i++) {
+    try { process.kill(group, 0) } catch { return }
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  throw new Error("Chromium's process group did not exit")
 }
 
 async function open(endpoint: string, envelopes: DraftKeyFixtureStore) {
