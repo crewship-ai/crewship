@@ -660,6 +660,7 @@ describe('unchanged-content transfer (G4 B1/B2)',()=>{
   journal.recovery.mockResolvedValueOnce([{draft:same,actions:['compare','copy']}])
   mount();await ready();await acquire()
   await waitFor(()=>expect(journal.discardRecovered).toHaveBeenCalledWith(expect.objectContaining({draft:same})))
+ })
 })
 
 describe('write and read revoked together while a lost save is reconciled',()=>{
