@@ -52,7 +52,8 @@ so a green CI and a red local run are consistent, not contradictory. Before
 blaming your diff, check the log for `WARNING: DATA RACE` — no such line plus
 a `panic: test timed out` means you hit the ceiling, not a race. That ceiling
 is #2031's subject: the CI job now prints its own `ok … Ns` into the run
-summary and warns when it crosses 1.6x the baseline, so budget erosion is
+summary and flags it when it crosses 1.6x the baseline (a warning on a pull
+request, a failure in the merge queue and on main), so budget erosion is
 reported as budget erosion rather than as your bug.
 
 ### Don't hash at production strength in a test

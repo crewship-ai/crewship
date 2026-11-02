@@ -2424,7 +2424,8 @@ jobs:
       - name: Verify complete API coverage and combined budget
         # Full-package baseline measured 2026-09-14: 2291–2358 seconds in
         # main runs 34828855474,34833070262,34835848487,34840188893.
-        # Keep the 1.6x alarm and PR-warning/main-failure policy from #2031.
+        # Keep the 1.6x alarm from #2031: it warns on PRs and fails in the
+        # merge queue and on main pushes (#4764: #4647 passed a warning-only queue).
         # All six package durations plus the genuine migration bootstrap
         # package duration exactly once. All setup/cleanup remains measured.
         run: python3 scripts/ci/api-race-shard.py report .ci-api-shards 6 2300 .ci-api-template
