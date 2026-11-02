@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest"
 import { renderHook, act, waitFor } from "@testing-library/react"
 
 // Two accounts in one browser (swarm close-ab S4c): the owner opens a private
@@ -27,7 +27,7 @@ import { useUserPreference } from "@/hooks/use-user-preference"
 const KEY = "artifacts.ws1.recentlyOpened"
 type Recent = { slug: string; at: number }[]
 
-let fetchMock: ReturnType<typeof vi.fn>
+let fetchMock: Mock<(url: string, init?: RequestInit) => Promise<Response>>
 let storage: Map<string, string>
 // What the server holds, per signed-in user (the cookie decides whose it is).
 let server: Record<string, Record<string, unknown>>
