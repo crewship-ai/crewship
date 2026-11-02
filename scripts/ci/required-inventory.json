@@ -1,7 +1,7 @@
 {
   "version": 1,
   "protected_files": {
-    ".github/workflows/ci.yml": "83540955d448ba049bc634d1478f69878526aad9b39ca3bc8f621b6c85fa2fdd",
+    ".github/workflows/ci.yml": "d30299415d8e987294cbd56f99ae3cb3a8459a55e82da5fc76addb08109bda56",
     ".github/workflows/security.yml": "c33ba55a4650e15787eca0ea994de968fcf74fa0a0b61eb68211ff133b8fd505",
     ".github/workflows/codeql.yml": "08ba82c71afd5cf02aa224e9f26c543469bfe8bf3417c1e51d7eb76ae095c8bf",
     "scripts/ci/plan.py": "246b2f92739a9640fdcf477c11091a3fce08954b8480790741bbc44b86a4c837",

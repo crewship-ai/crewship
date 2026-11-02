@@ -2249,8 +2249,8 @@ jobs:
         # failing tests and full coverage proven by this guard (4721 tests on
         # f586adadb): the internal/api runs plus merge_group 41313229101.
         # min 2448, median 3404, p95 3649, max 3684s; shard 1 is bimodal
-        # (~950s or ~1535s for the same tests). Budget = median rounded up;
-        # alarm 5440s. Was 2100 (PR run 37475371053, 4356 tests).
+        # (~950s or ~1535s for the same tests). Budget = median rounded to
+        # the nearest 100s (3404 -> 3400); alarm 5440s. Was 2100 (PR run 37475371053, 4356 tests).
         env:
           RACE_SHARD_PACKAGE: github.com/crewship-ai/crewship/cmd/crewship
           RACE_CLI_COMBINED_BUDGET_SECONDS: "3400"
@@ -2446,7 +2446,7 @@ jobs:
         #   41311602008,41316088349,41318596487,41335958269,41336008691,
         #   41343514361,41350774599.
         # min 4339, median 4977, p95 5330, max 5484s. Budget = median rounded
-        # up; alarm 8000s. The former 2300 was the unsplit package runtime
+        # to the nearest 100s (4977 -> 5000); alarm 8000s. The former 2300 was the unsplit package runtime
         # (2026-09-14), before the suite grew 7652 -> 9123 tests.
         env:
           RACE_API_COMBINED_BUDGET_SECONDS: "5000"
