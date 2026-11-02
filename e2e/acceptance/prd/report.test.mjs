@@ -195,7 +195,10 @@ test("gate: formatGate lists every problem; shipped required-ids.json is well fo
   assert.throws(() => loadRequired(new URL("./required-ids.json", import.meta.url).pathname, ""), /not configured/)
   const ids = real.rows.map((x) => x.id)
   assert.equal(new Set(ids).size, ids.length)
-  assert.equal(real.rows.filter((x) => x.allowSkipped).map((x) => x.id).join(), "A.craft.lease.fail-closed")
+  // No required row may be skipped: fail-closed is proven on the artifacts
+  // origin, which runs without a native editor profile (#4779).
+  assert.equal(real.rows.filter((x) => x.allowSkipped).map((x) => x.id).join(), "")
+  assert.equal(real.rows.find((x) => x.id === "A.craft.lease.fail-closed")?.origin, "artifacts")
   for (const id of ["B.project.from-chat", "A.lock", "quota.aggregate.workspace", "drafts.identity-switch", "A.craft.session.hour-word"]) assert.ok(ids.includes(id), id)
   assert.equal(ids.filter((i) => i.startsWith("drafts.crash.")).length, 11)
   for (const x of real.rows) assert.ok(real.origins[x.origin], x.id)

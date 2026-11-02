@@ -113,8 +113,7 @@
     },
     {
       "id": "A.craft.lease.fail-closed",
-      "origin": "craft",
-      "allowSkipped": true,
+      "origin": "artifacts",
       "alwaysRerun": true
     },
     {

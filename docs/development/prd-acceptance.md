@@ -318,7 +318,12 @@ adding its ID here in the same change.
 A required ID passes only when its latest row has result `passed`, `mode=full`,
 the canonical origin and an `appSha` equal to the release candidate. Exceptions:
 
-- `A.craft.lease.fail-closed` may be `skipped` (servers with a native editor only).
+- No row may be `skipped`. `A.craft.lease.fail-closed` is proven on the
+  artifacts origin, which runs the RC without a native editor profile
+  (`GET /api/v1/documents/status` reports `enabled: false`): run it there with
+  `PRD_CRAFT_NATIVE=off`, and leave it out of the craft-origin run
+  (`-- --grep-invert "native editor off"`), whose server has native editors
+  and would only skip it (#4779).
 - Rows marked `allowManual` (`A.craft.session.hour-*`) may be `mode=manual` with
   a link to the recording in `evidence` and every check of the row's
   `manualChecks` set to `true` in `checks` (Enter, font, styles, table, image,
