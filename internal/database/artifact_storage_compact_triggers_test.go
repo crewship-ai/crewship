@@ -64,7 +64,9 @@ func storageTriggerSQL(t *testing.T, db *sql.DB) map[string]string {
 
 // Every accounted table keeps its workspace and size rule exactly: each
 // compact trigger hands the expressions the #4647 trigger used to the shared
-// artifact_storage_charge procedure, and nothing else.
+// artifact_storage_charge procedure, and nothing else. The "after" side is the
+// head schema: a later migration that changes one of these triggers must
+// update this test (and keep the compact one-statement shape).
 func TestCompactStorageTriggersKeepEveryTablesWorkspaceAndSizeRule(t *testing.T) {
 	before := storageTriggerSQL(t, openStorageTriggerDB(t, true))
 	after := storageTriggerSQL(t, openStorageTriggerDB(t, false))
