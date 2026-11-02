@@ -6,11 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/runoutput"
 )
 
 type retainedContainerStatus struct {
@@ -125,5 +128,67 @@ func TestHostDetachedHoldDoesNotRestopOrOverwriteTerminalOutcome(t *testing.T) {
 	}
 	if current.Status != "error" {
 		t.Fatalf("hold overwrote terminal outcome: %s", current.Status)
+	}
+}
+
+// #4774: a cancelled protected run in a shared, long-lived container used to
+// stay nonterminal forever because only whole-container absence could prove
+// that nothing it started still ran. The provider's session-empty stop
+// receipt, bound to the launched execution, is that proof without removing the
+// container; anything less still keeps the run waiting.
+func TestHostCancelledRunSettlesOnlyWithItsOwnSessionStopReceipt(t *testing.T) {
+	o, run := retainedAnalysisFixture(t, "CLAUDE_CODE", "", "", 137, "execution_cancelled")
+	o.container = &retainedContainerStatus{state: "running"}
+	directory := filepath.Dir(run.Output.Directory)
+	snapshot, err := o.ReadRetainedRunResult(t.Context(), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.AcknowledgeRetainedRunResult(t.Context(), run, snapshot); !errors.Is(err, ErrHostCaptureUnconfirmed) {
+		t.Fatalf("cancelled run without stop receipt acknowledged: %v", err)
+	}
+	if stopped, err := o.probeHostRun(t.Context(), run, true); err == nil || stopped {
+		t.Fatalf("cancelled run without receipt reported stopped=%v %v", stopped, err)
+	}
+
+	// A receipt for a different execution is not evidence for this one.
+	if err := runoutput.RecordHostStopConfirmed(directory, "other-exec"); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.AcknowledgeRetainedRunResult(t.Context(), run, snapshot); !errors.Is(err, ErrHostCaptureUnconfirmed) {
+		t.Fatalf("foreign execution receipt accepted: %v", err)
+	}
+	if err := runoutput.RecordHostStopConfirmed(directory, "exec"); err == nil {
+		t.Fatal("receipt for another execution was overwritten")
+	}
+	if err := os.Remove(filepath.Join(directory, "stop-confirmed")); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runoutput.RecordHostStopConfirmed(directory, "exec"); err != nil {
+		t.Fatal(err)
+	}
+	if stopped, err := o.probeHostRun(t.Context(), run, true); err != nil || !stopped {
+		t.Fatalf("confirmed session stop not terminal: %v %v", stopped, err)
+	}
+	if err := o.AcknowledgeRetainedRunResult(t.Context(), run, snapshot); err != nil {
+		t.Fatalf("cancelled run with its stop receipt not acknowledged: %v", err)
+	}
+}
+
+// The receipt only covers a cancellation the provider performed. A forced end
+// with any other reason still needs whole-runtime absence.
+func TestHostStopReceiptDoesNotSettleOtherForcedEnds(t *testing.T) {
+	o, run := retainedAnalysisFixture(t, "CLAUDE_CODE", "", "", 1, "output_limit")
+	o.container = &retainedContainerStatus{state: "running"}
+	if err := runoutput.RecordHostStopConfirmed(filepath.Dir(run.Output.Directory), "exec"); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := o.ReadRetainedRunResult(t.Context(), run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := o.AcknowledgeRetainedRunResult(t.Context(), run, snapshot); !errors.Is(err, ErrHostCaptureUnconfirmed) {
+		t.Fatalf("non-cancel forced end settled by stop receipt: %v", err)
 	}
 }
