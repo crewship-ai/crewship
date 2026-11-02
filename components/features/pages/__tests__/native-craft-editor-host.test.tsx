@@ -602,6 +602,67 @@ describe('full native history',()=>{
  })
 })
 
+describe('unchanged-content transfer (G4 B1/B2)',()=>{
+ const baseBytes=()=>new TextEncoder().encode('{"body":[]}')
+ it('B1: releases custody when the editor content is identical to the loaded version',async()=>{
+  mount();await ready();await acquire()
+  ports.at(-1)!.snapshot.mockResolvedValue({bytes:baseBytes(),editorRevision:'same',documentId:'doc'})
+  fireEvent.click(screen.getByRole('button',{name:'Uvolnit úpravy'}))
+  await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(true))
+  expect(client.save).not.toHaveBeenCalled()
+ })
+ it('B1: publishes the loaded version when nothing changed',async()=>{
+  mount();await ready();await acquire()
+  ports.at(-1)!.snapshot.mockResolvedValue({bytes:baseBytes(),editorRevision:'same',documentId:'doc'})
+  fireEvent.click(screen.getByRole('button',{name:'Publikovat náhled'}))
+  await waitFor(()=>expect(client.share).toHaveBeenCalledOnce())
+  expect(client.share.mock.calls[0][0]).toMatchObject({baseVersion:'1',targetVersion:'1'})
+  expect(client.save).not.toHaveBeenCalled()
+ })
+ it('B2: releases after an already confirmed autosave when the bytes are unchanged',async()=>{
+  mount();await ready();await acquire();const p=ports.at(-1)!
+  act(()=>portOptions.at(-1)!.onChanged('edit','doc'))
+  await screen.findByText('Uloženo');expect(client.save).toHaveBeenCalledOnce()
+  fireEvent.click(screen.getByRole('button',{name:'Uvolnit úpravy'}))
+  await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='release')).toBe(true))
+  expect(client.save).toHaveBeenCalledOnce();expect(p.ack).toHaveBeenCalledOnce()
+ })
+ it('B2: publishes the confirmed version after an autosave when the bytes are unchanged',async()=>{
+  mount();await ready();await acquire()
+  act(()=>portOptions.at(-1)!.onChanged('edit','doc'))
+  await screen.findByText('Uloženo')
+  fireEvent.click(screen.getByRole('button',{name:'Publikovat náhled'}))
+  await waitFor(()=>expect(client.share).toHaveBeenCalledOnce())
+  expect(client.share.mock.calls[0][0]).toMatchObject({baseVersion:'2',targetVersion:'2'})
+  expect(client.save).toHaveBeenCalledOnce()
+ })
+ it('B1: hands off custody on unchanged content without saving',async()=>{
+  mount();await ready();await acquire()
+  ports.at(-1)!.snapshot.mockResolvedValue({bytes:baseBytes(),editorRevision:'same',documentId:'doc'})
+  client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:{actor_id:'user:other',display_name:'Jana',kind:'human'},generation:'9007199254740996'});return emptyLease})
+  act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}))
+  fireEvent.click(await screen.findByRole('button',{name:'Předat uživateli Jana'}))
+  await waitFor(()=>expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(true))
+  expect(client.save).not.toHaveBeenCalled()
+ })
+ it('B1: accepts an agent proposal on unchanged content without saving first',async()=>{
+  const proposal={id:'ncp_0123456789abcdef01234567',authorName:'Jamie',baseVersion:'1',summary:'Nadpis',createdAt:'2026-10-29T17:00:00Z',state:'open' as const}
+  client.proposals.mockResolvedValue([proposal])
+  mount();await ready();await screen.findByText('Jamie připravil návrh nad verzí 1');await acquire()
+  ports.at(-1)!.snapshot.mockResolvedValue({bytes:baseBytes(),editorRevision:'same',documentId:'doc'})
+  client.decideProposal.mockResolvedValue({...proposal,state:'accepted',resultVersion:'2'})
+  fireEvent.click(await screen.findByRole('button',{name:'Přijmout'}))
+  await waitFor(()=>expect(client.decideProposal).toHaveBeenCalledWith(proposal.id,'accept','9007199254740995',expect.any(AbortSignal)))
+  expect(client.save).not.toHaveBeenCalled()
+ })
+ it('B20: a recovered draft with the server bytes is retired from storage, not just the current row',async()=>{
+  const same={applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'0',editorRevision:'lost-ack',bytes:baseBytes()}
+  journal.recovery.mockResolvedValueOnce([{draft:same,actions:['compare','copy']}])
+  mount();await ready();await acquire()
+  await waitFor(()=>expect(journal.discardRecovered).toHaveBeenCalledWith(expect.objectContaining({draft:same})))
+ })
+})
+
 describe('write and read revoked together while a lost save is reconciled',()=>{
  // The native client never reports read_revoked (a refused bearer maps to write_revoked);
  // read loss reaches the host as session_retired draft:purge. It purges the journal the
