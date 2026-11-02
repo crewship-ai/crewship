@@ -125,8 +125,11 @@ func (w *Writer) matchReplayEntry(ctx context.Context, e Entry) (bool, error) {
 // ReplayTerminal returns an already committed terminal receipt after visible
 // history has expired. Scope is authenticated before its type is exposed; a
 // receipt for a chunk or another run can never acknowledge a terminal result.
-// When expectedExit is supplied, the receipt must also agree with that exact
-// exit fact, including the distinction between an absent code and zero.
+// When expectedExit is supplied, a receipt that recorded an exit code must
+// agree with that exact fact, including the distinction between an absent
+// expectation and zero. A receipt written without an exit code (a terminal
+// reported by status alone, such as a routine child run) records no exit fact,
+// so it cannot contradict one captured later; the caller still compares kinds.
 func (w *Writer) ReplayTerminal(ctx context.Context, id, workspace, agent, run string, expectedExit ...*int) (EntryType, bool, error) {
 	if id == "" || workspace == "" || agent == "" || run == "" {
 		return "", false, errors.New("journal terminal receipt requires exact identity")
@@ -148,7 +151,7 @@ func (w *Writer) ReplayTerminal(ctx context.Context, id, workspace, agent, run s
 	}
 	if len(expectedExit) == 1 {
 		expected := expectedExit[0]
-		if (expected == nil && code.Valid) || (expected != nil && (!code.Valid || code.Int64 != int64(*expected))) {
+		if (expected == nil && code.Valid) || (expected != nil && code.Valid && code.Int64 != int64(*expected)) {
 			return "", false, ErrReplayConflict
 		}
 	}

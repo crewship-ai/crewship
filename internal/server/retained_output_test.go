@@ -290,6 +290,44 @@ func TestRetainedOutputRefusesConflictingExitAfterTerminalPruning(t *testing.T) 
 	}
 }
 
+// A routine child run reports its terminal through UpdateRun with a status and
+// no exit code, so its run-terminal receipt records no exit fact. The protected
+// source later shows the real exit; that is not a conflict, and the retained
+// run must settle instead of retrying ErrReplayConflict every flush.
+func TestRetainedOutputSettlesAfterRoutineTerminalWithoutExit(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('retained-ws','Recovery','retained-ws')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('retained-agent','retained-ws','Agent','retained','RUNNING')`)
+	run := seedHostOutput(t, s, "run_retained_routine_child")
+	// Exactly what UpdateRun writes for pipeline recordChildTerminal:
+	// COMPLETED, exit code nil, no captured completion time.
+	entry := journal.RunTerminalReplay(run.ID, run.WorkspaceID, run.AgentID, run.StartedAt, journal.EntryRunCompleted, false, nil, nil, nil)
+	if _, _, err := s.journalWriter.EmitReplaySync(t.Context(), entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.flushRetainedOutput(t.Context()); err != nil {
+		t.Fatalf("retained run did not settle: %v", err)
+	}
+	raw, err := s.state.Get(t.Context(), "agent_runs", run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var current orchestrator.RunState
+	if err := json.Unmarshal(raw, &current); err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != "completed" || !current.Output.Acknowledged || current.Output.Unprojected != "" {
+		t.Fatalf("retained run not settled: status=%s output=%+v", current.Status, current.Output)
+	}
+	var terminals int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE trace_id=? AND entry_type LIKE 'run.%'`, run.ID).Scan(&terminals); err != nil {
+		t.Fatal(err)
+	}
+	if terminals != 1 {
+		t.Fatalf("terminal rows=%d, want the original one only", terminals)
+	}
+}
+
 // A normal host chat observer may return before protected output completes.
 // Only the real replay/analysis/projector path (not another caller finish)
 // may consume that later exit, on the SAME attempt and generation.
