@@ -36,7 +36,7 @@ func (s *Server) flushRetainedOutput(ctx context.Context) error {
 	cutoff := time.Now().Add(-7 * 24 * time.Hour)
 	for key, raw := range states {
 		var run orchestrator.RunState
-		if json.Unmarshal(raw, &run) != nil || run.ID != key || run.Output == nil || run.Output.Version != 2 || run.Output.Collected {
+		if json.Unmarshal(raw, &run) != nil || run.ID != key || run.Output == nil || run.Output.Version != 2 || run.Output.Collected || run.Output.Unprojected != "" {
 			continue
 		}
 		if run.Output.Acknowledged && (run.Status == "running" || !run.LastActivity.Before(cutoff)) {
@@ -67,32 +67,134 @@ func (s *Server) flushRetainedOutput(ctx context.Context) error {
 				continue
 			}
 		}
-		if err := s.projectRetainedOutput(ctx, run); err != nil {
+		err := s.projectRetainedOutput(ctx, run)
+		var refusal *retainedOwnershipRefusal
+		if errors.As(err, &refusal) {
+			// Retrying cannot change unverifiable ownership. Settle the ended
+			// run without its output instead of reporting it RUNNING forever.
+			if settleErr := s.settleUnprojectableRetainedRun(ctx, run, refusal); settleErr != nil {
+				err = fmt.Errorf("%s; settlement pending: %w", refusal.message, settleErr)
+			} else {
+				err = nil
+				if s.logger != nil {
+					s.logger.Warn("retained run settled without projecting output", "run_id", run.ID, "reason", refusal.reason)
+				}
+			}
+		}
+		if err != nil {
 			failures = append(failures, fmt.Errorf("retained run %s: %w", key, err))
 		}
 	}
 	return errors.Join(failures...)
 }
 
+// retainedOwnershipRefusal is a permanent fail-closed verdict: the recorded
+// ownership of a retained run cannot be verified against the agent, the work
+// ledger or the journal of its trace. No retry can make the output safe to
+// project, so the flush settles the ended run instead.
+type retainedOwnershipRefusal struct {
+	reason  string
+	message string
+}
+
+func (e *retainedOwnershipRefusal) Error() string { return e.message }
+
+const retainedConflictReason = "conflicting_journal_ownership"
+
+func refuseRetainedOwnership(reason, message string) error {
+	return &retainedOwnershipRefusal{reason: reason, message: message}
+}
+
+// settleUnprojectableRetainedRun never writes output, a work row, or anything
+// under an owner other than the one the run state, the agent row and the run's
+// own journal start all agree on. Only a journal-ownership conflict can have
+// such an agreed owner: the other refusals mean the run state itself is not
+// trusted to name one, so they settle the run state alone.
+func (s *Server) settleUnprojectableRetainedRun(ctx context.Context, run orchestrator.RunState, refusal *retainedOwnershipRefusal) error {
+	var record func(runoutput.Snapshot) error
+	if refusal.reason == retainedConflictReason {
+		record = func(snapshot runoutput.Snapshot) error { return s.recordRetainedOwnershipConflict(ctx, run, snapshot) }
+	}
+	return s.orchestrator.SettleRetainedRunUnprojected(ctx, run, refusal.reason, record)
+}
+
+// recordRetainedOwnershipConflict ends the run row GET /agents/{id}/runs shows
+// for the run's verified owner: a run.started under exactly that workspace and
+// agent with no terminal. It carries a fixed reason and no exit code or
+// output; the source's completion time only dates it, exactly as an ordinary
+// retained terminal would be. Rows of other owners in the trace stay untouched, and a
+// work-owned run keeps its outcome with the work ledger.
+func (s *Server) recordRetainedOwnershipConflict(ctx context.Context, run orchestrator.RunState, snapshot runoutput.Snapshot) error {
+	var workspace string
+	if err := s.db.QueryRowContext(ctx, `SELECT workspace_id FROM agents WHERE id=?`, run.AgentID).Scan(&workspace); err != nil {
+		return err
+	}
+	if run.WorkspaceID == "" || workspace != run.WorkspaceID {
+		return errors.New("retained run ownership disagrees with agent")
+	}
+	if _, owned, err := work.NewStore(s.db).RunProjection(ctx, run.ID); err != nil || owned {
+		return err
+	}
+	var ts string
+	var settled bool
+	err := s.db.QueryRowContext(ctx, `SELECT ts, EXISTS(SELECT 1 FROM journal_entries t WHERE t.workspace_id=? AND t.agent_id=? AND t.trace_id=?
+ AND t.entry_type IN ('run.completed','run.failed','run.cancelled','run.timeout','run.recovered_stop'))
+ FROM journal_entries WHERE workspace_id=? AND agent_id=? AND trace_id=? AND entry_type='run.started' ORDER BY ts LIMIT 1`,
+		run.WorkspaceID, run.AgentID, run.ID, run.WorkspaceID, run.AgentID, run.ID).Scan(&ts, &settled)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && settled) {
+		// No visible run row of this owner, or it already ended.
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	started, err := time.Parse(time.RFC3339Nano, ts)
+	if err != nil {
+		return err
+	}
+	eventTime, err := journal.RunTerminalEventTime(started, snapshot.Result.CompletedAt)
+	if err != nil {
+		return err
+	}
+	short := run.ID
+	if len(short) > 8 {
+		short = short[:8]
+	}
+	id := "retained-ownership-conflict:" + run.ID
+	_, _, err = s.journalWriter.EmitReplaySync(ctx, journal.Entry{
+		ID: id, WorkspaceID: run.WorkspaceID, AgentID: run.AgentID, TS: eventTime,
+		Type: journal.EntryRunFailed, Severity: journal.SeverityError, ActorType: journal.ActorSystem,
+		Summary: fmt.Sprintf("run %s failed", short), TraceID: run.ID, SpanID: id,
+		Payload: map[string]any{
+			"error_message": "retained run output withheld: its trace has conflicting journal ownership",
+			"metadata":      map[string]any{"retained_settlement": retainedConflictReason},
+		},
+	})
+	return err
+}
+
 func (s *Server) projectRetainedOutput(ctx context.Context, run orchestrator.RunState) error {
 	if run.WorkspaceID == "" || run.AgentID == "" || run.StartedAt.IsZero() {
-		return errors.New("retained run lacks original ownership")
+		return refuseRetainedOwnership("lacks_original_ownership", "retained run lacks original ownership")
 	}
 	var workspace string
-	if err := s.db.QueryRowContext(ctx, `SELECT workspace_id FROM agents WHERE id=?`, run.AgentID).Scan(&workspace); err != nil || workspace != run.WorkspaceID {
-		return errors.New("retained run ownership disagrees with agent")
+	if err := s.db.QueryRowContext(ctx, `SELECT workspace_id FROM agents WHERE id=?`, run.AgentID).Scan(&workspace); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		// A failed lookup is not a verdict; only a missing or other agent is.
+		return err
+	} else if err != nil || workspace != run.WorkspaceID {
+		return refuseRetainedOwnership("ownership_disagrees_with_agent", "retained run ownership disagrees with agent")
 	}
 	var conflict bool
 	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM journal_entries WHERE trace_id=? AND (workspace_id<>? OR COALESCE(agent_id,'')<>?) AND entry_type IN ('run.started','run.completed','run.failed','run.cancelled','run.timeout'))`, run.ID, workspace, run.AgentID).Scan(&conflict); err != nil {
 		return err
 	}
 	if conflict {
-		return errors.New("retained run has conflicting journal ownership")
+		return refuseRetainedOwnership(retainedConflictReason, "retained run has conflicting journal ownership")
 	}
 	if projection, owned, err := work.NewStore(s.db).RunProjection(ctx, run.ID); err != nil {
 		return err
 	} else if owned && (projection.WorkspaceID != workspace || projection.AgentID != run.AgentID || (projection.CrewID != "" && projection.CrewID != run.CrewID)) {
-		return errors.New("retained work scope differs")
+		return refuseRetainedOwnership("work_scope_differs", "retained work scope differs")
 	}
 	snapshot, err := s.orchestrator.ReplayRetainedRun(ctx, run, func(line runoutput.Line) error {
 		id := fmt.Sprintf("retained:%s:%d:%d", run.ID, line.Sequence, line.Index)

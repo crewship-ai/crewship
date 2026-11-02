@@ -22,9 +22,16 @@ Before tagging, verify:
       `pnpm lint && pnpm build && pnpm test --run`.
 - [ ] `gofmt -l internal/ cmd/` is empty for files touched in the
       release window.
+- [ ] Fragments are collected: on a release-prep branch run
+      `python3 scripts/changelog-collect.py` (`--dry-run` first to preview).
+      It moves every `changelog.d/<number>-<slug>.md` to the top of
+      `## [Unreleased]`, highest number first, and deletes the fragment
+      files; it refuses, changing nothing, on an empty fragment or a missing
+      heading. Commit the result with the version bump below. Fragments
+      merged after that commit wait for the next release.
 - [ ] `CHANGELOG.md` has a populated `## [X.Y.Z]` section under
       `## [Unreleased]`. Move the entries down, leave `## [Unreleased]`
-      empty.
+      empty; `changelog.d/` holds only its `README.md`.
 - [ ] `package.json` `version` matches the target tag (without the `v`
       prefix; `0.1.0-beta.1` for tag `v0.1.0-beta.1`).
 - [ ] No unresolved major review findings on the release PR; follow [Review before merge](CONTRIBUTING.md#review-before-merge).

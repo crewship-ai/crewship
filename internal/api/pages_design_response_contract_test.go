@@ -1,14 +1,14 @@
 package api
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 
-	"github.com/santhosh-tekuri/jsonschema/v5"
+	"github.com/getkin/kin-openapi/openapi3"
 )
 
 // Create performs the engine operation before opening its publication transaction.
@@ -77,27 +77,34 @@ func TestDesignActualResponsesMatchConcreteOpenAPIContracts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	compiler := jsonschema.NewCompiler()
-	if err = compiler.AddResource("design-spec.json", bytes.NewReader(raw)); err != nil {
+	doc, err := openapi3.NewLoader().LoadFromData(raw)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if doc.OpenAPI != "3.0.3" {
+		t.Fatalf("OpenAPI = %q, want 3.0.3", doc.OpenAPI)
 	}
 	validate := func(component string, w *httptest.ResponseRecorder, want int) {
 		t.Helper()
 		if w.Code != want {
 			t.Fatalf("%s status %d: %s", component, w.Code, w.Body)
 		}
-		schema, e := compiler.Compile("design-spec.json#/components/schemas/" + component)
-		if e != nil {
+		ref := doc.Components.Schemas[component]
+		if ref == nil || ref.Value == nil {
+			t.Fatalf("missing OpenAPI component %s", component)
+		}
+		schema := ref.Value
+		if e := schema.Validate(context.Background()); e != nil {
 			t.Fatal(e)
 		}
 		var body any
-		if e = json.Unmarshal(w.Body.Bytes(), &body); e != nil {
+		if e := json.Unmarshal(w.Body.Bytes(), &body); e != nil {
 			t.Fatal(e)
 		}
-		if e = schema.Validate(body); e != nil {
+		if e := schema.VisitJSON(body); e != nil {
 			t.Fatalf("actual %s violates schema: %v\n%s", component, e, w.Body)
 		}
-		if e = schema.Validate(map[string]any{}); e == nil {
+		if e := schema.VisitJSON(map[string]any{}); e == nil {
 			t.Fatalf("%s accepts an absent response body", component)
 		}
 		fields := body.(map[string]any)
@@ -105,7 +112,7 @@ func TestDesignActualResponsesMatchConcreteOpenAPIContracts(t *testing.T) {
 		for k, v := range fields {
 			renamed[strings.ToUpper(k)] = v
 		}
-		if e = schema.Validate(renamed); e == nil {
+		if e := schema.VisitJSON(renamed); e == nil {
 			t.Fatalf("%s accepts every wire field renamed", component)
 		}
 	}
