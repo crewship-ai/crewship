@@ -129,7 +129,7 @@
     "lowlight": "^3.3.0",
     "lucide-react": "^1.65.0",
     "marked": "^18.1.2",
-    "motion": "14.8.0",
+    "motion": "14.6.0",
     "nanoid": "^6.0.2",
     "next": "^16.4.3",
     "next-intl": "^4.14.9",
