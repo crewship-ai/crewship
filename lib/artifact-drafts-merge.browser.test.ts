@@ -202,3 +202,64 @@ it.skipIf(!existsSync(executable))("G4 r5 cross-tab: B holds the lock, A's stop 
     }, key)).toBe("rejected")
   } finally { await browser.close() }
 }, 60000)
+
+it.skipIf(!existsSync(executable))("G4 r6: a bundle recovery waiting on decrypt never overwrites a merge another tab committed meanwhile", async () => {
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const context = await browser.newContext()
+    await context.route("http://localhost/**", route => route.fulfill({ body: "<!doctype html><title>Drafts</title>", contentType: "text/html" }))
+    let humanA = "alice"
+    const a = await context.newPage(), b = await context.newPage(), c = await context.newPage()
+    await tab(a, () => humanA)
+    await tab(b, () => "alice")
+    await tab(c, () => "alice")
+    const key = JSON.stringify(["alice", "wordcraft-pending", "w", "page_5"])
+    const union = ((parts: string[]) => JSON.stringify([...new Set(parts.flatMap(part => part ? JSON.parse(part) as string[] : []))])).toString()
+    const withCombine = `const combine = (${union});`
+    // Build a stored bundle exactly as the r5 interleaving does (B writes under its lock, A retired appends).
+    await a.evaluate(async key => { const api = (window as unknown as W).artifactDrafts; await api.writeArtifactDraft(key, JSON.stringify(["A"])); await api.loadArtifactDraft(key) }, key)
+    await b.evaluate(async key => { await (window as unknown as W).artifactDrafts.loadArtifactDraft(key) }, key)
+    await b.evaluate(name => new Promise<void>(held => { void navigator.locks.request(name, () => new Promise<void>(release => { (window as unknown as W).release = release; held() })) }), `crewship-artifact-draft:${key}`)
+    await a.evaluate(({ key, withCombine }) => {
+      const w = window as unknown as W
+      const combine = new Function("parts", `${withCombine} return combine(parts)`) as (parts: string[]) => string
+      w.pending = w.artifactDrafts.mergeArtifactDraft(key, existing => JSON.stringify([...(existing ? JSON.parse(existing) as string[] : []), "B (stopped)"]), combine)
+      void w.pending.catch(() => {})
+    }, { key, withCombine })
+    humanA = "bob"
+    const suspended = a.evaluate(() => { const api = (window as unknown as W).artifactDrafts; api.beginLocalDraftIdentity("bob"); return api.suspendOtherArtifactDrafts("bob") })
+    await b.evaluate(async key => { const w = window as unknown as W; await w.artifactDrafts.writeArtifactDraft(key, JSON.stringify(["A", "C (newer, tab B)"])); w.release!() }, key)
+    expect(await a.evaluate(async () => (window as unknown as W).pending!)).toBe("")
+    await suspended
+
+    // Tab C recovers the bundle; its key unwrap (decrypt) is held.
+    let seen!: () => void, release!: () => void
+    const unwrapping = new Promise<void>(resolve => { seen = resolve }), gate = new Promise<void>(resolve => { release = resolve })
+    await c.route("**/api/v1/pages/*/draft-key?*", async route => {
+      if (route.request().postDataJSON()?.operation === "unwrap") { seen(); await gate }
+      await route.fallback()
+    })
+    const recovering = c.evaluate(async ({ key, withCombine }) => {
+      const combine = new Function("parts", `${withCombine} return combine(parts)`) as (parts: string[]) => string
+      try { return await (window as unknown as W).artifactDrafts.loadArtifactDraft(key, combine) } catch (error) { return `error: ${String(error)}` }
+    }, { key, withCombine })
+    await unwrapping
+    // Meanwhile tab B commits another stop under the cross-tab lock.
+    const committed = await b.evaluate(async ({ key, withCombine }) => {
+      const combine = new Function("parts", `${withCombine} return combine(parts)`) as (parts: string[]) => string
+      return (window as unknown as W).artifactDrafts.mergeArtifactDraft(key, existing => JSON.stringify([...(existing ? JSON.parse(existing) as string[] : []), "D (committed, tab B)"]), combine)
+    }, { key, withCombine })
+    expect(JSON.parse(committed)).toContain("D (committed, tab B)")
+    release()
+    await recovering
+
+    // B's durably stored originals survive C's late recovery.
+    const owner = JSON.parse(await b.evaluate(async ({ key, withCombine }) => {
+      const combine = new Function("parts", `${withCombine} return combine(parts)`) as (parts: string[]) => string
+      return (window as unknown as W).artifactDrafts.loadArtifactDraft(key, combine)
+    }, { key, withCombine })) as string[]
+    expect(owner.sort()).toEqual(["A", "B (stopped)", "C (newer, tab B)", "D (committed, tab B)"].sort())
+    // The other identity still gets nothing.
+    expect(await a.evaluate(async key => (window as unknown as W).artifactDrafts.readArtifactDraft(key), key)).toBe("")
+  } finally { await browser.close() }
+}, 60000)
