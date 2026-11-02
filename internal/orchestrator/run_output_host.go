@@ -460,7 +460,8 @@ func (o *Orchestrator) CollectRetainedRun(ctx context.Context, run RunState, cut
 }
 
 // forcedHostEndConfirmed reports whether a retained run that did not exit on
-// its own provably left nothing running. Whole-runtime absence always counts.
+// its own provably left nothing it still parents running. Whole-runtime
+// absence always counts.
 // A cancelled run also counts when the provider's stop recorded that the
 // leader's whole process tree (its session and every descendant) was killed
 // and the execution itself was terminal (runoutput.RecordHostStopConfirmed). That receipt is bound to the

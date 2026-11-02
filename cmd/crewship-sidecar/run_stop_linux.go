@@ -101,9 +101,11 @@ const stopBudget = 3 * time.Second
 
 // treeMember is one process held by pidfd while the leader's tree is stopped.
 type treeMember struct {
-	pid   int
-	fd    int
-	start uint64
+	pid     int
+	fd      int
+	start   uint64
+	session int
+	pgrp    int
 }
 
 // stopExactTree authenticates the leader (pidfd, namespace, start time) and
@@ -206,18 +208,23 @@ func stopExactTree(pid int, start uint64, diagnostics io.Writer) (confirmed bool
 					settled = false
 					continue
 				}
-				held = treeMember{pid: member.pid, fd: fd, start: member.start}
+				held = treeMember{pid: member.pid, fd: fd, start: again.start, session: again.session, pgrp: again.pgrp}
 				members[member.pid] = held
 				settled = false
 			}
+		}
+		// Every pinned member, including one that dropped out of the tree
+		// since it was pinned, is stopped again on every scan (repeating
+		// SIGSTOP is harmless) and must be fully stopped or exited.
+		for _, held := range members {
 			if pidfdExited(held.fd) {
 				continue
 			}
-			if !allThreadsStopped(member.pid) {
+			if sigErr := unix.PidfdSendSignal(held.fd, unix.SIGSTOP, nil, 0); sigErr != nil && !errors.Is(sigErr, unix.ESRCH) {
+				return unconfirmed("tree member not stoppable: %v", sigErr)
+			}
+			if !allThreadsStopped(held.pid) {
 				settled = false
-				if sigErr := unix.PidfdSendSignal(held.fd, unix.SIGSTOP, nil, 0); sigErr != nil && !errors.Is(sigErr, unix.ESRCH) {
-					return unconfirmed("tree member not stoppable: %v", sigErr)
-				}
 			}
 		}
 		if !pidfdExited(leader) && !allThreadsStopped(pid) {
@@ -245,7 +252,41 @@ func stopExactTree(pid int, start uint64, diagnostics io.Writer) (confirmed bool
 		fmt.Fprintln(diagnostics, "leader exit unconfirmed")
 		return false, nil
 	}
+	// Backstop: nothing may still run in the leader's or a member's session
+	// or process group, or as a child of any killed process.
+	procs, err := scanProcesses()
+	if err != nil {
+		fmt.Fprintln(diagnostics, "final process scan failed:", err)
+		return false, nil
+	}
+	sessions := map[int]bool{pid: true}
+	parents := map[int]bool{pid: true}
+	for _, m := range members {
+		parents[m.pid] = true
+		sessions[m.session] = true
+		sessions[m.pgrp] = true
+	}
+	for _, p := range procs {
+		if !sessions[p.session] && !sessions[p.pgrp] && !parents[p.ppid] {
+			continue
+		}
+		if p.state == 'X' || (p.state == 'Z' && singleThreaded(p.pid)) {
+			continue
+		}
+		fmt.Fprintln(diagnostics, "process survived the tree stop:", p.pid)
+		return false, nil
+	}
 	return true, nil
+}
+
+// singleThreaded reports whether pid has at most one task left (a zombie main
+// thread whose thread group has otherwise exited).
+func singleThreaded(pid int) bool {
+	tasks, err := os.ReadDir(fmt.Sprintf("/proc/%d/task", pid))
+	if errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	return err == nil && len(tasks) <= 1
 }
 
 // treeOf returns the processes in leader's session and every descendant of
@@ -319,9 +360,8 @@ func allThreadsStopped(pid int) bool {
 	for _, task := range tasks {
 		data, readErr := os.ReadFile(fmt.Sprintf("/proc/%d/task/%s/stat", pid, task.Name()))
 		if readErr != nil {
-			if errors.Is(readErr, os.ErrNotExist) || errors.Is(readErr, unix.ESRCH) {
-				continue
-			}
+			// A task that vanished mid-listing may have been replaced by a
+			// new one: not settled, rescan.
 			return false
 		}
 		end := strings.LastIndexByte(string(data), ')')
@@ -378,6 +418,7 @@ func waitPidfdExit(fd int, timeout time.Duration) bool {
 type processStat struct {
 	pid     int
 	ppid    int
+	pgrp    int
 	state   byte
 	session int
 	start   uint64
@@ -400,6 +441,10 @@ func readProcessStat(pid int) (processStat, error) {
 	if err != nil {
 		return processStat{}, errors.New("invalid parent process")
 	}
+	pgrp, err := strconv.Atoi(fields[2])
+	if err != nil {
+		return processStat{}, errors.New("invalid process group")
+	}
 	session, err := strconv.Atoi(fields[3])
 	if err != nil {
 		return processStat{}, errors.New("invalid process session")
@@ -408,7 +453,7 @@ func readProcessStat(pid int) (processStat, error) {
 	if err != nil || start == 0 {
 		return processStat{}, errors.New("invalid process start time")
 	}
-	return processStat{pid: pid, ppid: ppid, state: fields[0][0], session: session, start: start}, nil
+	return processStat{pid: pid, ppid: ppid, pgrp: pgrp, state: fields[0][0], session: session, start: start}, nil
 }
 
 // scanProcesses lists every process in this PID namespace. Processes that
