@@ -67,7 +67,7 @@ async function retireCommitted(journal:NativeDraftJournal,rows:NativeRecovery[],
  const digest=async(bytes:Uint8Array)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new Uint8Array(bytes))),v=>v.toString(16).padStart(2,'0')).join('')
  const serverHash=await digest(server),kept:NativeRecovery[]=[]
  for(const row of rows){
-  if(await digest(row.draft.bytes)===serverHash){try{await journal.confirm(row.draft);continue}catch{/* Kept for comparison. */}}
+  if(await digest(row.draft.bytes)===serverHash){try{await journal.discardRecovered(row);continue}catch{/* Kept for comparison. */}}
   kept.push(row)
  }
  return kept

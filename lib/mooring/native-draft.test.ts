@@ -131,3 +131,30 @@ it("a closed journal refuses a scope purge but erases exactly its own row (#4348
   await expect(old.persist(draft())).rejects.toThrow()
   await fresh.close()
 })
+
+it("G4 B20: confirm retires only this mount's row; discardRecovered removes the recovered row of an earlier mount", async () => {
+  mock.open.mockResolvedValue(storage())
+  const first = await openNativeDraftJournal(scope)
+  await first.persist(draft())
+  await first.close()
+  const second = await openNativeDraftJournal(scope)
+  const [recovered] = await second.recovery()
+  await second.confirm(recovered.draft)
+  expect(rows.size).toBe(1) // confirm cannot reach another mount's row
+  await second.discardRecovered(recovered)
+  expect(rows.size).toBe(0)
+  await second.close()
+})
+
+it("G4 B20: discardRecovered keeps a recovered row that changed since it was read", async () => {
+  mock.open.mockResolvedValue(storage())
+  const first = await openNativeDraftJournal(scope)
+  await first.persist(draft())
+  await first.close()
+  const second = await openNativeDraftJournal(scope)
+  const [recovered] = await second.recovery()
+  const [row] = [...rows.values()]; rows.set(row.id, { ...row, snapshot: row.snapshot.replace("doc:1:0", "doc:9:0") })
+  await second.discardRecovered(recovered)
+  expect(rows.size).toBe(1)
+  await second.close()
+})
