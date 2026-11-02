@@ -3,11 +3,12 @@ import { Buffer } from "node:buffer"
 import type { DocumentDraft } from "../document-queue"
 import { openNativeDraftJournal, validNativeDraft, type NativeDraft } from "./native-draft"
 
-const mock = vi.hoisted(() => ({ open: vi.fn(), purge: vi.fn(), retire: undefined as undefined | (() => Promise<void>) }))
+const mock = vi.hoisted(() => ({ open: vi.fn(), purge: vi.fn(), removeRow: vi.fn(), retire: undefined as undefined | (() => Promise<void>) }))
 vi.mock("../document-queue", async importOriginal => ({
   ...await importOriginal<typeof import("../document-queue")>(),
   openDocumentDrafts: mock.open,
   purgeDocumentDrafts: mock.purge,
+  removeDocumentDraftRow: mock.removeRow,
   registerDocumentDraftWriter: (_human: string, retire: () => Promise<void>) => { mock.retire = retire; return () => {} },
 }))
 vi.mock("../protected-document-drafts", () => ({ openProtectedDocumentDrafts: mock.open }))
@@ -17,7 +18,7 @@ const rows = new Map<string, DocumentDraft>()
 function storage(exclusive = true) {
   return { exclusive, load: vi.fn(async () => [...rows.values()]), put: vi.fn(async (row: DocumentDraft) => { rows.set(row.id, row) }), remove: vi.fn(async (id: string) => { rows.delete(id) }), close: vi.fn() }
 }
-beforeEach(() => { rows.clear(); mock.open.mockReset(); mock.purge.mockReset(); mock.purge.mockImplementation(async () => { rows.clear() }); mock.retire = undefined })
+beforeEach(() => { rows.clear(); mock.open.mockReset(); mock.purge.mockReset(); mock.purge.mockImplementation(async () => { rows.clear() }); mock.removeRow.mockReset(); mock.removeRow.mockImplementation(async (_h: string, _w: string, _p: string, row: { id: string }) => { rows.delete(row.id) }); mock.retire = undefined })
 afterEach(() => vi.restoreAllMocks())
 
 it("bounds raw native bytes at the server's 32 MiB limit separately from the encoded journal budget", () => {
@@ -110,4 +111,50 @@ it("keeps the exclusive store until a requested read purge completes and lets cl
   expect(closed).toBe(false); expect(store.close).not.toHaveBeenCalled()
   finish(); await Promise.all([purging, closing])
   expect(store.close).toHaveBeenCalledOnce()
+})
+
+it("a closed journal refuses a scope purge but erases exactly its own row (#4348)", async () => {
+  mock.open.mockImplementation(async () => storage())
+  const old = await openNativeDraftJournal(scope)
+  await old.persist(draft())
+  const [oldId] = [...rows.keys()]
+  await old.close()
+  const fresh = await openNativeDraftJournal(scope)
+  await fresh.persist({ ...draft(), sessionId: "tab-b" })
+  await expect(old.revokeRead()).rejects.toThrow()
+  expect(mock.purge).not.toHaveBeenCalled()
+  await old.eraseOwnRow!()
+  expect(mock.removeRow).toHaveBeenCalledOnce()
+  expect(mock.removeRow).toHaveBeenCalledWith("h", "w", "p", { schema: 1, epoch: "native-v1", id: oldId })
+  expect(rows.has(oldId)).toBe(false)
+  expect(rows.size).toBe(1)
+  await expect(old.persist(draft())).rejects.toThrow()
+  await fresh.close()
+})
+
+it("G4 B20: confirm retires only this mount's row; discardRecovered removes the recovered row of an earlier mount", async () => {
+  mock.open.mockResolvedValue(storage())
+  const first = await openNativeDraftJournal(scope)
+  await first.persist(draft())
+  await first.close()
+  const second = await openNativeDraftJournal(scope)
+  const [recovered] = await second.recovery()
+  await second.confirm(recovered.draft)
+  expect(rows.size).toBe(1) // confirm cannot reach another mount's row
+  await second.discardRecovered(recovered)
+  expect(rows.size).toBe(0)
+  await second.close()
+})
+
+it("G4 B20: discardRecovered keeps a recovered row that changed since it was read", async () => {
+  mock.open.mockResolvedValue(storage())
+  const first = await openNativeDraftJournal(scope)
+  await first.persist(draft())
+  await first.close()
+  const second = await openNativeDraftJournal(scope)
+  const [recovered] = await second.recovery()
+  const [row] = [...rows.values()]; rows.set(row.id, { ...row, snapshot: row.snapshot.replace("doc:1:0", "doc:9:0") })
+  await second.discardRecovered(recovered)
+  expect(rows.size).toBe(1)
+  await second.close()
 })

@@ -393,6 +393,7 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 	ping := time.NewTicker(20 * time.Second)
 	defer ping.Stop()
 	closeWith := func(err error) {
+		logDesignEngineUnavailable(err)
 		code, reason := designCloseFor(err)
 		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason), time.Now().Add(time.Second))
 	}
