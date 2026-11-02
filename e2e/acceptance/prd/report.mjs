@@ -245,11 +245,25 @@ export function gitDiffStat(from, to, paths) {
   return execFileSync("git", ["diff", "--stat", from, to, "--", ...paths], { encoding: "utf8" })
 }
 
+/** Latest row per test: a rerun supersedes that test's earlier attempt. @param {PrdRow[]} rows */
+function latestPerTest(rows) {
+  const latest = new Map()
+  for (const r of [...rows].sort((a, b) => time(b) - time(a) || ORDER[a.result] - ORDER[b.result])) if (!latest.has(r.test)) latest.set(r.test, r)
+  return [...latest.values()]
+}
+
+/** A manual record replaces the automated rows of its ID (a full run emits A.craft.session.hour-* as skipped and the walkthrough supplies the result). @param {PrdRow[]} rows */
+function selectTests(rows) {
+  const manual = rows.filter((r) => r.mode === "manual")
+  return latestPerTest(manual.length ? manual : rows)
+}
+
 /**
  * Checks merged rows against the required list. Per ID and test the latest
  * row on the RC SHA wins (a rerun supersedes that test's earlier attempt), and
- * the ID takes the worst of its tests, so a later passing test never hides a
- * failed one (#4767); a manual record replaces the automated rows of its ID.
+ * every selected test row is validated on its own (result, mode, origin,
+ * manual evidence), so no test hides a failed, quick-mode or wrong-origin one
+ * (#4767); a manual record replaces the automated rows of its ID.
  * Rows on other SHAs only count when no row
  * on the RC exists, and then fail as "appSha" unless a carryover record
  * covers them. A carried row keeps the SHA it was proven on and gets
@@ -259,14 +273,6 @@ export function gitDiffStat(from, to, paths) {
  * @param {PrdRow[]} rows @param {Required} required
  * @param {{ rc?: string | null, carryover?: Carryover[], diff?: (from: string, to: string, paths: string[]) => string }} opts
  */
-/** Latest row per test, then the worst of those (ties: latest). @param {PrdRow[]} rows */
-function pick(rows) {
-  const byLatest = (a, b) => time(b) - time(a) || ORDER[a.result] - ORDER[b.result]
-  const latest = new Map()
-  for (const r of [...rows].sort(byLatest)) if (!latest.has(r.test)) latest.set(r.test, r)
-  return [...latest.values()].sort((a, b) => ORDER[a.result] - ORDER[b.result] || byLatest(a, b))[0]
-}
-
 export function evaluateRequired(rows, required, opts) {
   const rc = opts?.rc
   if (!rc) throw new Error("--rc <SHA> is required for the RC gate")
@@ -276,21 +282,24 @@ export function evaluateRequired(rows, required, opts) {
   for (const req of required.rows) {
     const mine = rows.filter((r) => r.requirement === req.id)
     const onRc = mine.filter((r) => shaMatches(r.appSha, rc))
-    const pool = onRc.length ? onRc : mine
-    // A manual record replaces the automated rows of its ID (a full run emits
-    // A.craft.session.hour-* as skipped and the walkthrough supplies the result).
-    const manual = pool.filter((r) => r.mode === "manual")
-    let row = pick(manual.length ? manual : pool)
-    const fail = (kind, detail) => problems.push({ id: req.id, kind, detail })
-    if (!row) {
+    const selected = selectTests(onRc.length ? onRc : mine)
+    const seen = new Set()
+    const fail = (kind, detail) => {
+      if (seen.has(kind + "\0" + detail)) return
+      seen.add(kind + "\0" + detail)
+      problems.push({ id: req.id, kind, detail })
+    }
+    if (!selected.length) {
       fail("missing", "no result row recorded")
       continue
     }
     const carry = onRc.length ? null : (opts.carryover ?? []).find((c) => c.id === req.id)
-    let checkedRow = row
-    if (!shaMatches(row.appSha, rc) && carry) {
-      const from = pick(mine.filter((r) => shaMatches(r.appSha, carry.fromSha)))
-      if (!from) fail("appSha", `no row on carryover SHA ${String(carry.fromSha).slice(0, 12)}`)
+    // Every selected test row is validated on its own before the ID is
+    // judged, carried rows included, so no test hides another (#4767).
+    let toCheck = selected
+    if (carry) {
+      const from = selectTests(mine.filter((r) => shaMatches(r.appSha, carry.fromSha)))
+      if (!from.length) fail("appSha", `no row on carryover SHA ${String(carry.fromSha).slice(0, 12)}`)
       else {
         const paths = [...(carry.paths ?? []), ...(required.sharedPaths ?? [])]
         const why = req.alwaysRerun ? "save-class row must rerun on the RC"
@@ -298,29 +307,31 @@ export function evaluateRequired(rows, required, opts) {
           : !carry.engines?.from || carry.engines.from !== carry.engines.rc ? "engine pins missing or different"
           : null
         const diffStat = why ? null : (opts.diff ?? gitDiffStat)(carry.fromSha, rc, paths)
-        checkedRow = { ...from, carriedFrom: { fromSha: carry.fromSha, rc, paths, engines: carry.engines ?? null, diffStat } }
+        toCheck = from.map((r) => ({ ...r, carriedFrom: { fromSha: carry.fromSha, rc, paths, engines: carry.engines ?? null, diffStat } }))
         if (why) fail("carryover", why)
         else if (diffStat.trim()) fail("carryover", `paths changed since ${carry.fromSha.slice(0, 12)}: ${diffStat.trim().split("\n").pop()}`)
       }
-    } else if (!shaMatches(row.appSha, rc)) fail("appSha", `${String(row.appSha).slice(0, 12)} is not RC ${rc.slice(0, 12)}`)
-    checked.push(checkedRow)
-    row = checkedRow
-    const want = required.origins[req.origin]
-    if (normOrigin(row.origin) !== normOrigin(want)) fail("origin", `${row.origin} is not ${want}`)
-    if (row.result === "skipped" && req.allowSkipped) {
-      // Pre-approved skip (native editor servers only); nothing else to check.
-    } else if (row.result !== "passed") {
-      fail("result", row.result + (row.reason ? ` (${row.reason})` : ""))
     }
-    if (row.mode === "manual") {
-      if (!req.allowManual) fail("mode", "manual is not allowed for this row")
-      else if (!String(row.evidence ?? "").trim()) fail("evidence", "manual row has no link to the recording")
-      else {
-        const missing = (req.manualChecks ?? []).filter((c) => row.checks?.[c] !== true)
-        if (missing.length) fail("evidence", `manual record lacks checks: ${missing.join(", ")}`)
+    const want = required.origins[req.origin]
+    for (const row of toCheck) {
+      checked.push(row)
+      if (!carry && !shaMatches(row.appSha, rc)) fail("appSha", `${String(row.appSha).slice(0, 12)} is not RC ${rc.slice(0, 12)}`)
+      if (normOrigin(row.origin) !== normOrigin(want)) fail("origin", `${row.origin} is not ${want}`)
+      if (row.result === "skipped" && req.allowSkipped) {
+        // Pre-approved skip (native editor servers only); nothing else to check.
+      } else if (row.result !== "passed") {
+        fail("result", row.result + (row.reason ? ` (${row.reason})` : ""))
       }
-    } else if (row.mode !== "full") {
-      fail("mode", `mode ${row.mode}, need full`)
+      if (row.mode === "manual") {
+        if (!req.allowManual) fail("mode", "manual is not allowed for this row")
+        else if (!String(row.evidence ?? "").trim()) fail("evidence", "manual row has no link to the recording")
+        else {
+          const missing = (req.manualChecks ?? []).filter((c) => row.checks?.[c] !== true)
+          if (missing.length) fail("evidence", `manual record lacks checks: ${missing.join(", ")}`)
+        }
+      } else if (row.mode !== "full") {
+        fail("mode", `mode ${row.mode}, need full`)
+      }
     }
   }
   return { ok: problems.length === 0, rc, required: required.rows.length, problems, rows: checked }

@@ -187,6 +187,24 @@ test("gate: rows from several runs merge, latest per ID wins, no rc means any si
   assert.throws(() => evaluateRequired(good(), required, {}), /--rc/)
 })
 
+test("gate: every selected test row is validated, so a quick-mode test cannot hide behind a later full one (#4767 validation)", () => {
+  const rows = [
+    ...good().filter((x) => x.requirement !== "A.one"),
+    row({ requirement: "A.one", origin: CRAFT, appSha: RC, test: "browser", mode: "quick", finishedAt: "2026-11-02T10:00:00.000Z" }),
+    row({ requirement: "A.one", origin: CRAFT, appSha: RC, test: "api", finishedAt: "2026-11-02T10:05:00.000Z" }),
+  ]
+  assert.deepEqual(kinds(evaluateRequired(rows, required, { rc: RC })), ["A.one:mode"])
+})
+
+test("gate: every selected test row is validated, so a wrong-origin test cannot hide behind a later canonical one (#4767 validation)", () => {
+  const rows = [
+    ...good().filter((x) => x.requirement !== "A.one"),
+    row({ requirement: "A.one", origin: "https://elsewhere.test", appSha: RC, test: "browser", finishedAt: "2026-11-02T10:00:00.000Z" }),
+    row({ requirement: "A.one", origin: CRAFT, appSha: RC, test: "api", finishedAt: "2026-11-02T10:05:00.000Z" }),
+  ]
+  assert.deepEqual(kinds(evaluateRequired(rows, required, { rc: RC })), ["A.one:origin"])
+})
+
 test("gate: a manual walkthrough replaces the skipped automated row of its ID (#4767)", () => {
   const skippedAuto = row({ requirement: "A.hour", origin: CRAFT, appSha: RC, test: "hour in the browser", result: "skipped", reason: "manual walkthrough", finishedAt: "2026-11-02T10:00:00.000Z" })
   const walk = manualToRows([{ id: "A.hour", result: "passed", appSha: RC, evidence: "https://rec.test/v/1", recordedAt: "2026-11-02T12:00:00Z" }], required)
@@ -331,6 +349,19 @@ test("gate: shipped required-ids.json marks save rows, hour checklists and share
     for (const c of ["enter", "font", "styles", "table", "image", "reload", "restart", "content-after-restart"]) assert.ok(r.manualChecks?.includes(c), `${id} ${c}`)
   }
   assert.deepEqual(real.rows.filter((x) => x.allowManual).map((x) => x.id), ["A.craft.session.hour-word", "A.craft.session.hour-sheet"])
+})
+
+test("gate: every carried test row is validated too (#4767 validation)", () => {
+  const carry = [{ id: "B.one", fromSha: OLD, paths: ["e2e/x"], engines: { from: "e", rc: "e" } }]
+  const base = strictGood().filter((x) => x.requirement !== "B.one")
+  const quick = [...base,
+    row({ requirement: "B.one", origin: ART, appSha: OLD, test: "browser", mode: "quick", finishedAt: "2026-11-02T10:00:00.000Z" }),
+    row({ requirement: "B.one", origin: ART, appSha: OLD, test: "api", finishedAt: "2026-11-02T10:05:00.000Z" })]
+  assert.deepEqual(kinds(evaluateRequired(quick, strict, { rc: RC, carryover: carry, diff: () => "" })), ["B.one:mode"])
+  const elsewhere = [...base,
+    row({ requirement: "B.one", origin: "https://elsewhere.test", appSha: OLD, test: "browser", finishedAt: "2026-11-02T10:00:00.000Z" }),
+    row({ requirement: "B.one", origin: ART, appSha: OLD, test: "api", finishedAt: "2026-11-02T10:05:00.000Z" })]
+  assert.deepEqual(kinds(evaluateRequired(elsewhere, strict, { rc: RC, carryover: carry, diff: () => "" })), ["B.one:origin"])
 })
 
 test("manualToRows keeps the recorded checks", () => {

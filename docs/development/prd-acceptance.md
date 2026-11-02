@@ -315,8 +315,8 @@ public repository; pass them with `--origin-map craft=<url>,artifacts=<url>` or
 `PRD_RC_ORIGINS`. The gate refuses to run without them. Adding a scenario means
 adding its ID here in the same change.
 
-A required ID passes only when the latest row of every test that emits it has
-result `passed`, `mode=full`,
+A required ID passes only when the latest row of every test that emits it (each
+checked on its own, carried rows included) has result `passed`, `mode=full`,
 the canonical origin and an `appSha` equal to the release candidate. Exceptions:
 
 - `A.craft.lease.fail-closed` may be `skipped` (servers with a native editor only).
