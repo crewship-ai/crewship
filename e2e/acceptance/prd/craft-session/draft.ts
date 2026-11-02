@@ -29,9 +29,11 @@ export interface Typing {
   accepted: number[]
   /** The status text that ended the stream, if the editor stopped taking input. */
   stoppedBy?: string
+  /** Status reads that did not answer in time (a stalled renderer); such a line is not counted as accepted. */
+  unknown: number
 }
 
-export const newTyping = (): Typing => ({ typed: 0, accepted: [] })
+export const newTyping = (): Typing => ({ typed: 0, accepted: [], unknown: 0 })
 
 /** The markers of the given typeLines() lines: `${prefix}-${i}`. */
 export function typedMarkers(prefix: string, lines: number[]): string[] {
@@ -39,11 +41,13 @@ export function typedMarkers(prefix: string, lines: number[]): string[] {
 }
 
 const NOT_EDITABLE = /Pouze čtení|odpojen/
+// The software-rendered canvas can stall the renderer for seconds while typing;
+// a read that does not answer in time is unknown, not "no longer editable".
 const editorStatus = (page: Page) =>
   page
     .getByRole("status")
     .first()
-    .innerText({ timeout: 200 })
+    .innerText({ timeout: 2_000 })
     .catch(() => null)
 
 /** Does `text` hold every marker as a whole line number (`X-1` is not satisfied by `X-10`). */
@@ -131,7 +135,8 @@ export async function placeCaret(page: Page, app: "wordcraft" | "gridcraft", row
 /**
  * Types `${prefix}-0`, `${prefix}-1`, ... each followed by Enter, without ever
  * pausing for autosave, and records in `progress` which lines the editor took.
- * Stops once the editor reports it no longer takes input.
+ * Stops once the editor reports it no longer takes input; an unanswered status
+ * read only leaves that line unproven.
  */
 export async function typeLines(page: Page, prefix: string, lines: number, delay = 40, gapMs = 120, progress: Typing = newTyping()): Promise<number> {
   // A gap at or above the 300 ms autosave delay would let every line save.
@@ -139,8 +144,8 @@ export async function typeLines(page: Page, prefix: string, lines: number, delay
   try {
     let before = await editorStatus(page)
     for (let i = 0; i < lines; i++) {
-      if (before === null || NOT_EDITABLE.test(before)) {
-        progress.stoppedBy = before ?? "no status"
+      if (before !== null && NOT_EDITABLE.test(before)) {
+        progress.stoppedBy = before
         break
       }
       await page.keyboard.type(`${prefix}-${i}`, { delay })
@@ -148,8 +153,10 @@ export async function typeLines(page: Page, prefix: string, lines: number, delay
       progress.typed++
       const started = Date.now()
       const after = await editorStatus(page)
-      // A line during which the editor turned read-only is ambiguous: not required.
-      if (after !== null && !NOT_EDITABLE.test(after)) progress.accepted.push(i)
+      // A line during which the editor turned read-only, or whose status before or
+      // after is unknown, is ambiguous: not required.
+      if (after === null) progress.unknown++
+      if (before !== null && after !== null && !NOT_EDITABLE.test(after)) progress.accepted.push(i)
       before = after
       await page.waitForTimeout(Math.max(0, gapMs - (Date.now() - started)))
     }
