@@ -1,7 +1,7 @@
 ---
 name: crewship-design
 display_name: Crewship Design
-version: 1.0.0
+version: 1.0.1
 category: DESIGN
 license: Apache-2.0
 runtime: INSTRUCTIONS
@@ -43,8 +43,9 @@ Every call succeeds only when all of these hold:
   and creating a Design in the browser needs the Artifacts library
   (`NEXT_PUBLIC_ARTIFACTS_LIBRARY=true`). Both build-time switches are off by
   default.
-- Your crew is on the workspace's agent artifact policy
-  (`crewship workspace artifact-policy show`).
+- The workspace's agent artifact policy is enabled and lists your crew
+  (`crewship workspace artifact-policy show`); a listed crew under a
+  disabled policy is refused.
 - This run comes from a Design comment the owner sent from the editor to
   their connected private chat with you, and that request names this exact
   Design. The mandate covers that one Design for this run only.

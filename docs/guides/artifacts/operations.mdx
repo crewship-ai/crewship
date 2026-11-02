@@ -142,9 +142,10 @@ operation limits, set with `CREWSHIP_DOCUMENTS_MAX_DOCUMENTS_PER_WORKSPACE`,
 ### Artifacts per workspace
 
 An artifact is stored as a page record, so it counts toward the limit of 100
-pages per workspace. Creating a Project or Design in a full workspace returns
-`413` with the same code as a full history (`artifact_history_quota`, or
-"Design capacity is full").
+pages per workspace by default (an instance administrator changes it with
+`crewship admin instance page-limit set`). Creating a Project or Design in a full workspace returns
+`422` with code `pages_limit`, not the `413` of a full history
+(`artifact_history_quota`, or "Design capacity is full").
 
 ## Checking usage
 

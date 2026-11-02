@@ -1,7 +1,7 @@
 ---
 name: crewship-craft
 display_name: Crewship Craft
-version: 1.0.0
+version: 1.0.1
 category: WRITING
 license: Apache-2.0
 runtime: INSTRUCTIONS
@@ -67,7 +67,7 @@ least one of them must change the document):
   `{"command":"text.insert","params":{"text":"..."}}` inserts up to 64 KiB of
   text at the caret, within the 64 KiB call limit.
 - Sheet: `{"command":"cell.set","params":{"cell":"B2","input":"42"}}` sets
-  one cell. `input` is always a JSON string with a literal value. Formulas are
+  one cell. `input` is always a JSON string of at most 32 KiB with a literal value. Formulas are
   refused: no leading `=`, and a leading `+` or `-` only for a number.
   Cells use upper-case A1 references from `A1` to `XFD1048576`.
 
@@ -116,7 +116,8 @@ the task again when the document is free.
   `request_id` values. Stop writing. Keep your commands and tell the person
   that nothing more can be saved until they free space.
 - `422`: a query or command is not allowed or the document engine refused it.
-  Fix the command. Do not resend it unchanged.
+  Fix the command and send the corrected edit with a new `request_id`; do not
+  resend it unchanged.
 - `503` "native task outcome uncertain; retain exact original request" (the
   response echoes your `request`) or "original native save outcome
   unconfirmed; reconcile the exact original request": the save may or may not
