@@ -47,12 +47,13 @@ test was running when the axe fell, and **zero `WARNING: DATA RACE`**. That
 reads exactly like a failure and it is not one; it is the same ghost people
 chased in #1597. Run it as `go test -race -timeout 40m ./internal/api/`.
 CI's dedicated **Go Race (internal/api)** job passes a timeout derived from a
-measured baseline (`RACE_API_BASELINE_SECONDS` in `.github/workflows/ci.yml`),
+measured baseline (`RACE_API_TIMEOUT_BASIS_SECONDS` in `.github/workflows/ci.yml`),
 so a green CI and a red local run are consistent, not contradictory. Before
 blaming your diff, check the log for `WARNING: DATA RACE` — no such line plus
 a `panic: test timed out` means you hit the ceiling, not a race. That ceiling
 is #2031's subject: the CI job now prints its own `ok … Ns` into the run
-summary and warns when it crosses 1.6x the baseline, so budget erosion is
+summary and warns when the summed partition seconds cross 1.6x a separate
+combined budget (`RACE_API_COMBINED_BUDGET_SECONDS`), so budget erosion is
 reported as budget erosion rather than as your bug.
 
 ### Don't hash at production strength in a test

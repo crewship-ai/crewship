@@ -2242,11 +2242,19 @@ jobs:
         # repeats the package's one-time setup (CLI binary build and DB
         # migration behind sync.Once), so the sum is not the unsplit runtime:
         # 3 partitions summed 2064.6s on PR run 37475371053 (unsplit main:
-        # 878.8s). Baseline 2100 in that metric; the 1.6x alarm warns on PRs
-        # and fails on main pushes, as for internal/api.
+        # 878.8s). The 1.6x alarm warns on PRs and fails on main pushes, as
+        # for internal/api. The hang bound (RACE_CLI_TIMEOUT_BASIS_SECONDS)
+        # is a separate value.
+        # Re-baselined 2026-11-01 (#4761) from 22 runs, 04:51–21:44Z, with 0
+        # failing tests and full coverage proven by this guard (4721 tests on
+        # f586adadb): the internal/api runs plus merge_group 41313229101.
+        # min 2448, median 3404, p95 3649, max 3684s; shard 1 is bimodal
+        # (~950s or ~1535s for the same tests). Budget = median rounded up;
+        # alarm 5440s. Was 2100 (PR run 37475371053, 4356 tests).
         env:
           RACE_SHARD_PACKAGE: github.com/crewship-ai/crewship/cmd/crewship
-        run: python3 scripts/ci/api-race-shard.py report .ci-cli-shards 3 2100
+          RACE_CLI_COMBINED_BUDGET_SECONDS: "3400"
+        run: python3 scripts/ci/api-race-shard.py report .ci-cli-shards 3 "$RACE_CLI_COMBINED_BUDGET_SECONDS"
 
   go-race:
     needs: [merge-conflict-markers, changes]
@@ -2374,12 +2382,15 @@ jobs:
         env:
           SHARD_INDEX: ${{ matrix.shard }}
           SHARD_COUNT: "6"
-          RACE_API_BASELINE_SECONDS: "2300"
+          # Hang bound per partition: twice the unsplit package's measured
+          # full-package runtime (2291–2358s, main runs of 2026-09-14). This
+          # is NOT the combined budget below, which sums six partitions.
+          RACE_API_TIMEOUT_BASIS_SECONDS: "2300"
           JOB_CAP_MINUTES: "85"
           JOB_OVERHEAD_MINUTES: "6"
         run: |
           set -euo pipefail
-          timeout_s=$(( RACE_API_BASELINE_SECONDS * 2 ))
+          timeout_s=$(( RACE_API_TIMEOUT_BASIS_SECONDS * 2 ))
           if [ $(( timeout_s + JOB_OVERHEAD_MINUTES * 60 )) -ge $(( JOB_CAP_MINUTES * 60 )) ]; then
             echo "::error::API race timeout plus overhead exceeds the job cap."
             exit 1
@@ -2422,12 +2433,24 @@ jobs:
           name: api-race-template-${{ github.sha }}
           path: .ci-api-template/
       - name: Verify complete API coverage and combined budget
-        # Full-package baseline measured 2026-09-14: 2291–2358 seconds in
-        # main runs 34828855474,34833070262,34835848487,34840188893.
-        # Keep the 1.6x alarm and PR-warning/main-failure policy from #2031.
-        # All six package durations plus the genuine migration bootstrap
-        # package duration exactly once. All setup/cleanup remains measured.
-        run: python3 scripts/ci/api-race-shard.py report .ci-api-shards 6 2300 .ci-api-template
+        # Combined budget in the SUMMED metric: all six package durations
+        # plus the genuine migration bootstrap package duration exactly once.
+        # All setup/cleanup remains measured. Keep the 1.6x alarm and
+        # PR-warning/main-failure policy from #2031.
+        # Re-baselined 2026-11-01 (#4761) from 21 runs, 04:51–21:44Z, with 0
+        # failing tests and full coverage proven by this guard (9076 tests on
+        # f586adadb; runner image ubuntu-26.04 20261025.179.1):
+        # push 41274693559,41275662564,41281860894,41283175977,41284867750,
+        #   41307021326,41308408016,41311302308,41314103403,41321273979,
+        #   41340523798,41353507904; merge_group 41306787047,41306821857,
+        #   41311602008,41316088349,41318596487,41335958269,41336008691,
+        #   41343514361,41350774599.
+        # min 4339, median 4977, p95 5330, max 5484s. Budget = median rounded
+        # up; alarm 8000s. The former 2300 was the unsplit package runtime
+        # (2026-09-14), before the suite grew 7652 -> 9123 tests.
+        env:
+          RACE_API_COMBINED_BUDGET_SECONDS: "5000"
+        run: python3 scripts/ci/api-race-shard.py report .ci-api-shards 6 "$RACE_API_COMBINED_BUDGET_SECONDS" .ci-api-template
 
 
   # ── Go: cross-platform test matrix ──
