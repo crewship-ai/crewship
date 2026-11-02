@@ -26,6 +26,14 @@ async function launch(profile: string): Promise<{ child: ChildProcess; endpoint:
   return { child, endpoint }
 }
 
+/** SIGKILL and wait for exit, so nothing still writes to the profile when it is removed (#4772). */
+async function kill(child: ChildProcess) {
+  if (child.exitCode !== null || child.signalCode !== null) return
+  const exited = new Promise(resolve => child.once("exit", resolve))
+  child.kill("SIGKILL")
+  await exited
+}
+
 async function open(endpoint: string, envelopes: DraftKeyFixtureStore) {
   const browser = await chromium.connectOverCDP(endpoint)
   const context = browser.contexts()[0]
@@ -49,9 +57,7 @@ it.skipIf(!existsSync(executable))("keeps an awaited draft when the whole browse
       await api.writeArtifactDraft(api.artifactDraftKey("artifact-source", "alice", "w", "demo")!, "Typed just before the crash")
     })
     // No grace period: the measured localStorage loss happened within 2.5 s.
-    const exited = new Promise(resolve => first.child.once("exit", resolve))
-    first.child.kill("SIGKILL")
-    await exited
+    await kill(first.child)
 
     const second = await launch(profile)
     try {
@@ -71,6 +77,6 @@ it.skipIf(!existsSync(executable))("keeps an awaited draft when the whole browse
       })
       expect(afterExpiry).toBe("")
       await browser.close()
-    } finally { second.child.kill("SIGKILL") }
-  } finally { rmSync(profile, { recursive: true, force: true }) }
+    } finally { await kill(second.child) }
+  } finally { rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }) }
 }, 60000)
