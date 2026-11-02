@@ -34,6 +34,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
@@ -786,21 +787,14 @@ func ValidateCLITokenFull(ctx context.Context, db *sql.DB, token string, audit V
 		}
 	}
 
-	// last_used_at update stays fire-and-forget. Background ctx so
-	// the update survives the caller's deadline (auth has already
-	// been accepted); 5s bounds a wedged SQLite without leaking
-	// unbounded goroutines.
-	finish := beginBackgroundWork()
-	go func(id string) {
-		defer finish()
-		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, ierr := db.ExecContext(bgCtx,
-			"UPDATE cli_tokens SET last_used_at = ? WHERE id = ?", nowStr, id); ierr != nil {
-			// Best-effort. Silent — operator wouldn't act on this.
-			_ = ierr
-		}
-	}(tokenID)
+	// last_used_at is a best-effort UX breadcrumb on the settings page. It is
+	// written on the caller's goroutine, at most once per token per
+	// cliTokenTouchInterval in this process, under a short timeout. A
+	// fire-and-forget goroutine used to write it on every request; it ran
+	// concurrently with the handler's own queries, so the pool opened an
+	// extra SQLite connection and reparsed the whole schema for a
+	// breadcrumb. That was ~20% of internal/api's race-build CPU (#4770).
+	touchCLITokenLastUsed(ctx, db, tokenID, nowStr)
 
 	return ValidateCLITokenResult{
 		TokenID: tokenID, ExpiresAt: expiry,
@@ -846,4 +840,45 @@ func nullIfBlank(s string) sql.NullString {
 		return sql.NullString{}
 	}
 	return sql.NullString{String: s, Valid: true}
+}
+
+// cliTokenTouchInterval bounds how often one process writes a token's
+// last_used_at. The settings page shows it to the minute; writing it on
+// every request only added write transactions to the auth path.
+const cliTokenTouchInterval = time.Minute
+
+// cliTokenTouchTimeout bounds the synchronous write. A writer holding SQLite's
+// lock costs an authenticated request at most this long, once per interval;
+// the breadcrumb is skipped rather than waited for.
+const cliTokenTouchTimeout = 250 * time.Millisecond
+
+var (
+	cliTokenTouchMu sync.Mutex
+	cliTokenTouched = map[string]time.Time{}
+)
+
+// touchCLITokenLastUsed records that tokenID was used now. The attempt, not
+// its success, starts the interval, so a wedged database is not retried on
+// every request.
+func touchCLITokenLastUsed(ctx context.Context, db *sql.DB, tokenID, nowStr string) {
+	now := time.Now()
+	cliTokenTouchMu.Lock()
+	if last, ok := cliTokenTouched[tokenID]; ok && now.Sub(last) < cliTokenTouchInterval {
+		cliTokenTouchMu.Unlock()
+		return
+	}
+	if len(cliTokenTouched) >= 4096 {
+		for id, at := range cliTokenTouched {
+			if now.Sub(at) >= cliTokenTouchInterval {
+				delete(cliTokenTouched, id)
+			}
+		}
+	}
+	cliTokenTouched[tokenID] = now
+	cliTokenTouchMu.Unlock()
+
+	touchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cliTokenTouchTimeout)
+	defer cancel()
+	// Best-effort. Silent — operator wouldn't act on this.
+	_, _ = db.ExecContext(touchCtx, "UPDATE cli_tokens SET last_used_at = ? WHERE id = ?", nowStr, tokenID)
 }
