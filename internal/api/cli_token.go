@@ -3,7 +3,7 @@ package api
 // CLI token management. Two tiers post-Patch-J:
 //
 //   - STANDARD ("crewship_cli_"): 256-bit random (was 160-bit), SHA-256
-//     hash at rest, optional expiry, async last_used_at debounce.
+//     hash at rest, optional expiry, last_used_at written at most once a minute.
 //     Used by regular humans for their day-to-day CLI work.
 //
 //   - ADMIN ("crewship_admin_"): 256-bit random, HMAC-SHA256 keyed by
@@ -769,10 +769,10 @@ func ValidateCLITokenFull(ctx context.Context, db *sql.DB, token string, audit V
 	// fatal to the auth result — we'd rather 500 the caller than
 	// silently grant access without a trail.
 	//
-	// Best-effort path stays for last_used_at, which is just a UX
-	// breadcrumb on the settings page; missing one update because
-	// SQLite was momentarily wedged is acceptable, missing an audit
-	// row for an ADMIN action is not.
+	// last_used_at below stays best-effort: it is just a UX breadcrumb
+	// on the settings page; missing one update because SQLite was
+	// momentarily wedged is acceptable, missing an audit row for an
+	// ADMIN action is not.
 	if dbTier == "ADMIN" {
 		useID := generateCUID()
 		if _, auditErr := db.ExecContext(ctx,
@@ -789,7 +789,7 @@ func ValidateCLITokenFull(ctx context.Context, db *sql.DB, token string, audit V
 
 	// last_used_at is a best-effort UX breadcrumb on the settings page. It is
 	// written on the caller's goroutine, at most once per token per
-	// cliTokenTouchInterval in this process, under a short timeout. A
+	// cliTokenTouchInterval in this process, with lock waits bounded. A
 	// fire-and-forget goroutine used to write it on every request; it ran
 	// concurrently with the handler's own queries, so the pool opened an
 	// extra SQLite connection and reparsed the whole schema for a
@@ -847,38 +847,54 @@ func nullIfBlank(s string) sql.NullString {
 // every request only added write transactions to the auth path.
 const cliTokenTouchInterval = time.Minute
 
-// cliTokenTouchTimeout bounds the synchronous write. A writer holding SQLite's
-// lock costs an authenticated request at most this long, once per interval;
-// the breadcrumb is skipped rather than waited for.
+// cliTokenTouchTimeout bounds how long the synchronous write waits for
+// SQLite's lock (and for a pool connection); a writer holding the lock costs an
+// authenticated request at most about this long, once per interval, and the
+// breadcrumb is skipped rather than waited for. The commit's fsync itself is
+// not interruptible.
 const cliTokenTouchTimeout = 250 * time.Millisecond
+
+// cliTokenTouchRetry is how soon a failed write may be attempted again, so a
+// token used once while the lock was busy still gets its breadcrumb.
+const cliTokenTouchRetry = 5 * time.Second
+
+// cliTokenTouchCap bounds the throttle map; when every entry is recent the
+// map is simply cleared, which costs at most one extra write per token.
+const cliTokenTouchCap = 4096
 
 var (
 	cliTokenTouchMu sync.Mutex
 	cliTokenTouched = map[string]time.Time{}
 )
 
-// touchCLITokenLastUsed records that tokenID was used now. The attempt, not
-// its success, starts the interval, so a wedged database is not retried on
-// every request.
+// touchCLITokenLastUsed records that tokenID was used now. The map holds the
+// time from which the next attempt is allowed.
 func touchCLITokenLastUsed(ctx context.Context, db *sql.DB, tokenID, nowStr string) {
 	now := time.Now()
 	cliTokenTouchMu.Lock()
-	if last, ok := cliTokenTouched[tokenID]; ok && now.Sub(last) < cliTokenTouchInterval {
+	if next, ok := cliTokenTouched[tokenID]; ok && now.Before(next) {
 		cliTokenTouchMu.Unlock()
 		return
 	}
-	if len(cliTokenTouched) >= 4096 {
-		for id, at := range cliTokenTouched {
-			if now.Sub(at) >= cliTokenTouchInterval {
+	if len(cliTokenTouched) >= cliTokenTouchCap {
+		for id, next := range cliTokenTouched {
+			if !now.Before(next) {
 				delete(cliTokenTouched, id)
 			}
 		}
+		if len(cliTokenTouched) >= cliTokenTouchCap {
+			clear(cliTokenTouched)
+		}
 	}
-	cliTokenTouched[tokenID] = now
+	cliTokenTouched[tokenID] = now.Add(cliTokenTouchInterval)
 	cliTokenTouchMu.Unlock()
 
 	touchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cliTokenTouchTimeout)
 	defer cancel()
-	// Best-effort. Silent — operator wouldn't act on this.
-	_, _ = db.ExecContext(touchCtx, "UPDATE cli_tokens SET last_used_at = ? WHERE id = ?", nowStr, tokenID)
+	if _, err := db.ExecContext(touchCtx, "UPDATE cli_tokens SET last_used_at = ? WHERE id = ?", nowStr, tokenID); err != nil {
+		// Best-effort and silent, but retried soon rather than in a minute.
+		cliTokenTouchMu.Lock()
+		cliTokenTouched[tokenID] = now.Add(cliTokenTouchRetry)
+		cliTokenTouchMu.Unlock()
+	}
 }

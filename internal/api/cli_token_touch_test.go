@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 func readCLITokenLastUsed(t *testing.T, db *sql.DB, id string) sql.NullString {
@@ -45,5 +48,20 @@ func TestValidateCLITokenTouchesLastUsedOnTheCallerAndThrottles(t *testing.T) {
 	}
 	if got := readCLITokenLastUsed(t, db, id); got.String != "sentinel" {
 		t.Fatalf("throttled use rewrote last_used_at: %q", got.String)
+	}
+}
+
+// A failed write must not hide the breadcrumb for a whole interval: a token
+// used once while the lock was busy would otherwise read as never used.
+func TestCLITokenTouchFailureRetriesSoon(t *testing.T) {
+	id := "touch-fail-" + generateCUID()
+	closed := testutil.MigratedSQLDB(t)
+	_ = closed.Close()
+	touchCLITokenLastUsed(context.Background(), closed, id, "now")
+	cliTokenTouchMu.Lock()
+	next := cliTokenTouched[id]
+	cliTokenTouchMu.Unlock()
+	if wait := time.Until(next); wait <= 0 || wait > cliTokenTouchRetry {
+		t.Fatalf("failed touch retries in %v, want within %v", wait, cliTokenTouchRetry)
 	}
 }
