@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -234,7 +235,7 @@ func (h *PageHandler) artifactProjectComments(r *http.Request, k artifacts.Versi
 				return artifacts.ErrVersionNotFound
 			}
 		}
-		rows, e := tx.QueryContext(ctx, `SELECT id,version,path,selector,quote,text,author,coalesce(task_id,''),created_at,coalesce((SELECT status FROM artifact_project_comment_tasks t WHERE t.comment_id=artifact_project_comments.id),'comment'),coalesce((SELECT max(version) FROM artifact_project_comment_replies reply WHERE reply.comment_id=artifact_project_comments.id AND reply.needs_clarification=0),0) FROM artifact_project_comments WHERE workspace_id=? AND page_id=? AND (?=0 OR version=?) ORDER BY created_at,id LIMIT 500`, k.WorkspaceID, k.PageID, sharedOnly, version)
+		rows, e := tx.QueryContext(ctx, `SELECT id,version,path,selector,quote,text,author,coalesce(task_id,''),created_at,coalesce((SELECT status FROM artifact_project_comment_tasks t WHERE t.comment_id=artifact_project_comments.id),'comment'),coalesce((SELECT max(version) FROM artifact_project_comment_replies reply WHERE reply.comment_id=artifact_project_comments.id AND reply.needs_clarification=0),0) FROM artifact_project_comments WHERE workspace_id=? AND page_id=? AND (?=0 OR version=?) ORDER BY created_at DESC,id DESC LIMIT 500`, k.WorkspaceID, k.PageID, sharedOnly, version)
 		if e != nil {
 			return e
 		}
@@ -253,6 +254,9 @@ func (h *PageHandler) artifactProjectComments(r *http.Request, k artifacts.Versi
 		if e != nil {
 			return e
 		}
+		// The newest 500 are selected (a new comment must stay visible to the
+		// poller that just created it), then listed oldest first.
+		slices.Reverse(out)
 		retryable := map[string]bool{}
 		if !sharedOnly && owner == user.ID && len(out) > 0 {
 			retryable, e = h.artifactProjectRetryableComments(r, ctx, tx, k, version)
