@@ -399,17 +399,19 @@ export async function loadArtifactDraft(key: string, combine?: (parts: string[])
       if (failed) throw new Error("Artifact draft storage could not be read.")
       return ""
     }
-    // A bundle is opened part by part and combined by its owner's editor; it
-    // is then rewritten as one sealed row below. Without a combiner it is unreadable.
+    // A bundle is opened part by part and combined by its owner's editor.
+    // Recovery never rewrites it: a write here would hold no cross-tab lock
+    // and could replace a merge another tab committed meanwhile. The next
+    // stop merge compacts it under the lock. Without a combiner it is unreadable.
     const parts = bundleParts(raw)
     if (parts && !combine) throw new Error("Artifact draft storage could not be read.")
     let text: string
     if (parts) { const texts: string[] = []; for (const part of parts) texts.push(await cipher.open(part, row[1])); text = combine!(texts) }
     else text = isSealedLocalDraft(raw) ? await cipher.open(raw, row[1]) : raw
     if (retired(row)) throw retiredError()
-    if (persistedRevision && legacy === undefined && !parts && (writes.get(key) ?? 0) === seen) successfulWrites.set(key, { text, revision: persistedRevision })
+    if (persistedRevision && legacy === undefined && (writes.get(key) ?? 0) === seen) successfulWrites.set(key, { text, revision: persistedRevision })
     // A valid legacy row is sealed durably before it can enter the editor.
-    if ((!isSealedLocalDraft(raw) || legacy !== undefined) && (writes.get(key) ?? 0) === seen) await writeArtifactDraft(key, text)
+    if (!parts && (!isSealedLocalDraft(raw) || legacy !== undefined) && (writes.get(key) ?? 0) === seen) await writeArtifactDraft(key, text)
     if (retired(row)) throw retiredError()
     return text
   } catch (error) {
