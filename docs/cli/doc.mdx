@@ -334,7 +334,7 @@ With `-f json`, errors are printed as an `error` object with `message`,
 | Situation | Status | Message | Exit |
 |---|---|---|---|
 | Document service off | 503 | `Docs are not enabled on this server` | 7 |
-| Empty artifact with no document yet (`read`, `outline`, `initialize`, `patch`) | 404 | `document not found` | 3 |
+| Empty artifact with no document yet (`read`, `outline`, `patch`; `initialize` succeeds on it) | 404 | `document not found` | 3 |
 | No such artifact (`read`, `outline`, `initialize`, `patch`, `checkpoints`, `checkpoint`, `restore`) | 404 | `document page not found` | 3 |
 | `read`/`outline`/`initialize`/`patch`: another output, crew-owned initialization or missing access | 403 | `document access denied` | 4 |
 | History state or selected checkpoint not found | 404 | `document history unavailable` | 3 |

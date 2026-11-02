@@ -83,6 +83,7 @@ HOST_TESTS = {
         'TestHostCaptureStopRefusesRestartBeforeSignal',
     },
     'internal/server': {
+        'TestHostChatRetainedOutputSettlesSameAttemptAfterUnknownReturn',
         'TestRetainedDockerServerRestartProjectsActualProviderExit',
         'TestRetainedOutputCannotSettleAnotherAgentWork',
         'TestRetainedOutputCannotSettleForeignWork',

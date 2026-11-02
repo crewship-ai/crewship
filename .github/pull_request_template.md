@@ -27,14 +27,17 @@
 ## Changelog (enforced by the `Changelog Guard` workflow)
 
 A PR touching `internal/api/`, `internal/orchestrator/`, `internal/harbormaster/`,
-`cmd/crewship/`, `app/`, `components/`, `lib/`, `hooks/` or `stores/` needs an
-entry under `## [Unreleased]` in
-`CHANGELOG.md` — `RELEASING.md` cuts release notes from that section, so
-an omission ships silently.
+`cmd/crewship/`, `app/`, `components/`, `lib/`, `hooks/` or `stores/` needs a
+release note: a new fragment `changelog.d/<PR-number>-<slug>.md` (preferred,
+it cannot conflict with other queued PRs; see `changelog.d/README.md`) or an
+entry under `## [Unreleased]` in `CHANGELOG.md`. `RELEASING.md` cuts release
+notes from that section after collecting the fragments, so an omission ships
+silently.
 
-- [ ] Entry added under `## [Unreleased]`, marked `⚠️ **Behaviour change:**`
-      if something that used to work can now fail. The guard compares that
-      section specifically — an edit elsewhere in the file does not count
+- [ ] Fragment added in `changelog.d/` (or entry under `## [Unreleased]`),
+      marked `⚠️ **Behaviour change:**` if something that used to work can now
+      fail. An empty fragment, or a CHANGELOG.md edit outside
+      `## [Unreleased]`, does not count
 - [ ] …or the `skip-changelog` label is applied because this change has no
       user-visible effect (chore / internal refactor / test-only)
 

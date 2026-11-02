@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -77,7 +78,7 @@ func (h *PageHandler) GetDesignComments(w http.ResponseWriter, r *http.Request) 
 				return e
 			}
 		}
-		rows, e := tx.QueryContext(ctx, `SELECT c.id,c.version,c.path,c.selector,c.quote,c.text,c.author,coalesce(c.task_id,''),c.created_at,coalesce(t.status,'comment') FROM artifact_project_comments c LEFT JOIN artifact_project_comment_tasks t ON t.comment_id=c.id WHERE c.workspace_id=? AND c.page_id=? AND (?=0 OR c.version=?) ORDER BY c.created_at,c.id LIMIT 500`, k.WorkspaceID, k.PageID, sharedOnly, shared)
+		rows, e := tx.QueryContext(ctx, `SELECT c.id,c.version,c.path,c.selector,c.quote,c.text,c.author,coalesce(c.task_id,''),c.created_at,coalesce(t.status,'comment') FROM artifact_project_comments c LEFT JOIN artifact_project_comment_tasks t ON t.comment_id=c.id WHERE c.workspace_id=? AND c.page_id=? AND (?=0 OR c.version=?) ORDER BY c.created_at DESC,c.id DESC LIMIT 500`, k.WorkspaceID, k.PageID, sharedOnly, shared)
 		if e != nil {
 			return e
 		}
@@ -96,6 +97,7 @@ func (h *PageHandler) GetDesignComments(w http.ResponseWriter, r *http.Request) 
 		if e != nil {
 			return e
 		}
+		slices.Reverse(out) // newest 500, listed oldest first
 		for i := range out {
 			replies, e := tx.QueryContext(ctx, `SELECT text,version,needs_clarification,author,created_at FROM artifact_project_comment_replies WHERE comment_id=? AND (?=0 OR version=?) ORDER BY created_at,id`, out[i].ID, sharedOnly, shared)
 			if e != nil {

@@ -249,9 +249,9 @@ the Design:
    - **write** can change the canvas, save versions and restore them.
 4. To remove access, click **Revoke** next to the grant.
 
-Only the owner or a workspace administrator can change access. Changes take
-effect immediately: a person whose access is removed is disconnected from the
-canvas. Grants for agents do not give an agent permission to run tasks; that is
+Only the owner or a workspace administrator can change access. Changes apply
+to new requests immediately. A person whose access is removed is disconnected
+from the open canvas within a few seconds. Grants for agents do not give an agent permission to run tasks; that is
 controlled separately.
 
 ## What a reader sees
@@ -283,6 +283,14 @@ draft stays in this browser if you close the Design.
 
 The owner can connect one of their private agent chats. Comments then go to
 that agent, which changes the canvas and answers in the comment.
+
+Before you start, a workspace owner or admin must allow the agent's crew in the
+[agent publishing policy](/cli/artifacts#agent-publishing-policy): the policy
+must be enabled and list the crew. Otherwise sending is refused with "This
+agent's crew is not allowed to create artifact projects in this workspace"
+(the wording says projects, but the check also covers Designs). Give the agent
+the `crewship-design` skill as well; see
+[Give the agent its playbook](/guides/artifacts#give-the-agent-its-playbook).
 
 1. Open the private chat with the agent you want to use. Its address has the
    form `/chat/<agent>?session=<chat-id>`. Copy the value of the `session`
@@ -318,7 +326,7 @@ person who connected the chat.
 | Message | What happened | What to do |
 |---|---|---|
 | `Design changed; reload and reapply` | Someone else changed or saved the canvas between reading and writing it, or a comment points at a version that is no longer the latest. | Reload the Design and repeat the change or comment. |
-| `Design capacity is full; existing work is retained` | The Design's version history is full, or the workspace has reached its limit of pages and artifacts. Nothing was lost. | Delete artifacts you no longer need, or ask an administrator. |
+| `Design capacity is full; existing work is retained` | This Design's version history is full, or the workspace or server artifact storage budget is used up. Nothing was lost. | Delete artifacts you no longer need (this frees storage budget, not this Design's history) or ask an administrator to raise the limit. A workspace at its page limit answers `pages_limit` instead. |
 | `current Design edit permission required` | You lack edit access, or you tried to share or connect a chat without being the owner. | Ask the owner for **write** access. |
 | `design not found` | The Design does not exist, you cannot see it, or `artifacts_design` is off for the workspace. | Check the address, your access and the flag. |
 | `Design engine is unavailable; changes are not acknowledged` | The server could not process the canvas. | Keep the window open and try again; your changes stay in the browser. |

@@ -36,7 +36,7 @@ func artifactProjectFeedbackComponents() map[string]any {
 	}, "id", "version", "path", "selector", "quote", "text", "author", "created_at", "status", "replies", "delivery_retryable")
 	schemas["ArtifactProjectSnapshot"] = object(map[string]any{
 		"artifact_kind": map[string]any{"type": "string", "enum": []string{"slides"}},
-		"page_id":       str(), "name": str(), "slug": str(), "origin": map[string]any{"oneOf": []any{ref("ArtifactProjectOrigin"), map[string]any{"type": "null"}}},
+		"page_id":       str(), "name": str(), "slug": str(), "origin": map[string]any{"oneOf": []any{ref("ArtifactProjectOrigin"), nullOnlySchema()}},
 		"enabled": boolean(), "can_write": boolean(), "can_share": boolean(), "can_restore": boolean(), "can_send_to_agent": boolean(), "can_comment": boolean(), "latest_version": integer(1), "shared_version": integer(0), "manifest": ref("ArtifactProjectManifest"),
 		"versions": array(ref("ArtifactProjectVersion")), "quota": ref("ArtifactProjectQuota"), "comments": array(ref("ArtifactProjectComment")),
 		"retention_preview": ref("ArtifactProjectRetentionPreview"),
