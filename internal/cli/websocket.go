@@ -99,6 +99,11 @@ func (c *WSClient) Subscribe(channel string) error {
 	})
 }
 
+// Ping asks the server for a pong. The server handles a connection's frames in
+// order, so the pong that answers a ping sent right after Subscribe proves the
+// subscription is registered (the protocol has no subscribe acknowledgement).
+func (c *WSClient) Ping() error { return c.send(WSMessage{Type: "ping"}) }
+
 // SendMessage sends a chat message to the given channel and session. An
 // optional maxTurns (first variadic value, when > 0) caps the adapter agent
 // loop for this run — the CLI surface of the `--max-turns` flag. Kept variadic

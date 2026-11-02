@@ -328,6 +328,15 @@ export function captureDocumentDrafts(human: string, workspace?: string, page?: 
     }
   })
 }
+/** Deletes exactly one journal row by its full key, for a journal handle that
+ * is already closed (#4348). It needs no Page lock: the key names one mount's
+ * own row, so no other tab's or mount's row can match. Rejects when the
+ * deletion is not confirmed. */
+export function removeDocumentDraftRow(human: string, workspace: string, page: string, row: { schema: number; epoch: string; id: string }): Promise<void> {
+  if (!human || !workspace || !page || !row.id) return Promise.reject(new DocumentStorageError(message))
+  const key: [string, string] = [JSON.stringify([human, workspace, page]), JSON.stringify([row.schema, row.epoch, row.id])]
+  return withDraftRows("readwrite", (store, done) => { done(undefined); store.delete(key) })
+}
 export function removeCapturedDocumentDrafts(rows: CapturedDocumentDraft[]): Promise<void> {
   if (!rows.length) return Promise.resolve()
   return withDraftRows("readwrite", (store, done) => {

@@ -336,7 +336,10 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       await options.journal.confirm(attempt.draft)
       const capture = latest?.draft
       if (active && capture && capture !== attempt.draft && capture.contentHash === attempt.draft.contentHash) await options.journal.confirm(capture)
-    } catch { /* Unproven: the captured draft remains for comparison. */ }
+    } catch (error) {
+      // Read loss purges like a save that reports it; otherwise the draft remains for comparison.
+      if (error instanceof NativeSaveError && error.reason === "read_revoked") await revokeRead().catch(() => {})
+    }
   }
   // An untouched final capture equals the server version; keeping it would
   // offer a "local draft" on every later open. Unproven, it stays for compare.
