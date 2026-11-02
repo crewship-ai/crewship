@@ -226,3 +226,18 @@ it("G4 round 2: two tabs stopping at once keep both sets of changes (cross-tab l
     expect(JSON.parse(primary).originals.sort()).toEqual(["tab-one", "tab-two"])
   } finally { delete (navigator as { locks?: unknown }).locks }
 })
+it("G4 B3: a recovered draft is no longer offered after sign-out", async () => {
+  drafts.store.set(JSON.stringify(["human-one", "wordcraft-pending", "workspace", "page"]), draftText(["secret of A"]))
+  const view = render(<WordCraftEditorHost workspaceId="workspace" pageId="page" name="Original title" />)
+  await waitFor(() => expect(screen.getByRole("group", { name: "Místní koncept" })).toBeInTheDocument())
+  identity.status = "unauthenticated"
+  view.rerender(<WordCraftEditorHost workspaceId="workspace" pageId="page" name="Original title" />)
+  await waitFor(() => expect(screen.queryByRole("group", { name: "Místní koncept" })).toBeNull())
+})
+it("G4 B3: a recovered draft of one Page is not offered on another Page", async () => {
+  drafts.store.set(JSON.stringify(["human-one", "wordcraft-pending", "workspace", "page"]), draftText(["draft of page"]))
+  const view = render(<WordCraftEditorHost workspaceId="workspace" pageId="page" name="Original title" />)
+  await waitFor(() => expect(screen.getByRole("group", { name: "Místní koncept" })).toBeInTheDocument())
+  view.rerender(<WordCraftEditorHost workspaceId="workspace" pageId="other-page" name="Original title" />)
+  await waitFor(() => expect(screen.queryByRole("group", { name: "Místní koncept" })).toBeNull())
+})
