@@ -32,7 +32,7 @@ comes from these sources, and the Access tab shows each one:
 | Source | Shown as | Changed where |
 |---|---|---|
 | Ownership | **Owner** | Fixed. The owner always has Edit. |
-| Workspace role | **Workspace role** | Workspace members settings. Workspace owners and admins can open shared artifacts. |
+| Workspace role | **Workspace role** | Workspace members settings. Workspace owners and admins can open shared artifacts, and every Design, shared or not (see [Workspace administrators see every Design](#workspace-administrators-see-every-design)). |
 | Folder | **Via folder &lt;name&gt;** | The folder's **Folder settings**. |
 | Crew | **Member of crew &lt;name&gt;** or **Through a crew** | Crew membership. |
 | Direct share | **Shared directly** | The artifact's **Share** dialog. |
@@ -50,6 +50,27 @@ The artifact stops being private the first time you share a version (see
 to add anyone and shows: *private artifact audience requires explicit
 publication; ordinary grants cannot widen it*. In the list, a private artifact
 carries a **Private** pill.
+
+### Workspace administrators see every Design
+
+A workspace owner or admin can open every Design in the workspace, including
+one that another member has never shared. They see the latest canvas, every
+version and the full history, and can change the canvas, as if they had Edit.
+Sharing a version still belongs to the Design's owner only.
+
+Every time a workspace owner or admin opens or changes a Design they do not
+own, Crewship writes a `design.workspace_admin_accessed` entry to the workspace
+audit log. The entry names the administrator, the Design and its owner, and
+whether the access was a read or a write. Workspace owners and admins can list
+these entries:
+
+```bash
+crewship audit --action design.workspace_admin_accessed
+```
+
+This applies to Designs only. Other artifacts keep the rules above: a private
+project, for example, stays open only to its owner until a version is shared.
+People with Read or Comment on a Design still see only its shared version.
 
 ### Access levels
 
