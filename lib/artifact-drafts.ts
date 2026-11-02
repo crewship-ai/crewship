@@ -144,7 +144,7 @@ const indexedDbStore: ArtifactDraftStore = {
       cursor.onsuccess = () => {
         const row = cursor.result; if (!row) return
         const value = row.value
-        if ((!keep || value.key?.[0] !== keep) && (typeof value.text !== "string" || !isSealedLocalDraft(value.text))) row.delete()
+        if ((!keep || value.key?.[0] !== keep) && (typeof value.text !== "string" || !sealedAtRest(value.text))) row.delete()
         row.continue()
       }
     })
@@ -262,16 +262,43 @@ function queueArtifactDraft(key: string, text: string, admitted = false): Promis
   return scheduled
 }
 
+// A stop merged after an identity change cannot open a row another tab wrote
+// meanwhile. It appends its own sealed part instead; the owner's next load
+// opens every part and combines them. Parts are sealed like any other row.
+const BUNDLE = "crewship-local-draft-bundle-v1"
+const MAX_PARTS = 64
+function bundleParts(raw: string): string[] | undefined {
+  try {
+    const value = JSON.parse(raw)
+    if (value?.format === BUNDLE && Array.isArray(value.parts) && value.parts.length >= 1 && value.parts.length <= MAX_PARTS && value.parts.every((part: unknown) => typeof part === "string" && isSealedLocalDraft(part))) return value.parts
+  } catch { /* Not a bundle. */ }
+  return undefined
+}
+const sealedAtRest = (raw: string) => isSealedLocalDraft(raw) || bundleParts(raw) !== undefined
+type LaneRead = { text: string } | { append: string[] }
+
 /** The stored text, read inside the draft's own lane (no lane wait, no
  * migration write). A failed read rejects: the caller must not merge into an
  * assumed-empty draft. Uses the cipher this page already admitted. */
-async function readInLane(key: string, row: Row): Promise<string> {
+async function readInLane(key: string, row: Row, combine?: (parts: string[]) => string): Promise<LaneRead> {
   const store = durable()
   const record = store ? (store.read ? await store.read(row) : await store.get(row).then(text => text === undefined ? undefined : { text, revision: undefined })) : undefined
   const legacy = legacyGet(row), raw = legacy ?? record?.text
-  if (raw === undefined) return ""
-  if (!isSealedLocalDraft(raw)) return raw
-  try { return await (await cipherFor(key, row)).open(raw, row[1]) }
+  if (raw === undefined) return { text: "" }
+  // Appending needs no plaintext: only for a caller retired by an identity
+  // change, with a combiner, on durable storage.
+  const appendable = (error: unknown) => !(error instanceof LocalDraftReadRevoked) && retired(row) && legacy === undefined && !!combine && !!store
+  const parts = bundleParts(raw)
+  if (parts) {
+    if (!combine || legacy !== undefined) throw new Error("Artifact draft storage could not be read.")
+    try {
+      const cipher = await cipherFor(key, row), texts: string[] = []
+      for (const part of parts) texts.push(await cipher.open(part, row[1]))
+      return { text: combine(texts) }
+    } catch (error) { if (appendable(error)) return { append: parts }; throw error }
+  }
+  if (!isSealedLocalDraft(raw)) return { text: raw }
+  try { return { text: await (await cipherFor(key, row)).open(raw, row[1]) } }
   catch (error) {
     // An identity change that began after this merge was admitted blocks
     // every plaintext read (beginLocalDraftIdentity), so the deferred open
@@ -279,7 +306,9 @@ async function readInLane(key: string, row: Row): Promise<string> {
     // stored or loaded, its text is already in this tab's RAM: merge into it
     // rather than lose the stop's originals. Any other row stays unreadable.
     const known = successfulWrites.get(key)
-    if (!(error instanceof LocalDraftReadRevoked) && retired(row) && legacy === undefined && known && record?.revision !== undefined && known.revision === record.revision) return known.text
+    if (!(error instanceof LocalDraftReadRevoked) && retired(row) && legacy === undefined && known && record?.revision !== undefined && known.revision === record.revision) return { text: known.text }
+    // A row another tab wrote meanwhile: keep it as it is and add this stop.
+    if (appendable(error)) return { append: [raw] }
     throw error
   }
 }
@@ -293,7 +322,7 @@ async function readInLane(key: string, row: Row): Promise<string> {
  * a caller retired by an identity change); rejects when nothing durable was
  * stored.
  */
-export function mergeArtifactDraft(key: string, merge: (existing: string) => string): Promise<string> {
+export function mergeArtifactDraft(key: string, merge: (existing: string) => string, combine?: (parts: string[]) => string): Promise<string> {
   const row = parse(key)
   if (!row) return Promise.reject(new Error("Invalid artifact draft key."))
   if (retired(row)) return Promise.reject(retiredError())
@@ -304,7 +333,19 @@ export function mergeArtifactDraft(key: string, merge: (existing: string) => str
   current.merging = (current.merging ?? 0) + 1
   const before = Promise.all([current.scheduled ?? Promise.resolve(), current.tail]).catch(() => {})
   const task = async () => {
-    const text = merge(await readInLane(key, row))
+    const existing = await readInLane(key, row, combine)
+    if ("append" in existing) {
+      // Retired and unable to open what is stored: seal this stop's own
+      // result as one more part under the original owner's scope. Nothing
+      // stored is opened or replaced; the owner's next load combines them.
+      if (existing.append.length >= MAX_PARTS) throw new Error("Artifact draft storage is unavailable.")
+      const sealed = await (await cipherFor(key, row)).seal(merge(""), row[1])
+      await durable()!.put(row, JSON.stringify({ format: BUNDLE, parts: [...existing.append, sealed] }), crypto.randomUUID())
+      successfulWrites.delete(key)
+      current.failed = false
+      return ""
+    }
+    const text = merge(existing.text)
     await persist(row, text)
     // The merge is now the lane's latest durable value: an older failed write
     // must not be retried over it when the lane retires. A write queued after
@@ -340,7 +381,7 @@ export function admittedArtifactDraftCapture(key: string): (text: string) => Pro
  * localStorage copy exists: the draft may still be on disk, so a caller must
  * not treat the failure as "no draft" and write an empty or fresh value over it.
  */
-export async function loadArtifactDraft(key: string): Promise<string> {
+export async function loadArtifactDraft(key: string, combine?: (parts: string[]) => string): Promise<string> {
   const row = parse(key)
   if (!row || retired(row)) return ""
   await lanes.get(key)?.tail
@@ -358,9 +399,15 @@ export async function loadArtifactDraft(key: string): Promise<string> {
       if (failed) throw new Error("Artifact draft storage could not be read.")
       return ""
     }
-    const text = isSealedLocalDraft(raw) ? await cipher.open(raw, row[1]) : raw
+    // A bundle is opened part by part and combined by its owner's editor; it
+    // is then rewritten as one sealed row below. Without a combiner it is unreadable.
+    const parts = bundleParts(raw)
+    if (parts && !combine) throw new Error("Artifact draft storage could not be read.")
+    let text: string
+    if (parts) { const texts: string[] = []; for (const part of parts) texts.push(await cipher.open(part, row[1])); text = combine!(texts) }
+    else text = isSealedLocalDraft(raw) ? await cipher.open(raw, row[1]) : raw
     if (retired(row)) throw retiredError()
-    if (persistedRevision && legacy === undefined && (writes.get(key) ?? 0) === seen) successfulWrites.set(key, { text, revision: persistedRevision })
+    if (persistedRevision && legacy === undefined && !parts && (writes.get(key) ?? 0) === seen) successfulWrites.set(key, { text, revision: persistedRevision })
     // A valid legacy row is sealed durably before it can enter the editor.
     if ((!isSealedLocalDraft(raw) || legacy !== undefined) && (writes.get(key) ?? 0) === seen) await writeArtifactDraft(key, text)
     if (retired(row)) throw retiredError()
