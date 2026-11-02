@@ -387,18 +387,21 @@ func (e *hostCaptureExecutor) Stop(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if code != 0 {
+	if code != 0 && code != hostStopConfirmedExit {
 		return fmt.Errorf("host process signal failed: helper exit %d", code)
 	}
 	if _, err := provider.WaitExecExit(ctx, e.provider, id, 5*time.Second); err != nil {
 		return fmt.Errorf("host process terminal not confirmed: %w", err)
 	}
-	// The helper prints its receipt only after it froze and killed every
-	// process in the execution's session and a final scan found none alive.
-	// Together with the confirmed terminal exec above this is the evidence a
-	// cancelled run needs to settle without removing the shared container
-	// (#4774). Without the receipt the run keeps waiting for reattachment.
-	if hostStopReceipt(data) {
+	// The helper exits hostStopConfirmedExit only after it froze and killed
+	// the leader's whole tree (session and descendants) and saw every thread
+	// group exit. Together with the confirmed terminal exec above this is the
+	// evidence a cancelled run needs to settle without removing the shared
+	// container (#4774). The exit status comes from the runtime, so another
+	// process in the container cannot forge it. Exit 0 (only the exact process
+	// was killed, or an older helper) records nothing and the run keeps
+	// waiting for whole-runtime absence.
+	if code == hostStopConfirmedExit {
 		if err := runoutput.RecordHostStopConfirmed(e.authority.Directory, id); err != nil {
 			return fmt.Errorf("record host stop confirmation: %w", err)
 		}
@@ -406,14 +409,5 @@ func (e *hostCaptureExecutor) Stop(ctx context.Context, id string) error {
 	return nil
 }
 
-// hostStopSessionEmptyReceipt must match the sidecar's sessionEmptyReceipt.
-const hostStopSessionEmptyReceipt = "crewship-run-stop-session-empty-v1"
-
-func hostStopReceipt(output []byte) bool {
-	for _, line := range bytes.Split(output, []byte("\n")) {
-		if string(bytes.TrimRight(line, "\r")) == hostStopSessionEmptyReceipt {
-			return true
-		}
-	}
-	return false
-}
+// hostStopConfirmedExit must match the sidecar's stopConfirmedExit.
+const hostStopConfirmedExit = 10

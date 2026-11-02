@@ -461,9 +461,9 @@ func (o *Orchestrator) CollectRetainedRun(ctx context.Context, run RunState, cut
 
 // forcedHostEndConfirmed reports whether a retained run that did not exit on
 // its own provably left nothing running. Whole-runtime absence always counts.
-// A cancelled run also counts when the provider's stop recorded that every
-// process in the execution's session was killed and the execution itself was
-// terminal (runoutput.RecordHostStopConfirmed). That receipt is bound to the
+// A cancelled run also counts when the provider's stop recorded that the
+// leader's whole process tree (its session and every descendant) was killed
+// and the execution itself was terminal (runoutput.RecordHostStopConfirmed). That receipt is bound to the
 // execution identity recorded at launch, so a shared, long-lived container no
 // longer has to disappear before a cancelled run can settle (#4774).
 func (o *Orchestrator) forcedHostEndConfirmed(ctx context.Context, run RunState, snapshot runoutput.Snapshot) bool {
@@ -478,7 +478,8 @@ func (o *Orchestrator) forcedHostEndConfirmed(ctx context.Context, run RunState,
 		return false
 	}
 	identity, err := runoutput.ReadHostIdentity(directory)
-	if err != nil || identity.ContainerID != run.ContainerID || identity.ExecID == "" || (run.ExecID != "" && identity.ExecID != run.ExecID) {
+	if err != nil || identity.ContainerID != run.ContainerID || identity.ExecID == "" || (run.ExecID != "" && identity.ExecID != run.ExecID) ||
+		run.Output == nil || !identity.Deadline.Equal(run.Output.Deadline) {
 		return false
 	}
 	confirmed, err := runoutput.HostStopConfirmed(directory, identity.ExecID)
