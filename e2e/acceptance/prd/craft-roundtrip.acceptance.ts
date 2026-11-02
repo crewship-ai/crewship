@@ -119,7 +119,6 @@ test.describe("Word rich round trip", () => {
       await page.getByRole("status").first().waitFor()
       // The comment box sits 146 px left of the canvas's right edge; the canvas
       // width follows the shell layout, so the click is anchored to that edge.
-      const canvas = frame.locator("canvas").first()
       const width = (await canvas.boundingBox())?.width
       if (!width) throw new Error("the Word canvas has no layout box")
       await canvas.click({ position: { x: width - 146, y: 279 } })

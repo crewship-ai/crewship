@@ -282,7 +282,12 @@ for (const { application, label } of APPLICATIONS) {
           await placeCaret(page, application, 7)
           const progress = newTyping()
           const typing = typeLines(page, LATE, 8, 40, 120, progress)
-          await expect.poll(() => progress.accepted.length, { timeout: 30_000, message: `lines were typed before the handoff: ${JSON.stringify(progress)}` }).toBeGreaterThan(0)
+          await expect
+            .poll(() => progress.accepted.length, { timeout: 30_000, message: `lines were typed before the handoff` })
+            .toBeGreaterThan(0)
+            .catch((e: unknown) => {
+              throw new Error(`no accepted line before the handoff; typing progress at failure: ${JSON.stringify(progress)}`, { cause: e })
+            })
           const observer = await doc.session(peerCtx)
           const ask = await doc.leaseOp(peerCtx, observer, "request-handoff")
           expect(ask.status()).toBe(201)
