@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
@@ -29,6 +30,7 @@ type IPCResolver struct {
 	internalToken string
 	httpClient    *http.Client
 	logger        *slog.Logger
+	hostChatWork  sync.Map
 }
 
 // BaseURL returns the internal-API base URL this resolver dials. Exposed so
@@ -311,9 +313,16 @@ func (r *IPCResolver) CreateChat(ctx context.Context, req CreateChatRequest) err
 // CreateRun records a new agent run via the internal API.
 func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, workspaceID, triggerType string, metadata map[string]interface{}) error {
 	reqURL := fmt.Sprintf("%s/api/v1/internal/runs", r.baseURL)
+	requestedWork, _ := ctx.Value(hostChatAdmissionKey{}).(bool)
+	// Inherited dispatcher provenance keeps its existing settlement owner,
+	// including when a caller context also retains a human receipt/marker.
+	requestedWork = requestedWork && runauthority.OriginIDFromContext(ctx) == ""
 	payload := map[string]interface{}{
 		"id": runID, "agent_id": agentID, "chat_id": chatID,
 		"workspace_id": workspaceID, "trigger_type": triggerType,
+	}
+	if requestedWork {
+		payload["host_chat_work"] = true
 	}
 	if originID := runauthority.OriginIDFromContext(ctx); originID != "" {
 		payload["chat_origin_id"] = originID
@@ -365,6 +374,21 @@ func (r *IPCResolver) CreateRun(ctx context.Context, runID, agentID, chatID, wor
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8*1024))
 		return fmt.Errorf("create run: server returned %d: %s", resp.StatusCode, respBody)
 	}
+	if requestedWork {
+		var receipt struct {
+			HostChatWork string `json:"host_chat_work"`
+		}
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 8*1024)).Decode(&receipt); err != nil {
+			return fmt.Errorf("host run ownership acknowledgement unavailable: %w", err)
+		}
+		switch receipt.HostChatWork {
+		case "v1":
+			r.hostChatWork.Store(runID, true)
+		case "external":
+		default:
+			return errors.New("host run ownership acknowledgement unavailable")
+		}
+	}
 	return nil
 }
 
@@ -397,6 +421,9 @@ func (r *IPCResolver) UpdateRunOutcome(ctx context.Context, runID, status string
 func (r *IPCResolver) updateRunOutcome(ctx context.Context, runID, status string, exitCode *int, errorMsg *string, metadata map[string]interface{}, completedAt string, confirm bool) (string, error) {
 	reqURL := fmt.Sprintf("%s/api/v1/internal/runs/%s", r.baseURL, url.PathEscape(runID))
 	payload := map[string]interface{}{"status": status}
+	if proof, ok := ctx.Value(hostChatProofKey{}).(*hostChatProof); ok && proof != nil {
+		payload["host_chat_proof"] = proof
+	}
 	if completedAt != "" {
 		payload["completed_at"] = completedAt
 	}
