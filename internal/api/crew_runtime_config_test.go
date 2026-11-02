@@ -256,8 +256,8 @@ func TestEnsureProvisioned_NoProvisionNeeded(t *testing.T) {
 // EnqueueForCrew fast-path to AlreadyRunning instead of spawning a REAL build
 // goroutine against the default config: testProvisioner() has a nil
 // *devcontainer.FeatureDownloader, and the default declares two features
-// (common-utils, claude-code), so an actual resolve would panic rather than
-// fail cleanly.
+// (common-utils, claude-code), so an actual resolve fails with "no feature
+// downloader is configured" (it used to panic, #4742).
 func TestEnsureProvisioned_NoConfigNeedsProvisioning(t *testing.T) {
 	h := newTestProvisioningHandler(t)
 	h.provisioner = testProvisioner()
