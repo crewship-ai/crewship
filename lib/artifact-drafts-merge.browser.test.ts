@@ -136,3 +136,69 @@ it.skipIf(!existsSync(executable))("G4 r4 blocker 1: an identity change while a 
     expect(JSON.parse(await owner.evaluate(async key => (window as unknown as W).artifactDrafts.loadArtifactDraft(key), key))).toEqual(["A", "B (stopped)"])
   } finally { await browser.close() }
 }, 60000)
+
+it.skipIf(!existsSync(executable))("G4 r5 cross-tab: B holds the lock, A's stop waits, identity changes, B writes a newer revision, A gets the lock: A's originals stay sealed for their owner only", async () => {
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const context = await browser.newContext()
+    await context.route("http://localhost/**", route => route.fulfill({ body: "<!doctype html><title>Drafts</title>", contentType: "text/html" }))
+    let humanA = "alice"
+    const a = await context.newPage(), b = await context.newPage()
+    await tab(a, () => humanA)
+    await tab(b, () => "alice")
+    const key = JSON.stringify(["alice", "wordcraft-pending", "w", "page_4"])
+    const union = (parts: string[]) => JSON.stringify([...new Set(parts.flatMap(part => part ? JSON.parse(part) as string[] : []))])
+    await a.evaluate(async key => {
+      const api = (window as unknown as W).artifactDrafts
+      await api.writeArtifactDraft(key, JSON.stringify(["A"]))
+      await api.loadArtifactDraft(key)
+    }, key)
+    await b.evaluate(async key => { await (window as unknown as W).artifactDrafts.loadArtifactDraft(key) }, key)
+    // 1. Tab B holds the draft-merge lock.
+    await b.evaluate(name => new Promise<void>(held => {
+      void navigator.locks.request(name, () => new Promise<void>(release => { (window as unknown as W).release = release; held() }))
+    }), `crewship-artifact-draft:${key}`)
+    // 2. Tab A's stop is admitted with its captured originals and waits for the lock.
+    await a.evaluate(({ key, union }) => {
+      const w = window as unknown as W
+      const combine = new Function("parts", `return (${union})(parts)`) as (parts: string[]) => string
+      w.pending = w.artifactDrafts.mergeArtifactDraft(key, existing => JSON.stringify([...(existing ? JSON.parse(existing) as string[] : []), "B (stopped)"]), combine)
+      void w.pending.catch(() => {})
+    }, { key, union: union.toString() })
+    // 3. The identity changes on tab A, exactly as hooks/use-auth does it.
+    humanA = "bob"
+    const suspended = a.evaluate(() => { const api = (window as unknown as W).artifactDrafts; api.beginLocalDraftIdentity("bob"); return api.suspendOtherArtifactDrafts("bob") })
+    // 4. Tab B writes a newer revision while it still holds the lock. 5. A gets the lock.
+    await b.evaluate(async key => {
+      const w = window as unknown as W
+      await w.artifactDrafts.writeArtifactDraft(key, JSON.stringify(["A", "C (newer, tab B)"]))
+      w.release!()
+    }, key)
+    const merged = await a.evaluate(async () => {
+      try { return { ok: true, text: await (window as unknown as W).pending! } } catch (error) { return { ok: false, text: String(error) } }
+    })
+    await suspended
+    await a.evaluate(() => (window as unknown as W).artifactDrafts.finishLocalDraftIdentity("bob"))
+
+    // (a) The stop's originals were stored for alice, and the retired caller got no plaintext back.
+    expect(merged).toEqual({ ok: true, text: "" })
+    const raw = await a.evaluate(key => new Promise<string>((resolve, reject) => {
+      const open = indexedDB.open("crewship-artifact-drafts", 1)
+      open.onerror = () => reject(open.error)
+      open.onsuccess = () => { const get = open.result.transaction("drafts").objectStore("drafts").get(JSON.parse(key)); get.onsuccess = () => resolve(String(get.result?.text ?? "")); get.onerror = () => reject(get.error) }
+    }), key)
+    // Sealed at rest: no plaintext of either change is stored.
+    expect(raw).not.toContain("stopped")
+    expect(raw).not.toContain("newer")
+    const owner = JSON.parse(await b.evaluate(async ({ key, union }) => {
+      const combine = new Function("parts", `return (${union})(parts)`) as (parts: string[]) => string
+      return (window as unknown as W).artifactDrafts.loadArtifactDraft(key, combine)
+    }, { key, union: union.toString() })) as string[]
+    expect(owner.sort()).toEqual(["A", "B (stopped)", "C (newer, tab B)"].sort())
+    // (b) The next identity can neither read nor merge into alice's draft.
+    expect(await a.evaluate(async key => (window as unknown as W).artifactDrafts.readArtifactDraft(key), key)).toBe("")
+    expect(await a.evaluate(async key => {
+      try { await (window as unknown as W).artifactDrafts.mergeArtifactDraft(key, () => "bob"); return "merged" } catch { return "rejected" }
+    }, key)).toBe("rejected")
+  } finally { await browser.close() }
+}, 60000)
