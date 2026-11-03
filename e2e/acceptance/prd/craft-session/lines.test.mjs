@@ -2,7 +2,7 @@
 // (also run by e2e/acceptance/prd/report.test.mjs, the PRD runner step in CI)
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { checkDraftCopies, checkLines, checkNoLines, evaluateLines, foundLines, holdsAnyLine, lineLedger } from "./lines.ts"
+import { checkDraftCopies, checkLines, checkNoLines, editorTakesInput, evaluateLines, foundLines, holdsAnyLine, lineLedger } from "./lines.ts"
 
 const P = "PRDLINE"
 const word = (paras) => JSON.stringify({ body: paras.map((text) => ({ kind: "para", text, runs: [{ len: text.length }] })) })
@@ -149,4 +149,22 @@ test("a cut-line reading never excuses a real duplicate", () => {
   // An accepted last line cannot be cut: the editor still took input after it.
   const acceptedLast = lineLedger(P, { typed: 13, accepted: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], stoppedBy: "Pouze čtení" })
   assert.ok(evaluateLines(acceptedLast, word([...lines(12), `${P}-1`]), "draft").problems.length > 0)
+})
+
+test("a dirty editor that lost custody does not take input although its status reads Neuložený koncept", () => {
+  // G3 RC-3 (e3f048555) stale-generation rows: after the handoff the status stayed
+  // "Neuložený koncept" and only the toolbar showed the peer; every later line was
+  // counted as accepted although the editor showed only the first lines.
+  assert.equal(editorTakesInput("Neuložený koncept Historie 4714 / 17179869184 B", "Upravuje PRD Lease Peer Požádat o předání"), false)
+  assert.equal(editorTakesInput("Neuložený koncept", "Upravuje PRD QA owner Pouze čtení · místní koncept zachován"), false)
+  assert.equal(editorTakesInput("Neuložený koncept", "Upravuje PRD QA owner Pouze čtení"), false)
+  // Explicit read-only or disconnected status still ends input.
+  assert.equal(editorTakesInput("Pouze čtení", "Upravuje PRD QA owner Uvolnit úpravy"), false)
+  assert.equal(editorTakesInput("Spojení odpojeno", null), false)
+})
+
+test("an editor that holds custody takes input; an unreadable toolbar leaves the status to decide", () => {
+  assert.equal(editorTakesInput("Neuložený koncept", "Upravuje PRD QA owner Uvolnit úpravy"), true)
+  assert.equal(editorTakesInput("Připraveno k úpravám", "Upravuje PRD QA owner Uvolnit úpravy Předat uživateli PRD Lease Peer"), true)
+  assert.equal(editorTakesInput("Uloženo · verze 3", null), true)
 })
