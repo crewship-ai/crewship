@@ -6,7 +6,8 @@
 //
 // The states of a line, in the order the work moves through them:
 //   typed     the harness sent `${prefix}-${i}` and Enter;
-//   accepted  the editor's status was editable before and after the line;
+//   accepted  the editor took input before and after the line (status and
+//             custody toolbar, see editorTakesInput);
 //   captured  the line was found in a copy (draft in the open editor, the
 //             draft offered after a reload, or the server head).
 // A line that is accepted, or captured in an earlier copy, must be in every
@@ -14,6 +15,22 @@
 // turned read-only is unproven by status alone; it is still required as soon
 // as any copy proves it captured, or when a later line is in the copy (the
 // editor took input after it).
+
+// The status line alone cannot tell that the editor stopped taking input: the
+// host shows "Neuložený koncept" whenever the editor holds unsaved work, also
+// after its write custody is gone (native-craft-editor-host.tsx: dirty wins
+// over writable). The custody toolbar ("Úpravy dokumentu") says it explicitly:
+// "Požádat o předání" (someone else holds the editor) or "Pouze čtení".
+const STATUS_NOT_EDITABLE = /Pouze čtení|odpojen/
+const CUSTODY_NOT_EDITABLE = /Požádat o předání|Pouze čtení/
+
+/**
+ * Does the editor take input, judged from its status line and the text of its
+ * custody toolbar (null when the toolbar could not be read: the status decides).
+ */
+export function editorTakesInput(status: string, custody: string | null): boolean {
+  return !STATUS_NOT_EDITABLE.test(status) && !(custody !== null && CUSTODY_NOT_EDITABLE.test(custody))
+}
 
 export interface TypingProgress {
   typed: number

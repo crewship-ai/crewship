@@ -396,7 +396,8 @@ func (e *hostCaptureExecutor) Stop(ctx context.Context, id string) error {
 	// The helper exits hostStopConfirmedExit only after it froze and killed
 	// the leader's whole tree (session and descendants) and saw every thread
 	// group exit. Together with the confirmed terminal exec above this is the
-	// evidence a cancelled run needs to settle without removing the shared
+	// evidence a provider-stopped run (cancel, deadline, output cap,
+	// capture error) needs to settle without removing the shared
 	// container (#4774). The exit status comes from the runtime, so another
 	// process in the container cannot forge it. Exit 0 (only the exact process
 	// was killed, or an older helper) records nothing and the run keeps

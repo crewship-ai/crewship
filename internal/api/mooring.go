@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/pages"
+	"github.com/crewship-ai/crewship/internal/storageheadroom"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -37,17 +38,17 @@ func (r *Router) registerMooring(h *gridcraftHTTP) {
 	}
 	// openapi: responses 200,401,403
 	r.mux.Handle("GET /api/v1/mooring/apps", authed(wsCtx(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) { writeJSON(w, 200, mooring.Applications()) }))))
-	// openapi: responses 200,201,400,401,403,404,409,500,503
+	// openapi: responses 200,201,400,401,403,404,409,413,500,503
 	r.authedMut("POST", "/api/v1/mooring/documents", roleInline, m.create)
 	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/mooring", authed(wsCtx(http.HandlerFunc(m.read))))
-	// openapi: responses 200,400,401,403,404,409,500,503
+	// openapi: responses 200,400,401,403,404,409,413,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/mooring/commands", roleInline, m.command)
 	// openapi: responses 200,400,401,403,404,409,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/mooring/mandates", roleInline, m.mandate)
 	// openapi: responses 200,400,401,403,404,500,503
 	r.authedMut("DELETE", "/api/v1/pages/{slug}/mooring/mandates/{mandate}", roleInline, m.revoke)
-	// openapi: responses 200,400,403,404,409,500,503
+	// openapi: responses 200,400,403,404,409,413,500,503
 	r.mux.Handle("POST /api/v1/internal/mooring", internalAuth(http.HandlerFunc(m.agent)))
 }
 func mooringError(w http.ResponseWriter, e error) {
@@ -166,6 +167,12 @@ func (m *mooringHTTP) create(w http.ResponseWriter, r *http.Request) {
 	id = generateCUID()
 	stamp := tsformat.Format(time.Now())
 	raw, _ := json.Marshal(spec)
+	// Free-disk admission (#4835) before the Page, its first version, the
+	// document row and the journal entry.
+	if e = storageheadroom.Check(r.Context(), tx, 2*int64(len(raw))+int64(len(manifest.InitialState))+4*collabDiskRowOverhead+4096); e != nil {
+		mooringError(w, e)
+		return
+	}
 	_, e = tx.ExecContext(r.Context(), `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at,private_audience,created_by_test) VALUES(?,?,?,?,?,?,?,?,1,?)`, id, ws, req.Slug, req.Name, user.ID, string(raw), stamp, stamp, req.CreatedByTest)
 	if e == nil {
 		e = insertPageVersion(r.Context(), tx, id, 1, string(raw), user.ID, stamp)
