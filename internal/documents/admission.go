@@ -4,7 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/crewship-ai/crewship/internal/storageheadroom"
 )
+
+// admitDisk is the same free-disk admission native Craft writes use. Call it
+// inside the writer transaction after exact-retry replay and validation, and
+// before the first growing insert, so a refusal writes nothing. Lease and
+// engine-recovery bookkeeping update fixed-width columns and stay admitted.
+func admitDisk(ctx context.Context, tx *sql.Tx, writeBytes ...int) error {
+	total := int64(0)
+	for _, n := range writeBytes {
+		total += int64(n)
+	}
+	return storageheadroom.Check(ctx, tx, total)
+}
 
 // admitNewReceipt limits throughput, never the lifetime of idempotency evidence.
 // Call only after the authorized exact-retry lookup. All existing receipts remain
