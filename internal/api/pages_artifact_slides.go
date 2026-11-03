@@ -50,6 +50,7 @@ func (h *PageHandler) artifactSlidesEnabled(ctx context.Context) bool {
 // actual source bytes, not just the actor identity. The writer fence makes its
 // per-transaction source digest cache valid through View's final authorization.
 func (h *PageHandler) artifactSlidesAuthority(r *http.Request, k artifacts.VersionKey, version int64) artifacts.VersionViewAuthorize {
+	r = ensureDesignAdminAuditRequest(r, false)
 	authority := h.artifactProjectAuthority(r, k, false, false)
 	var selected artifactSlidesSelection
 	checked := false
@@ -76,8 +77,10 @@ func (h *PageHandler) artifactSlidesAuthority(r *http.Request, k artifacts.Versi
 			isOwner = run.HumanUserID == owner
 		}
 		isEditor := false
+		var rec *pageRecord
 		if user != nil && !isOwner && ctx.Value(artifactRunKey{}) == nil {
-			rec, e := h.loadPageForRead(ctx, k.WorkspaceID, "@"+k.PageID)
+			var e error
+			rec, e = h.loadPageForRead(ctx, k.WorkspaceID, "@"+k.PageID)
 			if e != nil {
 				return "", artifacts.VersionSelection{}, e
 			}
@@ -89,10 +92,22 @@ func (h *PageHandler) artifactSlidesAuthority(r *http.Request, k artifacts.Versi
 		}
 		// PRD §5: the administrator read (audited by the authority above)
 		// renders any retained version, like the owner.
+		// Independent of grants: an Edit or Read grant never narrows it.
 		isAdmin := false
-		if user != nil && !isOwner && !isEditor && ctx.Value(artifactRunKey{}) == nil {
+		if rec != nil {
 			if isAdmin, err = h.artifactAdminReader(ctx, k.WorkspaceID, user.ID, false); err != nil {
 				return "", artifacts.VersionSelection{}, err
+			}
+		}
+		if isAdmin {
+			covered, e := h.artifactVersionCoveredWithoutAdmin(ctx, k, rec, user.ID, false, isEditor, version, latest, shared)
+			if e != nil {
+				return "", artifacts.VersionSelection{}, e
+			}
+			if !covered {
+				if e = h.recordArtifactAdminRead(ctx, tx, r, k, rec, user.ID); e != nil {
+					return "", artifacts.VersionSelection{}, e
+				}
 			}
 		}
 		if !isOwner && !isAdmin && ((!isEditor && shared != version) || (isEditor && latest != version)) {

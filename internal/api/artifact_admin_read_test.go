@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -338,6 +339,164 @@ func TestWorkspaceAdminReadsPrivateSheetAndSlidesAndAuditLists(t *testing.T) {
 	for _, page := range []string{"boss-workbook", "boss-slides"} {
 		if !strings.Contains(listing.Body.String(), page) {
 			t.Errorf("audit listing misses the ADMIN read of %s: %s", page, listing.Body)
+		}
+	}
+}
+
+// Review round 2 (#4825): the administrator read is independent of every
+// other grant. An Edit or Read grant only adds rights; it never narrows a
+// workspace OWNER/ADMIN back to the latest or shared version. A read the
+// reader's own grant already serves (an editor on the latest, a grantee on the
+// shared pin) writes no administrator audit; a read reachable only through
+// the role (any other version, the full history) writes exactly one.
+// On 73fcdcf4 an ADMIN holding an Edit grant got 404 for v1 on Slides and
+// dashboard data and a latest-only Project; a Read grant hid nothing there
+// but the reads it could not have made without the role went unaudited.
+func TestWorkspaceAdminReadIsIndependentOfGrants(t *testing.T) {
+	type surface struct {
+		name  string
+		setup func(t *testing.T, h *PageHandler, owner string, call func(string, string, string, string) *httptest.ResponseRecorder)
+		read  func(t *testing.T, h *PageHandler, ws, user, page string, version int) (int, string)
+		v1    string
+		v2    string
+	}
+	surfaces := []surface{{
+		name: "project",
+		setup: func(t *testing.T, h *PageHandler, owner string, call func(string, string, string, string) *httptest.ResponseRecorder) {
+			if w := call(owner, "POST", "artifacts", `{"slug":"three-screens","name":"Three screens",`+strings.TrimPrefix(artifactProjectBody(0, "Version one"), "{")); w.Code != 201 {
+				t.Fatalf("create %d %s", w.Code, w.Body)
+			}
+			if w := call(owner, "POST", "three-screens/artifact/share", `{"base_version":1,"version":1}`); w.Code != 200 {
+				t.Fatalf("share %d %s", w.Code, w.Body)
+			}
+			if w := call(owner, "POST", "three-screens/artifact/versions", artifactProjectBody(1, "Version two")); w.Code != 200 {
+				t.Fatalf("v2 %d %s", w.Code, w.Body)
+			}
+		},
+		v1: "Version one", v2: "Version two",
+	}, {
+		name: "slides",
+		setup: func(t *testing.T, h *PageHandler, owner string, call func(string, string, string, string) *httptest.ResponseRecorder) {
+			t.Setenv("CREWSHIP_ARTIFACT_SLIDES_ENABLED", "true")
+			if w := call(owner, "POST", "artifacts", `{"slug":"three-screens","name":"Slides",`+strings.TrimPrefix(slidesArtifactBody(0, "Deck one"), "{")); w.Code != 201 {
+				t.Fatalf("create %d %s", w.Code, w.Body)
+			}
+			if w := call(owner, "POST", "three-screens/artifact/share", `{"base_version":1,"version":1}`); w.Code != 200 {
+				t.Fatalf("share %d %s", w.Code, w.Body)
+			}
+			if w := call(owner, "POST", "three-screens/artifact/versions", slidesArtifactBody(1, "Deck two")); w.Code != 200 {
+				t.Fatalf("v2 %d %s", w.Code, w.Body)
+			}
+		},
+		read: func(t *testing.T, h *PageHandler, ws, user, page string, version int) (int, string) {
+			w := httptest.NewRecorder()
+			h.GetArtifactSlides(w, slidesAPIRequest(t, h, ws, user, page, fmt.Sprintf("slides?version=%d", version)))
+			return w.Code, w.Body.String()
+		},
+		v1: "Deck one", v2: "Deck two",
+	}, {
+		name: "dashboard data",
+		setup: func(t *testing.T, h *PageHandler, owner string, call func(string, string, string, string) *httptest.ResponseRecorder) {
+			t.Setenv("CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED", "true")
+			if w := call(owner, "POST", "artifacts", `{"slug":"three-screens","name":"Dashboard",`+strings.TrimPrefix(dashboardBody(0, "sales"), "{")); w.Code != 201 {
+				t.Fatalf("create %d %s", w.Code, w.Body)
+			}
+			if w := call(owner, "POST", "three-screens/artifact/share", `{"base_version":1,"version":1}`); w.Code != 200 {
+				t.Fatalf("share %d %s", w.Code, w.Body)
+			}
+			if w := call(owner, "POST", "three-screens/artifact/versions", dashboardBody(1, "sales")); w.Code != 200 {
+				t.Fatalf("v2 %d %s", w.Code, w.Body)
+			}
+			var ws string
+			if err := h.db.QueryRow(`SELECT workspace_id FROM pages WHERE slug='three-screens'`).Scan(&ws); err != nil {
+				t.Fatal(err)
+			}
+			if w := dashboardRequest(t, h, ws, owner, "POST", "sales", "", `{"base_version":2,"documents":[{"id":"row","ifVersion":0,"value":{"amount":12}}]}`); w.Code != 200 {
+				t.Fatalf("data %d %s", w.Code, w.Body)
+			}
+		},
+		read: func(t *testing.T, h *PageHandler, ws, user, page string, version int) (int, string) {
+			w := dashboardRequest(t, h, ws, user, "GET", "", fmt.Sprintf("?version=%d", version), "")
+			return w.Code, w.Body.String()
+		},
+		v1: `"code_version":1,"collections":[{"name":"sales"`, v2: `"code_version":2,"collections":[{"name":"sales"`,
+	}}
+	for _, s := range surfaces {
+		for _, grant := range []string{"write", "read"} {
+			for _, role := range []string{"ADMIN", "OWNER"} {
+				t.Run(s.name+"/"+role+"+"+grant+" grant", func(t *testing.T) {
+					h, ws, owner, call := artifactProjectFixture(t)
+					s.setup(t, h, owner, call)
+					var page string
+					if err := h.db.QueryRow(`SELECT id FROM pages WHERE slug='three-screens'`).Scan(&page); err != nil {
+						t.Fatal(err)
+					}
+					execOrFatal(t, h.db, `UPDATE workspace_members SET role='MEMBER' WHERE workspace_id=? AND user_id=?`, ws, owner)
+					admin := "granted-admin"
+					pagesSeedUser(t, h, ws, admin, admin+"@example.test", role)
+					execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES(?,'user',?,?,?,datetime('now'))`, page, admin, grant, owner)
+					audits := func() int {
+						return adminReadAudits(t, h, auditActionWorkspaceAdminArtifactRead, admin, page)
+					}
+					// The version the grant itself serves, and the one only the role reaches.
+					covered, beyond := 2, 1
+					if grant == "read" {
+						covered, beyond = 1, 2
+					}
+					if s.name == "project" {
+						var view struct {
+							Manifest struct {
+								Version int64 `json:"version"`
+							} `json:"manifest"`
+							Versions []json.RawMessage `json:"versions"`
+							CanShare bool              `json:"can_share"`
+							Quota    struct {
+								Retention string `json:"retention"`
+							} `json:"quota"`
+						}
+						before := audits()
+						for _, v := range []int{1, 2} {
+							got := call(admin, "GET", fmt.Sprintf("three-screens/artifact?version=%d", v), "")
+							want := s.v1
+							if v == 2 {
+								want = s.v2
+							}
+							if got.Code != 200 || !strings.Contains(got.Body.String(), want) {
+								t.Fatalf("%s+%s grant read v%d: %d %s", role, grant, v, got.Code, got.Body)
+							}
+							if json.Unmarshal(got.Body.Bytes(), &view) != nil || len(view.Versions) != 2 || view.CanShare || view.Quota.Retention == "latest-version-only" {
+								t.Errorf("%s+%s grant v%d narrowed the administrator read: %s", role, grant, v, got.Body)
+							}
+						}
+						// Each response carries the whole history no grant reaches:
+						// one administrator audit per request.
+						if n := audits() - before; n != 2 {
+							t.Errorf("%s+%s grant Project reads audited %d times, want 2", role, grant, n)
+						}
+						return
+					}
+					before := audits()
+					code, body := s.read(t, h, ws, admin, page, covered)
+					want := map[int]string{1: s.v1, 2: s.v2}
+					if code != 200 || !strings.Contains(body, want[covered]) {
+						t.Fatalf("%s+%s grant read of its own v%d: %d %s", role, grant, covered, code, body)
+					}
+					if n := audits() - before; n != 0 {
+						t.Errorf("%s+%s grant read its own version and was audited %d times", role, grant, n)
+					}
+					code, body = s.read(t, h, ws, admin, page, beyond)
+					if code != 200 || !strings.Contains(body, want[beyond]) {
+						t.Fatalf("%s+%s grant narrowed the administrator read of v%d: %d %s", role, grant, beyond, code, body)
+					}
+					if n := audits() - before; n != 1 {
+						t.Errorf("%s+%s grant read v%d only through the role, audited %d times, want 1", role, grant, beyond, n)
+					}
+					var latest, shared int64
+					if err := h.db.QueryRow(`SELECT latest_version,shared_version FROM artifact_version_heads WHERE page_id=?`, page).Scan(&latest, &shared); err != nil || latest != 2 || shared != 1 {
+						t.Fatalf("administrator read changed the head: %d %d %v", latest, shared, err)
+					}
+				})
+			}
 		}
 	}
 }

@@ -56,15 +56,20 @@ A workspace owner or admin can read every artifact in the workspace, of every
 type: projects, Pages, Word documents, Sheets (including ones an agent
 created), Designs, Slides and dashboards. This includes another member's
 private artifact that was never shared. They see the latest version and the
-full version history, not only the shared version.
+full version history, not only the shared version. This does not depend on
+anything else they hold: an owner or admin who also has an Edit, Comment or
+Read share on the artifact still reads every version.
 
 Every such read is written to the workspace audit log. An entry is written
 whenever an owner or admin opens an artifact they do not own and reach only
 through their workspace role, not through its crew, a folder or a direct
-share. That covers the artifact itself, its versions, a single version, its
-history, an export or download, and list views that show the artifact. If the
-entry cannot be written, the artifact is not shown. The entries use these
-actions:
+share. For a project, slides or dashboard, a version their own share already
+serves writes no entry: the latest version for an Edit share, the shared
+version for a Read or Comment share. Any other version, and the version
+history, is reached through the role and writes an entry. That covers the
+artifact itself, its versions, a single version, its history, an export or
+download, and list views that show the artifact. If the entry cannot be
+written, the artifact is not shown. The entries use these actions:
 
 | Action | Written when |
 |---|---|
