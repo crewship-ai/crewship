@@ -30,8 +30,12 @@ export interface LineSighting {
 export interface LineRecord {
   index: number
   marker: string
-  /** "accepted": the status was editable before and after the line; "unproven": it was not shown to be. */
-  typing: "accepted" | "unproven"
+  /**
+   * "accepted": the status was editable before and after the line; "unproven":
+   * it was not shown to be; "in flight": the stream ended while the line was
+   * being typed (index `typed`), so it counts once a copy holds it.
+   */
+  typing: "accepted" | "unproven" | "in flight"
   /** Every check of a copy that must hold the lines, oldest first. */
   seen: LineSighting[]
 }
@@ -57,6 +61,8 @@ export function lineLedger(prefix: string, progress: TypingProgress): LineLedger
   const accepted = new Set(progress.accepted)
   const lines: LineRecord[] = []
   for (let i = 0; i < progress.typed; i++) lines.push({ index: i, marker: `${prefix}-${i}`, typing: accepted.has(i) ? "accepted" : "unproven", seen: [] })
+  // The line being typed when the stream ended: its marker may have reached the editor before Enter.
+  lines.push({ index: progress.typed, marker: `${prefix}-${progress.typed}`, typing: "in flight", seen: [] })
   return { prefix, typed: progress.typed, stoppedBy: progress.stoppedBy ?? null, lines }
 }
 
@@ -121,7 +127,12 @@ export function foundLines(prefix: string, raw: string): { kind: LineCheck["kind
 }
 
 function describe(line: LineRecord): string {
-  const typing = line.typing === "accepted" ? "accepted by the editor (editable before and after the line)" : "typed, not proven accepted by status"
+  const typing =
+    line.typing === "accepted"
+      ? "accepted by the editor (editable before and after the line)"
+      : line.typing === "in flight"
+        ? "in flight when typing ended"
+        : "typed, not proven accepted by status"
   const last = [...line.seen].reverse().find((s) => s.count > 0)
   return `${typing}; ${last ? `last seen in "${last.stage}" (x${last.count})` : "never seen in a copy"}`
 }
@@ -186,15 +197,16 @@ export function checkLines(ledger: LineLedger, raw: string, stage: string): Line
 
 /**
  * The offered drafts: one of them must hold the work (see evaluateLines). The
- * first draft without a problem is recorded; when none passes, the problems of
- * every draft are returned and the one with the fewest is recorded.
+ * sightings of every draft are recorded; when none passes, the problems of
+ * every draft are returned.
  */
 export function checkDraftCopies(ledger: LineLedger, drafts: string[], stage: string): LineCheck {
   if (drafts.length === 0) return { stage, kind: "text", found: [], problems: [`"${stage}": no draft was offered`] }
   const checks = drafts.map((text, i) => evaluateLines(ledger, text, drafts.length > 1 ? `${stage}, draft ${i + 1}` : stage))
   const pass = checks.find((c) => c.problems.length === 0)
+  // Every inspected draft is recorded: a line any of them held is required in every later copy.
+  for (const c of checks) recordLines(ledger, c)
   const best = pass ?? [...checks].sort((a, b) => a.problems.length - b.problems.length)[0]
-  recordLines(ledger, best)
   return pass ?? { ...best, problems: checks.flatMap((c) => c.problems) }
 }
 

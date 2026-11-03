@@ -119,3 +119,21 @@ test("plain text (a non-native copy) is still checked", () => {
   assert.equal(c.kind, "text")
   assert.match(c.problems[0], /lost PRDLINE-1/)
 })
+
+test("a line held by any offered draft is required in later copies, not only the first draft's lines", () => {
+  // Review r1 #1: both drafts pass, only the second proves the unproven line 3.
+  const ledger = lineLedger(P, { typed: 4, accepted: [0, 1, 2], stoppedBy: "Editor odpojen · koncept zachován" })
+  assert.deepEqual(checkDraftCopies(ledger, [word(lines(3)), word(lines(4))], "drafts in the open editor").problems, [])
+  const c = checkDraftCopies(ledger, [word(lines(3))], "draft offered after the reload")
+  assert.equal(c.problems.length, 1, c.problems.join("\n"))
+  assert.match(c.problems[0], /lost PRDLINE-3 .*an earlier copy held it/)
+})
+
+test("the line in flight, once seen, is required in later copies", () => {
+  // Review r1 #2: the marker went out but typing threw before Enter, so typed stayed 2.
+  const ledger = lineLedger(P, { typed: 2, accepted: [0, 1] })
+  assert.deepEqual(checkLines(ledger, word(lines(3)), "draft in the open editor").problems, [])
+  const c = checkLines(ledger, word(lines(2)), "draft offered after the reload")
+  assert.equal(c.problems.length, 1, c.problems.join("\n"))
+  assert.match(c.problems[0], /lost PRDLINE-2 .*an earlier copy held it/)
+})
