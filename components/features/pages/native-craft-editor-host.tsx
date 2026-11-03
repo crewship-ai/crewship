@@ -368,11 +368,14 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    readerRefresh=refresh
    return refresh.done
   }
-  async function observeLease(raw:unknown){
+  async function observeLease(raw:unknown,streamed=false){
    if(nativeFailed)return
    const next=leaseView(raw);viewNow=next;setView(next)
    const r=current
-   if(r?.writable&&!owns(next,r.generation)){if(!await retireWrite(r))return}
+   // A streamed renewal read late after a main-thread stall can carry a past
+   // expiry while custody holds (#4863). Only a custody change retires at once;
+   // an expiry-only lapse goes through leaseWatch's bounded server recheck.
+   if(r?.writable&&!(streamed?holds:owns)(next,r.generation)){if(!await retireWrite(r))return}
    if(!transition)await refreshReader()
   }
   async function acquire(){
@@ -505,7 +508,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     }
     if(event==='session_retired'&&value.reason==='write_revoked'){void reopenReadOnly().catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'));return}
     if(event==='session_retired'){void retireConnection('Spojení bylo ukončeno. Koncept zachován.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'));return}
-    void observeLease(value).catch(()=>{if(client===own)stop('Aktuální přístup nelze potvrdit. Koncept zachován.')})
+    void observeLease(value,true).catch(()=>{if(client===own)stop('Aktuální přístup nelze potvrdit. Koncept zachován.')})
    }).catch(()=>{if(!dead&&client===own)void retireConnection('Spojení přerušeno. Zápis není potvrzen.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})
   }
   return()=>{unregisterPrivacy();window.removeEventListener('message',windowMessage);control.current=()=>{};publishPreview.current=()=>{};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};stop('Editor uzavřen · koncept zachován',true)}
