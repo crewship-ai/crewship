@@ -265,10 +265,28 @@ func (s *Server) completeRetainedOutput(ctx context.Context, run orchestrator.Ru
 		if p.WorkspaceID != run.WorkspaceID || p.AgentID != run.AgentID || (p.CrewID != "" && p.CrewID != run.CrewID) {
 			return errors.New("retained work scope differs")
 		}
-		if p.Result.CompletedAt != snapshot.Result.CompletedAt {
+		status, result = p.Status, p.Result
+	}
+	terminalID := "run-terminal:" + run.ID
+	if owned {
+		terminalID = "work-terminal:" + run.ID
+	}
+	if owned && p.Result.CompletedAt != snapshot.Result.CompletedAt {
+		// A staged result that asserts a different time is a different
+		// capture. One that asserts none (assignment staging before it carried
+		// the captured time) is accepted only once the live projector has
+		// already fixed the terminal identity from that same staged result:
+		// then recovery only acknowledges, and the receipt below still checks
+		// its kind and exit. Without a receipt the two writers would date the
+		// terminal differently, so recovery keeps waiting.
+		if p.Result.CompletedAt != "" || p.Result.ExitCode == nil || *p.Result.ExitCode != snapshot.Result.ExitCode {
 			return errors.New("retained completion timestamp differs from staged result")
 		}
-		status, result = p.Status, p.Result
+		if _, exists, err := s.journalWriter.ReplayTerminal(ctx, terminalID, run.WorkspaceID, run.AgentID, run.ID, result.ExitCode); err != nil {
+			return err
+		} else if !exists {
+			return errors.New("retained completion timestamp differs from staged result")
+		}
 	}
 	kind := journal.EntryRunFailed
 	if status == "COMPLETED" {
@@ -279,10 +297,6 @@ func (s *Server) completeRetainedOutput(ctx context.Context, run orchestrator.Ru
 	}
 	if status == "TIMEOUT" {
 		kind = journal.EntryRunTimeout
-	}
-	terminalID := "run-terminal:" + run.ID
-	if owned {
-		terminalID = "work-terminal:" + run.ID
 	}
 	if prior, exists, err := s.journalWriter.ReplayTerminal(ctx, terminalID, run.WorkspaceID, run.AgentID, run.ID, result.ExitCode); err != nil {
 		return err

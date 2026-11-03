@@ -1188,11 +1188,7 @@ func (h *AssignmentHandler) runAssignment(
 			return requestWebhookCreation(gateCtx, h.orch, location, execution.launch)
 		}
 	}
-	req.OnExecTerminal = func(code int) {
-		if execution := ownedAssignmentExecution(ctx); execution != nil {
-			execution.exitCode = &code
-		}
-	}
+	bindAssignmentExitObservers(ctx, &req)
 	req.OnExecStarted = func(execID string) {
 		if execID == "" {
 			return

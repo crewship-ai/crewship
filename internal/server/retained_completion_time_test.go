@@ -165,3 +165,88 @@ func TestLegacyRetainedMetadataCannotInventCompletion(t *testing.T) {
 		})
 	}
 }
+
+// Assignment staging used to omit the protected capture time, while the live
+// outbox still projected that staged result as work-terminal:<run>. Recovery
+// then compared "" with the source time forever and never acknowledged the
+// run. A staged result without a time is the same capture once its receipt
+// exists; a different time, a different exit or no receipt stays refused.
+func TestRetainedCompletionAcknowledgesUntimedStagedResultWithReceipt(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		staged  string
+		exit    int
+		receipt bool
+		settles bool
+	}{
+		{name: "untimed with receipt", receipt: true, settles: true},
+		{name: "untimed without receipt"},
+		{name: "different time with receipt", staged: "2026-10-19T10:00:01.000000000Z", receipt: true},
+		{name: "untimed different exit with receipt", exit: 3, receipt: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestServerWithDeps(t)
+			mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('retained-ws','Recovery','retained-ws')`)
+			mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('retained-agent','retained-ws','Agent','retained','RUNNING')`)
+			store, a := retainedWorkFixture(t, s, "retained-ws")
+			run := seedHostOutput(t, s, a.RunID)
+			code := tc.exit
+			if _, err := store.RecoverRetainedResult(t.Context(), run.ID, work.RunResult{CompletedAt: tc.staged, ExitCode: &code}, code == 0); err != nil {
+				t.Fatal(err)
+			}
+			p, _, err := store.RunProjection(t.Context(), run.ID)
+			if err != nil || !p.Ready {
+				t.Fatalf("projection=%+v err=%v", p, err)
+			}
+			if tc.receipt {
+				// What the live outbox writes from the staged result.
+				eventAt, err := journal.RunTerminalEventTime(run.StartedAt, p.Result.CompletedAt)
+				if err != nil {
+					t.Fatal(err)
+				}
+				kind := journal.EntryRunFailed
+				if p.Status == "COMPLETED" {
+					kind = journal.EntryRunCompleted
+				}
+				entry := journal.RunTerminalReplay(run.ID, run.WorkspaceID, run.AgentID, eventAt, kind, true, p.Result.ExitCode, p.Result.ErrorMessage, p.Result.Metadata)
+				if _, _, err := s.journalWriter.EmitReplaySync(t.Context(), entry); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err = s.projectRetainedOutput(t.Context(), run)
+			if tc.settles != (err == nil) {
+				t.Fatalf("settled=%v err=%v", err == nil, err)
+			}
+			raw, err := s.state.Get(t.Context(), "agent_runs", run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var after struct {
+				Status string `json:"status"`
+				Output struct {
+					RetainedResult any `json:"retained_result"`
+				} `json:"output"`
+			}
+			if err := json.Unmarshal(raw, &after); err != nil {
+				t.Fatal(err)
+			}
+			if acknowledged := after.Output.RetainedResult != nil; acknowledged != tc.settles {
+				t.Fatalf("acknowledged=%v status=%s", acknowledged, after.Status)
+			}
+			if tc.settles && after.Status != "completed" {
+				t.Fatalf("run status=%s", after.Status)
+			}
+			var terminals int
+			if err := s.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE trace_id=? AND entry_type IN ('run.completed','run.failed')`, run.ID).Scan(&terminals); err != nil {
+				t.Fatal(err)
+			}
+			want := 0
+			if tc.receipt {
+				want = 1
+			}
+			if terminals != want {
+				t.Fatalf("terminal entries=%d want %d", terminals, want)
+			}
+		})
+	}
+}
