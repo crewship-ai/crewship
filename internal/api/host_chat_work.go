@@ -70,6 +70,27 @@ func (h *InternalHandler) applyHostChatWorkProof(w http.ResponseWriter, r *http.
 		return true
 	}
 	switch proof.Phase {
+	case "poll":
+		// Read-only: the host owning this execution asks whether a cancel was
+		// recorded through POST /work-items/{id}/cancel. No dispatcher owns a
+		// host-chat attempt, so this answer is the only way the request can
+		// reach the process (#4799). An ended attempt has nothing to stop.
+		if status != "RUNNING" {
+			replyError(w, 400, "cancel poll requires RUNNING status")
+			return true
+		}
+		binding, current, lookupErr := store.HostChatAttempt(r.Context(), runID)
+		if lookupErr != nil || !current || binding.Ended || !binding.State.Live() {
+			replyError(w, 409, "host run attempt is no longer current")
+			return true
+		}
+		requested, cancelErr := store.CancelRequested(r.Context(), runID)
+		if cancelErr != nil {
+			replyInternalError(w, h.logger, "read host run cancel request", cancelErr)
+			return true
+		}
+		writeJSON(w, 200, map[string]any{"id": runID, "status": "RUNNING", "cancel_requested": requested})
+		return true
 	case "request", "started", "heartbeat":
 		if status != "RUNNING" {
 			replyError(w, 400, "execution phase requires RUNNING status")

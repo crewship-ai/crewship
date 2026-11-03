@@ -1335,8 +1335,8 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	var observedTerminalAfterStop bool
 	req.ObservedTerminalAfterStop = func() { observedTerminalAfterStop = true }
 	req.CapturedExit = func(at string) { capturedCompletedAt = at }
-	chatWork := b.bindHostChatWork(ctx, &req, runID)
-	defer chatWork.Stop()
+	ctx, chatWork := b.bindHostChatWork(ctx, &req, runID)
+	defer chatWork.Close()
 	runErr := b.orch.RunAgent(ctx, req, handler)
 	chatWork.Stop()
 	if observedTerminalAfterStop {
