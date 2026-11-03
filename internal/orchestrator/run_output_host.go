@@ -336,7 +336,7 @@ func (o *Orchestrator) AcknowledgeRetainedRunResult(ctx context.Context, run Run
 		return errors.New("retained terminal acknowledgement mismatched source")
 	}
 	if snapshot.Result.Reason != "exited" && !o.forcedHostEndConfirmed(ctx, run, snapshot) {
-		return fmt.Errorf("%w: forced process end lacks whole-runtime absence", ErrHostCaptureUnconfirmed)
+		return fmt.Errorf("%w: forced process end lacks whole-runtime absence or a stop receipt", ErrHostCaptureUnconfirmed)
 	}
 	status := ""
 	if len(authoritativeStatus) > 1 {
