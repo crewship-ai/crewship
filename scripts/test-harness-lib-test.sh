@@ -142,8 +142,10 @@ echo "== crew-links evidence (#4855) =="
 # requested "<tag>-OK" string (stage ff4c164, 2026-11-03): the prompt carries
 # the tag, so the reply text cannot prove a crossing. Drive the real suite
 # against a stub CLI whose `activity` feed is the only thing that changes.
-# XLINK_MODE: refuse-quoting (no artifact, reply quotes the tag) or landed
-# (tag-correlated assignment for morgan; the reply never mentions the tag).
+# XLINK_MODE: refuse-quoting (no artifact, reply quotes the tag), landed
+# (tag-correlated assignment for morgan; the reply never mentions the tag),
+# leaky (an assignment lands even with the link removed) or feed-down
+# (`activity` itself fails).
 xlink_cli() {
   cat >"$1" <<'EOF'
 #!/usr/bin/env bash
@@ -163,12 +165,13 @@ case "$args" in
     [ -e "$state/unlinked" ] || echo "link cc_stub engineering ops bidirectional"; exit 0 ;;
   *" chat list "*) echo "[]"; exit 0 ;;
   *" activity "*)
+    [ "$XLINK_MODE" = feed-down ] && exit 1
     [ -s "$state/landed" ] && cat "$state/landed"; exit 0 ;;
   *" ask "*)
     tag="$(printf '%s' "$prompt" | grep -oE 'XLINK(NEG)?-[A-Z0-9]+' | head -1)"
     if [ -z "$tag" ]; then printf 'ops\n' >"$save"; exit 0; fi
     case "$tag" in XLINKNEG-*) : >"$state/unlinked" ;; esac
-    if [ "$XLINK_MODE" = landed ] && [ ! -e "$state/unlinked" ]; then
+    if { [ "$XLINK_MODE" = landed ] && [ ! -e "$state/unlinked" ]; } || [ "$XLINK_MODE" = leaky ]; then
       printf '{"id":"a-%s","to_slug":"morgan","entry_type":"assignment.created","summary":"assigned alex → Morgan: reply %s-OK"}\n' "$tag" "$tag" >>"$state/landed"
       printf 'Morgan answered.\n' >"$save"
     else
@@ -186,6 +189,7 @@ run_crew_links() { # <mode> — print the suite's output (colour-free, stdout no
   xlink_cli "$dir/crewship"
   env -u CREWSHIP_SERVER -u SERVER CREWSHIP="$dir/crewship" XLINK_STATE="$dir" XLINK_MODE="$1" \
     bash "$SCRIPT_DIR/test-harness/test-crew-links.sh" 2>&1
+  rm -rf "$dir"
 }
 
 if command -v jq >/dev/null 2>&1; then
@@ -199,6 +203,14 @@ if command -v jq >/dev/null 2>&1; then
   expect_contains "tag-correlated assignment -> section 3 PASSES" "$out" "PASS delegation crossed the link"
   expect_contains "landed run -> unlinked half PASSES" "$out" "PASS an unlinked crew cannot be delegated to"
   expect_contains "landed run -> suite is green" "$out" "failed: 0"
+
+  out="$(run_crew_links leaky)"
+  expect_contains "assignment lands with no link -> unlinked half FAILS" "$out" "FAIL an unlinked crew cannot be delegated to"
+
+  out="$(run_crew_links feed-down)"
+  expect_contains "unreadable activity feed -> section 3 names the feed" "$out" "could not be read, so there is no evidence"
+  expect_contains "unreadable activity feed -> unlinked half FAILS" "$out" "FAIL an unlinked crew cannot be delegated to"
+  expect_not_contains "unreadable activity feed -> no echo blame" "$out" "is not evidence"
 else
   echo "  skip crew-links evidence checks (jq not installed)"
 fi

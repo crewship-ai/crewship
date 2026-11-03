@@ -93,8 +93,12 @@ TAG="$(nonce XLINK)"
 # XLINK-…-OK") reads exactly like a delivered answer. On stage ff4c164 that
 # certified a crossing the server had refused with 403. Only the
 # tag-correlated artifact decides, in both halves of the suite.
+# Non-zero when the feed cannot be read: an empty answer must never stand in
+# for "no activity".
 xlink_to_morgan_ids() { # [tag] — defaults to this delegation's TAG
-  cs activity --since 30m --lines 200 --export ndjson 2>/dev/null |
+  local feed
+  feed="$(cs activity --since 30m --lines 200 --export ndjson 2>/dev/null)" || return 1
+  printf '%s\n' "$feed" |
     jq -r --arg tag "${1:-$TAG}" '
       select(.to_slug == "morgan")
       | select(.entry_type | test("^(assignment\\.|peer\\.conversation)"))
@@ -106,7 +110,8 @@ XLINK_HAVE_JQ=0
 have jq && XLINK_HAVE_JQ=1
 before_ids="$(mktemp)"; after_ids="$(mktemp)"
 trap 'rm -f "$before_ids" "$after_ids"' EXIT
-(( XLINK_HAVE_JQ == 1 )) && xlink_to_morgan_ids > "$before_ids"
+feed_ok=1
+if (( XLINK_HAVE_JQ == 1 )); then xlink_to_morgan_ids > "$before_ids" || feed_ok=0; fi
 
 info "Asking alex to delegate to morgan on the Ops crew (tag $TAG)…"
 # Success is a new tag-correlated cross-crew feed entry addressed to morgan.
@@ -120,14 +125,14 @@ for attempt in 1 2 3; do
   # Check the durable artifact after every attempt; stopping as soon as it
   # exists saves a model turn.
   if (( XLINK_HAVE_JQ == 1 )); then
-    xlink_to_morgan_ids > "$after_ids"
+    xlink_to_morgan_ids > "$after_ids" || feed_ok=0
     if [ -n "$(comm -13 "$before_ids" "$after_ids")" ]; then landed=1; break; fi
   fi
-  info "attempt $attempt: no tag echoed and no cross-crew activity for morgan yet; retrying…"
+  info "attempt $attempt: no tag-correlated cross-crew activity for morgan yet; retrying…"
 done
 
 if (( XLINK_HAVE_JQ == 1 )) && (( landed == 0 )); then
-  xlink_to_morgan_ids > "$after_ids"
+  xlink_to_morgan_ids > "$after_ids" || feed_ok=0
   [ -n "$(comm -13 "$before_ids" "$after_ids")" ] && landed=1
 fi
 
@@ -138,6 +143,9 @@ elif (( XLINK_HAVE_JQ == 0 )); then
   # That is a missing tool, not a failing product — say which.
   skip "cross-crew delegation over a live link" \
     "jq is not installed, so the activity feed could not be read — install jq to make this assertion"
+elif (( feed_ok == 0 )); then
+  _fail "cross-crew delegation over a live link" \
+    "\`crewship activity\` could not be read, so there is no evidence either way — the CLI feed this suite depends on failed"
 elif (( echoed == 1 )); then
   _fail "cross-crew delegation over a live link" \
     "alex's reply contains $TAG, but no cross-crew activity addressed to morgan carries it. The prompt itself contains the tag, so an echo (for example a refusal quoting it) is not evidence that work crossed the link"
@@ -181,7 +189,8 @@ else
   have jq && morgan_before2="$(cs chat list morgan --format json 2>/dev/null | jq 'length' 2>/dev/null || echo 0)"
 
   neg_before="$(mktemp)"; neg_after="$(mktemp)"
-  (( XLINK_HAVE_JQ == 1 )) && xlink_to_morgan_ids "$NEG" > "$neg_before"
+  neg_feed_ok=1
+  if (( XLINK_HAVE_JQ == 1 )); then xlink_to_morgan_ids "$NEG" > "$neg_before" || neg_feed_ok=0; fi
 
   neg_reply="$(ask_agent alex "Delegate this to Morgan on the Ops crew: ask Morgan to reply with exactly '${NEG}-OK'. Then report back Morgan's exact answer. If you cannot reach Morgan, say exactly why.")"
 
@@ -192,8 +201,10 @@ else
   # so the reply text cannot decide. Without jq there is no artifact to read,
   # and the reply is the only (weaker) signal left.
   if (( XLINK_HAVE_JQ == 1 )); then
-    xlink_to_morgan_ids "$NEG" > "$neg_after"
-    if [ -n "$(comm -13 "$neg_before" "$neg_after")" ]; then
+    xlink_to_morgan_ids "$NEG" > "$neg_after" || neg_feed_ok=0
+    if (( neg_feed_ok == 0 )); then
+      _fail "an unlinked crew cannot be delegated to" "\`crewship activity\` could not be read, so the refusal is unproven"
+    elif [ -n "$(comm -13 "$neg_before" "$neg_after")" ]; then
       _fail "an unlinked crew cannot be delegated to" "new cross-crew activity addressed to morgan carries $NEG with no link in place"
     else
       _pass "an unlinked crew cannot be delegated to"
