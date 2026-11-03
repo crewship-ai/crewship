@@ -103,6 +103,10 @@ func startWorkAcceptanceServer(t *testing.T, withReconciliation ...bool) string 
 	seed("wk-historical-1", "succeeded", "schedule", "2026-01-01T00:00:00Z", "cmucdeletedagent000000001", `{}`, true)
 	seed("wk-replay-0001", "failed", "webhook", "dlv-held-00001", "agent-b", `{"payload":"kept"}`, true)
 	seed("wk-expired-001", "failed", "webhook", "dlv-expired-01", "agent-b", `{"payload":"gone"}`, true)
+	// A finished host chat turn: nothing dispatches this kind, so a replay
+	// must be refused rather than queued forever (#4799).
+	seed("wk-chat-turn-01", "succeeded", "chat", "msg-acc-1", "agent-b", `{}`, true)
+	mustExec(`UPDATE work_items SET domain_kind=?, domain_id='run-chat-acc' WHERE id='wk-chat-turn-01'`, work.DomainHostChatTurn)
 
 	mustExec(`INSERT INTO work_attempts (run_id, work_id, attempt, generation, lease_owner, lease_expires_at,
 		heartbeat_at, runtime_locator, started_at, start_reason, cost_usd)
@@ -323,6 +327,35 @@ func TestAcceptance_WorkReplay_MintsNewWorkAndRefusesWhatItCannotReproduce(t *te
 	}
 	if !strings.Contains(expiredOut, "retention") {
 		t.Fatalf("the refusal must name the retention:\n%s", expiredOut)
+	}
+}
+
+// TestAcceptance_WorkReplay_RefusesAHostChatTurn pins #4799 through the
+// binary: a chat turn has no executor behind the work queue, so the CLI must
+// fail with the server's reason and no new work item may appear.
+func TestAcceptance_WorkReplay_RefusesAHostChatTurn(t *testing.T) {
+	cfgPath := startWorkAcceptanceServer(t)
+
+	before, err := runWorkCLI(t, cfgPath, "work", "list", "-f", "json")
+	if err != nil {
+		t.Fatalf("work list failed: %v\n%s", err, before)
+	}
+	out, err := runWorkCLI(t, cfgPath, "work", "replay", "wk-chat-turn-01", "--reason", "again")
+	if err == nil {
+		t.Fatalf("expected replaying a chat turn to fail, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Chat turn replay is unsupported") {
+		t.Fatalf("the refusal must explain itself:\n%s", out)
+	}
+	if strings.Contains(out, "Replayed ") {
+		t.Fatalf("a refused replay reported success:\n%s", out)
+	}
+	after, err := runWorkCLI(t, cfgPath, "work", "list", "-f", "json")
+	if err != nil {
+		t.Fatalf("work list failed: %v\n%s", err, after)
+	}
+	if strings.Count(after, `"id":`) != strings.Count(before, `"id":`) || strings.Contains(after, `"replay_of": "wk-chat-turn-01"`) || strings.Contains(after, `"replay_of":"wk-chat-turn-01"`) {
+		t.Fatalf("a refused replay queued work:\nbefore:\n%s\nafter:\n%s", before, after)
 	}
 }
 

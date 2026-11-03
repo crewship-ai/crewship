@@ -26,6 +26,9 @@ func (r *hostChatOutcomeResolver) takeHostChatWork(id string) bool { return r.ip
 func (r *hostChatOutcomeResolver) hostChatPhase(ctx context.Context, id, phase string) error {
 	return r.ipc.hostChatPhase(ctx, id, phase)
 }
+func (r *hostChatOutcomeResolver) hostChatCancelRequested(ctx context.Context, id string) (bool, error) {
+	return r.ipc.hostChatCancelRequested(ctx, id)
+}
 
 func TestHostChatConfirmedStopCarriesFencedCompletionProof(t *testing.T) {
 	var mu sync.Mutex
