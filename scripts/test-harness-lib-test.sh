@@ -147,12 +147,15 @@ EOF
 
 deny_dir="$(mktemp -d -t cs-deny.XXXXXX)"
 deny_cli "$deny_dir/crewship"
+: >"$deny_dir/log"
 deny() { # <id> — run the real helper against the stub; print "rc|stdout"
   # shellcheck disable=SC2016  # the inner shell expands these, not this one
   env -u CREWSHIP_SERVER -u SERVER CREWSHIP="$deny_dir/crewship" DENY_LOG="$deny_dir/log" \
     bash -c '. "$1/test-harness/lib.sh" && . "$1/test-harness/owned-escalation.sh" && out="$(deny_credential_escalation "$2")"; rc=$?; printf "%s|%s" "$rc" "$out"' _ "$SCRIPT_DIR" "$1"
 }
 expect_eq "deny of the exact escalation succeeds with no resolution text" "0|" "$(deny esc-deny)"
+# Only meaningful once the stub was really called.
+expect_contains "deny reached the CLI" "$(cat "$deny_dir/log")" "escalation resolve esc-deny"
 expect_not_contains "deny sends no --resolution" "$(cat "$deny_dir/log")" "--resolution"
 expect_contains "deny sends --action reject for that id" "$(cat "$deny_dir/log")" "escalation resolve esc-deny --action reject"
 expect_contains "a failed deny surfaces the CLI error" "$(deny esc-other)" "1|Error: escalation not found"
