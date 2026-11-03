@@ -30,8 +30,8 @@ export async function isolatedActor(prd: PrdScenario, browser: Browser, title: s
   const ownerAccount = prd.env.accounts.owner
   if (!ownerAccount) throw new Error("owner account missing")
   // Both API contexts outlive the 15-minute access cookie in the long rows
-  // (craft-hour): they renew their session on "session expired" (session-refresh.ts).
-  // The owner context owns its login, so it refreshes it.
+  // (craft-hour): each owns its login and refreshes it on "session expired"
+  // (session-refresh.ts).
   const owner = withSessionRenewal(await apiAs(prd.origin, await loginStorageState(prd.origin, ownerAccount)), prd.origin)
   cleanups.push(() => owner.dispose())
   const ws = await createQaWorkspace(owner, title)
@@ -44,12 +44,10 @@ export async function isolatedActor(prd: PrdScenario, browser: Browser, title: s
   }
   const person = await provisionMember(owner, prd.origin, ws, ROLE, "PRD outage person")
   const state = await loginStorageState(prd.origin, person.account)
-  // The person's API starts on the browser's login (no extra login for short
-  // rows); refreshing that shared session would revoke it for the browser, so on
-  // the first expiry it moves to a login of its own.
-  const api = withSessionRenewal(await apiAs(prd.origin, state), prd.origin, {
-    relogin: async () => apiAs(prd.origin, await loginStorageState(prd.origin, person.account)),
-  })
+  // The person's API gets a login of its own (refresh tokens rotate with replay
+  // detection: refreshing the browser's session would revoke it for both); it
+  // refreshes only that session and never logs in again during the row.
+  const api = withSessionRenewal(await apiAs(prd.origin, await loginStorageState(prd.origin, person.account)), prd.origin)
   cleanups.push(() => api.dispose())
   const context = await browser.newContext({ baseURL: prd.origin, storageState: state, ...options })
   cleanups.push(() => context.close())

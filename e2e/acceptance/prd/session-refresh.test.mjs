@@ -76,21 +76,20 @@ test("concurrent calls on an expired session share one refresh", async () => {
   assert.equal(ctx.calls.filter((c) => c.url === REFRESH_PATH).length, 1)
 })
 
-test("a context sharing its login with a browser never refreshes that session: it moves to its own login once", async () => {
-  const shared = fakeContext("shared", { expireAfter: 1 })
-  const own = fakeContext("own", { expireAfter: 1 })
+test("a revoked session surfaces after its access cookie expired: no password is re-entered, even when a login is offered", async () => {
+  // Codex r1 on #4853: RequireAuth answers no_credentials for an expired access
+  // cookie before it looks at revocation; a wrapper that logs in again on that
+  // 401 would hide a revoked session behind a fresh one.
+  const revoked = fakeContext("person", { expireAfter: 1, refresh: 401 })
   let logins = 0
   const log = []
-  const api = withSessionRenewal(shared, "https://h.example", { log, relogin: async () => (logins++, own) })
-  assert.equal((await api.get("/a")).status(), 201)
-  assert.equal((await api.get("/b")).status(), 201) // shared expired -> relogin -> repeated on own
-  assert.equal((await api.get("/c")).status(), 201) // own expired -> refresh of own session
-  assert.equal(logins, 1)
-  assert.equal(shared.calls.filter((c) => c.url === REFRESH_PATH).length, 0, "the browser's session is never refreshed by the harness")
-  assert.deepEqual(own.calls.map((c) => c.url), ["/b", "/c", REFRESH_PATH, "/c"])
-  assert.deepEqual(log.map((l) => l.how), ["relogin", "refresh"])
-  await api.dispose()
-  assert.equal(shared.disposed && own.disposed, true)
+  const api = withSessionRenewal(revoked, "https://h.example", { log, relogin: async () => (logins++, fakeContext("fresh login")) })
+  assert.equal((await api.post("/api/v1/x/sessions")).status(), 201)
+  const after = await api.post("/api/v1/x/sessions")
+  assert.equal(after.status(), 401, "the revoked session reaches the caller")
+  assert.equal(logins, 0, "no login during the row")
+  assert.deepEqual(revoked.calls.map((c) => c.url), ["/api/v1/x/sessions", "/api/v1/x/sessions", REFRESH_PATH])
+  assert.deepEqual(log.map((l) => [l.how, l.status]), [["refresh", 401]])
 })
 
 test("a failed renewal, another 401, and /api/auth/ calls reach the caller unchanged", async () => {
@@ -99,16 +98,13 @@ test("a failed renewal, another 401, and /api/auth/ calls reach the caller uncha
   assert.equal((await api.get("/a")).status(), 401)
   assert.equal(revoked.calls.filter((c) => c.url === "/a").length, 1, "not repeated after a failed refresh")
 
-  const failingLogin = withSessionRenewal(fakeContext("shared", { expireAfter: 0 }), "https://h.example", { relogin: async () => Promise.reject(new Error("429")) })
-  assert.equal((await failingLogin.get("/a")).status(), 401)
-
   const ctx = fakeContext("owner", { expireAfter: 0 })
   const auth = withSessionRenewal(ctx, "https://h.example")
   assert.equal((await auth.get("/api/auth/session")).status(), 401)
   assert.equal(ctx.calls.length, 1)
 })
 
-test("non-call members pass through bound to the current context", async () => {
+test("non-call members pass through bound to the wrapped context", async () => {
   const ctx = fakeContext("owner")
   const api = withSessionRenewal(ctx, "https://h.example")
   assert.deepEqual(await api.storageState(), { cookies: [], origins: [] })

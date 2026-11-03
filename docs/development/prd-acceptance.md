@@ -73,9 +73,9 @@ test signs the owner in again, and every extra context (`prd.api(role)`,
 The API contexts of the long rows (`outage-lostack/actor.ts`, used by
 `craft-hour`) outlive the 15-minute access cookie, so they renew the session on
 a `no_credentials`/`session_expired` 401 and repeat the call
-(`session-refresh.ts`): the owner context refreshes its own login, and the
-person's API context, which starts on the browser's login, first moves to a
-login of its own so that it never refreshes the browser's session.
+(`session-refresh.ts`). Each of them has a login of its own (never the
+browser's) and only refreshes that session; it never logs in again during a
+row, so a revoked session (whose refresh is refused) still fails the row.
 
 The rows that type unsaved lines (handoff, revoked right, restart, hour) count a
 line as accepted only when the editor took input before and after it. The
