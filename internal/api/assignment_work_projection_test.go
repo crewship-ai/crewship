@@ -207,3 +207,32 @@ func TestAssignmentMissingTerminalAfterCreationRemainsUnclear(t *testing.T) {
 		t.Fatalf("requested execution without terminal evidence classified %s", got)
 	}
 }
+
+// Retained recovery compares the staged completion time with the protected
+// source byte for byte. Assignment staging must carry the capture's own time,
+// as chat and webhook staging already do, or the run is never acknowledged.
+func TestAssignmentStagesProtectedCaptureCompletionTime(t *testing.T) {
+	rt, store, a := assignmentProjectionFixture(t)
+	launch := &webhookLaunch{store: store, workID: a.Item.ID, runID: a.RunID, generation: a.Generation}
+	execution := &assignmentExecution{assignment: dispatch.Assignment{Item: a.Item, RunID: a.RunID, Generation: a.Generation}, launch: launch}
+	ctx := context.WithValue(t.Context(), assignmentExecutionKey{}, execution)
+	var req orchestrator.AgentRunRequest
+	bindAssignmentExitObservers(ctx, &req)
+	if req.OnExecTerminal == nil || req.CapturedExit == nil {
+		t.Fatal("assignment run does not observe the protected exit")
+	}
+	const captured = "2026-11-01T02:57:59.922634143Z"
+	req.OnExecTerminal(0)
+	req.CapturedExit(captured)
+	if !rt.h.stageAssignmentResult(ctx, "projection", a.RunID, "done", "", nil) || execution.stageErr != nil {
+		t.Fatalf("not staged: %v", execution.stageErr)
+	}
+	var raw string
+	if err := rt.h.db.QueryRow(`SELECT run_result_json FROM work_attempts WHERE run_id=?`, a.RunID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var result work.RunResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil || result.CompletedAt != captured || result.ExitCode == nil || *result.ExitCode != 0 {
+		t.Fatalf("staged result=%s err=%v", raw, err)
+	}
+}

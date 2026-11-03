@@ -279,6 +279,18 @@ type MutateRequest struct {
 	Scope string
 	Key   string
 
+	// ScopeAgentID is agents.id of the agent that owns an "agent:<slug>"
+	// Scope. The slug in the key is not a stable identity: a deleted agent's
+	// slug is released and reused (#4840), and the file lock does not exclude
+	// that release (#4862). When set, the ledger records the intent only while
+	// this agent is live in WorkspaceID and its slug still names Scope, and
+	// confirms only under a key this agent still owns (its live slug or its
+	// tombstone). Both checks run inside the write statement or transaction,
+	// so SQLite's single writer orders them against the agent delete and the
+	// slug release. Empty = no ownership fence (trusted callers that pick the
+	// key explicitly, e.g. an operator restore, and ledgerless callers).
+	ScopeAgentID string
+
 	// Path is the resolved canonical absolute path on disk. AuditPath is the
 	// workspace-unique logical key ("agent:alice/AGENT.md"), which is what
 	// the revision anchor and the ledger are keyed by. Two agents in one
@@ -384,8 +396,8 @@ type MutateRequest struct {
 	// testHook stops a mutation at a named step so the crash tests can
 	// simulate a process death at exactly that point. Unexported: only
 	// package memory can set it, so it cannot be reached from production
-	// code by accident. Steps: "after_intent", "after_rename",
-	// "before_confirm".
+	// code by accident. Steps: "before_intent", "after_intent",
+	// "after_rename", "before_confirm".
 	testHook func(step string) error
 }
 
@@ -680,7 +692,12 @@ func mutateOpened(ctx context.Context, db *sql.DB, req MutateRequest, normConten
 	// 7. Durable intent, committed before any filesystem work.
 	var mutationID string
 	if db != nil {
-		mutationID, err = writeIntent(ctx, db, req, intentRow{
+		if req.testHook != nil {
+			if herr := req.testHook("before_intent"); herr != nil {
+				return res, herr
+			}
+		}
+		mutationID, err = writeIntent(ctx, db, req, anchor, intentRow{
 			requestSHA:   requestSHA,
 			baseRevision: res.BaseRevision,
 			baseSHA:      baseSHA,
@@ -730,17 +747,20 @@ func mutateOpened(ctx context.Context, db *sql.DB, req MutateRequest, normConten
 				return res, herr
 			}
 		}
-		if err := confirmMutation(ctx, db, req, mutationID, newRevision, targetSHA, len(effective), res); err != nil {
+		confirmedPath, err := confirmMutation(ctx, db, req, mutationID, anchor, newRevision, targetSHA, len(effective))
+		if err != nil {
 			return res, err
 		}
 		if req.RecordVersion {
-			parent, perr := LatestVersionSha(ctx, db, req.WorkspaceID, req.AuditPath)
+			// History goes where the mutation was confirmed: after a slug
+			// release that is the tombstone key, not the new agent's (#4862).
+			parent, perr := LatestVersionSha(ctx, db, req.WorkspaceID, confirmedPath)
 			if perr != nil {
 				return res, fmt.Errorf("lookup parent version sha: %w", perr)
 			}
 			rec, verr := RecordVersion(ctx, db, VersionRecord{
 				WorkspaceID: req.WorkspaceID,
-				Path:        req.AuditPath,
+				Path:        confirmedPath,
 				Tier:        req.Tier,
 				Content:     effective,
 				WrittenBy:   req.ActorID,
@@ -787,6 +807,9 @@ func (r MutateRequest) validate(db *sql.DB) error {
 	}
 	if r.RecordVersion && !ValidTier(r.Tier) {
 		return fmt.Errorf("%w: %q", ErrInvalidTier, r.Tier)
+	}
+	if r.ScopeAgentID != "" && !strings.HasPrefix(r.Scope, "agent:") {
+		return fmt.Errorf("mutate: scope_agent_id is only meaningful for an agent: scope, got %q", r.Scope)
 	}
 	return nil
 }

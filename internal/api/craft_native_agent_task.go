@@ -75,6 +75,11 @@ func (m *craftNativeAgentManager) produceTask(ctx context.Context, slug string, 
 	if err != nil || !mooring.ValidWireIdentifier(crew) || !utf8.ValidString(instruction) || strings.TrimSpace(instruction) == "" {
 		return zero, errCraftNativeAgentDenied
 	}
+	// The workspace agent artifact policy is the ceiling for every agent write
+	// to an artifact; whole-document consent works only inside it (#4681).
+	if !m.human.pages.artifactAgentPolicyAllows(ctx, ws, crew) {
+		return zero, errCraftNativeAgentDenied
+	}
 	var duplicate bool
 	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM work_items WHERE workspace_id=? AND source='chat' AND source_ref=? AND domain_kind=? AND domain_id=? AND agent_id=?)`, ws, input.MessageID, craftNativeAgentDomain, rec.ID, original.AgentID).Scan(&duplicate); err != nil || duplicate {
 		return zero, errCraftNativeAgentDenied

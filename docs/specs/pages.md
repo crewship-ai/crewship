@@ -1431,7 +1431,12 @@ an immutable Page ID and human identity as their recovery scope. New durable
 payloads are encrypted in the browser. Recovery obtains a key envelope through
 a fresh authenticated Page-read check; an expired session retains the copy and
 does not authorize releasing it to another identity. Bound legacy records are
-migrated before entering an editor. Unbound slug records are never replayed.
+migrated before entering an editor. Unbound slug records (Project source and
+comment drafts from builds before Page-ID keys) are never replayed
+automatically: the project editor shows the signed-in person's own copy as an
+older draft that may belong to another Page, and adopts it only on an explicit
+choice, into an empty Page-ID draft (a compare-and-set in one IndexedDB transaction;
+a draft another tab stored meanwhile is kept, and so is the slug copy).
 
 A positively verified loss of current Page read erases reachable local drafts;
 a network failure, expired cookie, or loss of Edit alone does not prove that

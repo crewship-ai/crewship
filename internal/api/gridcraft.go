@@ -62,9 +62,9 @@ func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.E
 	r.authedMut("POST", "/api/v1/workbooks", roleInline, h.create)
 	// openapi: responses 200,400,401,403,404,409,429,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/workbook", authed(wsCtx(http.HandlerFunc(h.read))))
-	// openapi: responses 200,400,401,403,404,409,429,500,503
+	// openapi: responses 200,400,401,403,404,409,413,429,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/operations", roleInline, h.importFile)
-	// openapi: responses 200,400,401,403,404,409,429,500,503
+	// openapi: responses 200,400,401,403,404,409,413,429,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/edits", roleInline, h.edit)
 	// openapi: responses 200,201,400,401,403,404,409,429,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/sessions", roleInline, h.openSession)
@@ -82,7 +82,7 @@ func (r *Router) RegisterGridCraft(options appengine.Options, engine appengine.E
 	r.authedMut("POST", "/api/v1/pages/{slug}/workbook/editors", roleInline, h.share)
 	// The crew IPC authenticates transport; the original signed run bearer is
 	// independently verified by artifactAgentRequest and checked again in SQL.
-	// openapi: responses 200,400,403,404,409,429,500,503
+	// openapi: responses 200,400,403,404,409,413,429,500,503
 	r.mux.Handle("POST /api/v1/internal/gridcraft", internalAuth(http.HandlerFunc(h.agent)))
 	r.registerMooring(h)
 	r.gridcraftOutbox = &gridcraftOutboxWorker{h: h}

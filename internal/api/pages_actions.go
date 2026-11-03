@@ -280,7 +280,7 @@ func (h *PageHandler) ListPanelActions(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	slug, panelID := r.PathValue("slug"), r.PathValue("panelId")
 
-	rec, _, err := h.resolvePanelForCaller(r.Context(), wsID, user.ID, slug, panelID)
+	rec, panel, err := h.resolvePanelForCaller(r.Context(), wsID, user.ID, slug, panelID)
 	if err != nil {
 		h.replyPanelLookupError(w, err, slug, panelID)
 		return
@@ -295,6 +295,9 @@ func (h *PageHandler) ListPanelActions(w http.ResponseWriter, r *http.Request) {
 		out = append(out, actionToWire(&spec.Actions[i]))
 	}
 	if !h.annotateApplicationRoutines(w, r, rec, out) {
+		return
+	}
+	if !h.auditPanelRead(w, r, rec, panel) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

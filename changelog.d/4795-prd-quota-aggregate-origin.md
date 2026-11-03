@@ -1,0 +1,1 @@
+- **The PRD RC gate now checks `quota.aggregate.workspace` on the craft origin (#4795).** The scenario saves through a native Word editor and skips without one, so on the artifacts origin, which runs without native editors, the row could never pass. It is now gated on the craft origin and always rerun, like the other native-editor quota rows.

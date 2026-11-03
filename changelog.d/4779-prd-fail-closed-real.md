@@ -1,0 +1,1 @@
+- **The RC gate no longer accepts a skipped `A.craft.lease.fail-closed` (#4779).** The row was proven on the craft origin, which runs native editors, so it was always skipped and passed without evidence. It is now proven on the artifacts origin, which runs the RC without a native editor profile (`PRD_CRAFT_NATIVE=off`), and no required row may be skipped.

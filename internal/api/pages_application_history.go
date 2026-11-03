@@ -110,5 +110,16 @@ func (h *PageHandler) ApplicationPanelHistory(w http.ResponseWriter, r *http.Req
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	if err := rows.Close(); err != nil {
+		replyInternalError(w, h.logger, "close panel history", err)
+		return
+	}
+	if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+		replyInternalError(w, h.logger, "finish panel history read", err)
+		return
+	}
+	if !h.auditPanelRead(w, r, rec, panel) {
+		return
+	}
 	writeJSON(w, 200, map[string]any{"items": items, "next_before": next, "publication": version})
 }

@@ -81,13 +81,10 @@ func TestCommandHistoryMigrationBackfillsExistingRows(t *testing.T) {
 	}
 	defer db.Close()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err = database.MigrateSkipping(t.Context(), db.DB, logger, "gridcraft_command_history"); err != nil {
-		if !strings.Contains(err.Error(), `no migration is named "gridcraft_command_history"`) {
-			t.Fatal(err)
-		}
-		if err = database.Migrate(t.Context(), db.DB, logger); err != nil {
-			t.Fatal(err)
-		}
+	// The database as the release before command history left it; later
+	// migrations may read the columns command history adds.
+	if err = database.MigrateBefore(t.Context(), db.DB, logger, "gridcraft_command_history"); err != nil {
+		t.Fatal(err)
 	}
 	for _, q := range []string{
 		`INSERT INTO users(id,email) VALUES('owner','owner@example.test')`,

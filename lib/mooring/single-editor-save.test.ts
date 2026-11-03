@@ -8,7 +8,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 const receipt = (r: NativeSaveRequest) => ({ durability: "node", issuedBy: "crewship", phase: "committed", candidateHash: r.contentHash, workspaceId: r.workspaceId, pageId: r.pageId, applicationId: r.applicationId, enginePin: r.enginePin, generation: r.generation, sessionId: r.sessionId, baseVersion: r.baseVersion, editorRevision: r.editorRevision, contentHash: r.contentHash, version: (BigInt(r.baseVersion) + 1n).toString() })
 function rig(baseVersion = "1", generation = "1") {
-  const journal = { persist: vi.fn().mockResolvedValue(undefined), confirm: vi.fn().mockResolvedValue(undefined), recovery: vi.fn().mockResolvedValue([]), onRetire: vi.fn(() => () => {}), close: vi.fn().mockResolvedValue(undefined), revokeRead: vi.fn().mockResolvedValue(undefined) } satisfies NativeDraftJournal
+  const journal = { persist: vi.fn().mockResolvedValue(undefined), confirm: vi.fn().mockResolvedValue(undefined), recovery: vi.fn().mockResolvedValue([]), onRetire: vi.fn(() => () => {}), close: vi.fn().mockResolvedValue(undefined), revokeRead: vi.fn().mockResolvedValue(undefined), discardRecovered: vi.fn().mockResolvedValue(undefined) } satisfies NativeDraftJournal
   const engine = { snapshot: vi.fn().mockResolvedValue({ bytes: new Uint8Array([1, 2]), editorRevision: "doc:1:0" }), validate: vi.fn().mockResolvedValue(undefined) }
   const transport = { save: vi.fn(async (r: NativeSaveRequest) => receipt(r)), reconcile: vi.fn(async (r: NativeSaveRequest) => receipt(r)) }
   const state = vi.fn(), onReceipt = vi.fn()
@@ -501,5 +501,42 @@ it("keeps the captured draft for comparison when the lost acknowledgement cannot
   expect(r.transport.reconcile).toHaveBeenCalledOnce()
   expect(r.journal.confirm).not.toHaveBeenCalled()
   expect(r.transport.save).toHaveBeenCalledOnce()
+  await r.controller.close()
+})
+
+// Write and read revoked together: the fresh capture is journaled, then the
+// lost save's reconcile reports read loss. It takes the same purge path as a
+// save that reports read_revoked; any other reconcile error keeps the draft.
+it.each([
+  ["after an uncertain save", false],
+  ["for a save still in flight", true],
+] as const)("purges the journal when reconcile reports read_revoked during write revocation (%s)", async (_case, inFlight) => {
+  const r = rig()
+  if (inFlight) r.transport.save.mockImplementationOnce(() => new Promise(() => {}))
+  else r.transport.save.mockRejectedValueOnce(new Error("lost ACK"))
+  r.transport.reconcile.mockRejectedValueOnce(new NativeSaveError("read_revoked"))
+  if (inFlight) { void r.controller.save(); await vi.waitFor(() => expect(r.transport.save).toHaveBeenCalledOnce()) }
+  else await r.controller.save()
+  const captured = await r.controller.revokeWrite()
+  expect(r.transport.reconcile).toHaveBeenCalledOnce()
+  // The fresh capture was journaled before reconcile; read loss must erase it.
+  expect(r.journal.persist.mock.invocationCallOrder.at(-1)!).toBeLessThan(r.transport.reconcile.mock.invocationCallOrder[0])
+  expect(r.journal.revokeRead).toHaveBeenCalledOnce()
+  // A purged capture is no capture: the host must not hand it off or list it.
+  expect(captured).toBe(false)
+  expect(r.journal.confirm).not.toHaveBeenCalled()
+  expect(r.transport.save).toHaveBeenCalledOnce()
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "stopped" }))
+  await r.controller.close()
+})
+
+it("a write refusal from reconcile during write revocation keeps the captured draft", async () => {
+  const r = rig()
+  r.transport.save.mockRejectedValueOnce(new Error("lost ACK"))
+  r.transport.reconcile.mockRejectedValueOnce(new NativeSaveError("write_revoked"))
+  await r.controller.save()
+  await expect(r.controller.revokeWrite()).resolves.toBe(true)
+  expect(r.journal.revokeRead).not.toHaveBeenCalled()
+  expect(r.journal.confirm).not.toHaveBeenCalled()
   await r.controller.close()
 })

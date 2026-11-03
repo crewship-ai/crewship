@@ -66,7 +66,8 @@ func TestSlidesHumanReadInitialize(t *testing.T) {
 		t.Fatalf("state %s", read.Body)
 	}
 	wantCode(t, call(f.boss, "GET", base+"/revisions/1", ""), 200, "exact revision")
-	wantCode(t, call(f.wsAdmin, "GET", base, ""), 404, "admin private denial")
+	wantCode(t, call(f.wsAdmin, "GET", base, ""), 200, "audited ADMIN read (PRD §5)")
+	wantCode(t, call(f.wsAdmin, "POST", base+"/initialize", strings.Replace(body, "init", "admin-init", 1)), 404, "ADMIN cannot initialize private output")
 	wantCode(t, call(f.boss, "POST", base+"/initialize", strings.Replace(body, "init", "changed", 1)), 409, "changed mutation")
 	for _, op := range []string{"patch", "restore", "reorder"} {
 		if call(f.boss, "POST", base+"/"+op, body).Code == 200 {
@@ -243,6 +244,10 @@ func TestSlidesHumanPrivateValidationDoesNotRevealExistence(t *testing.T) {
 	f.r.RegisterSlidesHuman(true)
 	seedInstanceUser(t, f.db, "slides-member", "member@slides.test", "ws-old", "MEMBER")
 	member := mintTokenFor(t, f.db, "slides-member", "slidesmemberoracle000000000")
+	// A workspace ADMIN is an audited reader of private output (PRD §5, #4825);
+	// the oracle is checked for the roles outside that audience.
+	seedInstanceUser(t, f.db, "slides-manager", "manager@slides.test", "ws-old", "MANAGER")
+	manager := mintTokenFor(t, f.db, "slides-manager", "slidesmanageroracle00000000")
 	const pageID, slug, title = "slides-secret", "private-deck", "PRIVATE_SLIDES_TITLE"
 	wmSeedPage(t, f.db, "ws-old", pageID, slug, title, "boss", "")
 	mustExec(t, f.db, `UPDATE pages SET private_audience=1 WHERE id=?`, pageID)
@@ -268,7 +273,7 @@ func TestSlidesHumanPrivateValidationDoesNotRevealExistence(t *testing.T) {
 		{"malformed initialization", "POST", "/initialize", "{"},
 		{"incomplete initialization", "POST", "/initialize", "{}"},
 	}
-	for _, principal := range []struct{ name, token string }{{"ADMIN", f.wsAdmin}, {"MEMBER", member}} {
+	for _, principal := range []struct{ name, token string }{{"MANAGER", manager}, {"MEMBER", member}} {
 		for _, reference := range []struct{ name, private, missing string }{{"slug", slug, "missing-deck"}, {"immutable ID", "@" + pageID, "@missing-deck"}} {
 			for _, tc := range cases {
 				t.Run(principal.name+"/"+reference.name+"/"+tc.name, func(t *testing.T) {

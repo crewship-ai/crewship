@@ -1,5 +1,5 @@
 import { openProtectedDocumentDrafts as openDocumentDrafts } from "../protected-document-drafts"
-import { DocumentStorageError, purgeDocumentDrafts, registerDocumentDraftWriter } from "../document-queue"
+import { DocumentStorageError, purgeDocumentDrafts, registerDocumentDraftWriter, removeDocumentDraftRow } from "../document-queue"
 
 export interface NativeDraft {
   applicationId: string
@@ -10,14 +10,21 @@ export interface NativeDraft {
   editorRevision: string
   bytes: Uint8Array
 }
-export interface NativeRecovery { draft: NativeDraft; actions: readonly ["compare", "copy"] }
+export interface NativeRecovery { draft: NativeDraft; actions: readonly ["compare", "copy"]; /** Journal row this recovery was read from; only `discardRecovered` uses it. */ source?: { id: string; snapshot: string } }
 export interface NativeDraftJournal {
   persist(draft: NativeDraft): Promise<void>
   confirm: (draft: NativeDraft) => Promise<void>
   recovery(): Promise<NativeRecovery[]>
+  /** Removes the exact stored row a recovery was read from (an earlier mount's
+   * draft). `confirm` only retires this mount's own row. */
+  discardRecovered(recovery: NativeRecovery): Promise<void>
   onRetire(listener: () => void): () => void
   close(): Promise<void>
   revokeRead(): Promise<void>
+  /** Erases only this mount's own persisted row, also after close (#4348).
+   * Unlike `revokeRead`, it never touches another mount's rows, so a closed
+   * handle may use it on a read revocation. */
+  eraseOwnRow?(): Promise<void>
 }
 // Raw native payload matches the server limit; base64 and journal metadata use a larger encoded budget.
 const MAX_NATIVE_BYTES = 32 * 1024 * 1024
@@ -107,6 +114,15 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
       const snapshot = encode(draft)
       return enqueue(async () => { if (current === snapshot) { await journal.remove(id); current = undefined } })
     },
+    discardRecovered(recovery) {
+      const source = recovery.source
+      if (!source || source.id === id) return Promise.resolve()
+      return enqueue(async () => {
+        if (!journal.exclusive) return
+        const row = (await journal.load()).find(candidate => candidate.id === source.id)
+        if (row && row.snapshot === source.snapshot) await journal.remove(row.id)
+      })
+    },
     recovery() {
       return enqueue(async () => {
         if (!journal.exclusive) return []
@@ -114,7 +130,7 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
         for (const row of await journal.load()) {
           if (row.id === id || row.schema !== 1 || row.epoch !== "native-v1") continue
           const draft = decode(row.snapshot)
-          if (draft?.applicationId === scope.applicationId) recovered.push({ draft, actions: ["compare", "copy"] })
+          if (draft?.applicationId === scope.applicationId) recovered.push({ draft, actions: ["compare", "copy"], source: { id: row.id, snapshot: row.snapshot } })
         }
         return recovered
       })
@@ -125,6 +141,10 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
       return () => { listeners.delete(listener) }
     },
     close,
+    eraseOwnRow() {
+      // Writes already queued finish first; a retired handle accepts no more.
+      return retire().then(() => removeDocumentDraftRow(scope.human, scope.workspace, scope.page, { schema: 1, epoch: "native-v1", id })).then(() => { current = undefined }).finally(closeStore)
+    },
     revokeRead() {
       if (purged) return purged
       // An old closed mount has no live admission to erase a fresh mount.

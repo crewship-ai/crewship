@@ -34,10 +34,11 @@ func TestPrivateDocumentConversationOutputAudience(t *testing.T) {
 	const admin, owner = "conversation-private-admin", "conversation-private-owner"
 	pagesSeedUser(t, pages, workspace, admin, "conversation-admin@example.test", "ADMIN")
 	pagesSeedUser(t, pages, workspace, owner, "conversation-owner@example.test", "OWNER")
-	// Pin the contrast: this is protected Document output, not merely an
-	// ordinary conversation whose legacy administrative access is under review.
-	if status := pagesGetStatus(t, pages, workspace, admin, "ADMIN", result.Slug).Code; status != http.StatusNotFound {
-		t.Fatalf("private Page baseline=%d want404", status)
+	// Pin the contrast: the Document itself is readable by a workspace ADMIN,
+	// audited (PRD §5, #4825); the chat conversation that produced it is a
+	// separate audience and stays closed to that ADMIN below.
+	if status := pagesGetStatus(t, pages, workspace, admin, "ADMIN", result.Slug).Code; status != http.StatusOK {
+		t.Fatalf("private Page administrator read=%d want200", status)
 	}
 	var parts conversation.PartAccumulator
 	parts.Add("tool_result", created.Body.String(), map[string]any{"tool_name": "doc_create", "tool_id": "fixture-create"})

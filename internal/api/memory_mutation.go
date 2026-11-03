@@ -294,6 +294,15 @@ type memoryMutationTarget struct {
 	byteCap   int
 }
 
+// scopeAgentID is the agent that owns the ledger key: the acting agent for its
+// own agent scope, nobody for a crew scope (keyed by the stable crew id).
+func (t memoryMutationTarget) scopeAgentID() string {
+	if strings.HasPrefix(t.ledgerKey, "agent:") {
+		return t.agentID
+	}
+	return ""
+}
+
 // Mutate serves POST /api/v1/internal/memory/mutation behind requireInternal.
 func (h *MemoryMutationHandler) Mutate(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxMemoryMutationRequestBytes)
@@ -397,12 +406,14 @@ func (h *MemoryMutationHandler) Mutate(w http.ResponseWriter, r *http.Request) {
 		Source:      source,
 		Tier:        target.tier,
 		Scope:       target.ledgerKey,
-		Key:         req.File,
-		Path:        target.path,
-		StorageRoot: h.storagePath,
-		AuditPath:   target.auditPath,
-		Op:          op,
-		Content:     req.Content,
+		// The slug in an agent: key is reusable; the agent id is not (#4862).
+		ScopeAgentID: target.scopeAgentID(),
+		Key:          req.File,
+		Path:         target.path,
+		StorageRoot:  h.storagePath,
+		AuditPath:    target.auditPath,
+		Op:           op,
+		Content:      req.Content,
 
 		ExpectedRevision: req.ExpectedRevision,
 		ExpectedSHA256:   req.ExpectedSHA256,

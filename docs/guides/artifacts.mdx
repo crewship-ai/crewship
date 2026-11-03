@@ -157,10 +157,18 @@ Identical file contents are stored once per project. The owner's project
 response carries `quota` with `used_bytes`, `limit_bytes` and `warning`, which
 turns true at 80 % of the limit. A save that would exceed the history limit
 returns `413` with code `artifact_history_quota` and keeps every existing
-version; keep your local draft. A direct creation at the 100-Page workspace
-limit also returns `413 artifact_history_quota`; that refusal need not mean
-an existing project’s history is full. Other readers see a `quota` that names only
+version; keep your local draft. A creation at the workspace page limit (100
+by default) returns `422` with code `pages_limit` instead; it says nothing about an
+existing project’s history. Other readers see a `quota` that names only
 their retention (`latest-version-only` or `shared-version-only`).
+
+Unsaved project source and comment drafts are kept encrypted in this browser
+under the Page ID. A draft that an older Crewship version kept under the Page
+address (slug) carries no Page identity, and that address may have belonged to
+another Page. Opening the project shows it as an **older draft**: it is never
+applied or deleted automatically. **Use old source draft here** (or **Use old
+comment here**) stores it encrypted under this Page and only then removes the
+old copy; **Discard** removes it. Only the account that typed it sees it.
 
 ## Give the agent its playbook
 

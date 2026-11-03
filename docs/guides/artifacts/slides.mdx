@@ -209,8 +209,8 @@ but it explains why a version is refused. A deck version contains:
 - One `slides/<id>.html` file per listed slide and no other files.
 
 Each slide file is a single `<section id="<id>">` holding, in order, any number
-of these elements and at most one closing `<aside>` with plain-text speaker
-notes:
+of these elements and at most one closing `<aside id="...">` (the `id` is required) with plain-text
+speaker notes:
 
 - `<p>`: a text block with plain text only.
 - `<div data-shape="rectangle">` or `<div data-shape="ellipse">`: an empty shape.
