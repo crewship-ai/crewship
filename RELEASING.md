@@ -27,7 +27,10 @@ Before tagging, verify:
       It moves every `changelog.d/<number>-<slug>.md` to the top of
       `## [Unreleased]`, highest number first, and deletes the fragment
       files; it refuses, changing nothing, on an empty fragment or a missing
-      heading. Commit the result with the version bump below. Fragments
+      heading. If it stops partway (crash, kill, full disk), just rerun it:
+      it installs `CHANGELOG.md` before deleting any fragment and does not
+      add a note already in `## [Unreleased]` twice. Commit the result with
+      the version bump below. Fragments
       merged after that commit wait for the next release.
 - [ ] `CHANGELOG.md` has a populated `## [X.Y.Z]` section under
       `## [Unreleased]`. Move the entries down, leave `## [Unreleased]`

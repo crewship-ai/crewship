@@ -7,6 +7,11 @@ release time this script moves every fragment's text to the top of that
 section, highest number first (the file is newest-first), and deletes the
 collected fragment files. See RELEASING.md.
 
+It installs the new CHANGELOG.md (staged, fsynced, then atomically renamed)
+before it deletes any fragment, so an interruption never loses a note: a
+rerun finds the leftover fragments, sees their notes already in
+## [Unreleased], does not add them again, and only deletes them.
+
 Fragments are the *.md files directly inside changelog.d/, except README.md.
 The script refuses, changing nothing, when CHANGELOG.md has no
 ## [Unreleased] heading, or a fragment is empty, not valid UTF-8, or not a
@@ -21,6 +26,7 @@ import re
 import sys
 
 HEADING = re.compile(r'^## \[Unreleased\][ \t]*$', re.M)
+NEXT_SECTION = re.compile(r'^## ', re.M)
 NUMBER = re.compile(r'^(\d+)')
 
 
@@ -49,14 +55,55 @@ def fragments(root):
     return sorted(found, key=fragment_key)
 
 
+def collected(section, note):
+    """Whether note already stands, as whole lines, in the section."""
+    return re.search(r'^' + re.escape(note) + r'$', section, re.M) is not None
+
+
 def collect(changelog, notes):
+    """Return changelog with the notes not yet in ## [Unreleased] on top.
+
+    A note already present there is from an earlier, interrupted run that
+    installed CHANGELOG.md but did not finish deleting the fragments.
+    """
     match = HEADING.search(changelog)
     if not match:
         raise ValueError("CHANGELOG.md has no '## [Unreleased]' heading")
     head, rest = changelog[:match.end()], changelog[match.end():]
+    end = NEXT_SECTION.search(rest)
+    section = rest[:end.start()] if end else rest
+    notes = [note for note in notes if not collected(section, note)]
+    if not notes:
+        return changelog
     rest = rest.lstrip('\n')
     block = '\n'.join(notes)
     return head + '\n\n' + block + '\n\n' + rest
+
+
+def install(path, text):
+    """Atomically replace path with text, durable before it returns."""
+    staged = path.with_name(path.name + '.collect-tmp')
+    try:
+        with open(staged, 'w', encoding='utf-8') as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(staged, path)
+    except BaseException:
+        try:
+            staged.unlink()
+        except OSError:
+            pass
+        raise
+    fsync_dir(path.parent)
+
+
+def fsync_dir(directory):
+    fd = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def main(argv=None):
@@ -83,7 +130,8 @@ def main(argv=None):
             if not text:
                 raise ValueError(f'{path.relative_to(root)} is empty; write its release note or delete it')
             notes.append(text)
-        result = collect(changelog_path.read_text(encoding='utf-8'), notes)
+        changelog = changelog_path.read_text(encoding='utf-8')
+        result = collect(changelog, notes)
     except (ValueError, OSError) as err:
         print(f'error: {err}', file=sys.stderr)
         return 1
@@ -92,16 +140,21 @@ def main(argv=None):
         sys.stdout.write(result)
         return 0
 
-    # Stage the new file first, then remove the fragments, then swap it in
-    # atomically: a failure before the swap leaves CHANGELOG.md untouched, and
-    # no state has the notes both in CHANGELOG.md and still in changelog.d/,
-    # so a rerun cannot duplicate entries. git still holds any removed file.
-    staged = changelog_path.with_name(changelog_path.name + '.collect-tmp')
-    staged.write_text(result, encoding='utf-8')
-    for path in paths:
-        path.unlink()
-        print(f'collected {path.relative_to(root)}', file=sys.stderr)
-    os.replace(staged, changelog_path)
+    # Install CHANGELOG.md first, durably, and only then delete the fragments
+    # (#4800). Deleting first lost every deleted note when the run stopped
+    # before the install: the rerun no longer saw them. Now an interruption at
+    # any point leaves each note in CHANGELOG.md, in its fragment, or both,
+    # and collect() skips the notes a rerun finds already collected.
+    try:
+        if result != changelog:
+            install(changelog_path, result)
+        for path in paths:
+            path.unlink()
+            print(f'collected {path.relative_to(root)}', file=sys.stderr)
+        fsync_dir(root / 'changelog.d')
+    except OSError as err:
+        print(f'error: {err}; rerun to finish collecting', file=sys.stderr)
+        return 1
     return 0
 
 

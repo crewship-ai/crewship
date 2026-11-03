@@ -593,6 +593,79 @@ collect_refuses "a dangling symlinked fragment makes collect refuse, changing no
 collect_fixture; printf -- '- **Latin-1 \xe9.**\n' > "$CROOT/changelog.d/94-latin1.md"
 collect_refuses "a non-UTF-8 fragment makes collect refuse cleanly, changing nothing"
 
+# An interrupted collect, then a rerun, must leave every note in CHANGELOG.md
+# exactly once (#4800). The harness runs the collector in-process and raises
+# before its k-th filesystem mutation (unlink, remove, rename, replace), as a
+# crash, kill or full disk at that point would; the plain script then reruns.
+# Deleting fragments before installing CHANGELOG.md lost the deleted notes.
+INTERRUPT_HARNESS='
+import importlib.util, os, sys
+collect, root, k = sys.argv[1], sys.argv[2], int(sys.argv[3])
+spec = importlib.util.spec_from_file_location("changelog_collect", collect)
+mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+class Interrupted(BaseException):
+    pass
+calls = [0]
+def guarded(real):
+    def call(*args, **kwargs):
+        calls[0] += 1
+        if calls[0] == k:
+            raise Interrupted()
+        return real(*args, **kwargs)
+    return call
+for name in ("unlink", "remove", "rename", "replace"):
+    setattr(os, name, guarded(getattr(os, name)))
+try:
+    mod.main(["--root", root])
+except Interrupted:
+    sys.exit(0)
+sys.exit(3)
+'
+interrupt_points=0
+for k in 1 2 3 4 5 6 7 8 9 10; do
+  collect_fixture
+  python3 -I -c "$INTERRUPT_HARNESS" "$COLLECT" "$CROOT" "$k" >/dev/null 2>&1; rc=$?
+  [ "$rc" -eq 3 ] && break
+  if [ "$rc" -ne 0 ]; then
+    fail "interrupt harness ran at mutation $k (exit $rc)"; break
+  fi
+  interrupt_points=$((interrupt_points + 1))
+  out="$(python3 -I "$COLLECT" --root "$CROOT" 2>&1)"; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail "a rerun after an interruption at mutation $k exits 0"; printf '%s\n' "$out" | sed 's/^/       | /'
+  elif [ "$(cat "$CROOT/CHANGELOG.md" 2>/dev/null)" != "$want" ]; then
+    fail "a rerun after an interruption at mutation $k keeps every note exactly once"
+    diff <(printf '%s\n' "$want") "$CROOT/CHANGELOG.md" | sed 's/^/       | /'
+  elif [ -e "$CROOT/changelog.d/90-older.md" ] || [ -e "$CROOT/changelog.d/4751-newer.md" ] \
+       || [ -e "$CROOT/CHANGELOG.md.collect-tmp" ]; then
+    fail "a rerun after an interruption at mutation $k removes the fragments and its staging file"
+  else
+    pass "a rerun after an interruption at mutation $k keeps every note exactly once"
+  fi
+done
+# The rerun skips only a note standing as whole lines in ## [Unreleased]: a
+# note that is a prefix of an existing entry, or one already released under an
+# older version, is still collected.
+collect_fixture; rm "$CROOT/changelog.d/4751-newer.md"
+printf -- '- **Existing entry.**\n' > "$CROOT/changelog.d/95-prefix.md"
+printf -- '- **Shipped.** Untouched.\n' > "$CROOT/changelog.d/96-released.md"
+python3 -I "$COLLECT" --root "$CROOT" >/dev/null 2>&1
+if [ "$(grep -cxF -- '- **Existing entry.**' "$CROOT/CHANGELOG.md")" -eq 1 ] \
+   && [ "$(grep -cxF -- '- **Shipped.** Untouched.' "$CROOT/CHANGELOG.md")" -eq 2 ]; then
+  pass "a note only resembling a collected one, or released earlier, is still collected"
+else
+  fail "a note only resembling a collected one, or released earlier, is still collected"
+  sed 's/^/       | /' "$CROOT/CHANGELOG.md"
+fi
+
+# Two fragments mean at least three mutations (two deletions, one install);
+# fewer interruption points would mean the harness no longer reaches them.
+if [ "$interrupt_points" -ge 3 ]; then
+  pass "the interruption harness reached $interrupt_points mutation points"
+else
+  fail "the interruption harness reached only $interrupt_points mutation point(s), want >= 3"
+fi
+
 echo
 if [ "$FAILURES" -ne 0 ]; then
   echo "$FAILURES check(s) failed."
