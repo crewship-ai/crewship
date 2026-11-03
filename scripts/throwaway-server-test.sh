@@ -455,6 +455,7 @@ check "scenario leaves the existing instance's manifest unchanged" "$(cat "$tmp/
 check "scenario leaves the existing instance's data" "$([[ -d "$tmp/state/taken/data" ]] && echo kept)" kept
 check "scenario issued no docker removal for the existing instance" "$(grep -cE '^(rm|volume rm|run)' "$FAKE_LOG" || true)" 0
 check "scenario teardown says it stopped nothing" "$(grep -c 'no instance owned by this run' "$tmp/scen/ev1/scenario.log" || true)" 1
+check "scenario result line reports the real (non-zero) exit status" "$(grep -c 'result: 0 failed check(s), exit status 1' "$tmp/scen/ev1/scenario.log" || true)" 1
 # A start that loses the name race (`already exists`) is not this run's either.
 cat >"$tmp/scen/tw-collide.sh" <<'TWF'
 #!/usr/bin/env bash

@@ -141,8 +141,8 @@ teardown() {
   else
     say "teardown: no instance owned by this run; nothing stopped"
   fi
-  say "result: $fails failed check(s), exit status $rc"
   if ((rc == 0 && fails > 0)); then rc=1; fi
+  say "result: $fails failed check(s), exit status $rc"
   exit "$rc"
 }
 trap teardown EXIT
@@ -507,7 +507,15 @@ for agent in "$A_DEADLINE" "$A_NATURAL"; do
     work_json "$id_new" >"$evidence/work-new-$agent-final.json"
     st="$(field 'd["state"]+" | "+d.get("state_reason","")' <"$evidence/work-new-$agent-final.json")"
     if [[ "$st" == succeeded* || "$st" == failed* ]]; then pass "(4) $agent new turn settled: $st"; else fail "(4) $agent new turn ended $st"; fi
-    if [[ -f "$evidence/.park-new-$agent" ]]; then fail "(4) $agent new turn went through needs_reconciliation"; else pass "(4) $agent new turn settled on the normal path (never needs_reconciliation)"; fi
+    # A protected-capture turn ended by its deadline is handed over through
+    # "protected host capture awaiting retained result" by design; only a
+    # lease-expiry park would mean the recovered server lost the turn again.
+    parks="$(field '"; ".join(e["reason"] for e in d["events"] if e["to_state"] == "needs_reconciliation")' <"$evidence/work-new-$agent-final.json")"
+    if [[ -z "$parks" || "$parks" == "protected host capture awaiting retained result" ]]; then
+      pass "(4) $agent new turn was never parked by lease expiry (handover: ${parks:-none})"
+    else
+      fail "(4) $agent new turn parked abnormally: $parks"
+    fi
   else
     fail "(4) $agent did not admit a new turn after recovery"
   fi
