@@ -438,6 +438,44 @@ export function readArtifactDraft(key: string): Promise<string> {
 // the owner's id; versioned prefixes come before their legacy forms.
 const LOCAL_PREFIXES = ["crewship-design:v2:", "design-comment:v2:", ...KINDS.map(kind => `${kind}:`), "crewship-design:"]
 
+/**
+ * A Project source or comment draft that a build before Page-ID keys (#4628)
+ * kept in localStorage under the Page *slug*. The record carries no Page
+ * identity, and a slug can be renamed or reused by another Page (G4 B23b), so
+ * it is never applied automatically and never deleted silently: the editor
+ * shows it as an older draft that may belong to another Page, and only the
+ * person's explicit choice adopts it (sealed under the Page ID) or discards
+ * it. Only the signed-in person's own key is read; other accounts' copies are
+ * removed on identity change and sign-out like every legacy plaintext copy.
+ */
+export type SlugArtifactDraftKind = "artifact-source" | "artifact-comment"
+export interface SlugArtifactDraft { key: string; text: string; kind: SlugArtifactDraftKind; human: string; workspace: string; slug: string }
+export function findSlugArtifactDraft(kind: SlugArtifactDraftKind, human: string | null | undefined, workspace: string, slug: string, pageId: string | null | undefined): SlugArtifactDraft | undefined {
+  // slug === pageId is the Page-ID key itself, migrated by loadArtifactDraft.
+  if (!human || !workspace || !slug || !pageId || slug === pageId) return undefined
+  if (owner !== undefined && owner !== human) return undefined
+  const key = legacyKey([human, kind, workspace, slug])
+  try {
+    const text = localStorage.getItem(key)
+    // Builds before #4628 wrote only plaintext; a sealed value is not theirs.
+    if (!text || isSealedLocalDraft(text)) return undefined
+    return { key, text, kind, human, workspace, slug }
+  } catch { return undefined }
+}
+/** Explicit adoption: stores `text` sealed under the Page-ID key first, and
+ * removes the slug copy only once that write is durable and only if the copy
+ * is still the one shown. A failed write keeps the slug copy. */
+export async function adoptSlugArtifactDraft(found: SlugArtifactDraft, pageKey: string, text = found.text): Promise<void> {
+  const row = parse(pageKey)
+  if (!row || row[0] !== found.human || row[1] !== found.kind || row[2] !== found.workspace) throw new Error("Invalid artifact draft key.")
+  await writeArtifactDraft(pageKey, text)
+  removeCapturedLegacyLocalDrafts([{ key: found.key, text: found.text }])
+}
+/** Explicit discard of the copy that was shown; a changed copy stays. */
+export function discardSlugArtifactDraft(found: SlugArtifactDraft): void {
+  removeCapturedLegacyLocalDrafts([{ key: found.key, text: found.text }])
+}
+
 export interface CapturedLegacyLocalDraft { key: string; text: string }
 /** Old localStorage copies are included in sign-out's visible discard warning.
  * `includeSealed` also takes encrypted fallback copies (written when IndexedDB

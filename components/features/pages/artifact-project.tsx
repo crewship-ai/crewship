@@ -12,7 +12,7 @@ import { ArtifactDashboardPreview } from "@/components/features/chat/artifact-co
 import { artifactSlidesMode } from "@/lib/pages/artifact-slides"
 import { ArtifactSlidesPreview } from "@/components/features/chat/artifact-context/viewer/artifact-slides-preview"
 import { createLocalDraftCipher, LocalDraftReadRevoked } from "@/lib/local-draft-seal"
-import { artifactDraftKey, loadArtifactDraft, writeArtifactDraft, clearArtifactDraft, artifactDraftRevision, purgeLocalDraftPage, captureLocalDraftPage } from "@/lib/artifact-drafts"
+import { artifactDraftKey, loadArtifactDraft, writeArtifactDraft, clearArtifactDraft, artifactDraftRevision, purgeLocalDraftPage, captureLocalDraftPage, findSlugArtifactDraft, adoptSlugArtifactDraft, discardSlugArtifactDraft, type SlugArtifactDraft } from "@/lib/artifact-drafts"
 
 export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspaceId: string; slug: string; initialVersion?: number }) {
  const session = useSessionSafe()
@@ -66,6 +66,16 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
   void writeArtifactDraft(sourceKey,JSON.stringify({body:value.body,path:value.path})).then(()=>setStorageError(false),()=>setStorageError(true))
  }
  const forgetSource=useCallback((key:string|null,revision?:number)=>{if(!key)return;const chosen=activeSource??storedSource?.draft;void clearArtifactDraft(key,JSON.stringify({body:chosen?.body,path:chosen?.path}),revision??artifactDraftRevision(key)).catch(()=>{});setStoredSource(undefined)},[storedSource,activeSource])
+ // Drafts a build before Page-ID keys kept under the slug (G4 B16). A slug is
+ // not a Page identity (it can be renamed or reused), so such a draft is only
+ // shown as an older draft and adopted under the Page ID on an explicit choice.
+ const slugPage=!query.isError&&!readDenied?data?.page_id:undefined
+ const [slugRead,setSlugRead]=useState(0)
+ const slugSource=useMemo(()=>slugRead>=0?findSlugArtifactDraft("artifact-source",human,workspaceId,slug,slugPage):undefined,[human,workspaceId,slug,slugPage,slugRead])
+ const slugComment=useMemo(()=>slugRead>=0?findSlugArtifactDraft("artifact-comment",human,workspaceId,slug,slugPage):undefined,[human,workspaceId,slug,slugPage,slugRead])
+ const slugSourceDraft=useMemo(()=>{try{const parsed=slugSource?JSON.parse(slugSource.text):null;return parsed&&Array.isArray(parsed.body?.files)&&typeof parsed.path==="string"?parsed as {body:ArtifactProjectSave;path:string}:undefined}catch{return undefined}},[slugSource])
+ const adoptSlug=(found:SlugArtifactDraft,key:string,text:string)=>{void adoptSlugArtifactDraft(found,key,text).then(()=>{setStorageError(false);setSlugRead(read=>read+1)},()=>setStorageError(true))}
+ const discardSlug=(found:SlugArtifactDraft)=>{discardSlugArtifactDraft(found);setSlugRead(read=>read+1)}
  const sourceCurrent=useRef({scope:sourceScope,draft:activeSource,canWrite:false})
  sourceCurrent.current={scope:sourceScope,draft:activeSource,canWrite:data?.can_write===true&&!query.isError}
  const agent = useArtifactAgentDispatch(workspaceId, data?.page_id, data?.origin, data?.can_write === true && data?.can_send_to_agent === true && !query.isError)
@@ -172,7 +182,21 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
    {data.can_write === true && data.can_restore === true && <Button variant="outline" disabled={restore.isPending} onClick={() => restore.mutate({ version: viewedVersion, base_version: data.latest_version }, { onSuccess: () => { setVersion(undefined); setAnchor(undefined) } })}>Restore version {viewedVersion}</Button>}{data.can_write === true && data.can_share === true && <Button variant="outline" disabled={share.isPending} onClick={() => share.mutate({ version: viewedVersion, base_version: data.latest_version })}>Share version {viewedVersion}</Button>}
   </header>
   {data.can_write && <div className="border-b px-4 py-2 text-xs text-muted-foreground" role="status">Storage: {data.quota.used_bytes.toLocaleString()} / {data.quota.limit_bytes.toLocaleString()} bytes. All versions retained; history is never deleted automatically.{data.quota.warning && <strong className="ml-2 text-destructive">Storage is nearly full. Existing versions remain safe.</strong>}</div>}
-  {activeSource && !data.can_write && <SourceRecovery body={activeSource.body}/>}
+  {(slugSource||slugComment)&&<section aria-label="Older draft" className="space-y-3 border-b p-3">{[slugSource,slugComment].map(found=>{
+  if(!found)return null
+  const isSource=found.kind==="artifact-source"
+  const canAdopt=isSource?!!slugSourceDraft&&!!sourceKey&&data.can_write===true&&manifest?.version===data.latest_version&&sourceReadDone&&!sourceRead.failed&&!activeSource&&storedSource?.key!==sourceKey:canComment&&!!draftKey&&draftState?.key===draftKey&&!draft
+  return <div key={found.key} className="space-y-1">
+   <p>This browser kept an unsaved {isSource?"source draft":"comment"} from an older version of Crewship under the address “{slug}”. It may belong to another Page that used this address before, so it is not applied here automatically. Check it before you use it.</p>
+   <textarea readOnly aria-label={isSource?"Older source draft":"Older comment"} className="min-h-24 w-full rounded border bg-background p-2 font-mono text-sm" value={isSource&&slugSourceDraft?JSON.stringify(slugSourceDraft.body,null,2):found.text} />
+   {canAdopt&&<Button variant="outline" onClick={()=>{
+    if(isSource&&slugSourceDraft&&sourceKey){const value={scope:sourceScope,...slugSourceDraft};setSourceError(undefined);setSourceDraft(value);adoptSlug(found,sourceKey,JSON.stringify({body:value.body,path:value.path}))}
+    else if(!isSource&&draftKey){setDraftState({key:draftKey,text:found.text});adoptSlug(found,draftKey,found.text)}
+   }}>{isSource?"Use old source draft here":"Use old comment here"}</Button>}
+   <Button variant="ghost" onClick={()=>discardSlug(found)}>{isSource?"Discard old source draft":"Discard old comment"}</Button>
+  </div>
+ })}</section>}
+ {activeSource && !data.can_write && <SourceRecovery body={activeSource.body}/>}
   {data.can_write === true && manifest?.version === data.latest_version && <section aria-label="Project source" className="border-b p-3">
    {!activeSource&&storedSource?.key===sourceKey&&data.can_write&&<div role="status" className="space-y-1"><p>Unsaved source draft from version {storedSource.draft.body.base_version} was kept in this browser.{storedSource.draft.body.base_version!==data.latest_version?` The project is now at version ${data.latest_version}; saving it will report a conflict, and your draft stays.`:""}</p><Button variant="outline" onClick={()=>{setSourceError(undefined);changeSource({scope:sourceScope,...storedSource.draft})}}>Restore source draft</Button><Button variant="ghost" onClick={()=>forgetSource(sourceKey)}>Discard it</Button></div>}
    {!activeSource&&sourceReadDone&&sourceRead.failed&&<div role="alert" className="space-y-1"><p>This browser could not check for an unsaved source draft. Editing now may replace one kept here.</p><Button variant="outline" onClick={()=>setSourceReadAttempt(attempt=>attempt+1)}>Check again</Button></div>}
