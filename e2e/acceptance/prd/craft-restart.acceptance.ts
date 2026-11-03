@@ -8,7 +8,8 @@
 // Full mode only. The restart is the operator's command, PRD_RESTART_COMMAND or PRD_RESTART_HANDSHAKE
 // (see craft-session/restart.ts); the row fails without it. Run these rows
 // serially and only when needed: a restart interrupts everyone on the instance.
-import { holdsAll, inspectDrafts, newTyping, placeCaret, saveByAutosaveOrKey, typedMarkers, typeLines } from "./craft-session/draft"
+import { holdsAll, inspectDrafts, newTyping, offerEvidence, placeCaret, saveByAutosaveOrKey, typedMarkers, typeLines } from "./craft-session/draft"
+import { checkDraftCopies, checkLines, holdsAnyLine, lineLedger, type LineCheck } from "./craft-session/lines"
 import { restartServer } from "./craft-session/restart"
 import { expect, prdRequirement, test } from "./fixtures"
 import { disposeActors, isolatedActor } from "./outage-lostack/actor"
@@ -43,17 +44,31 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
       await placeCaret(page, app, 5)
       const progress = newTyping()
       const typing = typeLines(page, M.M2, 40, 40, 120, progress)
-      await page.waitForTimeout(2_500)
+      await expect
+        .poll(() => progress.accepted.length, { timeout: 30_000, message: `lines were typed before the restart` })
+        .toBeGreaterThan(0)
+        .catch((e: unknown) => {
+          throw new Error(`no accepted line before the restart; typing progress at failure: ${JSON.stringify(progress)}`, { cause: e })
+        })
       const headBefore = await N.readHead(request, ref)
       expect(headBefore.text).toContain(M.M1)
       expect(headBefore.text, "the typing is not saved yet").not.toContain(`${M.M2}-0`)
       const savesBefore = ops.filter((o) => o.kind === "save").length
-      expect(progress.accepted.length, "lines were typed before the restart").toBeGreaterThan(0)
       const restart = await restartServer(prd.origin, `row A.resilience.restart.${label.toLowerCase()}`)
       const typedLines = await typing
       // Every line the editor took (also while the restart was in flight) must
       // survive, saved or in the draft, not just the first one.
       const unsaved = typedMarkers(M.M2, progress.accepted)
+      // Per line: typed, accepted by the editor, then found (once, in order) in
+      // each copy: the draft, or the head the server confirms. A missing line
+      // fails with its last state (craft-session/lines.ts).
+      const ledger = lineLedger(M.M2, progress)
+      const lineChecks: LineCheck[] = []
+      const expectLines = async (c: LineCheck) => {
+        lineChecks.push(c)
+        await prd.evidence("lines.json", { ledger, checks: lineChecks })
+        expect(c.problems, `every line the editor took is in "${c.stage}" exactly once and in order`).toEqual([])
+      }
 
       // What the open editor does on its own after the server is back.
       const timeline: Awaited<ReturnType<typeof N.uiState>>[] = []
@@ -67,9 +82,12 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
       expect(headAfter.text, "the work saved before the restart survived it").toContain(M.M1)
       const savedByEditor = headAfter.text.includes(`${M.M2}-0`)
       if (savedByEditor) expect(holdsAll(headAfter.text, unsaved), `the editor saved every line it took (${unsaved.length})`).toBe(true)
+      // Any line on the server (not only the first) means the editor saved: then it saved all of them.
+      if (savedByEditor || holdsAnyLine(ledger, headAfter.text)) await expectLines(checkLines(ledger, headAfter.text, `server head v${headAfter.version} after the restart`))
 
       // The disconnected editor still offers the unsaved work: look into it.
       const draftsInSession = savedByEditor ? null : await inspectDrafts(page, unsaved)
+      const linesInSession = draftsInSession && checkDraftCopies(ledger, draftsInSession.texts, "draft in the open editor after the restart")
       // The person reloads (after the editor's lease has run out). The document
       // opens; once the person takes the editor again the draft is offered
       // again (a draft is never imported into a read-only view).
@@ -85,11 +103,14 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
       await N.acquire(page, app)
       await N.pause(1_500)
       const drafts = savedByEditor ? null : await inspectDrafts(page, unsaved)
+      const linesAfterReload = drafts && checkDraftCopies(ledger, drafts.texts, "draft offered after the reload")
       if (!savedByEditor) {
         expect(draftsInSession!.rows.length, `the unsaved work is offered as a draft in the open editor (ui ${JSON.stringify(timeline.at(-1))})`).toBeGreaterThan(0)
         expect(draftsInSession!.hasMarker.some(Boolean), `the draft offered in the open editor holds all ${unsaved.length} lines the editor took`).toBe(true)
         expect(drafts!.rows.length, `the unsaved work is offered again after the reload (ui ${JSON.stringify(reopened)})`).toBeGreaterThan(0)
         expect(drafts!.hasMarker.some(Boolean), `the draft offered after the reload holds all ${unsaved.length} lines the editor took`).toBe(true)
+        await expectLines(linesInSession!)
+        await expectLines(linesAfterReload!)
       }
 
       // The editor works again: type, save once.
@@ -102,6 +123,8 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
       expect(v1, "a save after the restart is confirmed").toBeTruthy()
       await N.release(page).catch(() => {})
       const fin = await N.readHead(request, ref)
+      // Saved lines survive the reload and the next save, exactly once and in order (server-confirmed).
+      if (savedByEditor) await expectLines(checkLines(ledger, fin.text, `server head v${fin.version} after the reload and the next save`))
 
       // No duplicate version: every version came from a distinct save the editor sent.
       const committed = ops.filter((o) => o.kind === "save" && o.status === 200).length
@@ -112,7 +135,7 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
         baselineSaved: v0, headBefore: { version: headBefore.version, hash: headBefore.hash },
         typedLines, acceptedLines: progress.accepted, typingStoppedBy: progress.stoppedBy ?? null, timelineAfterRestart: timeline.slice(-3), savesWithoutPerson: savesWithoutPerson.length,
         headAfterRestart: { version: headAfter.version, hash: headAfter.hash, savedByEditor },
-        draftsInSession, reopened, drafts, afterReopen: { version: headReopened.version },
+        draftsInSession: offerEvidence(draftsInSession), reopened, drafts: offerEvidence(drafts), lines: { ledger, checks: lineChecks }, afterReopen: { version: headReopened.version },
         savedAfterRestart: v1 ?? null, final: { version: fin.version, hash: fin.hash, ...Object.fromEntries(Object.entries(M).map(([k, v]) => [k, fin.text.includes(v)])) },
         versionAccounting: { init: ref.initVersion, committedSaves: committed, unanswered }, ops,
       })

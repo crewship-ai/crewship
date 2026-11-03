@@ -459,6 +459,18 @@ func (o *Orchestrator) CollectRetainedRun(ctx context.Context, run RunState, cut
 	return err == nil, err
 }
 
+// RetainedEndConfirmed reports whether a complete retained capture proves the
+// execution left nothing running: the main process exited on its own, or a
+// forced end (cancel, output limit, output error) is backed by whole-runtime
+// absence or a whole-tree stop receipt. Settling work from a capture requires
+// it, exactly like every other retained settlement path.
+func (o *Orchestrator) RetainedEndConfirmed(ctx context.Context, run RunState, snapshot runoutput.Snapshot) bool {
+	if snapshot.Result == nil {
+		return false
+	}
+	return snapshot.Result.Reason == "exited" || o.forcedHostEndConfirmed(ctx, run, snapshot)
+}
+
 // forcedHostEndConfirmed reports whether a retained run that did not exit on
 // its own provably left nothing it still parents running. Whole-runtime
 // absence always counts.

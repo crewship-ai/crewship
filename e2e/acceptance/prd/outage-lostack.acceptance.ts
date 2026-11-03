@@ -256,7 +256,7 @@ test.describe("outage and lost acknowledgement", () => {
             await f.locator("canvas").first().click({ position: app === "wordcraft" ? { x: 678, y: 324 } : { x: 54, y: 240 } })
             await N.typeMarker(page, f, app, M.M4, "A4")
             await page.keyboard.press("Control+s")
-            next = await N.waitSaved(page)
+            next = await N.waitSaved(page, 30_000, saved)
             afterNext = await N.uiState(page)
             await N.release(page).catch(() => {})
           }

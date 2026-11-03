@@ -117,7 +117,11 @@ test.describe("Word rich round trip", () => {
       await click(UI.comment)
       await shot("comment-open")
       await page.getByRole("status").first().waitFor()
-      await frame.locator("canvas").first().click({ position: { x: 1214, y: 279 } })
+      // The comment box sits 146 px left of the canvas's right edge; the canvas
+      // width follows the shell layout, so the click is anchored to that edge.
+      const width = (await canvas.boundingBox())?.width
+      if (!width) throw new Error("the Word canvas has no layout box")
+      await canvas.click({ position: { x: width - 146, y: 279 } })
       await kb.type(m.comment)
       await kb.press("Control+Enter")
       await shot("comment-added")
