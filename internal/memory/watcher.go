@@ -198,12 +198,12 @@ func (w *Watcher) Events() <-chan WatchEvent {
 // Stop drains the goroutines and closes the event channel. Idempotent.
 //
 // Shutdown order matters: (a) signal stop so producer goroutines bail,
-// (b) cancel any pending debounce timer so no NEW flush starts, then
-// (c) wait for already-spawned flush callbacks to drain via flushWG.
-// Only after that is it safe to close(w.events). The prior version
-// closed events directly after w.wg.Wait() — but time.AfterFunc
-// callbacks are NOT tracked in wg, so an in-flight flush could send
-// on a closed channel and panic. The flushWG fix closes that race.
+// (b) under debounceMu, mark the watcher stopped and cancel any pending
+// debounce timer, so no later flush joins flushWG and no note re-arms the
+// timer, then (c) wait for the flushes that joined before (b). Only after
+// that is it safe to close(w.events). time.AfterFunc callbacks are not
+// tracked in wg; joining flushWG outside the lock let a late callback join
+// after the Wait and send on the closed channel (#4814).
 func (w *Watcher) Stop() {
 	w.closeOnce.Do(func() {
 		close(w.stop)
@@ -347,8 +347,9 @@ func (w *Watcher) note(path string) {
 
 // flush is called when the debounce window expires with no new
 // activity. It captures the accumulated paths and emits one
-// WatchEvent. If Stop fires concurrently the send is dropped via
-// the select on w.stop so we never block on a closed channel.
+// WatchEvent. A callback that starts after Stop returns without
+// sending; one already joined either delivers or sees w.stop, and
+// Stop waits for it before closing w.events.
 func (w *Watcher) flush() {
 	// Join flushWG under debounceMu, and only while Stop has not marked the
 	// watcher stopped. A callback that starts after Stop took the lock returns
