@@ -227,6 +227,18 @@ The walk covers every envelope-bearing column: `credentials.encrypted_value`, `c
   The CLI-side backup keyring (`~/.crewship/backup-keyring.enc`) is a separate rotation domain: it is encrypted with the **CLI host's** own `ENCRYPTION_KEY`, not the server's, so the server-side run never touches it. If you rotate the CLI host's key, re-store the affected passphrases (`crewship backup create --use-keyring` re-writes the entry) or keep that host's old key resolvable.
 </Warning>
 
+**Browser-local drafts when the page is left.** Unsaved Project source,
+comment and Design drafts are sealed with AES-GCM under a per-tab data key
+that the server wraps for one person and Page, then written to IndexedDB
+with strict durability. That write is asynchronous, so an edit typed just
+before a navigation or tab close could miss it. On `pagehide`, a hidden tab
+and `beforeunload`, the browser now encrypts the newest uncommitted edit
+synchronously with a single-use keystream prepared under the same data key
+(up to 2 MiB) and keeps that ciphertext in localStorage. It is never
+plaintext and opens only after the same server authorization as any other
+draft; the next load re-seals it into IndexedDB. If an edit cannot be
+captured this way, the browser asks before leaving.
+
 Instance recovery kits retain a configured v1 root even with no v1 envelopes.
 Use the kit's exact original key string. Workspace and crew backups exclude
 the instance audit trail; normal and fork restores retain the destination

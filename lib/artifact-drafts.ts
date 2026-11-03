@@ -182,15 +182,20 @@ function legacyRemove(row: Row) {
   try { for (const key of legacyKeys(row)) localStorage.removeItem(key) } catch { /* Unavailable storage holds nothing to remove. */ }
 }
 const cipherCells = new Map<string, Promise<LocalDraftCipher>>()
+// The settled cipher behind each cell, for the synchronous unload capture.
+const settledCiphers = new WeakMap<Promise<LocalDraftCipher>, LocalDraftCipher>()
+const settle = (cell: Promise<LocalDraftCipher>) => { void cell.then(value => { settledCiphers.set(cell, value) }, () => {}) }
+const settledCipher = (key: string) => { const cell = cipherCells.get(key); return cell && settledCiphers.get(cell) }
 const scopeFor = (row: Row): LocalDraftScope => ({ human: row[0], workspace: row[2], page: row[3] })
 function cipherFor(key: string, row: Row) {
   let cell = cipherCells.get(key)
-  if (!cell) { cell = createLocalDraftCipher(scopeFor(row)); cipherCells.set(key, cell); void cell.catch(() => { if (cipherCells.get(key) === cell) cipherCells.delete(key) }) }
+  if (!cell) { cell = createLocalDraftCipher(scopeFor(row)); cipherCells.set(key, cell); settle(cell); void cell.catch(() => { if (cipherCells.get(key) === cell) cipherCells.delete(key) }) }
   return cell
 }
 async function freshCipher(key: string, row: Row) {
   const next = createLocalDraftCipher(scopeFor(row)), previous = cipherCells.get(key)
   const ready = await next
+  settledCiphers.set(next, ready)
   cipherCells.set(key, next)
   if (previous) void (lanes.get(key)?.tail ?? Promise.resolve()).then(() => previous.then(value => value.close(), () => {}))
   return ready
@@ -201,6 +206,9 @@ async function freshCipher(key: string, row: Row) {
 interface Lane { next: string; scheduled?: Promise<void>; tail: Promise<void>; failed?: boolean; merging?: number }
 const lanes = new Map<string, Lane>()
 const writes = new Map<string, number>()
+// The newest write number (see `writes`) whose text is durably stored.
+const durableWrites = new Map<string, number>()
+const stored = (key: string, seq: number) => { if (seq > (durableWrites.get(key) ?? 0)) durableWrites.set(key, seq) }
 
 // The person whose drafts may be written: undefined until the auth hook first
 // settles, null after sign-out. Set by purgeOtherArtifactDrafts.
@@ -212,7 +220,7 @@ let identityPurge: Promise<void> = Promise.resolve()
 // `over` for a fallback copy: the IndexedDB revision it supersedes, null when
 // IndexedDB held none, undefined when that could not be determined.
 const successfulWrites = new Map<string, { text: string; revision: string; fallback?: string; over?: string | null }>()
-async function persist(row: Row, text: string): Promise<void> {
+async function persist(row: Row, text: string, seq = 0): Promise<void> {
   const key = JSON.stringify(row), revision = crypto.randomUUID()
   // Admission happened in writeArtifactDraft. Already admitted writes must
   // finish before identity retirement; later writes are rejected at the call.
@@ -230,15 +238,72 @@ async function persist(row: Row, text: string): Promise<void> {
     try {
       if (text) await store.put(row, sealed, revision)
       else await store.delete(row)
-      legacyRemove(row)
+      // An unload capture of a newer write stays until that write is durable.
+      const capture = unloadCaptures.get(key)
+      if (!capture || seq >= capture.seq) { legacyRemove(row); unloadCaptures.delete(key) }
       successfulWrites.set(key, { text, revision })
+      stored(key, seq)
       return
     } catch { /* Fall back to localStorage below rather than lose the text. */ }
   }
-  if (!text) { legacyRemove(row); if (!store) return; throw new Error("Artifact draft storage is unavailable.") }
+  if (!text) { legacyRemove(row); if (!store) { stored(key, seq); return } throw new Error("Artifact draft storage is unavailable.") }
   localStorage.setItem(legacyKey(row), sealed)
+  unloadCaptures.delete(key)
+  stored(key, seq)
   // Remember the fallback copy so a save, discard or sign-out can remove it.
   successfulWrites.set(key, { text, revision, fallback: sealed, over })
+}
+
+/**
+ * Unload capture (#4823). A strict write is asynchronous (seal, then the
+ * IndexedDB transaction) and dies with the document, so an edit typed just
+ * before leaving the page was lost. On pagehide, hidden visibility and
+ * beforeunload, every draft whose newest write is not durable yet is sealed
+ * synchronously with the writer's prepared keystream into its localStorage
+ * slot (the fallback-copy slot: same owner-scoped name, sealed, removed on
+ * sign-out, kept sealed across an identity change, purged on read revocation).
+ * The next load opens it with fresh same-person authorization and re-seals it
+ * into IndexedDB. A write that becomes durable afterwards removes the capture
+ * only if it is at least as new. An edit that cannot be captured (no keystream
+ * yet, too large, a running merge, refused storage) makes beforeunload ask.
+ *
+ * States per draft: "queued" (typed: accepted into the lane, RAM only),
+ * "captured" (sealed on unload, localStorage), "durable" (strict IndexedDB
+ * commit). Server confirmation belongs to the editor: its save ACK clears
+ * the draft with clearArtifactDraft.
+ */
+const unloadCaptures = new Map<string, { sealed: string; seq: number }>()
+function captureForUnload(): number {
+  let missed = 0
+  for (const [key, lane] of lanes) {
+    const seq = writes.get(key) ?? 0
+    if (seq <= (durableWrites.get(key) ?? 0) || unloadCaptures.get(key)?.seq === seq) continue
+    const row = parse(key)
+    // A pending deletion loses no work; a merge's result is not known yet.
+    if (!row || (!lane.next && !lane.merging)) continue
+    let sealed: string | undefined
+    try { sealed = lane.merging ? undefined : settledCipher(key)?.sealNow?.(lane.next, row[1]) } catch { sealed = undefined }
+    if (!sealed) { missed++; continue }
+    try { localStorage.setItem(legacyKey(row), sealed); unloadCaptures.set(key, { sealed, seq }) } catch { missed++ }
+  }
+  return missed
+}
+let unloadHooked = false
+function hookUnload() {
+  if (unloadHooked || typeof window === "undefined" || typeof document === "undefined") return
+  unloadHooked = true
+  window.addEventListener("pagehide", () => { captureForUnload() })
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") captureForUnload() })
+  // Only edits that could not be captured make the browser ask before leaving.
+  window.addEventListener("beforeunload", event => { if (captureForUnload() > 0) { event.preventDefault(); event.returnValue = "" } })
+}
+export type ArtifactDraftStorageState = "none" | "queued" | "captured" | "durable"
+/** Where the newest write of this draft is: see the unload capture above. */
+export function artifactDraftStorageState(key: string): ArtifactDraftStorageState {
+  const seq = writes.get(key) ?? 0
+  if (!seq) return "none"
+  if (seq <= (durableWrites.get(key) ?? 0)) return "durable"
+  return unloadCaptures.get(key)?.seq === seq ? "captured" : "queued"
 }
 
 /**
@@ -251,6 +316,9 @@ function queueArtifactDraft(key: string, text: string, admitted = false): Promis
   if (!row) return Promise.reject(new Error("Invalid artifact draft key."))
   if (!admitted && retired(row)) return Promise.reject(retiredError())
   writes.set(key, (writes.get(key) ?? 0) + 1)
+  hookUnload()
+  // Keep an unload keystream large enough for this text (UTF-8 upper bound).
+  if (text) void settledCipher(key)?.prepareInstant?.(text.length * 3).catch(() => {})
   let lane = lanes.get(key)
   if (!lane) { lane = { next: text, tail: Promise.resolve() }; lanes.set(key, lane) }
   lane.next = text
@@ -263,7 +331,7 @@ function queueArtifactDraft(key: string, text: string, admitted = false): Promis
   const purging = admitted ? Promise.resolve() : identityPurge
   const scheduled = Promise.all([current.tail, purging]).then(() => {
     current.scheduled = undefined
-    return persist(row, current.next)
+    return persist(row, current.next, writes.get(key) ?? 0)
   })
   current.scheduled = scheduled
   current.tail = scheduled.then(() => { current.failed = false }, () => { current.failed = true }).then(() => { if (!current.scheduled && !current.failed && !current.merging && lanes.get(key) === current) lanes.delete(key) })
@@ -335,12 +403,14 @@ export function mergeArtifactDraft(key: string, merge: (existing: string) => str
   if (!row) return Promise.reject(new Error("Invalid artifact draft key."))
   if (retired(row)) return Promise.reject(retiredError())
   writes.set(key, (writes.get(key) ?? 0) + 1)
+  hookUnload()
   let lane = lanes.get(key)
   if (!lane) { lane = { next: "", tail: Promise.resolve() }; lanes.set(key, lane) }
   const current = lane
   current.merging = (current.merging ?? 0) + 1
   const before = Promise.all([current.scheduled ?? Promise.resolve(), current.tail]).catch(() => {})
   const task = async () => {
+    const seq = writes.get(key) ?? 0
     const existing = await readInLane(key, row, combine)
     if ("append" in existing) {
       // Retired and unable to open what is stored: seal this stop's own
@@ -350,11 +420,12 @@ export function mergeArtifactDraft(key: string, merge: (existing: string) => str
       const sealed = await (await cipherFor(key, row)).seal(merge(""), row[1])
       await durable()!.put(row, JSON.stringify({ format: BUNDLE, parts: [...existing.append, sealed] }), crypto.randomUUID())
       successfulWrites.delete(key)
+      stored(key, seq)
       current.failed = false
       return ""
     }
     const text = merge(existing.text)
-    await persist(row, text)
+    await persist(row, text, seq)
     // The merge is now the lane's latest durable value: an older failed write
     // must not be retried over it when the lane retires. A write queued after
     // this merge keeps its own (newer) value.
@@ -417,6 +488,8 @@ export async function loadArtifactDraft(key: string, combine?: (parts: string[])
     if (parts) { const texts: string[] = []; for (const part of parts) texts.push(await cipher.open(part, row[1])); text = combine!(texts) }
     else text = isSealedLocalDraft(raw) ? await cipher.open(raw, row[1]) : raw
     if (retired(row)) throw retiredError()
+    // The next edit can then be captured synchronously if the page unloads.
+    void cipher.prepareInstant?.(Math.max(text.length * 3, 1)).catch(() => {})
     if (persistedRevision && legacy === undefined && (writes.get(key) ?? 0) === seen) successfulWrites.set(key, { text, revision: persistedRevision })
     // A valid legacy row is sealed durably before it can enter the editor.
     if (!parts && (!isSealedLocalDraft(raw) || legacy !== undefined) && (writes.get(key) ?? 0) === seen) await writeArtifactDraft(key, text)
@@ -500,7 +573,7 @@ export function suspendOtherArtifactDrafts(userId: string | null): Promise<void>
     for (const [key, lane] of retiring) {
       if (!lane.failed || lanes.get(key) !== lane) continue
       const row = parse(key)!
-      await persist(row, lane.next) // retained admitted text, no new authority or server save
+      await persist(row, lane.next, writes.get(key) ?? 0) // retained admitted text, no new authority or server save
       lane.failed = false; lane.next = ""
       if (lanes.get(key) === lane) lanes.delete(key)
     }

@@ -65,3 +65,33 @@ it("never revives an old cipher when the same identity returns before an expiry 
   finishLocalDraftIdentity(null) // superseded by the new login
   await expect(a.open(sealed, "source")).rejects.toThrow()
 })
+
+// #4823: the synchronous unload capture uses real AES-GCM keystream material.
+it("seals an unload capture synchronously, without plaintext, once per keystream, and opens it only with fresh same-person authorization", async () => {
+  const a = await createLocalDraftCipher(scope)
+  expect(a.sealNow!("too early", "source")).toBeUndefined() // nothing prepared: the caller must warn
+  await a.prepareInstant!(64)
+  const text = "Poslední slova před odchodem ✓"
+  const captured = a.sealNow!(text, "source")!
+  expect(captured).toBeTruthy()
+  expect(captured).not.toContain("Poslední")
+  expect(JSON.parse(captured).format).toBe("crewship-local-draft-instant-v1")
+  // Single use: the keystream is gone until a fresh one is prepared.
+  const again = a.sealNow!("second capture", "source")
+  if (again) expect(JSON.parse(again).iv).not.toBe(JSON.parse(captured).iv)
+  a.close()
+  const reopened = await createLocalDraftCipher(scope)
+  await expect(reopened.open(captured, "source")).resolves.toBe(text)
+  await expect(reopened.open(captured, "comment")).rejects.toThrow()
+  const otherPage = await createLocalDraftCipher({ ...scope, page: "other" })
+  await expect(otherPage.open(captured, "source")).rejects.toThrow()
+  beginLocalDraftIdentity("bob"); current = "bob"
+  await expect(reopened.open(captured, "source")).rejects.toThrow()
+})
+it("refuses an unload capture larger than the prepared keystream and after close", async () => {
+  const a = await createLocalDraftCipher(scope)
+  await a.prepareInstant!(16)
+  expect(a.sealNow!("x".repeat(128 * 1024), "source")).toBeUndefined()
+  a.close()
+  expect(a.sealNow!("short", "source")).toBeUndefined()
+})
