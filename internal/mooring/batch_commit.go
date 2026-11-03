@@ -490,13 +490,27 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 						return e
 					}
 				}
-				// The pre-engine probe only estimated from the current checkpoint.
-				// Probe again with the prepared candidate (history row and document
-				// head) and its retained ledger payloads before persisting it; a
-				// refusal rolls back the whole batch (#4835).
-				if e = storageheadroom.Check(ctx, tx, candidateDiskBytes(c, candidate, checkpointMetadata)); e != nil {
-					return e
-				}
+			}
+			// The pre-engine probe only estimated from the current checkpoint,
+			// and free disk can shrink while the engine runs. Every change,
+			// saved or terminally rejected, is probed again with the rows it
+			// really persists before the first of them is written (#4835). A
+			// refusal aborts the whole transaction: no Saved and no rejection
+			// becomes durable, and the caller gets the shared storage refusal,
+			// so the change stays a client draft to submit again later.
+			var persistedTargets []preparedTargetRow
+			if stored.Status == "saved" {
+				persistedTargets = targetRows
+			}
+			var written int64
+			written, e = changeDiskBytes(key, c, stored, candidate, checkpointMetadata, persistedTargets)
+			if e != nil {
+				return e
+			}
+			if e = storageheadroom.Check(ctx, tx, written); e != nil {
+				return e
+			}
+			if stored.Status == "saved" {
 				if e = s.saveCheckpoint(ctx, tx, request.Lease, stored.LastRevision, candidate, checkpointMetadata); e != nil {
 					return e
 				}
@@ -591,13 +605,46 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 	return result, nil
 }
 
-// candidateDiskBytes is what persisting one saved change adds: the encoded
-// candidate in checkpoint history and in the document head, its metadata, and
-// the operation payloads retained in the change and operation ledgers.
-func candidateDiskBytes(c BatchChange, candidate, metadata []byte) int64 {
-	n := 2*int64(base64.StdEncoding.EncodedLen(len(candidate))) + int64(len(metadata))
-	for _, op := range c.Operations {
-		n += 2 * int64(len(op.Payload))
+// diskRowOverhead covers the key columns, timestamps, row header and index
+// entries of one ledger row beyond its variable payload columns.
+const diskRowOverhead = 512
+
+// changeDiskBytes is an upper estimate of what persisting one change adds:
+// the change row and its audit entry (each holding the serialized result),
+// one operation row per operation (result packet, dependencies, fingerprint,
+// participant), and for a saved change the encoded candidate in checkpoint
+// history and the document head, its metadata, the target effect and version
+// rows, and the host attribution row.
+func changeDiskBytes(k SessionKey, c BatchChange, stored BatchChangeResult, candidate, metadata []byte, targets []preparedTargetRow) (int64, error) {
+	raw, err := json.Marshal(stored)
+	if err != nil {
+		return 0, err
 	}
-	return n
+	n := 2*(int64(len(raw))+diskRowOverhead) + int64(len(c.ID)+len(c.MembershipHash)+len(c.TaskID))
+	for i, op := range c.Operations {
+		if i >= len(stored.Operations) {
+			return 0, ErrInvalid
+		}
+		packet, err := json.Marshal(stored.Operations[i])
+		if err != nil {
+			return 0, err
+		}
+		dependencies, err := json.Marshal(op.Dependencies)
+		if err != nil {
+			return 0, err
+		}
+		n += int64(len(packet)+len(dependencies)+len(op.Fingerprint)+len(op.Participant)+len(op.ID)+len(c.ID)) + diskRowOverhead
+	}
+	if stored.Status != "saved" {
+		return n, nil
+	}
+	n += 2*(int64(base64.StdEncoding.EncodedLen(len(candidate)))+diskRowOverhead) + int64(len(metadata)) + diskRowOverhead
+	for _, r := range targets {
+		record, err := targetEffectRecord(k, r)
+		if err != nil {
+			return 0, err
+		}
+		n += 2 * (int64(len(record)) + diskRowOverhead)
+	}
+	return n, nil
 }

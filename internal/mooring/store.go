@@ -87,8 +87,9 @@ func (JSONStorage) Commit(ctx context.Context, tx *sql.Tx, page, actor string, m
 	receipt := Receipt{MutationID: r.MutationID, Rev: state.Rev + 1, Outcome: "committed", IssuedBy: "crewship", Durability: "node", Visibility: "committed-revision", PayloadHash: Fingerprint(snapshot), At: tsformat.Format(time.Now())}
 	data, _ := json.Marshal(receipt)
 	// Free-disk admission (#4835) after exact-retry replay and validation,
-	// before the head update and the receipt row (which keeps the snapshot).
-	if err = storageheadroom.Check(ctx, tx, 2*int64(len(snapshot))+int64(len(data))); err != nil {
+	// before the head update and the receipt row (which keeps the snapshot);
+	// the caller then appends one bounded journal entry.
+	if err = storageheadroom.Check(ctx, tx, 2*int64(len(snapshot))+int64(len(data)+len(raw)+len(actor)+len(r.MutationID))+journalEntryBytes+2*diskRowOverhead); err != nil {
 		return Receipt{}, err
 	}
 	var changed sql.Result
@@ -129,3 +130,7 @@ func VerifyCommitted(ctx context.Context, tx *sql.Tx, page, actor string, m Mani
 	}
 	return nil
 }
+
+// journalEntryBytes bounds the single host journal entry a Mooring write
+// appends in the same transaction.
+const journalEntryBytes = 4096

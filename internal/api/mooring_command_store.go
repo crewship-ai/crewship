@@ -231,7 +231,7 @@ func (s *collaborationCommandStore) Create(r *http.Request, initial commandSQLSn
 		}
 		// Free-disk admission (#4835): document head and checkpoint history
 		// each keep the encoded checkpoint.
-		if e := storageheadroom.Check(r.Context(), tx, 2*int64(base64.StdEncoding.EncodedLen(len(initial.Checkpoint)))); e != nil {
+		if e := storageheadroom.Check(r.Context(), tx, 2*int64(base64.StdEncoding.EncodedLen(len(initial.Checkpoint)))+2*collabDiskRowOverhead); e != nil {
 			return e
 		}
 		_, e := tx.ExecContext(r.Context(), `INSERT INTO mooring_collab_documents(page_id,workspace_id,application_id,revision,checkpoint_base64,format_profile,engine_revision,engine_sha256) VALUES(?,?,'wordcraft','0',?,?,?,?)`, s.owner.Key.ArtifactID, s.owner.Key.WorkspaceID, base64.StdEncoding.EncodeToString(initial.Checkpoint), commandFormat, commandEngineRevision, s.engineSHA)
@@ -627,7 +627,7 @@ func (s *collaborationCommandStore) persist(ctx context.Context, tx *sql.Tx, par
 	}
 	// Free-disk admission (#4835) before the first row of this command: two
 	// receipt copies plus the checkpoint in history and in the document head.
-	if err = storageheadroom.Check(ctx, tx, 2*int64(len(raw))+2*int64(base64.StdEncoding.EncodedLen(len(c.Checkpoint)))); err != nil {
+	if err = storageheadroom.Check(ctx, tx, 2*int64(len(raw)+len(c.OpID)+len(participant)+len(out.Fingerprint)+len(out.InputDigest))+2*int64(base64.StdEncoding.EncodedLen(len(c.Checkpoint)))+4*collabDiskRowOverhead); err != nil {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO mooring_collab_changes(page_id,workspace_id,change_id,membership_hash,result_json) VALUES(?,?,?,?,?)`, key.ArtifactID, key.WorkspaceID, c.OpID, out.InputDigest, string(raw)); err != nil {
@@ -748,3 +748,7 @@ func (s *collaborationCommandStore) reconcile(source commandOperationSource, op,
 	}
 	return out, err
 }
+
+// collabDiskRowOverhead covers the key columns, row header and index entries
+// of one collaboration row beyond its payload, for the free-disk estimates.
+const collabDiskRowOverhead = 512

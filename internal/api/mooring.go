@@ -167,8 +167,9 @@ func (m *mooringHTTP) create(w http.ResponseWriter, r *http.Request) {
 	id = generateCUID()
 	stamp := tsformat.Format(time.Now())
 	raw, _ := json.Marshal(spec)
-	// Free-disk admission (#4835) before the Page and its document row.
-	if e = storageheadroom.Check(r.Context(), tx, int64(len(raw)+len(manifest.InitialState))); e != nil {
+	// Free-disk admission (#4835) before the Page, its first version, the
+	// document row and the journal entry.
+	if e = storageheadroom.Check(r.Context(), tx, 2*int64(len(raw))+int64(len(manifest.InitialState))+4*collabDiskRowOverhead+4096); e != nil {
 		mooringError(w, e)
 		return
 	}

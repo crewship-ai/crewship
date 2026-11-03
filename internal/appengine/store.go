@@ -186,7 +186,7 @@ func (s *Store) reserve(ctx context.Context, k Key, r Request, a Authorize, e En
 		if err != nil {
 			return err
 		}
-		if err = storageheadroom.Check(ctx, tx, int64(len(v.Snapshot))+int64(len(commandBytes))); err != nil {
+		if err = storageheadroom.Check(ctx, tx, int64(len(v.Snapshot))+int64(len(commandBytes))+diskRowOverhead); err != nil {
 			return err
 		}
 		res.token++
@@ -317,15 +317,6 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 			// A write must never buy capacity by discarding earlier revisions.
 			return ErrQuota
 		}
-		// The reserve can shrink while the engine runs; probe again with the
-		// real candidate before the first row of this revision (#4835).
-		written := int64(len(c.Snapshot)) + int64(len(command))
-		if checkpoint {
-			written += int64(len(c.Snapshot))
-		}
-		if err = storageheadroom.Check(ctx, tx, written); err != nil {
-			return err
-		}
 		generation := v.Generation
 		if generation == 0 {
 			generation = 1
@@ -339,6 +330,17 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 		// verified recalculation outside the mandated effects.
 		auditBytes, err := json.Marshal(auditRecord{Receipt: receipt, ResultSHA256: c.ResultHash, Derived: c.Derived})
 		if err != nil {
+			return err
+		}
+		// The reserve can shrink while the engine runs; probe again with the
+		// real rows of this revision (head snapshot, checkpoint, recorded
+		// command, audit receipt, outbox and operation receipt) before the
+		// first of them is written (#4835).
+		written := int64(len(c.Snapshot)+len(command)+len(auditBytes)+len(receiptBytes)) + 4*diskRowOverhead
+		if checkpoint {
+			written += int64(len(c.Snapshot)) + diskRowOverhead
+		}
+		if err = storageheadroom.Check(ctx, tx, written); err != nil {
 			return err
 		}
 		// Only the first revision creates the head, so the personal-Page insert
@@ -740,3 +742,7 @@ type auditRecord struct {
 	ResultSHA256 string   `json:"result_sha256"`
 	Derived      *Derived `json:"derived,omitempty"`
 }
+
+// diskRowOverhead covers the key columns, row header and index entries of one
+// row beyond its variable payload, for the free-disk probe estimates.
+const diskRowOverhead = 512
