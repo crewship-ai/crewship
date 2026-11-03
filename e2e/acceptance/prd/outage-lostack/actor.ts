@@ -9,6 +9,7 @@
 import type { APIRequestContext, Browser, BrowserContext, BrowserContextOptions, Page } from "@playwright/test"
 import { apiAs, createQaWorkspace, deleteQaWorkspace, loginStorageState, provisionMember, type QaWorkspace } from "../auth"
 import type { PrdScenario } from "../fixtures"
+import { withSessionRenewal } from "../session-refresh"
 
 export interface Actor {
   /** Owner API (own login): workspace administration only. */
@@ -28,7 +29,10 @@ const cleanups: Array<() => Promise<unknown>> = []
 export async function isolatedActor(prd: PrdScenario, browser: Browser, title: string, options: BrowserContextOptions = {}): Promise<Actor> {
   const ownerAccount = prd.env.accounts.owner
   if (!ownerAccount) throw new Error("owner account missing")
-  const owner = await apiAs(prd.origin, await loginStorageState(prd.origin, ownerAccount))
+  // Both API contexts outlive the 15-minute access cookie in the long rows
+  // (craft-hour): they renew their session on "session expired" (session-refresh.ts).
+  // The owner context owns its login, so it refreshes it.
+  const owner = withSessionRenewal(await apiAs(prd.origin, await loginStorageState(prd.origin, ownerAccount)), prd.origin)
   cleanups.push(() => owner.dispose())
   const ws = await createQaWorkspace(owner, title)
   if (process.env.PRD_KEEP_WORKSPACES !== "1") {
@@ -40,7 +44,12 @@ export async function isolatedActor(prd: PrdScenario, browser: Browser, title: s
   }
   const person = await provisionMember(owner, prd.origin, ws, ROLE, "PRD outage person")
   const state = await loginStorageState(prd.origin, person.account)
-  const api = await apiAs(prd.origin, state)
+  // The person's API starts on the browser's login (no extra login for short
+  // rows); refreshing that shared session would revoke it for the browser, so on
+  // the first expiry it moves to a login of its own.
+  const api = withSessionRenewal(await apiAs(prd.origin, state), prd.origin, {
+    relogin: async () => apiAs(prd.origin, await loginStorageState(prd.origin, person.account)),
+  })
   cleanups.push(() => api.dispose())
   const context = await browser.newContext({ baseURL: prd.origin, storageState: state, ...options })
   cleanups.push(() => context.close())

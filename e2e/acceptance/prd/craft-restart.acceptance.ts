@@ -105,12 +105,14 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
       const drafts = savedByEditor ? null : await inspectDrafts(page, unsaved)
       const linesAfterReload = drafts && checkDraftCopies(ledger, drafts.texts, "draft offered after the reload")
       if (!savedByEditor) {
+        // Record both per-line checks (lines.json) before any verdict on the drafts.
+        lineChecks.push(linesInSession!, linesAfterReload!)
+        await prd.evidence("lines.json", { ledger, checks: lineChecks })
         expect(draftsInSession!.rows.length, `the unsaved work is offered as a draft in the open editor (ui ${JSON.stringify(timeline.at(-1))})`).toBeGreaterThan(0)
         expect(draftsInSession!.hasMarker.some(Boolean), `the draft offered in the open editor holds all ${unsaved.length} lines the editor took`).toBe(true)
         expect(drafts!.rows.length, `the unsaved work is offered again after the reload (ui ${JSON.stringify(reopened)})`).toBeGreaterThan(0)
         expect(drafts!.hasMarker.some(Boolean), `the draft offered after the reload holds all ${unsaved.length} lines the editor took`).toBe(true)
-        await expectLines(linesInSession!)
-        await expectLines(linesAfterReload!)
+        for (const c of [linesInSession!, linesAfterReload!]) expect(c.problems, `every line the editor took is in "${c.stage}" exactly once and in order`).toEqual([])
       }
 
       // The editor works again: type, save once.
