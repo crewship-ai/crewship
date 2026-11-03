@@ -14,7 +14,8 @@ import (
 
 // RecoverRetainedResult settles only the current attempt parked by lease
 // recovery. The caller must first validate the protected host capture bound to
-// runID. Live workers and operator resolutions retain their own authority.
+// runID and that the execution provably ended (orchestrator
+// RetainedEndConfirmed). Live workers and operator resolutions retain their own authority.
 // Failed background execution may have external effects, so it keeps
 // reconciliation and its capacity fence; a real successful exit can complete
 // the work, and a host chat turn settles a real exit either way, whichever
@@ -93,8 +94,9 @@ func (s *Store) RecoverRetainedResult(ctx context.Context, runID string, result 
 		// and a server slot for good: nobody resolves a chat turn, and its
 		// agent may since have been deleted. This holds for either park
 		// reason: an observer that gave up, or a lease that expired across a
-		// server restart (#4820). The capture is only delivered after the exec
-		// is gone, so no runtime can still be executing the turn.
+		// server restart (#4820). The caller settles from a capture only after
+		// the main process exited on its own or a forced end is backed by
+		// runtime absence or a whole-tree stop receipt.
 		if err := s.setStateTx(ctx, tx, it, StateFailed, runID, generation, "protected retained capture confirmed failed execution", now); err != nil {
 			return true, err
 		}
