@@ -13,7 +13,7 @@
 //     nothing, and A gets both drafts back after signing in again.
 import type { Page } from "@playwright/test"
 import { loginStorageState } from "./auth"
-import { CrashableProfile, createProject, ensureArtifactProjects, grantPage, openProject, openViewer, pause, prepareViewerComment, projectOffer, shareProject, typeSourceDraft, viewerCommentValue } from "./drafts-crash/crash"
+import { CrashableProfile, createProject, ensureArtifactProjects, grantPage, openProject, openViewer, projectURL, pause, prepareViewerComment, projectOffer, shareProject, typeSourceDraft, viewerCommentValue } from "./drafts-crash/crash"
 import { expect, prdRequirement, test } from "./fixtures"
 
 async function userIdOf(request: import("@playwright/test").APIRequestContext) {
@@ -83,11 +83,24 @@ async function logOut(page: Page): Promise<{ confirmShown: boolean; confirmText:
   return { confirmShown: shown, confirmText }
 }
 
-async function logIn(page: Page, email: string, password: string) {
-  if (!/\/login/.test(page.url())) await page.goto("/login")
+/**
+ * Signs in. With a target, the person comes back to that page the way the
+ * product returns an expired session (`/login?redirect=…`), and the helper
+ * waits until the browser is on the target path. Without it, the dashboard
+ * may still be redirecting (a fresh MEMBER goes on to /onboarding), and a
+ * following goto races that redirect (#4875).
+ */
+async function logIn(page: Page, email: string, password: string, target?: string) {
+  if (target) await page.goto(`/login?redirect=${encodeURIComponent(target)}`)
+  else if (!/\/login/.test(page.url())) await page.goto("/login")
   await page.locator("#email").fill(email)
   await page.locator("#password").fill(password)
   await page.locator('button[type="submit"]').first().click()
+  if (target) {
+    const want = new URL(target, page.url()).pathname
+    await expect.poll(() => new URL(page.url()).pathname, { timeout: 60_000, message: `signed in: landed on ${want}` }).toBe(want)
+    return
+  }
   await expect.poll(() => new URL(page.url()).pathname, { timeout: 60_000, message: "signed in: left the login page" }).not.toMatch(/^\/login/)
 }
 
@@ -145,7 +158,7 @@ test.describe("drafts and identity", () => {
         const leaked = (h: string) => h.includes(d.MARK) || h.includes(d.COMMENT)
         traffic.length = 0
         watching = true
-        await logIn(a, other.account.email, other.account.password)
+        await logIn(a, other.account.email, other.account.password, projectURL(project.slug, ws.id))
         await openProject(a, project.slug, ws.id)
         await a.waitForTimeout(3_000)
         const offer = await projectOffer(a)
@@ -196,7 +209,7 @@ test.describe("drafts and identity", () => {
         const out1 = await logOut(a)
         ev.logout = { ...out1, b: await readAsB(a, "logout", d1) }
         await logOut(a)
-        await logIn(a, ownerAccount.email, ownerAccount.password)
+        await logIn(a, ownerAccount.email, ownerAccount.password, projectURL(project.slug, ws.id))
         await openProject(a, project.slug, ws.id)
         await a.waitForTimeout(3_000)
         const after1 = await projectOffer(a)
@@ -213,7 +226,7 @@ test.describe("drafts and identity", () => {
         await a.goto("/login")
         ev.expiry = { b: await readAsB(a, "expiry", d2) }
         await logOut(a)
-        await logIn(a, ownerAccount.email, ownerAccount.password)
+        await logIn(a, ownerAccount.email, ownerAccount.password, projectURL(project.slug, ws.id))
         await openProject(a, project.slug, ws.id)
         await a.waitForTimeout(3_000)
         const back = await projectOffer(a)
