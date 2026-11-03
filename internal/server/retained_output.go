@@ -256,7 +256,7 @@ func (s *Server) completeRetainedOutput(ctx context.Context, run orchestrator.Ru
 		// otherwise a settled chat turn would free its agent and slot while
 		// its children still run (#4820 review). Retry on the next sweep.
 		if !s.orchestrator.RetainedEndConfirmed(ctx, run, snapshot) {
-			return fmt.Errorf("%w: forced process end lacks whole-runtime absence", orchestrator.ErrHostCaptureUnconfirmed)
+			return fmt.Errorf("%w: forced process end lacks whole-runtime absence or a stop receipt", orchestrator.ErrHostCaptureUnconfirmed)
 		}
 		if _, err := store.RecoverRetainedResult(ctx, run.ID, result, success); err != nil {
 			return err
