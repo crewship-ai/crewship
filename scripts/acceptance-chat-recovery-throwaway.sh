@@ -6,22 +6,27 @@
 #   scripts/acceptance-chat-recovery-throwaway.sh --binary /path/to/crewship --evidence DIR [--name NAME]
 #
 # The binary's directory must also hold crewship-sidecar (agent-executable).
-# Every server comes from scripts/throwaway-server.sh and is torn down on exit.
+# Every server comes from scripts/throwaway-server.sh. The run stops only the
+# instance it created: an existing instance of the same name is refused and
+# never touched. The default name is unique per run.
 #
 # What it proves, from server-side evidence (CLI JSON, the server's own retained
 # capture spool, host-side process listing) rather than agent text:
 #
-#   1. lease expiry while the server is down: three host chat turns are live
+#   1. lease expiry while the server is down: two host chat turns are live
 #      when the server process stops; after `restart --down-seconds` (past the
 #      60 s work lease, same data directory) each turn's attempt ends with
 #      "lease expired in runtime phase ..." and the turn is parked in
 #      needs_reconciliation.
-#   2. no premature settlement: while the turn's CLI process is still alive in
-#      its crew container the turn stays needs_reconciliation and the agent gets
-#      no second live turn. It settles only after the capture shows a confirmed
-#      end — a natural exit ("exited"), or a forced end with the exec-bound
-#      whole-tree stop receipt ("execution_cancelled" + stop-confirmed) — and
-#      never before the last moment the runtime was seen alive.
+#   2. no premature settlement: while any process of the turn's exec (leader,
+#      descendants, their sessions) is alive in its crew container the turn
+#      stays needs_reconciliation, and a second turn for the agent is refused
+#      by work admission (no work item; server logs the 429 capacity refusal).
+#      It settles only after the capture shows a confirmed end — a natural exit
+#      ("exited"), or a forced end with the exact exec-bound whole-tree receipt
+#      "tree-stopped <exec id>" ("execution_cancelled") — and the capture's
+#      own completed_at precedes the work item's terminal_at. The host-side
+#      "last seen alive" time is a cross-check and must exist.
 #   3. capacity is released: once settled, nothing for the server is left in
 #      starting, running or needs_reconciliation (the states that hold a
 #      ServerTotal execution slot).
@@ -47,8 +52,10 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-TW="$here/throwaway-server.sh"
-binary="" evidence="" name="chat-recovery-$(date -u +%H%M%S)"
+TW="${CHAT_RECOVERY_THROWAWAY_SCRIPT:-$here/throwaway-server.sh}"
+# Unique per run (time, pid, random): two runs sharing a state root never pick
+# the same instance name.
+binary="" evidence="" name="cr-$(date -u +%H%M%S)-$$-$(od -An -N2 -tx1 /dev/urandom | tr -d ' \n')"
 LEASE_DOWN="${CHAT_RECOVERY_DOWN_SECONDS:-75}"
 DEADLINE_SECS="${CHAT_RECOVERY_DEADLINE_SECONDS:-150}"
 LONG_SECS="${CHAT_RECOVERY_LONG_SECONDS:-900}"
@@ -99,27 +106,40 @@ while True:
     path = os.path.dirname(path)
 PY
 
+script_self="$here/$(basename "$0")"
 {
   echo "binary: $binary"
   echo "binary_sha256: $(sha256sum "$binary" | cut -d' ' -f1)"
   echo "sidecar_sha256: $(sha256sum "$sidecar" | cut -d' ' -f1)"
-  echo "binary_version: $("$binary" --version 2>/dev/null | head -1)"
-  echo "scenario_commit: $(git -C "$here/.." rev-parse HEAD 2>/dev/null || echo unknown)"
+  echo "binary_version: $("$binary" version 2>/dev/null | tr -s ' \n' ' ')"
+  echo "scenario_sha256: $(sha256sum "$script_self" | cut -d' ' -f1)"
+  echo "throwaway_script_sha256: $(sha256sum "$TW" | cut -d' ' -f1)"
+  echo "scenario_head: $(git -C "$here" rev-parse HEAD 2>/dev/null || echo unknown)"
+  if git -C "$here" diff --quiet HEAD -- "$script_self" "$TW" 2>/dev/null; then
+    echo "scenario_scripts_match_head: yes"
+  else
+    echo "scenario_scripts_match_head: NO (uncommitted changes)"
+  fi
   echo "started_at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "instance_name: $name"
   echo "lease_down_seconds: $LEASE_DOWN deadline_seconds: $DEADLINE_SECS"
 } >"$evidence/run-info.txt"
 
 # --- throwaway lifecycle ---------------------------------------------------
-started=0
+# owned=1 only once `start` succeeded for a name that did not exist before this
+# run. Teardown never stops an instance this run did not create.
+owned=0
 teardown() {
   local rc=$?
   set +e
-  if ((started)); then
+  if ((owned)); then
     say "teardown: stop $name"
     collect_server_log
     "$TW" stop "$name" >>"$LOG" 2>&1 || say "teardown of $name FAILED; manifest kept for 'stop $name'"
     "$TW" list >"$evidence/throwaway-list-after.txt" 2>&1
     if grep -q "^$name " "$evidence/throwaway-list-after.txt"; then say "teardown: $name still listed"; else say "teardown: $name no longer listed"; fi
+  else
+    say "teardown: no instance owned by this run; nothing stopped"
   fi
   say "result: $fails failed check(s), exit status $rc"
   if ((rc == 0 && fails > 0)); then rc=1; fi
@@ -132,13 +152,22 @@ dir="$STATE_ROOT/$name"
 collect_server_log() {
   # Lifecycle lines only; secrets never reach the evidence directory.
   [[ -f "$dir/server.log" ]] || return 0
-  grep -E 'lease|retained|reconcil|exec (agent|finished)|agent exited|host chat|shutting down|server (start|listen)|dispatch: recovered|capture|stop' "$dir/server.log" \
+  grep -E 'lease|retained|reconcil|exec (agent|finished)|agent exited|host chat|shutting down|server (start|listen)|dispatch: recovered|capture|stop|durable run record' "$dir/server.log" \
     | grep -viE 'token|secret|password|api_key|authorization' >"$evidence/server-lifecycle.log" || true
 }
 
+if [[ -e "$dir" ]]; then
+  die "an instance named $name already exists in $STATE_ROOT; it is not this run's and will not be touched"
+fi
 say "starting throwaway $name under $STATE_ROOT"
-started=1
-"$TW" start "$name" --binary "$binary" >>"$LOG" 2>&1 || die "throwaway start failed"
+if ! "$TW" start "$name" --binary "$binary" >>"$LOG" 2>"$evidence/start.err"; then
+  cat "$evidence/start.err" >>"$LOG"
+  # `start` claims the name with an atomic mkdir, so any failure other than
+  # the name collision happened inside an instance this run created.
+  if ! grep -q 'already exists' "$evidence/start.err" && [[ -f "$dir/manifest.json" ]]; then owned=1; fi
+  die "throwaway start failed"
+fi
+owned=1
 port="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["port"])' "$dir/manifest.json")"
 prefix="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["prefix"])' "$dir/manifest.json")"
 export CREWSHIP_SERVER="http://127.0.0.1:$port" CREWSHIP_CONFIG="$dir/cli-config.yaml"
@@ -149,15 +178,65 @@ cs seed --server "$CREWSHIP_SERVER" --offline-demo --skip-issues >"$evidence/see
 grep -viE 'password|token' "$evidence/seed.txt" >"$evidence/seed.redacted.txt" || true
 rm -f "$evidence/seed.txt"
 
-# agent -> crew slug for the agents this scenario drives.
 crew_of() { cs agent get "$1" -f json | python3 -c 'import json,sys; d=json.load(sys.stdin); c=d.get("crew") or {}; print(c.get("slug") or d.get("crew_slug") or "")'; }
 container_of() { docker ps --filter "name=^/$prefix-team-$1-" --format '{{.Names}}' | head -1; }
-runtime_alive() { # crew slug -> 0 when a Claude Code process runs in its container
-  local c; c="$(container_of "$1")"
-  [[ -n "$c" ]] && docker top "$c" -o pid,args 2>/dev/null | grep -q 'claude --print'
-}
 work_json() { cs work get "$1" -f json; }
 field() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1], {}, {"d": d}))' "$1"; }
+spool_of() { echo "$dir/data/run-output/$1"; }
+now_ns() { date -u +%Y-%m-%dT%H:%M:%S.%NZ; }
+
+# runtime_alive TAG RUN_ID CREW: 0 while any process of THIS run's exec is
+# alive in the crew container — the exec leader (from the capture's
+# identity.json exec id), its descendants, and anything left in a session one
+# of them opened (orphans reparented to the container init keep their
+# session). Records the observation time in .alive-TAG.
+runtime_alive() {
+  local tag="$1" run="$2" crew="$3" c exec_id
+  c="$(container_of "$crew")"
+  exec_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["exec_id"])' "$(spool_of "$run")/identity.json" 2>/dev/null || true)"
+  [[ -n "$c" && -n "$exec_id" ]] || return 1
+  if python3 - "$c" "$exec_id" "$evidence/.sids-$tag" <<'PY'; then
+import json, os, socket, subprocess, sys
+container, exec_id, sid_file = sys.argv[1:4]
+def api(path):
+    s = socket.socket(socket.AF_UNIX); s.connect("/var/run/docker.sock")
+    s.sendall(("GET %s HTTP/1.0\r\nHost: docker\r\n\r\n" % path).encode())
+    data = b""
+    while True:
+        chunk = s.recv(65536)
+        if not chunk: break
+        data += chunk
+    return json.loads(data.split(b"\r\n\r\n", 1)[1])
+leader = api("/exec/%s/json" % exec_id).get("Pid") or 0
+top = subprocess.run(["docker", "top", container, "-o", "pid"], capture_output=True, text=True).stdout.split()[1:]
+procs = {}
+for p in top:
+    try:
+        st = open("/proc/%s/stat" % p).read()
+        f = st[st.rindex(")") + 2:].split()
+        procs[int(p)] = (int(f[1]), int(f[3]))  # ppid, sid
+    except (OSError, ValueError):
+        pass
+tree = set([leader]) & set(procs)
+changed = True
+while changed:
+    changed = False
+    for p, (pp, _) in procs.items():
+        if pp in tree and p not in tree:
+            tree.add(p); changed = True
+sids = set()
+if os.path.exists(sid_file):
+    sids = {int(x) for x in open(sid_file).read().split()}
+sids |= {procs[p][1] for p in tree if procs[p][1] not in (0, 1)}
+open(sid_file, "w").write(" ".join(str(x) for x in sorted(sids)))
+alive = tree | {p for p, (_, sid) in procs.items() if sid in sids}
+sys.exit(0 if alive else 1)
+PY
+    now_ns >"$evidence/.alive-$tag"
+    return 0
+  fi
+  return 1
+}
 
 # start_turn AGENT TAG: send a chat turn in the background and print the work id
 # once its runtime is confirmed.
@@ -181,34 +260,36 @@ start_turn() {
 
 run_id_of() { work_json "$1" | field 'd["domain_id"]'; }
 
-# watch_until_terminal ID CREW TAG: poll the item and the runtime until the item
-# is terminal; record when the runtime was last seen alive and fail if the item
-# was ever terminal while the runtime was alive.
-watch_until_terminal() {
-  local id="$1" crew="$2" tag="$3" end=$((SECONDS + SETTLE_WAIT)) state alive seen_park=0
-  : >"$evidence/watch-$tag.tsv"
-  last_alive=""
+# watch_turns TAG:ID:RUN:CREW...: poll every listed turn together until all
+# are terminal. Fails any turn seen terminal while its runtime was alive.
+watch_turns() {
+  local end=$((SECONDS + SETTLE_WAIT)) spec tag id run crew state alive pending
+  for spec in "$@"; do : >"$evidence/watch-${spec%%:*}.tsv"; done
   while ((SECONDS < end)); do
-    state="$(work_json "$id" | field 'd["state"]')"
-    if runtime_alive "$crew"; then alive=1; last_alive="$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"; else alive=0; fi
-    printf '%s\t%s\t%s\n' "$(date -u +%H:%M:%S)" "$state" "$alive" >>"$evidence/watch-$tag.tsv"
-    [[ "$state" == needs_reconciliation ]] && seen_park=1
-    case "$state" in
-      succeeded|failed|cancelled|expired)
-        if ((alive)); then fail "[$tag] settled ($state) while its runtime was still alive"; fi
-        echo "$seen_park" >"$evidence/.park-$tag"
-        echo "$last_alive" >"$evidence/.alive-$tag"
-        return 0 ;;
-    esac
+    pending=0
+    for spec in "$@"; do
+      IFS=: read -r tag id run crew <<<"$spec"
+      [[ -f "$evidence/.done-$tag" ]] && continue
+      state="$(work_json "$id" | field 'd["state"]')"
+      if runtime_alive "$tag" "$run" "$crew"; then alive=1; else alive=0; fi
+      printf '%s\t%s\t%s\n' "$(date -u +%H:%M:%S)" "$state" "$alive" >>"$evidence/watch-$tag.tsv"
+      [[ "$state" != needs_reconciliation ]] || : >"$evidence/.park-$tag"
+      case "$state" in
+        succeeded|failed|cancelled|expired)
+          if ((alive)); then fail "[$tag] settled ($state) while its runtime was still alive"; fi
+          : >"$evidence/.done-$tag" ;;
+        *) pending=1 ;;
+      esac
+    done
+    ((pending)) || return 0
     sleep 3
   done
-  fail "[$tag] not settled within ${SETTLE_WAIT}s (last state $state)"
-  echo "$seen_park" >"$evidence/.park-$tag"
-  echo "$last_alive" >"$evidence/.alive-$tag"
+  for spec in "$@"; do
+    tag="${spec%%:*}"
+    [[ -f "$evidence/.done-$tag" ]] || fail "[$tag] not settled within ${SETTLE_WAIT}s"
+  done
   return 1
 }
-
-spool_of() { echo "$dir/data/run-output/$1"; }
 
 record_spool() { # tag run_id: names, receipts and the terminal record only, never output data
   local s; s="$(spool_of "$2")"
@@ -245,30 +326,8 @@ print(json.dumps(found))
 PY
 }
 
-capture_reason() { capture_record "$1" 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["reason"], d["exit_code"])' 2>/dev/null || true; }
-
-# assert_settled TAG ID RUN_ID CREW EXPECT_REASON
-assert_settled() {
-  local tag="$1" id="$2" run="$3" expect="$4" detail terminal last_alive reason
-  work_json "$id" >"$evidence/work-$tag-final.json"
-  detail="$(field 'd["state"]+" | "+d.get("state_reason","")' <"$evidence/work-$tag-final.json")"
-  terminal="$(field 'd.get("terminal_at") or ""' <"$evidence/work-$tag-final.json")"
-  record_spool "$tag" "$run"
-  reason="$(capture_reason "$run")"
-  last_alive="$(cat "$evidence/.alive-$tag" 2>/dev/null)"
-  say "[$tag] final: $detail; terminal_at=$terminal; capture=$reason; runtime last seen alive=$last_alive"
-  if [[ "$reason" == "$expect "* ]]; then pass "[$tag] capture recorded a confirmed end: $reason"; else fail "[$tag] capture reason '$reason', want '$expect'"; fi
-  if [[ "$expect" == execution_cancelled ]]; then
-    local exec_id
-    exec_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["exec_id"])' "$(spool_of "$run")/identity.json" 2>/dev/null || true)"
-    if [[ -n "$exec_id" ]] && grep -q "$exec_id" "$(spool_of "$run")/stop-confirmed" 2>/dev/null; then
-      pass "[$tag] whole-tree stop receipt is bound to the launched exec"
-    else
-      fail "[$tag] no stop receipt for the launched exec"
-    fi
-  fi
-  if [[ -n "$last_alive" && -n "$terminal" ]]; then
-    if python3 - "$terminal" "$last_alive" <<'PY'; then pass "[$tag] settled at $terminal, after the runtime was last seen alive ($last_alive)"; else fail "[$tag] terminal_at $terminal precedes last-seen-alive $last_alive"; fi
+ts_le() { # A B: 0 when timestamp A <= B (RFC3339, any fraction)
+  python3 - "$1" "$2" <<'PY'
 import sys
 from datetime import datetime
 def t(s):
@@ -276,8 +335,45 @@ def t(s):
     if "." in s:
         a, b = s.split(".", 1); s = a + "." + b[:6]
     return datetime.fromisoformat(s)
-sys.exit(0 if t(sys.argv[1]) >= t(sys.argv[2]) else 1)
+sys.exit(0 if t(sys.argv[1]) <= t(sys.argv[2]) else 1)
 PY
+}
+
+# assert_settled TAG ID RUN_ID EXPECT_REASON
+assert_settled() {
+  local tag="$1" id="$2" run="$3" expect="$4" detail terminal last_alive record reason completed
+  work_json "$id" >"$evidence/work-$tag-final.json"
+  detail="$(field 'd["state"]+" | "+d.get("state_reason","")' <"$evidence/work-$tag-final.json")"
+  terminal="$(field 'd.get("terminal_at") or ""' <"$evidence/work-$tag-final.json")"
+  record_spool "$tag" "$run"
+  record="$(capture_record "$run" 2>/dev/null || true)"
+  reason="$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d["reason"], d["exit_code"])' "$record" 2>/dev/null || true)"
+  completed="$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["completed_at"])' "$record" 2>/dev/null || true)"
+  last_alive="$(cat "$evidence/.alive-$tag" 2>/dev/null || true)"
+  say "[$tag] final: $detail; terminal_at=$terminal; capture=$reason completed_at=$completed; runtime last seen alive=$last_alive"
+  if [[ "$reason" == "$expect "* ]]; then pass "[$tag] capture recorded a confirmed end: $reason"; else fail "[$tag] capture reason '$reason', want '$expect'"; fi
+  if [[ "$expect" == execution_cancelled ]]; then
+    local exec_id
+    exec_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["exec_id"])' "$(spool_of "$run")/identity.json" 2>/dev/null || true)"
+    if [[ -n "$exec_id" ]] && python3 -c 'import sys; sys.exit(0 if open(sys.argv[1]).read() == "tree-stopped " + sys.argv[2] + "\n" else 1)' "$(spool_of "$run")/stop-confirmed" "$exec_id" 2>/dev/null; then
+      pass "[$tag] stop receipt is exactly 'tree-stopped <launched exec id>'"
+    else
+      fail "[$tag] no exact stop receipt for the launched exec"
+    fi
+  fi
+  # Server-side ordering: the capture's own end record precedes settlement.
+  if [[ -n "$completed" && -n "$terminal" ]] && ts_le "$completed" "$terminal"; then
+    pass "[$tag] server records: runtime end completed_at=$completed <= terminal_at=$terminal"
+  else
+    fail "[$tag] runtime end completed_at='$completed' not before terminal_at='$terminal'"
+  fi
+  # Host-side cross-check; its precondition is that the runtime was seen alive.
+  if [[ -z "$last_alive" ]]; then
+    fail "[$tag] precondition: the runtime was never observed alive"
+  elif [[ -n "$terminal" ]] && ts_le "$last_alive" "$terminal"; then
+    pass "[$tag] host cross-check: last seen alive $last_alive <= terminal_at $terminal"
+  else
+    fail "[$tag] terminal_at $terminal precedes last-seen-alive $last_alive"
   fi
 }
 
@@ -306,17 +402,18 @@ say "lease-deadline work=$id_dl run=$run_dl; lease-natural work=$id_nat run=$run
 for pair in "lease-deadline:$run_dl" "lease-natural:$run_nat"; do
   if [[ -f "$(spool_of "${pair#*:}")/identity.json" ]]; then pass "[${pair%%:*}] protected host capture owns the execution"; else die "[${pair%%:*}] no protected capture spool: legacy transport in use"; fi
 done
+runtime_alive lease-deadline "$run_dl" "$crew_deadline" || fail "[lease-deadline] runtime not observed alive before the restart"
+runtime_alive lease-natural "$run_nat" "$crew_natural" || fail "[lease-natural] runtime not observed alive before the restart"
 work_json "$id_dl" >"$evidence/work-lease-deadline-before.json"
 work_json "$id_nat" >"$evidence/work-lease-natural-before.json"
-slots_before="$(slot_holders)"
-say "slot-holding work items before restart: $slots_before"
+say "slot-holding work items before restart: $(slot_holders)"
 
 say "restart: SIGTERM, down ${LEASE_DOWN}s, same data dir (no reseed)"
 "$TW" restart "$name" --down-seconds "$LEASE_DOWN" >>"$LOG" 2>&1 || die "restart failed"
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("restarts", d.get("restarts"), "restarted_at", d.get("restarted_at"), "instance_id", d.get("instance_id"))' "$dir/manifest.json" | tee -a "$LOG" >"$evidence/restart-1.txt"
 
-for tag in lease-deadline lease-natural; do
-  if [[ "$tag" == lease-deadline ]]; then id="$id_dl" crew="$crew_deadline"; else id="$id_nat" crew="$crew_natural"; fi
+for spec in "lease-deadline:$id_dl:$run_dl:$crew_deadline" "lease-natural:$id_nat:$run_nat:$crew_natural"; do
+  IFS=: read -r tag id run crew <<<"$spec"
   parked=0
   for _ in $(seq 1 60); do
     if [[ "$(work_json "$id" | field 'd["state"]')" == needs_reconciliation ]]; then parked=1; break; fi
@@ -329,27 +426,48 @@ for tag in lease-deadline lease-natural; do
   else
     fail "[$tag] (1) not parked by lease expiry (end_reason='$end_reason')"
   fi
-  if runtime_alive "$crew"; then
-    pass "[$tag] (2) runtime still alive after restart; turn is needs_reconciliation, not settled"
+  if runtime_alive "$tag" "$run" "$crew"; then
+    pass "[$tag] (2) this exec's runtime still alive after restart; turn is needs_reconciliation, not settled"
   else
-    fail "[$tag] (2) precondition: runtime already gone when the server came back; premature-settlement check is vacuous"
+    fail "[$tag] (2) precondition: runtime already gone when the server came back"
   fi
 done
 
-# While parked with a live runtime, the agent must not get a second live turn.
-since_probe="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+# While parked with a live runtime, a second turn for the agent must be refused
+# by work admission: no work item is created, and the server records the
+# capacity refusal. (The chat client only sees the generic "failed to start a
+# durable run"; that wording is #4881.)
+probe_at="$(now_ns)"
 cs run "$A_NATURAL" "Recovery probe: second turn while parked." --no-stream --timeout 60 >"$evidence/run-second-while-parked.txt" 2>&1 || true
-live_second="$(cs work list --agent "$A_NATURAL" --since "$since_probe" -f json | python3 -c 'import json,sys; print(sum(1 for i in json.load(sys.stdin).get("items") or [] if i["state"] in ("starting","running")))')"
+sleep 2
+created_second="$(cs work list --agent "$A_NATURAL" --since "${probe_at%%.*}Z" -f json | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("items") or []))')"
+python3 - "$dir/server.log" "$probe_at" >"$evidence/second-turn-refusal.log" <<'PY' || true
+import json, sys
+from datetime import datetime
+def t(s):
+    s = s.rstrip("Z")
+    if "." in s:
+        a, b = s.split(".", 1); s = a + "." + b[:6]
+    return datetime.fromisoformat(s)
+since = t(sys.argv[2])
+for line in open(sys.argv[1], errors="replace"):
+    try:
+        d = json.loads(line)
+    except ValueError:
+        continue
+    if d.get("msg") == "failed to create durable run record" and t(d.get("time", "1970-01-01T00:00:00")) >= since:
+        print(json.dumps({"time": d.get("time"), "msg": d.get("msg"), "error": d.get("error")}))
+PY
 nat_state="$(work_json "$id_nat" | field 'd["state"]')"
-if [[ "$live_second" == 0 && "$nat_state" == needs_reconciliation ]] && runtime_alive "$crew_natural"; then
-  pass "[lease-natural] (2) agent got no second live turn while its parked runtime runs ($(head -c 200 "$evidence/run-second-while-parked.txt" | tr '\n' ' '))"
+if [[ "$created_second" == 0 ]] && grep -q '429' "$evidence/second-turn-refusal.log" && grep -q 'capacity unavailable' "$evidence/second-turn-refusal.log" \
+   && [[ "$nat_state" == needs_reconciliation ]] && runtime_alive lease-natural "$run_nat" "$crew_natural"; then
+  pass "[lease-natural] (2) second turn refused by admission while the parked runtime runs: no work item created; server: $(head -1 "$evidence/second-turn-refusal.log")"
 else
-  fail "[lease-natural] (2) second turn admitted ($live_second live) or state changed ($nat_state) while the runtime ran"
+  fail "[lease-natural] (2) second turn: $created_second work item(s) created, refusal record '$(head -1 "$evidence/second-turn-refusal.log")', parked state $nat_state"
 fi
 
-watch_until_terminal "$id_dl" "$crew_deadline" lease-deadline || true
+watch_turns "lease-deadline:$id_dl:$run_dl:$crew_deadline" "lease-natural:$id_nat:$run_nat:$crew_natural" || true
 assert_settled lease-deadline "$id_dl" "$run_dl" execution_cancelled
-watch_until_terminal "$id_nat" "$crew_natural" lease-natural || true
 assert_settled lease-natural "$id_nat" "$run_nat" exited
 
 slots="$(slot_holders)"
@@ -361,18 +479,19 @@ say "phase S: standard restart with a live turn on $B_STANDARD"
 id_std="$(start_turn "$B_STANDARD" standard)" || die "standard turn never confirmed its runtime"
 run_std="$(run_id_of "$id_std")"
 if [[ -f "$(spool_of "$run_std")/identity.json" ]]; then pass "[standard] protected host capture owns the execution"; else die "[standard] legacy transport in use"; fi
+runtime_alive standard "$run_std" "$crew_standard" || fail "[standard] runtime not observed alive before the restart"
 "$TW" restart "$name" >>"$LOG" 2>&1 || die "standard restart failed"
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print("restarts", d.get("restarts"), "restarted_at", d.get("restarted_at"))' "$dir/manifest.json" >"$evidence/restart-2.txt"
 work_json "$id_std" >"$evidence/work-standard-after-restart.json"
 std_state="$(field 'd["state"]' <"$evidence/work-standard-after-restart.json")"
-if runtime_alive "$crew_standard"; then
-  pass "[standard] runtime alive after restart; state $std_state"
+if runtime_alive standard "$run_std" "$crew_standard"; then
+  pass "[standard] this exec's runtime alive after restart; state $std_state"
 else
   fail "[standard] precondition: runtime gone right after restart (state $std_state)"
 fi
-watch_until_terminal "$id_std" "$crew_standard" standard || true
+watch_turns "standard:$id_std:$run_std:$crew_standard" || true
 assert_settled standard "$id_std" "$run_std" exited
-if [[ "$(cat "$evidence/.park-standard")" == 1 ]]; then say "[standard] passed through needs_reconciliation"; else say "[standard] settled without needs_reconciliation"; fi
+if [[ -f "$evidence/.park-standard" ]]; then say "[standard] passed through needs_reconciliation"; else say "[standard] settled without needs_reconciliation"; fi
 slots="$(slot_holders)"
 if [[ "$slots" == 0 ]]; then pass "(3) after the standard restart no work item holds an execution slot"; else fail "(3) $slots slot-holding item(s) remain after the standard restart"; fi
 
@@ -383,10 +502,12 @@ for agent in "$A_DEADLINE" "$A_NATURAL"; do
   cs agent update "$agent" --timeout "$DEADLINE_SECS" >>"$LOG" 2>&1 || true
   if id_new="$(start_turn "$agent" "new-$agent")"; then
     pass "(4) $agent admitted a new turn after recovery and its runtime started (work $id_new)"
-    watch_until_terminal "$id_new" "$crew" "new-$agent" || true
+    run_new="$(run_id_of "$id_new")"
+    watch_turns "new-$agent:$id_new:$run_new:$crew" || true
     work_json "$id_new" >"$evidence/work-new-$agent-final.json"
     st="$(field 'd["state"]+" | "+d.get("state_reason","")' <"$evidence/work-new-$agent-final.json")"
-    if [[ "$st" == succeeded* || "$st" == failed* ]]; then pass "(4) $agent new turn settled through the normal path: $st"; else fail "(4) $agent new turn ended $st"; fi
+    if [[ "$st" == succeeded* || "$st" == failed* ]]; then pass "(4) $agent new turn settled: $st"; else fail "(4) $agent new turn ended $st"; fi
+    if [[ -f "$evidence/.park-new-$agent" ]]; then fail "(4) $agent new turn went through needs_reconciliation"; else pass "(4) $agent new turn settled on the normal path (never needs_reconciliation)"; fi
   else
     fail "(4) $agent did not admit a new turn after recovery"
   fi
@@ -394,4 +515,4 @@ done
 slots="$(slot_holders)"
 cs work list -f json >"$evidence/work-all-final.json"
 if [[ "$slots" == 0 ]]; then pass "(3) at the end no work item holds an execution slot"; else fail "(3) $slots slot-holding item(s) remain at the end"; fi
-rm -f "$evidence"/.park-* "$evidence"/.alive-*
+rm -f "$evidence"/.park-* "$evidence"/.alive-* "$evidence"/.done-* "$evidence"/.sids-*

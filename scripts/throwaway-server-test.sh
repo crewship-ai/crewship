@@ -382,4 +382,102 @@ if (exec 3<>/dev/tcp/127.0.0.1/"$FAKE_PORT") 2>/dev/null; then r=still-listening
 check "restarted instance leaves no orphan server" "$r" closed
 if [[ -f "$FAKE_SERVER_PID" ]]; then kill "$(cat "$FAKE_SERVER_PID")" 2>/dev/null || true; fi
 
+# --- pid identity: restart/stop never signal a process that is not the server ---
+# Review of #4880: a server that died leaves its pid in the manifest; once the
+# number is reused, signalling it would kill an unrelated process.
+: >"$FAKE_SERVER_ENV"
+if (cmd_start fp --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT") >/dev/null 2>"$tmp/fp.err"; then r=started; else r=failed; cat "$tmp/fp.err" >&2; fi
+check "pid-identity fixture started" "$r" started
+check "start records the server's kernel start time" "$([[ "$(manifest_get "$tmp/state/fp" pid_starttime)" =~ ^[0-9]+$ ]] && echo yes)" yes
+fp_pid="$(manifest_get "$tmp/state/fp" pid)"
+server_pid_ours "$tmp/state/fp" "$fp_pid" && r=ours || r=foreign
+check "the running server is recognised as this instance's" "$r" ours
+# A recorded start time that differs means the pid now names another process.
+real_start="$(manifest_get "$tmp/state/fp" pid_starttime)"
+manifest_set "$tmp/state/fp" pid_starttime 1
+server_pid_ours "$tmp/state/fp" "$fp_pid" && r=ours || r=foreign
+check "a different kernel start time is not this instance's server" "$r" foreign
+if (cmd_restart fp) >/dev/null 2>&1; then r=accepted; else r=refused; fi
+check "restart with a mismatched start time does not take over the port" "$r" refused
+if kill -0 "$fp_pid" 2>/dev/null; then r=alive; else r=killed; fi
+check "restart never signals a pid whose start time differs" "$r" alive
+manifest_set "$tmp/state/fp" pid_starttime "$real_start"
+manifest_set "$tmp/state/fp" state running
+kill -TERM "$fp_pid" 2>/dev/null || true
+for _ in $(seq 1 50); do kill -0 "$fp_pid" 2>/dev/null || break; sleep 0.1; done
+# A foreign process of the same user on the recorded pid: neither restart nor stop may touch it.
+sleep 300 &
+foreign=$!
+manifest_set "$tmp/state/fp" pid "$foreign"
+manifest_set "$tmp/state/fp" pid_starttime "$(proc_starttime "$foreign")"
+server_pid_ours "$tmp/state/fp" "$foreign" && r=ours || r=foreign
+check "a process without this instance's data dir and prefix is foreign" "$r" foreign
+if (cmd_restart fp) >/dev/null 2>"$tmp/fp-restart.err"; then r=restarted; else r=failed; cat "$tmp/fp-restart.err" >&2; fi
+check "restart over a foreign pid starts the server again" "$r" restarted
+if kill -0 "$foreign" 2>/dev/null; then r=alive; else r=killed; fi
+check "restart never signals a foreign process on the recorded pid" "$r" alive
+fp_new="$(manifest_get "$tmp/state/fp" pid)"
+manifest_set "$tmp/state/fp" pid "$foreign"
+cmd_stop fp >/dev/null 2>&1 || true
+if kill -0 "$foreign" 2>/dev/null; then r=alive; else r=killed; fi
+check "stop never signals a foreign process on the recorded pid" "$r" alive
+kill "$foreign" "$fp_new" 2>/dev/null || true
+wait "$foreign" 2>/dev/null || true
+for _ in $(seq 1 50); do (exec 3<>/dev/tcp/127.0.0.1/"$FAKE_PORT") 2>/dev/null || break; sleep 0.1; done
+
+# --- start claims the name atomically; an existing instance is left alone ---
+mkdir -p "$tmp/state/taken/data"
+echo '{"name":"taken","state":"running","prefix":"crewship-tw-taken-0000","instance_id":"","data_dir":"x","pid":""}' >"$tmp/state/taken/manifest.json"
+taken_before="$(cat "$tmp/state/taken/manifest.json")"
+if (cmd_start taken --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT") >/dev/null 2>&1; then r=started; else r=refused; fi
+check "start refuses an existing name" "$r" refused
+check "refused start leaves the existing manifest unchanged" "$(cat "$tmp/state/taken/manifest.json")" "$taken_before"
+
+# --- the recovery scenario never stops an instance it did not create ---------
+# Review of #4880 (HIGH): ownership was claimed before `start`, so a name
+# collision made teardown stop someone else's instance.
+mkdir -p "$tmp/scen/bin"
+printf '#!/bin/sh\nexit 0\n' >"$tmp/scen/bin/crewship"
+cp "$tmp/scen/bin/crewship" "$tmp/scen/bin/crewship-sidecar"
+chmod 0755 "$tmp/scen/bin/crewship" "$tmp/scen/bin/crewship-sidecar"
+cat >"$tmp/bin/docker" <<'FAKE2'
+#!/usr/bin/env bash
+echo "$*" >>"$FAKE_LOG"
+exit 0
+FAKE2
+chmod +x "$tmp/bin/docker"
+: >"$FAKE_LOG"
+if (CREWSHIP_THROWAWAY_STATE="$tmp/state" bash "$here/acceptance-chat-recovery-throwaway.sh" \
+    --binary "$tmp/scen/bin/crewship" --evidence "$tmp/scen/ev1" --name taken) >/dev/null 2>&1; then r=ran; else r=refused; fi
+check "scenario refuses a name that already exists" "$r" refused
+check "scenario names the existing instance as the reason" "$(grep -c 'already exists in' "$tmp/scen/ev1/scenario.log" || true)" 1
+check "scenario leaves the existing instance's manifest unchanged" "$(cat "$tmp/state/taken/manifest.json")" "$taken_before"
+check "scenario leaves the existing instance's data" "$([[ -d "$tmp/state/taken/data" ]] && echo kept)" kept
+check "scenario issued no docker removal for the existing instance" "$(grep -cE '^(rm|volume rm|run)' "$FAKE_LOG" || true)" 0
+check "scenario teardown says it stopped nothing" "$(grep -c 'no instance owned by this run' "$tmp/scen/ev1/scenario.log" || true)" 1
+# A start that loses the name race (`already exists`) is not this run's either.
+cat >"$tmp/scen/tw-collide.sh" <<'TWF'
+#!/usr/bin/env bash
+echo "$*" >>"$TW_CALLS"
+if [[ "$1" == start ]]; then echo "throwaway-server: $2 already exists" >&2; exit 1; fi
+exit 0
+TWF
+chmod +x "$tmp/scen/tw-collide.sh"
+: >"$tmp/scen/tw-calls"
+if (TW_CALLS="$tmp/scen/tw-calls" CHAT_RECOVERY_THROWAWAY_SCRIPT="$tmp/scen/tw-collide.sh" CREWSHIP_THROWAWAY_STATE="$tmp/state" \
+    bash "$here/acceptance-chat-recovery-throwaway.sh" --binary "$tmp/scen/bin/crewship" --evidence "$tmp/scen/ev2" --name racer) >/dev/null 2>&1; then r=ran; else r=refused; fi
+check "scenario aborts when start loses the name" "$r" refused
+check "scenario reached start in the collision case" "$(grep -c '^start racer' "$tmp/scen/tw-calls" || true)" 1
+check "scenario never stops an instance whose start collided" "$(grep -c '^stop' "$tmp/scen/tw-calls" || true)" 0
+# Default names are unique per run.
+n1="$(grep -o 'instance_name: .*' "$tmp/scen/ev2/run-info.txt" || true)"
+(TW_CALLS=/dev/null CHAT_RECOVERY_THROWAWAY_SCRIPT="$tmp/scen/tw-collide.sh" CREWSHIP_THROWAWAY_STATE="$tmp/state" \
+    bash "$here/acceptance-chat-recovery-throwaway.sh" --binary "$tmp/scen/bin/crewship" --evidence "$tmp/scen/ev3") >/dev/null 2>&1 || true
+(TW_CALLS=/dev/null CHAT_RECOVERY_THROWAWAY_SCRIPT="$tmp/scen/tw-collide.sh" CREWSHIP_THROWAWAY_STATE="$tmp/state" \
+    bash "$here/acceptance-chat-recovery-throwaway.sh" --binary "$tmp/scen/bin/crewship" --evidence "$tmp/scen/ev4") >/dev/null 2>&1 || true
+d1="$(grep -o 'instance_name: .*' "$tmp/scen/ev3/run-info.txt" || true)"
+d2="$(grep -o 'instance_name: .*' "$tmp/scen/ev4/run-info.txt" || true)"
+check "explicit --name is recorded" "$n1" "instance_name: racer"
+check "default instance names differ between runs" "$([[ -n "$d1" && "$d1" != "$d2" ]] && echo unique)" unique
+
 exit "$fail"

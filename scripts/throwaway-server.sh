@@ -214,7 +214,10 @@ PYDOC
   local suffix; suffix="$(od -An -N2 -tx1 /dev/urandom | tr -d ' \n')"
   local prefix="crewship-tw-$name-$suffix"
 
-  mkdir -p "$dir/data"
+  # Atomic claim of the name: two concurrent starts cannot both own one dir.
+  mkdir -p "$STATE_ROOT"
+  mkdir "$dir" 2>/dev/null || die "$name already exists ($dir); stop it first"
+  mkdir "$dir/data"
   chmod 700 "$dir"
   if [[ -n "$page_projects" ]]; then
     # Owned by this instance: under $dir (so remove_state deletes it) but
@@ -295,6 +298,9 @@ launch_server() { # dir fail_state
   )
   local pid; pid="$(cat "$dir/server.pid")"
   manifest_set "$dir" pid "$pid"
+  # The kernel start time pins the pid to this process: a later restart or
+  # stop never signals another process that inherited the number.
+  manifest_set "$dir" pid_starttime "$(proc_starttime "$pid" || true)"
 
   local i
   for ((i = 0; i < START_TIMEOUT; i++)); do
@@ -316,18 +322,56 @@ launch_server() { # dir fail_state
   fi
 }
 
+# proc_starttime prints field 22 of /proc/PID/stat (clock ticks since boot).
+proc_starttime() {
+  python3 -c '
+import sys
+data = open("/proc/%s/stat" % sys.argv[1]).read()
+print(data[data.rindex(")") + 2:].split()[19])' "$1" 2>/dev/null
+}
+
+# server_pid_ours reports whether PID is still this instance's server: same
+# kernel start time as recorded at launch (when recorded) AND launched with
+# this instance's data directory and container prefix. A recycled pid fails.
+server_pid_ours() { # dir pid
+  local dir="$1" pid="$2" recorded now data prefix
+  [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null || return 1
+  recorded="$(manifest_get "$dir" pid_starttime)"
+  if [[ -n "$recorded" ]]; then
+    now="$(proc_starttime "$pid")" || return 1
+    [[ "$now" == "$recorded" ]] || return 1
+  fi
+  data="$(manifest_get "$dir" data_dir)"
+  prefix="$(manifest_get "$dir" prefix)"
+  [[ -n "$data" && -n "$prefix" ]] || return 1
+  python3 - "$pid" "$data" "$prefix" <<'PYENV'
+import sys
+pid, data, prefix = sys.argv[1:4]
+try:
+    env = open("/proc/%s/environ" % pid, "rb").read().split(b"\0")
+except OSError:
+    sys.exit(1)
+want = {("CREWSHIP_DATA_DIR=" + data).encode(), ("CREWSHIP_CONTAINER_PREFIX=" + prefix).encode()}
+sys.exit(0 if want <= set(env) else 1)
+PYENV
+}
+
 # stop_server_process ends only the recorded server process: SIGTERM, then
-# SIGKILL after 30 s. Containers, volumes and data are left alone.
+# SIGKILL after 30 s. Containers, volumes and data are left alone. A pid that
+# no longer belongs to this instance's server is never signalled.
 stop_server_process() { # dir
-  local pid; pid="$(manifest_get "$1" pid)"
-  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-    kill -TERM "$pid" 2>/dev/null || true
-    local i
-    for ((i = 0; i < 30; i++)); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
-    if kill -0 "$pid" 2>/dev/null; then
-      kill -KILL "$pid" 2>/dev/null || true
-      for ((i = 0; i < 10; i++)); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
-    fi
+  local dir="$1" pid; pid="$(manifest_get "$1" pid)"
+  [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null || return 0
+  if ! server_pid_ours "$dir" "$pid"; then
+    log "pid $pid is not this instance's server (exited, pid reused); not signalling it"
+    return 0
+  fi
+  kill -TERM "$pid" 2>/dev/null || true
+  local i
+  for ((i = 0; i < 30; i++)); do server_pid_ours "$dir" "$pid" || break; sleep 1; done
+  if server_pid_ours "$dir" "$pid"; then
+    kill -KILL "$pid" 2>/dev/null || true
+    for ((i = 0; i < 10; i++)); do server_pid_ours "$dir" "$pid" || break; sleep 1; done
   fi
 }
 
@@ -364,7 +408,7 @@ cmd_restart() {
   manifest_set "$dir" state "restarting"
   stop_server_process "$dir"
   local pid; pid="$(manifest_get "$dir" pid)"
-  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+  if [[ -n "$pid" ]] && server_pid_ours "$dir" "$pid"; then
     manifest_set "$dir" state "restart_failed"
     die "$name: server process $pid did not stop"
   fi
@@ -383,7 +427,7 @@ cmd_restart() {
   if [[ -n "$recorded" && "$current" != "$recorded" ]]; then
     stop_server_process "$dir"
     manifest_set "$dir" state "restart_failed"
-    die "$name: restarted server reports identity '${current:-none}', not '$recorded'"
+    die "$name: after restart the data directory names identity '${current:-none}', not '$recorded'"
   fi
   local count; count="$(manifest_get "$dir" restarts)"
   manifest_set "$dir" restarts "$(( ${count:-0} + 1 ))"
