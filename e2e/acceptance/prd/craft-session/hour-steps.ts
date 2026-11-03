@@ -174,13 +174,15 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   await placeCaret(page, d.app, 200)
   const progress = newTyping()
   const typing = typeLines(page, unsaved, 40, 40, 120, progress)
-  await page.waitForTimeout(2_500)
+  // Wait (bounded) for the first line the editor provably took; a stalled
+  // renderer can take seconds to answer a status read.
+  for (const end = Date.now() + 30_000; progress.accepted.length === 0 && Date.now() < end; ) await N.pause(250)
   const before = await readHeadText(api, ref)
   hashes.beforeRestart = before.hash
   if (before.text.includes(`${unsaved}-0`)) failures.push("the typing was saved before the restart; there was no unsaved work to lose")
   failures.push(...d.verify(before.text, saved, "before the restart"))
   const savesBefore = ops.filter((o) => o.kind === "save").length
-  if (progress.accepted.length === 0) failures.push("no line was typed before the restart")
+  if (progress.accepted.length === 0) failures.push(`no line was typed before the restart; typing progress: ${JSON.stringify(progress)}`)
   note("restart")
   restart = await input.restart(`half time of the ${minutes}-minute session`)
   note("server back")
