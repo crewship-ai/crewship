@@ -114,11 +114,34 @@ describe('native Word host authority and persistence',()=>{
   await waitFor(()=>expect(client.save).toHaveBeenCalledTimes(2))
   expect(client.save.mock.calls[1][0].baseVersion).toBe('2')
   await screen.findByText('Uloženo')
-  // A native Ctrl+S ticket also still saves.
-  p.snapshot.mockResolvedValue(sheet(4));act(()=>o.onSaveRequest({documentId:'doc',requestId:'ctrl-s',editorRevision:'grid:4'}))
+  // Sheet Ctrl+S, as the real GridCraft port reports it: no manual ticket id.
+  p.snapshot.mockResolvedValue(sheet(4));act(()=>o.onSaveRequest({documentId:'doc',editorRevision:'doc:4'}))
   await waitFor(()=>expect(client.save).toHaveBeenCalledTimes(3))
   expect(p.saveFailed).not.toHaveBeenCalled()
   await waitFor(()=>expect(screen.getByRole('status')).toHaveAttribute('data-save-phase','saved'))
+ })
+
+ it('#4852: after storage recovers with no further edit, the original receipt is acknowledged and publish waits for that ACK',async()=>{
+  client.open.mockResolvedValueOnce({sessionId:'private-session',applicationId:'gridcraft'})
+  const base=await client.read(new AbortController().signal)
+  client.read.mockResolvedValue({...base,applicationId:'gridcraft',bytes:new TextEncoder().encode('{"sheets":[]}')})
+  mount();await ready();await acquire()
+  const p=ports.at(-1)!,o=portOptions.at(-1)!,ack=deferred<boolean>();p.ack.mockReturnValueOnce(ack.promise)
+  journal.confirm.mockRejectedValueOnce(Error('storage deadline'))
+  p.snapshot.mockResolvedValue({bytes:new TextEncoder().encode('{"sheets":[2]}'),editorRevision:'grid:2',documentId:'doc'});act(()=>o.onChanged('grid:2','doc'))
+  // The bounded retry retires the row; the original receipt goes to the editor.
+  await waitFor(()=>expect(p.ack).toHaveBeenCalledOnce())
+  expect(client.save).toHaveBeenCalledOnce()
+  expect(p.ack).toHaveBeenCalledWith(expect.objectContaining({version:'2',contentHash:client.save.mock.calls[0][0].contentHash}))
+  expect(screen.queryByText('Uloženo')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button',{name:'Publikovat náhled'}))
+  await new Promise(resolve=>setTimeout(resolve,50))
+  expect(client.share).not.toHaveBeenCalled()
+  await act(async()=>ack.resolve(true))
+  await waitFor(()=>expect(client.share).toHaveBeenCalledOnce())
+  expect(client.share).toHaveBeenCalledWith(expect.objectContaining({baseVersion:'2',targetVersion:'2'}),expect.any(AbortSignal))
+  expect(client.save).toHaveBeenCalledOnce()
+  await waitFor(()=>expect(screen.getByRole('status')).toHaveTextContent('Uloženo · verze 2'))
  })
 
  it('stops only the current agent mandate with one H1 request and reloads its fresh version without acquiring',async()=>{
