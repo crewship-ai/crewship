@@ -440,6 +440,10 @@ curl -s -X POST http://localhost:9119/assign \
 Omit `crew` for your own crew. Results come back from `/results/{assignment_id}` either way, and
 `curl -s http://localhost:9119/connections` lists the links as they stand right now.
 
+Each hop is checked against the crew of the agent that dispatches it. A sub-agent in Ops that is
+working on Engineering's task may delegate onward to the crews **Ops** is linked to, so a link
+controls who can hand work across it, not what the receiving crew does with that work afterwards.
+
 A lead's system prompt already names the crews it can reach and who is in them, so it does not have to
 discover them. Peer queries (`/query`) are crew-local by design and cannot cross a link.
 

@@ -180,4 +180,22 @@ func TestAssignmentCreate_CrewBoundSubAgentKeepsLeadChat(t *testing.T) {
 	if w := post(withRun); w.Code != http.StatusCreated {
 		t.Fatalf("server-derived lead chat: status %d, want 201; %s", w.Code, w.Body.String())
 	}
+
+	// The exemption cannot borrow another crew's run: naming the lead's live run
+	// (f.run, an agent outside sub-crew) with an own-crew actor is refused.
+	borrowed := map[string]any{}
+	for k, v := range withRun {
+		borrowed[k] = v
+	}
+	borrowed["source_run_id"] = f.run
+	if w := post(borrowed); w.Code != http.StatusForbidden && w.Code != http.StatusConflict {
+		t.Fatalf("borrowed foreign run: status %d, want a refusal; %s", w.Code, w.Body.String())
+	}
+	var rows int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM assignments WHERE task = 'nested'`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Fatalf("assignments for the nested task = %d, want only the one admitted request", rows)
+	}
 }
