@@ -321,8 +321,9 @@ for (const { application, label } of APPLICATIONS) {
           const editorSaves = trail.filter((c) => c.path === "craft/document/save" && c.status === 200).length - savesBefore
           expect(editorSaves, "the editor saved nothing under the retired generation").toBe(0)
           const kept = await inspectDrafts(page, typedBefore)
-          expect(kept.hasMarker.some(Boolean), `the offered draft holds all ${typedBefore.length} lines the editor took`).toBe(true)
+          // Record the per-line check (lines.json) before any verdict on this copy.
           await expectLines(checkDraftCopies(ledger, kept.texts, "draft offered after the handoff"), "the offered draft holds every line the editor took, once and in order")
+          expect(kept.hasMarker.some(Boolean), `the offered draft holds all ${typedBefore.length} lines the editor took`).toBe(true)
           const shots: Record<string, Buffer> = { "owner-draft-offered.png": await page.screenshot({ fullPage: true }) }
 
           // After a reload the draft is offered again once the owner takes the
@@ -337,8 +338,9 @@ for (const { application, label } of APPLICATIONS) {
           await page.getByRole("status").filter({ hasText: "Připraveno k úpravám" }).first().waitFor({ timeout: 60_000 })
           await waitForDraftOffer(page, 60_000)
           const reloaded = await inspectDrafts(page, typedBefore)
-          expect(reloaded.hasMarker.some(Boolean), "the draft with every line is still offered after a reload").toBe(true)
+          // Record the per-line check (lines.json) before any verdict on this copy.
           await expectLines(checkDraftCopies(ledger, reloaded.texts, "draft offered after the reload"), "the draft offered after a reload holds every line, once and in order")
+          expect(reloaded.hasMarker.some(Boolean), "the draft with every line is still offered after a reload").toBe(true)
           const headReloaded = await headText(request, doc)
           expect(headReloaded.text, "the reload saved nothing").not.toContain(`${LATE}-0`)
           await expectLines(checkNoLines(ledger, headReloaded.text, `server head v${headReloaded.version} after the reload`), "the reload saved no typed line")

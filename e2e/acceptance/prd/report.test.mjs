@@ -6,9 +6,10 @@ import * as path from "node:path"
 import { test } from "node:test"
 import { parseOriginMap, evaluateRequired, formatGate, loadRequired, manualToRows, formatTable, parseArgs, readRows, resultOf, summarize, writeSummary } from "./report.mjs"
 import { idCoverageProblems, scanEmittedIds } from "./emitted-ids.mjs"
-// The Craft rows' lost-line checker has its own tests; loading them here runs
+// The Craft rows' lost-line checker and the API session renewal have their own tests; loading them here runs
 // them in the CI step of this file ("PRD acceptance runner tests").
 import "./craft-session/lines.test.mjs"
+import "./session-refresh.test.mjs"
 
 const row = (over = {}) => ({
   requirement: "B.project.version",

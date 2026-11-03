@@ -70,6 +70,20 @@ treated as a replay, which revokes the whole session (`session_revoked` for
 every holder). So global setup only checks that the accounts can sign in; each
 test signs the owner in again, and every extra context (`prd.api(role)`,
 `prd.browserContext(role)`, crashable browser profiles) gets its own login.
+The API contexts of the long rows (`outage-lostack/actor.ts`, used by
+`craft-hour`) outlive the 15-minute access cookie, so they renew the session on
+a `no_credentials`/`session_expired` 401 and repeat the call
+(`session-refresh.ts`). Each of them has a login of its own (never the
+browser's) and only refreshes that session; it never logs in again during a
+row, so a revoked session (whose refresh is refused) still fails the row.
+
+The rows that type unsaved lines (handoff, revoked right, restart, hour) count a
+line as accepted only when the editor took input before and after it. The
+status line alone does not show that: with unsaved work it reads "Neuložený
+koncept" also after the custody moved away, so the custody toolbar is read too
+("Požádat o předání" or "Pouze čtení" there means the editor no longer takes
+input; `craft-session/lines.ts`, `editorTakesInput`). Every per-line check is
+written to `lines.json` before the row asserts on the copy.
 
 ## Craft session rows
 

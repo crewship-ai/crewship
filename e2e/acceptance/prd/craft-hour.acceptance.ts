@@ -69,6 +69,8 @@ for (const { app, label } of KINDS) {
       } catch (err) {
         await prd.evidence("failure-craft-calls.json", trail).catch(() => {})
         await prd.evidence("failure-steps.json", steps).catch(() => {})
+        // Every save/reconcile the editor sent, answered or not: the trail above only holds answers.
+        await prd.evidence("failure-ops.json", ops).catch(() => {})
         throw err
       }
       const head = await readHeadText(api, ref)

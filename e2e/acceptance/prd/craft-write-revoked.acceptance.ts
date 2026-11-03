@@ -95,8 +95,9 @@ for (const { application, label } of APPLICATIONS) {
           const readOnlyAfterMs = Date.now() - revokedAt
           const offeredRows = await waitForDraftOffer(page, READ_ONLY_WITHIN_MS)
           const drafts = await inspectDrafts(page, typedBefore)
-          expect(drafts.hasMarker.some(Boolean), `the offered draft holds all ${typedBefore.length} lines the editor took`).toBe(true)
+          // Record the per-line check (lines.json) before any verdict on this copy.
           await expectLines(checkDraftCopies(ledger, drafts.texts, "draft offered when the right was withdrawn"), "the offered draft holds every line the editor took, once and in order")
+          expect(drafts.hasMarker.some(Boolean), `the offered draft holds all ${typedBefore.length} lines the editor took`).toBe(true)
           const shots: Record<string, Buffer> = { "peer-read-only.png": await page.screenshot({ fullPage: true }) }
 
           // The server takes no further write from the person and nothing was saved.
@@ -132,8 +133,9 @@ for (const { application, label } of APPLICATIONS) {
           await page.getByRole("status").filter({ hasText: "Připraveno k úpravám" }).first().waitFor({ timeout: 60_000 })
           await waitForDraftOffer(page, 60_000)
           const regained = await inspectDrafts(page, typedBefore)
-          expect(regained.hasMarker.some(Boolean), "after the right returns the draft with every line is offered again").toBe(true)
+          // Record the per-line check (lines.json) before any verdict on this copy.
           await expectLines(checkDraftCopies(ledger, regained.texts, "draft offered after the right returned"), "after the right returns the draft holds every line, once and in order")
+          expect(regained.hasMarker.some(Boolean), "after the right returns the draft with every line is offered again").toBe(true)
           const headRegained = await headText(request, doc)
           expect(headRegained.text, "nothing was saved automatically").not.toContain(`${WORK}-0`)
           await expectLines(checkNoLines(ledger, headRegained.text, `server head v${headRegained.version} after the right returned`), "no typed line was saved automatically")
