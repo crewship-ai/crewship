@@ -13,12 +13,14 @@ import (
 // are append-only audit history and keep their key.
 //
 // The API uses it when a soft-deleted agent's slug is freed for reuse (#4840).
-// A write of that agent still in flight is fenced by the ledger itself, not by
-// the file lock (the lock is per canonical file and the new agent's file is a
-// different one): confirmMutation resolves the key from its mutation row, so
-// a moved intent confirms under the moved key, and the anchor compare-and-swap
-// in writeIntent/confirmMutation refuses an intent whose anchor moved away
-// after it was read (#4862).
+// A write of that agent still in flight is fenced by the ledger, not by the
+// file lock (the lock is per canonical file; the new agent's file is another
+// one). A write that names its owner (MutateRequest.ScopeAgentID) records its
+// intent only while that agent is live and owns the slug, and confirms only
+// under a key the agent still owns, resolved from its mutation row, so a moved
+// intent confirms under the moved key (#4862). The caller must rename the
+// tombstone's slug in the same transaction: that rename is what the ownership
+// check reads, and SQLite's single writer orders it against both checks.
 func RekeyAgentScopeTx(ctx context.Context, tx *sql.Tx, workspaceID, from, to string) error {
 	oldPrefix, newPrefix := "agent:"+from+"/", "agent:"+to+"/"
 	n := utf8.RuneCountInString(oldPrefix) // SQLite substr counts characters

@@ -279,6 +279,18 @@ type MutateRequest struct {
 	Scope string
 	Key   string
 
+	// ScopeAgentID is agents.id of the agent that owns an "agent:<slug>"
+	// Scope. The slug in the key is not a stable identity: a deleted agent's
+	// slug is released and reused (#4840), and the file lock does not exclude
+	// that release (#4862). When set, the ledger records the intent only while
+	// this agent is live in WorkspaceID and its slug still names Scope, and
+	// confirms only under a key this agent still owns (its live slug or its
+	// tombstone). Both checks run inside the write statement or transaction,
+	// so SQLite's single writer orders them against the agent delete and the
+	// slug release. Empty = no ownership fence (trusted callers that pick the
+	// key explicitly, e.g. an operator restore, and ledgerless callers).
+	ScopeAgentID string
+
 	// Path is the resolved canonical absolute path on disk. AuditPath is the
 	// workspace-unique logical key ("agent:alice/AGENT.md"), which is what
 	// the revision anchor and the ledger are keyed by. Two agents in one
@@ -795,6 +807,9 @@ func (r MutateRequest) validate(db *sql.DB) error {
 	}
 	if r.RecordVersion && !ValidTier(r.Tier) {
 		return fmt.Errorf("%w: %q", ErrInvalidTier, r.Tier)
+	}
+	if r.ScopeAgentID != "" && !strings.HasPrefix(r.Scope, "agent:") {
+		return fmt.Errorf("mutate: scope_agent_id is only meaningful for an agent: scope, got %q", r.Scope)
 	}
 	return nil
 }

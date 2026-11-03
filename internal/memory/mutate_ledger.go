@@ -161,6 +161,7 @@ func writeIntent(ctx context.Context, db *sql.DB, req MutateRequest, expected *r
 	}
 
 	anchorCond, anchorArgs := anchorUnchangedCond(req.WorkspaceID, req.AuditPath, expected)
+	ownerCond, ownerArgs := scopeOwnerCond(req.WorkspaceID, req.ScopeAgentID, req.Scope, true)
 	args := append([]any{
 		id, req.WorkspaceID, req.AuditPath, req.Path, req.Scope, string(req.Tier),
 		req.OperationID, row.requestSHA, string(req.Op),
@@ -168,7 +169,7 @@ func writeIntent(ctx context.Context, db *sql.DB, req MutateRequest, expected *r
 		row.baseRevision, row.baseSHA, row.newRevision, row.targetSHA, len(row.target),
 		blobPath, string(removalsJSON), boolInt(row.verified), boolInt(row.adopted), boolInt(row.normalized),
 		boolInt(row.override), mutationStateIntent, string(resultJSON), nowStamp(),
-	}, anchorArgs...)
+	}, append(anchorArgs, ownerArgs...)...)
 	inserted, err := db.ExecContext(ctx, `
 		INSERT INTO memory_mutations (
 			id, workspace_id, path, canonical_path, scope, tier,
@@ -178,11 +179,11 @@ func writeIntent(ctx context.Context, db *sql.DB, req MutateRequest, expected *r
 			target_blob_ref, removals_json, removals_declared, adopted_base, normalized_base,
 			override_drift, state, result_json, recorded_at
 		) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
-		   WHERE `+anchorCond, args...)
+		   WHERE `+anchorCond+` AND `+ownerCond, args...)
 	if err == nil {
 		var n int64
 		if n, err = inserted.RowsAffected(); err == nil && n == 0 {
-			return "", fmt.Errorf("%w: the revision anchor of %s changed since this write read it (was the agent's slug released?)",
+			return "", fmt.Errorf("%w: %s changed hands or its revision anchor moved since this write read it (agent deleted or slug released?); nothing was written",
 				ErrMemoryConflict, req.AuditPath)
 		}
 	}
@@ -236,9 +237,15 @@ func confirmMutation(ctx context.Context, db *sql.DB, req MutateRequest, mutatio
 	if err != nil {
 		return "", fmt.Errorf("confirm memory mutation: %w", err)
 	}
+	// The UPDATE above holds SQLite's write lock, so the agent delete and the
+	// slug release cannot commit between this check and the anchor upsert.
+	// The owner need not be live here: the file was already renamed, and a
+	// key its agent still owns — the live slug or, after a release, the
+	// tombstone the row moved to — cannot belong to anyone else.
 	cond, args := anchorUnchangedCond(req.WorkspaceID, auditPath, expected)
+	ownerCond, ownerArgs := scopeOwnerCond(req.WorkspaceID, req.ScopeAgentID, scope, false)
 	var unchanged bool
-	if err := tx.QueryRowContext(ctx, `SELECT `+cond, args...).Scan(&unchanged); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT (`+cond+`) AND `+ownerCond, append(args, ownerArgs...)...).Scan(&unchanged); err != nil {
 		return "", fmt.Errorf("check revision anchor: %w", err)
 	}
 	if !unchanged {
@@ -246,7 +253,7 @@ func confirmMutation(ctx context.Context, db *sql.DB, req MutateRequest, mutatio
 		if err := markConflicted(ctx, db, mutationID); err != nil {
 			return "", err
 		}
-		return "", fmt.Errorf("%w: the revision anchor of %s changed while this write was in flight; the mutation is marked conflicted",
+		return "", fmt.Errorf("%w: %s changed hands or its revision anchor moved while this write was in flight; the mutation is marked conflicted",
 			ErrMemoryConflict, auditPath)
 	}
 	if err := upsertAnchorTx(ctx, tx, req.WorkspaceID, auditPath, scope, string(req.Tier),
@@ -257,6 +264,20 @@ func confirmMutation(ctx context.Context, db *sql.DB, req MutateRequest, mutatio
 		return "", fmt.Errorf("commit confirm: %w", err)
 	}
 	return auditPath, nil
+}
+
+// scopeOwnerCond is a boolean SQL expression: agentID still owns the agent
+// scope key scope in workspaceID, i.e. its slug is the one the key names. With
+// live, the agent must also not be deleted. An empty agentID fences nothing.
+func scopeOwnerCond(workspaceID, agentID, scope string, live bool) (string, []any) {
+	if agentID == "" {
+		return `1`, nil
+	}
+	q := `EXISTS (SELECT 1 FROM agents WHERE id = ? AND workspace_id = ? AND 'agent:' || slug = ?`
+	if live {
+		q += ` AND deleted_at IS NULL`
+	}
+	return q + `)`, []any{agentID, workspaceID, scope}
 }
 
 // anchorUnchangedCond is a boolean SQL expression: the anchor at
