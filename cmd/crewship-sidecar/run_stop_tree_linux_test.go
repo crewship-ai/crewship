@@ -5,10 +5,13 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -23,6 +26,7 @@ import (
 // start ticks and pidfds pinning every process of the tree once `want` exist.
 func startTreeFixture(t *testing.T, extra string, want int) (*exec.Cmd, uint64, []int) {
 	t.Helper()
+	adoptOrphansInTestProcess(t)
 	script := `sleep 300 & (sh -c 'sleep 300 & wait') & setsid sleep 300 & ` + extra + ` echo ready; wait`
 	cmd := exec.Command("/bin/sh", "-c", script)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
@@ -74,6 +78,53 @@ func startTreeFixture(t *testing.T, extra string, want int) (*exec.Cmd, uint64, 
 		t.Fatal(err)
 	}
 	return cmd, start, pinned
+}
+
+// adoptOrphansInTestProcess makes the test process stand in for the namespace
+// init a docker exec leader has above it: it becomes a child subreaper, so
+// orphans of a fixture tree are adopted by it, and it is the only adopter the
+// stop considers. In the host's namespace the real adopter set reaches the
+// host's init, which starts unrelated services in their own sessions at any
+// time and would make every confirmation in these tests unconfirmed.
+func adoptOrphansInTestProcess(t *testing.T) {
+	t.Helper()
+	if err := unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	self := os.Getpid()
+	ownSession, err := unix.Getsid(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphanAdoptersOf = func(int) (map[int]bool, error) { return map[int]bool{self: true}, nil }
+	// Registered first, so it runs after the fixture's own cleanup killed and
+	// waited for what it started: reap the orphans this process adopted.
+	t.Cleanup(func() {
+		orphanAdoptersOf = orphanAdopters
+		_ = unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0)
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			procs, _ := scanProcesses()
+			adopted := 0
+			for _, p := range procs {
+				if p.ppid != self {
+					continue
+				}
+				if p.state == 'Z' {
+					var status unix.WaitStatus
+					_, _ = unix.Wait4(p.pid, &status, unix.WNOHANG, nil)
+				} else if p.session != ownSession {
+					// A detached orphan of a fixture: it is ours alone.
+					_ = unix.Kill(p.pid, unix.SIGKILL)
+				}
+				adopted++
+			}
+			if adopted == 0 || time.Now().After(deadline) {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	})
 }
 
 func survivors(pinned []int) int {
@@ -317,5 +368,143 @@ func TestOrphanAdoptersCoverTheLeaderAncestryAndInit(t *testing.T) {
 	}
 	if !adopters[1] || !adopters[os.Getpid()] || !adopters[os.Getppid()] || adopters[leader.Process.Pid] {
 		t.Fatalf("adopters %v miss init or the leader's ancestors, or include the leader", adopters)
+	}
+}
+
+// One /proc snapshot is not a complete picture: an orphan of the tree can fork
+// after /proc was listed and exit before its own stat is read. The orphan is
+// then skipped as gone and its child was never listed, so the stop must not be
+// confirmed from that scan while the child runs (#4797).
+func TestExactTreeStopRefusesConfirmationWhenAnOrphanForksAndExitsDuringTheFinalScan(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Fatal("python3 is required for an orphan that forks on demand")
+	}
+	dir := t.TempDir()
+	script, ready := filepath.Join(dir, "hop.py"), filepath.Join(dir, "ready")
+	// On SIGUSR1 the process forks a long-lived child and exits at once.
+	if err := os.WriteFile(script, []byte(`import os, signal, sys, time
+def hop(*_):
+    if os.fork() == 0:
+        time.sleep(300)
+    os._exit(0)
+signal.signal(signal.SIGUSR1, hop)
+open(sys.argv[1], "w").close()
+time.sleep(300)
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	leader, start, _ := startTreeFixture(t, fmt.Sprintf(`sh -c 'setsid python3 %s %s & wait' & `, script, ready), 6)
+	child, orphan := orphanableMember(t, leader.Process.Pid)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("orphan fixture never installed its signal handler")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	orphanFd, err := unix.PidfdOpen(orphan, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = unix.PidfdSendSignal(orphanFd, unix.SIGKILL, nil, 0)
+		unix.Close(orphanFd)
+	})
+	// Orphan it before the stop, so it is outside the tree from the start.
+	if err := syscall.Kill(child, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		stat, err := readProcessStat(orphan)
+		if err == nil && stat.ppid != child {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("orphan never reparented")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	hopped := -1
+	var once sync.Once
+	finalScanEnumerated = func() {
+		once.Do(func() {
+			if err := unix.PidfdSendSignal(orphanFd, unix.SIGUSR1, nil, 0); err != nil {
+				t.Errorf("signal orphan: %v", err)
+				return
+			}
+			if !waitPidfdExit(orphanFd, 3*time.Second) {
+				t.Error("orphan did not exit after forking")
+				return
+			}
+			procs, err := scanProcesses()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			for _, p := range procs {
+				if p.session == orphan && p.state != 'Z' && p.state != 'X' {
+					hopped = p.pid
+				}
+			}
+		})
+	}
+	t.Cleanup(func() { finalScanEnumerated = nil })
+	var diagnostics bytes.Buffer
+	confirmed, stopErr := stopExactTree(leader.Process.Pid, start, &diagnostics)
+	if hopped < 0 {
+		t.Fatal("orphan's child never appeared")
+	}
+	hoppedFd, err := unix.PidfdOpen(hopped, 0)
+	if err != nil {
+		t.Fatalf("orphan's child %d is gone: %v", hopped, err)
+	}
+	defer func() {
+		_ = unix.PidfdSendSignal(hoppedFd, unix.SIGKILL, nil, 0)
+		unix.Close(hoppedFd)
+	}()
+	if stopErr != nil || confirmed {
+		t.Fatalf("stop confirmed=%v err=%v while %d, forked during the final scan, still runs; diag=%s", confirmed, stopErr, hopped, diagnostics.String())
+	}
+	if !strings.Contains(diagnostics.String(), "survived") {
+		t.Fatalf("unconfirmed without naming the survivor: %s", diagnostics.String())
+	}
+}
+
+// A scan during which any process was created is never accepted as complete.
+func TestClosedProcessScanRefusesAScanWithProcessCreation(t *testing.T) {
+	finalScanEnumerated = func() {
+		_ = exec.Command("/bin/true").Run()
+	}
+	t.Cleanup(func() { finalScanEnumerated = nil })
+	if procs, err := closedProcessScan(time.Now().Add(200 * time.Millisecond)); err == nil {
+		t.Fatalf("scan with concurrent process creation accepted (%d processes)", len(procs))
+	}
+	finalScanEnumerated = nil
+	if _, err := closedProcessScan(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("quiet scan refused: %v", err)
+	}
+}
+
+func TestParentsPresent(t *testing.T) {
+	pid1 := processStat{pid: 1, state: 'S'}
+	for _, tc := range []struct {
+		name  string
+		procs []processStat
+		want  bool
+	}{
+		{"consistent", []processStat{pid1, {pid: 10, ppid: 1, state: 'S'}, {pid: 11, ppid: 10, state: 'R'}}, true},
+		{"parent outside the namespace", []processStat{{pid: 10, ppid: 0, state: 'S'}}, true},
+		{"parent missing from the scan", []processStat{pid1, {pid: 11, ppid: 10, state: 'S'}}, false},
+		{"parent read dead", []processStat{pid1, {pid: 10, ppid: 1, state: 'X'}, {pid: 11, ppid: 10, state: 'S'}}, false},
+		{"dead child of a missing parent", []processStat{pid1, {pid: 11, ppid: 10, state: 'X'}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := parentsPresent(tc.procs); got != tc.want {
+				t.Fatalf("parentsPresent = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

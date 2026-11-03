@@ -103,6 +103,10 @@ const stopBudget = 3 * time.Second
 // Tests use it to make a still-running member exit inside that window.
 var afterLeaderStopped func()
 
+// finalScanEnumerated runs in the final scan after /proc was listed and
+// before any process stat is read. Tests use it to fork and exit there.
+var finalScanEnumerated func()
+
 // treeMember is one process held by pidfd while the leader's tree is stopped.
 type treeMember struct {
 	pid     int
@@ -185,7 +189,7 @@ func stopExactTree(pid int, start uint64, diagnostics io.Writer) (confirmed bool
 	}
 	// Recorded while the leader is alive: its ancestor chain can only shrink
 	// afterwards, so every later adopter of an orphan of the tree is in it.
-	adopters, err := orphanAdopters(pid)
+	adopters, err := orphanAdoptersOf(pid)
 	if err != nil {
 		return unconfirmed("leader ancestry unreadable: %v", err)
 	}
@@ -279,7 +283,7 @@ func stopExactTree(pid int, start uint64, diagnostics io.Writer) (confirmed bool
 	}
 	// Backstop: nothing may still run in the leader's or a member's session
 	// or process group, or as a child of any killed process.
-	procs, err := scanProcesses()
+	procs, err := closedProcessScan(deadline)
 	if err != nil {
 		fmt.Fprintln(diagnostics, "final process scan failed:", err)
 		return false, nil
@@ -296,7 +300,7 @@ func stopExactTree(pid int, start uint64, diagnostics io.Writer) (confirmed bool
 		byPID[p.pid] = p
 	}
 	for _, p := range procs {
-		if p.state == 'X' || (p.state == 'Z' && singleThreaded(p.pid)) {
+		if processDead(p) {
 			continue
 		}
 		if sessions[p.session] || sessions[p.pgrp] || parents[p.ppid] {
@@ -310,6 +314,10 @@ func stopExactTree(pid int, start uint64, diagnostics io.Writer) (confirmed bool
 	}
 	return true, nil
 }
+
+// orphanAdoptersOf is orphanAdopters; tests running in the host's PID
+// namespace replace it so the test process stands in for a container init.
+var orphanAdoptersOf = orphanAdopters
 
 // orphanAdopters returns every process that can adopt an orphan of leader's
 // tree: this namespace's init and each ancestor of leader inside the
@@ -535,19 +543,136 @@ func readProcessStat(pid int) (processStat, error) {
 	return processStat{pid: pid, ppid: ppid, pgrp: pgrp, state: fields[0][0], session: session, start: start}, nil
 }
 
+// closedProcessScan returns a /proc scan that is a complete picture of the
+// namespace, retrying until one is or deadline passes. A single scan is not:
+// a process can fork after /proc was listed and exit before its stat is read,
+// and then neither it nor its child appears (#4797). A scan counts only when
+//   - no PID was allocated in this namespace while it ran (the last PID in
+//     /proc/loadavg did not move), so every process alive at its end was
+//     alive throughout and was listed and read alive; and
+//   - every live process's parent is in it and alive, so no process was read
+//     before its parent exited and it was reparented.
+//
+// The last PID could only come back to the same value after pid_max
+// allocations; a scan is accepted only within pid_max/4 microseconds (at most
+// 250ms), which would take four PID allocations every microsecond.
+func closedProcessScan(deadline time.Time) ([]processStat, error) {
+	limit := 250 * time.Millisecond
+	pidMax, err := readPIDMax()
+	if err != nil {
+		return nil, err
+	}
+	if bound := time.Duration(pidMax/4) * time.Microsecond; bound < limit {
+		limit = bound
+	}
+	for {
+		before, err := lastAllocatedPID()
+		if err != nil {
+			return nil, err
+		}
+		began := time.Now()
+		pids, err := listProcessIDs()
+		if err != nil {
+			return nil, err
+		}
+		if finalScanEnumerated != nil {
+			finalScanEnumerated()
+		}
+		procs, err := readProcessStats(pids)
+		if err != nil {
+			return nil, err
+		}
+		after, err := lastAllocatedPID()
+		if err != nil {
+			return nil, err
+		}
+		if before == after && time.Since(began) < limit && parentsPresent(procs) {
+			return procs, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.New("no scan without concurrent process creation or exit")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+func processDead(p processStat) bool {
+	return p.state == 'X' || (p.state == 'Z' && singleThreaded(p.pid))
+}
+
+// parentsPresent reports whether every live process's parent (other than one
+// outside the namespace, PPID 0) was read alive in the same scan.
+func parentsPresent(procs []processStat) bool {
+	byPID := make(map[int]processStat, len(procs))
+	for _, p := range procs {
+		byPID[p.pid] = p
+	}
+	for _, p := range procs {
+		if p.ppid == 0 || processDead(p) {
+			continue
+		}
+		parent, ok := byPID[p.ppid]
+		if !ok || processDead(parent) {
+			return false
+		}
+	}
+	return true
+}
+
+// lastAllocatedPID is the last PID allocated in the reader's PID namespace.
+func lastAllocatedPID() (int, error) {
+	data, err := os.ReadFile("/proc/loadavg")
+	if err != nil {
+		return 0, err
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) != 5 {
+		return 0, errors.New("invalid /proc/loadavg")
+	}
+	return strconv.Atoi(fields[4])
+}
+
+func readPIDMax() (int, error) {
+	data, err := os.ReadFile("/proc/sys/kernel/pid_max")
+	if err != nil {
+		return 0, err
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || value < 300 {
+		return 0, errors.New("invalid pid_max")
+	}
+	return value, nil
+}
+
 // scanProcesses lists every process in this PID namespace. Processes that
 // vanish mid-scan are skipped.
 func scanProcesses() ([]processStat, error) {
+	pids, err := listProcessIDs()
+	if err != nil {
+		return nil, err
+	}
+	return readProcessStats(pids)
+}
+
+func listProcessIDs() ([]int, error) {
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
 		return nil, err
 	}
-	var out []processStat
+	var pids []int
 	for _, entry := range entries {
 		pid, convErr := strconv.Atoi(entry.Name())
 		if convErr != nil || pid < 1 {
 			continue
 		}
+		pids = append(pids, pid)
+	}
+	return pids, nil
+}
+
+func readProcessStats(pids []int) ([]processStat, error) {
+	var out []processStat
+	for _, pid := range pids {
 		stat, statErr := readProcessStat(pid)
 		if statErr != nil {
 			if errors.Is(statErr, os.ErrNotExist) || errors.Is(statErr, unix.ESRCH) {
