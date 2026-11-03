@@ -68,8 +68,12 @@ for (const { application, label } of APPLICATIONS) {
           await placeCaret(page, application, 6)
           const progress = newTyping()
           const typing = typeLines(page, WORK, 8, 40, 120, progress)
-          await page.waitForTimeout(1_600)
-          expect(progress.accepted.length, "lines were typed before the right was withdrawn").toBeGreaterThan(0)
+          await expect
+            .poll(() => progress.accepted.length, { timeout: 30_000, message: `lines were typed before the right was withdrawn` })
+            .toBeGreaterThan(0)
+            .catch((e: unknown) => {
+              throw new Error(`no accepted line before the right was withdrawn; typing progress at failure: ${JSON.stringify(progress)}`, { cause: e })
+            })
           const revokedAt = Date.now()
           await doc.revoke(request, peer.userId, "write")
           await typing

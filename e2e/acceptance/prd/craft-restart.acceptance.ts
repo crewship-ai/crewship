@@ -43,12 +43,16 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
       await placeCaret(page, app, 5)
       const progress = newTyping()
       const typing = typeLines(page, M.M2, 40, 40, 120, progress)
-      await page.waitForTimeout(2_500)
+      await expect
+        .poll(() => progress.accepted.length, { timeout: 30_000, message: `lines were typed before the restart` })
+        .toBeGreaterThan(0)
+        .catch((e: unknown) => {
+          throw new Error(`no accepted line before the restart; typing progress at failure: ${JSON.stringify(progress)}`, { cause: e })
+        })
       const headBefore = await N.readHead(request, ref)
       expect(headBefore.text).toContain(M.M1)
       expect(headBefore.text, "the typing is not saved yet").not.toContain(`${M.M2}-0`)
       const savesBefore = ops.filter((o) => o.kind === "save").length
-      expect(progress.accepted.length, "lines were typed before the restart").toBeGreaterThan(0)
       const restart = await restartServer(prd.origin, `row A.resilience.restart.${label.toLowerCase()}`)
       const typedLines = await typing
       // Every line the editor took (also while the restart was in flight) must
