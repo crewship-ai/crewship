@@ -141,14 +141,16 @@ if have jq; then
   detect2="owned_pending_escalation '$CREW' '$AGENT' '$ESC2'"
   if poll_until "second escalation appears (PENDING)" 60 "$detect2"; then
     id2="$(owned_pending_escalation "$CREW" "$AGENT" "$ESC2")"
-    if [[ -n "$id2" ]] && cs escalation resolve "$id2" --action reject --resolution "denied by audit harness" >/dev/null 2>&1; then
+    if [[ -z "$id2" ]]; then
+      _fail "deny exact owned escalation" "the owned request is absent or ambiguous"
+    elif deny_err="$(deny_credential_escalation "$id2")"; then
       if cs escalation list --crew "$CREW" --format json | jq -e --arg id "$id2" 'any(.[]; .id == $id and .status == "RESOLVED" and .action == "reject")' >/dev/null; then
         _pass "exact owned escalation records RESOLVED/reject"
       else
         _fail "exact owned escalation records RESOLVED/reject"
       fi
     else
-      _fail "deny exact owned escalation" "owned request absent or resolution failed"
+      _fail "deny exact owned escalation" "reject of $id2 failed: $deny_err"
     fi
   fi
 else

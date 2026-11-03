@@ -122,6 +122,51 @@ expect_contains "auth failure -> points at login/seed" "$out" "seed --nuke"
 expect_not_contains "auth failure -> does NOT claim the binary is missing" "$out" "not found"
 
 echo
+echo "== CREDENTIAL escalation deny (#4858) =="
+
+# The server refuses ANY resolution text on a CREDENTIAL escalation, for reject
+# as well as approve (#2376, TestResolveEscalation_Credential_RefusesText).
+# keeper-audit's deny once sent a reason and failed on stage the first time the
+# section got that far. This stub enforces the same rule and records the call.
+deny_cli() {
+  cat >"$1" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${DENY_LOG:?}"
+for a in "$@"; do [ "$a" = version ] && exit 0; done
+case " $* " in
+  *" escalation resolve "*" --resolution "*)
+    echo 'Error: a CREDENTIAL escalation takes no resolution text — supply the value with POST /api/v1/escalations/{id}/supply' >&2
+    exit 1 ;;
+  *" escalation resolve esc-deny --action reject "*) exit 0 ;;
+esac
+echo "Error: escalation not found" >&2
+exit 1
+EOF
+  chmod +x "$1"
+}
+
+deny_dir="$(mktemp -d -t cs-deny.XXXXXX)"
+deny_cli "$deny_dir/crewship"
+: >"$deny_dir/log"
+deny() { # <id> — run the real helper against the stub; print "rc|stdout"
+  # shellcheck disable=SC2016  # the inner shell expands these, not this one
+  env -u CREWSHIP_SERVER -u SERVER CREWSHIP="$deny_dir/crewship" DENY_LOG="$deny_dir/log" \
+    bash -c '. "$1/test-harness/lib.sh" && . "$1/test-harness/owned-escalation.sh" && out="$(deny_credential_escalation "$2")"; rc=$?; printf "%s|%s" "$rc" "$out"' _ "$SCRIPT_DIR" "$1"
+}
+expect_eq "deny of the exact escalation succeeds with no resolution text" "0|" "$(deny esc-deny)"
+# Only meaningful once the stub was really called.
+expect_contains "deny reached the CLI" "$(cat "$deny_dir/log")" "escalation resolve esc-deny"
+expect_not_contains "deny sends no --resolution" "$(cat "$deny_dir/log")" "--resolution"
+expect_contains "deny sends --action reject for that id" "$(cat "$deny_dir/log")" "escalation resolve esc-deny --action reject"
+expect_contains "a failed deny surfaces the CLI error" "$(deny esc-other)" "1|Error: escalation not found"
+if grep -nE 'escalation resolve[^#]*--resolution' "$SCRIPT_DIR/test-harness/test-keeper-audit-integrity.sh" >/dev/null; then
+  fail "keeper-audit resolves no escalation with resolution text" "$(grep -nE 'escalation resolve[^#]*--resolution' "$SCRIPT_DIR/test-harness/test-keeper-audit-integrity.sh")"
+else
+  pass "keeper-audit resolves no escalation with resolution text"
+fi
+rm -rf "$deny_dir"
+
+echo
 echo "== README prereqs =="
 
 # The prereqs say an installed CLI on PATH is enough, so the commands they hand
