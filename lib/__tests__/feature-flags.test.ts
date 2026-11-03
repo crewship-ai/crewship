@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest"
 import { readFileSync } from "node:fs"
 import { parseEnv } from "node:util"
 import { buildProfile, refTargetsMain, RELEASE_FLAGS } from "../../e2e/build-profile"
-import { artifactDesignSystem, artifactSlides, artifactsLibrary, chatArtifactProjects, chatCraftLease, crewsUnifiedUI, legacyMcpIntegrations, pagesOpenArtifacts } from "@/lib/feature-flags"
+import { artifactDesignSystem, artifactSlides, artifactsLibrary, artifactsServerCatalog, chatArtifactProjects, chatCraftLease, crewsUnifiedUI, legacyMcpIntegrations, pagesOpenArtifacts } from "@/lib/feature-flags"
 
 describe.each([
   ["NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", chatArtifactProjects],
@@ -148,5 +148,16 @@ describe("artifactDesignSystem", () => {
   it("keeps the tracked production build configuration default-off", () => {
     const production = readFileSync(".env.production", "utf8")
     expect(production.match(/^NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM\s*=\s*(.*?)\s*$/m)?.[1]).not.toBe("true")
+  })
+})
+
+describe("artifactsServerCatalog", () => {
+  afterEach(() => vi.unstubAllEnvs())
+  it("defaults off and needs the library itself", () => {
+    expect(artifactsServerCatalog()).toBe(false)
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_SERVER_CATALOG", "true")
+    expect(artifactsServerCatalog()).toBe(false)
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
+    expect(artifactsServerCatalog()).toBe(true)
   })
 })

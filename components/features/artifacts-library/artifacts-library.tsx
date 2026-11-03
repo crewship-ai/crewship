@@ -9,7 +9,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { SubBar, SubBarPrimary } from "@/components/layout/sub-bar"
 import { SecondaryPanel } from "@/components/layout/secondary-panel"
 import { PageEmpty, PageError, PageLoading, PageNoResults } from "@/components/layout/page-state"
-import { usePages, type PageCatalogFilter } from "@/hooks/use-pages"
+import { usePageCatalogWindow, usePages, type PageCatalogFilter } from "@/hooks/use-pages"
 import { usePageFolders } from "@/hooks/use-page-folders"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useDocumentViewerRead } from "@/hooks/use-document-viewer-read"
@@ -17,7 +17,7 @@ import { useUserPreference } from "@/hooks/use-user-preference"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { DocumentReadonly } from "@/components/features/pages/document-readonly/document-readonly"
 import { formatRelativeShort } from "@/lib/time"
-import { artifactDashboards, artifactSlides, artifactsDesign, pagesOpenArtifacts } from "@/lib/feature-flags"
+import { artifactDashboards, artifactSlides, artifactsDesign, artifactsServerCatalog, artifactsSharingMock, pagesOpenArtifacts } from "@/lib/feature-flags"
 import { cn } from "@/lib/utils"
 import { ArtifactViewerProvider } from "@/components/features/chat/artifact-context/projects/artifact-viewer-context"
 import { useArtifactProjectsAvailable } from "@/components/features/chat/artifact-context/projects/use-artifact-project-data"
@@ -38,7 +38,7 @@ import { AccessTab } from "./sharing/access-tab"
 import { FolderSettingsDialog } from "./sharing/folder-settings-dialog"
 import { BulkBar, MoveToFolderDialog } from "./sharing/bulk-actions"
 import {
-  applyFilters, EMPTY_FILTERS, groupItems, inView, needsAttention, sortItems, versioned,
+  applyFilters, EMPTY_FILTERS, groupItems, inView, needsAttention, serverCatalogParams, SERVER_PAGE_SIZE, sortItems, versioned,
   type GroupKey, type LibraryFilters, type Personal, type SortKey,
 } from "./library-filter"
 import { LibraryPanel } from "./library-panel"
@@ -552,6 +552,25 @@ export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanoni
   const filters = controlled ?? own
   const setFilters = (next: LibraryFilters) => { setOwn(next); onFiltersChange?.(next) }
   const [sort, setSort] = useState<SortKey>("updated")
+  // Behind its own default-off flag, the All view is filtered, sorted and paged
+  // by the server; the mock sharing store changes archive state the server cannot see.
+  const serverParams = artifactsServerCatalog() && !artifactsSharingMock() && item === null
+    ? serverCatalogParams(filters, sort, { design: artifactsDesign() }) : null
+  const serverKey = serverParams?.toString() ?? null
+  const [serverWindow, setServerWindow] = useState<{ key: string | null; page: number }>({ key: null, page: 0 })
+  const serverPage = serverWindow.key === serverKey ? serverWindow.page : 0
+  const catalogWindow = usePageCatalogWindow(workspaceId, serverParams, serverPage * SERVER_PAGE_SIZE, SERVER_PAGE_SIZE)
+  const windowItems = useMemo(() => {
+    const base = libraryItems(catalogWindow.pages, { keepOrder: true })
+    return withLibraryState(base, sharing.libraryState(base))
+  }, [catalogWindow.pages, sharing])
+  // A write can shrink the total under the current offset (archive the only
+  // item on the last page): move to the last page that still has rows.
+  const lastServerPage = Math.max(0, Math.ceil(catalogWindow.total / SERVER_PAGE_SIZE) - 1)
+  const pastEnd = serverParams !== null && !catalogWindow.loading && !catalogWindow.error && serverPage > lastServerPage
+  useEffect(() => {
+    if (pastEnd) setServerWindow({ key: serverKey, page: lastServerPage })
+  }, [pastEnd, serverKey, lastServerPage])
   const [group, setGroup] = useState<GroupKey>("none")
   const [layout, setLayout] = useState<Layout>("list")
   const [newKind, setNewKind] = useState<ArtifactKindKey | null | undefined>(undefined)
@@ -616,10 +635,16 @@ export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanoni
   } else if (filters.view === "home") {
     content = <LibraryHome items={items} creatable={creatable} personal={personal} onNew={kind => setNewKind(kind)} onOpen={pick}
       onShow={view => setFilters({ ...filters, view })} peeked={peeked?.slug} />
+  } else if (serverParams && catalogWindow.loading) {
+    content = <div aria-label="Loading artifacts"><PageLoading variant="cards" /></div>
+  } else if (serverParams && catalogWindow.error) {
+    content = <PageError title="Artifacts could not be loaded" onRetry={refresh} retryLabel="Try again" />
   } else {
-    const filtered = applyFilters(items, filters, personal)
-    // Recently opened keeps its own order until another sort is chosen.
-    const shown = filters.view === "opened" && sort === "updated" ? filtered : sortItems(filtered, sort)
+    const filtered = serverParams ? windowItems : applyFilters(items, filters, personal)
+    // Recently opened keeps its own order until another sort is chosen; a server window keeps the server's.
+    const shown = serverParams || filters.view === "opened" && sort === "updated" ? filtered : sortItems(filtered, sort)
+    const total = serverParams ? catalogWindow.total : shown.length
+    const first = serverPage * SERVER_PAGE_SIZE
     const chosen = shown.filter(entry => picked.has(entry.slug))
     const selection: Selection = {
       has: slug => picked.has(slug),
@@ -634,7 +659,7 @@ export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanoni
           <Settings2 aria-hidden />Folder settings
         </Button>
       </div>}
-      <DisplayRow count={shown.length} sort={sort} group={group} layout={layout} onSort={setSort} onGroup={setGroup} onLayout={setLayout}
+      <DisplayRow count={total} sort={sort} group={group} layout={layout} onSort={setSort} onGroup={setGroup} onLayout={setLayout}
         selecting={mobile ? selecting || picked.size > 0 : undefined} onSelecting={mobile && layout === "list" ? next => { setSelecting(next); if (!next) setPicked(new Set()) } : undefined} />
       {note && <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-card border border-dashed p-3 text-sm text-muted-foreground">
         <span className="min-w-0 flex-[1_1_260px]">{note}</span>
@@ -648,6 +673,11 @@ export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanoni
           {entry.label && <h2 className="text-xs font-semibold text-muted-foreground">{entry.label} <span className="tabular-nums">{entry.items.length}</span></h2>}
           <ItemsView items={entry.items} layout={layout} onOpen={pick} selection={layout === "list" && (!mobile || selecting || picked.size > 0) ? selection : undefined} peeked={peeked?.slug} />
         </section>)}
+      {serverParams && (total > SERVER_PAGE_SIZE || serverPage > 0) && <nav aria-label="Artifact pages" className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
+        <span className="tabular-nums">{shown.length ? `${first + 1}–${first + shown.length}` : "None"} of {total}</span>
+        <Button type="button" size="sm" variant="outline" disabled={serverPage === 0} onClick={() => setServerWindow({ key: serverKey, page: serverPage - 1 })}>Previous</Button>
+        <Button type="button" size="sm" variant="outline" disabled={first + SERVER_PAGE_SIZE >= total} onClick={() => setServerWindow({ key: serverKey, page: serverPage + 1 })}>Next</Button>
+      </nav>}
     </div>
   }
 

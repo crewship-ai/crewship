@@ -537,28 +537,67 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wsID := WorkspaceIDFromContext(r.Context())
-
-	viewer, err := h.loadViewer(r.Context(), wsID, user.ID)
+	// Ordinary catalogs keep a read snapshot. If admitted candidates require a
+	// custody audit, reload once under the existing metadata writer fence.
+	r, read, err := h.startMetadataRead(r, false)
 	if err != nil {
-		replyInternalError(w, h.logger, "load page viewer", err)
+		replyInternalError(w, h.logger, "begin page catalog read", err)
 		return
 	}
-	index, err := h.loadPageIndex(r.Context(), wsID, viewer, pagesInWorkspace(wsID))
-	if err != nil {
-		replyInternalError(w, h.logger, "list pages", err)
-		return
+	defer func() { read.tx.Rollback() }()
+	var viewer *pageViewer
+	var index *pageIndex
+	var candidates []pageIndexRow
+	for {
+		viewer, err = h.loadViewer(r.Context(), wsID, user.ID)
+		if err != nil {
+			replyInternalError(w, h.logger, "load page viewer", err)
+			return
+		}
+		index, err = h.loadPageIndex(r.Context(), wsID, viewer, pagesInWorkspace(wsID))
+		if err != nil {
+			replyInternalError(w, h.logger, "list pages", err)
+			return
+		}
+		candidates, err = pageCatalogCandidates(r, index, user.ID)
+		if err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		needsAudit := false
+		for _, candidate := range candidates {
+			if candidate.rec.PrivateAudience && candidate.rec.OwnerUserID != user.ID {
+				needsAudit = true
+				break
+			}
+		}
+		if read.writer || !needsAudit {
+			break
+		}
+		read.tx.Rollback()
+		nextRequest, nextRead, beginErr := h.startMetadataRead(r, true)
+		if beginErr != nil {
+			replyInternalError(w, h.logger, "begin page catalog audit", beginErr)
+			return
+		}
+		r, read = nextRequest, nextRead
 	}
 	rows, total, err := pageCatalogRows(r, index, user.ID)
 	if err != nil {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	out := make([]pageListWire, 0, len(rows))
-	for i := range rows {
-		if !h.auditPrivateOwnerAccess(w, r, &rows[i].rec) {
+	for i := range candidates {
+		if !h.auditPrivateOwnerAccess(w, r, &candidates[i].rec) {
 			return
 		}
+	}
+	out := make([]pageListWire, 0, len(rows))
+	for i := range rows {
 		out = append(out, h.pageListRow(&rows[i], index.folders, viewer))
+	}
+	if !h.finishMetadataRead(w, r, read) {
+		return
 	}
 	w.Header().Set("X-Total-Count", strconv.Itoa(total))
 	writeJSON(w, http.StatusOK, out)

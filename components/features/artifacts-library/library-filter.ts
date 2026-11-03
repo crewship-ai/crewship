@@ -169,6 +169,31 @@ export function facetCounts(items: LibraryItem[], filters: LibraryFilters, perso
   }
 }
 
+/** One server window of the All view (#4471). */
+export const SERVER_PAGE_SIZE = 50
+
+/**
+ * The All view as `GET /api/v1/pages` parameters, or null when only the browser
+ * can express it: another view, query operators, or owner labels (the server
+ * takes canonical owners, the panel shows names). Archived and test items stay
+ * out by the server's defaults, empty ones by `empty=exclude`, as in `inView`.
+ */
+export function serverCatalogParams(filters: LibraryFilters, sort: SortKey, options: { design: boolean }): URLSearchParams | null {
+  if (filters.view !== "all" || filters.owners.length) return null
+  const query = parseQuery(filters.q)
+  if (query.kinds.length || query.is.length || query.owner.length) return null
+  const kinds = (filters.kinds.length ? filters.kinds : options.design ? [] : LIBRARY_KINDS.map(entry => entry.kind))
+    .filter(kind => options.design || kind !== "design")
+  if (filters.kinds.length && !kinds.length) return null
+  const params = new URLSearchParams({ empty: "exclude", sort })
+  if (query.text) params.set("q", query.text)
+  if (kinds.length) params.set("kind", kinds.join(","))
+  if (filters.access.length) params.set("access", filters.access.join(","))
+  if (filters.version.length) params.set("version", filters.version.join(","))
+  if (filters.folder !== null) params.set("folder", filters.folder === "" ? UNFILED : filters.folder)
+  return params
+}
+
 export const activeFacetCount = (filters: LibraryFilters) =>
   filters.kinds.length + filters.access.length + filters.version.length + filters.owners.length + (filters.folder !== null ? 1 : 0)
 
