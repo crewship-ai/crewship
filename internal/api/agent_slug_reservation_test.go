@@ -185,6 +185,16 @@ func TestAgentSlugReuse_MovesDeletedAgentMemoryAnchors(t *testing.T) {
 			anchor("agent:e_g/pins.md")
 			anchor("agent:exg/AGENT.md")  // '_' must not match as a wildcard
 			anchor("agent:e_g2/AGENT.md") // a longer slug sharing the prefix
+			mutation := func(id, path, state string) {
+				t.Helper()
+				if _, err := h.db.Exec(`INSERT INTO memory_mutations (id, workspace_id, path, canonical_path, scope, tier, operation_id, request_sha256, op, new_revision, target_sha256, state, recorded_at)
+					VALUES (?, ?, ?, '/old/crew-a/agents/e_g/.memory/AGENT.md', 'agent:e_g', 'agent', ?, 'r', 'append', 2, 't', ?, '2026-11-02T17:52:00Z')`,
+					id, wsID, path, "op-"+id, state); err != nil {
+					t.Fatal(err)
+				}
+			}
+			mutation("mm_pending", "agent:e_g/AGENT.md", "renamed")
+			mutation("mm_done", "agent:e_g/pins.md", "confirmed")
 			deleteAgent(t, h, userID, wsID, "ag-old")
 
 			switch via {
@@ -225,6 +235,25 @@ func TestAgentSlugReuse_MovesDeletedAgentMemoryAnchors(t *testing.T) {
 				if got[p] != s {
 					t.Fatalf("anchors = %v, want %v", got, want)
 				}
+			}
+			mut := map[string]string{}
+			mrows, err := h.db.Query(`SELECT id, path || '|' || scope || '|' || canonical_path FROM memory_mutations WHERE workspace_id = ?`, wsID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer mrows.Close()
+			for mrows.Next() {
+				var id, v string
+				if err := mrows.Scan(&id, &v); err != nil {
+					t.Fatal(err)
+				}
+				mut[id] = v
+			}
+			// The unconfirmed write follows the tombstone (its file stays where it
+			// was); confirmed history keeps its key.
+			if mut["mm_pending"] != "agent:e_g_deleted_ag-old/AGENT.md|agent:e_g_deleted_ag-old|/old/crew-a/agents/e_g/.memory/AGENT.md" ||
+				mut["mm_done"] != "agent:e_g/pins.md|agent:e_g|/old/crew-a/agents/e_g/.memory/AGENT.md" {
+				t.Fatalf("mutations = %v", mut)
 			}
 			var tomb string
 			if err := h.db.QueryRow(`SELECT slug FROM agents WHERE id = 'ag-old'`).Scan(&tomb); err != nil || tomb != "e_g_deleted_ag-old" {

@@ -15,8 +15,8 @@ import (
 // file lives under the agent's crew, so an anchor left behind would be
 // inherited by the next agent with that slug, and every memory.write of that
 // agent would fail the drift check against a file it never had (#4840).
-// History (memory_versions, memory_mutations) is append-only audit and is not
-// rewritten.
+// Its unconfirmed memory writes move too; confirmed history (memory_versions,
+// confirmed memory_mutations) is append-only audit and keeps its key.
 func freeDeletedAgentSlug(ctx context.Context, db *sql.DB, workspaceID, slug string) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -58,6 +58,20 @@ func freeDeletedAgentSlug(ctx context.Context, db *sql.DB, workspaceID, slug str
 		 WHERE workspace_id = ? AND substr(path, 1, ?) = ?`,
 		newPrefix, n, "agent:"+renamed, workspaceID, n, oldPrefix); err != nil {
 		return fmt.Errorf("move deleted agent memory anchors: %w", err)
+	}
+	// Unconfirmed writes of the deleted agent (state intent/renamed) are
+	// recovered per audit key against the CALLER's file before every write
+	// (internal/memory recoverFileLocked). Left under the slug, the next agent
+	// would have the deleted agent's queued content replayed into its own
+	// memory. They move with the tombstone; boot recovery still finds them by
+	// canonical_path, which stays as recorded. Confirmed rows are audit history
+	// and keep their key.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE memory_mutations
+		   SET path = ? || substr(path, ? + 1), scope = ?
+		 WHERE workspace_id = ? AND substr(path, 1, ?) = ? AND state IN ('intent', 'renamed')`,
+		newPrefix, n, "agent:"+renamed, workspaceID, n, oldPrefix); err != nil {
+		return fmt.Errorf("move deleted agent unconfirmed memory writes: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE agents SET slug = ? WHERE id = ? AND deleted_at IS NOT NULL`, renamed, ids[0]); err != nil {
 		return err
