@@ -88,6 +88,10 @@ HOST_TESTS = {
     },
     'internal/server': {
         'TestHostChatRetainedOutputSettlesSameAttemptAfterUnknownReturn',
+        'TestLegacyRetainedMetadataCannotInventCompletion',
+        'TestRetainedCompletionAcknowledgesUntimedStagedResultWithReceipt',
+        'TestRetainedCompletionRejectsStagedTimestampMismatch',
+        'TestRetainedCompletionUsesCapturedTimeAfterHistoryPruning',
         'TestRetainedDockerServerRestartProjectsActualProviderExit',
         'TestRetainedOutputCannotSettleAnotherAgentWork',
         'TestRetainedOutputCannotSettleForeignWork',
@@ -106,7 +110,7 @@ HOST_FIXTURE_GROUPS = {
     'internal/runoutput': ('host_unix_test.go', 'host_capacity_test.go', 'replay_test.go'),
     'internal/orchestrator': ('run_output_analysis_test.go', 'run_output_host_test.go',
                               'run_output_runagent_test.go'),
-    'internal/server': ('retained_output_test.go',),
+    'internal/server': ('retained_output_test.go', 'retained_completion_time_test.go'),
     'internal/provider/docker': ('host_capture_test.go', 'host_capture_linux_test.go'),
 }
 HOST_FIXTURE_HELPERS = {('internal/runoutput', 'TestHostCaptureSubprocess')}
