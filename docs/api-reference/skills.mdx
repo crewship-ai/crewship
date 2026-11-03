@@ -489,7 +489,7 @@ Imports the staged SKILL.md through the canonical skills importer (same path as 
 | `400` | Invalid JSON, missing `crew_id`/`file_name`, or unsafe `file_name` |
 | `403` | Insufficient role |
 | `404` | Crew not found, or staged file missing |
-| `422` | Staged content failed the importer (frontmatter malformed, license rejected) |
+| `422` | Staged content failed the importer (frontmatter malformed, license rejected), or the staged entry is not a regular file (a symlink, or under a symlinked directory; it is not read) |
 | `503` | Server has no crew-memory root configured |
 
 ### Reject Proposed Skill

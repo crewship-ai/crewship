@@ -108,10 +108,17 @@ func (h *ProposedHandler) Diff(w http.ResponseWriter, r *http.Request) {
 	}
 	// Check the source artifact's existence before admission, preserving 410.
 	// Reading and formatting wait until after the nonblocking shared gate.
-	proposalFile, err := os.Open(exp.ProposalPath)
+	// Both files live in a memory tree the crew can write; neither may be
+	// read through a symlink (same discipline as the skills listing).
+	proposalFile, err := openProposalFileNoFollow(h.storageBasePath, exp.ProposalPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			replyError(w, http.StatusGone, "proposal markdown is missing on disk")
+			return
+		}
+		if isNoFollowRefusal(exp.ProposalPath, err) {
+			h.logger.Warn("proposal diff: refused non-regular proposal file", "proposal_id", proposalID, "error", err)
+			replyError(w, http.StatusUnprocessableEntity, "proposal markdown is not a regular file")
 			return
 		}
 		h.logger.Error("proposal diff: open body", "proposal_id", proposalID, "error", err)
@@ -140,10 +147,14 @@ func (h *ProposedHandler) Diff(w http.ResponseWriter, r *http.Request) {
 	canonicalPath := consolidate.CanonicalPathForProposal(exp.ProposalPath, now)
 	var current []byte
 	canonicalExists := true
-	canonicalFile, err := os.Open(canonicalPath)
+	canonicalFile, err := openProposalFileNoFollow(h.storageBasePath, canonicalPath)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		canonicalExists = false
+	case isNoFollowRefusal(canonicalPath, err):
+		h.logger.Warn("proposal diff: refused non-regular canonical file", "path", canonicalPath, "error", err)
+		replyError(w, http.StatusUnprocessableEntity, "canonical learned file is not a regular file")
+		return
 	case err != nil:
 		h.logger.Error("proposal diff: open canonical", "path", canonicalPath, "error", err)
 		replyError(w, http.StatusInternalServerError, "diff failed")

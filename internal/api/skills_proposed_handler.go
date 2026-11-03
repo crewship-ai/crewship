@@ -227,13 +227,22 @@ func (h *SkillProposedHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	full := filepath.Join(dir, body.FileName)
-	raw, err := os.ReadFile(full)
+	// Same read discipline as List: the .proposed directory sits inside a
+	// memory tree the crew can write, so neither the entry nor any parent
+	// directory may be a symlink. Approving must import exactly the file
+	// the operator saw listed, not whatever a link points to.
+	raw, err := memory.ReadFileNoFollowRoot(h.storageBasePath, full)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
+		switch {
+		case errors.Is(err, os.ErrNotExist):
 			replyError(w, http.StatusNotFound, "staged skill not found")
-			return
+		case isNoFollowRefusal(full, err):
+			h.logger.Warn("skills proposed: refused non-regular staged entry", "file", full, "err", err)
+			replyError(w, http.StatusUnprocessableEntity, "staged skill is not a regular file")
+		default:
+			h.logger.Error("skills proposed: read staged skill", "file", full, "err", err)
+			replyError(w, http.StatusInternalServerError, "read staged skill failed")
 		}
-		replyError(w, http.StatusInternalServerError, "read staged skill: "+err.Error())
 		return
 	}
 
