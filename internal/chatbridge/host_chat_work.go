@@ -90,8 +90,9 @@ type hostChatTracker struct {
 	observedExit *int
 	cancelRun    context.CancelCauseFunc
 
-	// fence orders stop delivery against completion: once the run has
-	// returned, a poll answer still in flight may no longer cancel it.
+	// fence orders stop delivery against completion: once the process exit
+	// was observed or the run returned, a poll answer still in flight may
+	// no longer cancel it.
 	fence     sync.Mutex
 	finished  bool
 	delivered bool
@@ -171,6 +172,11 @@ func (b *Bridge) bindHostChatWork(ctx context.Context, req *orchestrator.AgentRu
 	}
 	priorTerminal := req.OnExecTerminal
 	req.OnExecTerminal = func(code int) {
+		// The process's own exit is observed: from here a late cancel answer
+		// may not deliver a stop or turn this outcome into CANCELLED.
+		tracker.fence.Lock()
+		tracker.finished = true
+		tracker.fence.Unlock()
 		tracker.mu.Lock()
 		copy := code
 		tracker.observedExit = &copy

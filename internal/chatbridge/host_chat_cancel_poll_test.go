@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -286,5 +287,44 @@ func TestHostChatLateCancelPollDoesNotLoseACompletedTurn(t *testing.T) {
 	}
 	if !replied {
 		t.Fatalf("the completed reply was lost from history: %+v", msgs)
+	}
+}
+
+// pollingLifecycle answers every cancel poll with a recorded cancel.
+type pollingLifecycle struct {
+	*capResolver
+	polls chan struct{}
+}
+
+func (p *pollingLifecycle) takeHostChatWork(string) bool                        { return true }
+func (p *pollingLifecycle) hostChatPhase(context.Context, string, string) error { return nil }
+func (p *pollingLifecycle) hostChatCancelRequested(context.Context, string) (bool, error) {
+	select {
+	case p.polls <- struct{}{}:
+	default:
+	}
+	return true, nil
+}
+
+// #4838 round 2: once the process's own exit was observed (here a natural
+// exit 1), a cancel answer arriving before RunAgent returns must not deliver
+// a stop, or settlement would record CANCELLED over the real failure.
+func TestHostChatCancelAfterObservedExitDoesNotRewriteTheOutcome(t *testing.T) {
+	lifecycle := &pollingLifecycle{capResolver: &capResolver{info: baseInfo()}, polls: make(chan struct{}, 1)}
+	bridge := &Bridge{resolver: lifecycle, logger: slog.Default()}
+	var req orchestrator.AgentRunRequest
+	runCtx, tracker := bridge.bindHostChatWork(t.Context(), &req, "run-natural-exit")
+	defer tracker.Close()
+
+	req.OnExecTerminal(1) // natural failure observed; RunAgent has not returned yet
+	select {
+	case <-lifecycle.polls:
+	case <-time.After(3 * hostChatCancelPollInterval):
+		t.Fatal("no cancel poll ran after the observed exit")
+	}
+	tracker.Stop() // joins the loop, so the poll answer has been handled
+
+	if tracker.StopDelivered() || runCtx.Err() != nil {
+		t.Fatalf("a cancel answered after the observed exit was delivered: delivered=%v ctx=%v", tracker.StopDelivered(), runCtx.Err())
 	}
 }
