@@ -109,6 +109,9 @@ for bad in CREWSHIP_DATA_DIR=$tmp/live CREWSHIP_HOST=0.0.0.0 CREWSHIP_PORT=9999 
   check "--env refuses $key" "$r" refused
 done
 check "--env refusal names the allowlist" "$(grep -c 'not an optional feature setting' "$tmp/envreject.err" || true)" 1
+if (cmd_start envreject --binary /bin/true --env "$(printf 'CREWSHIP_RATELIMIT_DISABLED=1\nCREWSHIP_DATA_DIR=/live')") >/dev/null 2>&1; then r=started; else r=refused; fi
+check "--env refuses a multi-line value (restart replays settings by line)" "$r" refused
+check "multi-line refusal creates no instance state" "$([[ -e "$tmp/state/envreject" ]] && echo created || echo absent)" absent
 if (cmd_start envreject --binary /bin/true --env) >/dev/null 2>&1; then r=started; else r=refused; fi
 check "--env without a value is refused, not a set -u crash" "$r" refused
 
@@ -286,5 +289,265 @@ for bad_native in CREWSHIP_CRAFT_NATIVE_WORD_ACTOR_ID=forged CREWSHIP_CRAFT_NATI
   if (cmd_start nativebad --binary /bin/true --env "$bad_native") >/dev/null 2>&1; then r=started; else r=refused; fi
   check "native prefix does not admit arbitrary ${bad_native%%=*}" "$r" refused
  done
+
+# --- restart: same data, port, prefix, identity and settings; nothing removed ---
+# A recovery scenario restarts the server WITHOUT reseeding (#4824): only the
+# server process may change. Containers, volumes and the data directory belong
+# to the instance and must survive, and the settings it was started with must
+# reach the new process too.
+: >"$FAKE_SERVER_ENV"
+if (cmd_start rs --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" \
+    --env CREWSHIP_RATELIMIT_DISABLED=1 --page-projects) >/dev/null 2>"$tmp/rs-start.err"; then r=started; else r=failed; cat "$tmp/rs-start.err" >&2; fi
+check "restart fixture started" "$r" started
+mkdir -p "$tmp/state/rs/data/installations"
+echo iid-rs >"$tmp/state/rs/data/installations/self"
+echo kept >"$tmp/state/rs/data/marker"
+manifest_set "$tmp/state/rs" instance_id iid-rs
+rs_pid_before="$(manifest_get "$tmp/state/rs" pid)"
+rs_prefix="$(manifest_get "$tmp/state/rs" prefix)"
+env_before="$(grep -v '^_=' "$FAKE_SERVER_ENV" | sort)"
+: >"$FAKE_LOG"
+: >"$FAKE_SERVER_ENV"
+if (cmd_restart rs) >/dev/null 2>"$tmp/rs-restart.err"; then r=restarted; else r=failed; cat "$tmp/rs-restart.err" >&2; fi
+check "restart succeeds" "$r" restarted
+rs_pid_after="$(manifest_get "$tmp/state/rs" pid)"
+check "restart runs a new server process" "$([[ -n "$rs_pid_after" && "$rs_pid_after" != "$rs_pid_before" ]] && echo new)" new
+if kill -0 "$rs_pid_before" 2>/dev/null; then r=alive; else r=gone; fi
+check "restart ended the previous server process" "$r" gone
+check "restart keeps the state running" "$(manifest_get "$tmp/state/rs" state)" running
+check "restart keeps the port" "$(manifest_get "$tmp/state/rs" port)" "$FAKE_PORT"
+check "restart keeps the container prefix" "$(manifest_get "$tmp/state/rs" prefix)" "$rs_prefix"
+check "restart keeps the installation identity" "$(manifest_get "$tmp/state/rs" instance_id)" iid-rs
+check "restart keeps the data directory" "$(cat "$tmp/state/rs/data/marker" 2>/dev/null)" kept
+check "restart passes the same environment to the new process" "$(grep -v '^_=' "$FAKE_SERVER_ENV" | sort)" "$env_before"
+check "restart removes no container or volume" "$(grep -cE '^(rm|volume rm|run)' "$FAKE_LOG" || true)" 0
+check "restart records the restart count" "$(manifest_get "$tmp/state/rs" restarts)" 1
+
+# --down-seconds keeps the server stopped for that long before starting it.
+# shellcheck disable=SC2317 # invoked indirectly through RESTART_SLEEP
+fake_sleep() { echo "$1" >>"$tmp/slept"; }
+: >"$tmp/slept"
+if (RESTART_SLEEP=fake_sleep cmd_restart rs --down-seconds 75) >/dev/null 2>"$tmp/rs-down.err"; then r=restarted; else r=failed; cat "$tmp/rs-down.err" >&2; fi
+check "restart --down-seconds succeeds" "$r" restarted
+check "restart --down-seconds waits with the server stopped" "$(cat "$tmp/slept")" 75
+check "restart --down-seconds counts a second restart" "$(manifest_get "$tmp/state/rs" restarts)" 2
+for bad_down in -1 abc 1.5 ""; do
+  if (cmd_restart rs --down-seconds "$bad_down") >/dev/null 2>&1; then r=accepted; else r=refused; fi
+  check "restart refuses --down-seconds '$bad_down'" "$r" refused
+done
+check "refused restart options leave the server running" "$(manifest_get "$tmp/state/rs" state)" running
+
+# A different installation identity after restart means a different data
+# directory answered: never report it as the same instance.
+rs_pid="$(manifest_get "$tmp/state/rs" pid)"
+manifest_set "$tmp/state/rs" instance_id iid-other
+if (cmd_restart rs) >/dev/null 2>&1; then r=accepted; else r=refused; fi
+check "restart refuses an instance whose identity changed" "$r" refused
+check "identity mismatch leaves the server process alone" "$(manifest_get "$tmp/state/rs" pid)" "$rs_pid"
+if kill -0 "$rs_pid" 2>/dev/null; then r=alive; else r=gone; fi
+check "identity mismatch does not stop the server" "$r" alive
+manifest_set "$tmp/state/rs" instance_id iid-rs
+
+# Only a running or restart_failed instance may be restarted.
+for bad_state in stopping teardown_failed failed_to_start starting; do
+  manifest_set "$tmp/state/rs" state "$bad_state"
+  if (cmd_restart rs) >/dev/null 2>&1; then r=accepted; else r=refused; fi
+  check "restart refuses state $bad_state" "$r" refused
+done
+manifest_set "$tmp/state/rs" state running
+if (cmd_restart no-such-instance) >/dev/null 2>&1; then r=accepted; else r=refused; fi
+check "restart refuses an unknown instance" "$r" refused
+if (main restart) >/dev/null 2>&1; then r=accepted; else r=refused; fi
+check "restart without a name is refused" "$r" refused
+
+# The port must still be ours: another listener there is a different server.
+rs_pid="$(manifest_get "$tmp/state/rs" pid)"
+kill -TERM "$rs_pid" 2>/dev/null || true
+for _ in $(seq 1 50); do kill -0 "$rs_pid" 2>/dev/null || break; sleep 0.1; done
+python3 -m http.server "$FAKE_PORT" --bind 127.0.0.1 >/dev/null 2>&1 &
+squatter=$!
+for _ in $(seq 1 50); do (exec 3<>/dev/tcp/127.0.0.1/"$FAKE_PORT") 2>/dev/null && break; sleep 0.1; done
+if (cmd_restart rs) >/dev/null 2>&1; then r=accepted; else r=refused; fi
+check "restart refuses a port another process holds" "$r" refused
+check "occupied port marks the manifest" "$(manifest_get "$tmp/state/rs" state)" restart_failed
+kill "$squatter" 2>/dev/null || true
+wait "$squatter" 2>/dev/null || true
+for _ in $(seq 1 50); do (exec 3<>/dev/tcp/127.0.0.1/"$FAKE_PORT") 2>/dev/null || break; sleep 0.1; done
+if (cmd_restart rs) >/dev/null 2>"$tmp/rs-retry.err"; then r=restarted; else r=failed; cat "$tmp/rs-retry.err" >&2; fi
+check "restart_failed instance can be restarted once the port is free" "$r" restarted
+
+cmd_stop rs >/dev/null 2>&1 || true
+check "restarted instance tears down completely" "$([[ -e "$tmp/state/rs" ]] && echo left || echo gone)" gone
+if (exec 3<>/dev/tcp/127.0.0.1/"$FAKE_PORT") 2>/dev/null; then r=still-listening; else r=closed; fi
+check "restarted instance leaves no orphan server" "$r" closed
+if [[ -f "$FAKE_SERVER_PID" ]]; then kill "$(cat "$FAKE_SERVER_PID")" 2>/dev/null || true; fi
+
+# --- pid identity: restart/stop never signal a process that is not the server ---
+# Review of #4880: a server that died leaves its pid in the manifest; once the
+# number is reused, signalling it would kill an unrelated process.
+: >"$FAKE_SERVER_ENV"
+if (cmd_start fp --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT") >/dev/null 2>"$tmp/fp.err"; then r=started; else r=failed; cat "$tmp/fp.err" >&2; fi
+check "pid-identity fixture started" "$r" started
+check "start records the server's kernel start time" "$([[ "$(manifest_get "$tmp/state/fp" pid_starttime)" =~ ^[0-9]+$ ]] && echo yes)" yes
+fp_pid="$(manifest_get "$tmp/state/fp" pid)"
+server_pid_ours "$tmp/state/fp" "$fp_pid" && r=ours || r=foreign
+check "the running server is recognised as this instance's" "$r" ours
+# A recorded start time that differs means the pid now names another process.
+real_start="$(manifest_get "$tmp/state/fp" pid_starttime)"
+manifest_set "$tmp/state/fp" pid_starttime 1
+server_pid_ours "$tmp/state/fp" "$fp_pid" && r=ours || r=foreign
+check "a different kernel start time is not this instance's server" "$r" foreign
+if (cmd_restart fp) >/dev/null 2>&1; then r=accepted; else r=refused; fi
+check "restart with a mismatched start time does not take over the port" "$r" refused
+if kill -0 "$fp_pid" 2>/dev/null; then r=alive; else r=killed; fi
+check "restart never signals a pid whose start time differs" "$r" alive
+manifest_set "$tmp/state/fp" pid_starttime "$real_start"
+manifest_set "$tmp/state/fp" state running
+kill -TERM "$fp_pid" 2>/dev/null || true
+for _ in $(seq 1 50); do kill -0 "$fp_pid" 2>/dev/null || break; sleep 0.1; done
+# A foreign process of the same user on the recorded pid: neither restart nor stop may touch it.
+sleep 300 &
+foreign=$!
+manifest_set "$tmp/state/fp" pid "$foreign"
+manifest_set "$tmp/state/fp" pid_starttime "$(proc_starttime "$foreign")"
+server_pid_ours "$tmp/state/fp" "$foreign" && r=ours || r=foreign
+check "a process without this instance's data dir and prefix is foreign" "$r" foreign
+if (cmd_restart fp) >/dev/null 2>"$tmp/fp-restart.err"; then r=restarted; else r=failed; cat "$tmp/fp-restart.err" >&2; fi
+check "restart over a foreign pid starts the server again" "$r" restarted
+if kill -0 "$foreign" 2>/dev/null; then r=alive; else r=killed; fi
+check "restart never signals a foreign process on the recorded pid" "$r" alive
+fp_new="$(manifest_get "$tmp/state/fp" pid)"
+manifest_set "$tmp/state/fp" pid "$foreign"
+cmd_stop fp >/dev/null 2>&1 || true
+if kill -0 "$foreign" 2>/dev/null; then r=alive; else r=killed; fi
+check "stop never signals a foreign process on the recorded pid" "$r" alive
+kill "$foreign" "$fp_new" 2>/dev/null || true
+wait "$foreign" 2>/dev/null || true
+for _ in $(seq 1 50); do (exec 3<>/dev/tcp/127.0.0.1/"$FAKE_PORT") 2>/dev/null || break; sleep 0.1; done
+
+# --- start claims the name atomically; an existing instance is left alone ---
+mkdir -p "$tmp/state/taken/data"
+echo '{"name":"taken","state":"running","prefix":"crewship-tw-taken-0000","instance_id":"","data_dir":"x","pid":""}' >"$tmp/state/taken/manifest.json"
+taken_before="$(cat "$tmp/state/taken/manifest.json")"
+if (cmd_start taken --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT") >/dev/null 2>&1; then r=started; else r=refused; fi
+check "start refuses an existing name" "$r" refused
+check "refused start leaves the existing manifest unchanged" "$(cat "$tmp/state/taken/manifest.json")" "$taken_before"
+
+# --- the recovery scenario never stops an instance it did not create ---------
+# Review of #4880 (HIGH): ownership was claimed before `start`, so a name
+# collision made teardown stop someone else's instance.
+mkdir -p "$tmp/scen/bin"
+printf '#!/bin/sh\nexit 0\n' >"$tmp/scen/bin/crewship"
+cp "$tmp/scen/bin/crewship" "$tmp/scen/bin/crewship-sidecar"
+chmod 0755 "$tmp/scen/bin/crewship" "$tmp/scen/bin/crewship-sidecar"
+cat >"$tmp/bin/docker" <<'FAKE2'
+#!/usr/bin/env bash
+echo "$*" >>"$FAKE_LOG"
+exit 0
+FAKE2
+chmod +x "$tmp/bin/docker"
+: >"$FAKE_LOG"
+if (CREWSHIP_THROWAWAY_STATE="$tmp/state" bash "$here/acceptance-chat-recovery-throwaway.sh" \
+    --binary "$tmp/scen/bin/crewship" --evidence "$tmp/scen/ev1" --name taken) >/dev/null 2>&1; then r=ran; else r=refused; fi
+check "scenario refuses a name that already exists" "$r" refused
+check "scenario names the existing instance as the reason" "$(grep -c 'already exists in' "$tmp/scen/ev1/scenario.log" || true)" 1
+check "scenario leaves the existing instance's manifest unchanged" "$(cat "$tmp/state/taken/manifest.json")" "$taken_before"
+check "scenario leaves the existing instance's data" "$([[ -d "$tmp/state/taken/data" ]] && echo kept)" kept
+check "scenario issued no docker removal for the existing instance" "$(grep -cE '^(rm|volume rm|run)' "$FAKE_LOG" || true)" 0
+check "scenario teardown says it stopped nothing" "$(grep -c 'no instance owned by this run' "$tmp/scen/ev1/scenario.log" || true)" 1
+check "scenario result line reports the real (non-zero) exit status" "$(grep -c 'result: 0 failed check(s), exit status 1' "$tmp/scen/ev1/scenario.log" || true)" 1
+# A start that loses the name race (`already exists`) is not this run's either.
+cat >"$tmp/scen/tw-collide.sh" <<'TWF'
+#!/usr/bin/env bash
+echo "$*" >>"$TW_CALLS"
+if [[ "$1" == start ]]; then echo "throwaway-server: $2 already exists" >&2; exit 1; fi
+exit 0
+TWF
+chmod +x "$tmp/scen/tw-collide.sh"
+: >"$tmp/scen/tw-calls"
+if (TW_CALLS="$tmp/scen/tw-calls" CHAT_RECOVERY_THROWAWAY_SCRIPT="$tmp/scen/tw-collide.sh" CREWSHIP_THROWAWAY_STATE="$tmp/state" \
+    bash "$here/acceptance-chat-recovery-throwaway.sh" --binary "$tmp/scen/bin/crewship" --evidence "$tmp/scen/ev2" --name racer) >/dev/null 2>&1; then r=ran; else r=refused; fi
+check "scenario aborts when start loses the name" "$r" refused
+check "scenario reached start in the collision case" "$(grep -c '^start racer' "$tmp/scen/tw-calls" || true)" 1
+check "scenario never stops an instance whose start collided" "$(grep -c '^stop' "$tmp/scen/tw-calls" || true)" 0
+# R2-3: start fails before its claim while another session claimed the same
+# name meanwhile; that instance's manifest carries another nonce, so the
+# scenario must not take it over.
+cat >"$tmp/scen/tw-foreign.sh" <<'TWF'
+#!/usr/bin/env bash
+echo "$*" >>"$TW_CALLS"
+if [[ "$1" == start ]]; then
+  mkdir -p "$CREWSHIP_THROWAWAY_STATE/$2"
+  echo '{"name":"'"$2"'","state":"running","owner_nonce":"another-sessions-nonce"}' >"$CREWSHIP_THROWAWAY_STATE/$2/manifest.json"
+  echo "throwaway-server: no free port in 8110-8199" >&2
+  exit 1
+fi
+exit 0
+TWF
+chmod +x "$tmp/scen/tw-foreign.sh"
+: >"$tmp/scen/tw-calls"
+if (TW_CALLS="$tmp/scen/tw-calls" CHAT_RECOVERY_THROWAWAY_SCRIPT="$tmp/scen/tw-foreign.sh" CREWSHIP_THROWAWAY_STATE="$tmp/state" \
+    bash "$here/acceptance-chat-recovery-throwaway.sh" --binary "$tmp/scen/bin/crewship" --evidence "$tmp/scen/ev5" --name raced) >/dev/null 2>&1; then r=ran; else r=refused; fi
+check "scenario aborts when start fails" "$r" refused
+check "scenario passed its own nonce to start" "$(grep -cE '^start raced .*--owner-nonce [0-9a-f]{32}$' "$tmp/scen/tw-calls" || true)" 1
+check "scenario never stops an instance carrying another nonce" "$(grep -c '^stop' "$tmp/scen/tw-calls" || true)" 0
+
+# start records the caller's nonce and validates it.
+if (cmd_start nonce-ok --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" --owner-nonce abcd1234-ef) >/dev/null 2>&1; then r=started; else r=failed; fi
+check "start accepts an owner nonce" "$r" started
+check "start writes the owner nonce into the manifest" "$(manifest_get "$tmp/state/nonce-ok" owner_nonce)" abcd1234-ef
+cmd_stop nonce-ok >/dev/null 2>&1 || true
+for bad_nonce in short 'has space1' '../../x/y/z' "$(printf 'a%.0s' {1..65})"; do
+  if (cmd_start nonce-bad --binary /bin/true --owner-nonce "$bad_nonce") >/dev/null 2>&1; then r=started; else r=refused; fi
+  check "start refuses owner nonce '${bad_nonce:0:12}'" "$r" refused
+done
+check "refused nonces create no instance state" "$([[ -e "$tmp/state/nonce-bad" ]] && echo created || echo absent)" absent
+
+# Default names are unique per run.
+n1="$(grep -o 'instance_name: .*' "$tmp/scen/ev2/run-info.txt" || true)"
+(TW_CALLS=/dev/null CHAT_RECOVERY_THROWAWAY_SCRIPT="$tmp/scen/tw-collide.sh" CREWSHIP_THROWAWAY_STATE="$tmp/state" \
+    bash "$here/acceptance-chat-recovery-throwaway.sh" --binary "$tmp/scen/bin/crewship" --evidence "$tmp/scen/ev3") >/dev/null 2>&1 || true
+(TW_CALLS=/dev/null CHAT_RECOVERY_THROWAWAY_SCRIPT="$tmp/scen/tw-collide.sh" CREWSHIP_THROWAWAY_STATE="$tmp/state" \
+    bash "$here/acceptance-chat-recovery-throwaway.sh" --binary "$tmp/scen/bin/crewship" --evidence "$tmp/scen/ev4") >/dev/null 2>&1 || true
+d1="$(grep -o 'instance_name: .*' "$tmp/scen/ev3/run-info.txt" || true)"
+d2="$(grep -o 'instance_name: .*' "$tmp/scen/ev4/run-info.txt" || true)"
+check "explicit --name is recorded" "$n1" "instance_name: racer"
+check "default instance names differ between runs" "$([[ -n "$d1" && "$d1" != "$d2" ]] && echo unique)" unique
+
+# --- phase S evaluation, offline ---
+# The standard turn must be parked exactly once, by lease expiry. Fixtures:
+# (a) the standard work item's events from run 20261103T223140Z (fields other
+#     than state and events dropped); the product's lease-expiry reason itself
+#     contains "; a runtime may exist", which the evaluation must accept;
+# (b) the same history with a second park; (c) one park with another reason.
+std_fixture="$here/testdata/chat-recovery/standard-final-20261103T223140Z.json"
+python3 - "$std_fixture" "$tmp/std-two-parks.json" "$tmp/std-other-reason.json" <<'PY2'
+import copy, json, sys
+d = json.load(open(sys.argv[1]))
+two = copy.deepcopy(d)
+park = next(e for e in two["events"] if e["to_state"] == "needs_reconciliation")
+again = [dict(park, seq=park["seq"] + 1, from_state="needs_reconciliation", to_state="running", reason="reconciled: runtime alive"),
+         dict(park, seq=park["seq"] + 2, from_state="running", reason=park["reason"])]
+i = two["events"].index(park) + 1
+two["events"][i:i] = again
+json.dump(two, open(sys.argv[2], "w"))
+other = copy.deepcopy(d)
+next(e for e in other["events"] if e["to_state"] == "needs_reconciliation")["reason"] = "protected host capture awaiting retained result"
+json.dump(other, open(sys.argv[3], "w"))
+PY2
+std_eval() { bash "$here/acceptance-chat-recovery-throwaway.sh" --check-standard-parks "$1" 2>&1; }
+if out="$(std_eval "$std_fixture")"; then r=pass; else r=fail; fi
+check "phase S: saved run 20261103T223140Z (one lease-expiry park) passes" "$r" pass
+check "phase S: the pass names the lease-expiry reason" "$(grep -c '^PASS .*lease expired in runtime phase' <<<"$out" || true)" 1
+if out="$(std_eval "$tmp/std-two-parks.json")"; then r=pass; else r=fail; fi
+check "phase S: two parks fail" "$r" fail
+check "phase S: the failure counts both parks" "$(grep -c '^FAIL .*got 2: ' <<<"$out" || true)" 1
+if out="$(std_eval "$tmp/std-other-reason.json")"; then r=pass; else r=fail; fi
+check "phase S: one park with a non-lease reason fails" "$r" fail
+check "phase S: the failure names the wrong reason" "$(grep -c '^FAIL .*awaiting retained result' <<<"$out" || true)" 1
+if [[ -n "${CHAT_RECOVERY_STANDARD_FINAL:-}" ]]; then
+  if out="$(std_eval "$CHAT_RECOVERY_STANDARD_FINAL")"; then r=pass; else r=fail; fi
+  check "phase S: saved evidence file \$CHAT_RECOVERY_STANDARD_FINAL passes" "$r" pass
+fi
 
 exit "$fail"
