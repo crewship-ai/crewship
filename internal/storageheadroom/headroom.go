@@ -1,8 +1,8 @@
 // Package storageheadroom is the free-disk admission shared by every content
 // writer that grows the main database: native Craft and artifact versions
-// (through internal/artifacts) and the legacy document and Slides stores,
-// which sit below internal/artifacts in the import graph and therefore cannot
-// call it there.
+// (through internal/artifacts), the legacy document and Slides stores and the
+// GridCraft store, which sit below internal/artifacts in the import graph and
+// therefore cannot call it there, and the Mooring writers.
 //
 // Logical admission (workspace and instance byte budgets) is enforced by the
 // SQL capacity triggers; this probe only refuses a write that would eat into

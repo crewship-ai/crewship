@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/storageheadroom"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -179,6 +180,15 @@ func (s *Store) reserve(ctx context.Context, k Key, r Request, a Authorize, e En
 		if total >= s.options.MaxWorkers || workspace >= s.options.MaxWorkspaceWorkers || artifact != 0 {
 			return ErrCapacity
 		}
+		// Free-disk admission (#4835) before the reservation row and the
+		// engine run. An exact retry of a confirmed receipt returned above.
+		commandBytes, err := json.Marshal(r.Command)
+		if err != nil {
+			return err
+		}
+		if err = storageheadroom.Check(ctx, tx, int64(len(v.Snapshot))+int64(len(commandBytes))+diskRowOverhead); err != nil {
+			return err
+		}
 		res.token++
 		res.until = now.Add(s.options.LeaseDuration)
 		_, err = tx.ExecContext(ctx, `INSERT INTO gridcraft_operations(workspace_id,page_id,authority_id,mutation_id,payload_hash,state,token,lease_until)
@@ -187,10 +197,6 @@ ON CONFLICT(workspace_id,page_id,authority_id,mutation_id) DO UPDATE SET
 state='in_progress',
 token = excluded.token,
 lease_until = excluded.lease_until`, k.WorkspaceID, k.PageID, p.AuthorityID, r.MutationID, digest, res.token, res.until.UnixMilli())
-		if err != nil {
-			return err
-		}
-		commandBytes, err := json.Marshal(r.Command)
 		if err != nil {
 			return err
 		}
@@ -324,6 +330,17 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 		// verified recalculation outside the mandated effects.
 		auditBytes, err := json.Marshal(auditRecord{Receipt: receipt, ResultSHA256: c.ResultHash, Derived: c.Derived})
 		if err != nil {
+			return err
+		}
+		// The reserve can shrink while the engine runs; probe again with the
+		// real rows of this revision (head snapshot, checkpoint, recorded
+		// command, audit receipt, outbox and operation receipt) before the
+		// first of them is written (#4835).
+		written := int64(len(c.Snapshot)+len(command)+len(auditBytes)+len(receiptBytes)) + 4*diskRowOverhead
+		if checkpoint {
+			written += int64(len(c.Snapshot)) + diskRowOverhead
+		}
+		if err = storageheadroom.Check(ctx, tx, written); err != nil {
 			return err
 		}
 		// Only the first revision creates the head, so the personal-Page insert
@@ -725,3 +742,7 @@ type auditRecord struct {
 	ResultSHA256 string   `json:"result_sha256"`
 	Derived      *Derived `json:"derived,omitempty"`
 }
+
+// diskRowOverhead covers the key columns, row header and index entries of one
+// row beyond its variable payload, for the free-disk probe estimates.
+const diskRowOverhead = 512
