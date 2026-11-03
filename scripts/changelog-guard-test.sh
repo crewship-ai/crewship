@@ -595,75 +595,151 @@ collect_refuses "a non-UTF-8 fragment makes collect refuse cleanly, changing not
 
 # An interrupted collect, then a rerun, must leave every note in CHANGELOG.md
 # exactly once (#4800). The harness runs the collector in-process and raises
-# before its k-th filesystem mutation (unlink, remove, rename, replace), as a
-# crash, kill or full disk at that point would; the plain script then reruns.
+# before its k-th filesystem mutation (unlink, remove, rename, replace, fsync),
+# as a crash or kill at that point would; the rerun runs uninterrupted.
 # Deleting fragments before installing CHANGELOG.md lost the deleted notes.
+#
+# The harness also checks durability, for a power loss rather than a kill:
+# before a run deletes any fragment, it must fsync CHANGELOG.md and its
+# directory (after its own last rename onto CHANGELOG.md, if any). A rerun
+# that finds the notes already installed must do so too: the rename it found
+# may not have reached the disk yet. It exits 20 on a violation, 10 when it
+# interrupted the run, else with the collector's own exit code.
 INTERRUPT_HARNESS='
 import importlib.util, os, sys
-collect, root, k = sys.argv[1], sys.argv[2], int(sys.argv[3])
+collect, root, k = sys.argv[1], sys.argv[2], sys.argv[3]
 spec = importlib.util.spec_from_file_location("changelog_collect", collect)
 mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
 class Interrupted(BaseException):
     pass
-calls = [0]
-def guarded(real):
+changelog = os.path.realpath(os.path.join(root, "CHANGELOG.md"))
+fragments = os.path.realpath(os.path.join(root, "changelog.d"))
+calls, fds, need, bad = [0], {}, {"file", "dir"}, []
+real_open, real_close = os.open, os.close
+def opened(path, *args, **kwargs):
+    fd = real_open(path, *args, **kwargs)
+    fds[fd] = os.path.realpath(path)
+    return fd
+def closed(fd):
+    fds.pop(fd, None)
+    return real_close(fd)
+os.open, os.close = opened, closed
+def guarded(name, real):
     def call(*args, **kwargs):
         calls[0] += 1
-        if calls[0] == k:
+        if k == str(calls[0]) or (k == "unlink" and name == "unlink"):
             raise Interrupted()
-        return real(*args, **kwargs)
+        result = real(*args, **kwargs)
+        if name == "fsync":
+            path = fds.get(args[0])
+            if path == changelog:
+                need.discard("file")
+            elif path == os.path.dirname(changelog):
+                need.discard("dir")
+        elif name in ("replace", "rename") and os.path.realpath(args[1]) == changelog:
+            need.update(("file", "dir"))
+        elif name in ("unlink", "remove") and need:
+            path = os.path.realpath(args[0])
+            if os.path.dirname(path) == fragments and path.endswith(".md"):
+                bad.append(f"deleted {path} before fsyncing CHANGELOG.md {sorted(need)}")
+        return result
     return call
-for name in ("unlink", "remove", "rename", "replace"):
-    setattr(os, name, guarded(getattr(os, name)))
+for name in ("unlink", "remove", "rename", "replace", "fsync"):
+    setattr(os, name, guarded(name, getattr(os, name)))
 try:
-    mod.main(["--root", root])
+    rc = mod.main(["--root", root])
 except Interrupted:
-    sys.exit(0)
-sys.exit(3)
+    rc = 10
+if bad:
+    print("\n".join(bad), file=sys.stderr)
+    sys.exit(20)
+sys.exit(rc)
 '
+collect_journal="$CROOT/CHANGELOG.md.collect-journal"
 interrupt_points=0
-for k in 1 2 3 4 5 6 7 8 9 10; do
+for k in $(seq 1 40); do
   collect_fixture
-  python3 -I -c "$INTERRUPT_HARNESS" "$COLLECT" "$CROOT" "$k" >/dev/null 2>&1; rc=$?
-  [ "$rc" -eq 3 ] && break
-  if [ "$rc" -ne 0 ]; then
-    fail "interrupt harness ran at mutation $k (exit $rc)"; break
+  out="$(python3 -I -c "$INTERRUPT_HARNESS" "$COLLECT" "$CROOT" "$k" 2>&1)"; rc=$?
+  if [ "$rc" -eq 0 ]; then
+    break
+  elif [ "$rc" -ne 10 ]; then
+    fail "an interrupted collect at mutation $k (exit $rc)"; printf '%s\n' "$out" | sed 's/^/       | /'
+    break
   fi
   interrupt_points=$((interrupt_points + 1))
-  out="$(python3 -I "$COLLECT" --root "$CROOT" 2>&1)"; rc=$?
+  out="$(python3 -I -c "$INTERRUPT_HARNESS" "$COLLECT" "$CROOT" 0 2>&1)"; rc=$?
   if [ "$rc" -ne 0 ]; then
-    fail "a rerun after an interruption at mutation $k exits 0"; printf '%s\n' "$out" | sed 's/^/       | /'
+    fail "a rerun after an interruption at mutation $k exits 0, durably (exit $rc)"
+    printf '%s\n' "$out" | sed 's/^/       | /'
   elif [ "$(cat "$CROOT/CHANGELOG.md" 2>/dev/null)" != "$want" ]; then
     fail "a rerun after an interruption at mutation $k keeps every note exactly once"
     diff <(printf '%s\n' "$want") "$CROOT/CHANGELOG.md" | sed 's/^/       | /'
   elif [ -e "$CROOT/changelog.d/90-older.md" ] || [ -e "$CROOT/changelog.d/4751-newer.md" ] \
-       || [ -e "$CROOT/CHANGELOG.md.collect-tmp" ]; then
-    fail "a rerun after an interruption at mutation $k removes the fragments and its staging file"
+       || [ -e "$CROOT/CHANGELOG.md.collect-tmp" ] || [ -e "$collect_journal" ]; then
+    fail "a rerun after an interruption at mutation $k removes the fragments and its staging files"
   else
-    pass "a rerun after an interruption at mutation $k keeps every note exactly once"
+    pass "a rerun after an interruption at mutation $k keeps every note exactly once, durably"
   fi
 done
-# The rerun skips only a note standing as whole lines in ## [Unreleased]: a
-# note that is a prefix of an existing entry, or one already released under an
-# older version, is still collected.
-collect_fixture; rm "$CROOT/changelog.d/4751-newer.md"
-printf -- '- **Existing entry.**\n' > "$CROOT/changelog.d/95-prefix.md"
-printf -- '- **Shipped.** Untouched.\n' > "$CROOT/changelog.d/96-released.md"
-python3 -I "$COLLECT" --root "$CROOT" >/dev/null 2>&1
-if [ "$(grep -cxF -- '- **Existing entry.**' "$CROOT/CHANGELOG.md")" -eq 1 ] \
-   && [ "$(grep -cxF -- '- **Shipped.** Untouched.' "$CROOT/CHANGELOG.md")" -eq 2 ]; then
-  pass "a note only resembling a collected one, or released earlier, is still collected"
-else
-  fail "a note only resembling a collected one, or released earlier, is still collected"
-  sed 's/^/       | /' "$CROOT/CHANGELOG.md"
-fi
-
 # Two fragments mean at least three mutations (two deletions, one install);
 # fewer interruption points would mean the harness no longer reaches them.
 if [ "$interrupt_points" -ge 3 ]; then
   pass "the interruption harness reached $interrupt_points mutation points"
 else
   fail "the interruption harness reached only $interrupt_points mutation point(s), want >= 3"
+fi
+
+# A new note is never taken for an already collected one, whatever text
+# ## [Unreleased] already holds: a longer entry it is a prefix of, the same
+# text inside another entry's fenced example, an identical entry, or the same
+# entry released earlier. Each is collected and stands as a note of its own.
+collect_fixture; rm "$CROOT/changelog.d/4751-newer.md" "$CROOT/changelog.d/90-older.md"
+python3 - "$CROOT/CHANGELOG.md" <<'PY'
+import sys
+path = sys.argv[1]
+text = open(path, encoding='utf-8').read()
+text = text.replace('- **Existing entry.** Stays below the collected ones.\n',
+    '- **Existing entry.** Stays below the collected ones.\n'
+    '- **Fence example.** The fragment format, for example:\n\n'
+    '```markdown\n- **Retry failures are fixed.** Requests now succeed.\n```\n\n'
+    '- **Twin entry.**\n')
+open(path, 'w', encoding='utf-8').write(text)
+PY
+printf -- '- **Existing entry.**\n' > "$CROOT/changelog.d/95-prefix.md"
+printf -- '- **Retry failures are fixed.** Requests now succeed.\n' > "$CROOT/changelog.d/96-fenced.md"
+printf -- '- **Twin entry.**\n' > "$CROOT/changelog.d/97-twin.md"
+printf -- '- **Shipped.** Untouched.\n' > "$CROOT/changelog.d/98-released.md"
+python3 -I "$COLLECT" --root "$CROOT" >/dev/null 2>&1
+# count <line>: how often the exact line stands in CHANGELOG.md
+count() { grep -cxF -- "$1" "$CROOT/CHANGELOG.md"; }
+check_collected() {
+  if [ "$(count "$2")" -eq "$3" ] && [ ! -e "$CROOT/changelog.d/$4" ]; then
+    pass "$1"
+  else
+    fail "$1 ($(count "$2") of $3)"; sed 's/^/       | /' "$CROOT/CHANGELOG.md"
+  fi
+}
+check_collected "a note that is a prefix of an existing entry is still collected" '- **Existing entry.**' 1 95-prefix.md
+check_collected "a note that also appears in another entry's fenced example is still collected" \
+  '- **Retry failures are fixed.** Requests now succeed.' 2 96-fenced.md
+check_collected "a note identical to an existing ## [Unreleased] entry is still collected" '- **Twin entry.**' 2 97-twin.md
+check_collected "a note released under an older version is still collected" '- **Shipped.** Untouched.' 2 98-released.md
+
+# The rerun trusts its journal only while CHANGELOG.md is what the interrupted
+# run installed (or still what it read). Edited in between, the rerun cannot
+# tell which notes are in, so it refuses, changing nothing.
+collect_fixture
+python3 -I -c "$INTERRUPT_HARNESS" "$COLLECT" "$CROOT" unlink >/dev/null 2>&1
+printf -- '\n- **Hand edit.**\n' >> "$CROOT/CHANGELOG.md"
+before="$(cat "$CROOT/CHANGELOG.md")"
+out="$(python3 -I "$COLLECT" --root "$CROOT" 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && ! printf '%s\n' "$out" | grep -q Traceback \
+   && printf '%s\n' "$out" | grep -q 'collect-journal' \
+   && [ "$(cat "$CROOT/CHANGELOG.md")" = "$before" ] && [ -e "$CROOT/changelog.d/90-older.md" ]; then
+  pass "a CHANGELOG.md edited after an interrupted collect makes the rerun refuse, changing nothing"
+else
+  fail "a CHANGELOG.md edited after an interrupted collect makes the rerun refuse, changing nothing (exit $rc)"
+  printf '%s\n' "$out" | sed 's/^/       | /'
 fi
 
 echo

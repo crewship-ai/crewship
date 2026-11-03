@@ -7,10 +7,16 @@ release time this script moves every fragment's text to the top of that
 section, highest number first (the file is newest-first), and deletes the
 collected fragment files. See RELEASING.md.
 
-It installs the new CHANGELOG.md (staged, fsynced, then atomically renamed)
-before it deletes any fragment, so an interruption never loses a note: a
-rerun finds the leftover fragments, sees their notes already in
-## [Unreleased], does not add them again, and only deletes them.
+A run is crash-safe (#4800). Before changing anything it records, in
+CHANGELOG.md.collect-journal, the fragments it collects and the SHA-256 of
+CHANGELOG.md before and after. It then installs the new CHANGELOG.md
+(staged, fsynced, atomically renamed), makes that rename durable, and only
+then deletes the fragments and the journal. A rerun that finds a journal
+finishes the interrupted run: CHANGELOG.md matching the "after" hash means
+the listed fragments are already in it and are only deleted; matching the
+"before" hash means nothing was installed and the run starts over. Any
+other CHANGELOG.md makes it refuse, changing nothing. No note is ever
+recognised by its text, so a new note is never mistaken for a collected one.
 
 Fragments are the *.md files directly inside changelog.d/, except README.md.
 The script refuses, changing nothing, when CHANGELOG.md has no
@@ -20,13 +26,14 @@ regular file (a symlink, dangling or not, is never followed).
 Usage: python3 scripts/changelog-collect.py [--root DIR] [--dry-run]
 """
 import argparse
+import hashlib
+import json
 import os
 from pathlib import Path
 import re
 import sys
 
 HEADING = re.compile(r'^## \[Unreleased\][ \t]*$', re.M)
-NEXT_SECTION = re.compile(r'^## ', re.M)
 NUMBER = re.compile(r'^(\d+)')
 
 
@@ -55,33 +62,31 @@ def fragments(root):
     return sorted(found, key=fragment_key)
 
 
-def collected(section, note):
-    """Whether note already stands, as whole lines, in the section."""
-    return re.search(r'^' + re.escape(note) + r'$', section, re.M) is not None
-
-
 def collect(changelog, notes):
-    """Return changelog with the notes not yet in ## [Unreleased] on top.
-
-    A note already present there is from an earlier, interrupted run that
-    installed CHANGELOG.md but did not finish deleting the fragments.
-    """
     match = HEADING.search(changelog)
     if not match:
         raise ValueError("CHANGELOG.md has no '## [Unreleased]' heading")
     head, rest = changelog[:match.end()], changelog[match.end():]
-    end = NEXT_SECTION.search(rest)
-    section = rest[:end.start()] if end else rest
-    notes = [note for note in notes if not collected(section, note)]
-    if not notes:
-        return changelog
     rest = rest.lstrip('\n')
     block = '\n'.join(notes)
     return head + '\n\n' + block + '\n\n' + rest
 
 
-def install(path, text):
-    """Atomically replace path with text, durable before it returns."""
+def digest(text):
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def fsync_path(path):
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def write_durably(path, text):
+    """Atomically replace path with text; the file and its directory entry
+    are on disk before it returns."""
     staged = path.with_name(path.name + '.collect-tmp')
     try:
         with open(staged, 'w', encoding='utf-8') as f:
@@ -95,15 +100,74 @@ def install(path, text):
         except OSError:
             pass
         raise
-    fsync_dir(path.parent)
+    make_durable(path)
 
 
-def fsync_dir(directory):
-    fd = os.open(directory, os.O_RDONLY)
+def make_durable(path):
+    """fsync path and its directory: a rename onto path, by this run or by an
+    interrupted one, survives a power loss from here on."""
+    fsync_path(path)
+    fsync_path(path.parent)
+
+
+def read_journal(root, journal_path, changelog):
+    """Return the fragment paths an interrupted run already put into
+    CHANGELOG.md ([] when it installed nothing), or None without a journal."""
     try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+        text = journal_path.read_text(encoding='utf-8')
+    except FileNotFoundError:
+        return None
+    name = journal_path.relative_to(root)
+    try:
+        journal = json.loads(text)
+        before, after = journal['before'], journal['after']
+        names = journal['fragments']
+        if not all(isinstance(n, str) and '/' not in n and n.endswith('.md') for n in names):
+            raise ValueError
+    except (ValueError, KeyError, TypeError):
+        raise ValueError(f'{name} is unreadable; restore CHANGELOG.md and changelog.d/ '
+                         f'from git, delete {name} and collect again') from None
+    current = digest(changelog)
+    if current == after:
+        return [root / 'changelog.d' / n for n in names]
+    if current == before:
+        return []
+    raise ValueError(f'CHANGELOG.md changed after the interrupted collect recorded in {name}; '
+                     f'check which of its fragments ({", ".join(names)}) are in '
+                     f'## [Unreleased], delete those and {name}, and collect again')
+
+
+def read_notes(root, paths):
+    notes = []
+    for path in paths:
+        try:
+            text = path.read_text(encoding='utf-8').strip()
+        except UnicodeDecodeError:
+            raise ValueError(f'{path.relative_to(root)} is not valid UTF-8') from None
+        if not text:
+            raise ValueError(f'{path.relative_to(root)} is empty; write its release note or delete it')
+        notes.append(text)
+    return notes
+
+
+def delete_fragments(root, changelog_path, journal_path, paths):
+    """Delete collected fragments, then the journal naming them. The
+    CHANGELOG.md holding their notes is made durable first, on every path:
+    the rename may be an interrupted run's, not yet on disk."""
+    make_durable(changelog_path)
+    for path in paths:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        print(f'collected {path.relative_to(root)}', file=sys.stderr)
+    fsync_path(root / 'changelog.d')
+    discard_journal(journal_path)
+
+
+def discard_journal(journal_path):
+    journal_path.unlink()
+    fsync_path(journal_path.parent)
 
 
 def main(argv=None):
@@ -115,23 +179,18 @@ def main(argv=None):
     args = parser.parse_args(argv)
     root = Path(args.root)
     changelog_path = root / 'CHANGELOG.md'
+    journal_path = root / 'CHANGELOG.md.collect-journal'
 
+    # Validate everything before changing anything: a refusal changes nothing.
     try:
-        paths = fragments(root)
-        if not paths:
+        changelog = changelog_path.read_text(encoding='utf-8')
+        done = read_journal(root, journal_path, changelog)
+        done_names = {path.name for path in done or []}
+        paths = [path for path in fragments(root) if path.name not in done_names]
+        if not paths and done is None:
             print('No changelog fragments to collect.', file=sys.stderr)
             return 0
-        notes = []
-        for path in paths:
-            try:
-                text = path.read_text(encoding='utf-8').strip()
-            except UnicodeDecodeError:
-                raise ValueError(f'{path.relative_to(root)} is not valid UTF-8') from None
-            if not text:
-                raise ValueError(f'{path.relative_to(root)} is empty; write its release note or delete it')
-            notes.append(text)
-        changelog = changelog_path.read_text(encoding='utf-8')
-        result = collect(changelog, notes)
+        result = collect(changelog, read_notes(root, paths)) if paths else changelog
     except (ValueError, OSError) as err:
         print(f'error: {err}', file=sys.stderr)
         return 1
@@ -140,18 +199,24 @@ def main(argv=None):
         sys.stdout.write(result)
         return 0
 
-    # Install CHANGELOG.md first, durably, and only then delete the fragments
-    # (#4800). Deleting first lost every deleted note when the run stopped
-    # before the install: the rerun no longer saw them. Now an interruption at
-    # any point leaves each note in CHANGELOG.md, in its fragment, or both,
-    # and collect() skips the notes a rerun finds already collected.
     try:
-        if result != changelog:
-            install(changelog_path, result)
-        for path in paths:
-            path.unlink()
-            print(f'collected {path.relative_to(root)}', file=sys.stderr)
-        fsync_dir(root / 'changelog.d')
+        # Finish an interrupted run first: delete what it already collected,
+        # or drop its journal when it installed nothing.
+        if done:
+            delete_fragments(root, changelog_path, journal_path, done)
+        elif done is not None:
+            discard_journal(journal_path)
+        if paths:
+            # Journal, then CHANGELOG.md, then the fragments (#4800): every
+            # interruption leaves each note in its fragment, in CHANGELOG.md
+            # with the journal naming its fragment, or both.
+            write_durably(journal_path, json.dumps({
+                'before': digest(changelog),
+                'after': digest(result),
+                'fragments': [path.name for path in paths],
+            }, indent=2) + '\n')
+            write_durably(changelog_path, result)
+            delete_fragments(root, changelog_path, journal_path, paths)
     except OSError as err:
         print(f'error: {err}; rerun to finish collecting', file=sys.stderr)
         return 1

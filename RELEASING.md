@@ -28,8 +28,11 @@ Before tagging, verify:
       `## [Unreleased]`, highest number first, and deletes the fragment
       files; it refuses, changing nothing, on an empty fragment or a missing
       heading. If it stops partway (crash, kill, full disk), just rerun it:
-      it installs `CHANGELOG.md` before deleting any fragment and does not
-      add a note already in `## [Unreleased]` twice. Commit the result with
+      it records what it collects in `CHANGELOG.md.collect-journal`,
+      installs `CHANGELOG.md` durably before deleting any fragment, and the
+      rerun finishes from that journal, so no note is lost or added twice.
+      If you edited `CHANGELOG.md` in between, it refuses and says what to
+      check. Commit the result with
       the version bump below. Fragments
       merged after that commit wait for the next release.
 - [ ] `CHANGELOG.md` has a populated `## [X.Y.Z]` section under
