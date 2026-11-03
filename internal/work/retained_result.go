@@ -14,10 +14,12 @@ import (
 
 // RecoverRetainedResult settles only the current attempt parked by lease
 // recovery. The caller must first validate the protected host capture bound to
-// runID. Live workers and operator resolutions retain their own authority.
+// runID and that the execution provably ended (orchestrator
+// RetainedEndConfirmed). Live workers and operator resolutions retain their own authority.
 // Failed background execution may have external effects, so it keeps
 // reconciliation and its capacity fence; a real successful exit can complete
-// the work, and a host chat turn settles a real exit either way.
+// the work, and a host chat turn settles a real exit either way, whichever
+// accepted reason parked it.
 func (s *Store) RecoverRetainedResult(ctx context.Context, runID string, result RunResult, successful bool) (bool, error) {
 	if runID == "" || result.ExitCode == nil || successful && *result.ExitCode != 0 {
 		return false, fmt.Errorf("%w: retained result requires an actual exit", ErrNotBound)
@@ -84,13 +86,17 @@ func (s *Store) RecoverRetainedResult(ctx context.Context, runID string, result 
 		if err := s.setStateTx(ctx, tx, it, StateSucceeded, runID, generation, "protected retained capture confirmed successful execution", now); err != nil {
 			return true, err
 		}
-	} else if it.Source == SourceChat && it.DomainKind == DomainHostChatTurn && reason == "protected host capture awaiting retained result" {
+	} else if it.Source == SourceChat && it.DomainKind == DomainHostChatTurn {
 		// A host chat turn settles an observed nonzero exit as failed when it
 		// sees it live (FinishHostChat). The protected capture is the same
 		// host-observed proof arriving later, so it settles the turn the same
 		// way. Kept in reconciliation, the turn held its agent, crew, session
 		// and a server slot for good: nobody resolves a chat turn, and its
-		// agent may since have been deleted.
+		// agent may since have been deleted. This holds for either park
+		// reason: an observer that gave up, or a lease that expired across a
+		// server restart (#4820). The caller settles from a capture only after
+		// the main process exited on its own or a forced end is backed by
+		// runtime absence or a whole-tree stop receipt.
 		if err := s.setStateTx(ctx, tx, it, StateFailed, runID, generation, "protected retained capture confirmed failed execution", now); err != nil {
 			return true, err
 		}

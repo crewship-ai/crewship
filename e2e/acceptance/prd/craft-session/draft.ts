@@ -7,6 +7,7 @@ import type { APIRequestContext, Page } from "@playwright/test"
 import type { NativePage } from "../craft-lease/native"
 import { frameOf, recoveryRows } from "../drafts-crash/native"
 import { pause, status } from "../outage-lostack/native"
+import { editorTakesInput } from "./lines"
 
 export interface DraftOffer {
   /** The offered rows, e.g. "Místní koncept · verze 3". */
@@ -15,13 +16,16 @@ export interface DraftOffer {
   hasMarker: boolean[]
   /** Does the server's version shown beside the draft contain every marker. */
   serverHasMarker: boolean[]
+  /** For each offered row: the draft itself (the native JSON the editor keeps), for lines.ts checks. */
+  texts: string[]
 }
 
 /**
  * Progress of a typeLines() stream. `typed` counts lines (text + Enter) sent;
- * `accepted` lists the lines the editor provably took: its status showed it
- * editable both before and after the line ("Pouze čtení" or "odpojen" means
- * it no longer takes input). Every accepted line must survive, saved or in
+ * `accepted` lists the lines the editor provably took: it took input both
+ * before and after the line (lines.ts, editorTakesInput: status "Pouze čtení"
+ * or "odpojen", or a custody toolbar naming another holder or "Pouze čtení",
+ * means it no longer takes input). Every accepted line must survive, saved or in
  * the draft, including lines typed while a restart or handoff was in flight.
  */
 export interface Typing {
@@ -29,22 +33,36 @@ export interface Typing {
   accepted: number[]
   /** The status text that ended the stream, if the editor stopped taking input. */
   stoppedBy?: string
+  /** Status reads that did not answer in time (a stalled renderer); such a line is not counted as accepted. */
+  unknown: number
 }
 
-export const newTyping = (): Typing => ({ typed: 0, accepted: [] })
+export const newTyping = (): Typing => ({ typed: 0, accepted: [], unknown: 0 })
 
 /** The markers of the given typeLines() lines: `${prefix}-${i}`. */
 export function typedMarkers(prefix: string, lines: number[]): string[] {
   return lines.map((i) => `${prefix}-${i}`)
 }
 
-const NOT_EDITABLE = /Pouze čtení|odpojen/
-const editorStatus = (page: Page) =>
-  page
-    .getByRole("status")
-    .first()
-    .innerText({ timeout: 200 })
-    .catch(() => null)
+// The software-rendered canvas can stall the renderer for seconds while typing;
+// a read that does not answer in time is unknown, not "no longer editable".
+// The status line alone is not enough: with unsaved work it reads "Neuložený
+// koncept" also after the custody moved away, so the custody toolbar is read too
+// (lines.ts, editorTakesInput).
+interface EditorState {
+  status: string
+  custody: string | null
+}
+const editorState = async (page: Page): Promise<EditorState | null> => {
+  // Both reads at once: the gap between lines must stay below the autosave delay.
+  const [status, custody] = await Promise.all([
+    page.getByRole("status").first().innerText({ timeout: 2_000 }).catch(() => null),
+    page.getByRole("toolbar", { name: "Úpravy dokumentu" }).first().innerText({ timeout: 2_000 }).catch(() => null),
+  ])
+  return status === null ? null : { status, custody }
+}
+const takesInput = (s: EditorState) => editorTakesInput(s.status, s.custody)
+const describeState = (s: EditorState) => (s.custody === null ? s.status : `${s.status} | ${s.custody}`)
 
 /** Does `text` hold every marker as a whole line number (`X-1` is not satisfied by `X-10`). */
 export function holdsAll(text: string, markers: string[]): boolean {
@@ -66,6 +84,7 @@ export async function inspectDrafts(page: Page, marker: string | string[]): Prom
   const rows = (await recoveryRows(page).allInnerTexts()).map((r) => r.trim())
   const hasMarker: boolean[] = []
   const serverHasMarker: boolean[] = []
+  const texts: string[] = []
   for (let i = 0; i < rows.length; i++) {
     const row = recoveryRows(page).nth(i).locator("..")
     await row.getByRole("button", { name: "Porovnat", exact: true }).click()
@@ -73,17 +92,28 @@ export async function inspectDrafts(page: Page, marker: string | string[]): Prom
     const opened = await serverBox.waitFor({ timeout: 10_000 }).then(() => true, () => false)
     if (opened) {
       serverHasMarker.push(holdsAll(await serverBox.inputValue(), markers))
-      hasMarker.push(holdsAll(await page.locator('textarea[aria-label="Místní koncept"]').inputValue(), markers))
+      const draft = await page.locator('textarea[aria-label="Místní koncept"]').inputValue()
+      texts.push(draft)
+      hasMarker.push(holdsAll(draft, markers))
       await page.getByRole("button", { name: "Zavřít porovnání", exact: true }).click()
     } else {
       const download = page.waitForEvent("download", { timeout: 20_000 })
       await row.getByRole("button", { name: "Kopie konceptu", exact: true }).click()
       const file = await (await download).path()
       serverHasMarker.push(false)
-      hasMarker.push(holdsAll(await readFile(file, "utf8"), markers))
+      const draft = await readFile(file, "utf8")
+      texts.push(draft)
+      hasMarker.push(holdsAll(draft, markers))
     }
   }
-  return { rows, hasMarker, serverHasMarker }
+  return { rows, hasMarker, serverHasMarker, texts }
+}
+
+/** A DraftOffer for the evidence: the draft texts themselves are left out (their sizes stay). */
+export function offerEvidence(offer: DraftOffer | null): (Omit<DraftOffer, "texts"> & { draftChars: number[] }) | null {
+  if (!offer) return null
+  const { texts, ...rest } = offer
+  return { ...rest, draftChars: texts.map((t) => t.length) }
 }
 
 /** Waits until at least one draft row is offered and returns the rows. */
@@ -131,25 +161,28 @@ export async function placeCaret(page: Page, app: "wordcraft" | "gridcraft", row
 /**
  * Types `${prefix}-0`, `${prefix}-1`, ... each followed by Enter, without ever
  * pausing for autosave, and records in `progress` which lines the editor took.
- * Stops once the editor reports it no longer takes input.
+ * Stops once the editor reports it no longer takes input; an unanswered status
+ * read only leaves that line unproven.
  */
 export async function typeLines(page: Page, prefix: string, lines: number, delay = 40, gapMs = 120, progress: Typing = newTyping()): Promise<number> {
   // A gap at or above the 300 ms autosave delay would let every line save.
   if (gapMs >= 300 || delay >= 300) throw new Error(`typeLines gaps must stay below the 300 ms autosave delay (delay ${delay}, gap ${gapMs})`)
   try {
-    let before = await editorStatus(page)
+    let before = await editorState(page)
     for (let i = 0; i < lines; i++) {
-      if (before === null || NOT_EDITABLE.test(before)) {
-        progress.stoppedBy = before ?? "no status"
+      if (before !== null && !takesInput(before)) {
+        progress.stoppedBy = describeState(before)
         break
       }
       await page.keyboard.type(`${prefix}-${i}`, { delay })
       await page.keyboard.press("Enter")
       progress.typed++
       const started = Date.now()
-      const after = await editorStatus(page)
-      // A line during which the editor turned read-only is ambiguous: not required.
-      if (after !== null && !NOT_EDITABLE.test(after)) progress.accepted.push(i)
+      const after = await editorState(page)
+      // A line during which the editor stopped taking input, or whose state before
+      // or after is unknown, is ambiguous: not required.
+      if (after === null) progress.unknown++
+      if (before !== null && after !== null && takesInput(after)) progress.accepted.push(i)
       before = after
       await page.waitForTimeout(Math.max(0, gapMs - (Date.now() - started)))
     }

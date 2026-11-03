@@ -66,6 +66,9 @@ func (s *Store) UpgradeRequest(ctx context.Context, k Key, lease Lease, id, fing
 		if logBytes+2 > s.opts.MaxLogBytes {
 			return ErrQuota
 		}
+		if e = admitDisk(ctx, tx, 2); e != nil {
+			return e
+		}
 		r = Receipt{id, v.HeadRev + 1, v.Epoch + 1, actor, "upgrade"}
 		if _, e = tx.ExecContext(ctx, "INSERT INTO document_updates VALUES(?,?,?,?)", k.WorkspaceID, k.PageID, r.Rev, []byte{0, 0}); e != nil {
 			return e

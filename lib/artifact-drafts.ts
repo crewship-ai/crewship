@@ -35,6 +35,9 @@ export interface ArtifactDraftStore {
   /** Privacy migration: retain only sealed rows belonging to other identities. */
   purgeUnsealed?(keep: string | null): Promise<void>
   read?(row: Row): Promise<{ text: string; revision?: string } | undefined>
+  /** Atomic compare-and-set: stores only when no row exists, in one
+   * transaction. Resolves false when a row exists. */
+  putIfAbsent?(row: Row, text: string, revision: string): Promise<boolean>
   capture(human: string, workspace?: string, page?: string): Promise<CapturedArtifactDraft[]>
   removeCaptured(rows: CapturedArtifactDraft[]): Promise<void>
 }
@@ -112,6 +115,16 @@ const indexedDbStore: ArtifactDraftStore = {
   },
   async put(row, text, revision = crypto.randomUUID()) { await transact("readwrite", store => store.put({ key: row, text, revision })) },
   async delete(row) { await transact("readwrite", store => store.delete(row)) },
+  async putIfAbsent(row, text, revision) {
+    let written = false
+    // One readwrite transaction: IndexedDB serializes it against every other
+    // tab's write to this store, so the check and the put cannot be split.
+    await transact("readwrite", store => {
+      const found = store.get(row)
+      found.onsuccess = () => { if (found.result === undefined) { store.put({ key: row, text, revision }); written = true } }
+    })
+    return written
+  },
   async read(row) {
     const found = await transact<{ text?: unknown; revision?: unknown } | undefined>("readonly", store => store.get(row))
     return typeof found?.text === "string" ? { text: found.text, revision: typeof found.revision === "string" ? found.revision : undefined } : undefined
@@ -198,9 +211,13 @@ async function freshCipher(key: string, row: Row) {
 
 // One lane per draft: writes are ordered and coalesced (latest value wins), so
 // typing never queues more than one strict transaction behind the running one.
-interface Lane { next: string; scheduled?: Promise<void>; tail: Promise<void>; failed?: boolean; merging?: number }
+interface Lane { next: string; nextSeq?: number; scheduled?: Promise<void>; tail: Promise<void>; failed?: boolean; merging?: number }
 const lanes = new Map<string, Lane>()
 const writes = new Map<string, number>()
+// The newest write number (see `writes`, fixed when the write is admitted)
+// whose text is durably stored.
+const durableWrites = new Map<string, number>()
+const stored = (key: string, seq: number) => { if (seq > (durableWrites.get(key) ?? 0)) durableWrites.set(key, seq) }
 
 // The person whose drafts may be written: undefined until the auth hook first
 // settles, null after sign-out. Set by purgeOtherArtifactDrafts.
@@ -212,7 +229,7 @@ let identityPurge: Promise<void> = Promise.resolve()
 // `over` for a fallback copy: the IndexedDB revision it supersedes, null when
 // IndexedDB held none, undefined when that could not be determined.
 const successfulWrites = new Map<string, { text: string; revision: string; fallback?: string; over?: string | null }>()
-async function persist(row: Row, text: string): Promise<void> {
+async function persist(row: Row, text: string, seq: number): Promise<void> {
   const key = JSON.stringify(row), revision = crypto.randomUUID()
   // Admission happened in writeArtifactDraft. Already admitted writes must
   // finish before identity retirement; later writes are rejected at the call.
@@ -232,13 +249,53 @@ async function persist(row: Row, text: string): Promise<void> {
       else await store.delete(row)
       legacyRemove(row)
       successfulWrites.set(key, { text, revision })
+      stored(key, seq)
       return
     } catch { /* Fall back to localStorage below rather than lose the text. */ }
   }
-  if (!text) { legacyRemove(row); if (!store) return; throw new Error("Artifact draft storage is unavailable.") }
+  if (!text) { legacyRemove(row); if (!store) { stored(key, seq); return } throw new Error("Artifact draft storage is unavailable.") }
   localStorage.setItem(legacyKey(row), sealed)
+  stored(key, seq)
   // Remember the fallback copy so a save, discard or sign-out can remove it.
   successfulWrites.set(key, { text, revision, fallback: sealed, over })
+}
+
+/**
+ * Leaving the page (#4823). A strict write is asynchronous (seal, then the
+ * IndexedDB transaction) and dies with the document, so an edit typed just
+ * before a navigation or tab close may never be stored. Nothing can seal it
+ * synchronously without an unauthenticated record or raw key bytes in the
+ * page, so the browser asks before leaving while any draft's newest write is
+ * not durable yet. A pagehide without beforeunload (a killed mobile tab)
+ * cannot ask; that edit can be lost.
+ *
+ * States per draft: "queued" (typed: accepted into the lane, RAM only) and
+ * "durable" (strict IndexedDB commit, or the sealed localStorage fallback).
+ * Server confirmation belongs to the editor: its save ACK clears the draft
+ * with clearArtifactDraft.
+ */
+function uncommittedDrafts(): number {
+  let count = 0
+  for (const [key, lane] of lanes) {
+    if ((writes.get(key) ?? 0) <= (durableWrites.get(key) ?? 0)) continue
+    // A pending deletion loses no work.
+    if (!lane.next && !lane.merging && !lane.failed) continue
+    count++
+  }
+  return count
+}
+let unloadHooked = false
+function hookUnload() {
+  if (unloadHooked || typeof window === "undefined") return
+  unloadHooked = true
+  window.addEventListener("beforeunload", event => { if (uncommittedDrafts() > 0) { event.preventDefault(); event.returnValue = "" } })
+}
+export type ArtifactDraftStorageState = "none" | "queued" | "durable"
+/** Where the newest write of this draft is: see "Leaving the page" above. */
+export function artifactDraftStorageState(key: string): ArtifactDraftStorageState {
+  const seq = writes.get(key) ?? 0
+  if (!seq) return "none"
+  return seq <= (durableWrites.get(key) ?? 0) ? "durable" : "queued"
 }
 
 /**
@@ -251,9 +308,11 @@ function queueArtifactDraft(key: string, text: string, admitted = false): Promis
   if (!row) return Promise.reject(new Error("Invalid artifact draft key."))
   if (!admitted && retired(row)) return Promise.reject(retiredError())
   writes.set(key, (writes.get(key) ?? 0) + 1)
+  hookUnload()
   let lane = lanes.get(key)
   if (!lane) { lane = { next: text, tail: Promise.resolve() }; lanes.set(key, lane) }
   lane.next = text
+  lane.nextSeq = writes.get(key)
   if (lane.scheduled) return lane.scheduled
   const current = lane
   // A write also waits for an identity purge that began before it, so that
@@ -263,7 +322,8 @@ function queueArtifactDraft(key: string, text: string, admitted = false): Promis
   const purging = admitted ? Promise.resolve() : identityPurge
   const scheduled = Promise.all([current.tail, purging]).then(() => {
     current.scheduled = undefined
-    return persist(row, current.next)
+    // Coalesced: this persist stores the newest admitted text.
+    return persist(row, current.next, current.nextSeq ?? 0)
   })
   current.scheduled = scheduled
   current.tail = scheduled.then(() => { current.failed = false }, () => { current.failed = true }).then(() => { if (!current.scheduled && !current.failed && !current.merging && lanes.get(key) === current) lanes.delete(key) })
@@ -334,7 +394,10 @@ export function mergeArtifactDraft(key: string, merge: (existing: string) => str
   const row = parse(key)
   if (!row) return Promise.reject(new Error("Invalid artifact draft key."))
   if (retired(row)) return Promise.reject(retiredError())
-  writes.set(key, (writes.get(key) ?? 0) + 1)
+  // A merge is not coalesced: its write number is fixed here, at admission.
+  const seq = (writes.get(key) ?? 0) + 1
+  writes.set(key, seq)
+  hookUnload()
   let lane = lanes.get(key)
   if (!lane) { lane = { next: "", tail: Promise.resolve() }; lanes.set(key, lane) }
   const current = lane
@@ -350,11 +413,12 @@ export function mergeArtifactDraft(key: string, merge: (existing: string) => str
       const sealed = await (await cipherFor(key, row)).seal(merge(""), row[1])
       await durable()!.put(row, JSON.stringify({ format: BUNDLE, parts: [...existing.append, sealed] }), crypto.randomUUID())
       successfulWrites.delete(key)
+      stored(key, seq)
       current.failed = false
       return ""
     }
     const text = merge(existing.text)
-    await persist(row, text)
+    await persist(row, text, seq)
     // The merge is now the lane's latest durable value: an older failed write
     // must not be retried over it when the lane retires. A write queued after
     // this merge keeps its own (newer) value.
@@ -438,6 +502,58 @@ export function readArtifactDraft(key: string): Promise<string> {
 // the owner's id; versioned prefixes come before their legacy forms.
 const LOCAL_PREFIXES = ["crewship-design:v2:", "design-comment:v2:", ...KINDS.map(kind => `${kind}:`), "crewship-design:"]
 
+/**
+ * A Project source or comment draft that a build before Page-ID keys (#4628)
+ * kept in localStorage under the Page *slug*. The record carries no Page
+ * identity, and a slug can be renamed or reused by another Page (G4 B23b), so
+ * it is never applied automatically and never deleted silently: the editor
+ * shows it as an older draft that may belong to another Page, and only the
+ * person's explicit choice adopts it (sealed under the Page ID) or discards
+ * it. Only the signed-in person's own key is read; other accounts' copies are
+ * removed on identity change and sign-out like every legacy plaintext copy.
+ */
+export type SlugArtifactDraftKind = "artifact-source" | "artifact-comment"
+export interface SlugArtifactDraft { key: string; text: string; kind: SlugArtifactDraftKind; human: string; workspace: string; slug: string }
+export function findSlugArtifactDraft(kind: SlugArtifactDraftKind, human: string | null | undefined, workspace: string, slug: string, pageId: string | null | undefined): SlugArtifactDraft | undefined {
+  // slug === pageId is the Page-ID key itself, migrated by loadArtifactDraft.
+  if (!human || !workspace || !slug || !pageId || slug === pageId) return undefined
+  if (owner !== undefined && owner !== human) return undefined
+  const key = legacyKey([human, kind, workspace, slug])
+  try {
+    const text = localStorage.getItem(key)
+    // Builds before #4628 wrote only plaintext; a sealed value is not theirs.
+    if (!text || isSealedLocalDraft(text)) return undefined
+    return { key, text, kind, human, workspace, slug }
+  } catch { return undefined }
+}
+/** Explicit adoption into an empty Page-ID draft, as a compare-and-set: the
+ * text is sealed first, then written in one IndexedDB transaction only if no
+ * Page-ID row exists. A draft any tab stored meanwhile, including during the
+ * seal, is kept ("kept-existing") and so is the slug copy. Only after a durable
+ * adoption is the slug copy removed, and only if it is still the one shown. A
+ * failure rejects and keeps the slug copy. */
+export async function adoptSlugArtifactDraft(found: SlugArtifactDraft, pageKey: string, text = found.text): Promise<"adopted" | "kept-existing"> {
+  const row = parse(pageKey)
+  if (!row || row[0] !== found.human || row[1] !== found.kind || row[2] !== found.workspace) throw new Error("Invalid artifact draft key.")
+  if (retired(row)) throw retiredError()
+  const store = durable()
+  if (!store?.putIfAbsent || !text) throw new Error("Artifact draft storage is unavailable.")
+  await lanes.get(pageKey)?.tail
+  // A sealed fallback copy of a Page-ID draft is a draft too.
+  if (legacyGet(row) !== undefined) return "kept-existing"
+  const sealed = await (await cipherFor(pageKey, row)).seal(text, row[1])
+  if (retired(row)) throw retiredError()
+  const revision = crypto.randomUUID()
+  if (!(await store.putIfAbsent(row, sealed, revision))) return "kept-existing"
+  successfulWrites.set(pageKey, { text, revision })
+  removeCapturedLegacyLocalDrafts([{ key: found.key, text: found.text }])
+  return "adopted"
+}
+/** Explicit discard of the copy that was shown; a changed copy stays. */
+export function discardSlugArtifactDraft(found: SlugArtifactDraft): void {
+  removeCapturedLegacyLocalDrafts([{ key: found.key, text: found.text }])
+}
+
 export interface CapturedLegacyLocalDraft { key: string; text: string }
 /** Old localStorage copies are included in sign-out's visible discard warning.
  * `includeSealed` also takes encrypted fallback copies (written when IndexedDB
@@ -500,7 +616,7 @@ export function suspendOtherArtifactDrafts(userId: string | null): Promise<void>
     for (const [key, lane] of retiring) {
       if (!lane.failed || lanes.get(key) !== lane) continue
       const row = parse(key)!
-      await persist(row, lane.next) // retained admitted text, no new authority or server save
+      await persist(row, lane.next, lane.nextSeq ?? 0) // retained admitted text, no new authority or server save
       lane.failed = false; lane.next = ""
       if (lanes.get(key) === lane) lanes.delete(key)
     }

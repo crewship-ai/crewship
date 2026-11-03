@@ -199,6 +199,29 @@ poll_until() {
   return 1
 }
 
+# agent_has_no_open_chat <agent-slug> — true once the agent holds no open chat
+# turn. A turn whose ask timed out keeps the agent's slot until its protected
+# capture settles it (#4819), typically ~20 s; asking the same agent inside that
+# window is correctly refused with 429 (#4842).
+agent_has_no_open_chat() {
+  cs work list --open --class chat --agent "$1" --format json 2>/dev/null \
+    | jq -e '(.items // []) | length == 0' >/dev/null
+}
+
+# wait_agent_idle <agent-slug> [timeout-s] — wait for agent_has_no_open_chat
+# before driving the same agent again. Records a failure with the evidence if
+# the agent never frees; returns 0 without asserting when jq is unavailable.
+wait_agent_idle() {
+  local agent="$1" timeout="${2:-120}" waited=0
+  have jq || return 0
+  while (( waited < timeout )); do
+    agent_has_no_open_chat "$agent" && return 0
+    sleep "$POLL_INTERVAL"; waited=$((waited+POLL_INTERVAL))
+  done
+  _fail "$agent frees its previous chat turn" "still open after ${timeout}s: $(cs work list --open --class chat --agent "$agent" --format json 2>/dev/null | jq -c '[(.items // [])[] | {id, state, state_reason}]' 2>/dev/null | head -c 300)"
+  return 1
+}
+
 # preflight — confirm the CLI is reachable and the workspace is seeded.
 #
 # The two failure modes are reported separately on purpose: "no binary" is a

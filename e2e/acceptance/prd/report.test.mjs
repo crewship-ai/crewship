@@ -6,6 +6,10 @@ import * as path from "node:path"
 import { test } from "node:test"
 import { parseOriginMap, evaluateRequired, formatGate, loadRequired, manualToRows, formatTable, parseArgs, readRows, resultOf, summarize, writeSummary } from "./report.mjs"
 import { idCoverageProblems, scanEmittedIds } from "./emitted-ids.mjs"
+// The Craft rows' lost-line checker and the API session renewal have their own tests; loading them here runs
+// them in the CI step of this file ("PRD acceptance runner tests").
+import "./craft-session/lines.test.mjs"
+import "./session-refresh.test.mjs"
 
 const row = (over = {}) => ({
   requirement: "B.project.version",
@@ -238,6 +242,8 @@ test("gate: formatGate lists every problem; shipped required-ids.json is well fo
   // origin, which runs without a native editor profile (#4779).
   assert.equal(real.rows.filter((x) => x.allowSkipped).map((x) => x.id).join(), "")
   assert.equal(real.rows.find((x) => x.id === "A.craft.lease.fail-closed")?.origin, "artifacts")
+  // Its scenario saves through a native Word editor, which only the craft origin has (#4795).
+  assert.equal(real.rows.find((x) => x.id === "quota.aggregate.workspace")?.origin, "craft")
   for (const id of ["B.project.from-chat", "A.lock", "quota.aggregate.workspace", "drafts.identity-switch", "A.craft.session.hour-word"]) assert.ok(ids.includes(id), id)
   assert.equal(ids.filter((i) => i.startsWith("drafts.crash.")).length, 11)
   for (const x of real.rows) assert.ok(real.origins[x.origin], x.id)

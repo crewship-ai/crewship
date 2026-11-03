@@ -101,7 +101,8 @@ var knownAssigneeWriteFuncs = []string{
 var assigneeWritesWithoutHelper = map[string]string{
 	"assignments_run.go:Create": "target.ID is resolved via `SELECT ... FROM agents WHERE a.slug = ? AND " +
 		"a.crew_id = ?`, and body.CrewID was already proven bound to the calling token's workspace by " +
-		"assertBoundCrewWorkspaceDB earlier in this same function — scoped by construction before the UPDATE " +
+		"assertAssignmentTargetCrewDB earlier in this same function (#4845: the target crew may be a linked crew, " +
+		"but always one of the token's workspace) — scoped by construction before the UPDATE " +
 		"ever runs, not by the helper",
 	"issue_handler_workflow.go:Review": "reassign_to's agent lookup filters `WHERE slug = ? AND workspace_id = ?` " +
 		"— agents.slug is only UNIQUE(workspace_id, slug), never globally unique, so the workspace filter on the " +

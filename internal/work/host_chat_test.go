@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 )
 
 func hostChatRequest(id string) HostChatRequest {
@@ -236,5 +237,58 @@ func TestHostChatRecoveredFailedExitReleasesCapacity(t *testing.T) {
 	same.AgentID, same.CrewID = "gone-agent-0", "gone-crew-0"
 	if _, _, err := s.BeginHostChat(t.Context(), same); err != nil {
 		t.Fatalf("settled failure still holds its agent: %v", err)
+	}
+}
+
+// #4820: a server restart mid-turn lets RecoverExpiredLeases park the host chat
+// turn with "lease expired in runtime phase …". RecoverRetainedResult accepted
+// that park but settled a FAILED capture only for the protected-capture park
+// reason, so after every deploy-time restart a failed turn kept its agent, crew,
+// session and a server slot. The proof is the same either way: CaptureHost only
+// delivers the capture after the exec is gone. Background work keeps its fence
+// (TestRetainedResultRecoveryKeepsAttemptAuthority).
+func TestHostChatLeaseExpiredFailedExitReleasesCapacity(t *testing.T) {
+	s, _, clock := newTestStore(t)
+	limit := SerialAgentLimits().ServerTotal
+	var parked []string
+	for i := 0; i < limit; i++ {
+		r := hostChatRequest(fmt.Sprintf("msg_restarted_%d", i))
+		r.AgentID, r.CrewID, r.ChatID = fmt.Sprintf("agent-%d", i), fmt.Sprintf("crew-%d", i), fmt.Sprintf("chat-%d", i)
+		if _, _, err := s.BeginHostChat(t.Context(), r); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.HostChatPhase(t.Context(), r.RunID, "request"); err != nil {
+			t.Fatal(err)
+		}
+		parked = append(parked, r.RunID)
+	}
+	// The server restarted mid-turn; nobody renewed the leases.
+	clock.Advance(LeaseDuration + time.Second)
+	out, err := s.RecoverExpiredLeases(t.Context())
+	if err != nil || len(out.Reconciliation) != limit {
+		t.Fatalf("lease recovery: %+v %v", out, err)
+	}
+	for _, runID := range parked {
+		b, _, err := s.HostChatAttempt(t.Context(), runID)
+		if err != nil || b.State != StateNeedsReconciliation {
+			t.Fatalf("expired turn %s: %v", b.State, err)
+		}
+		killed := 137
+		if _, err := s.RecoverRetainedResult(t.Context(), runID, RunResult{ExitCode: &killed}, false); err != nil {
+			t.Fatalf("protected recovery: %v", err)
+		}
+		b, _, err = s.HostChatAttempt(t.Context(), runID)
+		if err != nil || b.State != StateFailed {
+			t.Fatalf("recovered failed exit after lease expiry left work %s: %v", b.State, err)
+		}
+		p, _, err := s.RunProjection(t.Context(), runID)
+		if err != nil || !p.Ready || p.Status != "FAILED" || p.Result.ExitCode == nil || *p.Result.ExitCode != killed {
+			t.Fatalf("projection: %+v %v", p, err)
+		}
+	}
+	fresh := hostChatRequest("msg_after_restart")
+	fresh.AgentID, fresh.CrewID, fresh.ChatID = "new-agent", "new-crew", "new-chat"
+	if _, _, err := s.BeginHostChat(t.Context(), fresh); err != nil {
+		t.Fatalf("settled failures still hold server capacity: %v", err)
 	}
 }

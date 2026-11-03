@@ -135,6 +135,10 @@ func TestRetainedRunWithUnverifiableOwnershipSettlesWithoutProjection(t *testing
 			// Two background ticks: the first settles, the second must find
 			// nothing left to warn about.
 			first, second := s.flushRetainedOutput(t.Context()), s.flushRetainedOutput(t.Context())
+			// A restart after settlement must keep its ownership boundary:
+			// generic boot recovery may not cancel the trace under any owner
+			// the settlement deliberately left untouched (#4798).
+			s.recoverOrphanedRuns(t.Context())
 
 			raw, err := s.state.Get(t.Context(), "agent_runs", runID)
 			if err != nil {

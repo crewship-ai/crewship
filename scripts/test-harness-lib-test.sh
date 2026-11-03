@@ -122,6 +122,51 @@ expect_contains "auth failure -> points at login/seed" "$out" "seed --nuke"
 expect_not_contains "auth failure -> does NOT claim the binary is missing" "$out" "not found"
 
 echo
+echo "== CREDENTIAL escalation deny (#4858) =="
+
+# The server refuses ANY resolution text on a CREDENTIAL escalation, for reject
+# as well as approve (#2376, TestResolveEscalation_Credential_RefusesText).
+# keeper-audit's deny once sent a reason and failed on stage the first time the
+# section got that far. This stub enforces the same rule and records the call.
+deny_cli() {
+  cat >"$1" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${DENY_LOG:?}"
+for a in "$@"; do [ "$a" = version ] && exit 0; done
+case " $* " in
+  *" escalation resolve "*" --resolution "*)
+    echo 'Error: a CREDENTIAL escalation takes no resolution text — supply the value with POST /api/v1/escalations/{id}/supply' >&2
+    exit 1 ;;
+  *" escalation resolve esc-deny --action reject "*) exit 0 ;;
+esac
+echo "Error: escalation not found" >&2
+exit 1
+EOF
+  chmod +x "$1"
+}
+
+deny_dir="$(mktemp -d -t cs-deny.XXXXXX)"
+deny_cli "$deny_dir/crewship"
+: >"$deny_dir/log"
+deny() { # <id> — run the real helper against the stub; print "rc|stdout"
+  # shellcheck disable=SC2016  # the inner shell expands these, not this one
+  env -u CREWSHIP_SERVER -u SERVER CREWSHIP="$deny_dir/crewship" DENY_LOG="$deny_dir/log" \
+    bash -c '. "$1/test-harness/lib.sh" && . "$1/test-harness/owned-escalation.sh" && out="$(deny_credential_escalation "$2")"; rc=$?; printf "%s|%s" "$rc" "$out"' _ "$SCRIPT_DIR" "$1"
+}
+expect_eq "deny of the exact escalation succeeds with no resolution text" "0|" "$(deny esc-deny)"
+# Only meaningful once the stub was really called.
+expect_contains "deny reached the CLI" "$(cat "$deny_dir/log")" "escalation resolve esc-deny"
+expect_not_contains "deny sends no --resolution" "$(cat "$deny_dir/log")" "--resolution"
+expect_contains "deny sends --action reject for that id" "$(cat "$deny_dir/log")" "escalation resolve esc-deny --action reject"
+expect_contains "a failed deny surfaces the CLI error" "$(deny esc-other)" "1|Error: escalation not found"
+if grep -nE 'escalation resolve[^#]*--resolution' "$SCRIPT_DIR/test-harness/test-keeper-audit-integrity.sh" >/dev/null; then
+  fail "keeper-audit resolves no escalation with resolution text" "$(grep -nE 'escalation resolve[^#]*--resolution' "$SCRIPT_DIR/test-harness/test-keeper-audit-integrity.sh")"
+else
+  pass "keeper-audit resolves no escalation with resolution text"
+fi
+rm -rf "$deny_dir"
+
+echo
 echo "== README prereqs =="
 
 # The prereqs say an installed CLI on PATH is enough, so the commands they hand
@@ -134,6 +179,86 @@ expect_contains "README seeds with the PATH form" \
   "$(grep -E '^[[:space:]]*crewship seed ' "$README" || true)" "crewship seed --nuke"
 expect_contains "README still names the locally-built ./crewship form" \
   "$(cat "$README")" "./crewship"
+
+echo
+echo "== crew-links evidence (#4855) =="
+
+# test-crew-links.sh once passed when alex REFUSED the delegation but quoted the
+# requested "<tag>-OK" string (stage ff4c164, 2026-11-03): the prompt carries
+# the tag, so the reply text cannot prove a crossing. Drive the real suite
+# against a stub CLI whose `activity` feed is the only thing that changes.
+# XLINK_MODE: refuse-quoting (no artifact, reply quotes the tag), landed
+# (tag-correlated assignment for morgan; the reply never mentions the tag),
+# leaky (an assignment lands even with the link removed) or feed-down
+# (`activity` itself fails).
+xlink_cli() {
+  cat >"$1" <<'EOF'
+#!/usr/bin/env bash
+state="${XLINK_STATE:?}"
+args=" $* "
+prompt="" save="" prev=""
+for a in "$@"; do
+  [ "$prev" = "-p" ] && prompt="$a"
+  [ "$prev" = "--save" ] && save="$a"
+  prev="$a"
+done
+case "$args" in
+  *" crew connect "*) rm -f "$state/unlinked"; exit 0 ;;
+  *" version "*|*" whoami "*|*" crew disconnect "*) exit 0 ;;
+  *" agent list "*|*" routine list "*) echo row; exit 0 ;;
+  *" crew connections "*)
+    [ -e "$state/unlinked" ] || echo "link cc_stub engineering ops bidirectional"; exit 0 ;;
+  *" chat list "*) echo "[]"; exit 0 ;;
+  *" activity "*)
+    [ "$XLINK_MODE" = feed-down ] && exit 1
+    [ -s "$state/landed" ] && cat "$state/landed"; exit 0 ;;
+  *" ask "*)
+    tag="$(printf '%s' "$prompt" | grep -oE 'XLINK(NEG)?-[A-Z0-9]+' | head -1)"
+    if [ -z "$tag" ]; then printf 'ops\n' >"$save"; exit 0; fi
+    case "$tag" in XLINKNEG-*) : >"$state/unlinked" ;; esac
+    if { [ "$XLINK_MODE" = landed ] && [ ! -e "$state/unlinked" ]; } || [ "$XLINK_MODE" = leaky ]; then
+      printf '{"id":"a-%s","to_slug":"morgan","entry_type":"assignment.created","summary":"assigned alex → Morgan: reply %s-OK"}\n' "$tag" "$tag" >>"$state/landed"
+      printf 'Morgan answered.\n' >"$save"
+    else
+      printf "Refused by the platform: I could not get Morgan to reply '%s-OK'.\n" "$tag" >"$save"
+    fi
+    exit 0 ;;
+esac
+exit 0
+EOF
+  chmod +x "$1"
+}
+
+run_crew_links() { # <mode> — print the suite's output (colour-free, stdout not a tty)
+  local dir; dir="$(mktemp -d -t cs-xlink.XXXXXX)"
+  xlink_cli "$dir/crewship"
+  env -u CREWSHIP_SERVER -u SERVER CREWSHIP="$dir/crewship" XLINK_STATE="$dir" XLINK_MODE="$1" \
+    bash "$SCRIPT_DIR/test-harness/test-crew-links.sh" 2>&1
+  rm -rf "$dir"
+}
+
+if command -v jq >/dev/null 2>&1; then
+  out="$(run_crew_links refuse-quoting)"
+  expect_contains "quoted tag without an artifact -> section 3 FAILS" "$out" "FAIL cross-crew delegation over a live link"
+  expect_contains "quoted tag without an artifact -> says the echo is not evidence" "$out" "is not evidence"
+  expect_not_contains "quoted tag without an artifact -> suite is not green" "$out" "failed: 0"
+  expect_contains "refusal quoting the NEG tag -> unlinked half still PASSES" "$out" "PASS an unlinked crew cannot be delegated to"
+
+  out="$(run_crew_links landed)"
+  expect_contains "tag-correlated assignment -> section 3 PASSES" "$out" "PASS delegation crossed the link"
+  expect_contains "landed run -> unlinked half PASSES" "$out" "PASS an unlinked crew cannot be delegated to"
+  expect_contains "landed run -> suite is green" "$out" "failed: 0"
+
+  out="$(run_crew_links leaky)"
+  expect_contains "assignment lands with no link -> unlinked half FAILS" "$out" "FAIL an unlinked crew cannot be delegated to"
+
+  out="$(run_crew_links feed-down)"
+  expect_contains "unreadable activity feed -> section 3 names the feed" "$out" "could not be read, so there is no evidence"
+  expect_contains "unreadable activity feed -> unlinked half FAILS" "$out" "FAIL an unlinked crew cannot be delegated to"
+  expect_not_contains "unreadable activity feed -> no echo blame" "$out" "is not evidence"
+else
+  echo "  skip crew-links evidence checks (jq not installed)"
+fi
 
 echo
 if [ "$FAILURES" -eq 0 ]; then

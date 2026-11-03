@@ -378,7 +378,8 @@
     },
     {
       "id": "quota.aggregate.workspace",
-      "origin": "artifacts"
+      "origin": "craft",
+      "alwaysRerun": true
     },
     {
       "id": "drafts.crash.comments",
