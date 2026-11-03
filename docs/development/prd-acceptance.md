@@ -147,7 +147,7 @@ checks only (about a minute), and restores the original value in a `finally`
 block. While it is lowered, other workspaces over 1 MiB cannot grow (nothing is
 deleted). The row's evidence records the original, lowered and restored values
 and how long the limit was lowered. Needs an instance admin owner and a native
-Word editor on the origin.
+Word editor, so its canonical origin is the craft origin (#4795).
 
 ## Cleanup
 
