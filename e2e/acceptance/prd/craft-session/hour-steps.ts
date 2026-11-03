@@ -6,7 +6,8 @@ import { readFacts } from "../craft-lease/sheet-workbook"
 import { captureAdmission, traceCraft, type CraftCall } from "../craft-lease/helpers"
 import type { PrdScenario } from "../fixtures"
 import * as N from "../outage-lostack/native"
-import { holdsAll, inspectDrafts, newTyping, placeCaret, saveByAutosaveOrKey, typedMarkers, typeLines } from "./draft"
+import { holdsAll, inspectDrafts, newTyping, offerEvidence, placeCaret, saveByAutosaveOrKey, typedMarkers, typeLines, type DraftOffer } from "./draft"
+import { checkDraftCopies, checkLines, holdsAnyLine, lineLedger, type LineCheck } from "./lines"
 import { present, sha256, wordFacts } from "./facts"
 import type { RestartRecord } from "./restart"
 
@@ -187,6 +188,14 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   const typedLines = await typing
   // Every line the editor took (also during the restart) must survive, saved or in the draft.
   const typedBefore = typedMarkers(unsaved, progress.accepted)
+  // Per line: typed, accepted, then found once and in order in each copy (draft
+  // or server-confirmed head); a missing line fails with its last state (lines.ts).
+  const ledger = lineLedger(unsaved, progress)
+  const lineChecks: LineCheck[] = []
+  const lineFailures = (c: LineCheck) => {
+    lineChecks.push(c)
+    failures.push(...c.problems)
+  }
 
   // The open editor after the restart: what it shows on its own.
   const timeline: Awaited<ReturnType<typeof N.uiState>>[] = []
@@ -202,10 +211,17 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   failures.push(...d.verify(after.text, saved, "after the restart"))
   const savedByEditor = after.text.includes(`${unsaved}-0`)
   if (savedByEditor && !holdsAll(after.text, typedBefore)) failures.push(`the editor saved only part of the ${typedBefore.length} lines it took`)
+  // Any line on the server (not only the first) means the editor saved: then it saved all of them.
+  if (savedByEditor || holdsAnyLine(ledger, after.text)) lineFailures(checkLines(ledger, after.text, `server head v${after.version} after the restart`))
   if (!savedByEditor && sentByEditor.some((o) => o.status === 200)) failures.push("the editor saved after the restart although the draft is not on the server")
 
   // The disconnected editor still offers the unsaved typing: look into it before leaving.
-  const draftsInSession = savedByEditor ? null : await inspectDrafts(page, typedBefore.length ? typedBefore : [`${unsaved}-0`]).catch((e) => ({ rows: [] as string[], hasMarker: [] as boolean[], serverHasMarker: [] as boolean[], error: String(e).slice(0, 200) }))
+  let inSessionError: string | null = null
+  const draftsInSession: DraftOffer | null = savedByEditor ? null : await inspectDrafts(page, typedBefore.length ? typedBefore : [`${unsaved}-0`]).catch((e) => {
+    inSessionError = String(e).slice(0, 200)
+    return { rows: [] as string[], hasMarker: [] as boolean[], serverHasMarker: [] as boolean[], texts: [] as string[] }
+  })
+  const linesInSession = draftsInSession?.texts.length ? checkDraftCopies(ledger, draftsInSession.texts, "draft in the open editor after the restart") : null
   // The person reloads (after the editor's lease has run out): the document
   // opens, takes the editor again, and a draft is offered again (a draft is
   // never imported into a read-only view).
@@ -223,14 +239,18 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   note("editing again")
   await N.pause(1_500)
   const drafts = savedByEditor ? null : await inspectDrafts(page, typedBefore.length ? typedBefore : [`${unsaved}-0`])
+  const linesAfterReload = drafts ? checkDraftCopies(ledger, drafts.texts, "draft offered after the reload") : null
   const offered = Boolean(draftsInSession?.hasMarker.some(Boolean) || drafts?.hasMarker.some(Boolean))
-  if (!savedByEditor && !offered) failures.push(`after the restart the ${typedBefore.length} lines the editor took are neither saved nor all offered as a draft (in the old editor: ${JSON.stringify(draftsInSession)}; after the reload: ${JSON.stringify(drafts)}; ui ${JSON.stringify(reopened)})`)
+  if (!savedByEditor && !offered) failures.push(`after the restart the ${typedBefore.length} lines the editor took are neither saved nor all offered as a draft (in the old editor: ${JSON.stringify({ ...offerEvidence(draftsInSession), error: inSessionError })}; after the reload: ${JSON.stringify(offerEvidence(drafts))}; ui ${JSON.stringify(reopened)})`)
   if (!savedByEditor && !drafts?.hasMarker.some(Boolean)) failures.push("after the reload and taking the editor the draft with every line is not offered again")
+  // Every offered draft that was inspected holds every line once and in order.
+  if (linesInSession) lineFailures(linesInSession)
+  if (linesAfterReload) lineFailures(linesAfterReload)
   const reloaded = await readHeadText(api, ref)
   hashes.afterReload = reloaded.hash
   if (reloaded.hash !== after.hash) failures.push("reloading the editor changed the saved document")
   failures.push(...d.verify(reloaded.text, saved, "after the reload"))
-  afterRestart = { typedLines, acceptedLines: progress.accepted, typingStoppedBy: progress.stoppedBy ?? null, timeline: timeline.slice(-3), sentByEditor: sentByEditor.length, savedByEditor, draftsInSession, reopened, drafts, version: reloaded.version }
+  afterRestart = { typedLines, acceptedLines: progress.accepted, typingStoppedBy: progress.stoppedBy ?? null, timeline: timeline.slice(-3), sentByEditor: sentByEditor.length, savedByEditor, draftsInSession: draftsInSession && { ...offerEvidence(draftsInSession), error: inSessionError }, reopened, drafts: offerEvidence(drafts), lines: { ledger, checks: lineChecks }, version: reloaded.version }
   note("reloaded, editor reopened")
 
   // Second half on the reloaded editor.
@@ -238,6 +258,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   const fin = await readHeadText(api, ref)
   hashes.final = fin.hash
   failures.push(...d.verify(fin.text, saved, "at the end"))
+  if (savedByEditor) lineFailures(checkLines(ledger, fin.text, `server head v${fin.version} at the end`))
   await N.release(page).catch(() => {})
   await page.reload()
   await N.frameOf(page, d.app)
@@ -246,6 +267,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   hashes.afterFinalReload = last.hash
   if (last.hash !== fin.hash) failures.push("the last reload changed the saved document")
   failures.push(...d.verify(last.text, saved, "after the last reload"))
+  if (savedByEditor) lineFailures(checkLines(ledger, last.text, `server head v${last.version} after the last reload`))
   const alerts = (await N.uiState(page)).alerts
   if (alerts.length) failures.push(`after the last reload the editor shows an alert: ${alerts.join(" | ").slice(0, 200)}`)
   await prd.evidence("final-editor.png", await page.screenshot({ fullPage: true }))

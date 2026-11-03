@@ -11,6 +11,7 @@ import { loginStorageState } from "./auth"
 import { captureAdmission, isCraft, nativeProfile, PEER_NAME, peerApi, requireNative, traceCraft, type CraftCall } from "./craft-lease/helpers"
 import { APPLICATIONS, NativePage, sessionUserId, type Admission, type LeaseView } from "./craft-lease/native"
 import { headText, inspectDrafts, placeCaret, newTyping, typedMarkers, typeLines, waitForDraftOffer } from "./craft-session/draft"
+import { checkDraftCopies, checkNoLines, lineLedger, type LineCheck } from "./craft-session/lines"
 import * as editor from "./drafts-crash/native"
 import { expect, prdRequirement, test } from "./fixtures"
 
@@ -293,6 +294,14 @@ for (const { application, label } of APPLICATIONS) {
           await typing
           // Every line the editor took (also after the request, until it turned read-only) must be in the draft.
           const typedBefore = typedMarkers(LATE, progress.accepted)
+          // Per line: typed, accepted, then found once and in order in each draft; the server holds none (craft-session/lines.ts).
+          const ledger = lineLedger(LATE, progress)
+          const lineChecks: LineCheck[] = []
+          const expectLines = async (c: LineCheck, what: string) => {
+            lineChecks.push(c)
+            await prd.evidence("lines.json", { ledger, checks: lineChecks })
+            expect(c.problems, what).toEqual([])
+          }
           const offered = await waitForDraftOffer(page, 60_000)
 
           // The late write under the retired generation is refused and the draft stays.
@@ -304,10 +313,12 @@ for (const { application, label } of APPLICATIONS) {
           const after = await headText(request, doc)
           expect(after.version, "the late write created no version").toBe(before.version)
           expect(after.text).not.toContain(`${LATE}-0`)
+          await expectLines(checkNoLines(ledger, after.text, `server head v${after.version} after the handoff`), "no typed line was saved under the retired generation")
           const editorSaves = trail.filter((c) => c.path === "craft/document/save" && c.status === 200).length - savesBefore
           expect(editorSaves, "the editor saved nothing under the retired generation").toBe(0)
           const kept = await inspectDrafts(page, typedBefore)
           expect(kept.hasMarker.some(Boolean), `the offered draft holds all ${typedBefore.length} lines the editor took`).toBe(true)
+          await expectLines(checkDraftCopies(ledger, kept.texts, "draft offered after the handoff"), "the offered draft holds every line the editor took, once and in order")
           const shots: Record<string, Buffer> = { "owner-draft-offered.png": await page.screenshot({ fullPage: true }) }
 
           // After a reload the draft is offered again once the owner takes the
@@ -323,11 +334,15 @@ for (const { application, label } of APPLICATIONS) {
           await waitForDraftOffer(page, 60_000)
           const reloaded = await inspectDrafts(page, typedBefore)
           expect(reloaded.hasMarker.some(Boolean), "the draft with every line is still offered after a reload").toBe(true)
-          expect((await headText(request, doc)).text, "the reload saved nothing").not.toContain(`${LATE}-0`)
+          await expectLines(checkDraftCopies(ledger, reloaded.texts, "draft offered after the reload"), "the draft offered after a reload holds every line, once and in order")
+          const headReloaded = await headText(request, doc)
+          expect(headReloaded.text, "the reload saved nothing").not.toContain(`${LATE}-0`)
+          await expectLines(checkNoLines(ledger, headReloaded.text, `server head v${headReloaded.version} after the reload`), "the reload saved no typed line")
 
           await prd.evidence("result.json", {
             application, mode: prd.mode, appSha: prd.appSha, workspaceId: ws.id, pageId: doc.pageId,
             lateWrite: late.status(), versionUnchanged: after.version, draftOffered: offered, draftHasWork: kept.hasMarker, acceptedLines: progress.accepted, typingStoppedBy: progress.stoppedBy ?? null, afterReload: reloaded.rows,
+            lines: { ledger, checks: lineChecks },
           })
           for (const [name, png] of Object.entries(shots)) await prd.evidence(name, png)
           passed = true
