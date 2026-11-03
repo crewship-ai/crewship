@@ -451,7 +451,7 @@ func (h *PageHandler) GetFolder(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !h.auditCatalogRows(w, r, index.rows, viewer.UserID) {
+	if !h.auditCatalogRows(w, r, index.rows, viewer) {
 		return
 	}
 	out := pageFolderShowWire{pageFolderWire: f.wire(len(index.rows), index.acl[f.ID], viewer), Pages: make([]pageListWire, 0, len(index.rows))}

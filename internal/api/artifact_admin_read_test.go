@@ -159,9 +159,10 @@ func TestWorkspaceAdminReadOfOrdinaryArtifactIsAudited(t *testing.T) {
 				}
 				want := before
 				// A panel crew reaches the Page, but its whole arrangement
-				// (versions, export, project sources) needs `write`: the crew
-				// member who is also ADMIN reads that only through the role.
-				if tc.audited || tc.crew && wholeArrangementSurface(surface) {
+				// (versions, export, project sources) and the detail read's
+				// authored half need `write`: the crew member who is also
+				// ADMIN receives those only through the role.
+				if tc.audited || tc.crew && (wholeArrangementSurface(surface) || surface == "page") {
 					want++
 				}
 				if after := adminReadAudits(t, h, auditActionWorkspaceAdminArtifactRead, reader, id); after != want {
@@ -180,6 +181,9 @@ func TestWorkspaceAdminReadOfOrdinaryArtifactIsAudited(t *testing.T) {
 					if got := privateReadSurfaceCall(t, h, ws, member, "MEMBER", surface); got.Code == 200 {
 						t.Errorf("panel crew MEMBER read %s without write: %s", surface, got.Body)
 					}
+				}
+				if got := pagesGetStatus(t, h, ws, member, "MEMBER", "private-read"); got.Code != 200 || strings.Contains(got.Body.String(), `"authored":true`) {
+					t.Errorf("panel crew MEMBER received the authored half: %d %s", got.Code, got.Body)
 				}
 			}
 			before := adminReadAudits(t, h, auditActionWorkspaceAdminArtifactRead, reader, id)
@@ -867,6 +871,8 @@ func TestWorkspaceAdminWholeArrangementReadAuditNeedsWriteNotReach(t *testing.T)
 		{"ADMIN read grant", "ADMIN", "read", true},
 		{"OWNER read grant", "OWNER", "read", true},
 		{"ADMIN no grant", "ADMIN", "", true},
+		// Export also needs every panel, and this ADMIN is outside the
+		// panel's crew (TestWorkspaceAdminPageReadAuditFollowsMemberStanding).
 		{"ADMIN write grant", "ADMIN", "write", false},
 		{"MEMBER write grant", "MEMBER", "write", false},
 	}
@@ -888,7 +894,7 @@ func TestWorkspaceAdminWholeArrangementReadAuditNeedsWriteNotReach(t *testing.T)
 					t.Fatalf("%s %s HTTP%d want200: %s", tc.name, surface, got.Code, got.Body)
 				}
 				want := 0
-				if tc.wantAudit {
+				if tc.wantAudit || tc.role == "ADMIN" && surface == "export" {
 					want = 1
 				}
 				if n := adminReadAudits(t, h, auditActionWorkspaceAdminArtifactRead, reader, id) - before; n != want {
@@ -896,5 +902,104 @@ func TestWorkspaceAdminWholeArrangementReadAuditNeedsWriteNotReach(t *testing.T)
 				}
 			}
 		})
+	}
+}
+
+// adminStandingSurfaceCall drives one GET of the Page fixture, including the
+// detail read, a panel's declared actions and the catalog.
+func adminStandingSurfaceCall(t *testing.T, h *PageHandler, ws, user, role, surface string) *httptest.ResponseRecorder {
+	t.Helper()
+	switch surface {
+	case "page":
+		return pagesGetStatus(t, h, ws, user, role, "private-read")
+	case "catalog":
+		r := pagesRequest(t, http.MethodGet, "/api/v1/pages", ws, user, role, "")
+		out := httptest.NewRecorder()
+		h.List(out, r)
+		return out
+	case "panel-actions":
+		r := pagesRequest(t, http.MethodGet, "/api/v1/pages/private-read/panels/sluzby/actions", ws, user, role, "")
+		r.SetPathValue("slug", "private-read")
+		r.SetPathValue("panelId", "sluzby")
+		out := httptest.NewRecorder()
+		h.ListPanelActions(out, r)
+		return out
+	}
+	return privateReadSurfaceCall(t, h, ws, user, role, surface)
+}
+
+// Final review gate (#4825): Page GET and every read that returns content
+// through the role-sensitive decisions (mayEditSpec's authored half, panel
+// visibility, whole-definition reads). The reader is compared with the same
+// person as a plain MEMBER (same grants and crews): what that member would
+// also receive is authorized by the grant and not audited; anything only the
+// OWNER/ADMIN role adds is audited, exactly once per read. The fixture Page is
+// owned by another member and carries one panel owned by crew-lookout.
+// On 8d88967f3 an ADMIN or OWNER with a Read grant received the panel and its
+// authored half from GET /pages/{slug}, its declared actions and its catalog
+// state without any audit.
+func TestWorkspaceAdminPageReadAuditFollowsMemberStanding(t *testing.T) {
+	all := []string{"page", "catalog", "panel-actions", "versions", "export", "project", "project-revision"}
+	cases := []struct {
+		name, role, grant string
+		crew              bool
+		audited           []string // surfaces audited exactly once; every other surface zero
+	}{
+		{"ADMIN read grant", "ADMIN", "read", false, all},
+		{"OWNER read grant", "OWNER", "read", false, all},
+		{"ADMIN no grant", "ADMIN", "", false, all},
+		// Write authorizes the arrangement, never another crew's panel.
+		{"ADMIN write grant outside the panel crew", "ADMIN", "write", false, []string{"page", "catalog", "panel-actions", "export", "project", "project-revision"}},
+		{"ADMIN write grant in the panel crew", "ADMIN", "write", true, nil},
+		{"MEMBER write grant in the panel crew", "MEMBER", "write", true, nil},
+		{"MEMBER read grant", "MEMBER", "read", false, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h, ws, owner, id := privateReadSurfaceFixture(t)
+			execOrFatal(t, h.db, `UPDATE pages SET private_audience=0 WHERE id=?`, id)
+			reader := "standing-reader"
+			pagesSeedUser(t, h, ws, reader, reader+"@example.test", tc.role)
+			if tc.grant != "" {
+				execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES(?,'user',?,?,?,datetime('now'))`, id, reader, tc.grant, owner)
+			}
+			if tc.crew {
+				pagesJoinCrew(t, h, reader, "crew-lookout")
+			}
+			audited := map[string]bool{}
+			for _, s := range tc.audited {
+				audited[s] = true
+			}
+			admin := tc.role == "ADMIN" || tc.role == "OWNER"
+			for _, surface := range all {
+				before := adminReadAudits(t, h, auditActionWorkspaceAdminArtifactRead, reader, id)
+				got := adminStandingSurfaceCall(t, h, ws, reader, tc.role, surface)
+				if admin && got.Code != 200 {
+					t.Fatalf("%s: %s HTTP%d want200: %s", tc.name, surface, got.Code, got.Body)
+				}
+				want := 0
+				if audited[surface] {
+					want = 1
+				}
+				if n := adminReadAudits(t, h, auditActionWorkspaceAdminArtifactRead, reader, id) - before; n != want {
+					t.Errorf("%s: %s audits=%d want %d", tc.name, surface, n, want)
+				}
+			}
+			if tc.name == "MEMBER read grant" {
+				got := pagesGetStatus(t, h, ws, reader, tc.role, "private-read")
+				if got.Code != 200 || !strings.Contains(got.Body.String(), `"sealed":true`) || strings.Contains(got.Body.String(), "Jede to?") || strings.Contains(got.Body.String(), `"authored":true`) {
+					t.Errorf("plain Read-grant member received sealed content: %d %s", got.Code, got.Body)
+				}
+			}
+		})
+	}
+	// A failed audit releases nothing on the detail read either.
+	h, ws, owner, id := privateReadSurfaceFixture(t)
+	execOrFatal(t, h.db, `UPDATE pages SET private_audience=0 WHERE id=?`, id)
+	pagesSeedUser(t, h, ws, "denied-admin", "denied-admin@example.test", "ADMIN")
+	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES(?,'user','denied-admin','read',?,datetime('now'))`, id, owner)
+	execOrFatal(t, h.db, `CREATE TRIGGER deny_standing_read BEFORE INSERT ON audit_logs WHEN NEW.user_id='denied-admin' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	if got := pagesGetStatus(t, h, ws, "denied-admin", "ADMIN", "private-read"); got.Code == 200 || strings.Contains(got.Body.String(), "Jede to?") {
+		t.Errorf("Read-grant ADMIN page released without its audit: %d %s", got.Code, got.Body)
 	}
 }

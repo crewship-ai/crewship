@@ -553,7 +553,7 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !h.auditCatalogRows(w, r, rows, user.ID) {
+	if !h.auditCatalogRows(w, r, rows, viewer) {
 		return
 	}
 	out := make([]pageListWire, 0, len(rows))
@@ -569,11 +569,11 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 // custodian's private artifact, or an ordinary artifact this caller reaches
 // only through its workspace OWNER/ADMIN role). False means the response was
 // already written and nothing may be released.
-func (h *PageHandler) auditCatalogRows(w http.ResponseWriter, r *http.Request, rows []pageIndexRow, userID string) bool {
+func (h *PageHandler) auditCatalogRows(w http.ResponseWriter, r *http.Request, rows []pageIndexRow, viewer *pageViewer) bool {
 	audited := r
 	var batch *privateMetadataRead
 	for i := range rows {
-		if !catalogRowNeedsAudit(&rows[i], userID) {
+		if !catalogRowNeedsAudit(&rows[i], viewer) {
 			continue
 		}
 		if batch == nil {
@@ -585,21 +585,43 @@ func (h *PageHandler) auditCatalogRows(w http.ResponseWriter, r *http.Request, r
 			}
 			defer batch.tx.Rollback()
 		}
-		if !h.auditPrivateOwnerAccess(w, audited, &rows[i].rec) {
+		if rows[i].rec.PrivateAudience {
+			if !h.auditPrivateOwnerAccess(w, audited, &rows[i].rec) {
+				return false
+			}
+			continue
+		}
+		// catalogRowNeedsAudit already decided from the loaded row that only
+		// the role reaches it or shows its sealed panels' state.
+		if !h.auditWorkspaceAdminReadBeyond(w, audited, &rows[i].rec, func(context.Context, string, string) (bool, error) { return true, nil }) {
 			return false
 		}
 	}
 	return batch == nil || h.finishMetadataRead(w, audited, batch)
 }
 
-// catalogRowNeedsAudit selects the rows auditPrivateOwnerAccess must see:
-// another custodian's private artifact, or an ordinary artifact the caller
-// reaches only through the workspace role arm (pageReach).
-func catalogRowNeedsAudit(row *pageIndexRow, userID string) bool {
+// catalogRowNeedsAudit selects the rows that need an administrator audit:
+// another custodian's private artifact; an ordinary artifact the caller
+// reaches only through the workspace role arm (pageReach); or, for an
+// OWNER/ADMIN, one whose state rollup counts a panel the same person as a
+// plain member would have sealed (pageListRow counts only visible panels).
+func catalogRowNeedsAudit(row *pageIndexRow, viewer *pageViewer) bool {
 	if row.rec.PrivateAudience {
-		return row.rec.OwnerUserID != userID
+		return row.rec.OwnerUserID != viewer.UserID
 	}
-	return len(row.reach) == 1 && row.reach[0] == pageReachRole
+	if len(row.reach) == 1 && row.reach[0] == pageReachRole {
+		return true
+	}
+	if !workspaceArtifactReader(viewer.Role) || row.rec.OwnerUserID == viewer.UserID {
+		return false
+	}
+	member := pageViewer{UserID: viewer.UserID, Role: "MEMBER", Crews: viewer.Crews}
+	for _, panel := range row.panels {
+		if !pages.CanSeePanel(member.Role, member.Crews[panel.OwnerCrewID]) {
+			return true
+		}
+	}
+	return false
 }
 
 // pageIndex is what the index and the folder readers share: every page in
@@ -904,7 +926,7 @@ func (h *PageHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.auditPrivateOwnerAccess(w, r, rec) {
+	if !h.auditPageDocumentRead(w, r, rec, panels) {
 		return
 	}
 

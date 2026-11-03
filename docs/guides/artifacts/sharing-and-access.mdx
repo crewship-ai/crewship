@@ -100,7 +100,10 @@ delete the Page. An admin's read of them is audited even when the admin is
 also a named editor, because the editor share never opens them. The same holds
 for any Page's versions, export and project sources: an admin with only a read
 share reads them as an admin, audited; an edit share opens them without an
-entry.
+entry. Opening a Page works the same way: an admin sees every panel and the
+panels' authored settings, and the read is audited whenever someone with the
+admin's own shares and crews, but without the admin role, would see less
+(a panel of another crew, or the authored settings without an edit share).
 
 An entry records the artifact's owner at the moment its content was read. If
 ownership moves to the reader while the read is in progress, the entry still

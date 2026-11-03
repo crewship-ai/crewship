@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/pages"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -152,15 +153,95 @@ func (h *PageHandler) auditWorkspaceAdminRead(w http.ResponseWriter, r *http.Req
 	})
 }
 
+// The administrator read rule for ordinary Pages, by what a read releases.
+// PRD §5: a workspace OWNER/ADMIN reads everything, and every read only the
+// role makes possible is audited. The comparison is always the same person
+// as a plain MEMBER: same crews, grants and folder ACLs, no manage role. A
+// read that member would also receive is authorized by that standing and is
+// not audited; anything more is audited. Private Pages are audited for every
+// non-custodian administrator by auditPrivateOwnerAccess.
+
+// memberViewer is userID as a plain MEMBER: same crews, no manage role.
+func (h *PageHandler) memberViewer(ctx context.Context, workspace, userID string) (*pageViewer, error) {
+	viewer, err := h.loadViewer(ctx, workspace, userID)
+	if err != nil {
+		return nil, err
+	}
+	member := *viewer
+	member.Role = "MEMBER"
+	return &member, nil
+}
+
+// memberSealsPanel reports whether userID as a plain MEMBER would receive any
+// of panels sealed (§7.1 rule 2: panel visibility is its owning crew's).
+func (h *PageHandler) memberSealsPanel(ctx context.Context, workspace, userID string, panels []*panelRecord) (bool, error) {
+	if len(panels) == 0 {
+		return false, nil
+	}
+	member, err := h.memberViewer(ctx, workspace, userID)
+	if err != nil {
+		return false, err
+	}
+	for _, p := range panels {
+		if !h.canSeePanel(member, p) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// memberSealsDefinition reports whether the requesting user as a plain
+// MEMBER could not see some panel declared in docs (the visibility
+// requireProjectDefinitions and the review surface apply).
+func (h *PageHandler) memberSealsDefinition(ctx context.Context, workspace string, docs ...*pages.Document) (bool, error) {
+	auth, err := h.reviewDefinitionAuthorizer(ctx, workspace)
+	if err != nil {
+		return false, err
+	}
+	member := *auth.viewer
+	member.Role = "MEMBER"
+	auth.viewer = &member
+	for _, doc := range docs {
+		if doc == nil {
+			continue
+		}
+		for _, panel := range doc.Spec.Panels {
+			if !auth.visible(panel.Owner) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+// parsedDefinitions decodes stored spec_json values; empty ones are skipped.
+// A spec that does not decode is returned as an error, never as "visible".
+func parsedDefinitions(specs ...string) ([]*pages.Document, error) {
+	out := make([]*pages.Document, 0, len(specs))
+	for _, spec := range specs {
+		if spec == "" {
+			continue
+		}
+		var doc pages.Document
+		if err := json.Unmarshal([]byte(spec), &doc); err != nil {
+			return nil, err
+		}
+		out = append(out, &doc)
+	}
+	return out, nil
+}
+
 // auditWholeArrangementRead is auditPrivateOwnerAccess for a read that
 // releases a Page's whole arrangement: its spec history, its export bundle,
 // its project sources and their history. Reaching the Page does not authorize
 // these; a member needs `write` on it (mayEditSpec), and the spec history of a
 // Page holding a workbook is its owner's alone (workbookPageOwnerOnly) even for
-// a named Sheet editor. An administrator whose standing without the role does
-// not authorize the read (a Read grant, a Sheet editor grant, a panel crew, no
-// grant) reads it through the role and is audited.
-func (h *PageHandler) auditWholeArrangementRead(w http.ResponseWriter, r *http.Request, rec *pageRecord, workbookHistory bool) bool {
+// a named Sheet editor. definitions, when given, must also be wholly visible
+// to the member (export requires every panel). An administrator whose
+// standing without the role does not authorize the read (a Read grant, a
+// Sheet editor grant, a panel crew, no grant, a Write grant without the
+// panels' crews where every panel is required) is audited.
+func (h *PageHandler) auditWholeArrangementRead(w http.ResponseWriter, r *http.Request, rec *pageRecord, workbookHistory bool, definitions ...*pages.Document) bool {
 	if rec.PrivateAudience {
 		return h.auditPrivateOwnerAccess(w, r, rec)
 	}
@@ -170,7 +251,73 @@ func (h *PageHandler) auditWholeArrangementRead(w http.ResponseWriter, r *http.R
 		}
 		// The same member without the manage role; an unresolvable grant
 		// counts as none, so the read is audited rather than released quietly.
-		return !h.mayEditSpec(ctx, workspace, userID, "MEMBER", rec), nil
+		if !h.mayEditSpec(ctx, workspace, userID, "MEMBER", rec) {
+			return true, nil
+		}
+		return h.memberSealsDefinition(ctx, workspace, definitions...)
+	})
+}
+
+// auditDefinitionPanelsRead covers the project reads that also release a
+// whole definition (the draft, a retained revision, the review snapshot).
+// projectPage has already audited a reader the member standing would refuse
+// outright (no `write`) and every private-Page administrator read; this adds
+// the reader whose `write` is real but who sees some declared panel only
+// through the role.
+func (h *PageHandler) auditDefinitionPanelsRead(w http.ResponseWriter, r *http.Request, rec *pageRecord, definitions ...*pages.Document) bool {
+	if rec.PrivateAudience {
+		return true
+	}
+	return h.auditWorkspaceAdminReadBeyond(w, r, rec, func(ctx context.Context, workspace, userID string) (bool, error) {
+		if !h.mayEditSpec(ctx, workspace, userID, "MEMBER", rec) {
+			return false, nil // audited by projectPage
+		}
+		return h.memberSealsDefinition(ctx, workspace, definitions...)
+	})
+}
+
+// auditPageDocumentRead is the audit of the Page detail read (Get). An
+// OWNER/ADMIN receives every panel unsealed and, through mayEditSpec, the
+// authored half (actions, wake gates, on_failure). The same person as a
+// plain member would reach the Page only by its non-role arms, receive the
+// panels of other crews sealed, and get the authored half only with `write`.
+func (h *PageHandler) auditPageDocumentRead(w http.ResponseWriter, r *http.Request, rec *pageRecord, panels []*panelRecord) bool {
+	if rec.PrivateAudience {
+		return h.auditPrivateOwnerAccess(w, r, rec)
+	}
+	return h.auditWorkspaceAdminReadBeyond(w, r, rec, func(ctx context.Context, workspace, userID string) (bool, error) {
+		if roleOnly, err := h.reachedOnlyByAdminRole(ctx, workspace, rec, userID); err != nil || roleOnly {
+			return roleOnly, err
+		}
+		if sealed, err := h.memberSealsPanel(ctx, workspace, userID, panels); err != nil || sealed {
+			return sealed, err
+		}
+		return len(panels) > 0 && !h.mayEditSpec(ctx, workspace, userID, "MEMBER", rec), nil
+	})
+}
+
+// auditPanelRead is the audit of a single panel's read (its declared actions,
+// its application payload history). resolvePanelForCaller admitted the
+// caller by panel visibility; a plain member sees a panel only through its
+// owning crew.
+func (h *PageHandler) auditPanelRead(w http.ResponseWriter, r *http.Request, rec *pageRecord, panel *panelRecord) bool {
+	if rec.PrivateAudience {
+		user := UserFromContext(r.Context())
+		if user == nil || user.ID == rec.OwnerUserID {
+			return true
+		}
+		role, err := h.liveContentHumanRole(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			replyInternalError(w, h.logger, "authorize private panel audit", err)
+			return false
+		}
+		if !workspaceArtifactReader(role) {
+			return true // admitted by its crew, as before; not an administrator read
+		}
+		return h.auditPrivateOwnerAccess(w, r, rec)
+	}
+	return h.auditWorkspaceAdminReadBeyond(w, r, rec, func(ctx context.Context, workspace, userID string) (bool, error) {
+		return h.memberSealsPanel(ctx, workspace, userID, []*panelRecord{panel})
 	})
 }
 
