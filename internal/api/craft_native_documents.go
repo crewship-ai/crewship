@@ -90,6 +90,20 @@ func craftNativeDocumentError(w http.ResponseWriter, err error) {
 		craftNativeHTTPError(w, err)
 	}
 }
+
+// auditRead applies PRD §5's administrator read audit at the response
+// boundary of a native Craft content read, outside the engine transaction:
+// another custodian's private document, or an ordinary one reached only
+// through the workspace OWNER/ADMIN role. A failed audit releases nothing.
+func (d *craftNativeDocumentsHTTP) auditRead(w http.ResponseWriter, r *http.Request, entry *craftNativeSession) bool {
+	rec, err := d.human.pages.loadPageForRead(r.Context(), entry.scope.WorkspaceID, "@"+entry.scope.ArtifactID)
+	if err != nil {
+		craftNativeDocumentError(w, errCraftNativeAccess)
+		return false
+	}
+	return d.human.pages.auditPrivateOwnerAccess(w, r, rec)
+}
+
 func (d *craftNativeDocumentsHTTP) readSnapshot(w http.ResponseWriter, r *http.Request) {
 	r, entry, s, profile, err := d.bind(r)
 	if err != nil {
@@ -99,6 +113,9 @@ func (d *craftNativeDocumentsHTTP) readSnapshot(w http.ResponseWriter, r *http.R
 	state, err := s.Read(r.Context(), entry.scope)
 	if err != nil {
 		craftNativeDocumentError(w, err)
+		return
+	}
+	if !d.auditRead(w, r, entry) {
 		return
 	}
 	file, ok := state.Manifest.Files["document.json"]

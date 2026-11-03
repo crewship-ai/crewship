@@ -161,6 +161,7 @@ func (h *PageHandler) artifactProjectStart(w http.ResponseWriter, r *http.Reques
 // writer fence. A retained chat principal alone never grants a Page mutation.
 func (h *PageHandler) artifactProjectAuthority(r *http.Request, k artifacts.VersionKey, write, share bool) artifacts.VersionAuthorize {
 	var admittedEpoch string
+	r = ensureDesignAdminAuditRequest(r, write || share)
 	return func(ctx context.Context, tx *sql.Tx) (string, error) {
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
 		if !h.artifactProjectEnabled(ctx) {
@@ -222,15 +223,34 @@ func (h *PageHandler) artifactProjectAuthority(r *http.Request, k artifacts.Vers
 		if rec.OwnerUserID == user.ID {
 			return user.ID, nil
 		}
-		// Private audience remains a separate boundary even for an Edit grant.
-		if rec.PrivateAudience {
-			return "", artifacts.ErrVersionNotFound
-		}
 		viewer, err := h.loadViewer(ctx, k.WorkspaceID, user.ID)
 		if err != nil {
 			return "", err
 		}
 		viewer.Role = role
+		// PRD §5: a workspace OWNER/ADMIN reads every version of any Project,
+		// private or not, audited in this transaction. Read only: writes and
+		// sharing keep the paths below.
+		if !write && !share && workspaceArtifactReader(role) {
+			action := auditActionPrivateArtifactRead
+			audit := rec.PrivateAudience
+			if !audit {
+				action = auditActionWorkspaceAdminArtifactRead
+				if audit, err = h.reachedOnlyByAdminRole(ctx, k.WorkspaceID, rec, user.ID); err != nil {
+					return "", err
+				}
+			}
+			if audit {
+				if err := h.recordWorkspaceAdminArtifactAccess(ctx, tx, r, k, user.ID, rec.OwnerUserID, rec.OwnerCrewID, action, "Workspace administrator read an artifact"); err != nil {
+					return "", err
+				}
+			}
+			return user.ID, nil
+		}
+		// Private audience remains a separate boundary even for an Edit grant.
+		if rec.PrivateAudience {
+			return "", artifacts.ErrVersionNotFound
+		}
 		allowed, err := h.canSeePage(ctx, k.WorkspaceID, rec, nil, viewer)
 		if err != nil || !allowed {
 			return "", artifacts.ErrVersionNotFound
@@ -564,10 +584,12 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 		}
 		selected = n
 	}
+	r = ensureDesignAdminAuditRequest(r, false)
 	auth := h.artifactProjectAuthority(r, k, false, false)
 	owner := false
 	canWrite := false
 	editor := false
+	adminRead := false
 	var origin any
 	var name, slug string
 	view, err := h.artifactProjectStore(r.Context()).View(r.Context(), k, func(ctx context.Context, tx *sql.Tx) (string, artifacts.VersionSelection, error) {
@@ -595,6 +617,10 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 			return "", artifacts.VersionSelection{}, viewerErr
 		}
 		editor = !owner && h.artifactProjectHumanEditor(context.WithValue(ctx, pageAuthReaderKey{}, tx), k, rec, viewer)
+		adminRead, e = h.artifactAdminReader(context.WithValue(ctx, pageAuthReaderKey{}, tx), k.WorkspaceID, user.ID, owner || editor)
+		if e != nil {
+			return "", artifacts.VersionSelection{}, e
+		}
 		if owner || editor {
 			_, writeErr := h.artifactProjectAuthority(r, k, true, false)(ctx, tx)
 			if writeErr != nil && !errors.Is(writeErr, errArtifactProjectAccess) {
@@ -621,13 +647,14 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 				return "", artifacts.VersionSelection{}, artifacts.ErrVersionNotFound
 			}
 		}
-		return actor, artifacts.VersionSelection{Version: selected, SharedOnly: !owner && !editor, IncludeHistory: owner}, nil
+		return actor, artifacts.VersionSelection{Version: selected, SharedOnly: !owner && !editor && !adminRead, IncludeHistory: owner || adminRead}, nil
 	})
 	if err != nil {
 		artifactProjectError(w, err)
 		return
 	}
-	comments, err := h.artifactProjectComments(r, k, view.State.Manifest.Version, !owner)
+	notifyDesignAdminAudit(r)
+	comments, err := h.artifactProjectComments(r, k, view.State.Manifest.Version, !owner && !adminRead)
 	if err != nil {
 		artifactProjectError(w, err)
 		return
@@ -707,6 +734,21 @@ func artifactProjectVersionInfos(infos []artifacts.VersionInfo) []map[string]any
 
 // Edit requires a current explicit Page or inherited folder write entitlement;
 // workspace management and read visibility alone do not grant private head access.
+// artifactAdminReader reports PRD §5's administrator read for a versioned
+// artifact: a live, unrestricted workspace OWNER/ADMIN who is neither the
+// owner nor an editor (privileged is true for those) reads every version, its
+// history and its comments. It is never write, share or restore authority.
+func (h *PageHandler) artifactAdminReader(ctx context.Context, workspace, user string, privileged bool) (bool, error) {
+	if privileged {
+		return false, nil
+	}
+	role, err := h.liveContentHumanRole(ctx, workspace, user)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil && workspaceArtifactReader(role), err
+}
+
 func (h *PageHandler) artifactProjectHumanEditor(ctx context.Context, k artifacts.VersionKey, rec *pageRecord, viewer *pageViewer) bool {
 	if rec == nil || rec.PrivateAudience || viewer == nil {
 		return false

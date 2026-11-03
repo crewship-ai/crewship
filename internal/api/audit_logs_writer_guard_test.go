@@ -72,8 +72,8 @@ var legacyAuditInsertSites = map[string]string{
 	"internal/backup/host_hooks_recover.go:resetRecoveredHostHooks": "offline recovery normalization before server start; source signing keys or current migrations may be unavailable, so preserve source chain and atomically record legacy quarantine receipt without granting destination authority",
 
 	"internal/api/internal_handler.go:WriteAuditLog":                             "the best-effort writer this guard polices at its call sites",
-	"internal/api/pages_private_metadata_read.go:appendPrivateReadAudit":         "read-access record (OWNER reading a private Page); fail-closed in the read transaction, no access changes",
-	"internal/api/pages_private_audience.go:recordPrivateOwnerAccess":            "read-access record (OWNER reading a private Page); written on the read transaction, no access changes",
+	"internal/api/pages_private_metadata_read.go:appendPrivateReadAudit":         "read-access record (workspace OWNER/ADMIN reading another custodian's private Page, or an ordinary Page through the role alone; PRD §5); fail-closed in the read transaction, no access changes",
+	"internal/api/pages_private_audience.go:recordPrivateOwnerAccess":            "read-access record (workspace OWNER/ADMIN reading a private Page; PRD §5); written on the read transaction, no access changes",
 	"internal/chataudience/private_artifact_read.go:CanReadArtifactConversation": "read-access record (OWNER reading a private chat artifact); conditional insert re-checks authority, no access changes",
 	"internal/api/agent_persona.go:SuggestAgentPersona":                          "persona.suggest_pending proposal record read by the inbox; a pending suggestion changes no access",
 }

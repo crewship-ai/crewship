@@ -90,10 +90,11 @@ func TestGridCraftSecondEditorPublishGrantAndRevoke(t *testing.T) {
 		t.Fatal("published workbook listed for a member without a grant")
 	}
 	// An ADMIN may administer ordinary grants, but a grant the owner did not
-	// issue never reaches workbook content.
-	wantCode(t, f.do(f.wsAdmin, "GET", base+q, ""), 404, "admin role is not a workbook reader")
+	// issue never reaches workbook write. Reading is the audited workspace
+	// administrator read (PRD §5, #4825), with or without that grant.
+	wantCode(t, f.do(f.wsAdmin, "GET", base+q, ""), 200, "admin role is an audited workbook reader")
 	wantCode(t, f.do(f.wsAdmin, "PUT", "/api/v1/pages/shared-book/grants"+q, `{"subject_type":"user","subject":"wsadmin@ex.com","level":"write"}`), 409, "admin self grant refused")
-	wantCode(t, f.do(f.wsAdmin, "GET", base+q, ""), 404, "admin-issued grant is inert")
+	wantCode(t, f.do(f.wsAdmin, "GET", base+q, ""), 200, "admin-issued grant adds nothing beyond the audited read")
 	wantCode(t, f.do(f.wsAdmin, "POST", base+"/operations"+q, gridcraftImportBody("admin", 3, 1)), 404, "admin-issued grant cannot write")
 
 	// The workspace OWNER read remains audited and read-only.

@@ -71,7 +71,15 @@ func (h *PageHandler) artifactDataAuthority(r *http.Request, k artifacts.Version
 			}
 			isEditor = h.artifactProjectHumanEditor(ctx, k, rec, viewer)
 		}
-		if write && latest != version || !isOwner && ((!isEditor && shared != version) || (isEditor && latest != version)) {
+		// PRD §5: the administrator read (audited by the authority above) may
+		// select any retained version, like the owner. Writes never take it.
+		isAdmin := false
+		if !write && user != nil && !isOwner && !isEditor && ctx.Value(artifactRunKey{}) == nil {
+			if isAdmin, err = h.artifactAdminReader(ctx, k.WorkspaceID, user.ID, false); err != nil {
+				return "", err
+			}
+		}
+		if write && latest != version || !isOwner && !isAdmin && ((!isEditor && shared != version) || (isEditor && latest != version)) {
 			return "", artifacts.ErrVersionConflict
 		}
 		collections, err := artifacts.DashboardCollectionsTx(ctx, tx, k, version)
@@ -181,6 +189,7 @@ func (h *PageHandler) GetArtifactData(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	r = ensureDesignAdminAuditRequest(r, false)
 	if err := h.artifactProjectCheck(r, k, false); err != nil {
 		artifactDataError(w, err)
 		return
@@ -196,6 +205,7 @@ func (h *PageHandler) GetArtifactData(w http.ResponseWriter, r *http.Request) {
 		artifactDataError(w, err)
 		return
 	}
+	notifyDesignAdminAudit(r)
 	writeArtifactData(w, projectArtifactData(r, collection, version, documents))
 }
 func (h *PageHandler) ListArtifactData(w http.ResponseWriter, r *http.Request) {
@@ -203,6 +213,7 @@ func (h *PageHandler) ListArtifactData(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	r = ensureDesignAdminAuditRequest(r, false)
 	if err := h.artifactProjectCheck(r, k, false); err != nil {
 		artifactDataError(w, err)
 		return
@@ -223,6 +234,7 @@ func (h *PageHandler) ListArtifactData(w http.ResponseWriter, r *http.Request) {
 			visible = append(visible, collection)
 		}
 	}
+	notifyDesignAdminAudit(r)
 	writeArtifactData(w, artifactDataCollectionsResponse{CodeVersion: version, Collections: visible})
 }
 func (h *PageHandler) BatchArtifactData(w http.ResponseWriter, r *http.Request) {

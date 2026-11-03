@@ -553,15 +553,53 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if !h.auditCatalogRows(w, r, rows, user.ID) {
+		return
+	}
 	out := make([]pageListWire, 0, len(rows))
 	for i := range rows {
-		if !h.auditPrivateOwnerAccess(w, r, &rows[i].rec) {
-			return
-		}
 		out = append(out, h.pageListRow(&rows[i], index.folders, viewer))
 	}
 	w.Header().Set("X-Total-Count", strconv.Itoa(total))
 	writeJSON(w, http.StatusOK, out)
+}
+
+// auditCatalogRows records, in one writer batch committed before any row is
+// released, the audit of every catalog row that needs one (another
+// custodian's private artifact, or an ordinary artifact this caller reaches
+// only through its workspace OWNER/ADMIN role). False means the response was
+// already written and nothing may be released.
+func (h *PageHandler) auditCatalogRows(w http.ResponseWriter, r *http.Request, rows []pageIndexRow, userID string) bool {
+	audited := r
+	var batch *privateMetadataRead
+	for i := range rows {
+		if !catalogRowNeedsAudit(&rows[i], userID) {
+			continue
+		}
+		if batch == nil {
+			var err error
+			audited, batch, err = h.startMetadataRead(r, true)
+			if err != nil {
+				replyInternalError(w, h.logger, "begin catalog read audit", err)
+				return false
+			}
+			defer batch.tx.Rollback()
+		}
+		if !h.auditPrivateOwnerAccess(w, audited, &rows[i].rec) {
+			return false
+		}
+	}
+	return batch == nil || h.finishMetadataRead(w, audited, batch)
+}
+
+// catalogRowNeedsAudit selects the rows auditPrivateOwnerAccess must see:
+// another custodian's private artifact, or an ordinary artifact the caller
+// reaches only through the workspace role arm (pageReach).
+func catalogRowNeedsAudit(row *pageIndexRow, userID string) bool {
+	if row.rec.PrivateAudience {
+		return row.rec.OwnerUserID != userID
+	}
+	return len(row.reach) == 1 && row.reach[0] == pageReachRole
 }
 
 // pageIndex is what the index and the folder readers share: every page in
@@ -1550,7 +1588,15 @@ func (h *PageHandler) loadPageWithPrivateAudience(ctx context.Context, wsID, slu
 		if err != nil {
 			return nil, err
 		}
-		if !privatePageViewer(&p, viewer) {
+		// Readers get the PRD §5 audience (custodian, workspace OWNER/ADMIN),
+		// audited at the response boundary. Mutation and configuration loads
+		// keep the custodian audience: an administrator's read never becomes
+		// write, share, publish or custody power over private output.
+		allowed := privatePageCustodian(&p, viewer)
+		if custodyRead {
+			allowed = privatePageViewer(&p, viewer)
+		}
+		if !allowed {
 			return nil, sql.ErrNoRows
 		}
 	}

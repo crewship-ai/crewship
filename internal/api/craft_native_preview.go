@@ -97,6 +97,9 @@ func (d *craftNativeDocumentsHTTP) preview(w http.ResponseWriter, r *http.Reques
 		craftNativeDocumentError(w, mooring.ErrNativeProfile)
 		return
 	}
+	if !h.pages.auditPrivateOwnerAccess(w, r, rec) {
+		return
+	}
 	writeJSON(w, 200, craftNativePreviewResponse{Version: strconv.FormatInt(state.Manifest.Version, 10), Bytes: file.Content, ApplicationID: proof.application, EnginePin: store.EnginePin(), EditorBundle: cfg.EditorBundle, EditorURL: profile.EditorURL})
 }
 

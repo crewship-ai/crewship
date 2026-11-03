@@ -30,6 +30,7 @@ type artifactSlidesSelection struct {
 	actor   string
 	owner   bool
 	editor  bool
+	admin   bool
 	version int64
 	source  [sha256.Size]byte
 }
@@ -86,7 +87,15 @@ func (h *PageHandler) artifactSlidesAuthority(r *http.Request, k artifacts.Versi
 			}
 			isEditor = h.artifactProjectHumanEditor(ctx, k, rec, viewer)
 		}
-		if !isOwner && ((!isEditor && shared != version) || (isEditor && latest != version)) {
+		// PRD §5: the administrator read (audited by the authority above)
+		// renders any retained version, like the owner.
+		isAdmin := false
+		if user != nil && !isOwner && !isEditor && ctx.Value(artifactRunKey{}) == nil {
+			if isAdmin, err = h.artifactAdminReader(ctx, k.WorkspaceID, user.ID, false); err != nil {
+				return "", artifacts.VersionSelection{}, err
+			}
+		}
+		if !isOwner && !isAdmin && ((!isEditor && shared != version) || (isEditor && latest != version)) {
 			return "", artifacts.VersionSelection{}, artifacts.ErrVersionNotFound
 		}
 		if lastTx != tx {
@@ -96,13 +105,13 @@ func (h *PageHandler) artifactSlidesAuthority(r *http.Request, k artifacts.Versi
 			}
 			lastTx = tx
 		}
-		current := artifactSlidesSelection{actor: actor, owner: isOwner, editor: isEditor, version: version, source: source}
+		current := artifactSlidesSelection{actor: actor, owner: isOwner, editor: isEditor, admin: isAdmin, version: version, source: source}
 		if checked && selected != current {
 			return "", artifacts.VersionSelection{}, artifacts.ErrVersionAuthority
 		}
 		selected = current
 		checked = true
-		return actor, artifacts.VersionSelection{Version: version, SharedOnly: !isOwner && !isEditor}, nil
+		return actor, artifacts.VersionSelection{Version: version, SharedOnly: !isOwner && !isEditor && !isAdmin}, nil
 	}
 }
 
@@ -229,6 +238,7 @@ func (h *PageHandler) serveArtifactSlides(w http.ResponseWriter, r *http.Request
 		artifactSlidesError(w, artifacts.ErrVersionNotFound)
 		return
 	}
+	r = ensureDesignAdminAuditRequest(r, false)
 	auth := h.artifactSlidesAuthority(r, k, version)
 	store := h.artifactProjectStore(r.Context())
 	view, err := store.View(r.Context(), k, auth)
@@ -236,6 +246,7 @@ func (h *PageHandler) serveArtifactSlides(w http.ResponseWriter, r *http.Request
 		artifactSlidesError(w, err)
 		return
 	}
+	notifyDesignAdminAudit(r)
 	projection, err := artifacts.ParseSlidesArtifact(k.PageID, view.State.Manifest.Files)
 	if err != nil {
 		artifactSlidesError(w, err)

@@ -95,7 +95,9 @@ func (m *mooringHTTP) human(r *http.Request, tx *sql.Tx, write bool) (appengine.
 	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
 	user := UserFromContext(ctx)
 	rec, access, e := m.workbook.pages.workbookHumanAccess(ctx, k.WorkspaceID, k.PageID, user.ID, write)
-	if e != nil || rec == nil || !rec.PrivateAudience || access != workbookOwner || rec.HasWorkbook {
+	// A read also admits the audited workspace OWNER/ADMIN (PRD §5); the
+	// caller records that audit before releasing the document.
+	if e != nil || rec == nil || !rec.PrivateAudience || rec.HasWorkbook || access != workbookOwner && (write || access != workbookAuditor) {
 		return k, "", appengine.ErrForbidden
 	}
 	return k, "user:" + user.ID, nil
@@ -226,6 +228,16 @@ func (m *mooringHTTP) read(w http.ResponseWriter, r *http.Request) {
 	manifest, state, e := m.document(r.Context(), tx, k)
 	if e != nil {
 		mooringError(w, e)
+		return
+	}
+	// Release the read snapshot before the durable audit (one-connection safe).
+	_ = tx.Rollback()
+	rec, e := m.workbook.pages.loadPageForRead(r.Context(), k.WorkspaceID, "@"+k.PageID)
+	if e != nil {
+		mooringError(w, appengine.ErrForbidden)
+		return
+	}
+	if !m.workbook.pages.auditPrivateOwnerAccess(w, r, rec) {
 		return
 	}
 	editor := map[string]string{}

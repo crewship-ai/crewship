@@ -78,6 +78,9 @@ func (d *craftNativeDocumentsHTTP) listProposals(w http.ResponseWriter, r *http.
 		craftNativeProposalError(w, err)
 		return
 	}
+	if !d.auditRead(w, r, entry) {
+		return
+	}
 	out := make([]craftNativeProposalResponse, 0, len(list))
 	for _, p := range list {
 		out = append(out, d.proposalView(r, entry.scope.WorkspaceID, p))
@@ -97,6 +100,9 @@ func (d *craftNativeDocumentsHTTP) proposalDocument(w http.ResponseWriter, r *ht
 	p, err := s.ProposalContent(r.Context(), entry.scope, r.PathValue("proposalID"))
 	if err != nil {
 		craftNativeProposalError(w, err)
+		return
+	}
+	if !d.auditRead(w, r, entry) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")

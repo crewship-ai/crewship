@@ -115,6 +115,11 @@ func (h *PageHandler) artifactProjectCommentAuthority(r *http.Request, k artifac
 		if err != nil || !h.mayCommentPage(ctx, k.WorkspaceID, user.ID, role, rec) {
 			return "", errArtifactProjectAccess
 		}
+		// The administrator read of private output (PRD §5) passes the read
+		// authority above; feedback on it stays with its custodian.
+		if rec.PrivateAudience && rec.OwnerUserID != user.ID {
+			return "", errArtifactProjectAccess
+		}
 		version, err := h.artifactCommentVersion(ctx, tx, k, user.ID)
 		if err != nil {
 			return "", err

@@ -14,13 +14,15 @@ func TestPageImmutableReference(t *testing.T) {
 		t.Fatal(err)
 	}
 	pagesSeedUser(t, h, ws, "reference-admin", "admin@reference.example", "ADMIN")
+	pagesSeedUser(t, h, ws, "reference-member", "member@reference.example", "MEMBER")
 	for _, tc := range []struct {
 		name, workspace, user, role, ref string
 		status                           int
 	}{
 		{"author stable ID", ws, author, "MEMBER", "@" + id, 200},
 		{"legacy slug", ws, author, "MEMBER", "created-doc", 200},
-		{"private administrator", ws, "reference-admin", "ADMIN", "@" + id, 404},
+		{"private administrator (audited, PRD §5)", ws, "reference-admin", "ADMIN", "@" + id, 200},
+		{"private member", ws, "reference-member", "MEMBER", "@" + id, 404},
 		{"foreign workspace", "foreign", author, "MEMBER", "@" + id, 404},
 		{"empty immutable reference", ws, author, "MEMBER", "@", 404},
 		{"invalid immutable reference", ws, author, "MEMBER", "@@" + id, 404},

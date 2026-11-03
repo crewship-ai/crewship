@@ -58,11 +58,20 @@ func TestPagesSlidesMetadataPrivateAudience(t *testing.T) {
 	req.SetPathValue("slug", "@"+id)
 	out := httptest.NewRecorder()
 	h.Get(out, req)
-	if out.Code != 404 {
-		t.Fatalf("uninvited ADMIN Page GET returned%d, want404", out.Code)
+	// PRD §5 (#4825): the uninvited ADMIN reads it, audited; a MEMBER does not.
+	if out.Code != 200 {
+		t.Fatalf("uninvited ADMIN Page GET returned%d, want200", out.Code)
 	}
-	if rows := pagesListRows(t, h, rig.wsID, "slides-other-admin", "ADMIN"); len(rows) != 0 {
-		t.Fatalf("uninvited ADMIN catalog exposed private Page: %#v", rows)
+	if rows := pagesListRows(t, h, rig.wsID, "slides-other-admin", "ADMIN"); rows[id] == nil {
+		t.Fatalf("ADMIN catalog misses the private Page: %#v", rows)
+	}
+	var audits int
+	if err := rig.db.QueryRow(`SELECT count(*) FROM audit_logs WHERE action='artifact.private_owner_accessed' AND user_id='slides-other-admin' AND entity_id=?`, id).Scan(&audits); err != nil || audits != 2 {
+		t.Fatalf("ADMIN read and listing audits=%d err=%v, want 2", audits, err)
+	}
+	pagesSeedUser(t, h, rig.wsID, "slides-other-member", "slides-member@example.invalid", "MEMBER")
+	if rows := pagesListRows(t, h, rig.wsID, "slides-other-member", "MEMBER"); rows[id] != nil {
+		t.Fatalf("uninvited MEMBER catalog exposed private Page: %#v", rows)
 	}
 }
 

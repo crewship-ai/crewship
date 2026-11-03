@@ -41,10 +41,10 @@ func (h *gridcraftHTTP) agentSharedWorkbook(ctx context.Context, a *artifactRunA
 // next operation, including a second check after an engine candidate.
 //
 // A private workbook keeps the private-output audience: the owner reads and
-// writes, a workspace OWNER reads with an audit. After the owner explicitly
-// publishes it (gridcraftHTTP.share), the owner and every live, trusted member
-// holding a user `write` grant issued by the current owner may read and write;
-// a workspace OWNER still only reads, audited. Workspace roles, folder ACLs,
+// writes, a workspace OWNER or ADMIN reads with an audit (PRD §5). After the
+// owner explicitly publishes it (gridcraftHTTP.share), the owner and every
+// live, trusted member holding a user `write` grant issued by the current owner
+// may read and write; a workspace OWNER or ADMIN still only reads, audited. Workspace roles, folder ACLs,
 // crew/agent/workspace grants, `read` grants and grants issued by anybody but
 // the owner do not reach workbook content.
 func (h *PageHandler) workbookHumanAccess(ctx context.Context, workspace, pageID, userID string, write bool) (*pageRecord, workbookAccess, error) {
@@ -85,7 +85,7 @@ func (h *PageHandler) workbookHumanAccess(ctx context.Context, workspace, pageID
 			return rec, workbookEditor, nil
 		}
 	}
-	if !write && viewer.Role == "OWNER" {
+	if !write && workspaceArtifactReader(viewer.Role) {
 		return rec, workbookAuditor, nil
 	}
 	return nil, workbookNoAccess, appengine.ErrForbidden
