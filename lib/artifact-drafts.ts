@@ -462,14 +462,20 @@ export function findSlugArtifactDraft(kind: SlugArtifactDraftKind, human: string
     return { key, text, kind, human, workspace, slug }
   } catch { return undefined }
 }
-/** Explicit adoption: stores `text` sealed under the Page-ID key first, and
- * removes the slug copy only once that write is durable and only if the copy
- * is still the one shown. A failed write keeps the slug copy. */
-export async function adoptSlugArtifactDraft(found: SlugArtifactDraft, pageKey: string, text = found.text): Promise<void> {
+/** Explicit adoption into an empty Page-ID draft. The destination is read and
+ * written in one merge (the draft's lane, under its cross-tab Web Lock), so a
+ * draft another tab stored after the offer is kept as it is: "kept-existing",
+ * and the slug copy stays too. Only after a durable adoption is the slug copy
+ * removed, and only if it is still the one shown. A failed read or write
+ * rejects and keeps the slug copy. */
+export async function adoptSlugArtifactDraft(found: SlugArtifactDraft, pageKey: string, text = found.text): Promise<"adopted" | "kept-existing"> {
   const row = parse(pageKey)
   if (!row || row[0] !== found.human || row[1] !== found.kind || row[2] !== found.workspace) throw new Error("Invalid artifact draft key.")
-  await writeArtifactDraft(pageKey, text)
+  let existed = false
+  await mergeArtifactDraft(pageKey, existing => { existed = existing !== ""; return existed ? existing : text })
+  if (existed) return "kept-existing"
   removeCapturedLegacyLocalDrafts([{ key: found.key, text: found.text }])
+  return "adopted"
 }
 /** Explicit discard of the copy that was shown; a changed copy stays. */
 export function discardSlugArtifactDraft(found: SlugArtifactDraft): void {

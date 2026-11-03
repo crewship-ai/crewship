@@ -74,7 +74,15 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  const slugSource=useMemo(()=>slugRead>=0?findSlugArtifactDraft("artifact-source",human,workspaceId,slug,slugPage):undefined,[human,workspaceId,slug,slugPage,slugRead])
  const slugComment=useMemo(()=>slugRead>=0?findSlugArtifactDraft("artifact-comment",human,workspaceId,slug,slugPage):undefined,[human,workspaceId,slug,slugPage,slugRead])
  const slugSourceDraft=useMemo(()=>{try{const parsed=slugSource?JSON.parse(slugSource.text):null;return parsed&&Array.isArray(parsed.body?.files)&&typeof parsed.path==="string"?parsed as {body:ArtifactProjectSave;path:string}:undefined}catch{return undefined}},[slugSource])
- const adoptSlug=(found:SlugArtifactDraft,key:string,text:string)=>{void adoptSlugArtifactDraft(found,key,text).then(()=>{setStorageError(false);setSlugRead(read=>read+1)},()=>setStorageError(true))}
+ const [slugNotice,setSlugNotice]=useState<string>()
+ // Adoption checks the destination atomically: a draft another tab stored
+ // after the offer is kept and shown, and the older draft stays offered.
+ const adoptSlug=(found:SlugArtifactDraft,key:string,text:string,adopted:()=>void,kept:()=>void)=>{void adoptSlugArtifactDraft(found,key,text).then(result=>{
+  setStorageError(false)
+  if(result==="adopted"){setSlugNotice(undefined);adopted()}
+  else{setSlugNotice("This Page already has a newer draft in this browser. It was kept, and the older draft was not used.");kept()}
+  setSlugRead(read=>read+1)
+ },()=>setStorageError(true))}
  const discardSlug=(found:SlugArtifactDraft)=>{discardSlugArtifactDraft(found);setSlugRead(read=>read+1)}
  const sourceCurrent=useRef({scope:sourceScope,draft:activeSource,canWrite:false})
  sourceCurrent.current={scope:sourceScope,draft:activeSource,canWrite:data?.can_write===true&&!query.isError}
@@ -182,7 +190,8 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
    {data.can_write === true && data.can_restore === true && <Button variant="outline" disabled={restore.isPending} onClick={() => restore.mutate({ version: viewedVersion, base_version: data.latest_version }, { onSuccess: () => { setVersion(undefined); setAnchor(undefined) } })}>Restore version {viewedVersion}</Button>}{data.can_write === true && data.can_share === true && <Button variant="outline" disabled={share.isPending} onClick={() => share.mutate({ version: viewedVersion, base_version: data.latest_version })}>Share version {viewedVersion}</Button>}
   </header>
   {data.can_write && <div className="border-b px-4 py-2 text-xs text-muted-foreground" role="status">Storage: {data.quota.used_bytes.toLocaleString()} / {data.quota.limit_bytes.toLocaleString()} bytes. All versions retained; history is never deleted automatically.{data.quota.warning && <strong className="ml-2 text-destructive">Storage is nearly full. Existing versions remain safe.</strong>}</div>}
-  {(slugSource||slugComment)&&<section aria-label="Older draft" className="space-y-3 border-b p-3">{[slugSource,slugComment].map(found=>{
+  {slugNotice&&<p role="status" className="border-b px-4 py-2 text-sm">{slugNotice}</p>}
+ {(slugSource||slugComment)&&<section aria-label="Older draft" className="space-y-3 border-b p-3">{[slugSource,slugComment].map(found=>{
   if(!found)return null
   const isSource=found.kind==="artifact-source"
   const canAdopt=isSource?!!slugSourceDraft&&!!sourceKey&&data.can_write===true&&manifest?.version===data.latest_version&&sourceReadDone&&!sourceRead.failed&&!activeSource&&storedSource?.key!==sourceKey:canComment&&!!draftKey&&draftState?.key===draftKey&&!draft
@@ -190,8 +199,8 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
    <p>This browser kept an unsaved {isSource?"source draft":"comment"} from an older version of Crewship under the address “{slug}”. It may belong to another Page that used this address before, so it is not applied here automatically. Check it before you use it.</p>
    <textarea readOnly aria-label={isSource?"Older source draft":"Older comment"} className="min-h-24 w-full rounded border bg-background p-2 font-mono text-sm" value={isSource&&slugSourceDraft?JSON.stringify(slugSourceDraft.body,null,2):found.text} />
    {canAdopt&&<Button variant="outline" onClick={()=>{
-    if(isSource&&slugSourceDraft&&sourceKey){const value={scope:sourceScope,...slugSourceDraft};setSourceError(undefined);setSourceDraft(value);adoptSlug(found,sourceKey,JSON.stringify({body:value.body,path:value.path}))}
-    else if(!isSource&&draftKey){setDraftState({key:draftKey,text:found.text});adoptSlug(found,draftKey,found.text)}
+    if(isSource&&slugSourceDraft&&sourceKey){const value={scope:sourceScope,...slugSourceDraft};adoptSlug(found,sourceKey,JSON.stringify({body:value.body,path:value.path}),()=>{setSourceError(undefined);setSourceDraft(value)},()=>setSourceReadAttempt(attempt=>attempt+1))}
+    else if(!isSource&&draftKey){const key=draftKey;adoptSlug(found,key,found.text,()=>setDraftState(previous=>previous?.key===key&&!previous.text?{key,text:found.text}:previous),()=>{void loadArtifactDraft(key).then(text=>setDraftState(previous=>previous?.key===key&&!previous.text?{key,text}:previous),()=>setStorageError(true))})}
    }}>{isSource?"Use old source draft here":"Use old comment here"}</Button>}
    <Button variant="ghost" onClick={()=>discardSlug(found)}>{isSource?"Discard old source draft":"Discard old comment"}</Button>
   </div>

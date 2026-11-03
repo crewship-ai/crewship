@@ -123,3 +123,20 @@ it("removes another account's slug draft on identity change (privacy rules of #4
  expect(local.has("artifact-source:bob:w:demo")).toBe(false)
  expect(local.get("artifact-source:owner:w:demo")).toBe(oldSource("Owner draft"))
 })
+
+// Codex #4831 round 1: tab B stores a Page-ID draft after tab A offered the old
+// slug draft. A's adoption must keep B's draft and the slug copy, and say so.
+it.each([
+ ["source", "artifact-source", "Use old source draft here", oldSource("Old slug draft"), oldSource("Tab B newer draft")],
+ ["comment", "artifact-comment", "Use old comment here", "Old slug comment", "Tab B newer comment"],
+] as const)("never replaces a %s draft another tab stored after the offer", async (_name, kind, button, slugText, newer) => {
+ local.set(`${kind}:owner:w:demo`, slugText)
+ render(<ArtifactProject workspaceId="w" slug="demo" />)
+ await screen.findByRole("region", { name: "Older draft" })
+ await waitFor(() => expect(screen.getByRole("button", { name: button })).toBeEnabled())
+ disk.set(pageRow("owner", kind), `sealed:${newer}`)
+ fireEvent.click(screen.getByRole("button", { name: button }))
+ await screen.findByText(/already has a newer draft in this browser/)
+ expect(disk.get(pageRow("owner", kind))).toBe(`sealed:${newer}`)
+ expect(local.get(`${kind}:owner:w:demo`)).toBe(slugText)
+})
