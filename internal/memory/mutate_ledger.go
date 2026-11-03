@@ -129,7 +129,15 @@ type intentRow struct {
 // The transaction is opened after the blob is on disk and closed before the
 // canonical write starts, so no SQLite write lock is ever held across an fsync
 // of the memory file.
-func writeIntent(ctx context.Context, db *sql.DB, req MutateRequest, row intentRow) (string, error) {
+//
+// expected is the anchor the caller read under the lock (nil = none). The
+// insert is conditional on it still being there: the file lock is per
+// canonical file, so it does not exclude a ledger change made for another file
+// with the same audit key — a freed and reused agent slug moves the anchor to
+// the tombstone key, and the new agent writes its own (#4862). Recording an
+// intent against a key that changed hands would let this write's confirmation
+// land on the new owner's anchor.
+func writeIntent(ctx context.Context, db *sql.DB, req MutateRequest, expected *revisionAnchor, row intentRow) (string, error) {
 	blobPath := blobPathFor(req.BlobRoot, row.targetSHA)
 	if _, err := writeBlobIfMissing(blobPath, row.target); err != nil {
 		return "", fmt.Errorf("park intent blob: %w", err)
@@ -152,7 +160,17 @@ func writeIntent(ctx context.Context, db *sql.DB, req MutateRequest, row intentR
 		return "", fmt.Errorf("encode result: %w", err)
 	}
 
-	_, err = db.ExecContext(ctx, `
+	anchorCond, anchorArgs := anchorUnchangedCond(req.WorkspaceID, req.AuditPath, expected)
+	ownerCond, ownerArgs := scopeOwnerCond(req.WorkspaceID, req.ScopeAgentID, req.Scope, true)
+	args := append([]any{
+		id, req.WorkspaceID, req.AuditPath, req.Path, req.Scope, string(req.Tier),
+		req.OperationID, row.requestSHA, string(req.Op),
+		req.ActorType, req.ActorID, req.RunID, req.Generation, req.Source,
+		row.baseRevision, row.baseSHA, row.newRevision, row.targetSHA, len(row.target),
+		blobPath, string(removalsJSON), boolInt(row.verified), boolInt(row.adopted), boolInt(row.normalized),
+		boolInt(row.override), mutationStateIntent, string(resultJSON), nowStamp(),
+	}, append(anchorArgs, ownerArgs...)...)
+	inserted, err := db.ExecContext(ctx, `
 		INSERT INTO memory_mutations (
 			id, workspace_id, path, canonical_path, scope, tier,
 			operation_id, request_sha256, op,
@@ -160,14 +178,15 @@ func writeIntent(ctx context.Context, db *sql.DB, req MutateRequest, row intentR
 			base_revision, base_sha256, new_revision, target_sha256, target_bytes,
 			target_blob_ref, removals_json, removals_declared, adopted_base, normalized_base,
 			override_drift, state, result_json, recorded_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		id, req.WorkspaceID, req.AuditPath, req.Path, req.Scope, string(req.Tier),
-		req.OperationID, row.requestSHA, string(req.Op),
-		req.ActorType, req.ActorID, req.RunID, req.Generation, req.Source,
-		row.baseRevision, row.baseSHA, row.newRevision, row.targetSHA, len(row.target),
-		blobPath, string(removalsJSON), boolInt(row.verified), boolInt(row.adopted), boolInt(row.normalized),
-		boolInt(row.override), mutationStateIntent, string(resultJSON), nowStamp(),
-	)
+		) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+		   WHERE `+anchorCond+` AND `+ownerCond, args...)
+	if err == nil {
+		var n int64
+		if n, err = inserted.RowsAffected(); err == nil && n == 0 {
+			return "", fmt.Errorf("%w: %s changed hands or its revision anchor moved since this write read it (agent deleted or slug released?); nothing was written",
+				ErrMemoryConflict, req.AuditPath)
+		}
+	}
 	if err != nil {
 		// The partial unique index idx_memory_mutations_pending is what makes
 		// "one pending intent per key" a database fact rather than a
@@ -190,29 +209,86 @@ func writeIntent(ctx context.Context, db *sql.DB, req MutateRequest, row intentR
 // and the revision anchor moves, atomically with respect to each other. A
 // reader that sees the new revision therefore always sees the mutation that
 // produced it.
-func confirmMutation(ctx context.Context, db *sql.DB, req MutateRequest, mutationID string, revision int64, targetSHA string, bytes int, res MutateResult) error {
+//
+// The key is resolved from the mutation row, not from the request: freeing a
+// deleted agent's slug moves its pending rows and anchors to the tombstone key
+// while a write of that agent may be between its intent and this confirmation
+// (#4862). The anchor under that key must still be the one the write read
+// (expected); otherwise the mutation is marked conflicted and no anchor moves.
+// It returns the audit key the mutation was confirmed under.
+func confirmMutation(ctx context.Context, db *sql.DB, req MutateRequest, mutationID string, expected *revisionAnchor, revision int64, targetSHA string, bytes int) (string, error) {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin confirm: %w", err)
+		return "", fmt.Errorf("begin confirm: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	now := nowStamp()
-	if _, err := tx.ExecContext(ctx, `
+	var auditPath, scope string
+	err = tx.QueryRowContext(ctx, `
 		UPDATE memory_mutations
 		   SET state = ?, confirmed_at = ?
-		 WHERE id = ?`,
-		mutationStateConfirmed, now, mutationID); err != nil {
-		return fmt.Errorf("confirm memory mutation: %w", err)
+		 WHERE id = ? AND state IN (?, ?)
+		RETURNING path, scope`,
+		mutationStateConfirmed, now, mutationID, mutationStateIntent, mutationStateRenamed).Scan(&auditPath, &scope)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("%w: mutation %s on %s is no longer pending", ErrMemoryConflict, mutationID, req.AuditPath)
 	}
-	if err := upsertAnchorTx(ctx, tx, req.WorkspaceID, req.AuditPath, req.Scope, string(req.Tier),
+	if err != nil {
+		return "", fmt.Errorf("confirm memory mutation: %w", err)
+	}
+	// The UPDATE above holds SQLite's write lock, so the agent delete and the
+	// slug release cannot commit between this check and the anchor upsert.
+	// The owner need not be live here: the file was already renamed, and a
+	// key its agent still owns — the live slug or, after a release, the
+	// tombstone the row moved to — cannot belong to anyone else.
+	cond, args := anchorUnchangedCond(req.WorkspaceID, auditPath, expected)
+	ownerCond, ownerArgs := scopeOwnerCond(req.WorkspaceID, req.ScopeAgentID, scope, false)
+	var unchanged bool
+	if err := tx.QueryRowContext(ctx, `SELECT (`+cond+`) AND `+ownerCond, append(args, ownerArgs...)...).Scan(&unchanged); err != nil {
+		return "", fmt.Errorf("check revision anchor: %w", err)
+	}
+	if !unchanged {
+		_ = tx.Rollback()
+		if err := markConflicted(ctx, db, mutationID); err != nil {
+			return "", err
+		}
+		return "", fmt.Errorf("%w: %s changed hands or its revision anchor moved while this write was in flight; the mutation is marked conflicted",
+			ErrMemoryConflict, auditPath)
+	}
+	if err := upsertAnchorTx(ctx, tx, req.WorkspaceID, auditPath, scope, string(req.Tier),
 		revision, targetSHA, bytes, mutationID, now); err != nil {
-		return err
+		return "", err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit confirm: %w", err)
+		return "", fmt.Errorf("commit confirm: %w", err)
 	}
-	return nil
+	return auditPath, nil
+}
+
+// scopeOwnerCond is a boolean SQL expression: agentID still owns the agent
+// scope key scope in workspaceID, i.e. its slug is the one the key names. With
+// live, the agent must also not be deleted. An empty agentID fences nothing.
+func scopeOwnerCond(workspaceID, agentID, scope string, live bool) (string, []any) {
+	if agentID == "" {
+		return `1`, nil
+	}
+	q := `EXISTS (SELECT 1 FROM agents WHERE id = ? AND workspace_id = ? AND 'agent:' || slug = ?`
+	if live {
+		q += ` AND deleted_at IS NULL`
+	}
+	return q + `)`, []any{agentID, workspaceID, scope}
+}
+
+// anchorUnchangedCond is a boolean SQL expression: the anchor at
+// (workspaceID, auditPath) is exactly expected, or absent when expected is nil.
+func anchorUnchangedCond(workspaceID, auditPath string, expected *revisionAnchor) (string, []any) {
+	if expected == nil {
+		return `NOT EXISTS (SELECT 1 FROM memory_revisions WHERE workspace_id = ? AND path = ?)`,
+			[]any{workspaceID, auditPath}
+	}
+	return `EXISTS (SELECT 1 FROM memory_revisions WHERE workspace_id = ? AND path = ? AND revision = ? AND content_sha256 = ?)`,
+		[]any{workspaceID, auditPath, expected.revision, expected.contentSHA}
 }
 
 func upsertAnchorTx(ctx context.Context, tx *sql.Tx, workspaceID, auditPath, scope, tier string, revision int64, sha string, bytes int, mutationID, now string) error {
