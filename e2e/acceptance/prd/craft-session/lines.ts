@@ -118,12 +118,19 @@ export function documentUnits(raw: string): { kind: LineCheck["kind"]; units: st
 const escape = (s: string) => s.replace(/[.*+?^$()|[\]\\{}]/g, "\\$&")
 
 /** The ledger's line indices in `raw`, in document order (`X-1` is never read from `X-10`). */
-export function foundLines(prefix: string, raw: string): { kind: LineCheck["kind"]; found: number[] } {
+export function foundLines(prefix: string, raw: string): { kind: LineCheck["kind"]; found: number[]; units: string[]; at: number[] } {
   const { kind, units } = documentUnits(raw)
   const re = new RegExp(escape(prefix) + "-(\\d+)(?!\\d)", "g")
   const found: number[] = []
-  for (const unit of units) for (const m of unit.matchAll(re)) found.push(Number(m[1]))
-  return { kind, found }
+  // The unit (paragraph, cell) of each occurrence.
+  const at: number[] = []
+  units.forEach((unit, u) => {
+    for (const m of unit.matchAll(re)) {
+      found.push(Number(m[1]))
+      at.push(u)
+    }
+  })
+  return { kind, found, units, at }
 }
 
 function describe(line: LineRecord): string {
@@ -144,15 +151,20 @@ function describe(line: LineRecord): string {
  * record the sighting (see recordLines / checkLines).
  */
 export function evaluateLines(ledger: LineLedger, raw: string, stage: string): LineCheck {
-  const { kind, found } = foundLines(ledger.prefix, raw)
+  const { kind, found, units, at } = foundLines(ledger.prefix, raw)
   const problems: string[] = []
   // The editor can stop taking input in the middle of the last line: "X-1" left
-  // of "X-12" is that cut line, not a second X-1. Only the very last occurrence,
-  // and only when the stream stopped, is read that way.
+  // of "X-12" is that cut line, not a second X-1. Read that way only when the
+  // stream stopped (the status turned read-only after the last typed line, so
+  // no line was in flight), the occurrence is the whole final non-empty
+  // paragraph/cell, and that last typed line is not accepted and not complete
+  // anywhere in the copy.
   const cut = found.at(-1)
-  if (cut !== undefined && ledger.stoppedBy !== null) {
-    const last = [ledger.typed - 1, ledger.typed].map(String)
-    if (last.some((l) => l !== String(cut) && l.startsWith(String(cut))) && found.slice(0, -1).includes(cut)) found.pop()
+  const lastUnit = units.reduce((last, u, i) => (u.trim() ? i : last), -1)
+  if (cut !== undefined && ledger.stoppedBy !== null && at.at(-1) === lastUnit && units[lastUnit].trim() === `${ledger.prefix}-${cut}`) {
+    const accepted = new Set(ledger.lines.filter((l) => l.typing === "accepted").map((l) => l.index))
+    const cutFrom = [ledger.typed - 1].filter((l) => l >= 0 && !accepted.has(l) && !found.includes(l) && String(l) !== String(cut) && String(l).startsWith(String(cut)))
+    if (cutFrom.length && found.slice(0, -1).includes(cut)) found.pop()
   }
   const counts = new Map<number, number>()
   for (const i of found) counts.set(i, (counts.get(i) ?? 0) + 1)

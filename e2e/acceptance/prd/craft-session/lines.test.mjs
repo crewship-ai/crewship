@@ -137,3 +137,16 @@ test("the line in flight, once seen, is required in later copies", () => {
   assert.equal(c.problems.length, 1, c.problems.join("\n"))
   assert.match(c.problems[0], /lost PRDLINE-2 .*an earlier copy held it/)
 })
+
+test("a cut-line reading never excuses a real duplicate", () => {
+  // Review r2: line 12 is complete, so a trailing X-1 is a second X-1, not a cut X-12.
+  const ledger = lineLedger(P, { typed: 13, accepted: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], stoppedBy: "Pouze čtení" })
+  const c = evaluateLines(ledger, word([...lines(13), `${P}-1`]), "draft")
+  assert.ok(c.problems.some((p) => /holds PRDLINE-1 2 times/.test(p)), c.problems.join("\n"))
+  // The cut must be the final paragraph: a second X-1 followed by more text is a duplicate.
+  const notLast = evaluateLines(ledger, word([...lines(12), `${P}-1`, "after"]), "draft")
+  assert.ok(notLast.problems.some((p) => /holds PRDLINE-1 2 times/.test(p)), notLast.problems.join("\n"))
+  // An accepted last line cannot be cut: the editor still took input after it.
+  const acceptedLast = lineLedger(P, { typed: 13, accepted: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], stoppedBy: "Pouze čtení" })
+  assert.ok(evaluateLines(acceptedLast, word([...lines(12), `${P}-1`]), "draft").problems.length > 0)
+})
