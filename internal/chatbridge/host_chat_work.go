@@ -89,6 +89,35 @@ type hostChatTracker struct {
 	mu           sync.Mutex
 	observedExit *int
 	cancelRun    context.CancelCauseFunc
+
+	// fence orders stop delivery against completion: once the run has
+	// returned, a poll answer still in flight may no longer cancel it.
+	fence     sync.Mutex
+	finished  bool
+	delivered bool
+}
+
+// deliverStop cancels the run unless it has already returned.
+func (t *hostChatTracker) deliverStop() bool {
+	t.fence.Lock()
+	defer t.fence.Unlock()
+	if t.finished {
+		return false
+	}
+	t.delivered = true
+	t.cancelRun(ws.ErrExplicitStopRequested)
+	return true
+}
+
+// StopDelivered reports whether a work-item cancel was delivered to the run
+// before it returned. Only then may settlement treat the run as stopped.
+func (t *hostChatTracker) StopDelivered() bool {
+	if t == nil {
+		return false
+	}
+	t.fence.Lock()
+	defer t.fence.Unlock()
+	return t.delivered
 }
 
 // bindHostChatWork returns the context the run must execute under. A cancel
@@ -110,9 +139,8 @@ func (b *Bridge) bindHostChatWork(ctx context.Context, req *orchestrator.AgentRu
 			b.logger.Warn("host chat cancel poll failed; retaining durable ownership", "run_id", runID, "error", err)
 			return
 		}
-		if requested {
+		if requested && tracker.deliverStop() {
 			b.logger.Info("work-item cancel requested; stopping host chat execution", "run_id", runID)
-			cancelRun(ws.ErrExplicitStopRequested)
 		}
 	}
 	started := make(chan struct{}, 1)
@@ -184,9 +212,13 @@ func (b *Bridge) bindHostChatWork(ctx context.Context, req *orchestrator.AgentRu
 	return runCtx, tracker
 }
 
-// Stop ends the lifecycle loop; the run context stays usable for settlement.
+// Stop fences stop delivery and ends the lifecycle loop. Call it as soon as
+// the run returns: a poll answer arriving afterwards cannot cancel the run.
 func (t *hostChatTracker) Stop() {
 	if t != nil {
+		t.fence.Lock()
+		t.finished = true
+		t.fence.Unlock()
 		t.once.Do(func() { close(t.stop); <-t.done })
 	}
 }

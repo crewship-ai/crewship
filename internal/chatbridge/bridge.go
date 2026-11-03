@@ -1335,10 +1335,16 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	var observedTerminalAfterStop bool
 	req.ObservedTerminalAfterStop = func() { observedTerminalAfterStop = true }
 	req.CapturedExit = func(at string) { capturedCompletedAt = at }
-	ctx, chatWork := b.bindHostChatWork(ctx, &req, runID)
+	runCtx, chatWork := b.bindHostChatWork(ctx, &req, runID)
 	defer chatWork.Close()
-	runErr := b.orch.RunAgent(ctx, req, handler)
+	runErr := b.orch.RunAgent(runCtx, req, handler)
 	chatWork.Stop()
+	// Settlement keeps the turn's own context. Only a work-item stop that was
+	// delivered before the run returned, and that the run reported, makes
+	// the stopped run context the one settlement branches on (#4799).
+	if runErr != nil && chatWork.StopDelivered() {
+		ctx = runCtx
+	}
 	if observedTerminalAfterStop {
 		terminalCtx, terminalCancel := context.WithTimeout(context.WithoutCancel(ctx), ledgerWriteTimeout)
 		defer terminalCancel()

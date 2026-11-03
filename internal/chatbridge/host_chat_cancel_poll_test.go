@@ -165,3 +165,126 @@ func TestHostChatWorkItemCancelStopsTheRunningExecution(t *testing.T) {
 		t.Fatalf("confirmed host stop not acknowledged: %v", err)
 	}
 }
+
+// ipcSettlingResolver sends every terminal write through the real IPC
+// client, so a cancelled settlement context fails the way it does in
+// production instead of being ignored by the in-memory recorder.
+type ipcSettlingResolver struct{ *hostChatOutcomeResolver }
+
+func (r *ipcSettlingResolver) UpdateRun(ctx context.Context, id, status string, exit *int, message *string, metadata map[string]interface{}) error {
+	return r.ipc.UpdateRun(ctx, id, status, exit, message, metadata)
+}
+func (r *ipcSettlingResolver) UpdateRunWithCompletion(ctx context.Context, id, status string, exit *int, message *string, metadata map[string]interface{}, completed string) error {
+	return r.ipc.UpdateRunWithCompletion(ctx, id, status, exit, message, metadata, completed)
+}
+
+// slowSuccessContainer finishes the turn on its own after a delay, so a
+// natural completion can race an in-flight cancel poll.
+type slowSuccessContainer struct {
+	scriptedContainer
+	delay time.Duration
+	mu2   sync.Mutex
+	done  bool
+}
+
+func (c *slowSuccessContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	if len(cfg.Env) > 0 {
+		r, w := io.Pipe()
+		go func() {
+			time.Sleep(c.delay)
+			c.mu2.Lock()
+			c.done = true
+			c.mu2.Unlock()
+			_, _ = io.WriteString(w, claudeSuccessOutput(0))
+			_ = w.Close()
+		}()
+		return &provider.ExecResult{ExecID: "agent-exec", Reader: r}, nil
+	}
+	return c.scriptedContainer.Exec(ctx, cfg)
+}
+
+func (c *slowSuccessContainer) ExecInspect(_ context.Context, id string) (bool, int, error) {
+	if id != "agent-exec" {
+		return false, 0, nil
+	}
+	c.mu2.Lock()
+	defer c.mu2.Unlock()
+	return !c.done, 0, nil
+}
+
+// #4838 review: a cancel poll still in flight when the agent completes on its
+// own must not cancel the settlement of that completed turn. The completed
+// reply has to be persisted and the turn settled as COMPLETED.
+func TestHostChatLateCancelPollDoesNotLoseACompletedTurn(t *testing.T) {
+	var mu sync.Mutex
+	var terminalStatus string
+	var polled bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			ID     string         `json:"id"`
+			Status string         `json:"status"`
+			Proof  *hostChatProof `json:"host_chat_proof"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			w.WriteHeader(400)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			_ = json.NewEncoder(w).Encode(map[string]string{"id": request.ID, "host_chat_work": "v1"})
+			return
+		}
+		if request.Status == "RUNNING" {
+			reply := map[string]any{"id": path.Base(r.URL.Path), "status": "RUNNING"}
+			if request.Proof != nil && request.Proof.Phase == "poll" {
+				// The cancel was recorded while this poll was in flight; it
+				// answers only after the agent has already completed.
+				time.Sleep(1500 * time.Millisecond)
+				mu.Lock()
+				polled = true
+				mu.Unlock()
+				reply["cancel_requested"] = true
+			}
+			_ = json.NewEncoder(w).Encode(reply)
+			return
+		}
+		mu.Lock()
+		terminalStatus = request.Status
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": path.Base(r.URL.Path), "status": request.Status})
+	}))
+	defer server.Close()
+
+	info := baseInfo()
+	info.HumanAuthority = &chataudience.Receipt{UserID: "user-1", ChatID: "host-late-poll", WorkspaceID: info.WorkspaceID, AgentID: info.AgentID}
+	resolver := &ipcSettlingResolver{&hostChatOutcomeResolver{&ipcOutcomeResolver{capResolver: &capResolver{info: info}, ipc: NewIPCResolver(server.URL, "synthetic-host-token", slog.Default())}}}
+	// The first poll starts at ~2s and answers at ~3.5s; the agent completes at ~2.5s.
+	bridge := testBridgeWithContainer(t, resolver, &slowSuccessContainer{delay: hostChatCancelPollInterval + 500*time.Millisecond})
+
+	err := bridge.HandleChatMessage(t.Context(), "user-1", "host-late-poll", "hi", func(ws.ChatEvent) {})
+	if err != nil {
+		t.Fatalf("a naturally completed turn failed: %v", err)
+	}
+	mu.Lock()
+	gotPoll, gotStatus := polled, terminalStatus
+	mu.Unlock()
+	if !gotPoll {
+		t.Fatal("fixture did not race an in-flight poll against completion")
+	}
+	if gotStatus != "COMPLETED" {
+		t.Fatalf("completed turn settled as %q, want COMPLETED", gotStatus)
+	}
+	msgs, rerr := bridge.convStore.Read(context.Background(), "host-late-poll", 0, 0)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	var replied bool
+	for _, m := range msgs {
+		if m.Role == "assistant" && strings.Contains(m.Content, "Hello world") {
+			replied = true
+		}
+	}
+	if !replied {
+		t.Fatalf("the completed reply was lost from history: %+v", msgs)
+	}
+}
