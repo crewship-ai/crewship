@@ -2,6 +2,7 @@ package work
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -186,5 +187,54 @@ func TestHostChatStaleGenerationCannotReenter(t *testing.T) {
 	zero := 0
 	if err = s.FinishHostChat(t.Context(), r.RunID, HostChatResult{Status: "COMPLETED", ObservedExit: &zero}); !errors.Is(err, ErrStaleGeneration) {
 		t.Fatalf("stale exit settled newer generation: %v", err)
+	}
+}
+
+// A host turn parked for its protected capture used to stay in
+// needs_reconciliation when the capture recovered a FAILED exit, holding the
+// agent, crew, session and one of the server's execution slots forever. Stage
+// accumulated one such turn per e2e iteration (an agent waiting on a human
+// credential outlived the harness ask); after eight, every chat on the server
+// was refused with 429. The recovered exit is the same host-observed proof
+// FinishHostChat settles to failed when it sees it live, so it must settle the
+// turn the same way and give the capacity back.
+func TestHostChatRecoveredFailedExitReleasesCapacity(t *testing.T) {
+	s, _, _ := newTestStore(t)
+	limit := SerialAgentLimits().ServerTotal
+	for i := 0; i < limit; i++ {
+		r := hostChatRequest(fmt.Sprintf("msg_parked_%d", i))
+		r.AgentID, r.CrewID, r.ChatID = fmt.Sprintf("gone-agent-%d", i), fmt.Sprintf("gone-crew-%d", i), fmt.Sprintf("gone-chat-%d", i)
+		if _, _, err := s.BeginHostChat(t.Context(), r); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.HostChatPhase(t.Context(), r.RunID, "request"); err != nil {
+			t.Fatal(err)
+		}
+		// The observer gave up before the process exit was seen.
+		if err := s.FinishHostChat(t.Context(), r.RunID, HostChatResult{Status: "FAILED"}); err != nil {
+			t.Fatal(err)
+		}
+		killed := 137
+		if _, err := s.RecoverRetainedResult(t.Context(), r.RunID, RunResult{ExitCode: &killed}, false); err != nil {
+			t.Fatalf("protected recovery: %v", err)
+		}
+		b, _, err := s.HostChatAttempt(t.Context(), r.RunID)
+		if err != nil || b.State != StateFailed {
+			t.Fatalf("recovered failed exit left work %s: %v", b.State, err)
+		}
+		p, _, err := s.RunProjection(t.Context(), r.RunID)
+		if err != nil || !p.Ready || p.Status != "FAILED" || p.Result.ExitCode == nil || *p.Result.ExitCode != killed {
+			t.Fatalf("projection: %+v %v", p, err)
+		}
+	}
+	fresh := hostChatRequest("msg_fresh")
+	fresh.AgentID, fresh.CrewID, fresh.ChatID = "new-agent", "new-crew", "new-chat"
+	if _, _, err := s.BeginHostChat(t.Context(), fresh); err != nil {
+		t.Fatalf("settled failures still hold server capacity: %v", err)
+	}
+	same := hostChatRequest("msg_same_agent")
+	same.AgentID, same.CrewID = "gone-agent-0", "gone-crew-0"
+	if _, _, err := s.BeginHostChat(t.Context(), same); err != nil {
+		t.Fatalf("settled failure still holds its agent: %v", err)
 	}
 }

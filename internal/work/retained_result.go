@@ -15,8 +15,9 @@ import (
 // RecoverRetainedResult settles only the current attempt parked by lease
 // recovery. The caller must first validate the protected host capture bound to
 // runID. Live workers and operator resolutions retain their own authority.
-// Failed execution may have external effects, so it keeps reconciliation and
-// its capacity fence; a real successful exit can complete the work.
+// Failed background execution may have external effects, so it keeps
+// reconciliation and its capacity fence; a real successful exit can complete
+// the work, and a host chat turn settles a real exit either way.
 func (s *Store) RecoverRetainedResult(ctx context.Context, runID string, result RunResult, successful bool) (bool, error) {
 	if runID == "" || result.ExitCode == nil || successful && *result.ExitCode != 0 {
 		return false, fmt.Errorf("%w: retained result requires an actual exit", ErrNotBound)
@@ -81,6 +82,16 @@ func (s *Store) RecoverRetainedResult(ctx context.Context, runID string, result 
 	if successful {
 		status = "COMPLETED"
 		if err := s.setStateTx(ctx, tx, it, StateSucceeded, runID, generation, "protected retained capture confirmed successful execution", now); err != nil {
+			return true, err
+		}
+	} else if it.Source == SourceChat && it.DomainKind == DomainHostChatTurn && reason == "protected host capture awaiting retained result" {
+		// A host chat turn settles an observed nonzero exit as failed when it
+		// sees it live (FinishHostChat). The protected capture is the same
+		// host-observed proof arriving later, so it settles the turn the same
+		// way. Kept in reconciliation, the turn held its agent, crew, session
+		// and a server slot for good: nobody resolves a chat turn, and its
+		// agent may since have been deleted.
+		if err := s.setStateTx(ctx, tx, it, StateFailed, runID, generation, "protected retained capture confirmed failed execution", now); err != nil {
 			return true, err
 		}
 	}
