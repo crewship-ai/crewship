@@ -328,3 +328,129 @@ func TestHostChatCancelAfterObservedExitDoesNotRewriteTheOutcome(t *testing.T) {
 		t.Fatalf("a cancel answered after the observed exit was delivered: delivered=%v ctx=%v", tracker.StopDelivered(), runCtx.Err())
 	}
 }
+
+// inspectGapContainer ends its agent process naturally with exit 1. The
+// moment the orchestrator's ExecInspect observes that terminal exit — and
+// before RunAgent can report it through OnExecTerminal — it arms the
+// work-item cancel and holds the inspection until the cancel poll has
+// actually been delivered to the run, then answers the observed exit.
+type inspectGapContainer struct {
+	scriptedContainer
+	armed     chan struct{}
+	armOnce   sync.Once
+	delivered bool
+}
+
+func (c *inspectGapContainer) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	if len(cfg.Env) > 0 {
+		out := `{"type":"system","subtype":"init","model":"claude-test"}` + "\n" +
+			`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"partial answer"}}}` + "\n"
+		return &provider.ExecResult{ExecID: "agent-exec", Reader: io.NopCloser(strings.NewReader(out))}, nil
+	}
+	return c.scriptedContainer.Exec(ctx, cfg)
+}
+
+func (c *inspectGapContainer) ExecInspect(ctx context.Context, id string) (bool, int, error) {
+	if id != "agent-exec" {
+		return false, 0, nil
+	}
+	c.armOnce.Do(func() {
+		close(c.armed)
+		select {
+		case <-ctx.Done():
+			// The cancel poll answered and was delivered to the run while
+			// the terminal exit was observed but not yet reported.
+			c.mu.Lock()
+			c.delivered = true
+			c.mu.Unlock()
+		case <-time.After(5 * hostChatCancelPollInterval):
+			// Fail-safe only: the assertion below reports the missing race.
+		}
+	})
+	return false, 1, nil
+}
+
+// #4838 round 3: a cancel delivered between the orchestrator observing the
+// process's natural terminal exit (ExecInspect) and reporting it
+// (OnExecTerminal) must not turn that natural failure into CANCELLED. The
+// observed exit is the outcome; the turn settles FAILED with exit 1.
+func TestHostChatCancelBetweenInspectAndTerminalCallbackKeepsNaturalFailure(t *testing.T) {
+	container := &inspectGapContainer{armed: make(chan struct{})}
+	var mu sync.Mutex
+	var terminal *hostChatProof
+	var terminalStatus string
+	var cancelAnswered bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			ID     string         `json:"id"`
+			Status string         `json:"status"`
+			Proof  *hostChatProof `json:"host_chat_proof"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			w.WriteHeader(400)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			_ = json.NewEncoder(w).Encode(map[string]string{"id": request.ID, "host_chat_work": "v1"})
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if request.Status == "RUNNING" {
+			reply := map[string]any{"id": path.Base(r.URL.Path), "status": "RUNNING"}
+			if request.Proof != nil && request.Proof.Phase == "poll" {
+				select {
+				case <-container.armed:
+					// The work-item cancel is recorded only once the
+					// terminal exit was observed.
+					reply["cancel_requested"] = true
+					cancelAnswered = true
+				default:
+				}
+			}
+			_ = json.NewEncoder(w).Encode(reply)
+			return
+		}
+		if terminalStatus == "" {
+			terminal, terminalStatus = request.Proof, request.Status
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": path.Base(r.URL.Path), "status": request.Status})
+	}))
+	defer server.Close()
+
+	info := baseInfo()
+	info.HumanAuthority = &chataudience.Receipt{UserID: "user-1", ChatID: "host-inspect-gap", WorkspaceID: info.WorkspaceID, AgentID: info.AgentID}
+	resolver := &ipcSettlingResolver{&hostChatOutcomeResolver{&ipcOutcomeResolver{capResolver: &capResolver{info: info}, ipc: NewIPCResolver(server.URL, "synthetic-host-token", slog.Default())}}}
+	bridge := testBridgeWithContainer(t, resolver, container)
+
+	var events []ws.ChatEvent
+	err := bridge.HandleChatMessage(t.Context(), "user-1", "host-inspect-gap", "hi", func(e ws.ChatEvent) { events = append(events, e) })
+
+	container.mu.Lock()
+	delivered := container.delivered
+	container.mu.Unlock()
+	mu.Lock()
+	defer mu.Unlock()
+	if !cancelAnswered || !delivered {
+		t.Fatalf("fixture did not deliver a cancel between inspection and the terminal callback: answered=%v delivered=%v", cancelAnswered, delivered)
+	}
+	if terminalStatus != "FAILED" {
+		t.Fatalf("natural exit 1 settled as %q, want FAILED (proof=%+v err=%v)", terminalStatus, terminal, err)
+	}
+	if terminal == nil || terminal.Phase != "finish" || terminal.ObservedExit == nil || *terminal.ObservedExit != 1 {
+		t.Fatalf("settlement lost the observed natural exit: %+v", terminal)
+	}
+	if err == nil || errors.Is(err, ws.ErrRunCancelled) || errors.Is(err, context.Canceled) {
+		t.Fatalf("natural failure reported as a stop: %v", err)
+	}
+	var sawError bool
+	for _, e := range events {
+		if e.Type == "error" {
+			sawError = true
+		}
+	}
+	if !sawError {
+		t.Fatalf("the failure never reached the chat: %+v", events)
+	}
+}

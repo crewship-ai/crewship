@@ -111,14 +111,28 @@ func (t *hostChatTracker) deliverStop() bool {
 }
 
 // StopDelivered reports whether a work-item cancel was delivered to the run
-// before it returned. Only then may settlement treat the run as stopped.
+// before it returned and actually ended it. Only then may settlement treat
+// the run as stopped.
+//
+// The process's observed exit is authoritative. A cancel can be delivered
+// after the orchestrator inspected a natural terminal exit but before it
+// reported that exit through OnExecTerminal (#4838 round 3): the delivery
+// then races nothing, the process had already ended on its own. So an
+// observed exit that is not a stop signal (143/137) wins over the delivery,
+// and settlement records the natural outcome instead of CANCELLED.
 func (t *hostChatTracker) StopDelivered() bool {
 	if t == nil {
 		return false
 	}
 	t.fence.Lock()
-	defer t.fence.Unlock()
-	return t.delivered
+	delivered := t.delivered
+	t.fence.Unlock()
+	if !delivered {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.observedExit == nil || *t.observedExit == 143 || *t.observedExit == 137
 }
 
 // bindHostChatWork returns the context the run must execute under. A cancel
