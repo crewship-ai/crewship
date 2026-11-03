@@ -8,12 +8,13 @@ section, highest number first (the file is newest-first), and deletes the
 collected fragment files. See RELEASING.md.
 
 A run is crash-safe (#4800). Before changing anything it records, in
-CHANGELOG.md.collect-journal, the fragments it collects and the SHA-256 of
-CHANGELOG.md before and after. It then installs the new CHANGELOG.md
+CHANGELOG.md.collect-journal, the fragments it collects with their SHA-256,
+and the SHA-256 of CHANGELOG.md before and after. It then installs the new CHANGELOG.md
 (staged, fsynced, atomically renamed), makes that rename durable, and only
 then deletes the fragments and the journal. A rerun that finds a journal
 finishes the interrupted run: CHANGELOG.md matching the "after" hash means
-the listed fragments are already in it and are only deleted; matching the
+the listed fragments are already in it and are only deleted (a fragment
+edited since makes it refuse instead); matching the
 "before" hash means nothing was installed and the run starts over. Any
 other CHANGELOG.md makes it refuse, changing nothing. No note is ever
 recognised by its text, so a new note is never mistaken for a collected one.
@@ -121,15 +122,30 @@ def read_journal(root, journal_path, changelog):
     try:
         journal = json.loads(text)
         before, after = journal['before'], journal['after']
-        names = journal['fragments']
-        if not all(isinstance(n, str) and '/' not in n and n.endswith('.md') for n in names):
+        hashes = journal['fragments']
+        names = list(hashes)
+        if not all(isinstance(n, str) and '/' not in n and n.endswith('.md')
+                   and isinstance(h, str) for n, h in hashes.items()):
             raise ValueError
-    except (ValueError, KeyError, TypeError):
+    except (ValueError, KeyError, TypeError, AttributeError):
         raise ValueError(f'{name} is unreadable; restore CHANGELOG.md and changelog.d/ '
                          f'from git, delete {name} and collect again') from None
     current = digest(changelog)
     if current == after:
-        return [root / 'changelog.d' / n for n in names]
+        # A fragment edited since its note went in holds text CHANGELOG.md
+        # lacks: deleting it would lose that text, so refuse instead.
+        paths = [root / 'changelog.d' / n for n in names]
+        for path in paths:
+            try:
+                data = path.read_bytes()
+            except FileNotFoundError:
+                continue
+            if hashlib.sha256(data).hexdigest() != hashes[path.name]:
+                raise ValueError(f'{path.relative_to(root)} changed after the interrupted collect '
+                                 f'recorded in {name} put its note into CHANGELOG.md; move the new '
+                                 f'text into ## [Unreleased] by hand, then delete the fragment '
+                                 f'and {name}, or restore it from git, and collect again')
+        return paths
     if current == before:
         return []
     raise ValueError(f'CHANGELOG.md changed after the interrupted collect recorded in {name}; '
@@ -213,7 +229,8 @@ def main(argv=None):
             write_durably(journal_path, json.dumps({
                 'before': digest(changelog),
                 'after': digest(result),
-                'fragments': [path.name for path in paths],
+                'fragments': {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                              for path in paths},
             }, indent=2) + '\n')
             write_durably(changelog_path, result)
             delete_fragments(root, changelog_path, journal_path, paths)

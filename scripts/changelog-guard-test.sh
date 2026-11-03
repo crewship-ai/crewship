@@ -742,6 +742,24 @@ else
   printf '%s\n' "$out" | sed 's/^/       | /'
 fi
 
+# Likewise a fragment edited after the interrupted run installed CHANGELOG.md:
+# its new text is in no CHANGELOG.md, so deleting it would lose it. The rerun
+# refuses, keeping the edited fragment and CHANGELOG.md as they are.
+collect_fixture
+python3 -I -c "$INTERRUPT_HARNESS" "$COLLECT" "$CROOT" unlink >/dev/null 2>&1
+printf -- '- **Older fix (#90), reworded.** Details.\n' > "$CROOT/changelog.d/90-older.md"
+before="$(cat "$CROOT/CHANGELOG.md")"
+out="$(python3 -I "$COLLECT" --root "$CROOT" 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && ! printf '%s\n' "$out" | grep -q Traceback \
+   && printf '%s\n' "$out" | grep -q '90-older.md' \
+   && [ "$(cat "$CROOT/CHANGELOG.md")" = "$before" ] \
+   && grep -qF 'reworded' "$CROOT/changelog.d/90-older.md" 2>/dev/null; then
+  pass "a fragment edited after an interrupted collect makes the rerun refuse, keeping it"
+else
+  fail "a fragment edited after an interrupted collect makes the rerun refuse, keeping it (exit $rc)"
+  printf '%s\n' "$out" | sed 's/^/       | /'
+fi
+
 echo
 if [ "$FAILURES" -ne 0 ]; then
   echo "$FAILURES check(s) failed."
