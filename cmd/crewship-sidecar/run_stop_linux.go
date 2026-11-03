@@ -99,6 +99,10 @@ func probeExactProcessSupport(output io.Writer) error {
 // wait for the helper.
 const stopBudget = 3 * time.Second
 
+// afterLeaderStopped runs between the leader's SIGSTOP and the first scan.
+// Tests use it to make a still-running member exit inside that window.
+var afterLeaderStopped func()
+
 // treeMember is one process held by pidfd while the leader's tree is stopped.
 type treeMember struct {
 	pid     int
@@ -120,9 +124,21 @@ type treeMember struct {
 // confirmed on its pidfd. confirmed is true only then.
 //
 // While the leader is alive (stopped, not reaped) its PID, and therefore the
-// session ID, cannot be reused by an unrelated session. A process that was
-// already orphaned (reparented away from the tree) before the stop is not a
-// descendant any more and is not covered; it would survive a normal exit too.
+// session ID, cannot be reused by an unrelated session.
+//
+// A member can exit before a scan reads it (also between the leader's SIGSTOP
+// and the first scan), and a child of it that left the session is then
+// reparented out of the tree, where neither ancestry nor session finds it
+// (#4797). The helper is a separate exec, not an ancestor of the run, so it
+// cannot become the run's subreaper; the run shares the container's cgroup, so
+// there is no per-run freezer either. Instead the final check relies on how
+// the kernel reparents: an orphan of the tree is adopted only by a subreaper
+// among the leader's ancestors in this PID namespace or by its init, started
+// no earlier than the leader, and sits in a session created inside the run,
+// which no older adopter can belong to. Any such live process blocks
+// confirmation. That includes an unrelated process with the same shape (for
+// example another execution's daemon started meanwhile): the helper cannot
+// tell them apart, so the stop stays unconfirmed rather than risk a survivor.
 func stopExactTree(pid int, start uint64, diagnostics io.Writer) (confirmed bool, err error) {
 	if pid < 2 || start == 0 {
 		return false, errors.New("invalid process identity")
@@ -166,6 +182,15 @@ func stopExactTree(pid int, start uint64, diagnostics io.Writer) (confirmed bool
 	}
 	if err := unix.PidfdSendSignal(leader, unix.SIGSTOP, nil, 0); err != nil {
 		return false, err
+	}
+	// Recorded while the leader is alive: its ancestor chain can only shrink
+	// afterwards, so every later adopter of an orphan of the tree is in it.
+	adopters, err := orphanAdopters(pid)
+	if err != nil {
+		return unconfirmed("leader ancestry unreadable: %v", err)
+	}
+	if afterLeaderStopped != nil {
+		afterLeaderStopped()
 	}
 	settledScans := 0
 	previous := ""
@@ -266,17 +291,71 @@ func stopExactTree(pid int, start uint64, diagnostics io.Writer) (confirmed bool
 		sessions[m.session] = true
 		sessions[m.pgrp] = true
 	}
+	byPID := make(map[int]processStat, len(procs))
 	for _, p := range procs {
-		if !sessions[p.session] && !sessions[p.pgrp] && !parents[p.ppid] {
-			continue
-		}
+		byPID[p.pid] = p
+	}
+	for _, p := range procs {
 		if p.state == 'X' || (p.state == 'Z' && singleThreaded(p.pid)) {
 			continue
 		}
-		fmt.Fprintln(diagnostics, "process survived the tree stop:", p.pid)
-		return false, nil
+		if sessions[p.session] || sessions[p.pgrp] || parents[p.ppid] {
+			fmt.Fprintln(diagnostics, "process survived the tree stop:", p.pid)
+			return false, nil
+		}
+		if p.pid != pid && mayBeOrphanOfTree(p, byPID, adopters, start) {
+			fmt.Fprintln(diagnostics, "process possibly orphaned from the tree survived the stop:", p.pid)
+			return false, nil
+		}
 	}
 	return true, nil
+}
+
+// orphanAdopters returns every process that can adopt an orphan of leader's
+// tree: this namespace's init and each ancestor of leader inside the
+// namespace (any of them may be a child subreaper, which no other process can
+// observe). A docker exec leader's parent lies outside the container's
+// namespace (PPID 0), so there it is only init.
+func orphanAdopters(leader int) (map[int]bool, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		adopters := map[int]bool{1: true}
+		stat, err := readProcessStat(leader)
+		if err != nil {
+			return nil, err
+		}
+		complete := true
+		for p := stat.ppid; p > 1 && !adopters[p]; {
+			adopters[p] = true
+			ancestor, readErr := readProcessStat(p)
+			if readErr != nil {
+				// The ancestor exited and the leader moved up the chain;
+				// walk it again.
+				complete, lastErr = false, readErr
+				break
+			}
+			p = ancestor.ppid
+		}
+		if complete {
+			return adopters, nil
+		}
+	}
+	return nil, lastErr
+}
+
+// mayBeOrphanOfTree reports whether p could be a process of the stopped tree
+// that was reparented away from it: adopted by an orphan adopter, started no
+// earlier than the leader, and in a session other than its adopter's. An
+// orphan's session was created by a process of the run, which the older
+// adopter cannot have joined, and two live sessions never share an ID. A
+// process forked by the adopter itself keeps the adopter's session. An adopter
+// missing from the scan proves nothing, so p then counts as an orphan.
+func mayBeOrphanOfTree(p processStat, byPID map[int]processStat, adopters map[int]bool, leaderStart uint64) bool {
+	if !adopters[p.ppid] || p.start < leaderStart {
+		return false
+	}
+	adopter, ok := byPID[p.ppid]
+	return !ok || adopter.session != p.session
 }
 
 // singleThreaded reports whether pid has at most one task left (a zombie main
