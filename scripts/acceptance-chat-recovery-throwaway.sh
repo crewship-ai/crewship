@@ -32,8 +32,10 @@
 #      ServerTotal execution slot).
 #   4. new work: the same agents accept a new chat turn afterwards; it is
 #      admitted, its runtime starts, and it settles terminally.
-#   S. standard restart (SIGTERM, start again immediately, lease not expired):
-#      the same no-premature-settlement and release checks.
+#   S. standard restart (SIGTERM, start again immediately): nothing in the new
+#      process heartbeats a turn the old process started (only the chat bridge
+#      that launched it does), so the turn must be parked by lease expiry
+#      about 60 s later, then pass the same confirmed-end and release checks.
 #
 # No model provider is configured (offline demo seed): the property under test
 # is the runtime lifecycle, not model output. Without a credential the Claude
@@ -160,13 +162,16 @@ if [[ -e "$dir" ]]; then
   die "an instance named $name already exists in $STATE_ROOT; it is not this run's and will not be touched"
 fi
 say "starting throwaway $name under $STATE_ROOT"
-if ! "$TW" start "$name" --binary "$binary" >>"$LOG" 2>"$evidence/start.err"; then
+nonce="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+manifest_nonce() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("owner_nonce",""))' "$dir/manifest.json" 2>/dev/null || true; }
+if ! "$TW" start "$name" --binary "$binary" --owner-nonce "$nonce" >>"$LOG" 2>"$evidence/start.err"; then
   cat "$evidence/start.err" >>"$LOG"
-  # `start` claims the name with an atomic mkdir, so any failure other than
-  # the name collision happened inside an instance this run created.
-  if ! grep -q 'already exists' "$evidence/start.err" && [[ -f "$dir/manifest.json" ]]; then owned=1; fi
+  # Ours only if the manifest carries the nonce this run passed to start: a
+  # same-name instance another session claimed meanwhile carries a different one.
+  if [[ "$(manifest_nonce)" == "$nonce" ]]; then owned=1; fi
   die "throwaway start failed"
 fi
+[[ "$(manifest_nonce)" == "$nonce" ]] || die "started instance $name does not carry this run's nonce; not touching it"
 owned=1
 port="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["port"])' "$dir/manifest.json")"
 prefix="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["prefix"])' "$dir/manifest.json")"
@@ -491,7 +496,12 @@ else
 fi
 watch_turns "standard:$id_std:$run_std:$crew_standard" || true
 assert_settled standard "$id_std" "$run_std" exited
-if [[ -f "$evidence/.park-standard" ]]; then say "[standard] passed through needs_reconciliation"; else say "[standard] settled without needs_reconciliation"; fi
+std_parks="$(field '"; ".join(e["reason"] for e in d["events"] if e["to_state"] == "needs_reconciliation")' <"$evidence/work-standard-final.json")"
+if [[ "$std_parks" == "lease expired in runtime phase"* && "$std_parks" != *";"* ]]; then
+  pass "[standard] (1) parked by lease expiry after the immediate restart: $std_parks"
+else
+  fail "[standard] (1) expected exactly one lease-expiry park, got '${std_parks:-none}'"
+fi
 slots="$(slot_holders)"
 if [[ "$slots" == 0 ]]; then pass "(3) after the standard restart no work item holds an execution slot"; else fail "(3) $slots slot-holding item(s) remain after the standard restart"; fi
 
@@ -510,12 +520,19 @@ for agent in "$A_DEADLINE" "$A_NATURAL"; do
     # A protected-capture turn ended by its deadline is handed over through
     # "protected host capture awaiting retained result" by design; only a
     # lease-expiry park would mean the recovered server lost the turn again.
+    # Bound to the designed case: the handover park may come only once the
+    # turn's own deadline (claim time + DEADLINE_SECS) has passed, and the turn
+    # must then carry a confirmed forced end (exact receipt, ordering).
     parks="$(field '"; ".join(e["reason"] for e in d["events"] if e["to_state"] == "needs_reconciliation")' <"$evidence/work-new-$agent-final.json")"
-    if [[ -z "$parks" || "$parks" == "protected host capture awaiting retained result" ]]; then
-      pass "(4) $agent new turn was never parked by lease expiry (handover: ${parks:-none})"
+    claimed_at="$(field '[e["at"] for e in d["events"] if e["to_state"] == "starting"][-1]' <"$evidence/work-new-$agent-final.json")"
+    park_at="$(field '([e["at"] for e in d["events"] if e["to_state"] == "needs_reconciliation"] or [""])[-1]' <"$evidence/work-new-$agent-final.json")"
+    earliest="$(python3 -c 'import sys; from datetime import datetime, timedelta; s=sys.argv[1].rstrip("Z"); a,b=(s.split(".",1)+["0"])[:2]; t=datetime.fromisoformat(a+"."+b[:6])+timedelta(seconds=int(sys.argv[2])); print(t.isoformat()+"Z")' "$claimed_at" "$DEADLINE_SECS")"
+    if [[ "$parks" == "protected host capture awaiting retained result" ]] && ts_le "$earliest" "$park_at"; then
+      pass "(4) $agent new turn: deadline handover at $park_at, not before claim+${DEADLINE_SECS}s ($earliest)"
     else
-      fail "(4) $agent new turn parked abnormally: $parks"
+      fail "(4) $agent new turn parked '${parks:-never}' at '${park_at}', want the retained handover no earlier than $earliest"
     fi
+    assert_settled "new-$agent" "$id_new" "$run_new" execution_cancelled
   else
     fail "(4) $agent did not admit a new turn after recovery"
   fi

@@ -470,6 +470,39 @@ if (TW_CALLS="$tmp/scen/tw-calls" CHAT_RECOVERY_THROWAWAY_SCRIPT="$tmp/scen/tw-c
 check "scenario aborts when start loses the name" "$r" refused
 check "scenario reached start in the collision case" "$(grep -c '^start racer' "$tmp/scen/tw-calls" || true)" 1
 check "scenario never stops an instance whose start collided" "$(grep -c '^stop' "$tmp/scen/tw-calls" || true)" 0
+# R2-3: start fails before its claim while another session claimed the same
+# name meanwhile; that instance's manifest carries another nonce, so the
+# scenario must not take it over.
+cat >"$tmp/scen/tw-foreign.sh" <<'TWF'
+#!/usr/bin/env bash
+echo "$*" >>"$TW_CALLS"
+if [[ "$1" == start ]]; then
+  mkdir -p "$CREWSHIP_THROWAWAY_STATE/$2"
+  echo '{"name":"'"$2"'","state":"running","owner_nonce":"another-sessions-nonce"}' >"$CREWSHIP_THROWAWAY_STATE/$2/manifest.json"
+  echo "throwaway-server: no free port in 8110-8199" >&2
+  exit 1
+fi
+exit 0
+TWF
+chmod +x "$tmp/scen/tw-foreign.sh"
+: >"$tmp/scen/tw-calls"
+if (TW_CALLS="$tmp/scen/tw-calls" CHAT_RECOVERY_THROWAWAY_SCRIPT="$tmp/scen/tw-foreign.sh" CREWSHIP_THROWAWAY_STATE="$tmp/state" \
+    bash "$here/acceptance-chat-recovery-throwaway.sh" --binary "$tmp/scen/bin/crewship" --evidence "$tmp/scen/ev5" --name raced) >/dev/null 2>&1; then r=ran; else r=refused; fi
+check "scenario aborts when start fails" "$r" refused
+check "scenario passed its own nonce to start" "$(grep -cE '^start raced .*--owner-nonce [0-9a-f]{32}$' "$tmp/scen/tw-calls" || true)" 1
+check "scenario never stops an instance carrying another nonce" "$(grep -c '^stop' "$tmp/scen/tw-calls" || true)" 0
+
+# start records the caller's nonce and validates it.
+if (cmd_start nonce-ok --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" --owner-nonce abcd1234-ef) >/dev/null 2>&1; then r=started; else r=failed; fi
+check "start accepts an owner nonce" "$r" started
+check "start writes the owner nonce into the manifest" "$(manifest_get "$tmp/state/nonce-ok" owner_nonce)" abcd1234-ef
+cmd_stop nonce-ok >/dev/null 2>&1 || true
+for bad_nonce in short 'has space1' '../../x/y/z' "$(printf 'a%.0s' {1..65})"; do
+  if (cmd_start nonce-bad --binary /bin/true --owner-nonce "$bad_nonce") >/dev/null 2>&1; then r=started; else r=refused; fi
+  check "start refuses owner nonce '${bad_nonce:0:12}'" "$r" refused
+done
+check "refused nonces create no instance state" "$([[ -e "$tmp/state/nonce-bad" ]] && echo created || echo absent)" absent
+
 # Default names are unique per run.
 n1="$(grep -o 'instance_name: .*' "$tmp/scen/ev2/run-info.txt" || true)"
 (TW_CALLS=/dev/null CHAT_RECOVERY_THROWAWAY_SCRIPT="$tmp/scen/tw-collide.sh" CREWSHIP_THROWAWAY_STATE="$tmp/state" \

@@ -2,7 +2,7 @@
 # throwaway-server.sh — a disposable Crewship server that cleans up after itself.
 #
 #   scripts/throwaway-server.sh run   NAME [--binary PATH] [--port N] [--env NAME=VALUE]... [--page-projects [DIR]] [--documents] -- CMD [ARGS...]
-#   scripts/throwaway-server.sh start NAME [--binary PATH] [--port N] [--env NAME=VALUE]... [--page-projects [DIR]] [--documents]
+#   scripts/throwaway-server.sh start NAME [--binary PATH] [--port N] [--env NAME=VALUE]... [--page-projects [DIR]] [--documents] [--owner-nonce TOKEN]
 #   scripts/throwaway-server.sh stop  NAME
 #   scripts/throwaway-server.sh restart NAME [--down-seconds N]
 #   scripts/throwaway-server.sh list
@@ -139,13 +139,18 @@ THROWAWAY_ENV_ALLOWLIST=(
 
 cmd_start() {
   local name="$1"; shift
-  local binary="" port="" page_projects="" documents=0
+  local binary="" port="" page_projects="" documents=0 owner_nonce=""
   local -a extra_env=()
   while (($#)); do
     case "$1" in
       --binary) binary="$2"; shift 2 ;;
       --port) port="$2"; shift 2 ;;
       --documents) documents=1; shift ;;
+      # A caller-chosen token written into the manifest at claim time, so a
+      # caller can later prove an instance is the one IT started.
+      --owner-nonce)
+        [[ "${2:-}" =~ ^[A-Za-z0-9-]{8,64}$ ]] || die "--owner-nonce expects 8-64 letters, digits or dashes"
+        owner_nonce="$2"; shift 2 ;;
       # Pass one optional feature setting to the server process. The key
       # must be on the allowlist above (see its comment for why anything
       # else is refused). Repeatable; NAME=VALUE form only.
@@ -254,6 +259,7 @@ PYDOC
   "documents_authority_socket": "$documents_authority",
   "documents_service_socket": "$documents_service",
   "documents_service_token_file": "$documents_token",
+  "owner_nonce": "$owner_nonce",
   "pid": "",
   "instance_id": ""
 }
