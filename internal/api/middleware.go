@@ -784,6 +784,31 @@ func assertBoundCrewWorkspaceDB(w http.ResponseWriter, r *http.Request, db *sql.
 	return true
 }
 
+// assertAssignmentTargetCrewDB checks the TARGET crew of an internal
+// assignment against the token's workspace binding. Unlike
+// assertBoundCrewWorkspaceDB it does not require a crew-bound caller to name
+// its own crew: crossing a crew link is the point of a cross-crew /assign, and
+// Create enforces the caller's crew and the link separately (#4845). An
+// unknown or foreign crew gets the same 403, so this is not an existence
+// oracle. No-op for master-token callers.
+func assertAssignmentTargetCrewDB(w http.ResponseWriter, r *http.Request, db *sql.DB, logger *slog.Logger, crewID string) bool {
+	bound := InternalTokenWorkspaceFromContext(r.Context())
+	if bound == "" {
+		return true
+	}
+	var wsID string
+	err := db.QueryRowContext(r.Context(), `SELECT workspace_id FROM crews WHERE id = ?`, crewID).Scan(&wsID)
+	if err != nil || wsID != bound {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) && logger != nil {
+			logger.Error("resolve target crew workspace for token binding", "crew_id", crewID, "error", err)
+		}
+		replyError(w, http.StatusForbidden,
+			"crew does not belong to the workspace bound to the internal token")
+		return false
+	}
+	return true
+}
+
 // effectiveCrewFilter returns the crew filter an internal read/list
 // endpoint should apply when it accepts an OPTIONAL ?crew_id (#1186
 // remainder: crew-connections, issues list, mission lookups). For a

@@ -50,9 +50,17 @@ func TestAssignmentCreate_CrewBoundTokenAcrossLink(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO chats (id, agent_id, workspace_id, mode, status) VALUES ('xc-chat-ops', 'xc-morgan', ?, 'CHAT', 'ACTIVE')`, wsID)
 	execOrFatal(t, db, `INSERT INTO crew_connections (id, workspace_id, from_crew_id, to_crew_id, direction, status, created_at)
 		VALUES ('xc-link', ?, 'xc-eng', 'xc-ops', 'bidirectional', 'active', datetime('now'))`, wsID)
+	// One-way link INTO eng: rel may dispatch to eng, eng may not dispatch to rel.
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('xc-rel', ?, 'Rel', 'rel')`, wsID)
+	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug, status) VALUES ('xc-riley', 'xc-rel', ?, 'riley', 'riley', 'IDLE')`, wsID)
+	execOrFatal(t, db, `INSERT INTO crew_connections (id, workspace_id, from_crew_id, to_crew_id, direction, status, created_at)
+		VALUES ('xc-oneway', ?, 'xc-rel', 'xc-eng', 'unidirectional', 'active', datetime('now'))`, wsID)
+	// A workspace agent without a crew (agents_create.go allows it).
+	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug, status) VALUES ('xc-loose', NULL, ?, 'loose', 'loose', 'IDLE')`, wsID)
 
 	h := NewAssignmentHandler(db, nil, nil, "token", logger)
 	t.Cleanup(h.WaitDispatches)
+	const callerRefusal = `{"error":"assigning chat or agent is outside the crew bound to the internal token"}`
 
 	cases := []struct {
 		name      string
@@ -61,18 +69,29 @@ func TestAssignmentCreate_CrewBoundTokenAcrossLink(t *testing.T) {
 		crew      string
 		actor     string
 		wantCode  int
-		wantInErr string
+		wantExact string
 	}{
-		{name: "linked crew is reachable", chat: "xc-chat-eng", target: "morgan", crew: "xc-ops", wantCode: http.StatusCreated},
-		{name: "own crew by id", chat: "xc-chat-eng", target: "sam", crew: "xc-eng", wantCode: http.StatusCreated},
-		{name: "unlinked crew is refused by the link check", chat: "xc-chat-eng", target: "jordan", crew: "xc-qa",
-			wantCode: http.StatusForbidden, wantInErr: "not connected"},
-		{name: "crew of another workspace is refused", chat: "xc-chat-eng", target: "morgan", crew: "xc-far",
-			wantCode: http.StatusForbidden, wantInErr: "workspace"},
-		{name: "chat of another crew cannot be used by this token", chat: "xc-chat-ops", target: "sam", crew: "xc-eng",
-			wantCode: http.StatusForbidden, wantInErr: "crew bound to the internal token"},
-		{name: "acting agent of another crew cannot be named by this token", chat: "xc-chat-eng", target: "sam", crew: "xc-eng",
-			actor: "xc-morgan", wantCode: http.StatusForbidden, wantInErr: "crew bound to the internal token"},
+		// The sidecar always forwards actor_agent_id (internal/sidecar/assignment.go),
+		// so the rows that model real traffic name one.
+		{name: "linked crew is reachable", chat: "xc-chat-eng", target: "morgan", crew: "xc-ops", actor: "xc-alex", wantCode: http.StatusCreated},
+		{name: "linked crew is reachable without an actor", chat: "xc-chat-eng", target: "morgan", crew: "xc-ops", wantCode: http.StatusCreated},
+		{name: "own crew by id", chat: "xc-chat-eng", target: "sam", crew: "xc-eng", actor: "xc-alex", wantCode: http.StatusCreated},
+		{name: "unlinked crew is refused by the link check", chat: "xc-chat-eng", target: "jordan", crew: "xc-qa", actor: "xc-alex",
+			wantCode: http.StatusForbidden, wantExact: `{"error":"crews are not connected — create a crew connection first"}`},
+		{name: "one-way link is refused against its direction", chat: "xc-chat-eng", target: "riley", crew: "xc-rel", actor: "xc-alex",
+			wantCode: http.StatusForbidden, wantExact: `{"error":"crews are not connected — create a crew connection first"}`},
+		{name: "crew of another workspace is refused", chat: "xc-chat-eng", target: "morgan", crew: "xc-far", actor: "xc-alex",
+			wantCode: http.StatusForbidden, wantExact: `{"error":"crew does not belong to the workspace bound to the internal token"}`},
+		{name: "unknown crew gets the identical refusal", chat: "xc-chat-eng", target: "morgan", crew: "xc-nope", actor: "xc-alex",
+			wantCode: http.StatusForbidden, wantExact: `{"error":"crew does not belong to the workspace bound to the internal token"}`},
+		{name: "chat of another crew without an actor", chat: "xc-chat-ops", target: "sam", crew: "xc-eng",
+			wantCode: http.StatusForbidden, wantExact: callerRefusal},
+		{name: "chat of another crew with an own-crew actor", chat: "xc-chat-ops", target: "morgan", crew: "xc-ops", actor: "xc-alex",
+			wantCode: http.StatusForbidden, wantExact: callerRefusal},
+		{name: "acting agent of another crew", chat: "xc-chat-eng", target: "sam", crew: "xc-eng", actor: "xc-morgan",
+			wantCode: http.StatusForbidden, wantExact: callerRefusal},
+		{name: "crewless acting agent", chat: "xc-chat-eng", target: "morgan", crew: "xc-ops", actor: "xc-loose",
+			wantCode: http.StatusForbidden, wantExact: callerRefusal},
 	}
 	for i, tc := range cases {
 		task := "probe-" + string(rune('a'+i))
@@ -96,12 +115,12 @@ func TestAssignmentCreate_CrewBoundTokenAcrossLink(t *testing.T) {
 			if w.Code != tc.wantCode {
 				t.Fatalf("status = %d, want %d; body=%s", w.Code, tc.wantCode, w.Body.String())
 			}
-			if tc.wantInErr != "" && !strings.Contains(w.Body.String(), tc.wantInErr) {
-				t.Errorf("refusal %q does not contain %q", w.Body.String(), tc.wantInErr)
+			if tc.wantExact != "" && strings.TrimSpace(w.Body.String()) != tc.wantExact {
+				t.Errorf("refusal = %s, want exactly %s", strings.TrimSpace(w.Body.String()), tc.wantExact)
 			}
 			var rows int
 			if err := db.QueryRowContext(context.Background(),
-				`SELECT COUNT(*) FROM assignments WHERE chat_id = ? AND task = ? AND assigned_to_id IN (SELECT id FROM agents WHERE slug = ? AND crew_id = COALESCE(NULLIF(?, ''), 'xc-eng'))`,
+				`SELECT COUNT(*) FROM assignments WHERE chat_id = ? AND task = ? AND assigned_to_id IN (SELECT id FROM agents WHERE slug = ? AND crew_id = ?)`,
 				tc.chat, task, tc.target, tc.crew).Scan(&rows); err != nil {
 				t.Fatalf("count assignments: %v", err)
 			}
@@ -112,5 +131,53 @@ func TestAssignmentCreate_CrewBoundTokenAcrossLink(t *testing.T) {
 				t.Errorf("refused request still wrote %d assignment row(s)", rows)
 			}
 		})
+	}
+}
+
+// TestAssignmentCreate_CrewBoundSubAgentKeepsLeadChat pins the one exception
+// to the chat-crew rule (#4845 review B2). A sub-agent in a linked crew that is
+// executing an assignment runs on its lead's chat, so that chat belongs to the
+// other crew. When the server derived the chat from source_run_id
+// (delegationExecutionChat proved the run), the sub-agent's own crew token may
+// still delegate. The same body without source_run_id names a foreign chat and
+// is refused.
+func TestAssignmentCreate_CrewBoundSubAgentKeepsLeadChat(t *testing.T) {
+	f := newChatIssueFixture(t)
+	db := f.h.db
+	execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug) VALUES ('sub-crew', ?, 'Ops', 'sub-ops')`, f.workspace)
+	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug, status) VALUES ('sub-agent', 'sub-crew', ?, 'Sub', 'sub-agent', 'IDLE')`, f.workspace)
+	execOrFatal(t, db, `INSERT INTO agents (id, crew_id, workspace_id, name, slug, status) VALUES ('sub-peer', 'sub-crew', ?, 'Peer', 'sub-peer', 'IDLE')`, f.workspace)
+	execOrFatal(t, db, `INSERT INTO crew_connections (id, workspace_id, from_crew_id, to_crew_id, direction, status, created_at)
+		VALUES ('sub-link', ?, ?, 'sub-crew', 'bidirectional', 'active', datetime('now'))`, f.workspace, f.crew)
+
+	// The sub-agent's run executes on the lead's chat, as buildAssignmentRunRequest
+	// does: a host-admitted ASSIGNMENT run whose run.started names that chat.
+	execOrFatal(t, db, `INSERT INTO journal_entries (id, workspace_id, agent_id, entry_type, actor_type, summary, trace_id, payload)
+		VALUES ('sub-run-start', ?, 'sub-agent', 'run.started', 'orchestrator', 'started', 'sub-run', ?)`,
+		f.workspace, `{"trigger_type":"ASSIGNMENT","host_admitted":true,"chat_id":"`+f.chat+`"}`)
+
+	h := NewAssignmentHandler(db, nil, nil, "host", newTestLogger())
+	t.Cleanup(h.WaitDispatches)
+	post := func(body map[string]any) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/assignments", jsonBody(body))
+		ctx := context.WithValue(req.Context(), ctxInternalTokenWS, f.workspace)
+		ctx = context.WithValue(ctx, ctxInternalTokenCrew, "sub-crew")
+		w := httptest.NewRecorder()
+		h.Create(w, req.WithContext(ctx))
+		h.WaitDispatches()
+		return w
+	}
+	base := map[string]any{"workspace_id": f.workspace, "crew_id": "sub-crew", "actor_agent_id": "sub-agent",
+		"target_slug": "sub-peer", "task": "nested", "chat_id": f.chat}
+
+	if w := post(base); w.Code != http.StatusForbidden {
+		t.Fatalf("lead's chat without source_run_id: status %d, want 403; %s", w.Code, w.Body.String())
+	}
+	withRun := map[string]any{"source_run_id": "sub-run"}
+	for k, v := range base {
+		withRun[k] = v
+	}
+	if w := post(withRun); w.Code != http.StatusCreated {
+		t.Fatalf("server-derived lead chat: status %d, want 201; %s", w.Code, w.Body.String())
 	}
 }

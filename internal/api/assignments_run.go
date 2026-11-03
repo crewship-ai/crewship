@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/crewship-ai/crewship/internal/dispatch"
-	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -157,6 +156,8 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "lookup assigner crew for connection check", err)
 		return
 	}
+	chatCrewID := assignerCrewID
+	actorNamed, actorCrew := false, ""
 
 	// The ACTING agent (#1754). A crew shares one sidecar, so the chat's agent
 	// is only ever the one that booted it; the sidecar resolves who actually
@@ -183,20 +184,32 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		assignedByID = body.ActorAgentID
+		actorNamed, actorCrew = true, actorCrewID
 		if actorCrewID != "" {
 			assignerCrewID = actorCrewID
 		}
 	}
 
-	// A crew-bound token speaks for its own crew only (#1222, #4845): the chat
-	// it dispatches from and the agent it names as the actor must both be in
-	// that crew, or the crew link below would be evaluated for somebody else.
-	if boundCrew := InternalTokenCrewFromContext(r.Context()); boundCrew != "" && assignerCrewID != boundCrew {
-		h.logger.Warn("internal API assignment refused: caller outside the token's crew",
-			"token_crew", boundCrew, "assigner_crew", assignerCrewID, "chat_id", body.ChatID)
-		replyError(w, http.StatusForbidden,
-			"assigning chat or agent is outside the crew bound to the internal token")
-		return
+	// A crew-bound token speaks for its own crew only (#1222, #4845). Three
+	// things must be that crew before the crew link below is evaluated:
+	//   - the acting agent, when one is named. A crewless or foreign actor
+	//     would otherwise be the identity the delegation caps measure;
+	//   - the chat, unless the server derived it from source_run_id. A
+	//     sub-agent running an assignment keeps its lead's chat, which may
+	//     belong to a linked crew (delegationExecutionChat proved that run);
+	//   - the effective assigner, i.e. the actor's crew, else the chat's crew.
+	if boundCrew := InternalTokenCrewFromContext(r.Context()); boundCrew != "" {
+		chatServerDerived := body.SourceRunID != ""
+		if (actorNamed && actorCrew != boundCrew) ||
+			(!chatServerDerived && chatCrewID != boundCrew) ||
+			assignerCrewID != boundCrew {
+			h.logger.Warn("internal API assignment refused: caller outside the token's crew",
+				"token_crew", boundCrew, "chat_crew", chatCrewID, "actor_crew", actorCrew,
+				"chat_server_derived", chatServerDerived, "chat_id", body.ChatID)
+			replyError(w, http.StatusForbidden,
+				"assigning chat or agent is outside the crew bound to the internal token")
+			return
+		}
 	}
 
 	// Delegation caps (#1754) — before anything is written, and before the
@@ -1926,28 +1939,3 @@ func (h *AssignmentHandler) assignmentCancelRequested(ctx context.Context, assig
 
 // List handles GET /api/v1/crews/{crewId}/assignments.
 // Returns all assignments for agents in this crew, sorted by created_at DESC.
-
-// assertAssignmentTargetCrewDB checks the TARGET crew of an internal
-// assignment against the token's workspace binding. Unlike
-// assertBoundCrewWorkspaceDB it does not require a crew-bound caller to name
-// its own crew: crossing a crew link is the point of a cross-crew /assign, and
-// Create enforces the caller's crew and the link separately (#4845). An
-// unknown or foreign crew gets the same 403, so this is not an existence
-// oracle. No-op for master-token callers.
-func assertAssignmentTargetCrewDB(w http.ResponseWriter, r *http.Request, db *sql.DB, logger *slog.Logger, crewID string) bool {
-	bound := InternalTokenWorkspaceFromContext(r.Context())
-	if bound == "" {
-		return true
-	}
-	var wsID string
-	err := db.QueryRowContext(r.Context(), `SELECT workspace_id FROM crews WHERE id = ?`, crewID).Scan(&wsID)
-	if err != nil || wsID != bound {
-		if err != nil && !errors.Is(err, sql.ErrNoRows) && logger != nil {
-			logger.Error("resolve target crew workspace for token binding", "crew_id", crewID, "error", err)
-		}
-		replyError(w, http.StatusForbidden,
-			"crew does not belong to the workspace bound to the internal token")
-		return false
-	}
-	return true
-}
