@@ -736,4 +736,60 @@ describe('native host lease expiry re-verification',()=>{
    await waitFor(()=>expect(p.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal)))
   }finally{vi.useRealTimers()}
  })
+ // A renewal event queued during a main-thread stall arrives with an expiry that
+ // is already past although the holder and generation are unchanged (#4863).
+ // Only the server recheck may retire write for an expiry-only lapse.
+ const stale=()=>({...ownedLease,expires_at:new Date(Date.now()-1_000).toISOString()})
+ it('keeps write when a late lease event of the same holder arrives already expired and the server still confirms custody',async()=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   client.leaseAction.mockImplementation(async(action:string)=>{if(action==='acquire')client.lease.mockImplementation(async()=>soon());return soon()})
+   mount();await ready();await acquire()
+   const p=ports.at(-1)!,reads=client.read.mock.calls.length,checks=client.lease.mock.calls.length
+   await act(async()=>{stream?.('lease',stale())})
+   await act(async()=>{await vi.advanceTimersByTimeAsync(2_000)})
+   expect(p.setReadOnly).not.toHaveBeenCalledWith(true,expect.anything())
+   expect(client.lease.mock.calls.length).toBeGreaterThan(checks)
+   expect(client.read.mock.calls.length).toBe(reads)
+   expect(ports.at(-1)).toBe(p)
+   expect(screen.queryByText(/Pouze čtení/)).not.toBeInTheDocument()
+   expect(screen.queryByRole('button',{name:'Převzít úpravy'})).not.toBeInTheDocument()
+   expect(screen.getByRole('button',{name:'Uvolnit úpravy'})).toBeInTheDocument()
+  }finally{vi.useRealTimers()}
+ })
+ it('retires write within the recheck bound when a late expired lease event arrives and the server no longer confirms custody',async()=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   client.leaseAction.mockImplementation(async(action:string)=>{if(action==='acquire')client.lease.mockImplementation(async()=>soon());return soon()})
+   mount();await ready();await acquire()
+   const p=ports.at(-1)!
+   client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:{actor_id:'user:other',display_name:'Jana',kind:'human'},generation:'9007199254740996'})
+   await act(async()=>{stream?.('lease',stale())})
+   await act(async()=>{await vi.advanceTimersByTimeAsync(6_000)})
+   expect(p.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal))
+  }finally{vi.useRealTimers()}
+ })
+ it('retires write when a late expired lease event never gets a server answer within the recheck bound',async()=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   client.leaseAction.mockImplementation(async(action:string)=>{if(action==='acquire')client.lease.mockImplementation(async()=>soon());return soon()})
+   mount();await ready();await acquire()
+   const p=ports.at(-1)!;client.lease.mockImplementation(()=>new Promise(()=>{}))
+   await act(async()=>{stream?.('lease',stale())})
+   await act(async()=>{await vi.advanceTimersByTimeAsync(7_000)})
+   expect(p.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal))
+  }finally{vi.useRealTimers()}
+ })
+ for(const [name,loss] of [
+  ['another holder',{mine:false,can_write:false,holder:{actor_id:'user:other',display_name:'Jana',kind:'human'},generation:'9007199254740996'}],
+  ['write revoked',{can_write:false}],
+  ['edit revoked',{can_edit:false}],
+  ['another generation',{generation:'9007199254740996'}],
+ ] as const)it(`retires write at once on a lease event reporting ${name}, without a server recheck`,async()=>{
+  mount();await ready();await acquire()
+  const p=ports.at(-1)!,checks=client.lease.mock.calls.length
+  act(()=>stream?.('lease',{...ownedLease,...loss}))
+  await waitFor(()=>expect(p.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal)),{timeout:500})
+  expect(client.lease.mock.calls.slice(checks).length).toBe(0)
+ })
 })
