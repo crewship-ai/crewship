@@ -715,3 +715,65 @@ func TestWorkspaceAdminSheetHistoryIsIndependentOfEditGrant(t *testing.T) {
 	admin := openEditorSession(t, f, f.wsAdmin, base)
 	wantCode(t, f.do(f.wsAdmin, "POST", base+"/edits"+q, cellEdit(admin.SessionID, 1, int(admin.Rev), "C3", "admin-edit")), 200, "granted ADMIN edits")
 }
+
+// Coordinator follow-up (#4825): the Page spec history of a Page holding a
+// Sheet was readable only by its owner (workbookPageOwnerOnly), a per-type
+// exception to PRD §5. A workspace OWNER/ADMIN who does not own it now reads
+// it through the audited administrator path; every other non-owner, including
+// the Sheet's named editor, is still refused. A failed audit releases nothing
+// and the private read never reaches the member-visible journal.
+func TestWorkspaceAdminReadsSheetPageSpecHistory(t *testing.T) {
+	f := gridcraftInstanceFixture(t)
+	f.r.RegisterGridCraft(appengine.Options{Enabled: true}, gridcraftFixtureEngine{})
+	seedInstanceUser(t, f.db, "ann", "ann@ex.com", "ws-old", "MEMBER")
+	seedInstanceUser(t, f.db, "bob", "bob@ex.com", "ws-old", "MEMBER")
+	ann := mintTokenFor(t, f.db, "ann", "workbookann000000000000000")
+	bob := mintTokenFor(t, f.db, "bob", "workbookbob000000000000000")
+	q := "?workspace_id=ws-old"
+	liveWorkbook(t, f, ann, "ann", "private-spec-book")
+	liveWorkbook(t, f, ann, "ann", "shared-spec-book")
+	wantCode(t, f.do(ann, "POST", "/api/v1/pages/shared-spec-book/workbook/editors"+q, `{"editor":"bob@ex.com","publish":true}`), 200, "publish with bob")
+	for _, id := range []string{"private-spec-book", "shared-spec-book"} {
+		mustExec(t, f.db, `INSERT INTO page_versions(page_id,seq,spec_json,author_user_id,created_at) VALUES(?,1,'{"metadata":{"name":"secret-spec-name"},"spec":{"panels":[]}}','ann','2026-11-01T00:00:00Z')`, id)
+	}
+	versions := func(token, id string) *httptest.ResponseRecorder {
+		return f.do(token, "GET", "/api/v1/pages/"+id+"/versions"+q, "")
+	}
+	wantCode(t, versions(ann, "private-spec-book"), 200, "owner history")
+	wantCode(t, versions(ann, "shared-spec-book"), 200, "owner history (published)")
+	for _, reader := range []struct{ token, user string }{{f.boss, "boss"}, {f.wsAdmin, "wsadmin"}} {
+		for _, c := range []struct{ id, action string }{
+			{"private-spec-book", auditActionPrivateArtifactRead},
+			{"shared-spec-book", auditActionPrivateArtifactRead},
+		} {
+			before := adminReadAudits(t, f.r.pages, c.action, reader.user, c.id) + adminReadAudits(t, f.r.pages, auditActionWorkspaceAdminArtifactRead, reader.user, c.id)
+			got := versions(reader.token, c.id)
+			wantCode(t, got, 200, reader.user+" spec history of "+c.id)
+			if !strings.Contains(got.Body.String(), "secret-spec-name") {
+				t.Fatalf("%s history of %s misses the retained version: %s", reader.user, c.id, got.Body.String())
+			}
+			after := adminReadAudits(t, f.r.pages, c.action, reader.user, c.id) + adminReadAudits(t, f.r.pages, auditActionWorkspaceAdminArtifactRead, reader.user, c.id)
+			if after != before+1 {
+				t.Fatalf("%s spec history of %s audits %d -> %d, want one more", reader.user, c.id, before, after)
+			}
+		}
+	}
+	// The named editor and an unrelated member stay refused.
+	if w := versions(bob, "shared-spec-book"); w.Code == 200 {
+		t.Fatalf("Sheet editor read the Page spec history: %s", w.Body.String())
+	}
+	seedInstanceUser(t, f.db, "dave", "dave@ex.com", "ws-old", "MEMBER")
+	dave := mintTokenFor(t, f.db, "dave", "workbookdave00000000000000")
+	if w := versions(dave, "private-spec-book"); w.Code == 200 || strings.Contains(w.Body.String(), "secret-spec-name") {
+		t.Fatalf("member read the private Sheet Page spec history: %s", w.Body.String())
+	}
+	// The private administrator read stays out of the member journal.
+	if n := gridcraftCount(t, f, `SELECT count(*) FROM journal_entries WHERE payload LIKE '%private-spec-book%' AND entry_type LIKE '%accessed%'`); n != 0 {
+		t.Fatalf("private Sheet spec history read reached the journal: %d", n)
+	}
+	// A failed audit releases nothing.
+	mustExec(t, f.db, `CREATE TRIGGER deny_spec_history_audit BEFORE INSERT ON audit_logs WHEN NEW.user_id='wsadmin' AND NEW.entity_id='private-spec-book' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
+	if w := versions(f.wsAdmin, "private-spec-book"); w.Code == 200 || strings.Contains(w.Body.String(), "secret-spec-name") {
+		t.Fatalf("spec history released without its audit: %d %s", w.Code, w.Body.String())
+	}
+}

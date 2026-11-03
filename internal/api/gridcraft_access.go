@@ -99,7 +99,7 @@ func (h *PageHandler) workbookHumanAccess(ctx context.Context, workspace, pageID
 
 // workbookPageRefusal is shown to anyone but the owner who tries to delete,
 // rename, roll back or read the spec history of a Page holding a workbook.
-const workbookPageRefusal = "only the workbook owner may delete, rename, roll back or read the history of this page; workbooks have no backup or archive"
+const workbookPageRefusal = "only the workbook owner may delete, rename, roll back or read the history of this page (workspace owners and admins may read it, audited); workbooks have no backup or archive"
 
 // workbookFolderRefusal is shown to anyone but the owner who tries to move a
 // Page holding a workbook into or out of a folder. A workbook in a folder is
@@ -110,7 +110,9 @@ const workbookFolderRefusal = "only the workbook owner may move this page into o
 // holding a workbook with its owner, before and after publication. Workbooks
 // are excluded from backups and have no archive, so an ADMIN, the workspace
 // OWNER or an editor deleting the Page would be an irreversible loss, and spec
-// versions from the private period must not become readable to others.
+// versions from the private period must not become readable to editors or
+// other members. The one exception is reading that history: ListVersions also
+// admits the audited workspace OWNER/ADMIN read (PRD §5).
 func workbookPageOwnerOnly(rec *pageRecord, userID string) bool {
 	return !rec.HasWorkbook || rec.OwnerUserID == userID
 }

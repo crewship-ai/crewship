@@ -157,7 +157,8 @@ func TestGridCraftShareRequiresImportedWorkbookAndLiveEditor(t *testing.T) {
 
 // A workbook has no backup or archive, so deleting, renaming or rolling back
 // its Page stays with the owner before and after publication. Version history
-// from the private period is not exposed to anyone else.
+// is read only by the owner and, audited, by workspace OWNER/ADMIN (PRD §5,
+// #4825); editors and other members never read it.
 func TestGridCraftWorkbookPageLifecycleIsOwnerOnly(t *testing.T) {
 	f := gridcraftInstanceFixture(t)
 	seedInstanceUser(t, f.db, "ann", "ann@ex.com", "ws-old", "MEMBER")
@@ -171,7 +172,7 @@ func TestGridCraftWorkbookPageLifecycleIsOwnerOnly(t *testing.T) {
 	page := "/api/v1/pages/life-book"
 	wantCode(t, f.do(ann, "POST", page+"/workbook/operations"+q, gridcraftImportBody("i", 0, 0)), 200, "import")
 	wantCode(t, f.do(ann, "PATCH", page+q, `{"name":"Renamed privately"}`), 200, "owner rename")
-	refused := func(token, what string) {
+	refused := func(token, what string, history bool) {
 		t.Helper()
 		for _, c := range []struct{ method, path, body string }{
 			{"DELETE", page, ""},
@@ -179,17 +180,33 @@ func TestGridCraftWorkbookPageLifecycleIsOwnerOnly(t *testing.T) {
 			{"GET", page + "/versions", ""},
 			{"POST", page + "/rollback", `{"to":1}`},
 		} {
-			if code := f.do(token, c.method, c.path+q, c.body).Code; code != 403 && code != 404 {
+			code := f.do(token, c.method, c.path+q, c.body).Code
+			if c.method == "GET" && history {
+				if code != 200 {
+					t.Fatalf("%s %s %s = %d, want the audited administrator read", what, c.method, c.path, code)
+				}
+				continue
+			}
+			if code != 403 && code != 404 {
 				t.Fatalf("%s %s %s = %d, want refusal", what, c.method, c.path, code)
 			}
 		}
 	}
-	refused(f.boss, "private OWNER")
-	refused(f.wsAdmin, "private ADMIN")
+	historyAudits := func(user string) int {
+		return gridcraftCount(t, f, `SELECT count(*) FROM audit_logs WHERE user_id=? AND entity_id='life-book-id' AND action IN ('artifact.private_owner_accessed','artifact.workspace_admin_accessed')`, user)
+	}
+	refused(f.boss, "private OWNER", true)
+	refused(f.wsAdmin, "private ADMIN", true)
+	if historyAudits("boss") != 1 || historyAudits("wsadmin") != 1 {
+		t.Fatalf("private history reads audits boss=%d wsadmin=%d", historyAudits("boss"), historyAudits("wsadmin"))
+	}
 	wantCode(t, f.do(ann, "POST", page+"/workbook/editors"+q, `{"editor":"bob@ex.com","publish":true}`), 200, "publish")
-	refused(f.boss, "published OWNER")
-	refused(f.wsAdmin, "published ADMIN")
-	refused(bob, "editor")
+	refused(f.boss, "published OWNER", true)
+	refused(f.wsAdmin, "published ADMIN", true)
+	if historyAudits("boss") != 2 || historyAudits("wsadmin") != 2 {
+		t.Fatalf("published history reads audits boss=%d wsadmin=%d", historyAudits("boss"), historyAudits("wsadmin"))
+	}
+	refused(bob, "editor", false)
 	if n := gridcraftCount(t, f, `SELECT count(*) FROM pages WHERE id='life-book-id' AND name='Renamed privately'`); n != 1 {
 		t.Fatal("non-owner changed the workbook Page")
 	}
