@@ -9,7 +9,7 @@ import * as N from "../outage-lostack/native"
 import { holdsAll, inspectDrafts, newTyping, offerEvidence, placeCaret, saveByAutosaveOrKey, typedMarkers, typeLines, type DraftOffer } from "./draft"
 import { checkDraftCopies, checkLines, holdsAnyLine, lineLedger, type LineCheck } from "./lines"
 import { present, sha256, wordFacts } from "./facts"
-import { baselineBefore, cellInTable, confirmCycle, holdsMarker, type CycleConfirmation } from "./confirm"
+import { auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, markerReport, tableRunsLeft, type CycleConfirmation, type MarkerReport } from "./confirm"
 import type { RestartRecord } from "./restart"
 
 export type SessionKind = "wordcraft" | "gridcraft"
@@ -24,6 +24,8 @@ export interface SessionInput {
   trail: CraftCall[]
   /** What the person did and when (filled while the session runs, so a failed run still shows it). */
   steps: Array<{ atMs: number; step: string }>
+  /** The per-cycle evidence chain and the checkpoints (filled while the session runs, so a failed run still shows them). */
+  evidence: { chain: CycleChain[]; checkpoints: Checkpoint[] }
   minutes: number
   restart(why: string): Promise<RestartRecord>
 }
@@ -42,6 +44,38 @@ export interface SessionResult {
   afterRestart: Record<string, unknown>
   steps: Array<{ atMs: number; step: string }>
   failures: string[]
+  /** Where the stored versions can be read later: the QA workspace is kept for the hour rows. */
+  workspaceId: string
+  /** Per cycle, the save from the keystrokes to the stored head (compact; marker excerpts only). */
+  chain: CycleChain[]
+  /** The stored head at the restart and reload checkpoints, against the saved markers. */
+  checkpoints: Checkpoint[]
+}
+
+/**
+ * One cycle's evidence chain: (1) what the editor showed right after the typing (the canvas
+ * text itself is not observable from the page; the status line and its save trace are),
+ * (2)-(4) every save the editor sent in the cycle (body SHA-256, base version, time, reply
+ * status and version), (5) the stored head after the cycle against every saved marker and the
+ * table cell text, (6) what the editor showed after the save.
+ */
+export interface CycleChain {
+  cycle: number
+  typed: string[]
+  local: { observed: string; status: string; savePhase: string | null; saveReason: string | null }
+  sent: Array<Pick<N.Op, "n" | "kind" | "sentAt" | "baseVersion" | "bodySha256" | "status" | "version" | "phase" | "failed">>
+  head: { version: string; sha256: string; markers: MarkerReport }
+  confirmed: boolean
+  editor: { label: string | null; status: string; savePhase: string | null; saveReason: string | null }
+}
+
+/** (7) The stored head at a checkpoint: version, hash, whether it equals the previous checkpoint, and the marker set. */
+export interface Checkpoint {
+  stage: string
+  version: string
+  sha256: string
+  sameAsPrevious: boolean | null
+  markers: MarkerReport
 }
 
 export async function readHeadText(api: APIRequestContext, ref: N.NativeRef): Promise<{ version: string; text: string; hash: string }> {
@@ -63,6 +97,23 @@ function logConsole(page: Page, trail: CraftCall[]): void {
   page.on("pageerror", (e) => add("pageerror", String(e)))
 }
 
+/** The status line with its save trace, as attributes. */
+async function statusTrace(page: Page): Promise<{ status: string; savePhase: string | null; saveReason: string | null }> {
+  const s = page.getByRole("status").first()
+  const [status, savePhase, saveReason] = await Promise.all([
+    N.status(page),
+    s.getAttribute("data-save-phase", { timeout: 2_000 }).catch(() => null),
+    s.getAttribute("data-save-reason", { timeout: 2_000 }).catch(() => null),
+  ])
+  return { status: status.slice(0, 80), savePhase, saveReason }
+}
+
+/** The status line and the save trace, for a failure line. */
+async function uiEvidence(page: Page): Promise<string> {
+  const t = await statusTrace(page)
+  return `${t.status.slice(0, 60)}; data-save-phase=${t.savePhase ?? "none"} data-save-reason=${t.saveReason ?? "none"}`
+}
+
 /** What a cycle's work can report back to the session. */
 interface CycleHooks {
   step(name: string): void
@@ -74,6 +125,13 @@ interface CycleHooks {
   beforeTyping(): Promise<void>
   /** An input problem of a step (the person's typing did not reach the document), not a lost save. */
   fail(problem: string): void
+  /** The markers the server confirmed so far (a step checks they survive its own typing). */
+  savedMarkers(): string[]
+  /**
+   * Saved markers the step's own typing changed (harness input, with evidence): they leave
+   * the saved list, so the later checks do not report them as lost saves, and the row fails.
+   */
+  harnessInput(markers: string[], problem: string): void
 }
 
 /** What differs between Word and Sheet: how a cycle works and how the saved document is checked. */
@@ -83,6 +141,8 @@ interface Driver {
   work(page: Page, f: Frame, cycle: number, frac: number, hooks: CycleHooks): Promise<string[]>
   /** Optional first action that proves the freshly opened editor takes input: the save label it saw and the markers it typed. */
   warmup?(page: Page, f: Frame, after: string): Promise<{ label: string | undefined; typed: string[] }>
+  /** The table step's cell text, reported in the evidence chain (Word). */
+  cell?: string
   /** Problems found in the saved document (empty when it holds everything the session did). */
   verify(text: string, saved: string[], stage: string): string[]
 }
@@ -102,6 +162,11 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   const steps = input.steps
   const note = (step: string) => steps.push({ atMs: Date.now() - t0, step })
   const saved: string[] = []
+  const { chain, checkpoints } = input.evidence
+  const checkpoint = (stage: string, head: { version: string; text: string; hash: string }) => {
+    const prev = checkpoints.at(-1)
+    checkpoints.push({ stage, version: head.version, sha256: head.hash, sameAsPrevious: prev ? prev.sha256 === head.hash : null, markers: markerReport(head.text, saved, d.cell) })
+  }
   const hashes: Record<string, string> = {}
   let cycles = 0
   let lastVersion = ref.initVersion
@@ -130,12 +195,14 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   // A cycle's typing counts as saved only when the server head holds every marker; the
   // label is not trusted, an earlier step's save can already sit on it (confirm.ts, #4871).
   // A read can race the save the label just announced: re-read for a few seconds.
+  let lastHead: { version: string; text: string; hash: string } | undefined
   const confirmTyped = async (typed: string[], baseline: string, label: string | undefined): Promise<CycleConfirmation> => {
     let head = await readHeadText(api, ref)
     for (const end = Date.now() + 5_000; !typed.every((m) => holdsMarker(head.text, m)) && Date.now() < end; ) {
       await N.pause(1_000)
       head = await readHeadText(api, ref)
     }
+    lastHead = head
     return confirmCycle({ typed, baseline, label, head })
   }
   await N.openEditor(page, ref)
@@ -160,6 +227,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
     f = await N.frameOf(page, d.app)
     await f.locator("canvas").first().click({ position: d.app === "wordcraft" ? { x: 678, y: 324 } : { x: 54, y: 240 } })
     const n = cycles
+    const opsAt = ops.length
     let baseline = lastVersion
     const typed = await d.work(page, f, n, frac, {
       step: note,
@@ -170,7 +238,17 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
         baseline = baselineBefore(lastVersion, await N.status(page))
       },
       fail: (problem) => failures.push(`cycle ${n}: ${problem}`),
+      savedMarkers: () => [...saved],
+      harnessInput: (markers, problem) => {
+        for (const m of markers) {
+          const i = saved.indexOf(m)
+          if (i >= 0) saved.splice(i, 1)
+        }
+        failures.push(`cycle ${n}: ${problem}`)
+      },
     })
+    // (1) What the editor showed right after the typing, before the save.
+    const local = await statusTrace(page)
     if (cycles < 2) await prd.evidence(`step-cycle-${cycles}-typed.png`, await page.screenshot()).catch(() => {})
     // The editor saves by itself 300 ms after the last keystroke. Take that
     // save when it comes; press Ctrl+S only when it does not (Ctrl+S always
@@ -180,7 +258,18 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
     const c = await confirmTyped(typed, baseline, label)
     lastVersion = newer(newer(baseline, label), c.version)
     if (c.confirmed) saved.push(...typed)
-    else failures.push(`cycle ${n}: ${c.problem} (${(await N.status(page)).slice(0, 80)})`)
+    else failures.push(`cycle ${n}: ${c.problem} (${await uiEvidence(page)})`)
+    const shown = await statusTrace(page)
+    const head = lastHead ?? (await readHeadText(api, ref))
+    chain.push({
+      cycle: n,
+      typed,
+      local: { observed: "status line only; the canvas text is not observable from the page", ...local },
+      sent: ops.slice(opsAt).map(({ n: i, kind, sentAt, baseVersion, bodySha256, status, version, phase, failed }) => ({ n: i, kind, sentAt, baseVersion, bodySha256, status, version, phase, failed })),
+      head: { version: head.version, sha256: head.hash, markers: markerReport(head.text, saved, d.cell) },
+      confirmed: c.confirmed,
+      editor: { label: label ?? null, ...shown },
+    })
     const ui = await N.uiState(page)
     note(`cycle ${n}: ${ui.status.slice(0, 40)}${c.confirmed ? ` · server v${c.version} holds the typing` : " · NOT on the server"}`)
     if (ui.alerts.length) failures.push(`cycle ${cycles}: the editor shows an alert: ${ui.alerts.join(" | ").slice(0, 200)}`)
@@ -216,6 +305,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   for (const end = Date.now() + 30_000; progress.accepted.length === 0 && Date.now() < end; ) await N.pause(250)
   const before = await readHeadText(api, ref)
   hashes.beforeRestart = before.hash
+  checkpoint("beforeRestart", before)
   if (before.text.includes(`${unsaved}-0`)) failures.push("the typing was saved before the restart; there was no unsaved work to lose")
   failures.push(...d.verify(before.text, saved, "before the restart"))
   const savesBefore = ops.filter((o) => o.kind === "save").length
@@ -246,6 +336,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   const sentByEditor = ops.slice(savesBefore).filter((o) => o.kind === "save")
   const after = await readHeadText(api, ref)
   hashes.afterRestart = after.hash
+  checkpoint("afterRestart", after)
   failures.push(...d.verify(after.text, saved, "after the restart"))
   const savedByEditor = after.text.includes(`${unsaved}-0`)
   if (savedByEditor && !holdsAll(after.text, typedBefore)) failures.push(`the editor saved only part of the ${typedBefore.length} lines it took`)
@@ -286,6 +377,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   if (linesAfterReload) lineFailures(linesAfterReload)
   const reloaded = await readHeadText(api, ref)
   hashes.afterReload = reloaded.hash
+  checkpoint("afterReload", reloaded)
   if (reloaded.hash !== after.hash) failures.push("reloading the editor changed the saved document")
   failures.push(...d.verify(reloaded.text, saved, "after the reload"))
   afterRestart = { typedLines, acceptedLines: progress.accepted, typingStoppedBy: progress.stoppedBy ?? null, timeline: timeline.slice(-3), sentByEditor: sentByEditor.length, savedByEditor, draftsInSession: draftsInSession && { ...offerEvidence(draftsInSession), error: inSessionError }, reopened, drafts: offerEvidence(drafts), lines: { ledger, checks: lineChecks }, version: reloaded.version }
@@ -295,6 +387,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   await pacedUntil(total)
   const fin = await readHeadText(api, ref)
   hashes.final = fin.hash
+  checkpoint("final", fin)
   failures.push(...d.verify(fin.text, saved, "at the end"))
   if (savedByEditor) lineFailures(checkLines(ledger, fin.text, `server head v${fin.version} at the end`))
   await N.release(page).catch(() => {})
@@ -303,6 +396,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   await N.pause(2_000)
   const last = await readHeadText(api, ref)
   hashes.afterFinalReload = last.hash
+  checkpoint("afterFinalReload", last)
   if (last.hash !== fin.hash) failures.push("the last reload changed the saved document")
   failures.push(...d.verify(last.text, saved, "after the last reload"))
   if (savedByEditor) lineFailures(checkLines(ledger, last.text, `server head v${last.version} after the last reload`))
@@ -332,6 +426,9 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
     afterRestart,
     steps,
     failures,
+    workspaceId: ref.workspaceId,
+    chain,
+    checkpoints,
   }
 }
 
@@ -344,10 +441,9 @@ const WORD_UI = {
   heading1: { x: 918, y: 94 },
   table: { x: 150, y: 94 },
   table2x2: { x: 166, y: 200 },
-  // The first cell of the 2x2 table inserted at the end of the document (RC-4
-  // step-table-after.png, canvas origin at page 241,168). Only a retry target: the
-  // server check after it decides whether the text reached a table cell.
-  firstCell: { x: 443, y: 672 },
+  // No point on the page itself: where the document sits on the canvas depends on the
+  // scroll and the page breaks. In the RC-4 rerun a fixed "first cell" point hit the
+  // previous cycle's B line and the cell text split a saved marker (#4877).
   pictures: { x: 218, y: 94 },
 } as const
 
@@ -355,6 +451,7 @@ export function wordSession(input: SessionInput) {
   const tag = Math.random().toString(36).slice(2, 7)
   const m = { heading: `HOURHEAD${tag}`, bold: `HOURBOLD${tag}`, cell: `HOURCELL${tag}`, font: `HOURFONT${tag}` }
   const done = new Set<string>()
+  let tableRuns = 0
   // Did the cell text reach a table cell of the server head? The editor saves 300 ms
   // after the last keystroke; an unsaved draft gets Ctrl+S once, as in saveByAutosaveOrKey.
   const cellSaved = async (page: Page): Promise<boolean> => {
@@ -371,7 +468,8 @@ export function wordSession(input: SessionInput) {
   }
   const driver: Driver = {
     app: "wordcraft",
-    async work(page, f, cycle, frac, { step, shot, beforeTyping, fail }) {
+    cell: m.cell,
+    async work(page, f, cycle, frac, { step, shot, beforeTyping, fail, savedMarkers, harnessInput }) {
       const kb = page.keyboard
       const canvas = f.locator("canvas").first()
       const click = async (at: { x: number; y: number }) => {
@@ -384,9 +482,9 @@ export function wordSession(input: SessionInput) {
         if (frac < at || done.has(name)) return
         done.add(name)
         step(name)
-        await shot(`${name}-before`).catch(() => {})
+        await shot(`${name}-c${cycle}-before`).catch(() => {})
         await fn()
-        await shot(`${name}-after`).catch(() => {})
+        await shot(`${name}-c${cycle}-after`).catch(() => {})
       }
       await kb.press("Control+End")
       await once("heading", 0, async () => {
@@ -408,7 +506,9 @@ export function wordSession(input: SessionInput) {
         await tick("bold off")
       })
       await once("font", 0.08, async () => {
+        // A paragraph of its own: typed at the end of the last B line it would sit right after a saved marker.
         await kb.press("Control+End")
+        await kb.press("Enter")
         await kb.type(m.font)
         await kb.press("Shift+Home")
         await kb.press("Control+Shift+Period")
@@ -417,30 +517,59 @@ export function wordSession(input: SessionInput) {
         await kb.press("Enter")
       })
       await once("table", 0.16, async () => {
+        tableRuns++
+        // The saved markers this step must leave intact, as the server holds them now.
+        const pre = await readHeadText(input.api, input.ref)
+        const saved = savedMarkers()
+        // The cell text with a space on each side: wherever it lands it cannot glue onto a marker.
+        const cellText = ` ${m.cell} `
+        /** Did the attempt change saved text? */
+        const audit = async (attempt: string): Promise<boolean> => {
+          const head = await readHeadText(input.api, input.ref)
+          const a = auditStep({ before: pre.text, after: head.text, saved, inserted: m.cell })
+          if (a.missingBefore.length) step(`table: before the step the server head v${pre.version} already lacked ${a.missingBefore.length} saved marker(s), first ${a.missingBefore.slice(0, 2).join(", ")}`)
+          const problem = describeAudit(a, attempt, `v${pre.version} -> v${head.version}; ${await uiEvidence(page)}`)
+          if (!problem) return false
+          await shot(`table-c${cycle}-damaged`).catch(() => {})
+          if (a.splitByStep.length) harnessInput(a.splitByStep.map((d) => d.marker), problem)
+          // Not split by the cell text: the markers stay saved, so the later checks report them as missing.
+          else fail(problem)
+          return true
+        }
         await kb.press("Control+End")
         await kb.press("Enter")
         await click(WORD_UI.insertTab)
         await click(WORD_UI.table)
         await click(WORD_UI.table2x2)
-        // The person types into the new table, and the result is checked on the
-        // server, not assumed (#4871: in RC-4 these keystrokes never reached the
-        // document and the table was saved empty).
-        await kb.type(m.cell)
+        await shot(`table-c${cycle}-inserted`).catch(() => {})
+        // The person types into the new table at once. Where the text went is decided by
+        // the saved document (a table cell of the server head), right here in the step.
+        await kb.type(cellText)
         let landed = await cellSaved(page)
-        if (landed) step("table: the cell text reached a table cell without an extra click")
+        let damaged = await audit("typing right after the 2x2 insert")
+        if (landed) step("table: the cell text reached a table cell right after the 2x2 insert")
         else {
-          // Product/UX evidence, kept visible: after the ribbon's 2x2 insert the caret was not in the table.
-          step(`table: typing right after the 2x2 insert did not reach the document (${(await N.status(page)).slice(0, 36)}); an extra click into the first cell is needed`)
-          await shot("table-no-focus").catch(() => {})
-          await click(WORD_UI.firstCell)
-          await kb.type(m.cell)
-          landed = await cellSaved(page)
-          step(landed ? "table: the cell text reached a table cell after the extra click into the first cell" : "table: the cell text is not in a table cell also after a click into the first cell")
+          // #4877, kept as a failure while the product bug is present: after the ribbon's
+          // 2x2 insert the keyboard does not return to the document.
+          fail(`typing right after 2x2 insert did not reach the document (#4877): ${m.cell} is not in a table cell of the server head (${await uiEvidence(page)})`)
+          await shot(`table-c${cycle}-no-focus`).catch(() => {})
+          if (!damaged) {
+            // Keyboard focus back without touching the page: a click on the ribbon's Insert
+            // tab is chrome, and the editor hands the keyboard back to the document with the
+            // caret where the insert put it (WordCraft #1093), i.e. in the new table.
+            await click(WORD_UI.insertTab)
+            await kb.type(cellText)
+            landed = await cellSaved(page)
+            damaged = await audit("typing after the focus came back through the ribbon")
+            await shot(`table-c${cycle}-after-refocus`).catch(() => {})
+            step(landed ? "table: the cell text reached a table cell after the focus came back through the ribbon" : "table: the cell text is not in a table cell also after the focus came back through the ribbon")
+          }
         }
         if (!landed) {
-          // An input failure, not a lost save: the table is not checked as saved work.
-          done.delete("table")
-          fail(`typing after the table insert did not reach the document: ${m.cell} is not in a table cell of the server head, also after a click into the first cell`)
+          // An input failure, not a lost save: the table is not checked as saved work. One
+          // more run in a later cycle at most, none when the step changed saved text.
+          if (tableRunsLeft(tableRuns, damaged) > 0) done.delete("table")
+          fail(`typing after the table insert did not reach a table cell (run ${tableRuns}${damaged ? ", saved text changed by the step" : ""}): ${m.cell} is not in a table cell of the server head (${await uiEvidence(page)})`)
         }
         await kb.press("Control+End")
       })

@@ -14,7 +14,7 @@
 //
 // Full mode only. A run shorter than 60 minutes (PRD_HOUR_SHORT_RUN=1, for
 // debugging) does the same work and then fails on purpose: it is not evidence.
-import { readHeadText, sheetSession, wordSession, type SessionKind } from "./craft-session/hour-steps"
+import { readHeadText, sheetSession, wordSession, type Checkpoint, type CycleChain, type SessionKind } from "./craft-session/hour-steps"
 import type { CraftCall } from "./craft-lease/helpers"
 import { restartServer } from "./craft-session/restart"
 import { expect, prdRequirement, test } from "./fixtures"
@@ -55,20 +55,25 @@ for (const { app, label } of KINDS) {
       test.skip(app === "wordcraft" && process.env.PRD_HOUR_WORD_AUTOMATED !== "1", "A.craft.session.hour-word is a manual row (mode=manual): not reliably automatable, see the manual walkthrough in docs/development/prd-acceptance.md")
       const { minutes, short } = hourMinutes()
       test.setTimeout((minutes + 25) * 60_000)
-      const { context, api, ws } = await isolatedActor(prd, browser, `hour ${label}`, { viewport: N.VIEWPORT })
+      // The QA workspace stays after the row (keepWorkspace): its stored versions are the
+      // evidence a later reader needs, and result.json names the workspace and the page.
+      const { context, api, ws } = await isolatedActor(prd, browser, `hour ${label}`, { viewport: N.VIEWPORT }, { keepWorkspace: true })
       const probe = await N.nativeEnabled(api, ws.id)
       expect(probe.enabled, `native ${label} editing must be on: ${probe.detail}`).toBe(true)
       const ref = await N.createNative(api, ws.id, app, `PRD hour ${label}`)
       const ops = N.instrument(context)
       const trail: CraftCall[] = []
       const steps: Array<{ atMs: number; step: string }> = []
-      const session = (app === "wordcraft" ? wordSession : sheetSession)({ prd, context, api, ref, ops, trail, steps, minutes, restart: (why) => restartServer(prd.origin, `${label} hour session: ${why}`) })
+      const evidence = { chain: [] as CycleChain[], checkpoints: [] as Checkpoint[] }
+      await prd.evidence("document-ref.json", { workspaceId: ws.id, pageId: ref.pageId, kept: true })
+      const session = (app === "wordcraft" ? wordSession : sheetSession)({ prd, context, api, ref, ops, trail, steps, evidence, minutes, restart: (why) => restartServer(prd.origin, `${label} hour session: ${why}`) })
       let result
       try {
         result = await session.run()
       } catch (err) {
         await prd.evidence("failure-craft-calls.json", trail).catch(() => {})
         await prd.evidence("failure-steps.json", steps).catch(() => {})
+        await prd.evidence("failure-chain.json", { workspaceId: ws.id, pageId: ref.pageId, ...evidence }).catch(() => {})
         // Every save/reconcile the editor sent, answered or not: the trail above only holds answers.
         await prd.evidence("failure-ops.json", ops).catch(() => {})
         throw err
