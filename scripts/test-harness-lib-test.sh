@@ -136,6 +136,74 @@ expect_contains "README still names the locally-built ./crewship form" \
   "$(cat "$README")" "./crewship"
 
 echo
+echo "== crew-links evidence (#4855) =="
+
+# test-crew-links.sh once passed when alex REFUSED the delegation but quoted the
+# requested "<tag>-OK" string (stage ff4c164, 2026-11-03): the prompt carries
+# the tag, so the reply text cannot prove a crossing. Drive the real suite
+# against a stub CLI whose `activity` feed is the only thing that changes.
+# XLINK_MODE: refuse-quoting (no artifact, reply quotes the tag) or landed
+# (tag-correlated assignment for morgan; the reply never mentions the tag).
+xlink_cli() {
+  cat >"$1" <<'EOF'
+#!/usr/bin/env bash
+state="${XLINK_STATE:?}"
+args=" $* "
+prompt="" save="" prev=""
+for a in "$@"; do
+  [ "$prev" = "-p" ] && prompt="$a"
+  [ "$prev" = "--save" ] && save="$a"
+  prev="$a"
+done
+case "$args" in
+  *" crew connect "*) rm -f "$state/unlinked"; exit 0 ;;
+  *" version "*|*" whoami "*|*" crew disconnect "*) exit 0 ;;
+  *" agent list "*|*" routine list "*) echo row; exit 0 ;;
+  *" crew connections "*)
+    [ -e "$state/unlinked" ] || echo "link cc_stub engineering ops bidirectional"; exit 0 ;;
+  *" chat list "*) echo "[]"; exit 0 ;;
+  *" activity "*)
+    [ -s "$state/landed" ] && cat "$state/landed"; exit 0 ;;
+  *" ask "*)
+    tag="$(printf '%s' "$prompt" | grep -oE 'XLINK(NEG)?-[A-Z0-9]+' | head -1)"
+    if [ -z "$tag" ]; then printf 'ops\n' >"$save"; exit 0; fi
+    case "$tag" in XLINKNEG-*) : >"$state/unlinked" ;; esac
+    if [ "$XLINK_MODE" = landed ] && [ ! -e "$state/unlinked" ]; then
+      printf '{"id":"a-%s","to_slug":"morgan","entry_type":"assignment.created","summary":"assigned alex → Morgan: reply %s-OK"}\n' "$tag" "$tag" >>"$state/landed"
+      printf 'Morgan answered.\n' >"$save"
+    else
+      printf "Refused by the platform: I could not get Morgan to reply '%s-OK'.\n" "$tag" >"$save"
+    fi
+    exit 0 ;;
+esac
+exit 0
+EOF
+  chmod +x "$1"
+}
+
+run_crew_links() { # <mode> — print the suite's output (colour-free, stdout not a tty)
+  local dir; dir="$(mktemp -d -t cs-xlink.XXXXXX)"
+  xlink_cli "$dir/crewship"
+  env -u CREWSHIP_SERVER -u SERVER CREWSHIP="$dir/crewship" XLINK_STATE="$dir" XLINK_MODE="$1" \
+    bash "$SCRIPT_DIR/test-harness/test-crew-links.sh" 2>&1
+}
+
+if command -v jq >/dev/null 2>&1; then
+  out="$(run_crew_links refuse-quoting)"
+  expect_contains "quoted tag without an artifact -> section 3 FAILS" "$out" "FAIL cross-crew delegation over a live link"
+  expect_contains "quoted tag without an artifact -> says the echo is not evidence" "$out" "is not evidence"
+  expect_not_contains "quoted tag without an artifact -> suite is not green" "$out" "failed: 0"
+  expect_contains "refusal quoting the NEG tag -> unlinked half still PASSES" "$out" "PASS an unlinked crew cannot be delegated to"
+
+  out="$(run_crew_links landed)"
+  expect_contains "tag-correlated assignment -> section 3 PASSES" "$out" "PASS delegation crossed the link"
+  expect_contains "landed run -> unlinked half PASSES" "$out" "PASS an unlinked crew cannot be delegated to"
+  expect_contains "landed run -> suite is green" "$out" "failed: 0"
+else
+  echo "  skip crew-links evidence checks (jq not installed)"
+fi
+
+echo
 if [ "$FAILURES" -eq 0 ]; then
   echo "all test-harness lib checks passed"
 else

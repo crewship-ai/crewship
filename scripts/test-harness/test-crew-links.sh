@@ -87,9 +87,15 @@ TAG="$(nonce XLINK)"
 # The trade, stated rather than hidden: if the model delegates but drops the
 # tag from the task, this reads as no evidence. That is the correct bias —
 # it fails loudly instead of passing on somebody else's assignment.
-xlink_to_morgan_ids() {
+#
+# A tag in alex's REPLY is not evidence (#4855): the prompt hands alex the
+# tag, so a refusal that quotes it ("I could not get Morgan to say
+# XLINK-…-OK") reads exactly like a delivered answer. On stage ff4c164 that
+# certified a crossing the server had refused with 403. Only the
+# tag-correlated artifact decides, in both halves of the suite.
+xlink_to_morgan_ids() { # [tag] — defaults to this delegation's TAG
   cs activity --since 30m --lines 200 --export ndjson 2>/dev/null |
-    jq -r --arg tag "$TAG" '
+    jq -r --arg tag "${1:-$TAG}" '
       select(.to_slug == "morgan")
       | select(.entry_type | test("^(assignment\\.|peer\\.conversation)"))
       | select(((.summary // "") + " " + (.payload.task // "")) | contains($tag))
@@ -103,18 +109,16 @@ trap 'rm -f "$before_ids" "$after_ids"' EXIT
 (( XLINK_HAVE_JQ == 1 )) && xlink_to_morgan_ids > "$before_ids"
 
 info "Asking alex to delegate to morgan on the Ops crew (tag $TAG)…"
-# Success is EITHER the tag coming back (alex reported morgan's answer) OR a
-# new cross-crew feed entry addressed to morgan (the delegation landed even
-# if alex narrated it badly). Three attempts: each is a real model turn, and
-# a feature that works does not need four.
-crossed=0
+# Success is a new tag-correlated cross-crew feed entry addressed to morgan.
+# An echoed tag only sharpens the failure message. Three attempts: each is a
+# real model turn, and a feature that works does not need four.
+echoed=0
 landed=0
 for attempt in 1 2 3; do
   reply="$(ask_agent alex "Delegate this to Morgan on the Ops crew — Ops is linked to yours, so use the crew field of /assign. Do NOT do it yourself: ask Morgan to reply with exactly '${TAG}-OK' and nothing else. Then report back Morgan's exact answer.")"
-  if printf '%s' "$reply" | grep -qiF -- "$TAG"; then crossed=1; break; fi
-  # Check the durable artifact between attempts, not only at the end: an
-  # attempt can land the assignment without echoing the tag, and stopping
-  # here saves a model turn.
+  printf '%s' "$reply" | grep -qiF -- "$TAG" && echoed=1
+  # Check the durable artifact after every attempt; stopping as soon as it
+  # exists saves a model turn.
   if (( XLINK_HAVE_JQ == 1 )); then
     xlink_to_morgan_ids > "$after_ids"
     if [ -n "$(comm -13 "$before_ids" "$after_ids")" ]; then landed=1; break; fi
@@ -127,15 +131,16 @@ if (( XLINK_HAVE_JQ == 1 )) && (( landed == 0 )); then
   [ -n "$(comm -13 "$before_ids" "$after_ids")" ] && landed=1
 fi
 
-if (( crossed == 1 )); then
-  _pass "alex reports back a result delegated across the crew link"
-elif (( landed == 1 )); then
-  _pass "delegation crossed the link — new cross-crew activity addressed to morgan (tag not echoed)"
+if (( landed == 1 )); then
+  _pass "delegation crossed the link — new cross-crew activity addressed to morgan"
 elif (( XLINK_HAVE_JQ == 0 )); then
   # No jq means no way to read the feed, so there is no evidence either way.
   # That is a missing tool, not a failing product — say which.
   skip "cross-crew delegation over a live link" \
     "jq is not installed, so the activity feed could not be read — install jq to make this assertion"
+elif (( echoed == 1 )); then
+  _fail "cross-crew delegation over a live link" \
+    "alex's reply contains $TAG, but no cross-crew activity addressed to morgan carries it. The prompt itself contains the tag, so an echo (for example a refusal quoting it) is not evidence that work crossed the link"
 else
   # FAIL, and deliberately so.
   #
@@ -175,12 +180,28 @@ else
   morgan_before2=0
   have jq && morgan_before2="$(cs chat list morgan --format json 2>/dev/null | jq 'length' 2>/dev/null || echo 0)"
 
+  neg_before="$(mktemp)"; neg_after="$(mktemp)"
+  (( XLINK_HAVE_JQ == 1 )) && xlink_to_morgan_ids "$NEG" > "$neg_before"
+
   neg_reply="$(ask_agent alex "Delegate this to Morgan on the Ops crew: ask Morgan to reply with exactly '${NEG}-OK'. Then report back Morgan's exact answer. If you cannot reach Morgan, say exactly why.")"
 
   morgan_after2=0
   have jq && morgan_after2="$(cs chat list morgan --format json 2>/dev/null | jq 'length' 2>/dev/null || echo 0)"
 
-  assert_not_contains "an unlinked crew cannot be delegated to" "$neg_reply" "$NEG-OK"
+  # Same evidence rule as section 3: a correct refusal may quote ${NEG}-OK,
+  # so the reply text cannot decide. Without jq there is no artifact to read,
+  # and the reply is the only (weaker) signal left.
+  if (( XLINK_HAVE_JQ == 1 )); then
+    xlink_to_morgan_ids "$NEG" > "$neg_after"
+    if [ -n "$(comm -13 "$neg_before" "$neg_after")" ]; then
+      _fail "an unlinked crew cannot be delegated to" "new cross-crew activity addressed to morgan carries $NEG with no link in place"
+    else
+      _pass "an unlinked crew cannot be delegated to"
+    fi
+  else
+    assert_not_contains "an unlinked crew cannot be delegated to" "$neg_reply" "$NEG-OK"
+  fi
+  rm -f "$neg_before" "$neg_after"
   if (( morgan_after2 > morgan_before2 )); then
     _fail "no work reaches an unlinked crew" "a chat for morgan appeared with no link in place ($morgan_before2 → $morgan_after2)"
   else
