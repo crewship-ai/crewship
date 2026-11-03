@@ -4,6 +4,7 @@
 #   scripts/throwaway-server.sh run   NAME [--binary PATH] [--port N] [--env NAME=VALUE]... [--page-projects [DIR]] [--documents] -- CMD [ARGS...]
 #   scripts/throwaway-server.sh start NAME [--binary PATH] [--port N] [--env NAME=VALUE]... [--page-projects [DIR]] [--documents]
 #   scripts/throwaway-server.sh stop  NAME
+#   scripts/throwaway-server.sh restart NAME [--down-seconds N]
 #   scripts/throwaway-server.sh list
 #
 # `--env` accepts only optional feature settings (see THROWAWAY_ENV_ALLOWLIST)
@@ -20,6 +21,15 @@
 # pointing at it, and tears everything down when CMD ends — success, failure
 # or Ctrl-C (trap). `start` leaves it running for interactive work; `stop`
 # tears it down later.
+#
+# `restart` stops only the server process (SIGTERM, SIGKILL after 30 s) and
+# starts the same binary again on the same data directory, port, container
+# prefix and settings. Nothing is reseeded and no container, volume or file is
+# removed, so a recovery test sees exactly what a deploy-time restart leaves
+# behind. `--down-seconds N` keeps the server stopped for N seconds first (for
+# example past the 60 s work lease). It refuses an instance whose recorded
+# installation identity no longer matches its data directory, and a port that
+# another process took meanwhile (state restart_failed; restart or stop again).
 #
 # Why: a test server whose data directory is deleted while its crew
 # containers live on leaves resources that no installation remembers (dozens
@@ -141,6 +151,8 @@ cmd_start() {
       # else is refused). Repeatable; NAME=VALUE form only.
       --env)
         [[ "${2:-}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || die "--env expects NAME=VALUE, got '${2:-}'"
+        # One line each: restart reads the saved settings back line by line.
+        [[ "$2" != *$'\n'* ]] || die "--env values must be a single line"
         local key="${2%%=*}"
         local ok=0
         local allowed
@@ -168,7 +180,7 @@ cmd_start() {
         # Names this script itself keeps in the instance dir (data would put
         # the projects path ON the data dir, which config refuses at boot).
         case "$page_projects" in
-          data|server.log|server.pid|manifest.json|cli-config.yaml)
+          data|server.log|server.pid|server.env|manifest.json|cli-config.yaml)
             die "--page-projects: '$page_projects' is reserved for the instance's own files" ;;
         esac
         shift
@@ -243,13 +255,42 @@ PYDOC
   "instance_id": ""
 }
 EOF
+  # The optional settings are kept beside the manifest (mode 0600) so that
+  # `restart` gives the new process exactly what this one received. They are
+  # allowlisted feature settings and owned paths, never secret values.
+  local setting
+  (umask 077; : >"$dir/server.env")
+  for setting in ${extra_env[@]+"${extra_env[@]}"}; do
+    printf '%s\n' "$setting" >>"$dir/server.env"
+  done
+  launch_server "$dir" failed_to_start
+  local iid; iid="$(instance_id "$dir/data" || true)"
+  manifest_set "$dir" instance_id "$iid"
+  manifest_set "$dir" state "running"
+  log "$name running on http://127.0.0.1:$port (prefix $prefix, instance ${iid:-unknown})"
+  echo "export CREWSHIP_SERVER=http://127.0.0.1:$port CREWSHIP_CONFIG=$dir/cli-config.yaml"
+}
+
+# launch_server starts the recorded binary on the instance's own data
+# directory, port, prefix and saved settings, then waits for any HTTP answer.
+# On failure it records FAIL_STATE and exits; it never stops anything else.
+launch_server() { # dir fail_state
+  local dir="$1" fail_state="$2" name binary port prefix
+  name="$(manifest_get "$dir" name)"
+  binary="$(manifest_get "$dir" binary)"
+  port="$(manifest_get "$dir" port)"
+  prefix="$(manifest_get "$dir" prefix)"
+  local -a saved_env=()
+  if [[ -s "$dir/server.env" ]]; then
+    mapfile -t saved_env <"$dir/server.env"
+  fi
   (
     cd "$dir"
     env -i HOME="$HOME" PATH="$PATH" \
       CREWSHIP_DATA_DIR="$dir/data" CREWSHIP_HOST=127.0.0.1 CREWSHIP_PORT="$port" \
       CREWSHIP_CONTAINER_PREFIX="$prefix" \
-      ${extra_env[@]+"${extra_env[@]}"} \
-      setsid "$binary" start >"$dir/server.log" 2>&1 &
+      ${saved_env[@]+"${saved_env[@]}"} \
+      setsid "$binary" start >>"$dir/server.log" 2>&1 &
     echo $! >"$dir/server.pid"
   )
   local pid; pid="$(cat "$dir/server.pid")"
@@ -258,7 +299,7 @@ EOF
   local i
   for ((i = 0; i < START_TIMEOUT; i++)); do
     if ! kill -0 "$pid" 2>/dev/null; then
-      manifest_set "$dir" state "failed_to_start"
+      manifest_set "$dir" state "$fail_state"
       die "server exited during start; see $dir/server.log — 'stop $name' cleans up"
     fi
     # Any HTTP answer means it is up: / is 404 on a build without the web UI.
@@ -270,14 +311,85 @@ EOF
   if ((i >= START_TIMEOUT)); then
     # Never leave a server running that the caller believes failed.
     kill -TERM "$pid" 2>/dev/null || true
-    manifest_set "$dir" state "failed_to_start"
+    manifest_set "$dir" state "$fail_state"
     die "server did not answer on :$port within $START_TIMEOUT s; see $dir/server.log — 'stop $name' cleans up"
   fi
-  local iid; iid="$(instance_id "$dir/data" || true)"
-  manifest_set "$dir" instance_id "$iid"
+}
+
+# stop_server_process ends only the recorded server process: SIGTERM, then
+# SIGKILL after 30 s. Containers, volumes and data are left alone.
+stop_server_process() { # dir
+  local pid; pid="$(manifest_get "$1" pid)"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    kill -TERM "$pid" 2>/dev/null || true
+    local i
+    for ((i = 0; i < 30; i++)); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null || true
+      for ((i = 0; i < 10; i++)); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+    fi
+  fi
+}
+
+port_listening() { ss -ltn "sport = :$1" | grep -q LISTEN; }
+
+cmd_restart() {
+  local name="$1"; shift
+  local down=0
+  while (($#)); do
+    case "$1" in
+      --down-seconds)
+        [[ "${2:-}" =~ ^[0-9]{1,5}$ ]] || die "--down-seconds expects whole seconds, got '${2:-}'"
+        down="$2"; shift 2 ;;
+      *) die "unknown option $1" ;;
+    esac
+  done
+  valid_name "$name" || die "invalid name"
+  local dir; dir="$(dir_for "$name")"
+  [[ -f "$dir/manifest.json" ]] || die "no throwaway server named $name"
+  local state; state="$(manifest_get "$dir" state)"
+  case "$state" in
+    running|restart_failed) ;;
+    *) die "$name is $state; only a running or restart_failed instance can be restarted" ;;
+  esac
+  local data recorded current
+  data="$(manifest_get "$dir" data_dir)"
+  [[ "$data" == "$dir/data" && -d "$data" ]] || die "$name has no owned data directory; refusing to restart"
+  recorded="$(manifest_get "$dir" instance_id)"
+  current="$(instance_id "$data" || true)"
+  if [[ -n "$recorded" && "$current" != "$recorded" ]]; then
+    die "$name: data directory identity '${current:-none}' does not match the recorded '$recorded'; not restarting"
+  fi
+
+  manifest_set "$dir" state "restarting"
+  stop_server_process "$dir"
+  local pid; pid="$(manifest_get "$dir" pid)"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    manifest_set "$dir" state "restart_failed"
+    die "$name: server process $pid did not stop"
+  fi
+  log "$name server process stopped; data, containers and volumes kept"
+  if ((down > 0)); then
+    log "$name stays down for $down s"
+    "${RESTART_SLEEP:-sleep}" "$down"
+  fi
+  local port; port="$(manifest_get "$dir" port)"
+  if port_listening "$port"; then
+    manifest_set "$dir" state "restart_failed"
+    die "$name: port $port is held by another process; not starting a second server"
+  fi
+  launch_server "$dir" restart_failed
+  current="$(instance_id "$data" || true)"
+  if [[ -n "$recorded" && "$current" != "$recorded" ]]; then
+    stop_server_process "$dir"
+    manifest_set "$dir" state "restart_failed"
+    die "$name: restarted server reports identity '${current:-none}', not '$recorded'"
+  fi
+  local count; count="$(manifest_get "$dir" restarts)"
+  manifest_set "$dir" restarts "$(( ${count:-0} + 1 ))"
+  manifest_set "$dir" restarted_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   manifest_set "$dir" state "running"
-  log "$name running on http://127.0.0.1:$port (prefix $prefix, instance ${iid:-unknown})"
-  echo "export CREWSHIP_SERVER=http://127.0.0.1:$port CREWSHIP_CONFIG=$dir/cli-config.yaml"
+  log "$name restarted on http://127.0.0.1:$port (pid $(manifest_get "$dir" pid), instance ${current:-unknown})"
 }
 
 # owned_resources prints "container ID" and "volume NAME" lines for exactly
@@ -320,15 +432,7 @@ cmd_stop() {
   [[ -f "$dir/manifest.json" ]] || die "no throwaway server named $name"
   manifest_set "$dir" state "stopping"
 
-  local pid; pid="$(manifest_get "$dir" pid)"
-  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-    kill -TERM "$pid" 2>/dev/null || true
-    local i
-    for ((i = 0; i < 30; i++)); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
-    if kill -0 "$pid" 2>/dev/null; then
-      kill -KILL "$pid" 2>/dev/null || true
-    fi
-  fi
+  stop_server_process "$dir"
   if [[ -z "$(manifest_get "$dir" instance_id)" ]]; then
     manifest_set "$dir" instance_id "$(instance_id "$(manifest_get "$dir" data_dir)" || true)"
   fi
@@ -403,12 +507,13 @@ cmd_list() {
 }
 
 main() {
-  (($#)) || { sed -n '2,8p' "$0"; exit 2; }
+  (($#)) || { sed -n '2,9p' "$0"; exit 2; }
   local sub="$1"; shift
   case "$sub" in
     start) (($#)) || die "start NAME"; cmd_start "$@" ;;
     stop) (($#)) || die "stop NAME"; cmd_stop "$1" ;;
     run) (($#)) || die "run NAME -- CMD"; cmd_run "$@" ;;
+    restart) (($#)) || die "restart NAME [--down-seconds N]"; cmd_restart "$@" ;;
     list) cmd_list ;;
     *) die "unknown command $sub" ;;
   esac

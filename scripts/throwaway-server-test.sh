@@ -109,6 +109,9 @@ for bad in CREWSHIP_DATA_DIR=$tmp/live CREWSHIP_HOST=0.0.0.0 CREWSHIP_PORT=9999 
   check "--env refuses $key" "$r" refused
 done
 check "--env refusal names the allowlist" "$(grep -c 'not an optional feature setting' "$tmp/envreject.err" || true)" 1
+if (cmd_start envreject --binary /bin/true --env "$(printf 'CREWSHIP_RATELIMIT_DISABLED=1\nCREWSHIP_DATA_DIR=/live')") >/dev/null 2>&1; then r=started; else r=refused; fi
+check "--env refuses a multi-line value (restart replays settings by line)" "$r" refused
+check "multi-line refusal creates no instance state" "$([[ -e "$tmp/state/envreject" ]] && echo created || echo absent)" absent
 if (cmd_start envreject --binary /bin/true --env) >/dev/null 2>&1; then r=started; else r=refused; fi
 check "--env without a value is refused, not a set -u crash" "$r" refused
 
@@ -286,5 +289,97 @@ for bad_native in CREWSHIP_CRAFT_NATIVE_WORD_ACTOR_ID=forged CREWSHIP_CRAFT_NATI
   if (cmd_start nativebad --binary /bin/true --env "$bad_native") >/dev/null 2>&1; then r=started; else r=refused; fi
   check "native prefix does not admit arbitrary ${bad_native%%=*}" "$r" refused
  done
+
+# --- restart: same data, port, prefix, identity and settings; nothing removed ---
+# A recovery scenario restarts the server WITHOUT reseeding (#4824): only the
+# server process may change. Containers, volumes and the data directory belong
+# to the instance and must survive, and the settings it was started with must
+# reach the new process too.
+: >"$FAKE_SERVER_ENV"
+if (cmd_start rs --binary "$tmp/bin/fake-crewship" --port "$FAKE_PORT" \
+    --env CREWSHIP_RATELIMIT_DISABLED=1 --page-projects) >/dev/null 2>"$tmp/rs-start.err"; then r=started; else r=failed; cat "$tmp/rs-start.err" >&2; fi
+check "restart fixture started" "$r" started
+mkdir -p "$tmp/state/rs/data/installations"
+echo iid-rs >"$tmp/state/rs/data/installations/self"
+echo kept >"$tmp/state/rs/data/marker"
+manifest_set "$tmp/state/rs" instance_id iid-rs
+rs_pid_before="$(manifest_get "$tmp/state/rs" pid)"
+rs_prefix="$(manifest_get "$tmp/state/rs" prefix)"
+env_before="$(grep -v '^_=' "$FAKE_SERVER_ENV" | sort)"
+: >"$FAKE_LOG"
+: >"$FAKE_SERVER_ENV"
+if (cmd_restart rs) >/dev/null 2>"$tmp/rs-restart.err"; then r=restarted; else r=failed; cat "$tmp/rs-restart.err" >&2; fi
+check "restart succeeds" "$r" restarted
+rs_pid_after="$(manifest_get "$tmp/state/rs" pid)"
+check "restart runs a new server process" "$([[ -n "$rs_pid_after" && "$rs_pid_after" != "$rs_pid_before" ]] && echo new)" new
+if kill -0 "$rs_pid_before" 2>/dev/null; then r=alive; else r=gone; fi
+check "restart ended the previous server process" "$r" gone
+check "restart keeps the state running" "$(manifest_get "$tmp/state/rs" state)" running
+check "restart keeps the port" "$(manifest_get "$tmp/state/rs" port)" "$FAKE_PORT"
+check "restart keeps the container prefix" "$(manifest_get "$tmp/state/rs" prefix)" "$rs_prefix"
+check "restart keeps the installation identity" "$(manifest_get "$tmp/state/rs" instance_id)" iid-rs
+check "restart keeps the data directory" "$(cat "$tmp/state/rs/data/marker" 2>/dev/null)" kept
+check "restart passes the same environment to the new process" "$(grep -v '^_=' "$FAKE_SERVER_ENV" | sort)" "$env_before"
+check "restart removes no container or volume" "$(grep -cE '^(rm|volume rm|run)' "$FAKE_LOG" || true)" 0
+check "restart records the restart count" "$(manifest_get "$tmp/state/rs" restarts)" 1
+
+# --down-seconds keeps the server stopped for that long before starting it.
+# shellcheck disable=SC2317 # invoked indirectly through RESTART_SLEEP
+fake_sleep() { echo "$1" >>"$tmp/slept"; }
+: >"$tmp/slept"
+if (RESTART_SLEEP=fake_sleep cmd_restart rs --down-seconds 75) >/dev/null 2>"$tmp/rs-down.err"; then r=restarted; else r=failed; cat "$tmp/rs-down.err" >&2; fi
+check "restart --down-seconds succeeds" "$r" restarted
+check "restart --down-seconds waits with the server stopped" "$(cat "$tmp/slept")" 75
+check "restart --down-seconds counts a second restart" "$(manifest_get "$tmp/state/rs" restarts)" 2
+for bad_down in -1 abc 1.5 ""; do
+  if (cmd_restart rs --down-seconds "$bad_down") >/dev/null 2>&1; then r=accepted; else r=refused; fi
+  check "restart refuses --down-seconds '$bad_down'" "$r" refused
+done
+check "refused restart options leave the server running" "$(manifest_get "$tmp/state/rs" state)" running
+
+# A different installation identity after restart means a different data
+# directory answered: never report it as the same instance.
+rs_pid="$(manifest_get "$tmp/state/rs" pid)"
+manifest_set "$tmp/state/rs" instance_id iid-other
+if (cmd_restart rs) >/dev/null 2>&1; then r=accepted; else r=refused; fi
+check "restart refuses an instance whose identity changed" "$r" refused
+check "identity mismatch leaves the server process alone" "$(manifest_get "$tmp/state/rs" pid)" "$rs_pid"
+if kill -0 "$rs_pid" 2>/dev/null; then r=alive; else r=gone; fi
+check "identity mismatch does not stop the server" "$r" alive
+manifest_set "$tmp/state/rs" instance_id iid-rs
+
+# Only a running or restart_failed instance may be restarted.
+for bad_state in stopping teardown_failed failed_to_start starting; do
+  manifest_set "$tmp/state/rs" state "$bad_state"
+  if (cmd_restart rs) >/dev/null 2>&1; then r=accepted; else r=refused; fi
+  check "restart refuses state $bad_state" "$r" refused
+done
+manifest_set "$tmp/state/rs" state running
+if (cmd_restart no-such-instance) >/dev/null 2>&1; then r=accepted; else r=refused; fi
+check "restart refuses an unknown instance" "$r" refused
+if (main restart) >/dev/null 2>&1; then r=accepted; else r=refused; fi
+check "restart without a name is refused" "$r" refused
+
+# The port must still be ours: another listener there is a different server.
+rs_pid="$(manifest_get "$tmp/state/rs" pid)"
+kill -TERM "$rs_pid" 2>/dev/null || true
+for _ in $(seq 1 50); do kill -0 "$rs_pid" 2>/dev/null || break; sleep 0.1; done
+python3 -m http.server "$FAKE_PORT" --bind 127.0.0.1 >/dev/null 2>&1 &
+squatter=$!
+for _ in $(seq 1 50); do (exec 3<>/dev/tcp/127.0.0.1/"$FAKE_PORT") 2>/dev/null && break; sleep 0.1; done
+if (cmd_restart rs) >/dev/null 2>&1; then r=accepted; else r=refused; fi
+check "restart refuses a port another process holds" "$r" refused
+check "occupied port marks the manifest" "$(manifest_get "$tmp/state/rs" state)" restart_failed
+kill "$squatter" 2>/dev/null || true
+wait "$squatter" 2>/dev/null || true
+for _ in $(seq 1 50); do (exec 3<>/dev/tcp/127.0.0.1/"$FAKE_PORT") 2>/dev/null || break; sleep 0.1; done
+if (cmd_restart rs) >/dev/null 2>"$tmp/rs-retry.err"; then r=restarted; else r=failed; cat "$tmp/rs-retry.err" >&2; fi
+check "restart_failed instance can be restarted once the port is free" "$r" restarted
+
+cmd_stop rs >/dev/null 2>&1 || true
+check "restarted instance tears down completely" "$([[ -e "$tmp/state/rs" ]] && echo left || echo gone)" gone
+if (exec 3<>/dev/tcp/127.0.0.1/"$FAKE_PORT") 2>/dev/null; then r=still-listening; else r=closed; fi
+check "restarted instance leaves no orphan server" "$r" closed
+if [[ -f "$FAKE_SERVER_PID" ]]; then kill "$(cat "$FAKE_SERVER_PID")" 2>/dev/null || true; fi
 
 exit "$fail"
