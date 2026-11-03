@@ -147,6 +147,37 @@ const (
 // or for an administrator who would reach it without the role. A failed audit
 // refuses the read; nothing is released unaudited.
 func (h *PageHandler) auditWorkspaceAdminRead(w http.ResponseWriter, r *http.Request, rec *pageRecord) bool {
+	return h.auditWorkspaceAdminReadBeyond(w, r, rec, func(ctx context.Context, workspace, userID string) (bool, error) {
+		return h.reachedOnlyByAdminRole(ctx, workspace, rec, userID)
+	})
+}
+
+// auditWholeArrangementRead is auditPrivateOwnerAccess for a read that
+// releases a Page's whole arrangement: its spec history, its export bundle,
+// its project sources and their history. Reaching the Page does not authorize
+// these; a member needs `write` on it (mayEditSpec), and the spec history of a
+// Page holding a workbook is its owner's alone (workbookPageOwnerOnly) even for
+// a named Sheet editor. An administrator whose standing without the role does
+// not authorize the read (a Read grant, a Sheet editor grant, a panel crew, no
+// grant) reads it through the role and is audited.
+func (h *PageHandler) auditWholeArrangementRead(w http.ResponseWriter, r *http.Request, rec *pageRecord, workbookHistory bool) bool {
+	if rec.PrivateAudience {
+		return h.auditPrivateOwnerAccess(w, r, rec)
+	}
+	return h.auditWorkspaceAdminReadBeyond(w, r, rec, func(ctx context.Context, workspace, userID string) (bool, error) {
+		if workbookHistory && !workbookPageOwnerOnly(rec, userID) {
+			return true, nil
+		}
+		// The same member without the manage role; an unresolvable grant
+		// counts as none, so the read is audited rather than released quietly.
+		return !h.mayEditSpec(ctx, workspace, userID, "MEMBER", rec), nil
+	})
+}
+
+// auditWorkspaceAdminReadBeyond records the administrator read when roleOnly
+// reports that the reader's standing without the OWNER/ADMIN role does not
+// authorize this read.
+func (h *PageHandler) auditWorkspaceAdminReadBeyond(w http.ResponseWriter, r *http.Request, rec *pageRecord, roleOnlyRead func(ctx context.Context, workspace, userID string) (bool, error)) bool {
 	user := UserFromContext(r.Context())
 	if user == nil || (rec.OwnerUserID != "" && user.ID == rec.OwnerUserID) {
 		return true
@@ -160,7 +191,7 @@ func (h *PageHandler) auditWorkspaceAdminRead(w http.ResponseWriter, r *http.Req
 		replyInternalError(w, h.logger, "authorize administrator artifact audit", err)
 		return false
 	}
-	roleOnly, err := h.reachedOnlyByAdminRole(r.Context(), workspace, rec, user.ID)
+	roleOnly, err := roleOnlyRead(r.Context(), workspace, user.ID)
 	if err != nil {
 		replyInternalError(w, h.logger, "resolve administrator artifact reach", err)
 		return false

@@ -96,7 +96,11 @@ history, and each read writes an entry. The editor share adds only editing.
 The Page versions of a Sheet (`crewship page versions`) are likewise open to
 its owner and to workspace owners and admins, audited; editors and other
 members cannot read them, and only the owner can roll back, rename, move or
-delete the Page.
+delete the Page. An admin's read of them is audited even when the admin is
+also a named editor, because the editor share never opens them. The same holds
+for any Page's versions, export and project sources: an admin with only a read
+share reads them as an admin, audited; an edit share opens them without an
+entry.
 
 An entry records the artifact's owner at the moment its content was read. If
 ownership moves to the reader while the read is in progress, the entry still

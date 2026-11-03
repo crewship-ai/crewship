@@ -158,11 +158,28 @@ func TestWorkspaceAdminReadOfOrdinaryArtifactIsAudited(t *testing.T) {
 					t.Errorf("%s HTTP%d want200: %s", surface, got.Code, got.Body)
 				}
 				want := before
-				if tc.audited {
+				// A panel crew reaches the Page, but its whole arrangement
+				// (versions, export, project sources) needs `write`: the crew
+				// member who is also ADMIN reads that only through the role.
+				if tc.audited || tc.crew && wholeArrangementSurface(surface) {
 					want++
 				}
 				if after := adminReadAudits(t, h, auditActionWorkspaceAdminArtifactRead, reader, id); after != want {
 					t.Errorf("%s audits=%d want %d", surface, after-before, want-before)
+				}
+			}
+			if tc.crew {
+				// The same crew member without the role is refused them.
+				member := "crew-member-" + tc.name
+				pagesSeedUser(t, h, ws, member, member+"@example.test", "MEMBER")
+				pagesJoinCrew(t, h, member, "crew-lookout")
+				for _, surface := range privateReadSurfaces {
+					if !wholeArrangementSurface(surface) {
+						continue
+					}
+					if got := privateReadSurfaceCall(t, h, ws, member, "MEMBER", surface); got.Code == 200 {
+						t.Errorf("panel crew MEMBER read %s without write: %s", surface, got.Body)
+					}
 				}
 			}
 			before := adminReadAudits(t, h, auditActionWorkspaceAdminArtifactRead, reader, id)
@@ -199,6 +216,12 @@ func TestWorkspaceAdminReadOfOrdinaryArtifactIsAudited(t *testing.T) {
 	if got := pagesGetStatus(t, h, ws, "audited-admin", "ADMIN", "private-read"); got.Code != 500 || strings.Contains(got.Body.String(), "Private read output") {
 		t.Errorf("unaudited administrator read released: HTTP%d", got.Code)
 	}
+}
+
+// wholeArrangementSurface names the read surfaces that release a Page's whole
+// arrangement and so need `write` from a member (auditWholeArrangementRead).
+func wholeArrangementSurface(surface string) bool {
+	return surface == "versions" || surface == "export" || strings.HasPrefix(surface, "project")
 }
 
 // Artifact Projects (the engine Slides and Dashboard data build on): on main
@@ -775,5 +798,103 @@ func TestWorkspaceAdminReadsSheetPageSpecHistory(t *testing.T) {
 	mustExec(t, f.db, `CREATE TRIGGER deny_spec_history_audit BEFORE INSERT ON audit_logs WHEN NEW.user_id='wsadmin' AND NEW.entity_id='private-spec-book' BEGIN SELECT RAISE(ABORT,'audit unavailable'); END`)
 	if w := versions(f.wsAdmin, "private-spec-book"); w.Code == 200 || strings.Contains(w.Body.String(), "secret-spec-name") {
 		t.Fatalf("spec history released without its audit: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// Final review (#4825) on ab3d4c603: a workspace ADMIN the owner named as an
+// editor of a published Sheet read its Page spec history without an audit.
+// The history is the workbook owner's alone (workbookPageOwnerOnly); the
+// editor grant reaches the Page but never authorizes that history, so the
+// read happens only through the administrator role and must be audited.
+func TestWorkspaceAdminSheetPageHistoryAuditIgnoresEditorGrant(t *testing.T) {
+	cases := []struct {
+		name        string
+		reader      string
+		namedEditor bool
+		wantRead    bool
+		wantAudits  int
+	}{
+		{"ADMIN named editor", "wsadmin", true, true, 1},
+		{"OWNER named editor", "boss", true, true, 1},
+		{"ADMIN without grant", "wsadmin", false, true, 1},
+		{"plain named editor", "bob", true, false, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := gridcraftInstanceFixture(t)
+			f.r.RegisterGridCraft(appengine.Options{Enabled: true}, gridcraftFixtureEngine{})
+			seedInstanceUser(t, f.db, "ann", "ann@ex.com", "ws-old", "MEMBER")
+			seedInstanceUser(t, f.db, "bob", "bob@ex.com", "ws-old", "MEMBER")
+			ann := mintTokenFor(t, f.db, "ann", "workbookann000000000000000")
+			tokens := map[string]string{"wsadmin": f.wsAdmin, "boss": f.boss, "bob": mintTokenFor(t, f.db, "bob", "workbookbob000000000000000")}
+			q := "?workspace_id=ws-old"
+			base := liveWorkbook(t, f, ann, "ann", "edited-spec-book")
+			wantCode(t, f.do(ann, "POST", base+"/editors"+q, `{"editor":"bob@ex.com","publish":true}`), 200, "publish with bob")
+			if tc.namedEditor && tc.reader != "bob" {
+				wantCode(t, f.do(ann, "POST", base+"/editors"+q, `{"editor":"`+tc.reader+`@ex.com"}`), 200, "owner names the administrator editor")
+				if n := gridcraftCount(t, f, `SELECT count(*) FROM page_grants WHERE page_id='edited-spec-book' AND subject_type='user' AND subject_id=? AND level='write'`, tc.reader); n != 1 {
+					t.Fatalf("editor grant rows = %d", n)
+				}
+			}
+			mustExec(t, f.db, `INSERT INTO page_versions(page_id,seq,spec_json,author_user_id,created_at) VALUES('edited-spec-book',1,'{"metadata":{"name":"secret-spec-name"},"spec":{"panels":[]}}','ann','2026-11-01T00:00:00Z')`)
+			audits := func() int {
+				return adminReadAudits(t, f.r.pages, auditActionWorkspaceAdminArtifactRead, tc.reader, "edited-spec-book") +
+					adminReadAudits(t, f.r.pages, auditActionPrivateArtifactRead, tc.reader, "edited-spec-book")
+			}
+			before := audits()
+			got := f.do(tokens[tc.reader], "GET", "/api/v1/pages/edited-spec-book/versions"+q, "")
+			released := got.Code == 200 && strings.Contains(got.Body.String(), "secret-spec-name")
+			if released != tc.wantRead {
+				t.Fatalf("%s spec history released=%v want %v: %d %s", tc.name, released, tc.wantRead, got.Code, got.Body.String())
+			}
+			if n := audits() - before; n != tc.wantAudits {
+				t.Fatalf("%s spec history audits=%d, want %d", tc.name, n, tc.wantAudits)
+			}
+		})
+	}
+}
+
+// The same rule for every read that releases an ordinary Page's whole
+// arrangement (spec history, export, project sources and history): a member
+// needs `write` on the Page for them, so an administrator holding only a Read
+// grant reads them through the role and is audited. A Write grant authorizes
+// them on its own and adds no audit; it never removes the read either.
+func TestWorkspaceAdminWholeArrangementReadAuditNeedsWriteNotReach(t *testing.T) {
+	cases := []struct {
+		name, role, grant string
+		wantAudit         bool
+	}{
+		{"ADMIN read grant", "ADMIN", "read", true},
+		{"OWNER read grant", "OWNER", "read", true},
+		{"ADMIN no grant", "ADMIN", "", true},
+		{"ADMIN write grant", "ADMIN", "write", false},
+		{"MEMBER write grant", "MEMBER", "write", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, surface := range []string{"versions", "export", "project-source", "project-history"} {
+				h, ws, owner, id := privateReadSurfaceFixture(t)
+				execOrFatal(t, h.db, `UPDATE pages SET private_audience=0 WHERE id=?`, id)
+				reader := "arrangement-reader"
+				pagesSeedUser(t, h, ws, reader, reader+"@example.test", tc.role)
+				if tc.grant != "" {
+					execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES(?,'user',?,?,?,datetime('now'))`, id, reader, tc.grant, owner)
+				}
+				before := adminReadAudits(t, h, auditActionWorkspaceAdminArtifactRead, reader, id)
+				got := privateReadSurfaceCall(t, h, ws, reader, tc.role, surface)
+				// A member's whole-arrangement reads keep their other gates
+				// (export needs every panel); only the audit is asserted.
+				if got.Code != 200 && tc.role != "MEMBER" {
+					t.Fatalf("%s %s HTTP%d want200: %s", tc.name, surface, got.Code, got.Body)
+				}
+				want := 0
+				if tc.wantAudit {
+					want = 1
+				}
+				if n := adminReadAudits(t, h, auditActionWorkspaceAdminArtifactRead, reader, id) - before; n != want {
+					t.Errorf("%s %s audits=%d want %d", tc.name, surface, n, want)
+				}
+			}
+		})
 	}
 }
