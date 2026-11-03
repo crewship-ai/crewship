@@ -424,8 +424,9 @@ start`, awaited through `crewship issue runs` (`issue_work` in `lib.sh`). A
 refusal is never a pass of a positive scenario; it stays a separate negative
 check, and a negative only counts when its run actually ended. A LEAD
 delegate gets no mission task: `issue start` runs lead planning with LEAD
-privileges and the crew sidecar — the only run that may write `CREW.md` or
-`/assign` across a link — and `issue runs` labels it `source=delegation`.
+privileges and the crew sidecar — the run meant to write `CREW.md` or
+`/assign` across a link (the intent; the non-lead negative checks whether a
+non-lead run can write anyway) — and `issue runs` labels it `source=delegation`.
 `issue_work` therefore awaits the delegate's own run, `task` or `delegation`,
 and never another agent's or a mention's. The spec each scenario rests on:
 

@@ -225,6 +225,9 @@ else
   neg_ran=1
   neg_work="$(issue_work engineering alex "Ops confirmation needed ($NEG)" \
     "Engineering needs the Ops lead to confirm on-call readiness. As engineering lead, assign this to morgan on the ops crew through /assign with crew \"ops\", task text: 'Confirm on-call readiness for ${NEG}.' If the assignment is refused, report the exact error message on this issue.")" || neg_ran=0
+  # Only a COMPLETED run counts: one that FAILED or was CANCELLED at once
+  # never got to attempt the hand-off.
+  [[ "$neg_work" == *" COMPLETED" ]] || neg_ran=0
   neg_ident="${neg_work%% *}"
   neg_reply=""
   [[ -n "$neg_ident" ]] && neg_reply="$(cs issue runs "$neg_ident" --format json 2>/dev/null \

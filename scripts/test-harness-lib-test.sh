@@ -236,6 +236,7 @@ case "$args" in
     id="${args##* issue runs }"; id="${id%% *}"
     st=COMPLETED
     [ "$XLINK_MODE" = neg-hangs ] && grep -q XLINKNEG "$state/issue-$id" && st=RUNNING
+    [ "$XLINK_MODE" = neg-failed ] && grep -q XLINKNEG "$state/issue-$id" && st=FAILED
     jq -nc --arg r "$(cat "$state/result-$id" 2>/dev/null)" --arg st "$st" '[{status:$st,source:"delegation",agent_slug:"alex",result_summary:$r}]'
     exit 0 ;;
   *" issue comments "*|*" issue get "*) exit 0 ;;
@@ -276,6 +277,10 @@ if command -v jq >/dev/null 2>&1; then
   expect_contains "unlinked hand-off run never ends -> FAILS, not a vacuous pass" "$out" "FAIL the lead's unlinked hand-off issue ran to an end"
   expect_contains "unlinked hand-off run never ends -> refusal unproven" "$out" "FAIL an unlinked crew cannot be delegated to"
   expect_contains "unlinked hand-off run never ends -> no-work check unproven" "$out" "FAIL no work reaches an unlinked crew"
+
+  out="$(run_crew_links neg-failed)"
+  expect_contains "unlinked hand-off run FAILED at once -> not a pass" "$out" "FAIL an unlinked crew cannot be delegated to"
+  expect_contains "unlinked hand-off run FAILED at once -> no-work check unproven" "$out" "FAIL no work reaches an unlinked crew"
 
   out="$(run_crew_links feed-down)"
   expect_contains "unreadable activity feed -> section 3 names the feed" "$out" "could not be read, so there is no evidence"

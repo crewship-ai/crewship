@@ -37,7 +37,7 @@ preflight
 
 # shellcheck source=owned-escalation.sh
 source "$HERE/owned-escalation.sh"
-register_secret harness-placeholder-not-a-real-token  # keep it out of failure evidence (#4874)
+register_secret harness-placeholder-not-a-real-token; register_secret audit-v1; register_secret audit-v2  # keep it out of failure evidence (#4874)
 
 AGENT="${AGENT:-morgan}"
 CREW="${CREW:-ops}"

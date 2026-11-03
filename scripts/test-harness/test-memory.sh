@@ -121,9 +121,12 @@ section "2b. Negative: crew memory is not writable by a non-lead or by an unveri
 # path: declining it is the curated-memory contract, and the check is the
 # server's, not the reply's — the label must not be in CREW.md.
 info "Delegating a crew-memory record to sam (not the lead) ($FACT_NONLEAD)…"
-if ! issue_work engineering sam "Record the sprint label in crew memory" \
-  "Decision for the engineering crew: the sprint label is ${FACT_NONLEAD}. Record it in crew-shared memory (CREW.md) so the crew can read it, and report the tool outcome on this issue." >/dev/null; then
-  _fail "a non-lead cannot write crew-shared memory" "sam's issue run did not run to an end, so nothing was tested"
+# Only a COMPLETED run counts: a run that FAILED or was CANCELLED at once
+# never had the chance to write, so it proves nothing either way.
+nl_work="$(issue_work engineering sam "Record the sprint label in crew memory" \
+  "Decision for the engineering crew: the sprint label is ${FACT_NONLEAD}. Record it in crew-shared memory (CREW.md) so the crew can read it, and report the tool outcome on this issue.")"
+if [[ "$nl_work" != *" COMPLETED" ]]; then
+  _fail "a non-lead cannot write crew-shared memory" "sam's issue run did not complete (${nl_work:-not started}), so nothing was tested"
 elif crew_hits "$FACT_NONLEAD"; then
   _fail "a non-lead cannot write crew-shared memory" "CREW.md contains $FACT_NONLEAD after sam's run"
 else

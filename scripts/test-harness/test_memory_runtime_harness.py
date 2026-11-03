@@ -52,7 +52,8 @@ if args[:2]==['issue','start']:
  state.write_text(json.dumps(data));sys.exit(0)
 if args[:2]==['issue','runs']:
  issue=data['issues'][args[2]];src='delegation' if issue['agent'] in ('alex','morgan') else 'task'  # a LEAD delegate runs as lead planning
- print(json.dumps([{'status':'COMPLETED','source':src,'agent_slug':issue['agent']}]));sys.exit(0)
+ st='FAILED' if os.environ.get('NONLEAD_RUN_FAILED')=='1' and issue['agent']=='sam' else 'COMPLETED'
+ print(json.dumps([{'status':st,'source':src,'agent_slug':issue['agent']}]));sys.exit(0)
 if args[0]=='chat' or args[:2]==['issue','get'] or args[:2]==['issue','comments']:print('[]');sys.exit(0)
 if args[:2]==['memory','inventory']:
  if os.environ.get('FAIL_INVENTORY')=='1':sys.exit(9)
@@ -83,6 +84,11 @@ class MemoryHarnessTests(unittest.TestCase):
 
  def test_negative_that_never_ran_is_not_a_pass(self):
   result=self.run_suite(FAIL_NONLEAD_START='1')
+  self.assertEqual(result.returncode,1)
+  self.assertIn('FAIL a non-lead cannot write crew-shared memory',result.stdout)
+
+ def test_negative_whose_run_failed_is_not_a_pass(self):
+  result=self.run_suite(NONLEAD_RUN_FAILED='1')
   self.assertEqual(result.returncode,1)
   self.assertIn('FAIL a non-lead cannot write crew-shared memory',result.stdout)
 
