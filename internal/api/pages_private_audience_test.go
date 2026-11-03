@@ -24,7 +24,7 @@ func TestPrivateChatDocumentAudience(t *testing.T) {
 	}{
 		{"author", author, "MEMBER", true},
 		{"owner", "private-OWNER", "OWNER", true},
-		{"admin", "private-ADMIN", "ADMIN", false},
+		{"admin", "private-ADMIN", "ADMIN", true}, // PRD §5 (#4825), audited below
 		{"manager", "private-MANAGER", "MANAGER", false},
 		{"member", "private-MEMBER", "MEMBER", false},
 		{"viewer", "private-VIEWER", "VIEWER", false},
@@ -48,8 +48,10 @@ func TestPrivateChatDocumentAudience(t *testing.T) {
 		})
 	}
 	var count int
-	if err := h.db.QueryRow(`SELECT count(*) FROM audit_logs WHERE action='artifact.private_owner_accessed' AND user_id='private-OWNER'`).Scan(&count); err != nil || count == 0 {
-		t.Errorf("OWNER access not durably audited: count%d err%v", count, err)
+	for _, reader := range []string{"private-OWNER", "private-ADMIN"} {
+		if err := h.db.QueryRow(`SELECT count(*) FROM audit_logs WHERE action='artifact.private_owner_accessed' AND user_id=?`, reader).Scan(&count); err != nil || count == 0 {
+			t.Errorf("%s access not durably audited: count%d err%v", reader, count, err)
+		}
 	}
 	access := pagesAccessCall(t, h, workspace, author, "MEMBER", "created-doc", "")
 	if access.Code != 200 {
@@ -59,8 +61,12 @@ func TestPrivateChatDocumentAudience(t *testing.T) {
 	if err := json.Unmarshal(access.Body.Bytes(), &report); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(access.Body.String(), "admin@example.com") {
-		t.Error("access report invents an ADMIN path")
+	// The administrator read is a real path now (PRD §5), so the report may
+	// name the workspace ADMIN; it must not invent a MANAGER or MEMBER path.
+	for _, absent := range []string{"manager@example.com", "member@example.com", "viewer@example.com"} {
+		if strings.Contains(access.Body.String(), absent) {
+			t.Errorf("access report invents a path for %s", absent)
+		}
 	}
 	denied := pagesAccessCall(t, h, workspace, "private-ADMIN", "ADMIN", "created-doc", "")
 	if denied.Code != 404 {
@@ -116,11 +122,14 @@ func TestPrivateAudienceCustodyAndAuditCatalog(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("OWNER opening successor document: %d %s", w.Code, w.Body.String())
 	}
-	execOrFatal(t, r.db, `UPDATE workspace_members SET role='ADMIN' WHERE user_id=? AND workspace_id=?`, r.adminID, r.wsID)
-	// A stale role must not preserve discovery or expose the access audit.
+	// A stale role must not preserve discovery. ADMIN keeps the audited read
+	// (PRD §5, #4825), so demote below the administrator roles.
+	execOrFatal(t, r.db, `UPDATE workspace_members SET role='MEMBER' WHERE user_id=? AND workspace_id=?`, r.adminID, r.wsID)
 	if pagesSlugListed(pagesListSlugs(t, h, r.wsID, r.adminID, "OWNER"), "private-output") {
 		t.Error("stale OWNER role disclosed private catalog entry")
 	}
+	// The audit catalog of private artifacts stays with the workspace OWNER.
+	execOrFatal(t, r.db, `UPDATE workspace_members SET role='ADMIN' WHERE user_id=? AND workspace_id=?`, r.adminID, r.wsID)
 	audit := NewAuditHandler(r.db, newTestLogger())
 	req := pagesRequest(t, "GET", "/api/v1/audit", r.wsID, r.adminID, "ADMIN", "")
 	out := httptest.NewRecorder()

@@ -161,3 +161,104 @@ INSERT INTO agents VALUES
 		t.Errorf("ambiguous legacy slug assigned: %v", got)
 	}
 }
+
+// #4840: the agent-scope memory ledger key is workspace-wide
+// ("agent:<slug>/<file>"), the file lives under the agent's crew. A new agent
+// taking a deleted agent's slug in another crew inherited that agent's
+// revision anchors, and every memory.write of the new agent failed the drift
+// check ("edited outside the memory contract"). Freeing the slug moves the
+// anchors with the tombstone; unrelated slugs stay untouched.
+func TestAgentSlugReuse_MovesDeletedAgentMemoryAnchors(t *testing.T) {
+	for _, via := range []string{"create", "rename"} {
+		t.Run(via, func(t *testing.T) {
+			h, userID, wsID := slugFixture(t)
+			seedAgentRow(t, h.db, "ag-old", wsID, "crew-a", "Eng", "e_g", "AGENT")
+			anchor := func(path string) {
+				t.Helper()
+				scope := path[:strings.Index(path, "/")]
+				if _, err := h.db.Exec(`INSERT INTO memory_revisions (workspace_id, path, scope, tier, revision, content_sha256, bytes, last_mutation_id, updated_at)
+					VALUES (?, ?, ?, 'agent', 1, 'c95f0e', 3, 'mm_x', '2026-11-02T17:51:01Z')`, wsID, path, scope); err != nil {
+					t.Fatal(err)
+				}
+			}
+			anchor("agent:e_g/AGENT.md")
+			anchor("agent:e_g/pins.md")
+			anchor("agent:exg/AGENT.md")  // '_' must not match as a wildcard
+			anchor("agent:e_g2/AGENT.md") // a longer slug sharing the prefix
+			mutation := func(id, path, state string) {
+				t.Helper()
+				if _, err := h.db.Exec(`INSERT INTO memory_mutations (id, workspace_id, path, canonical_path, scope, tier, operation_id, request_sha256, op, new_revision, target_sha256, state, recorded_at)
+					VALUES (?, ?, ?, '/old/crew-a/agents/e_g/.memory/AGENT.md', 'agent:e_g', 'agent', ?, 'r', 'append', 2, 't', ?, '2026-11-02T17:52:00Z')`,
+					id, wsID, path, "op-"+id, state); err != nil {
+					t.Fatal(err)
+				}
+			}
+			mutation("mm_pending", "agent:e_g/AGENT.md", "renamed")
+			mutation("mm_done", "agent:e_g/pins.md", "confirmed")
+			deleteAgent(t, h, userID, wsID, "ag-old")
+
+			switch via {
+			case "create":
+				if rr := createAgent(t, h, userID, wsID, "crew-b", "e_g"); rr.Code != http.StatusCreated && rr.Code != http.StatusOK {
+					t.Fatalf("other crew create = %d %s", rr.Code, rr.Body.String())
+				}
+			case "rename":
+				seedAgentRow(t, h.db, "ag-new", wsID, "crew-b", "New", "fresh", "AGENT")
+				if rr := patchAgent(t, h, userID, wsID, "ag-new", map[string]any{"slug": "e_g"}); rr.Code != http.StatusOK {
+					t.Fatalf("rename onto freed slug = %d %s", rr.Code, rr.Body.String())
+				}
+			}
+
+			got := map[string]string{}
+			rows, err := h.db.Query(`SELECT path, scope FROM memory_revisions WHERE workspace_id = ? ORDER BY path`, wsID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var path, scope string
+				if err := rows.Scan(&path, &scope); err != nil {
+					t.Fatal(err)
+				}
+				got[path] = scope
+			}
+			want := map[string]string{
+				"agent:e_g_deleted_ag-old/AGENT.md": "agent:e_g_deleted_ag-old",
+				"agent:e_g_deleted_ag-old/pins.md":  "agent:e_g_deleted_ag-old",
+				"agent:exg/AGENT.md":                "agent:exg",
+				"agent:e_g2/AGENT.md":               "agent:e_g2",
+			}
+			if len(got) != len(want) {
+				t.Fatalf("anchors = %v, want %v", got, want)
+			}
+			for p, s := range want {
+				if got[p] != s {
+					t.Fatalf("anchors = %v, want %v", got, want)
+				}
+			}
+			mut := map[string]string{}
+			mrows, err := h.db.Query(`SELECT id, path || '|' || scope || '|' || canonical_path FROM memory_mutations WHERE workspace_id = ?`, wsID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer mrows.Close()
+			for mrows.Next() {
+				var id, v string
+				if err := mrows.Scan(&id, &v); err != nil {
+					t.Fatal(err)
+				}
+				mut[id] = v
+			}
+			// The unconfirmed write follows the tombstone (its file stays where it
+			// was); confirmed history keeps its key.
+			if mut["mm_pending"] != "agent:e_g_deleted_ag-old/AGENT.md|agent:e_g_deleted_ag-old|/old/crew-a/agents/e_g/.memory/AGENT.md" ||
+				mut["mm_done"] != "agent:e_g/pins.md|agent:e_g|/old/crew-a/agents/e_g/.memory/AGENT.md" {
+				t.Fatalf("mutations = %v", mut)
+			}
+			var tomb string
+			if err := h.db.QueryRow(`SELECT slug FROM agents WHERE id = 'ag-old'`).Scan(&tomb); err != nil || tomb != "e_g_deleted_ag-old" {
+				t.Fatalf("tombstone slug = %q %v", tomb, err)
+			}
+		})
+	}
+}

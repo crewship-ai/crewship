@@ -18,6 +18,7 @@ import (
 type designAdminAuditKey struct{}
 type designAdminAuditScope struct {
 	id, created, operation string
+	action                 string
 	mu                     sync.Mutex
 	chain                  []any
 	notify                 func()
@@ -42,9 +43,20 @@ func ensureDesignAdminAuditRequest(r *http.Request, write bool) *http.Request {
 // websocket heartbeats verify that record instead of producing new events.
 // An incoming websocket edit gets a fresh ID and commits its audit with data.
 func (h *PageHandler) recordDesignAdminAccess(ctx context.Context, tx *sql.Tx, r *http.Request, k artifacts.VersionKey, actor, ownerUser, ownerCrew string) error {
+	return h.recordWorkspaceAdminArtifactAccess(ctx, tx, r, k, actor, ownerUser, ownerCrew, "design.workspace_admin_accessed", "Workspace administrator accessed a Design")
+}
+
+// recordWorkspaceAdminArtifactAccess is the in-transaction audit of PRD §5
+// for versioned artifact engines (Design, artifact Projects and the Slides,
+// Dashboard data and comments built on them): one audit_logs row plus its
+// chained journal entry per request admission, committed with the read it
+// authorizes. Repeated authority callbacks of the same request (fenced
+// rechecks, comments, write probes) re-verify that one row instead of adding
+// rows, so every admission stays traceable to exactly one record.
+func (h *PageHandler) recordWorkspaceAdminArtifactAccess(ctx context.Context, tx *sql.Tx, r *http.Request, k artifacts.VersionKey, actor, ownerUser, ownerCrew, action, summary string) error {
 	scope, ok := r.Context().Value(designAdminAuditKey{}).(*designAdminAuditScope)
 	if !ok {
-		return errors.New("Design administrator audit scope unavailable")
+		return errors.New("administrator artifact audit scope unavailable")
 	}
 	human := UserFromContext(ctx)
 	if human == nil {
@@ -57,10 +69,25 @@ func (h *PageHandler) recordDesignAdminAccess(ctx context.Context, tx *sql.Tx, r
 	if err != nil {
 		return err
 	}
-	const action = "design.workspace_admin_accessed"
+	if scope.action != "" && scope.action != action {
+		return errors.New("administrator artifact audit scope reused for another action")
+	}
+	scope.action = action
 	args := []any{scope.id, k.WorkspaceID, human.ID, action, k.PageID, string(raw), scope.created}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,'page',?,?,?) ON CONFLICT(id) DO NOTHING`, args...); err != nil {
 		return err
+	}
+	// A read of a private artifact stays in audit_logs only, where the audit
+	// listing shows it to the workspace OWNER and the artifact's owner alone.
+	// The journal has no such audience filter (any member reads
+	// GET /api/v1/journal), so publishing there would reveal the private
+	// artifact, its owner and who read it.
+	var private bool
+	if err = tx.QueryRowContext(ctx, `SELECT private_audience FROM pages WHERE workspace_id=? AND id=?`, k.WorkspaceID, k.PageID).Scan(&private); err != nil {
+		return err
+	}
+	if private {
+		return h.acknowledgeWorkspaceAdminArtifactAudit(ctx, tx, args)
 	}
 	if scope.chain == nil {
 		stamp, err := time.Parse(time.RFC3339Nano, scope.created)
@@ -71,7 +98,7 @@ func (h *PageHandler) recordDesignAdminAccess(ctx context.Context, tx *sql.Tx, r
 			ID: scope.id, TS: stamp, WorkspaceID: k.WorkspaceID,
 			Type: classifyAuditAction(action), Severity: journal.SeverityNotice,
 			ActorType: journal.ActorUser, ActorID: human.ID,
-			Summary: "Workspace administrator accessed a Design",
+			Summary: summary,
 			Payload: map[string]any{"action": action, "entity_type": "page", "entity_id": k.PageID, "metadata": metadata},
 			Refs:    map[string]any{"entity_type": "page", "entity_id": k.PageID},
 		})
@@ -91,17 +118,23 @@ func (h *PageHandler) recordDesignAdminAccess(ctx context.Context, tx *sql.Tx, r
 		return err
 	}
 	if !reflect.DeepEqual(frame, scope.chain) {
-		return errors.New("Design administrator chained audit changed")
+		return errors.New("administrator artifact chained audit changed")
 	}
 	// Check the compliance row after the chained append too: a journal
 	// trigger may otherwise change a previously acknowledged legacy row.
+	return h.acknowledgeWorkspaceAdminArtifactAudit(ctx, tx, args)
+}
+
+// acknowledgeWorkspaceAdminArtifactAudit verifies the request's exact
+// audit_logs row inside the read's transaction.
+func (h *PageHandler) acknowledgeWorkspaceAdminArtifactAudit(ctx context.Context, tx *sql.Tx, args []any) error {
 	var acknowledged bool
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM audit_logs WHERE id COLLATE BINARY=? AND workspace_id COLLATE BINARY=? AND user_id COLLATE BINARY=? AND action COLLATE BINARY=? AND entity_type='page' AND entity_id COLLATE BINARY=? AND metadata COLLATE BINARY=? AND created_at COLLATE BINARY=? AND ip_address IS NULL AND user_agent IS NULL)`, args...).Scan(&acknowledged)
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM audit_logs WHERE id COLLATE BINARY=? AND workspace_id COLLATE BINARY=? AND user_id COLLATE BINARY=? AND action COLLATE BINARY=? AND entity_type='page' AND entity_id COLLATE BINARY=? AND metadata COLLATE BINARY=? AND created_at COLLATE BINARY=? AND ip_address IS NULL AND user_agent IS NULL)`, args...).Scan(&acknowledged)
 	if err != nil {
 		return err
 	}
 	if !acknowledged {
-		return errors.New("Design administrator audit was not durably acknowledged")
+		return errors.New("administrator artifact audit was not durably acknowledged")
 	}
 	return nil
 }

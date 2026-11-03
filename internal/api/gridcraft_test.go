@@ -44,7 +44,7 @@ func TestGridCraftHumanDefaultOffImportReadRetryAndPrivacy(t *testing.T) {
 	call(f.boss, "POST", base+"/operations", string(raw))
 	call(f.boss, "POST", base+"/operations", string(raw))
 	call(f.boss, "GET", base, "")
-	wantCode(t, f.do(f.wsAdmin, "GET", base+"?workspace_id=ws-old", ""), 404, "private admin")
+	wantCode(t, f.do(f.wsAdmin, "GET", base+"?workspace_id=ws-old", ""), 200, "private admin audited read (PRD §5)")
 	wantCode(t, f.do(f.wsAdmin, "POST", base+"/operations?workspace_id=ws-old", string(raw)), 404, "private write")
 	var n int
 	if err := f.db.QueryRow(`SELECT count(*) FROM gridcraft_revisions`).Scan(&n); err != nil || n != 1 {
@@ -429,10 +429,15 @@ func TestGridCraftHumanCreatesEmptyPrivateWorkbookPage(t *testing.T) {
 	panels := `{"panels":[{"id":"p","schema":"status.v1","title":"t","owner":"crew/lookout","producer":"script/watch.sh","sla_seconds":30}]}`
 	wantCode(t, f.do(f.boss, "PATCH", "/api/v1/pages/pilot-book?workspace_id=ws-old", panels), 409, "panels cannot hide a workbook")
 	wantCode(t, f.do(f.boss, "GET", "/api/v1/pages/pilot-book/workbook?workspace_id=ws-old", ""), 200, "workbook still readable")
-	wantCode(t, f.do(f.wsAdmin, "GET", "/api/v1/pages/pilot-book/workbook?workspace_id=ws-old", ""), 404, "private to its author")
+	// PRD §5 (#4825): a workspace ADMIN reads the private workbook, audited;
+	// it still cannot write it.
+	wantCode(t, f.do(f.wsAdmin, "GET", "/api/v1/pages/pilot-book/workbook?workspace_id=ws-old", ""), 200, "audited administrator read")
 	listed := f.do(f.wsAdmin, "GET", "/api/v1/pages?workspace_id=ws-old", "")
-	if strings.Contains(listed.Body.String(), "pilot-book") || strings.Contains(listed.Body.String(), created.PageID) {
-		t.Fatalf("admin page list exposes the private workbook page: %s", listed.Body.String())
+	if !strings.Contains(listed.Body.String(), "pilot-book") {
+		t.Fatalf("admin page list misses the private workbook page: %s", listed.Body.String())
+	}
+	if n := gridcraftCount(t, f, `SELECT count(*) FROM audit_logs WHERE action='artifact.private_owner_accessed' AND user_id='wsadmin' AND entity_id='`+created.PageID+`'`); n < 2 {
+		t.Fatalf("administrator workbook read and listing audits=%d, want 2", n)
 	}
 	wantCode(t, create(f.boss, `{"slug":"long-name","name":"`+strings.Repeat("n", 201)+`"}`), 400, "name length bound")
 	for i := 0; i < maxEmptyWorkbookPages; i++ {

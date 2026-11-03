@@ -3,10 +3,12 @@ package mooring
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strconv"
 
+	"github.com/crewship-ai/crewship/internal/storageheadroom"
 	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
 )
 
@@ -221,6 +223,15 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 		if e = s.targetCapacity(ctx, tx, key.ArtifactID, changes, known); e != nil {
 			return e
 		}
+		// Free-disk admission (#4835) before any engine work or row of a fresh
+		// change; an all-known exact retry writes nothing and stays admitted.
+		// Each fresh change can store its checkpoint twice (document head and
+		// checkpoint history), estimated from the current checkpoint.
+		if fresh := len(changes) - len(known); fresh > 0 {
+			if e = storageheadroom.Check(ctx, tx, int64(fresh)*2*int64(base64.StdEncoding.EncodedLen(len(checkpoint)))); e != nil {
+				return e
+			}
+		}
 		taskReasons, e := s.validateTasks(ctx, tx, key, changes, known)
 		if e != nil {
 			return e
@@ -242,6 +253,10 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 		for index, r := range known {
 			accepted[index] = r
 		}
+		// pending accumulates the rows of every change this transaction has
+		// written so far: none is durable before commit, so all of them still
+		// grow the WAL together with the next change (#4835).
+		var pending int64
 		for len(done) < len(changes) {
 			next := -1
 			for i := range changes {
@@ -479,6 +494,30 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 						return e
 					}
 				}
+			}
+			// The pre-engine probe only estimated from the current checkpoint,
+			// and free disk can shrink while the engine runs. Every change,
+			// saved or terminally rejected, is probed again with the rows it
+			// really persists before the first of them is written (#4835). A
+			// refusal aborts the whole transaction: no Saved and no rejection
+			// becomes durable, and the caller gets the shared storage refusal,
+			// so the change stays a client draft to submit again later. The probe
+			// covers the earlier changes of this batch too: each fits alone, but
+			// the transaction as a whole must not eat the reserve.
+			var persistedTargets []preparedTargetRow
+			if stored.Status == "saved" {
+				persistedTargets = targetRows
+			}
+			var written int64
+			written, e = changeDiskBytes(key, c, stored, candidate, checkpointMetadata, persistedTargets)
+			if e != nil {
+				return e
+			}
+			pending += written
+			if e = storageheadroom.Check(ctx, tx, pending); e != nil {
+				return e
+			}
+			if stored.Status == "saved" {
 				if e = s.saveCheckpoint(ctx, tx, request.Lease, stored.LastRevision, candidate, checkpointMetadata); e != nil {
 					return e
 				}
@@ -571,4 +610,48 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 		s.config.AfterCommit(BatchCommitEvent{Scope: request.Lease.Key, Result: eventResult})
 	}
 	return result, nil
+}
+
+// diskRowOverhead covers the key columns, timestamps, row header and index
+// entries of one ledger row beyond its variable payload columns.
+const diskRowOverhead = 512
+
+// changeDiskBytes is an upper estimate of what persisting one change adds:
+// the change row and its audit entry (each holding the serialized result),
+// one operation row per operation (result packet, dependencies, fingerprint,
+// participant), and for a saved change the encoded candidate in checkpoint
+// history and the document head, its metadata, the target effect and version
+// rows, and the host attribution row.
+func changeDiskBytes(k SessionKey, c BatchChange, stored BatchChangeResult, candidate, metadata []byte, targets []preparedTargetRow) (int64, error) {
+	raw, err := json.Marshal(stored)
+	if err != nil {
+		return 0, err
+	}
+	n := 2*(int64(len(raw))+diskRowOverhead) + int64(len(c.ID)+len(c.MembershipHash)+len(c.TaskID))
+	for i, op := range c.Operations {
+		if i >= len(stored.Operations) {
+			return 0, ErrInvalid
+		}
+		packet, err := json.Marshal(stored.Operations[i])
+		if err != nil {
+			return 0, err
+		}
+		dependencies, err := json.Marshal(op.Dependencies)
+		if err != nil {
+			return 0, err
+		}
+		n += int64(len(packet)+len(dependencies)+len(op.Fingerprint)+len(op.Participant)+len(op.ID)+len(c.ID)) + diskRowOverhead
+	}
+	if stored.Status != "saved" {
+		return n, nil
+	}
+	n += 2*(int64(base64.StdEncoding.EncodedLen(len(candidate)))+diskRowOverhead) + int64(len(metadata)) + diskRowOverhead
+	for _, r := range targets {
+		record, err := targetEffectRecord(k, r)
+		if err != nil {
+			return 0, err
+		}
+		n += 2 * (int64(len(record)) + diskRowOverhead)
+	}
+	return n, nil
 }

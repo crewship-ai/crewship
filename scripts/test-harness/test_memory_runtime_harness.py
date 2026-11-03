@@ -21,9 +21,13 @@ if args[0]=='ask':
  agent=args[args.index('--agent')+1]
  if 'memory.write' in prompt:
   if os.environ.get('FAIL_WRITE')=='1':sys.exit(9)
-  fact=re.search(r'(?:CODENAME|SPRINT|ONCALL)-[A-Z0-9]+',prompt).group()
-  key='agent' if 'tier=AGENT' in prompt else 'crew' if 'tier=CREW' in prompt else 'pins'
-  data[key]=fact;state.write_text(json.dumps(data));reply='persisted'
+  # A bare ask may only write the agent's own memory; a crew-memory request
+  # with no crew record behind it is refused (the negative scenario, #4873).
+  if 'tier=AGENT' in prompt:
+   data['agent']=re.search(r'CODENAME-[A-Z0-9]+',prompt).group();state.write_text(json.dumps(data));reply='persisted'
+  elif os.environ.get('OBEY_BARE_ASK')=='1' and 'tier=CREW' in prompt:
+   data['crew']=data.get('crew','')+' '+re.search(r'SPRINT\w*-[A-Z0-9]+',prompt).group();state.write_text(json.dumps(data));reply='persisted'
+  else:reply='refused: no crew record asks for this'
  elif 'engineering' in prompt:
   if os.environ.get('FAIL_ISOLATION')=='1':sys.exit(9)
   reply='NOT_IN_MEMORY'
@@ -32,6 +36,25 @@ if args[0]=='ask':
   reply=data.get(key,'NOT_IN_MEMORY')
  Path(args[args.index('--save')+1]).write_text(reply)
  sys.exit(0)
+if args[:2]==['work','list']:print('{"items":[]}');sys.exit(0)
+if args[:2]==['issue','create']:
+ issues=data.setdefault('issues',{});ident='ISS-%d'%(len(issues)+1)
+ issues[ident]={'agent':args[args.index('--delegate')+1],'desc':args[args.index('--description')+1]}
+ state.write_text(json.dumps(data));print(json.dumps({'identifier':ident}));sys.exit(0)
+if args[:2]==['issue','start']:
+ issue=data['issues'][args[2]]
+ if os.environ.get('FAIL_NONLEAD_START')=='1' and issue['agent']=='sam':sys.exit(9)
+ desc=issue['desc'];fact=re.search(r'(?:SPRINT\w*|ONCALL)-[A-Z0-9]+',desc).group()
+ if os.environ.get('FAIL_WRITE')!='1':
+  # Only the crew lead (alex) writes CREW.md; morgan pins into morgan's own agent memory.
+  if 'tier=CREW' in desc and issue['agent']=='alex':data['crew']=fact
+  if 'tier=pins' in desc and issue['agent']=='morgan':data['pins']=fact
+ state.write_text(json.dumps(data));sys.exit(0)
+if args[:2]==['issue','runs']:
+ issue=data['issues'][args[2]];src='delegation' if issue['agent'] in ('alex','morgan') else 'task'  # a LEAD delegate runs as lead planning
+ st='FAILED' if os.environ.get('NONLEAD_RUN_FAILED')=='1' and issue['agent']=='sam' else 'COMPLETED'
+ print(json.dumps([{'status':st,'source':src,'agent_slug':issue['agent']}]));sys.exit(0)
+if args[0]=='chat' or args[:2]==['issue','get'] or args[:2]==['issue','comments']:print('[]');sys.exit(0)
 if args[:2]==['memory','inventory']:
  if os.environ.get('FAIL_INVENTORY')=='1':sys.exit(9)
  docs=[{'scope':'agent','name':'AGENT.md','content':data.get('agent','')}, {'scope':'crew','name':'CREW.md','content':data.get('crew','')}, {'scope':'agent','name':'pins.md','content':data.get('pins','')}]
@@ -51,6 +74,23 @@ class MemoryHarnessTests(unittest.TestCase):
   result=self.run_suite()
   self.assertEqual(result.returncode,0,result.stdout+result.stderr)
   self.assertIn('server inventory corroborates',result.stdout)
+  self.assertIn('PASS a non-lead cannot write crew-shared memory',result.stdout)
+  self.assertIn('PASS an unverified crew-memory request leaves CREW.md unchanged',result.stdout)
+
+ def test_crew_write_by_bare_ask_is_a_failure(self):
+  result=self.run_suite(OBEY_BARE_ASK='1')
+  self.assertEqual(result.returncode,1)
+  self.assertIn('FAIL an unverified crew-memory request leaves CREW.md unchanged',result.stdout)
+
+ def test_negative_that_never_ran_is_not_a_pass(self):
+  result=self.run_suite(FAIL_NONLEAD_START='1')
+  self.assertEqual(result.returncode,1)
+  self.assertIn('FAIL a non-lead cannot write crew-shared memory',result.stdout)
+
+ def test_negative_whose_run_failed_is_not_a_pass(self):
+  result=self.run_suite(NONLEAD_RUN_FAILED='1')
+  self.assertEqual(result.returncode,1)
+  self.assertIn('FAIL a non-lead cannot write crew-shared memory',result.stdout)
 
  def test_write_failure_stays_red(self):
   result=self.run_suite(FAIL_WRITE='1')

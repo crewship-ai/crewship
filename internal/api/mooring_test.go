@@ -28,7 +28,17 @@ func TestMooringManifestCommandDurabilityAndAuthority(t *testing.T) {
 	}
 	base := "/api/v1/pages/generic-hello/mooring"
 	wantCode(t, f.do(f.boss, "POST", "/api/v1/mooring/documents?workspace_id=ws-old", body), 200, "create retry")
-	wantCode(t, f.do(f.wsAdmin, "GET", base+"?workspace_id=ws-old", ""), 404, "private content no implicit admin")
+	// PRD §5 (#4825): the workspace ADMIN reads private content, audited, and
+	// never writes it.
+	wantCode(t, f.do(f.wsAdmin, "GET", base+"?workspace_id=ws-old", ""), 200, "private content audited admin read")
+	var adminAudits int
+	if err := f.db.QueryRow(`SELECT count(*) FROM audit_logs WHERE action='artifact.private_owner_accessed' AND user_id='wsadmin' AND entity_id=?`, page.ID).Scan(&adminAudits); err != nil || adminAudits != 1 {
+		t.Fatalf("admin Mooring read audits=%d err=%v", adminAudits, err)
+	}
+	adminPacket := `{"mutation_id":"admin","base_rev":1,"generation":1,"command":"set","arguments":{"text":"admin"}}`
+	if w := f.do(f.wsAdmin, "POST", base+"/commands?workspace_id=ws-old", adminPacket); w.Code == 200 {
+		t.Fatalf("admin wrote private Mooring content: %s", w.Body.String())
+	}
 
 	unsupportedReads := `{"mutation_id":"unsupported-read","base_rev":1,"generation":1,"read_set":{},"command":"set","arguments":{"text":"candidate"}}`
 	wantCode(t, f.do(f.boss, "POST", base+"/commands?workspace_id=ws-old", unsupportedReads), 400, "generic adapter must not ignore read-set semantics")

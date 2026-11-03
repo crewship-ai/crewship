@@ -85,7 +85,7 @@ name or the address (slug). You can also use these operators:
 | `is:unshared` or `is:draft` | Artifacts with versions but no shared version |
 | `is:private` | Artifacts only their owner can open |
 | `is:empty` | Artifacts with nothing in them yet |
-| `owner:you` | Your own artifacts, or a crew name |
+| `owner:you` | Artifacts whose owner name contains the text, ignoring case: `you` for your own, or part of a crew name |
 
 For example, `kind:dashboard is:shared sales` finds shared dashboards whose
 name contains "sales". If you search from **Home**, the library switches to
@@ -99,7 +99,8 @@ name contains "sales". If you search from **Home**, the library switches to
 3. Pick values: **Who can open** has **Everyone with access** and
    **Private**, **Version** has **Shared version**, **Not shared yet** and
    **No versions**. The count next to each value is how many items you
-   would see if you picked it. **Clear** in the block's header drops all
+   would see if you picked it. **Kind** and **Version** values with no
+   matching artifact are hidden unless you already selected them. **Clear** in the block's header drops all
    filters.
 4. To close the block, press <kbd>Esc</kbd> or click **Filter** again.
    Chips under the main lists show the filters you set; click a chip's
@@ -220,19 +221,10 @@ A new artifact starts as **Only you until you share it**. If you picked a
 folder, it starts as **People with access to** that folder.
 
 Who can create: an Owner, Admin or Manager, or a member with the
-`page.create` capability. The server checks this on every create.
-
-<Warning>
-Known issues:
-
-- A member who can't create artifacts, such as a Viewer, may still see
-  **New artifact** with Project, Dashboard or Slide deck. The server refuses
-  the creation. See issue #4534.
-- After **Create page** or **Create and edit**, the library may show
-  **This artifact is not available.** The artifact was created. Open it from
-  **All artifacts**; a new empty Page is in the **Empty** view. See issue
-  #4535.
-</Warning>
+`page.create` capability. The server checks this on every create. A member
+who can't create, such as a Viewer, doesn't see **New artifact** in the bar,
+on **Home** or in the empty library; this includes Project, Dashboard and
+Slide deck, which an agent makes for you.
 
 ## Versions
 

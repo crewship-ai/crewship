@@ -12,7 +12,7 @@ const executable = chromium.executablePath()
 
 /** A real Chromium process on a persistent profile, so the test can SIGKILL it. */
 async function launch(profile: string): Promise<{ child: ChildProcess; endpoint: string }> {
-  const child = spawn(executable, ["--headless=new", "--no-sandbox", "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] })
+  const child = spawn(executable, ["--headless=new", "--no-sandbox", "--no-first-run", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"], detached: true })
   const endpoint = await new Promise<string>((resolve, reject) => {
     let output = ""
     const timer = setTimeout(() => reject(new Error(`Chromium did not start: ${output}`)), 15000)
@@ -24,6 +24,21 @@ async function launch(profile: string): Promise<{ child: ChildProcess; endpoint:
     child.once("exit", () => { clearTimeout(timer); reject(new Error(`Chromium exited: ${output}`)) })
   })
   return { child, endpoint }
+}
+
+/**
+ * SIGKILL Chromium's whole process group and wait until it is gone. Killing
+ * only the parent left its helper processes writing to the profile, so the
+ * cleanup failed with ENOTEMPTY (#4772).
+ */
+async function kill(child: ChildProcess) {
+  const group = -child.pid!
+  try { process.kill(group, "SIGKILL") } catch { return }
+  for (let i = 0; i < 100; i++) {
+    try { process.kill(group, 0) } catch { return }
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  throw new Error("Chromium's process group did not exit")
 }
 
 async function open(endpoint: string, envelopes: DraftKeyFixtureStore) {
@@ -49,9 +64,7 @@ it.skipIf(!existsSync(executable))("keeps an awaited draft when the whole browse
       await api.writeArtifactDraft(api.artifactDraftKey("artifact-source", "alice", "w", "demo")!, "Typed just before the crash")
     })
     // No grace period: the measured localStorage loss happened within 2.5 s.
-    const exited = new Promise(resolve => first.child.once("exit", resolve))
-    first.child.kill("SIGKILL")
-    await exited
+    await kill(first.child)
 
     const second = await launch(profile)
     try {
@@ -71,6 +84,6 @@ it.skipIf(!existsSync(executable))("keeps an awaited draft when the whole browse
       })
       expect(afterExpiry).toBe("")
       await browser.close()
-    } finally { second.child.kill("SIGKILL") }
-  } finally { rmSync(profile, { recursive: true, force: true }) }
+    } finally { await kill(second.child) }
+  } finally { rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }) }
 }, 60000)

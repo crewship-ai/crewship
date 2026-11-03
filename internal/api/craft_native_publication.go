@@ -40,8 +40,16 @@ func (m *craftNativeHTTP) authorizeNative(ctx context.Context, tx *sql.Tx, scope
 	if intent != "read" && intent != "write" {
 		return mooring.EditLeasePrincipal{}, errCraftNativeAccess
 	}
-	if _, err := m.checkEntry(ctx, tx, entry, intent == "write"); err != nil {
+	capture, _ := ctx.Value(craftNativeReadCaptureKey{}).(*craftNativeReadCapture)
+	if capture != nil && intent == "read" {
+		capture.record = nil
+	}
+	proof, err := m.checkEntry(ctx, tx, entry, intent == "write")
+	if err != nil {
 		return mooring.EditLeasePrincipal{}, err
+	}
+	if capture != nil && intent == "read" {
+		capture.record = proof.record
 	}
 	return craftNativePrincipal(entry), nil
 }

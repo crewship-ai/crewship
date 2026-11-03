@@ -239,3 +239,53 @@ func TestGovModelResolver_Status(t *testing.T) {
 		}
 	})
 }
+
+// TestGovModelResolver_DegradedJudgeUsesTrustedEndpointFence pins #4793
+// (CodeQL #762): the degraded / no-endpoint Ollama judge dials the instance
+// judge URL, which an OWNER/ADMIN sets at runtime, so it must go through the
+// same trusted-endpoint client as every other dial of that URL. Loopback stays
+// reachable; a redirect from the judge must not be followed.
+func TestGovModelResolver_DegradedJudgeUsesTrustedEndpointFence(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		m    func(url string) governance.ResolvedGovModel
+	}{
+		{"degraded fallback", func(url string) governance.ResolvedGovModel {
+			return governance.ResolvedGovModel{Provider: governance.ProviderOllama, Model: testOllamaModel, EndpointURL: url, Degraded: true}
+		}},
+		{"ollama without endpoint", func(string) governance.ResolvedGovModel {
+			return governance.ResolvedGovModel{Provider: governance.ProviderOllama, Model: testOllamaModel}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var followed bool
+			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				followed = true
+				_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"reflected"},"done":true}`))
+			}))
+			defer target.Close()
+			var reached bool
+			judge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				reached = true
+				http.Redirect(w, r, target.URL+r.URL.Path, http.StatusTemporaryRedirect)
+			}))
+			defer judge.Close()
+
+			r := NewGovModelResolver(nil, nil, newTestLogger(), judge.URL, testOllamaModel)
+			p, err := r.buildProvider(tc.m(judge.URL))
+			if err != nil {
+				t.Fatalf("buildProvider: %v", err)
+			}
+			_, _ = p.Complete(context.Background(), llm.Request{
+				Model:    testOllamaModel,
+				Messages: []llm.Message{{Role: llm.RoleUser, Content: "hi"}},
+			})
+			if !reached {
+				t.Fatal("the loopback judge endpoint must stay reachable")
+			}
+			if followed {
+				t.Error("degraded judge followed a redirect from the judge endpoint: it dials without the trusted-endpoint fence")
+			}
+		})
+	}
+}

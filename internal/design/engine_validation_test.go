@@ -13,7 +13,7 @@ func TestEngineRejectsMalformedNodeFieldsWithoutChangingState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"id", "type", "name", "parentId", "fill", "text", "src"} {
+	for _, field := range []string{"id", "type", "name", "parentId", "fill", "text", "src", "linkTo"} {
 		t.Run(field, func(t *testing.T) {
 			node := map[string]any{"id": "safe", field: map[string]any{"unsafe": "object"}}
 			raw, _ := json.Marshal([]any{map[string]any{"op": "upsert", "node": node}})
@@ -34,6 +34,8 @@ func TestEngineRejectsMalformedNodeFieldsWithoutChangingState(t *testing.T) {
 		{"id": "safe", "parentId": strings.Repeat("x", 129)},
 		{"id": "safe", "name": strings.Repeat("x", 2001)},
 		{"id": "safe", "fill": strings.Repeat("x", 257)},
+		{"id": "safe", "linkTo": strings.Repeat("x", 129)},
+		{"id": "safe", "linkTo": 7},
 	} {
 		raw, _ := json.Marshal([]any{map[string]any{"op": "upsert", "node": node}})
 		if _, err := Run(t.Context(), Request{State: base.State, Operations: raw}); !errors.Is(err, ErrInvalid) {
@@ -67,5 +69,32 @@ func TestEngineRejectsMalformedFieldInYjsSyncAndRestore(t *testing.T) {
 				t.Fatalf("malformed Yjs %s escaped validation: %v state %d", name, err, len(result.State))
 			}
 		})
+	}
+}
+
+// A prototype link is an optional screen ID on a layer (#4449). It is stored
+// as a plain bounded string; an empty string means "no link" for REST and
+// agent callers, which cannot send null. A dangling target stays valid data:
+// the screen may be deleted later and playback treats the hotspot as inert.
+func TestEngineAcceptsPrototypeLinksAsBoundedScreenIDs(t *testing.T) {
+	result, err := Run(t.Context(), Request{Operations: json.RawMessage(`[
+		{"op":"upsert","node":{"id":"a","type":"frame","x":0,"y":0,"width":360,"height":640}},
+		{"op":"upsert","node":{"id":"b","type":"frame","x":400,"y":0,"width":360,"height":640}},
+		{"op":"upsert","node":{"id":"next","type":"rect","parentId":"a","x":24,"y":24,"width":120,"height":48,"linkTo":"b"}},
+		{"op":"upsert","node":{"id":"dangling","type":"rect","parentId":"a","x":24,"y":96,"width":120,"height":48,"linkTo":"deleted-screen"}}
+	]`)})
+	if err != nil {
+		t.Fatalf("prototype link refused: %v", err)
+	}
+	var next map[string]any
+	if err = json.Unmarshal(result.Nodes[2], &next); err != nil || next["linkTo"] != "b" {
+		t.Fatalf("link not returned to readers: %s (%v)", result.Nodes[2], err)
+	}
+	cleared, err := Run(t.Context(), Request{State: result.State, Operations: json.RawMessage(`[{"op":"upsert","node":{"id":"next","linkTo":""}}]`)})
+	if err != nil {
+		t.Fatalf("clearing a link refused: %v", err)
+	}
+	if err = json.Unmarshal(cleared.Nodes[2], &next); err != nil || next["linkTo"] != "" {
+		t.Fatalf("link not cleared: %s (%v)", cleared.Nodes[2], err)
 	}
 }

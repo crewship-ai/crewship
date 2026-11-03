@@ -527,7 +527,9 @@ the new item records what it is a replay of and why.
 --target-revision is inherited from the original unless you name one, because
 running against a different revision has to be a deliberate act.
 
-Replaying live work is refused — cancel it first. Replaying webhook-sourced
+Replaying live work is refused — cancel it first. A chat turn is refused too:
+nothing in the work queue runs chat turns, so send the message again in its
+chat instead. Replaying webhook-sourced
 work whose raw payload has passed its retention is also refused, with the
 expiry named: the original bytes are gone and only the sender can produce them
 again.`,

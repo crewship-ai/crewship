@@ -93,7 +93,14 @@ function load(snapshot) {
   return doc;
 }
 const snapshot = doc => encode(Y.encodeStateAsUpdate(doc));
-const project = doc => yDocToProsemirrorJSON(doc, 'default');
+// y-tiptap 3.0.11 stopped emitting empty mark attrs. Keep the projection that
+// block hashes and stored receipts were computed from: every mark has attrs.
+const withMarkAttrs = node => {
+  if (Array.isArray(node.marks)) node.marks = node.marks.map(mark => mark && typeof mark === 'object' && !('attrs' in mark) ? { ...mark, attrs: {} } : mark);
+  if (Array.isArray(node.content)) node.content.forEach(withMarkAttrs);
+  return node;
+};
+const project = doc => withMarkAttrs(yDocToProsemirrorJSON(doc, 'default'));
 function validateJSON(json, version = VERSION) {
   const types = typesFor(version);
   const seen = new Set(); let count = 0;

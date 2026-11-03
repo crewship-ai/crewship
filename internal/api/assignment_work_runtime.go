@@ -25,7 +25,10 @@ type assignmentExecution struct {
 	staged     bool
 	stageErr   error
 	exitCode   *int
-	release    func()
+	// completedAt is the protected capture's own exit time. Retained recovery
+	// requires the staged result to carry exactly this value.
+	completedAt string
+	release     func()
 }
 
 func ownedAssignmentExecution(ctx context.Context) *assignmentExecution {
@@ -90,6 +93,22 @@ func (rt *agentWorkRuntime) Classify(a dispatch.Assignment, err error) dispatch.
 	return rt.WebhookRuntime.Classify(a, err)
 }
 
+// bindAssignmentExitObservers records the observed exit and, for protected
+// capture, its exact completion time. Retained recovery compares the staged
+// time with the source byte for byte, so it must come from the capture.
+func bindAssignmentExitObservers(ctx context.Context, req *orchestrator.AgentRunRequest) {
+	req.OnExecTerminal = func(code int) {
+		if execution := ownedAssignmentExecution(ctx); execution != nil {
+			execution.exitCode = &code
+		}
+	}
+	req.CapturedExit = func(at string) {
+		if execution := ownedAssignmentExecution(ctx); execution != nil {
+			execution.completedAt = at
+		}
+	}
+}
+
 // stageAssignmentResult records observations; the dispatcher alone owns the
 // terminal transition. The domain row is projected after that transition.
 func (h *AssignmentHandler) stageAssignmentResult(ctx context.Context, id, runID, result, errMsg string, acc *orchestrator.Accumulator) bool {
@@ -119,7 +138,7 @@ func (h *AssignmentHandler) stageAssignmentResult(ctx context.Context, id, runID
 	}
 	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	execution.stageErr = execution.launch.RecordResult(settleCtx, work.RunResult{ExitCode: execution.exitCode, ErrorMessage: message, Metadata: metadata})
+	execution.stageErr = execution.launch.RecordResult(settleCtx, work.RunResult{CompletedAt: execution.completedAt, ExitCode: execution.exitCode, ErrorMessage: message, Metadata: metadata})
 	execution.staged = execution.stageErr == nil
 	return true
 }

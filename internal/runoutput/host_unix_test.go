@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -24,6 +25,7 @@ type hostFixtureExecutor struct {
 	running        bool
 	code           int
 	stdout, stderr string
+	stdoutErr      error // returned by stdout after its content, when set
 	inspectErr     error
 }
 
@@ -31,7 +33,11 @@ func (f *hostFixtureExecutor) Start(context.Context, HostCommand) (*HostExecutio
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.starts++
-	return &HostExecution{ID: "owned-exec", Stdout: io.NopCloser(strings.NewReader(f.stdout)), Stderr: io.NopCloser(strings.NewReader(f.stderr))}, nil
+	stdout := io.Reader(strings.NewReader(f.stdout))
+	if f.stdoutErr != nil {
+		stdout = io.MultiReader(stdout, iotest.ErrReader(f.stdoutErr))
+	}
+	return &HostExecution{ID: "owned-exec", Stdout: io.NopCloser(stdout), Stderr: io.NopCloser(strings.NewReader(f.stderr))}, nil
 }
 func (f *hostFixtureExecutor) Inspect(context.Context, string) (bool, int, error) {
 	f.mu.Lock()
@@ -115,6 +121,24 @@ func TestHostCaptureSeparatesStreamsScrubsAndRejectsDuplicate(t *testing.T) {
 	identity, err := os.ReadFile(filepath.Join(input.Directory, "identity.json"))
 	if err != nil || bytes.Contains(identity, []byte(secret)) || !bytes.Contains(identity, []byte("owned-exec")) {
 		t.Fatalf("identity=%s %v", identity, err)
+	}
+}
+
+// A capture error is recorded only after the provider was asked to stop the
+// owned execution, exactly like the output cap. The orchestrator accepts the
+// provider's whole-tree stop receipt for output_error on that premise (#4824).
+func TestHostCaptureStreamErrorStopsOwnedExecutionBeforeOutputError(t *testing.T) {
+	input := hostFixtureInput(t)
+	createHostFixtureDir(t, input)
+	broken := errors.New("stdout pipe broke")
+	executor := &hostFixtureExecutor{running: true, stdout: "partial\n", stdoutErr: broken}
+	result, err := CaptureHost(t.Context(), input, executor)
+	if !errors.Is(err, broken) || result.Reason != "output_error" || executor.stops != 1 {
+		t.Fatalf("result=%+v stops=%d err=%v", result, executor.stops, err)
+	}
+	snapshot, err := Inspect(t.Context(), filepath.Join(input.Directory, "output"))
+	if err != nil || !snapshot.Complete || snapshot.Result.Reason != "output_error" {
+		t.Fatalf("snapshot=%+v %v", snapshot, err)
 	}
 }
 

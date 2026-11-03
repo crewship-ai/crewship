@@ -88,7 +88,15 @@ func TestChatShareReadCLIUsesOnlyExplicitToken(t *testing.T) {
 			cliCfg = &cli.CLIConfig{Token: "must-not-send-admin-token", Workspace: "must-not-send-workspace", Server: "https://other.invalid"}
 			chatShareReadCmd.SetIn(strings.NewReader("cshr_synthetic\n"))
 			_ = chatShareReadCmd.Flags().Set("token-stdin", "true")
-			t.Cleanup(func() { chatShareReadCmd.SetIn(nil); _ = chatShareReadCmd.Flags().Set("token-stdin", "false") })
+			// Flags().Set back to false would leave Changed=true and leak into
+			// later tests under -shuffle (TestCLIStateIsPristine); restore the
+			// default and clear Changed.
+			t.Cleanup(func() {
+				chatShareReadCmd.SetIn(nil)
+				f := chatShareReadCmd.Flags().Lookup("token-stdin")
+				_ = f.Value.Set(f.DefValue)
+				f.Changed = false
+			})
 			err := chatShareReadCmd.RunE(chatShareReadCmd, []string{"share-one"})
 			if redirect {
 				if err == nil {

@@ -1,0 +1,1 @@
+- **WordCraft no longer shows a recovered local draft after the person or the Page changes (#4666, B3).** The banner with "Stáhnout koncept" kept the previous person's or Page's recovered draft after sign-out, a sign-in as someone else or a switch to another Page; it is now cleared before the new identity's or Page's draft is loaded.

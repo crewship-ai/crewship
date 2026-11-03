@@ -368,7 +368,10 @@ func (h *PageHandler) prepareSubjectAccess(w http.ResponseWriter, r *http.Reques
 				}
 				privateCaller = &pageViewer{UserID: user.ID, Role: liveRole}
 			}
-			if !privatePageViewer(rec, privateCaller) {
+			// Access administration of private output (who can reach it) stays
+			// with its custodian and the workspace OWNER, like the per-Page
+			// report; PRD §5's administrator read covers the artifact itself.
+			if !privatePageCustodian(rec, privateCaller) {
 				continue
 			}
 		}

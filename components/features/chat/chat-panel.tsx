@@ -74,6 +74,7 @@ import { DocumentResultCards } from "./document-result-cards"
 import type { ViewerTarget } from "./artifact-viewer/types"
 import { SavedDocumentPanel } from "./artifacts/saved-document-panel"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
+import { usePageCreationAccess } from "@/hooks/use-page-creation-access"
 import { ArtifactContextCards, type OpenLinked } from "./artifact-context/artifact-context-cards"
 import { ArtifactLibraryHost } from "./artifact-context/artifact-library-host"
 import { LinkedArtifactPanel, type LinkedActive } from "./artifact-context/linked-artifact-panel"
@@ -361,6 +362,8 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   const session = useSession()
   const currentUserId = session.data?.user?.id ?? null
   const documentsAvailability = useDocumentsAvailability(currentUserId ? workspaceId ?? "" : "")
+  // The server admits a chat-created document only for a role or page.create (#4534).
+  const mayCreatePages = usePageCreationAccess(workspaceId ?? "")
   const artifactProjectAvailable = useArtifactProjectAvailability(currentUserId ? workspaceId ?? "" : "", agentId)
   const artifactScope = JSON.stringify([currentUserId, workspaceId, agentId, sessionId])
   const artifactContextNonce = useRef(0)
@@ -1615,7 +1618,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
           agentId={agentId}
           sessionId={sessionId}
           agentName={agentName}
-          documentCreationEnabled={documentsAvailability.data === true && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
+          documentCreationEnabled={documentsAvailability.data === true && mayCreatePages && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
           artifactCreationEnabled={artifactProjectAvailable && crewRefusedAgent !== agentId && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
           sendRefusal={sendRefusal}
           variant="mobile"
@@ -1756,7 +1759,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
           agentId={agentId}
           sessionId={sessionId}
           agentName={agentName}
-          documentCreationEnabled={documentsAvailability.data === true && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
+          documentCreationEnabled={documentsAvailability.data === true && mayCreatePages && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
           artifactCreationEnabled={artifactProjectAvailable && crewRefusedAgent !== agentId && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
           sendRefusal={sendRefusal}
           variant="desktop"

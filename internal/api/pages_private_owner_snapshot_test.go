@@ -217,7 +217,7 @@ func TestPrivateMetadataReadFreshWriterAuthority(t *testing.T) {
 				if mutation == "custody" {
 					execOrFatal(t, original, `UPDATE pages SET owner_user_id=? WHERE id=?`, custodian, page)
 				} else {
-					execOrFatal(t, original, `UPDATE workspace_members SET role='ADMIN' WHERE workspace_id=? AND user_id='ptadmin'`, ws)
+					execOrFatal(t, original, `UPDATE workspace_members SET role='MEMBER' WHERE workspace_id=? AND user_id='ptadmin'`, ws)
 				}
 			}
 			hooked := sql.OpenDB(c)
@@ -266,7 +266,8 @@ func TestPrivateMetadataAuthorityBeforeWriter(t *testing.T) {
 	}{
 		{"custodian", "", "MEMBER", true},
 		{"workspace-owner", "ptadmin", "OWNER", true},
-		{"nonowner-admin", "ptadmin", "OWNER", false},
+		{"workspace-admin", "ptadmin", "ADMIN", true}, // PRD §5 (#4825)
+		{"stale-member", "ptadmin", "OWNER", false},
 	} {
 		t.Run(who.name, func(t *testing.T) {
 			h, ws, custodian, _ := privateMetadataFixture(t)
@@ -275,9 +276,12 @@ func TestPrivateMetadataAuthorityBeforeWriter(t *testing.T) {
 				user = custodian
 			}
 			original := h.db
+			if who.role == "ADMIN" {
+				execOrFatal(t, original, `UPDATE workspace_members SET role='ADMIN' WHERE workspace_id=? AND user_id='ptadmin'`, ws)
+			}
 			if !who.allowed {
 				// Keep stale OWNER request context: only fresh stored standing counts.
-				execOrFatal(t, original, `UPDATE workspace_members SET role='ADMIN' WHERE workspace_id=? AND user_id='ptadmin'`, ws)
+				execOrFatal(t, original, `UPDATE workspace_members SET role='MEMBER' WHERE workspace_id=? AND user_id='ptadmin'`, ws)
 			}
 			writerBegins := 0
 			c := &privateMetadataBeginConnector{inner: &reviewHookConnector{inner: original.Driver(), dsn: reviewDBPath(t, original) + "?_pragma=busy_timeout(100)&_pragma=foreign_keys(ON)&_txlock=immediate", hook: &reviewQueryHook{}}}

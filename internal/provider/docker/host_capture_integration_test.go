@@ -382,4 +382,9 @@ func runHostCaptureDockerQualification(t *testing.T, scenario string, stopTarget
 	if err != nil || !untouched.Running {
 		t.Fatalf("unrelated exec affected: %+v err=%v", untouched, err)
 	}
+	// #4774: the exec leads its own session with no other process in its
+	// tree, so the helper confirms the tree stop and the host records it.
+	if confirmed, err := runoutput.HostStopConfirmed(directory, execution.ID); err != nil || !confirmed {
+		t.Fatalf("tree stop not recorded for the stopped execution: %v %v", confirmed, err)
+	}
 }

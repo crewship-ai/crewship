@@ -25,8 +25,16 @@ export interface SingleEditorSaveOptions {
   baseVersion: string
   /** The bytes the server confirmed as `baseVersion`, exactly as loaded. Seeds
    * the unchanged-content baseline for a freshly opened editor. Never a local
-   * draft. Word's per-RPC nativeState is unknown at load, so it is not compared. */
-  loaded?: { bytes: Uint8Array }
+   * draft. Word's per-RPC nativeState is unknown at load, so it is not compared.
+   * `mountedState` is the engine's nativeState right after it was bootstrapped
+   * from exactly these bytes. An export captured before the first edit whose
+   * nativeState still equals it is the engine's rendition of this version
+   * (Word normalizes it) and is never saved as a new version, so accepting a
+   * proposal or handing the editor over stays on `baseVersion` (#4699). The
+   * engine's own revision is compared, so a `changed` event that arrives late
+   * cannot hide an edit. Without it a differing export is saved, as for a
+   * restored draft; an engine without nativeState (Sheet) is unaffected. */
+  loaded?: { bytes: Uint8Array; mountedState?: string }
   generation: string
   sessionId: string
   journal: NativeDraftJournal
@@ -54,7 +62,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   if (!Number.isFinite(idleMs) || idleMs < 1 || idleMs > 5000 || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) throw new Error("invalid_save_deadline")
   let active = true, writable = true, dirty = false, edits = 0, baseVersion = options.baseVersion
   let blocked: string | undefined, latest: Prepared | undefined, unconfirmed: Prepared | undefined
-  let confirmed: { nativeState: string | undefined; contentHash: string; version: string; seeded?: boolean } | undefined
+  let confirmed: { nativeState: string | undefined; contentHash: string; version: string; seeded?: boolean; mountedState?: string } | undefined
   let pending: { attempt: Prepared; abort: AbortController; done: Promise<void> } | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
   let preparations = Promise.resolve(), draftWrites = Promise.resolve()
@@ -62,6 +70,10 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   let preparingCount = 0
   let nextPreparation = 0, lastFailedPreparation = 0, nextAutosave = 0
   let writeRetirement: Promise<boolean> | undefined
+  // A validated receipt whose local row retirement failed. It is delivered to
+  // the receipt observer (the native ACK) once that row is retired, or
+  // superseded by a newer receipt; it is never sent again (#4852).
+  let owedReceipt: NativeSaveReceipt | undefined
   const lifetime = new AbortController()
   let lastState: NativeSaveState = { phase: "idle", dirty: false }
   const stateWaiters = new Set<() => void>()
@@ -75,7 +87,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   const stop = () => {
     if (!active) return
     active = false; clearTimeout(timer); lifetime.abort(); pending?.abort.abort()
-    latest = undefined; unconfirmed = undefined; confirmed = undefined
+    latest = undefined; unconfirmed = undefined; confirmed = undefined; owedReceipt = undefined
     emit("stopped")
   }
   const unregister = options.journal.onRetire(stop)
@@ -85,7 +97,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   const seedVersion = options.baseVersion
   const seeding: Promise<void> = options.loaded
     ? crypto.subtle.digest("SHA-256", new Uint8Array(options.loaded.bytes)).then(digest => {
-      if (active && !confirmed) confirmed = { nativeState: undefined, seeded: true, version: seedVersion, contentHash: `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("")}` }
+      if (active && !confirmed) confirmed = { nativeState: undefined, seeded: true, mountedState: options.loaded?.mountedState, version: seedVersion, contentHash: `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("")}` }
     }, () => {})
     : Promise.resolve()
   emit("idle")
@@ -94,8 +106,10 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     const token = ++nextAutosave
     if (active) timer = setTimeout(() => { if (token === nextAutosave) void save(undefined, token) }, idleMs)
   }
+  // A local storage fence is retried: the next capture either persists (which
+  // lifts it) or fails visibly again. Server and authority fences never are.
   function scheduleIfNeeded() {
-    if (active && writable && dirty && !blocked && !unconfirmed && !pending && preparingCount === 0 && manualCount === 0) schedule()
+    if (active && writable && dirty && (!blocked || blocked === "storage") && !unconfirmed && !pending && preparingCount === 0 && manualCount === 0) schedule()
   }
   function validReceipt(raw: unknown, attempt: Prepared): raw is NativeSaveReceipt {
     if (!raw || typeof raw !== "object") return false
@@ -112,13 +126,27 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     if (!active || !writable) return
     baseVersion = receipt.version
     unconfirmed = undefined
-    try { await options.journal.confirm(attempt.draft) } catch { blocked = "storage"; emit("draft", "storage"); return }
+    try { await options.journal.confirm(attempt.draft) } catch {
+      // The server committed exactly these bytes; only the local recovery row
+      // could not be retired (e.g. an IDB deadline that fired late after a
+      // main-thread stall). Keep the row, report it, and record the committed
+      // baseline so the retry retires the row instead of sending a duplicate
+      // version. The fence lifts on the next durable capture (#4852).
+      if (!active || !writable) return
+      confirmed = { nativeState: attempt.nativeState, contentHash: attempt.draft.contentHash, version: receipt.version }
+      owedReceipt = receipt
+      blocked = "storage"; emit("draft", "storage"); return
+    }
     if (!active || !writable) return
     confirmed = { nativeState: attempt.nativeState, contentHash: attempt.draft.contentHash, version: receipt.version }
-    try { void Promise.resolve(options.onReceipt?.(receipt)).catch(() => {}) } catch { /* Receipt observers cannot change persistence. */ }
+    owedReceipt = undefined
+    deliver(receipt)
     if (!active || !writable) return
     dirty = preparingCount > 0 || lastFailedPreparation > (latest?.sequence ?? 0) || edits !== attempt.epoch || latest?.draft.contentHash !== attempt.draft.contentHash || latest?.draft.editorRevision !== attempt.draft.editorRevision
     emit(dirty ? "dirty" : "saved")
+  }
+  function deliver(receipt: NativeSaveReceipt) {
+    try { void Promise.resolve(options.onReceipt?.(receipt)).catch(() => {}) } catch { /* Receipt observers cannot change persistence. */ }
   }
   async function bounded(callback: (signal: AbortSignal) => Promise<unknown>, abort: AbortController): Promise<unknown> {
     let onAbort!: () => void
@@ -163,6 +191,9 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       if (!active || sequence < lastPersistedSequence) return
       await options.journal.persist(draft)
       lastPersistedSequence = sequence
+      // Storage answered durably again: an earlier failed row retirement must
+      // not stop every later save while the lease is held (#4852).
+      if (blocked === "storage") blocked = undefined
     })
     draftWrites = writing.catch(() => {})
     return writing
@@ -232,9 +263,11 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       // (any application, not only Word). Never create a version from them:
       // retire only the local recovery row; the RPC-bound receipt and native ACK
       // remain exclusive to the original request. A native Ctrl+S ticket always
-      // transmits, as its ACK is bound to its own RPC.
+      // transmits, as its ACK is bound to its own RPC. An untouched export of an
+      // engine mounted from the seeded bytes is that same version.
       await seeding
-      if ((autosaveToken !== undefined || hostFlush && requestId === undefined) && confirmed && (confirmed.seeded || confirmed.nativeState === attempt.nativeState) && confirmed.contentHash === attempt.draft.contentHash && confirmed.version === baseVersion) {
+      const unchanged = confirmed && (confirmed.contentHash === attempt.draft.contentHash || untouched(attempt))
+      if ((autosaveToken !== undefined || hostFlush && requestId === undefined) && confirmed && unchanged && (confirmed.seeded || confirmed.nativeState === attempt.nativeState) && confirmed.version === baseVersion) {
         const baseline = confirmed
         try { await options.journal.confirm(attempt.draft) } catch {
           if (!unavailable() && confirmed === baseline && baseVersion === baseline.version) { blocked = "storage"; emit("draft", "storage") }
@@ -243,6 +276,10 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         // Another save can finish, fail, or retire authority during storage.
         // Its state and receipt baseline always supersede this older idle RPC.
         if (unavailable() || confirmed !== baseline || baseVersion !== baseline.version) return
+        // Storage recovered after a committed save whose row could not be
+        // retired: its own validated receipt now completes the native ACK.
+        const owed = owedReceipt
+        if (owed && owed.version === baseline.version && owed.contentHash === baseline.contentHash) { owedReceipt = undefined; deliver(owed) }
         dirty = preparingCount > 0 || lastFailedPreparation > (latest?.sequence ?? 0) || edits !== attempt.epoch || latest?.draft.contentHash !== attempt.draft.contentHash || latest?.nativeState !== attempt.nativeState
         emit(dirty ? "dirty" : "saved")
         scheduleIfNeeded()
@@ -274,6 +311,13 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       check()
     })
   }
+  // Still the seeded server version as the engine rendered it on mount: no
+  // receipt since, no edit before the capture and the engine's own state
+  // unchanged since bootstrap.
+  function untouched(attempt: Prepared): boolean {
+    return confirmed?.seeded === true && confirmed.mountedState !== undefined && attempt.epoch === 0 && edits === 0
+      && attempt.nativeState === confirmed.mountedState && attempt.draft.baseVersion === confirmed.version
+  }
   function revokeWrite(): Promise<boolean> {
     if (!active) return Promise.resolve(false)
     if (writeRetirement) return writeRetirement
@@ -298,7 +342,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       if (lifetime.signal.aborted) { abort(); return }
       void save().then(async () => {
         const captured = active && lastPersistedSequence >= sequence
-        if (captured && !finished) { clearTimeout(deadline); await proveLost() }
+        if (captured && !finished) { clearTimeout(deadline); await proveLost(); await retireUntouched(); await retireOwed() }
         finish(captured)
       }, () => finish(false))
     })
@@ -319,7 +363,24 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       await options.journal.confirm(attempt.draft)
       const capture = latest?.draft
       if (active && capture && capture !== attempt.draft && capture.contentHash === attempt.draft.contentHash) await options.journal.confirm(capture)
-    } catch { /* Unproven: the captured draft remains for comparison. */ }
+    } catch (error) {
+      // Read loss purges like a save that reports it; otherwise the draft remains for comparison.
+      if (error instanceof NativeSaveError && error.reason === "read_revoked") await revokeRead().catch(() => {})
+    }
+  }
+  // An untouched final capture equals the server version; keeping it would
+  // offer a "local draft" on every later open. Unproven, it stays for compare.
+  async function retireUntouched() {
+    const capture = latest
+    if (!active || !capture || unconfirmed || !untouched(capture)) return
+    try { await options.journal.confirm(capture.draft) } catch { /* It remains a draft to compare. */ }
+  }
+  // A final capture with exactly the bytes of a committed save whose row could
+  // not be retired is that server version; retire it instead of offering it.
+  async function retireOwed() {
+    const owed = owedReceipt, capture = latest
+    if (!active || !owed || !capture || capture.draft.contentHash !== owed.contentHash) return
+    try { await options.journal.confirm(capture.draft); owedReceipt = undefined } catch { /* It remains a draft to compare. */ }
   }
   function revokeRead() { stop(); unregister(); return options.journal.revokeRead() }
   return {
@@ -327,6 +388,12 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     save: (requestId?: string) => save(requestId),
     // Host transfer flush waits for pending transport without claiming a native Ctrl+S ticket.
     async flush() { await save(undefined, undefined, true); await waitForCleanSaved() },
+    // The server version the editor's clean, saved content is confirmed at: the
+    // last receipt, or the loaded version when nothing has changed since opening.
+    confirmedVersion(): string | undefined {
+      if (!active || !writable || blocked || unconfirmed || pending || dirty || lastState.phase !== "saved") return undefined
+      return confirmed?.version === baseVersion ? confirmed.version : undefined
+    },
     async reconcile() { if (active && writable && unconfirmed && !pending && options.transport.reconcile) await transmit(unconfirmed, true) },
     revokeWrite,
     revokeRead,
