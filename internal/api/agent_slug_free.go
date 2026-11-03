@@ -4,7 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"unicode/utf8"
+
+	"github.com/crewship-ai/crewship/internal/memory"
 )
 
 // freeDeletedAgentSlug releases a slug still held by a soft-deleted agent so
@@ -49,29 +50,10 @@ func freeDeletedAgentSlug(ctx context.Context, db *sql.DB, workspaceID, slug str
 		return fmt.Errorf("free deleted agent slug %q: %d tombstones hold it", slug, len(ids))
 	}
 	renamed := slug + "_deleted_" + ids[0]
-	oldPrefix, newPrefix := "agent:"+slug+"/", "agent:"+renamed+"/"
-	n := utf8.RuneCountInString(oldPrefix) // SQLite substr counts characters
-	// Exact prefix comparison, not LIKE: '_' in a slug is a LIKE wildcard.
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE memory_revisions
-		   SET path = ? || substr(path, ? + 1), scope = ?
-		 WHERE workspace_id = ? AND substr(path, 1, ?) = ?`,
-		newPrefix, n, "agent:"+renamed, workspaceID, n, oldPrefix); err != nil {
-		return fmt.Errorf("move deleted agent memory anchors: %w", err)
-	}
-	// Unconfirmed writes of the deleted agent (state intent/renamed) are
-	// recovered per audit key against the CALLER's file before every write
-	// (internal/memory recoverFileLocked). Left under the slug, the next agent
-	// would have the deleted agent's queued content replayed into its own
-	// memory. They move with the tombstone; boot recovery still finds them by
-	// canonical_path, which stays as recorded. Confirmed rows are audit history
-	// and keep their key.
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE memory_mutations
-		   SET path = ? || substr(path, ? + 1), scope = ?
-		 WHERE workspace_id = ? AND substr(path, 1, ?) = ? AND state IN ('intent', 'renamed')`,
-		newPrefix, n, "agent:"+renamed, workspaceID, n, oldPrefix); err != nil {
-		return fmt.Errorf("move deleted agent unconfirmed memory writes: %w", err)
+	// Anchors and unconfirmed writes move with the tombstone; a write of the
+	// deleted agent still in flight is fenced by the ledger (#4862).
+	if err := memory.RekeyAgentScopeTx(ctx, tx, workspaceID, slug, renamed); err != nil {
+		return fmt.Errorf("free deleted agent slug %q: %w", slug, err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE agents SET slug = ? WHERE id = ? AND deleted_at IS NOT NULL`, renamed, ids[0]); err != nil {
 		return err

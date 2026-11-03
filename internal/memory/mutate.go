@@ -384,8 +384,8 @@ type MutateRequest struct {
 	// testHook stops a mutation at a named step so the crash tests can
 	// simulate a process death at exactly that point. Unexported: only
 	// package memory can set it, so it cannot be reached from production
-	// code by accident. Steps: "after_intent", "after_rename",
-	// "before_confirm".
+	// code by accident. Steps: "before_intent", "after_intent",
+	// "after_rename", "before_confirm".
 	testHook func(step string) error
 }
 
@@ -680,7 +680,12 @@ func mutateOpened(ctx context.Context, db *sql.DB, req MutateRequest, normConten
 	// 7. Durable intent, committed before any filesystem work.
 	var mutationID string
 	if db != nil {
-		mutationID, err = writeIntent(ctx, db, req, intentRow{
+		if req.testHook != nil {
+			if herr := req.testHook("before_intent"); herr != nil {
+				return res, herr
+			}
+		}
+		mutationID, err = writeIntent(ctx, db, req, anchor, intentRow{
 			requestSHA:   requestSHA,
 			baseRevision: res.BaseRevision,
 			baseSHA:      baseSHA,
@@ -730,17 +735,20 @@ func mutateOpened(ctx context.Context, db *sql.DB, req MutateRequest, normConten
 				return res, herr
 			}
 		}
-		if err := confirmMutation(ctx, db, req, mutationID, newRevision, targetSHA, len(effective), res); err != nil {
+		confirmedPath, err := confirmMutation(ctx, db, req, mutationID, anchor, newRevision, targetSHA, len(effective))
+		if err != nil {
 			return res, err
 		}
 		if req.RecordVersion {
-			parent, perr := LatestVersionSha(ctx, db, req.WorkspaceID, req.AuditPath)
+			// History goes where the mutation was confirmed: after a slug
+			// release that is the tombstone key, not the new agent's (#4862).
+			parent, perr := LatestVersionSha(ctx, db, req.WorkspaceID, confirmedPath)
 			if perr != nil {
 				return res, fmt.Errorf("lookup parent version sha: %w", perr)
 			}
 			rec, verr := RecordVersion(ctx, db, VersionRecord{
 				WorkspaceID: req.WorkspaceID,
-				Path:        req.AuditPath,
+				Path:        confirmedPath,
 				Tier:        req.Tier,
 				Content:     effective,
 				WrittenBy:   req.ActorID,
