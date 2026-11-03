@@ -9,6 +9,7 @@
 import { captureAdmission, peerApi, requireNative, traceCraft, type CraftCall } from "./craft-lease/helpers"
 import { APPLICATIONS, NativePage, emptyDocument, parseEvents } from "./craft-lease/native"
 import { headText, inspectDrafts, placeCaret, newTyping, typedMarkers, typeLines, waitForDraftOffer } from "./craft-session/draft"
+import { checkDraftCopies, checkNoLines, lineLedger, type LineCheck } from "./craft-session/lines"
 import { pause } from "./drafts-crash/crash"
 import * as editor from "./drafts-crash/native"
 import { expect, prdRequirement, test } from "./fixtures"
@@ -79,6 +80,14 @@ for (const { application, label } of APPLICATIONS) {
           await typing
           // Every line the editor took (also after the request, until it turned read-only) must be in the draft.
           const typedBefore = typedMarkers(WORK, progress.accepted)
+          // Per line: typed, accepted, then found once and in order in each draft; the server holds none (craft-session/lines.ts).
+          const ledger = lineLedger(WORK, progress)
+          const lineChecks: LineCheck[] = []
+          const expectLines = async (c: LineCheck, what: string) => {
+            lineChecks.push(c)
+            await prd.evidence("lines.json", { ledger, checks: lineChecks })
+            expect(c.problems, what).toEqual([])
+          }
           await expect(page.getByRole("button", { name: "Uvolnit úpravy", exact: true }), "the editor is no longer the person's to edit").toHaveCount(0, { timeout: READ_ONLY_WITHIN_MS })
           // The editor ends the write session: "Pouze čtení", or "Editor odpojen · koncept zachován"
           // when the server closes the editor's event stream because the authority changed.
@@ -87,6 +96,7 @@ for (const { application, label } of APPLICATIONS) {
           const offeredRows = await waitForDraftOffer(page, READ_ONLY_WITHIN_MS)
           const drafts = await inspectDrafts(page, typedBefore)
           expect(drafts.hasMarker.some(Boolean), `the offered draft holds all ${typedBefore.length} lines the editor took`).toBe(true)
+          await expectLines(checkDraftCopies(ledger, drafts.texts, "draft offered when the right was withdrawn"), "the offered draft holds every line the editor took, once and in order")
           const shots: Record<string, Buffer> = { "peer-read-only.png": await page.screenshot({ fullPage: true }) }
 
           // The server takes no further write from the person and nothing was saved.
@@ -94,6 +104,7 @@ for (const { application, label } of APPLICATIONS) {
           const headNow = await headText(request, doc)
           expect(headNow.version, "no version was created").toBe(before.version)
           expect(headNow.text).not.toContain(`${WORK}-0`)
+          await expectLines(checkNoLines(ledger, headNow.text, `server head v${headNow.version} after the right was withdrawn`), "no typed line was saved")
           expect(trail.filter((c) => c.path === "craft/document/save" && c.status === 200).length, "the editor saved nothing after the right was withdrawn").toBe(saves)
           const head = await doc.document(request, await doc.session(request))
           const late = await doc.save(context.request, own!, {
@@ -122,7 +133,10 @@ for (const { application, label } of APPLICATIONS) {
           await waitForDraftOffer(page, 60_000)
           const regained = await inspectDrafts(page, typedBefore)
           expect(regained.hasMarker.some(Boolean), "after the right returns the draft with every line is offered again").toBe(true)
-          expect((await headText(request, doc)).text, "nothing was saved automatically").not.toContain(`${WORK}-0`)
+          await expectLines(checkDraftCopies(ledger, regained.texts, "draft offered after the right returned"), "after the right returns the draft holds every line, once and in order")
+          const headRegained = await headText(request, doc)
+          expect(headRegained.text, "nothing was saved automatically").not.toContain(`${WORK}-0`)
+          await expectLines(checkNoLines(ledger, headRegained.text, `server head v${headRegained.version} after the right returned`), "no typed line was saved automatically")
           shots["peer-draft-after-regrant.png"] = await page.screenshot({ fullPage: true })
 
           await prd.evidence("result.json", {
@@ -136,6 +150,7 @@ for (const { application, label } of APPLICATIONS) {
             reacquire: reacquire.status(),
             versionUnchanged: before.version,
             afterRegrant: regained.rows,
+            lines: { ledger, checks: lineChecks },
           })
           for (const [name, png] of Object.entries(shots)) await prd.evidence(name, png)
           passed = true

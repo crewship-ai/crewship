@@ -15,6 +15,8 @@ export interface DraftOffer {
   hasMarker: boolean[]
   /** Does the server's version shown beside the draft contain every marker. */
   serverHasMarker: boolean[]
+  /** For each offered row: the draft itself (the native JSON the editor keeps), for lines.ts checks. */
+  texts: string[]
 }
 
 /**
@@ -70,6 +72,7 @@ export async function inspectDrafts(page: Page, marker: string | string[]): Prom
   const rows = (await recoveryRows(page).allInnerTexts()).map((r) => r.trim())
   const hasMarker: boolean[] = []
   const serverHasMarker: boolean[] = []
+  const texts: string[] = []
   for (let i = 0; i < rows.length; i++) {
     const row = recoveryRows(page).nth(i).locator("..")
     await row.getByRole("button", { name: "Porovnat", exact: true }).click()
@@ -77,17 +80,28 @@ export async function inspectDrafts(page: Page, marker: string | string[]): Prom
     const opened = await serverBox.waitFor({ timeout: 10_000 }).then(() => true, () => false)
     if (opened) {
       serverHasMarker.push(holdsAll(await serverBox.inputValue(), markers))
-      hasMarker.push(holdsAll(await page.locator('textarea[aria-label="Místní koncept"]').inputValue(), markers))
+      const draft = await page.locator('textarea[aria-label="Místní koncept"]').inputValue()
+      texts.push(draft)
+      hasMarker.push(holdsAll(draft, markers))
       await page.getByRole("button", { name: "Zavřít porovnání", exact: true }).click()
     } else {
       const download = page.waitForEvent("download", { timeout: 20_000 })
       await row.getByRole("button", { name: "Kopie konceptu", exact: true }).click()
       const file = await (await download).path()
       serverHasMarker.push(false)
-      hasMarker.push(holdsAll(await readFile(file, "utf8"), markers))
+      const draft = await readFile(file, "utf8")
+      texts.push(draft)
+      hasMarker.push(holdsAll(draft, markers))
     }
   }
-  return { rows, hasMarker, serverHasMarker }
+  return { rows, hasMarker, serverHasMarker, texts }
+}
+
+/** A DraftOffer for the evidence: the draft texts themselves are left out (their sizes stay). */
+export function offerEvidence(offer: DraftOffer | null): (Omit<DraftOffer, "texts"> & { draftChars: number[] }) | null {
+  if (!offer) return null
+  const { texts, ...rest } = offer
+  return { ...rest, draftChars: texts.map((t) => t.length) }
 }
 
 /** Waits until at least one draft row is offered and returns the rows. */
