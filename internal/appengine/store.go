@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/storageheadroom"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -179,6 +180,15 @@ func (s *Store) reserve(ctx context.Context, k Key, r Request, a Authorize, e En
 		if total >= s.options.MaxWorkers || workspace >= s.options.MaxWorkspaceWorkers || artifact != 0 {
 			return ErrCapacity
 		}
+		// Free-disk admission (#4835) before the reservation row and the
+		// engine run. An exact retry of a confirmed receipt returned above.
+		commandBytes, err := json.Marshal(r.Command)
+		if err != nil {
+			return err
+		}
+		if err = storageheadroom.Check(ctx, tx, int64(len(v.Snapshot))+int64(len(commandBytes))); err != nil {
+			return err
+		}
 		res.token++
 		res.until = now.Add(s.options.LeaseDuration)
 		_, err = tx.ExecContext(ctx, `INSERT INTO gridcraft_operations(workspace_id,page_id,authority_id,mutation_id,payload_hash,state,token,lease_until)
@@ -187,10 +197,6 @@ ON CONFLICT(workspace_id,page_id,authority_id,mutation_id) DO UPDATE SET
 state='in_progress',
 token = excluded.token,
 lease_until = excluded.lease_until`, k.WorkspaceID, k.PageID, p.AuthorityID, r.MutationID, digest, res.token, res.until.UnixMilli())
-		if err != nil {
-			return err
-		}
-		commandBytes, err := json.Marshal(r.Command)
 		if err != nil {
 			return err
 		}
@@ -310,6 +316,15 @@ func (s *Store) Execute(ctx context.Context, k Key, r Request, a Authorize, e En
 			// Confirmed history is retained until an explicit retention action.
 			// A write must never buy capacity by discarding earlier revisions.
 			return ErrQuota
+		}
+		// The reserve can shrink while the engine runs; probe again with the
+		// real candidate before the first row of this revision (#4835).
+		written := int64(len(c.Snapshot)) + int64(len(command))
+		if checkpoint {
+			written += int64(len(c.Snapshot))
+		}
+		if err = storageheadroom.Check(ctx, tx, written); err != nil {
+			return err
 		}
 		generation := v.Generation
 		if generation == 0 {

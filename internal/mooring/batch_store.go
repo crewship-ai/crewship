@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+
+	"github.com/crewship-ai/crewship/internal/storageheadroom"
 )
 
 // BatchDenied is a trusted host authorization decision. Other callback errors
@@ -135,6 +137,11 @@ func (s *BatchStore) Initialize(ctx context.Context, lease OwnerLease, checkpoin
 			return err
 		}
 		encoded := base64.StdEncoding.EncodeToString(checkpoint)
+		// Free-disk admission (#4835): the document and checkpoint rows each
+		// keep the encoded checkpoint.
+		if err = storageheadroom.Check(ctx, tx, 2*int64(len(encoded))+int64(len(metadata))); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO mooring_collab_documents(page_id,workspace_id,application_id,revision,checkpoint_base64,target_tracking) VALUES(?,?,?,'0',?,?)`, lease.Key.ArtifactID, lease.Key.WorkspaceID, lease.Key.ApplicationID, encoded, s.targetsEnabled()); err != nil {
 			return err
 		}
@@ -194,6 +201,10 @@ func (s *BatchStore) RegisterTask(ctx context.Context, lease OwnerLease, id, par
 			return err
 		}
 		if err = s.config.Owners.Check(ctx, tx, lease); err != nil {
+			return err
+		}
+		// Free-disk admission (#4835) after the exact-retry lookup above.
+		if err = storageheadroom.Check(ctx, tx, int64(len(id)+len(participant))); err != nil {
 			return err
 		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO mooring_collab_tasks(page_id,workspace_id,task_id,participant_ref,allow_partial,status) VALUES(?,?,?,?,?,'running')`, lease.Key.ArtifactID, lease.Key.WorkspaceID, id, participant, allowPartial); err != nil {

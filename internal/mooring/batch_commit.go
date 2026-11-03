@@ -3,10 +3,12 @@ package mooring
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strconv"
 
+	"github.com/crewship-ai/crewship/internal/storageheadroom"
 	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
 )
 
@@ -220,6 +222,15 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 		}
 		if e = s.targetCapacity(ctx, tx, key.ArtifactID, changes, known); e != nil {
 			return e
+		}
+		// Free-disk admission (#4835) before any engine work or row of a fresh
+		// change; an all-known exact retry writes nothing and stays admitted.
+		// Each fresh change can store its checkpoint twice (document head and
+		// checkpoint history), estimated from the current checkpoint.
+		if fresh := len(changes) - len(known); fresh > 0 {
+			if e = storageheadroom.Check(ctx, tx, int64(fresh)*2*int64(base64.StdEncoding.EncodedLen(len(checkpoint)))); e != nil {
+				return e
+			}
 		}
 		taskReasons, e := s.validateTasks(ctx, tx, key, changes, known)
 		if e != nil {

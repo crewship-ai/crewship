@@ -191,8 +191,8 @@ func ConsumeStorageUpload(ctx context.Context, tx *sql.Tx, k VersionKey) error {
 
 // CheckStorageHeadroom is the free-disk admission for artifact writers. It runs
 // under the existing database writer fence. Logical admission is enforced by
-// SQL capacity charges, never by this probe alone. Legacy document and Slides
-// writers call storageheadroom.Check directly; StorageBudgetError maps both to
+// SQL capacity charges, never by this probe alone. Legacy document, Slides,
+// GridCraft and Mooring writers call storageheadroom.Check directly; StorageBudgetError maps both to
 // the same ErrStorageQuota refusal. Reads do not call this guard.
 func CheckStorageHeadroom(ctx context.Context, tx *sql.Tx, writeBytes int64) error {
 	if writeBytes < 0 || writeBytes > MaxStorageUploadBytes {

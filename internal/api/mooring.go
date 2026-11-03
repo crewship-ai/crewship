@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/pages"
+	"github.com/crewship-ai/crewship/internal/storageheadroom"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -166,6 +167,11 @@ func (m *mooringHTTP) create(w http.ResponseWriter, r *http.Request) {
 	id = generateCUID()
 	stamp := tsformat.Format(time.Now())
 	raw, _ := json.Marshal(spec)
+	// Free-disk admission (#4835) before the Page and its document row.
+	if e = storageheadroom.Check(r.Context(), tx, int64(len(raw)+len(manifest.InitialState))); e != nil {
+		mooringError(w, e)
+		return
+	}
 	_, e = tx.ExecContext(r.Context(), `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at,private_audience,created_by_test) VALUES(?,?,?,?,?,?,?,?,1,?)`, id, ws, req.Slug, req.Name, user.ID, string(raw), stamp, stamp, req.CreatedByTest)
 	if e == nil {
 		e = insertPageVersion(r.Context(), tx, id, 1, string(raw), user.ID, stamp)
