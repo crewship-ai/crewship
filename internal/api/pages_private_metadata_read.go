@@ -70,6 +70,21 @@ func (h *PageHandler) beginPageMetadataRead(w http.ResponseWriter, r *http.Reque
 				r, b, err = h.startMetadataRead(r, true)
 			}
 		}
+		if err == nil && !private {
+			// A workspace administrator reading an ordinary artifact it does not
+			// own may need the audit of PRD §5; take the writer only then.
+			if user := UserFromContext(r.Context()); user != nil && user.ID != custodian {
+				var role string
+				role, err = h.liveContentHumanRole(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID)
+				if errors.Is(err, sql.ErrNoRows) {
+					role, err = "", nil
+				}
+				if err == nil && workspaceArtifactReader(role) {
+					b.tx.Rollback()
+					r, b, err = h.startMetadataRead(r, true)
+				}
+			}
+		}
 		if errors.Is(err, sql.ErrNoRows) {
 			err = nil
 		}
@@ -98,7 +113,7 @@ func (h *PageHandler) finishMetadataRead(w http.ResponseWriter, r *http.Request,
 			replyInternalError(w, h.logger, "verify private reader", err)
 			return false
 		}
-		if role != "OWNER" {
+		if !workspaceArtifactReader(role) {
 			replyError(w, 404, "page not found")
 			return false
 		}
@@ -112,11 +127,14 @@ func (h *PageHandler) finishMetadataRead(w http.ResponseWriter, r *http.Request,
 
 var errPrivateMetadataAudit = errors.New("private read audit unavailable")
 
-func (h *PageHandler) appendPrivateReadAudit(r *http.Request, b *privateMetadataRead, rec *pageRecord, metadata string) error {
+func (h *PageHandler) appendPrivateReadAudit(r *http.Request, b *privateMetadataRead, rec *pageRecord, action, metadata string) error {
 	if !b.writer {
 		return errPrivateMetadataAudit
 	}
-	row := [8]string{generateCUID(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, "artifact.private_owner_accessed", "page", rec.ID, metadata, tsformat.Format(time.Now())}
+	if action != auditActionPrivateArtifactRead && action != auditActionWorkspaceAdminArtifactRead {
+		return errPrivateMetadataAudit
+	}
+	row := [8]string{generateCUID(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context()).ID, action, "page", rec.ID, metadata, tsformat.Format(time.Now())}
 	res, err := b.tx.ExecContext(r.Context(), `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,?,?,?,?)`, row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7])
 	if err != nil {
 		return err

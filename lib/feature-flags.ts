@@ -172,6 +172,15 @@ export function artifactsDesign(): boolean {
   return process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN === "true"
 }
 
+/**
+ * Prototype playback of linked Design screens (#4449). Default off. Only has
+ * an effect together with `artifactsDesign()`; while off the editor offers no
+ * link field and no Play mode, and stored links stay inert data.
+ */
+export function artifactsDesignPrototype(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE === "true"
+}
+
 /** Read-only Design System token preview for artifacts with `design-system.json`. Default off. */
 export function artifactDesignSystem(): boolean {
   return process.env.NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM === "true"

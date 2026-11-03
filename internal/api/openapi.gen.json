@@ -2197,7 +2197,11 @@
                 "$ref": "#/components/schemas/ArtifactProjectOrigin"
               },
               {
-                "type": "null"
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
               }
             ]
           },
@@ -7500,6 +7504,11 @@
             "minLength": 1,
             "type": "string"
           },
+          "linkTo": {
+            "description": "Prototype link: ID of the screen (frame) a click on this layer opens in Play mode. Empty string clears it. A target that no longer exists is kept and plays as an inert hotspot.",
+            "maxLength": 128,
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -7564,6 +7573,11 @@
           "id": {
             "maxLength": 128,
             "minLength": 1,
+            "type": "string"
+          },
+          "linkTo": {
+            "description": "Prototype link: ID of the screen (frame) a click on this layer opens in Play mode. Empty string clears it. A target that no longer exists is kept and plays as an inert hotspot.",
+            "maxLength": 128,
             "type": "string"
           },
           "name": {
@@ -7782,7 +7796,11 @@
                 "$ref": "#/components/schemas/ArtifactProjectOrigin"
               },
               {
-                "type": "null"
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
               }
             ]
           },
@@ -10377,7 +10395,9 @@
             "type": "object"
           },
           {
-            "items": {},
+            "items": {
+              "$ref": "#/components/schemas/FinalAuthUserPreferenceValue"
+            },
             "type": "array"
           },
           {
@@ -10390,7 +10410,11 @@
             "type": "boolean"
           },
           {
-            "type": "null"
+            "enum": [
+              null
+            ],
+            "nullable": true,
+            "type": "object"
           }
         ]
       },
@@ -10402,7 +10426,9 @@
             "type": "object"
           },
           {
-            "items": {},
+            "items": {
+              "$ref": "#/components/schemas/FinalAuthWebhookPayload"
+            },
             "type": "array"
           },
           {
@@ -10415,7 +10441,11 @@
             "type": "boolean"
           },
           {
-            "type": "null"
+            "enum": [
+              null
+            ],
+            "nullable": true,
+            "type": "object"
           }
         ]
       },
@@ -119004,6 +119034,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -124339,7 +124387,11 @@
                                 "type": "object"
                               },
                               {
-                                "type": "null"
+                                "enum": [
+                                  null
+                                ],
+                                "nullable": true,
+                                "type": "object"
                               }
                             ]
                           },
@@ -125702,7 +125754,11 @@
                                   "type": "object"
                                 },
                                 {
-                                  "type": "null"
+                                  "enum": [
+                                    null
+                                  ],
+                                  "nullable": true,
+                                  "type": "object"
                                 }
                               ]
                             },
@@ -126152,7 +126208,11 @@
                               "type": "object"
                             },
                             {
-                              "type": "null"
+                              "enum": [
+                                null
+                              ],
+                              "nullable": true,
+                              "type": "object"
                             }
                           ]
                         },
@@ -126471,7 +126531,11 @@
                               "type": "object"
                             },
                             {
-                              "type": "null"
+                              "enum": [
+                                null
+                              ],
+                              "nullable": true,
+                              "type": "object"
                             }
                           ]
                         },
@@ -126863,7 +126927,11 @@
                                 "type": "object"
                               },
                               {
-                                "type": "null"
+                                "enum": [
+                                  null
+                                ],
+                                "nullable": true,
+                                "type": "object"
                               }
                             ]
                           },
@@ -127339,7 +127407,11 @@
                             "type": "object"
                           },
                           {
-                            "type": "null"
+                            "enum": [
+                              null
+                            ],
+                            "nullable": true,
+                            "type": "object"
                           }
                         ]
                       },
@@ -127781,7 +127853,11 @@
                           "type": "object"
                         },
                         {
-                          "type": "null"
+                          "enum": [
+                            null
+                          ],
+                          "nullable": true,
+                          "type": "object"
                         }
                       ]
                     },
@@ -128042,7 +128118,11 @@
                           "type": "object"
                         },
                         {
-                          "type": "null"
+                          "enum": [
+                            null
+                          ],
+                          "nullable": true,
+                          "type": "object"
                         }
                       ]
                     },
@@ -129374,7 +129454,11 @@
                           "type": "object"
                         },
                         {
-                          "type": "null"
+                          "enum": [
+                            null
+                          ],
+                          "nullable": true,
+                          "type": "object"
                         }
                       ]
                     },
@@ -129635,7 +129719,11 @@
                           "type": "object"
                         },
                         {
-                          "type": "null"
+                          "enum": [
+                            null
+                          ],
+                          "nullable": true,
+                          "type": "object"
                         }
                       ]
                     },
@@ -130379,7 +130467,11 @@
                           "type": "object"
                         },
                         {
-                          "type": "null"
+                          "enum": [
+                            null
+                          ],
+                          "nullable": true,
+                          "type": "object"
                         }
                       ]
                     },
@@ -130902,7 +130994,11 @@
                           "type": "object"
                         },
                         {
-                          "type": "null"
+                          "enum": [
+                            null
+                          ],
+                          "nullable": true,
+                          "type": "object"
                         }
                       ]
                     },
@@ -133485,7 +133581,7 @@
     },
     "/api/v1/pages/{slug}/artifact/data": {
       "get": {
-        "description": "List the data collections declared by `dashboard.json` in code `version`, with their document counts and sizes. The owner may pass any version, an editor the latest version and other readers only the shared version. Requires the `artifact_projects` and `artifact_dashboard_data` feature flags.",
+        "description": "List the data collections declared by `dashboard.json` in code `version`, with their document counts and sizes. A declared collection that has never been written to is not listed. The owner may pass any version, an editor the latest version and other readers only the shared version. Requires the `artifact_projects` and `artifact_dashboard_data` feature flags.",
         "operationId": "get_api_v1_pages_slug_artifact_data",
         "parameters": [
           {
@@ -136154,7 +136250,7 @@
             "content": {
               "text/event-stream": {
                 "schema": {
-                  "description": "SSE event: lease with NativeCraftLease JSON, or session_retired with delivery=stopped, reason=authority_changed and draft=retain|purge. Generic auth failures do not imply draft purge.",
+                  "description": "SSE event: lease with NativeCraftLease JSON, or session_retired with delivery=stopped, reason=authority_changed|write_revoked and draft=retain|purge; write_revoked (always with draft=retain) means read remains and write was removed, and the client may request a fresh read admission. Generic auth failures do not imply draft purge.",
                   "type": "string"
                 }
               }
@@ -144896,6 +144992,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -151535,7 +151649,11 @@
                               "type": "object"
                             },
                             {
-                              "type": "null"
+                              "enum": [
+                                null
+                              ],
+                              "nullable": true,
+                              "type": "object"
                             }
                           ]
                         },
@@ -154289,6 +154407,16 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -154931,6 +155059,16 @@
               }
             },
             "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
           },
           "429": {
             "content": {

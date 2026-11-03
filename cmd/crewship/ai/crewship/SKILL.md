@@ -197,7 +197,7 @@ and touch only the nodes you mean to change. Every successful `apply` already
 saves a retained version; do not add a snapshot afterwards. Use `snapshot
 <slug> --message "..."` only to retain the current live canvas separately,
 for example after human browser edits. `versions` and `restore --version <n>`
-work as for Projects. When a person sent a Design comment to your run, the
+work as for Projects, except that Design `restore` takes no `--base-version`. When a person sent a Design comment to your run, the
 `apply` that changes the node records the answer on the version it creates; a
 `snapshot` does not answer it. Creating a Design, `share`, `comment` and `agent`
 (connecting a private chat) are for people.

@@ -251,9 +251,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Free slug from soft-deleted agents so the UNIQUE constraint doesn't block re-creation.
-	if _, err := h.db.ExecContext(r.Context(),
-		"UPDATE agents SET slug = slug || '_deleted_' || id WHERE workspace_id = ? AND slug = ? AND deleted_at IS NOT NULL",
-		workspaceID, req.Slug); err != nil {
+	if err := freeDeletedAgentSlug(r.Context(), h.db, workspaceID, req.Slug); err != nil {
 		h.logger.Warn("free deleted agent slug", "slug", req.Slug, "error", err)
 	}
 

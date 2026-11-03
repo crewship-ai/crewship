@@ -44,6 +44,16 @@ describe("artifact kind registry", () => {
     expect(artifactKind("dashboard").live({ ...ALL, dashboards: false })).toBe(false)
   })
 
+  it("needs page creation for agent-made kinds too, as the server's create check does (#4534)", () => {
+    // A Viewer's availability read says projects are enabled; only the role or page.create may create.
+    const viewer: ArtifactCapabilities = { ...ALL, designs: true, pages: false }
+    expect(artifactKind("project").live(viewer)).toBe(false)
+    expect(artifactKind("dashboard").live(viewer)).toBe(false)
+    expect(artifactKind("slides").live(viewer)).toBe(false)
+    expect(creatableKinds(viewer)).toEqual([])
+    expect(creatableKinds({ ...ALL, designs: true }).map(k => k.key)).toEqual(["project", "dashboard", "page", "word", "sheet", "slides", "design"])
+  })
+
   it("offers Design only with its build capability and Page creation access", () => {
     expect(artifactKind("design").make).toBe("canvas")
     expect(artifactKind("design").live(ALL)).toBe(false)

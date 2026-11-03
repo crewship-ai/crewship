@@ -121,7 +121,8 @@ The slug must be unused in the workspace. A taken slug currently returns
 Edits are a JSON object with `operations` (1 to 500) and an optional `message`.
 An upsert carries a whole node: `id`, `type` (`frame`, `rect`, `text` or
 `image`), `name`, `x`, `y`, `width`, `height`, `fill` and optionally
-`parentId`, `text` or `src`. Delete uses `{"op":"delete","id":"<node-id>"}` and
+`parentId`, `text`, `src` or `linkTo`. `linkTo` is the ID of the screen that a
+click on the layer opens in prototype playback; `""` removes it. Delete uses `{"op":"delete","id":"<node-id>"}` and
 reorder uses `{"op":"reorder","order":["<id>", …]}`. Keep the IDs of existing
 nodes. The file may be at most 1 MiB; other top-level keys are refused before
 the request (`unknown design field "extra"`).

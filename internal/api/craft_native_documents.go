@@ -62,6 +62,7 @@ func (d *craftNativeDocumentsHTTP) bind(r *http.Request) (*http.Request, *craftN
 	if err != nil {
 		return nil, nil, nil, zero, err
 	}
+	bound = bound.WithContext(context.WithValue(bound.Context(), craftNativeReadCaptureKey{}, &craftNativeReadCapture{}))
 	entry, _ := bound.Context().Value(craftNativeContextKey{}).(*craftNativeSession)
 	profile, ok := d.applications[entry.application]
 	if !ok || profile.Store.Application != entry.application {
@@ -90,6 +91,30 @@ func craftNativeDocumentError(w http.ResponseWriter, err error) {
 		craftNativeHTTPError(w, err)
 	}
 }
+
+// craftNativeReadCapture holds the Page record that the human read authority
+// (authorizeNative, intent "read") authorized inside the engine transaction
+// that read the content. bind installs one per request.
+type craftNativeReadCaptureKey struct{}
+type craftNativeReadCapture struct{ record *pageRecord }
+
+// auditRead applies PRD §5's administrator read audit at the response
+// boundary of a native Craft content read, outside the engine transaction:
+// another custodian's private document, or an ordinary one reached only
+// through the workspace OWNER/ADMIN role. The decision uses the custodian
+// captured in the read's own transaction, never a later lookup: a custody
+// transfer to the reader after the read must not skip the audit. A failed
+// audit, or a read without a captured record, releases nothing.
+func (d *craftNativeDocumentsHTTP) auditRead(w http.ResponseWriter, r *http.Request, entry *craftNativeSession) bool {
+	capture, _ := r.Context().Value(craftNativeReadCaptureKey{}).(*craftNativeReadCapture)
+	if capture == nil || capture.record == nil || capture.record.ID != entry.scope.ArtifactID {
+		craftNativeDocumentError(w, errCraftNativeAccess)
+		return false
+	}
+	privateReadAuditSeam(entry.scope.ArtifactID)
+	return d.human.pages.auditPrivateOwnerAccess(w, r, capture.record)
+}
+
 func (d *craftNativeDocumentsHTTP) readSnapshot(w http.ResponseWriter, r *http.Request) {
 	r, entry, s, profile, err := d.bind(r)
 	if err != nil {
@@ -99,6 +124,9 @@ func (d *craftNativeDocumentsHTTP) readSnapshot(w http.ResponseWriter, r *http.R
 	state, err := s.Read(r.Context(), entry.scope)
 	if err != nil {
 		craftNativeDocumentError(w, err)
+		return
+	}
+	if !d.auditRead(w, r, entry) {
 		return
 	}
 	file, ok := state.Manifest.Files["document.json"]

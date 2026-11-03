@@ -310,8 +310,19 @@ func TestExtractTarGz_DefaultsZeroModeAndSkipsLinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("zero-mode.txt missing: %v", err)
 	}
-	if info.Mode().Perm() != 0o644 {
-		t.Errorf("zero mode should default to 0644, got %v", info.Mode().Perm())
+	// Creation permissions are filtered by the caller's inherited umask.
+	// Use a private control file as the OS oracle without changing process-wide
+	// umask in this parallel test or widening the extracted file's permissions.
+	control := filepath.Join(dest, "creation-mode-control")
+	if err := os.WriteFile(control, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	controlInfo, err := os.Stat(control)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := info.Mode().Perm(), controlInfo.Mode().Perm(); got != want {
+		t.Errorf("zero mode should match 0644 creation under inherited umask: got %04o, want %04o", got, want)
 	}
 	for _, skipped := range []string{"link", "hardlink"} {
 		if _, err := os.Lstat(filepath.Join(dest, skipped)); !os.IsNotExist(err) {

@@ -12,7 +12,7 @@ func TestPagesPersonalSpaceClassification(t *testing.T) {
 		user, role     string
 		privateVisible bool
 	}{
-		{author, "MEMBER", true}, {"space-owner", "OWNER", true}, {"space-admin", "ADMIN", false},
+		{author, "MEMBER", true}, {"space-owner", "OWNER", true}, {"space-admin", "ADMIN", true}, // PRD §5 (#4825): audited administrator read
 	} {
 		if tc.user != author {
 			pagesSeedUser(t, h, ws, tc.user, tc.user+"@example.test", tc.role)

@@ -109,6 +109,10 @@ which of three things happened:
 | `requested` | The work holds a runtime. It has been signalled; it becomes `cancelled` only once the stop is **confirmed**, and `needs_reconciliation` if it cannot be. |
 | `already_terminal` | It finished first. The state shown is the real one — the command never claims a cancel it did not perform. |
 
+A running chat turn (`host_chat_turn`) is stopped by the server that runs it:
+it notices the request within about two seconds, stops the agent process and
+settles the item as `cancelled` from the observed exit.
+
 Cancelling does not undo external effects that already happened.
 
 ---
@@ -133,9 +137,11 @@ authorization: the new item runs under **your** identity, carries `replay_of`
 and your reason, and re-uses the original input. Terminal history is never
 rewritten.
 
-Two refusals, each with an explanation rather than an opaque failure:
+Refusals come with an explanation rather than an opaque failure:
 
 - Replaying work that has not finished. Cancel it first.
+- Replaying a chat turn (`host_chat_turn`). Nothing in the work queue runs chat
+  turns, so a copy would never start; send the message again in its chat.
 - Replaying webhook-sourced work whose raw payload has passed its retention.
   The delivery record survives the payload, so "we received it, we can no
   longer replay it" stays distinguishable from "we never saw it" — but only

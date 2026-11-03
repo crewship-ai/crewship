@@ -37,7 +37,7 @@ its switch is on for the workspace (or for the whole server).
 | Dashboard data | `artifact_dashboard_data`, plus `artifact_projects` | `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED=true` | `404` "dashboard data is disabled" |
 | Slides projection and PDF | `artifact_slides`, plus `artifact_projects` | `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true` | `404` |
 | Design | `artifacts_design` (independent of `artifact_projects`) | `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true` | `404` "design not found" |
-| Craft (native Word and Sheet) | none | `CREWSHIP_CRAFT_NATIVE_ENABLED=true` (YAML `craft_native.enabled`) | Mutations return `503` "native Craft unavailable" |
+| Craft (native Word and Sheet) | none | `CREWSHIP_CRAFT_NATIVE_ENABLED=true` (YAML `craft_native.enabled`), plus a qualified Word or Sheet profile for a usable editor | Mutations return `503` "native Craft unavailable" |
 | Craft agent tasks | none | `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true`, in addition to Craft | `503` "native Craft agents unavailable" |
 
 Turn a workspace flag on with

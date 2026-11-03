@@ -1,0 +1,1 @@
+- **PRD acceptance harness: the identity-switch row lets the sealed source draft be written before leaving the page (#4811).** It navigated 0 ms after a programmatic fill, before the asynchronous IndexedDB write finished, so A got back the pre-edit snapshot. It now settles 1 s after typing, and a mismatch records the lengths and the first difference.

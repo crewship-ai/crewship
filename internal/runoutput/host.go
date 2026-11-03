@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -482,6 +483,84 @@ func RequestHostStop(dir string) error {
 	closeErr := f.Close()
 	return errors.Join(writeErr, syncErr, closeErr, syncDir(dir))
 }
+
+// hostStopConfirmedFile records that the provider's stop of one exact
+// execution froze and killed the leader's whole process tree (its session and
+// every descendant) and saw each thread group exit (sidecar run-stop-process),
+// and that the provider then confirmed the execution terminal. Unlike
+// stop-requested, it is evidence that nothing the execution started and still
+// parented still runs (#4774).
+const hostStopConfirmedFile = "stop-confirmed"
+
+func hostStopConfirmedContent(execID string) string {
+	return "tree-stopped " + execID + "\n"
+}
+
+// RecordHostStopConfirmed writes the stop-confirmed record for execID. Call it
+// only after the helper exited with its stop-confirmed status AND the provider
+// reported the execution itself terminal.
+func RecordHostStopConfirmed(dir, execID string) error {
+	if err := validateHostDirectory(dir); err != nil {
+		return err
+	}
+	if execID == "" || strings.ContainsAny(execID, " \n") {
+		return errors.New("invalid execution identity")
+	}
+	// Write a complete temporary record and link it into place, so a crash
+	// can never leave a partial stop-confirmed file that blocks the run for
+	// good; the link also refuses to replace an existing record.
+	final := filepath.Join(dir, hostStopConfirmedFile)
+	tmp, err := os.CreateTemp(dir, hostStopConfirmedFile+".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	_, writeErr := tmp.Write([]byte(hostStopConfirmedContent(execID)))
+	chmodErr := tmp.Chmod(0600)
+	syncErr := tmp.Sync()
+	closeErr := tmp.Close()
+	if err := errors.Join(writeErr, chmodErr, syncErr, closeErr); err != nil {
+		return err
+	}
+	if err := os.Link(tmp.Name(), final); errors.Is(err, os.ErrExist) {
+		confirmed, readErr := HostStopConfirmed(dir, execID)
+		if readErr != nil {
+			return readErr
+		}
+		if !confirmed {
+			return errors.New("stop confirmation belongs to another execution")
+		}
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return syncDir(dir)
+}
+
+// HostStopConfirmed reports whether dir holds a stop-confirmed record for
+// exactly execID. Any other content is an error, never a confirmation.
+func HostStopConfirmed(dir, execID string) (bool, error) {
+	if err := validateHostDirectory(dir); err != nil {
+		return false, err
+	}
+	f, err := os.Open(filepath.Join(dir, hostStopConfirmedFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, 257))
+	if err != nil {
+		return false, err
+	}
+	if !strings.HasPrefix(string(data), "tree-stopped ") || !strings.HasSuffix(string(data), "\n") {
+		return false, errors.New("invalid protected stop confirmation")
+	}
+	return execID != "" && string(data) == hostStopConfirmedContent(execID), nil
+}
+
 func HostStopRequested(dir string) (bool, error) {
 	if err := validateHostDirectory(dir); err != nil {
 		return false, err

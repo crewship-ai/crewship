@@ -353,3 +353,54 @@ func TestAcceptance_ChatWatch_RefusedSubscriptionExitsInsteadOfRetrying(t *testi
 		t.Errorf("subscribed %d times; a refusal is not retried", n)
 	}
 }
+
+// B13 (G4): a message committed between the first read and the subscription
+// has no subscriber to announce it to. The follower must subscribe first.
+func TestAcceptance_ChatRoomMessages_FollowSubscribesBeforeFirstRead(t *testing.T) {
+	s := newChatParityStub(t)
+	const room = "conv_parity"
+	var mu sync.Mutex
+	var subscribed []*websocket.Conn
+	committed := false
+	s.routes["GET /api/v1/auth/cli-token/validate"] = func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"valid":true,"user_id":"u_me"}`))
+	}
+	s.routes["GET "+chatRoomBase+"/"+room+"/messages"] = func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.URL.Query().Get("after_sequence") == "" {
+			// The read returns m1; right after it, m2 is committed and
+			// announced to whoever is subscribed at that moment.
+			_, _ = w.Write([]byte(`{"messages":[{"id":"m1","conversation_id":"conv_parity","sequence":1,"author_name":"Ana","content":"standup in 5"}],"has_more":false}`))
+			committed = true
+			b, _ := json.Marshal(wsproto.ServerMessage{Type: "conversation.updated", Channel: "user:u_me", Payload: map[string]string{"conversation_id": room}})
+			for _, c := range subscribed {
+				_ = websocket.Message.Send(c, string(b))
+			}
+			return
+		}
+		if committed {
+			_, _ = w.Write([]byte(`{"messages":[{"id":"m2","conversation_id":"conv_parity","sequence":2,"author_name":"Bob","content":"joining"}],"has_more":false}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"messages":[],"has_more":false}`))
+	}
+	s.onFrame = func(conn *websocket.Conn, f cli.WSMessage) bool {
+		if f.Type == "subscribe" && f.Channel == "user:u_me" {
+			// The server may take a while to register a subscription; the
+			// follower must not read before it is registered.
+			time.Sleep(400 * time.Millisecond)
+			mu.Lock()
+			subscribed = append(subscribed, conn)
+			mu.Unlock()
+		}
+		return true
+	}
+	out, errOut, err := s.runUntil(t, "joining", 1, "chat", "room", "messages", room, "--follow")
+	if err != nil {
+		t.Fatalf("interrupted follow exits 0: %v\n%s", err, errOut)
+	}
+	if !strings.Contains(out, "#2 Bob: joining") {
+		t.Errorf("a message committed after the first read was not printed:\n%s", out)
+	}
+}

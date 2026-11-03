@@ -95,6 +95,10 @@ type Watcher struct {
 	pendingPaths   map[string]struct{}
 	debounceTimer  *time.Timer
 	debounceActive bool
+	// stopped is set by Stop under debounceMu. A flush that sees it returns
+	// before joining flushWG, and note no longer arms the timer, so Stop's
+	// flushWG.Wait covers every callback that can still send (#4814).
+	stopped bool
 }
 
 // StartWatcher launches a memory-directory watcher rooted at `root`.
@@ -194,17 +198,18 @@ func (w *Watcher) Events() <-chan WatchEvent {
 // Stop drains the goroutines and closes the event channel. Idempotent.
 //
 // Shutdown order matters: (a) signal stop so producer goroutines bail,
-// (b) cancel any pending debounce timer so no NEW flush starts, then
-// (c) wait for already-spawned flush callbacks to drain via flushWG.
-// Only after that is it safe to close(w.events). The prior version
-// closed events directly after w.wg.Wait() — but time.AfterFunc
-// callbacks are NOT tracked in wg, so an in-flight flush could send
-// on a closed channel and panic. The flushWG fix closes that race.
+// (b) under debounceMu, mark the watcher stopped and cancel any pending
+// debounce timer, so no later flush joins flushWG and no note re-arms the
+// timer, then (c) wait for the flushes that joined before (b). Only after
+// that is it safe to close(w.events). time.AfterFunc callbacks are not
+// tracked in wg; joining flushWG outside the lock let a late callback join
+// after the Wait and send on the closed channel (#4814).
 func (w *Watcher) Stop() {
 	w.closeOnce.Do(func() {
 		close(w.stop)
 		w.wg.Wait()
 		w.debounceMu.Lock()
+		w.stopped = true
 		if w.debounceTimer != nil {
 			w.debounceTimer.Stop()
 		}
@@ -320,6 +325,9 @@ func (w *Watcher) snapshot() map[string]time.Time {
 func (w *Watcher) note(path string) {
 	w.debounceMu.Lock()
 	defer w.debounceMu.Unlock()
+	if w.stopped {
+		return
+	}
 	w.pendingPaths[path] = struct{}{}
 	if w.debounceTimer == nil {
 		w.debounceTimer = time.AfterFunc(w.cfg.Debounce, w.flush)
@@ -339,17 +347,22 @@ func (w *Watcher) note(path string) {
 
 // flush is called when the debounce window expires with no new
 // activity. It captures the accumulated paths and emits one
-// WatchEvent. If Stop fires concurrently the send is dropped via
-// the select on w.stop so we never block on a closed channel.
+// WatchEvent. A callback that starts after Stop returns without
+// sending; one already joined either delivers or sees w.stop, and
+// Stop waits for it before closing w.events.
 func (w *Watcher) flush() {
-	// Hold flushWG for the entire callback so Stop() blocks until
-	// every in-flight flush has reached its select-on-stop branch.
-	// Decrement is deferred so the WaitGroup balances even if the
-	// function panics inside the body.
+	// Join flushWG under debounceMu, and only while Stop has not marked the
+	// watcher stopped. A callback that starts after Stop took the lock returns
+	// here; every one that joined before is waited for before close(w.events).
+	// Adding outside the lock let a late callback join after Stop's Wait and
+	// then send on the closed channel (#4814).
+	w.debounceMu.Lock()
+	if w.stopped {
+		w.debounceMu.Unlock()
+		return
+	}
 	w.flushWG.Add(1)
 	defer w.flushWG.Done()
-
-	w.debounceMu.Lock()
 	paths := make([]string, 0, len(w.pendingPaths))
 	for p := range w.pendingPaths {
 		paths = append(paths, p)

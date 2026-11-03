@@ -33,6 +33,7 @@ variable is on shows nothing until the server reports the feature available.
 | Dashboard with live data | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`; also `NEXT_PUBLIC_ARTIFACTS_LIBRARY` for the library route | `artifact_projects` and `artifact_dashboard_data` | — |
 | Slides artifact preview and PDF export | `NEXT_PUBLIC_ARTIFACT_SLIDES` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`; also `NEXT_PUBLIC_ARTIFACTS_LIBRARY` for the library route | `artifact_projects` and `artifact_slides` | — |
 | Design canvas | `NEXT_PUBLIC_ARTIFACTS_DESIGN` | `artifacts_design` | — |
+| Design prototype playback (**Play**, **Link to screen**) | `NEXT_PUBLIC_ARTIFACTS_DESIGN` and `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE` | `artifacts_design` | — |
 | Craft edit lease bar and draft recovery in chat | `NEXT_PUBLIC_CHAT_CRAFT_LEASE` | — | `craft_native.enabled` with a Word or Sheet profile |
 | Native Craft Word or Sheet editor at `/pages/craft/editor` and **New Doc** for native documents | — | — | `craft_native.enabled` with a qualified profile for that application |
 | Creating a Word document (Docs) | — | — | `documents.enabled` |
@@ -285,6 +286,7 @@ only when its value is exactly `true`.
 | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` | off | Live data previews in Dashboard artifacts, inside the library or the chat and Page viewer. No data requests while off. |
 | `NEXT_PUBLIC_ARTIFACT_SLIDES` | off | Slides previews of artifact versions, inside the library or the chat and Page viewer |
 | `NEXT_PUBLIC_ARTIFACTS_DESIGN` | off | The Design canvas |
+| `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE` | off | Prototype playback of linked Design screens: the **Play** button and the **Link to screen** field. Needs `NEXT_PUBLIC_ARTIFACTS_DESIGN`. |
 | `NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM` | off | Read-only Design System token preview in the artifact viewer |
 | `NEXT_PUBLIC_SLIDES_EDITOR` | off | The native Slides editor on a Page that has Slides. Edits stay a local draft. |
 | `NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS` | off | Development only. Leave off: the server does not serve the revert and proposal endpoints this client calls. |

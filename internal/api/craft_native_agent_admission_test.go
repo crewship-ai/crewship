@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -32,12 +33,74 @@ func nativeAgentAdmissionFixture(t *testing.T) (*artifactPrincipalFixture, *craf
 	f, source := originalSessionFixture(t)
 	f.rig.seedPage(t, "native-agent-page", "native-agent-page", "Native", source.UserID, "")
 	mustExec(t, f.rig.db, `INSERT INTO craft_native_documents(page_id,workspace_id,application_id,engine_revision,engine_sha256,editor_bundle) VALUES('native-agent-page',?,'wordcraft',?,?,?)`, f.rig.wsID, strings.Repeat("a", 40), strings.Repeat("b", 64), strings.Repeat("c", 64))
+	// The workspace agent artifact policy admits the agent's crew (#4681).
+	mustExec(t, f.rig.db, `INSERT INTO workspace_artifact_creation_policy(workspace_id,enabled,version,updated_at) VALUES(?,1,1,'2026-10-17T00:00:00Z')`, f.a.WorkspaceID)
+	mustExec(t, f.rig.db, `INSERT INTO workspace_artifact_creation_crews(workspace_id,crew_id) VALUES(?,?)`, f.a.WorkspaceID, f.a.CrewID)
 	u := &AuthUser{ID: source.UserID, SessionID: source.ID, OriginalCredential: source}
 	ctx := auth.WithOriginalCredential(context.WithValue(context.WithValue(context.WithValue(t.Context(), ctxUser, u), ctxAuthKind, AuthKindSession), ctxWorkspaceID, f.rig.wsID), *source)
 	h := newCraftNativeHTTP(f.pages, true, &collaborationAdmissionTestClock{boot: "native-agent-admission", now: time.Second})
 	d := newCraftNativeDocumentsHTTP(h, map[string]craftNativeApplication{"wordcraft": {Store: mooring.NativeStoreConfig{Application: "wordcraft"}}})
 	m := newCraftNativeAgentManager(h, d, CraftNativeHTTPConfig{AgentsEnabled: true})
 	return f, m, ctx
+}
+
+// The workspace agent artifact policy is the ceiling for native Craft agent
+// tasks: an excluded crew or a disabled policy refuses the task before anything
+// is accepted (#4681).
+func TestCraftNativeAgentTaskRefusedOutsideWorkspaceArtifactPolicy(t *testing.T) {
+	for _, tc := range []struct{ name, sql string }{
+		{"crew excluded", `DELETE FROM workspace_artifact_creation_crews`},
+		{"policy disabled", `UPDATE workspace_artifact_creation_policy SET enabled=0`},
+		{"no policy", `DELETE FROM workspace_artifact_creation_crews; DELETE FROM workspace_artifact_creation_policy`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, m, ctx := nativeAgentAdmissionFixture(t)
+			mustExec(t, f.rig.db, tc.sql)
+			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true})
+			if !errors.Is(err, errCraftNativeAgentDenied) || accepted.WorkID != "" {
+				t.Fatalf("task admitted outside the artifact policy: receipt=%+v err=%v", accepted, err)
+			}
+			var items int
+			if err = f.rig.db.QueryRow(`SELECT count(*) FROM work_items WHERE domain_kind=?`, craftNativeAgentDomain).Scan(&items); err != nil || items != 0 {
+				t.Fatal("refused task left a work item", items, err)
+			}
+		})
+	}
+}
+
+// Excluding the crew after admission stops the running task at its next
+// recheck (#4681).
+func TestCraftNativeAgentRecheckRefusesCrewExcludedAfterAdmission(t *testing.T) {
+	for _, tc := range []struct{ name, sql string }{
+		{"crew excluded", `DELETE FROM workspace_artifact_creation_crews`},
+		{"policy disabled", `UPDATE workspace_artifact_creation_policy SET enabled=0`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, m, ctx := nativeAgentAdmissionFixture(t)
+			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true})
+			if err != nil {
+				t.Fatal("admission inside the policy", err)
+			}
+			m.mu.Lock()
+			e := m.entries[accepted.WorkID]
+			m.mu.Unlock()
+			check := func() error {
+				tx, err := f.rig.db.BeginTx(t.Context(), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tx.Rollback()
+				return m.checkOriginalGrant(t.Context(), tx, e.grant)
+			}
+			if err = check(); err != nil {
+				t.Fatal("recheck inside the policy", err)
+			}
+			mustExec(t, f.rig.db, tc.sql)
+			if err = check(); !errors.Is(err, errCraftNativeAgentDenied) {
+				t.Fatalf("recheck kept a task outside the artifact policy: %v", err)
+			}
+		})
+	}
 }
 
 func TestCraftNativeAgentTaskCapturesNativeConsentWithoutD1Subject(t *testing.T) {

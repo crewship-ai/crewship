@@ -1142,6 +1142,13 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 			if run.Status == "cancelled" && run.StopJournalPending && run.ID != "" {
 				protectedRuns[run.ID] = true
 			}
+			// A retained run settled without projection decided exactly which
+			// rows of its trace it may end (#4700). Its status is no longer
+			// "running", but generic recovery must still not cancel the trace
+			// under an owner that settlement deliberately left untouched (#4798).
+			if run.Output != nil && run.Output.Unprojected != "" && run.ID != "" && key == run.ID {
+				protectedRuns[run.ID] = true
+			}
 		}
 	}
 	// Boot probes can create new outbox entries. Project them before the

@@ -34,6 +34,7 @@ type artifactDataSelection struct {
 }
 
 func (h *PageHandler) artifactDataAuthority(r *http.Request, k artifacts.VersionKey, collection string, version int64, write bool) (artifacts.VersionAuthorize, *artifactDataSelection) {
+	r = ensureDesignAdminAuditRequest(r, write)
 	authority := h.artifactProjectAuthority(r, k, write, false)
 	if write {
 		authority = h.artifactProjectOwnerMutationAuthority(r, k, version)
@@ -60,8 +61,10 @@ func (h *PageHandler) artifactDataAuthority(r *http.Request, k artifacts.Version
 			isOwner = run.HumanUserID == owner
 		}
 		isEditor := false
+		var rec *pageRecord
 		if user != nil && !isOwner && ctx.Value(artifactRunKey{}) == nil {
-			rec, e := h.loadPageForRead(ctx, k.WorkspaceID, "@"+k.PageID)
+			var e error
+			rec, e = h.loadPageForRead(ctx, k.WorkspaceID, "@"+k.PageID)
 			if e != nil {
 				return "", e
 			}
@@ -71,7 +74,27 @@ func (h *PageHandler) artifactDataAuthority(r *http.Request, k artifacts.Version
 			}
 			isEditor = h.artifactProjectHumanEditor(ctx, k, rec, viewer)
 		}
-		if write && latest != version || !isOwner && ((!isEditor && shared != version) || (isEditor && latest != version)) {
+		// PRD §5: the administrator read (audited by the authority above) may
+		// select any retained version, like the owner. Writes never take it.
+		// Independent of grants: an Edit or Read grant never narrows it.
+		isAdmin := false
+		if !write && rec != nil {
+			if isAdmin, err = h.artifactAdminReader(ctx, k.WorkspaceID, user.ID, false); err != nil {
+				return "", err
+			}
+		}
+		if isAdmin {
+			covered, e := h.artifactVersionCoveredWithoutAdmin(ctx, k, rec, user.ID, false, isEditor, version, latest, shared)
+			if e != nil {
+				return "", e
+			}
+			if !covered {
+				if e = h.recordArtifactAdminRead(ctx, tx, r, k, rec, user.ID); e != nil {
+					return "", e
+				}
+			}
+		}
+		if write && latest != version || !isOwner && !isAdmin && ((!isEditor && shared != version) || (isEditor && latest != version)) {
 			return "", artifacts.ErrVersionConflict
 		}
 		collections, err := artifacts.DashboardCollectionsTx(ctx, tx, k, version)
@@ -181,6 +204,7 @@ func (h *PageHandler) GetArtifactData(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	r = ensureDesignAdminAuditRequest(r, false)
 	if err := h.artifactProjectCheck(r, k, false); err != nil {
 		artifactDataError(w, err)
 		return
@@ -196,6 +220,7 @@ func (h *PageHandler) GetArtifactData(w http.ResponseWriter, r *http.Request) {
 		artifactDataError(w, err)
 		return
 	}
+	notifyDesignAdminAudit(r)
 	writeArtifactData(w, projectArtifactData(r, collection, version, documents))
 }
 func (h *PageHandler) ListArtifactData(w http.ResponseWriter, r *http.Request) {
@@ -203,6 +228,7 @@ func (h *PageHandler) ListArtifactData(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	r = ensureDesignAdminAuditRequest(r, false)
 	if err := h.artifactProjectCheck(r, k, false); err != nil {
 		artifactDataError(w, err)
 		return
@@ -223,6 +249,7 @@ func (h *PageHandler) ListArtifactData(w http.ResponseWriter, r *http.Request) {
 			visible = append(visible, collection)
 		}
 	}
+	notifyDesignAdminAudit(r)
 	writeArtifactData(w, artifactDataCollectionsResponse{CodeVersion: version, Collections: visible})
 }
 func (h *PageHandler) BatchArtifactData(w http.ResponseWriter, r *http.Request) {
