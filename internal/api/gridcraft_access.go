@@ -20,7 +20,7 @@ const (
 	workbookNoAccess workbookAccess = iota
 	workbookOwner                   // the human owner of the Page
 	workbookEditor                  // a member the owner explicitly named as editor
-	workbookAuditor                 // workspace OWNER: audited read, never write
+	workbookAuditor                 // workspace OWNER/ADMIN: audited read of the full history, never write
 )
 
 // errWorkbookProposalRequired refuses direct agent access to shared workbooks.
@@ -44,9 +44,11 @@ func (h *gridcraftHTTP) agentSharedWorkbook(ctx context.Context, a *artifactRunA
 // writes, a workspace OWNER or ADMIN reads with an audit (PRD §5). After the
 // owner explicitly publishes it (gridcraftHTTP.share), the owner and every
 // live, trusted member holding a user `write` grant issued by the current owner
-// may read and write; a workspace OWNER or ADMIN still only reads, audited. Workspace roles, folder ACLs,
-// crew/agent/workspace grants, `read` grants and grants issued by anybody but
-// the owner do not reach workbook content.
+// may read and write; a workspace OWNER or ADMIN reads as the audited
+// administrator (full retained history), with or without such a grant, and
+// writes only through it. Workspace roles, folder ACLs, crew/agent/workspace
+// grants, `read` grants and grants issued by anybody but the owner do not
+// reach workbook content.
 func (h *PageHandler) workbookHumanAccess(ctx context.Context, workspace, pageID, userID string, write bool) (*pageRecord, workbookAccess, error) {
 	viewer, err := h.livePrivatePageReader(ctx, workspace, userID)
 	if err != nil || viewer == nil {
@@ -79,14 +81,18 @@ func (h *PageHandler) workbookHumanAccess(ctx context.Context, workspace, pageID
 	if rec.OwnerUserID == userID {
 		return rec, workbookOwner, nil
 	}
+	// PRD §5: a read by a workspace OWNER/ADMIN is the audited administrator
+	// read with the full retained history, whatever grant it also holds. An
+	// owner-issued editor grant must never narrow it to the publication floor
+	// (workbookEditor's HistoryFloor). Writes still need that grant.
+	if !write && workspaceArtifactReader(viewer.Role) {
+		return rec, workbookAuditor, nil
+	}
 	if _, err := h.liveContentHumanRole(ctx, workspace, rec.OwnerUserID); err == nil {
 		var editor bool
 		if h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM page_grants WHERE page_id=? AND subject_type='user' AND subject_id=? AND level='write' AND granted_by_user_id=?)`, rec.ID, userID, rec.OwnerUserID).Scan(&editor) == nil && editor {
 			return rec, workbookEditor, nil
 		}
-	}
-	if !write && workspaceArtifactReader(viewer.Role) {
-		return rec, workbookAuditor, nil
 	}
 	return nil, workbookNoAccess, appengine.ErrForbidden
 }

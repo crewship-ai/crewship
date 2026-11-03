@@ -2,14 +2,19 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/appengine"
+	"github.com/crewship-ai/crewship/internal/artifacts"
+	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/slides"
 )
 
@@ -558,4 +563,155 @@ func TestWorkspaceAdminPrivateReadStaysOutOfMemberJournal(t *testing.T) {
 	if listing.Code != 200 || !strings.Contains(listing.Body.String(), page) {
 		t.Errorf("workspace OWNER cannot list the private administrator read: %d %s", listing.Code, listing.Body)
 	}
+}
+
+// installPrivateReadAuditHook runs hook once, for pageID, at the seam between
+// a content read that released its transaction and that read's audit decision.
+func installPrivateReadAuditHook(t *testing.T, pageID string, hook func()) *int {
+	t.Helper()
+	fired := 0
+	fn := func(id string) {
+		if id == pageID && fired == 0 {
+			fired++
+			hook()
+		}
+	}
+	privateReadAuditHook.Store(&fn)
+	t.Cleanup(func() { privateReadAuditHook.Store(nil) })
+	return &fired
+}
+
+// Review round 3 (#4825), blocker 1: the audit of an administrator's read of
+// private Mooring content must be decided on the custodian the content was
+// read under. On f7ccbad7 the read reloaded the Page after its transaction;
+// a custody transfer to the reading ADMIN in that window made the reload name
+// the ADMIN as owner, so the response released the previous custodian's
+// content with no access record.
+func TestWorkspaceAdminMooringReadAuditSurvivesConcurrentCustodyTransfer(t *testing.T) {
+	f := gridcraftInstanceFixture(t)
+	f.r.RegisterGridCraft(appengine.Options{Enabled: true}, gridcraftFixtureEngine{})
+	created := f.do(f.boss, "POST", "/api/v1/mooring/documents?workspace_id=ws-old", `{"app_id":"hello","slug":"custody-race","name":"Custody race"}`)
+	wantCode(t, created, 201, "create")
+	var page struct {
+		ID string `json:"page_id"`
+	}
+	if json.Unmarshal(created.Body.Bytes(), &page) != nil || page.ID == "" {
+		t.Fatal(created.Body.String())
+	}
+	fired := installPrivateReadAuditHook(t, page.ID, func() {
+		// The workspace OWNER hands custody to the reading ADMIN after the
+		// content snapshot of boss's document was taken.
+		mustExec(t, f.db, `UPDATE pages SET owner_user_id='wsadmin' WHERE id=?`, page.ID)
+	})
+	read := f.do(f.wsAdmin, "GET", "/api/v1/pages/custody-race/mooring?workspace_id=ws-old", "")
+	if *fired != 1 {
+		t.Fatalf("custody transfer seam fired %d times", *fired)
+	}
+	audits := adminReadAudits(t, f.r.pages, auditActionPrivateArtifactRead, "wsadmin", page.ID)
+	if read.Code == 200 && audits != 1 {
+		t.Fatalf("ADMIN received boss's private Mooring content with %d access records", audits)
+	}
+	if read.Code != 200 && audits != 0 {
+		t.Fatalf("refused read still audited: %d %d", read.Code, audits)
+	}
+	if read.Code == 200 {
+		var meta string
+		if err := f.db.QueryRow(`SELECT metadata FROM audit_logs WHERE action=? AND user_id='wsadmin' AND entity_id=?`, auditActionPrivateArtifactRead, page.ID).Scan(&meta); err != nil || !strings.Contains(meta, `"owner_user_id":"boss"`) {
+			t.Fatalf("audit does not name the custodian the content was read under: %q %v", meta, err)
+		}
+	}
+}
+
+// The same seam for a native Word (Craft) document read: the record audited
+// is the one authorized in the engine transaction that read the content.
+func TestWorkspaceAdminNativeWordReadAuditSurvivesConcurrentCustodyTransfer(t *testing.T) {
+	f, h, _ := craftNativeHTTPFixture(t)
+	// ptdeparting reads as a workspace ADMIN another member's private document,
+	// with a credential captured after the role change.
+	mustExec(t, f.db, `UPDATE workspace_members SET role='ADMIN' WHERE user_id=? AND workspace_id=?`, f.userID, f.wsID)
+	mustExec(t, f.db, `UPDATE pages SET owner_user_id=?, private_audience=1 WHERE id='native-page'`, f.adminID)
+	mustExec(t, f.db, `INSERT INTO user_sessions(id,user_id,expires_at) VALUES('native-admin-source',?,?)`, f.userID, time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano))
+	u := &AuthUser{ID: f.userID, SessionID: "native-admin-source", CredentialExpiresAt: time.Now().Add(time.Hour)}
+	source, err := captureOriginalHumanCredential(t.Context(), f.db, u, AuthKindSession, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.OriginalCredential = source
+	ctx := auth.WithOriginalCredential(context.WithValue(context.WithValue(context.WithValue(t.Context(), ctxUser, u), ctxAuthKind, AuthKindSession), ctxWorkspaceID, f.wsID), *source)
+	cfg := mooring.NativeStoreConfig{Application: "wordcraft", EngineRevision: strings.Repeat("a", 40), EngineSHA256: strings.Repeat("b", 64), EditorBundle: strings.Repeat("c", 64), Validate: func(context.Context, []byte) error { return nil }}
+	d := newCraftNativeDocumentsHTTP(h, map[string]craftNativeApplication{"wordcraft": {Store: cfg, EditorURL: "/workbook-editor/b/" + cfg.EditorBundle + "/index.html"}})
+	s := artifacts.NewVersionStore(f.db, artifacts.VersionOptions{Enabled: true, ContentType: "wordcraft"})
+	if _, err := s.Apply(t.Context(), artifacts.VersionKey{WorkspaceID: f.wsID, PageID: "native-page"}, artifacts.VersionRequest{BaseVersion: 0, EntryPoint: "document.json", Files: map[string]artifacts.VersionFile{"document.json": {Content: []byte(`{"secret":1}`), MediaType: "application/json"}}}, func(context.Context, *sql.Tx) (string, error) { return "user:" + f.adminID, nil }); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := craftNativeIssued(t, h, ctx)
+	baseline := craftNativeDocumentCall(t, d, ctx, token, "read", nil)
+	if baseline.Code != 200 || adminReadAudits(t, h.pages, auditActionPrivateArtifactRead, f.userID, "native-page") != 1 {
+		t.Fatalf("baseline audited ADMIN native read: %d %s", baseline.Code, baseline.Body)
+	}
+	fired := installPrivateReadAuditHook(t, "native-page", func() {
+		mustExec(t, f.db, `UPDATE pages SET owner_user_id=? WHERE id='native-page'`, f.userID)
+	})
+	read := craftNativeDocumentCall(t, d, ctx, token, "read", nil)
+	if *fired != 1 {
+		t.Fatalf("custody transfer seam fired %d times (read %d %s)", *fired, read.Code, read.Body)
+	}
+	audits := adminReadAudits(t, h.pages, auditActionPrivateArtifactRead, f.userID, "native-page")
+	if read.Code == 200 && audits != 2 {
+		t.Fatalf("ADMIN received another custodian's native document with %d access records (want 2)", audits)
+	}
+	if read.Code != 200 && audits != 1 {
+		t.Fatalf("refused read changed audits: %d %d", read.Code, audits)
+	}
+}
+
+// Review round 3 (#4825), blocker 2: an owner-issued Edit grant never narrows
+// an administrator's Sheet read. On f7ccbad7 an ADMIN holding that grant was
+// served as a named editor, so /commits below the publication floor returned
+// 410 while the same ADMIN without the grant read the retained history.
+func TestWorkspaceAdminSheetHistoryIsIndependentOfEditGrant(t *testing.T) {
+	f := gridcraftInstanceFixture(t)
+	f.r.RegisterGridCraft(appengine.Options{Enabled: true, Editor: true}, gridcraftCellsEngine{})
+	setGridCraftEditorFlag(t, f, "ws-old", true)
+	seedInstanceUser(t, f.db, "ann", "ann@ex.com", "ws-old", "MEMBER")
+	seedInstanceUser(t, f.db, "bob", "bob@ex.com", "ws-old", "MEMBER")
+	ann := mintTokenFor(t, f.db, "ann", "workbookann000000000000000")
+	q := "?workspace_id=ws-old"
+	base := liveWorkbook(t, f, ann, "ann", "admin-history")
+	owner := openEditorSession(t, f, ann, base)
+	wantCode(t, f.do(ann, "POST", base+"/edits"+q, cellEdit(owner.SessionID, 1, 1, "B2", "private-draft")), 200, "owner private edit")
+	wantCode(t, f.do(ann, "POST", base+"/editors"+q, `{"editor":"bob@ex.com","publish":true}`), 200, "publish with bob")
+
+	history := func(what string) string {
+		t.Helper()
+		feed := f.do(f.wsAdmin, "GET", base+"/commits"+q+"&since=0", "")
+		wantCode(t, feed, 200, what)
+		if !strings.Contains(feed.Body.String(), "private-draft") {
+			t.Fatalf("%s misses retained history: %s", what, feed.Body.String())
+		}
+		return feed.Body.String()
+	}
+	audits := func() int {
+		return adminReadAudits(t, f.r.pages, auditActionPrivateArtifactRead, "wsadmin", "admin-history")
+	}
+	without := history("ADMIN history without a grant")
+	afterWithout := audits()
+	if afterWithout < 1 {
+		t.Fatalf("ADMIN history read without a grant not audited: %d", afterWithout)
+	}
+
+	wantCode(t, f.do(ann, "POST", base+"/editors"+q, `{"editor":"wsadmin@ex.com"}`), 200, "owner names the ADMIN editor")
+	if n := gridcraftCount(t, f, `SELECT count(*) FROM page_grants WHERE page_id='admin-history' AND subject_type='user' AND subject_id='wsadmin' AND level='write' AND granted_by_user_id='ann'`); n != 1 {
+		t.Fatalf("owner-issued Edit grant rows = %d", n)
+	}
+	with := history("ADMIN history with an owner-issued Edit grant")
+	if with != without {
+		t.Fatalf("grant changed the administrator's history:\nwithout %s\nwith    %s", without, with)
+	}
+	if got := audits(); got != afterWithout+1 {
+		t.Fatalf("ADMIN history read with a grant audits=%d, want %d", got, afterWithout+1)
+	}
+	// The grant still adds what it grants: a live editor session and writes.
+	admin := openEditorSession(t, f, f.wsAdmin, base)
+	wantCode(t, f.do(f.wsAdmin, "POST", base+"/edits"+q, cellEdit(admin.SessionID, 1, int(admin.Rev), "C3", "admin-edit")), 200, "granted ADMIN edits")
 }

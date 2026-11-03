@@ -69,7 +69,9 @@ func (d *craftNativeDocumentsHTTP) preview(w http.ResponseWriter, r *http.Reques
 	cfg := profile.Store
 	cfg.Enabled = true
 	cfg.Leases = h.leases
+	var readRecord *pageRecord
 	cfg.Authorize = func(ctx context.Context, tx *sql.Tx, k mooring.EditLeaseScope, intent string) (mooring.EditLeasePrincipal, error) {
+		readRecord = nil
 		if k != scope || intent != "preview" {
 			return mooring.EditLeasePrincipal{}, errCraftNativeAccess
 		}
@@ -77,9 +79,11 @@ func (d *craftNativeDocumentsHTTP) preview(w http.ResponseWriter, r *http.Reques
 		if err != nil {
 			return mooring.EditLeasePrincipal{}, err
 		}
-		if current.application != proof.application || current.workspaceEpoch != proof.workspaceEpoch || current.memberID != proof.memberID || current.memberRevision != proof.memberRevision {
+		if current.application != proof.application || current.workspaceEpoch != proof.workspaceEpoch || current.memberID != proof.memberID || current.memberRevision != proof.memberRevision || current.record == nil || current.record.ID != rec.ID {
 			return mooring.EditLeasePrincipal{}, errCraftNativeAccess
 		}
+		// The audit below decides on the custodian of this transaction's read.
+		readRecord = current.record
 		return mooring.EditLeasePrincipal{ActorID: "user:" + source.UserID}, nil
 	}
 	store := mooring.NewNativeStore(h.pages.db, cfg)
@@ -97,7 +101,11 @@ func (d *craftNativeDocumentsHTTP) preview(w http.ResponseWriter, r *http.Reques
 		craftNativeDocumentError(w, mooring.ErrNativeProfile)
 		return
 	}
-	if !h.pages.auditPrivateOwnerAccess(w, r, rec) {
+	if readRecord == nil {
+		craftNativeDocumentError(w, errCraftNativeAccess)
+		return
+	}
+	if !h.pages.auditPrivateOwnerAccess(w, r, readRecord) {
 		return
 	}
 	writeJSON(w, 200, craftNativePreviewResponse{Version: strconv.FormatInt(state.Manifest.Version, 10), Bytes: file.Content, ApplicationID: proof.application, EnginePin: store.EnginePin(), EditorBundle: cfg.EditorBundle, EditorURL: profile.EditorURL})

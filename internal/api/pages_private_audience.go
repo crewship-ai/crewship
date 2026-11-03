@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
@@ -211,6 +212,17 @@ func (h *PageHandler) reachedOnlyByAdminRole(ctx context.Context, workspace stri
 	plain.PrivateAudience = false
 	reached, err := h.canSeePage(ctx, workspace, &plain, panels, viewer)
 	return !reached, err
+}
+
+// privateReadAuditHook is a test-only seam. It runs between a content read
+// that released its transaction and the audit decision for that read, so a
+// test can interleave a concurrent change (a custody transfer) deterministically.
+var privateReadAuditHook atomic.Pointer[func(pageID string)]
+
+func privateReadAuditSeam(pageID string) {
+	if hook := privateReadAuditHook.Load(); hook != nil {
+		(*hook)(pageID)
+	}
 }
 
 func privateAudienceActorID(ctx context.Context) string {
