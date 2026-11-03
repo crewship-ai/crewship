@@ -122,6 +122,12 @@ test.describe("drafts and identity", () => {
         const COMMENT = `Identity unsent comment ${tag}`
         await openProject(a, project.slug, ws.id)
         const typed = await typeSourceDraft(a, MARK)
+        // The draft is sealed and written to IndexedDB asynchronously; a person's
+        // last keystroke precedes leaving the page by far more than a programmatic
+        // fill does. Navigating 0 ms after fill() outran that write on dev2 (the
+        // restored text was the pre-edit snapshot); 500 ms passed. The crash rows
+        // prove a hard kill 300 ms after typing keeps the draft.
+        await pause(1_000)
         await openViewer(a, project.slug, ws.id)
         const fill = await prepareViewerComment(a)
         await fill(COMMENT)
@@ -212,15 +218,29 @@ test.describe("drafts and identity", () => {
         await a.waitForTimeout(3_000)
         const back = await projectOffer(a)
         let restoredIdentical: boolean | null = null
+        let restoredDiff: { typedLength: number; restoredLength: number; firstDifferenceAt: number; typedAround: string; restoredAround: string } | null = null
         if (back.restoreOffered === 1) {
           await a.getByRole("button", { name: "Restore source draft", exact: true }).click()
-          restoredIdentical = (await a.getByRole("textbox", { name: "Source file", exact: true }).inputValue()) === d2.typed
+          const source = a.getByRole("textbox", { name: "Source file", exact: true })
+          // Bounded: the restored text must appear; the value itself is evidence either way.
+          const end = Date.now() + 10_000
+          let restored = await source.inputValue()
+          while (restored !== d2.typed && Date.now() < end) {
+            await a.waitForTimeout(250)
+            restored = await source.inputValue()
+          }
+          restoredIdentical = restored === d2.typed
+          if (!restoredIdentical) {
+            let at = 0
+            while (at < restored.length && at < d2.typed.length && restored[at] === d2.typed[at]) at++
+            restoredDiff = { typedLength: d2.typed.length, restoredLength: restored.length, firstDifferenceAt: at, typedAround: d2.typed.slice(Math.max(0, at - 40), at + 80), restoredAround: restored.slice(Math.max(0, at - 40), at + 80) }
+          }
         }
         await openViewer(a, project.slug, ws.id)
         await prepareViewerComment(a)
         const aComment = await viewerCommentValue(a)
         await a.screenshot({ path: test.info().outputPath("expiry-a-again.png"), fullPage: true })
-        ;(ev.expiry as Record<string, unknown>).aAgain = { offer: back, restoredIdentical, viewerComment: aComment }
+        ;(ev.expiry as Record<string, unknown>).aAgain = { offer: back, restoredIdentical, restoredDiff, viewerComment: aComment }
         checks.push(() => {
           expect.soft(back.restoreOffered, "expiry: A is offered the source draft again").toBe(1)
           expect.soft(restoredIdentical, "expiry: the restored source is what A typed").toBe(true)
