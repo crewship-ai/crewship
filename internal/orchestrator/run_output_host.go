@@ -474,16 +474,19 @@ func (o *Orchestrator) RetainedEndConfirmed(ctx context.Context, run RunState, s
 // forcedHostEndConfirmed reports whether a retained run that did not exit on
 // its own provably left nothing it still parents running. Whole-runtime
 // absence always counts.
-// A cancelled run also counts when the provider's stop recorded that the
+// A run CaptureHost ended through the provider's stop (cancellation, deadline,
+// output cap or capture error) also counts when that stop recorded that the
 // leader's whole process tree (its session and every descendant) was killed
-// and the execution itself was terminal (runoutput.RecordHostStopConfirmed). That receipt is bound to the
-// execution identity recorded at launch, so a shared, long-lived container no
-// longer has to disappear before a cancelled run can settle (#4774).
+// and the execution itself was terminal (runoutput.RecordHostStopConfirmed).
+// That receipt is bound to the execution identity recorded at launch, so a
+// shared, long-lived container no longer has to disappear before such a run
+// can settle (#4774, #4824). The reason only says why the stop happened; the
+// receipt is what proves its effect.
 func (o *Orchestrator) forcedHostEndConfirmed(ctx context.Context, run RunState, snapshot runoutput.Snapshot) bool {
 	if absent, err := o.containerRuntimeAbsent(ctx, run.ContainerID); err == nil && absent {
 		return true
 	}
-	if snapshot.Result == nil || snapshot.Result.Reason != "execution_cancelled" {
+	if snapshot.Result == nil || !providerStoppedReason(snapshot.Result.Reason) {
 		return false
 	}
 	directory, err := o.validatedHostRunDirectory(run)
@@ -497,4 +500,16 @@ func (o *Orchestrator) forcedHostEndConfirmed(ctx context.Context, run RunState,
 	}
 	confirmed, err := runoutput.HostStopConfirmed(directory, identity.ExecID)
 	return err == nil && confirmed
+}
+
+// providerStoppedReason reports whether CaptureHost records reason only after it
+// asked the provider to stop the execution (runoutput.CaptureHost: the output
+// cap and a capture error cancel the run context, which stops the execution
+// exactly like a deadline or cancellation does).
+func providerStoppedReason(reason string) bool {
+	switch reason {
+	case "execution_cancelled", "output_limit", "output_error":
+		return true
+	}
+	return false
 }
