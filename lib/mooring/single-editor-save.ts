@@ -102,8 +102,10 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     const token = ++nextAutosave
     if (active) timer = setTimeout(() => { if (token === nextAutosave) void save(undefined, token) }, idleMs)
   }
+  // A local storage fence is retried: the next capture either persists (which
+  // lifts it) or fails visibly again. Server and authority fences never are.
   function scheduleIfNeeded() {
-    if (active && writable && dirty && !blocked && !unconfirmed && !pending && preparingCount === 0 && manualCount === 0) schedule()
+    if (active && writable && dirty && (!blocked || blocked === "storage") && !unconfirmed && !pending && preparingCount === 0 && manualCount === 0) schedule()
   }
   function validReceipt(raw: unknown, attempt: Prepared): raw is NativeSaveReceipt {
     if (!raw || typeof raw !== "object") return false
@@ -120,7 +122,16 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     if (!active || !writable) return
     baseVersion = receipt.version
     unconfirmed = undefined
-    try { await options.journal.confirm(attempt.draft) } catch { blocked = "storage"; emit("draft", "storage"); return }
+    try { await options.journal.confirm(attempt.draft) } catch {
+      // The server committed exactly these bytes; only the local recovery row
+      // could not be retired (e.g. an IDB deadline that fired late after a
+      // main-thread stall). Keep the row, report it, and record the committed
+      // baseline so the retry retires the row instead of sending a duplicate
+      // version. The fence lifts on the next durable capture (#4852).
+      if (!active || !writable) return
+      confirmed = { nativeState: attempt.nativeState, contentHash: attempt.draft.contentHash, version: receipt.version }
+      blocked = "storage"; emit("draft", "storage"); return
+    }
     if (!active || !writable) return
     confirmed = { nativeState: attempt.nativeState, contentHash: attempt.draft.contentHash, version: receipt.version }
     try { void Promise.resolve(options.onReceipt?.(receipt)).catch(() => {}) } catch { /* Receipt observers cannot change persistence. */ }
@@ -171,6 +182,9 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       if (!active || sequence < lastPersistedSequence) return
       await options.journal.persist(draft)
       lastPersistedSequence = sequence
+      // Storage answered durably again: an earlier failed row retirement must
+      // not stop every later save while the lease is held (#4852).
+      if (blocked === "storage") blocked = undefined
     })
     draftWrites = writing.catch(() => {})
     return writing

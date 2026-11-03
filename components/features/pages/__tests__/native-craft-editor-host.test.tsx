@@ -97,6 +97,30 @@ describe('native Word host authority and persistence',()=>{
   await screen.findByText('Uloženo')
  })
 
+ it('#4852: a Sheet keeps saving autosave and Ctrl+S after one save could not retire its local draft row',async()=>{
+  client.open.mockResolvedValueOnce({sessionId:'private-session',applicationId:'gridcraft'})
+  const base=await client.read(new AbortController().signal)
+  client.read.mockResolvedValue({...base,applicationId:'gridcraft',bytes:new TextEncoder().encode('{"sheets":[]}')})
+  mount();await ready();await acquire()
+  const p=ports.at(-1)!,o=portOptions.at(-1)!
+  const sheet=(n:number)=>({bytes:new TextEncoder().encode(`{"sheets":[${n}]}`),editorRevision:`grid:${n}`,documentId:'doc'})
+  // The server commits the save; only the IDB row retirement misses its deadline.
+  journal.confirm.mockRejectedValueOnce(Error('storage deadline'))
+  p.snapshot.mockResolvedValue(sheet(2));act(()=>o.onChanged('grid:2','doc'))
+  await waitFor(()=>expect(client.save).toHaveBeenCalledTimes(1))
+  await waitFor(()=>expect(journal.confirm).toHaveBeenCalledTimes(1))
+  // Second sheet / next row: the autosave must reach the server again.
+  p.snapshot.mockResolvedValue(sheet(3));act(()=>o.onChanged('grid:3','doc'))
+  await waitFor(()=>expect(client.save).toHaveBeenCalledTimes(2))
+  expect(client.save.mock.calls[1][0].baseVersion).toBe('2')
+  await screen.findByText('Uloženo')
+  // A native Ctrl+S ticket also still saves.
+  p.snapshot.mockResolvedValue(sheet(4));act(()=>o.onSaveRequest({documentId:'doc',requestId:'ctrl-s',editorRevision:'grid:4'}))
+  await waitFor(()=>expect(client.save).toHaveBeenCalledTimes(3))
+  expect(p.saveFailed).not.toHaveBeenCalled()
+  await waitFor(()=>expect(screen.getByRole('status')).toHaveAttribute('data-save-phase','saved'))
+ })
+
  it('stops only the current agent mandate with one H1 request and reloads its fresh version without acquiring',async()=>{
   const agent={...ownedLease,mine:false,can_write:false,can_stop_agent:true,holder:{actor_id:'agent:actual',display_name:'Jamie',kind:'agent'}}
   client.lease.mockResolvedValue(agent)
