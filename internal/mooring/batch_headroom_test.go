@@ -1,12 +1,14 @@
 package mooring
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
+	"github.com/crewship-ai/crewship/internal/diskusage"
 	"github.com/crewship-ai/crewship/internal/storageheadroom"
 )
 
@@ -116,6 +118,52 @@ func TestBatchCommitBelowFreeDiskReserveWritesNothingAndKeepsLeaseAndReads(t *te
 		t.Fatalf("task registration after space returned: %v", err)
 	}
 	if r, err := s.Commit(t.Context(), BatchRequest{lease, "1", []BatchChange{fresh}}); err != nil || r.Revision != "2" {
+		t.Fatalf("same commit after space returned = %+v %v", r, err)
+	}
+}
+
+// Review of #4835: the pre-engine probe can only estimate from the current
+// checkpoint. A small checkpoint that prepares into a large candidate must be
+// probed again with the real candidate before any history or head row: free
+// space here covers the estimate but not the candidate.
+func TestBatchCommitLargeCandidateBelowFreeDiskReserveWritesNothing(t *testing.T) {
+	s, adapter, _, _, lease := batchFixture(t)
+	before := mooringCollabRows(t, s)
+	large := append([]byte("1"), bytes.Repeat([]byte(" "), 3<<19)...)
+	adapter.apply = func(context.Context, []byte, BatchChange) ([]byte, *PreparedFailure, error) {
+		return large, nil, nil
+	}
+	lowFreeDisk(t, s.db, false)
+	var dbBytes int64
+	if err := s.db.QueryRow(`SELECT (SELECT page_count FROM pragma_page_count)*(SELECT page_size FROM pragma_page_size)`).Scan(&dbBytes); err != nil {
+		t.Fatal(err)
+	}
+	// Enough for the database copy, the small estimate and 1 MiB of slack for
+	// ledger rows; far less than the ~4 MiB the encoded candidate needs twice.
+	free := uint64(dbBytes) + 1<<20
+	restore := storageheadroom.SetUsageForTest(func(string) (diskusage.Stats, error) {
+		return diskusage.Stats{FreeBytes: free}, nil
+	})
+	defer restore()
+	change := testBatchChange(t, lease.Key, "large", "", testBatchOp("large"))
+	events := 0
+	s.config.AfterCommit = func(BatchCommitEvent) { events++ }
+	result, err := s.Commit(t.Context(), BatchRequest{lease, "0", []BatchChange{change}})
+	wantFreeDiskRefusal(t, "large candidate", err)
+	if adapter.calls.Load() != 1 {
+		t.Fatalf("the pre-engine estimate should admit the small checkpoint; engine calls=%d", adapter.calls.Load())
+	}
+	if len(result.Changes) != 0 || events != 0 {
+		t.Fatalf("refused commit leaked: %+v events=%d", result, events)
+	}
+	if got := mooringCollabRows(t, s); got != before {
+		t.Fatalf("refused candidate wrote rows: before=%v after=%v", before, got)
+	}
+	if revision, checkpoint, err := s.ReadCheckpoint(t.Context(), lease.Key); err != nil || revision != "0" || string(checkpoint) != "0" {
+		t.Fatalf("confirmed checkpoint changed: %q %d bytes %v", revision, len(checkpoint), err)
+	}
+	free = 1 << 62
+	if r, err := s.Commit(t.Context(), BatchRequest{lease, "0", []BatchChange{change}}); err != nil || r.Revision != "1" {
 		t.Fatalf("same commit after space returned = %+v %v", r, err)
 	}
 }

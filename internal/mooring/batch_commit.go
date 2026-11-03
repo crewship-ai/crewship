@@ -490,6 +490,13 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 						return e
 					}
 				}
+				// The pre-engine probe only estimated from the current checkpoint.
+				// Probe again with the prepared candidate (history row and document
+				// head) and its retained ledger payloads before persisting it; a
+				// refusal rolls back the whole batch (#4835).
+				if e = storageheadroom.Check(ctx, tx, candidateDiskBytes(c, candidate, checkpointMetadata)); e != nil {
+					return e
+				}
 				if e = s.saveCheckpoint(ctx, tx, request.Lease, stored.LastRevision, candidate, checkpointMetadata); e != nil {
 					return e
 				}
@@ -582,4 +589,15 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 		s.config.AfterCommit(BatchCommitEvent{Scope: request.Lease.Key, Result: eventResult})
 	}
 	return result, nil
+}
+
+// candidateDiskBytes is what persisting one saved change adds: the encoded
+// candidate in checkpoint history and in the document head, its metadata, and
+// the operation payloads retained in the change and operation ledgers.
+func candidateDiskBytes(c BatchChange, candidate, metadata []byte) int64 {
+	n := 2*int64(base64.StdEncoding.EncodedLen(len(candidate))) + int64(len(metadata))
+	for _, op := range c.Operations {
+		n += 2 * int64(len(op.Payload))
+	}
+	return n
 }

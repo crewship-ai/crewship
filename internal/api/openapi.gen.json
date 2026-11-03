@@ -118945,6 +118945,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -144696,6 +144714,24 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -154093,6 +154129,16 @@
             },
             "description": "Conflict"
           },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
           "429": {
             "content": {
               "application/json": {
@@ -154735,6 +154781,16 @@
               }
             },
             "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbookError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
           },
           "429": {
             "content": {
