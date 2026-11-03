@@ -9,6 +9,8 @@ const home = fs.mkdtempSync(path.join(os.tmpdir(), "prd-env-home-"))
 process.env.HOME = home
 process.env.USERPROFILE = home
 const { storageStatePath } = await import("./env.ts")
+// The config's own test runs in this file's CI step ("PRD acceptance runner tests").
+await import("./config.test.mjs")
 
 const run = (outputDir, email, origin = "https://pages.example.test") => ({
   origin,
