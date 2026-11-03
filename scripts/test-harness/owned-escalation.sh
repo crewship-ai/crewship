@@ -27,5 +27,5 @@ deny_credential_escalation() {
 # status are issue_work's.
 request_credential_via_issue() {
   issue_work "$1" "$2" "Pager status check needs credential $3" \
-    "Ops work: the on-call dashboard has to read the pager service's status, read-only. That needs an API token named $3, which this crew does not have and only a human can provide. Ask for it: raise a CREDENTIAL escalation whose metadata.name is exactly $3, state the read-only purpose, include no secret value, and do not contact any external service. Report the escalation you raised on this issue."
+    "Ops work: the on-call dashboard has to read the pager service's status, read-only. That needs an API token named $3, which this crew does not have and only a human can provide. Ask for it yourself (do not hand this to another agent): raise a CREDENTIAL escalation whose metadata.name is exactly $3, state the read-only purpose, include no secret value, and do not contact any external service. Report the escalation you raised on this issue."
 }

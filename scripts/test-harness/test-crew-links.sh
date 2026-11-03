@@ -26,6 +26,7 @@
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$HERE/lib.sh"
+keep_failure_evidence  # #4874: keep transcripts of a failing run before the gauntlet reseed
 
 preflight
 
@@ -212,14 +213,18 @@ else
   neg_feed_ok=1
   if (( XLINK_HAVE_JQ == 1 )); then xlink_to_morgan_ids "$NEG" > "$neg_before" || neg_feed_ok=0; fi
 
-  # The same grounded hand-off, now with no link: the attempt must reach the
-  # server and be refused there ("crews are not connected",
-  # internal/api/assignments_run.go). A lead that never tries proves nothing
-  # about enforcement, so the refusal reason is required as well as the
-  # absence of any work for morgan.
+  # The same grounded hand-off, now with no link. The server refuses an
+  # unlinked /assign with "crews are not connected"
+  # (internal/api/assignments_run.go), but that 403 is not journaled and an
+  # assignment run's tool results are not stored as a chat, so the refusal
+  # itself leaves no server record to assert on. What the records can prove:
+  # the lead's run on this issue ran to an end, and no work for morgan landed.
+  # A run that never ended tests nothing, so it fails both checks. The lead's
+  # own account of the refusal is printed as information only.
   wait_agent_idle alex
+  neg_ran=1
   neg_work="$(issue_work engineering alex "Ops confirmation needed ($NEG)" \
-    "Engineering needs the Ops lead to confirm on-call readiness. As engineering lead, assign this to morgan on the ops crew through /assign with crew \"ops\", task text: 'Confirm on-call readiness for ${NEG}.' If the assignment is refused, report the exact error message on this issue.")" || true
+    "Engineering needs the Ops lead to confirm on-call readiness. As engineering lead, assign this to morgan on the ops crew through /assign with crew \"ops\", task text: 'Confirm on-call readiness for ${NEG}.' If the assignment is refused, report the exact error message on this issue.")" || neg_ran=0
   neg_ident="${neg_work%% *}"
   neg_reply=""
   [[ -n "$neg_ident" ]] && neg_reply="$(cs issue runs "$neg_ident" --format json 2>/dev/null \
@@ -232,7 +237,11 @@ else
   # Same evidence rule as section 3: a correct refusal may quote ${NEG}-OK,
   # so the reply text cannot decide. Without jq there is no artifact to read,
   # and the reply is the only (weaker) signal left.
-  if (( XLINK_HAVE_JQ == 1 )); then
+  if (( neg_ran == 0 )); then
+    _fail "the lead's unlinked hand-off issue ran to an end" "${neg_work:-the issue could not be created or started}"
+    _fail "an unlinked crew cannot be delegated to" "the hand-off run never ended, so the refusal was not exercised"
+  elif (( XLINK_HAVE_JQ == 1 )); then
+    _pass "the lead's unlinked hand-off issue ran to an end"
     xlink_to_morgan_ids "$NEG" > "$neg_after" || neg_feed_ok=0
     if (( neg_feed_ok == 0 )); then
       _fail "an unlinked crew cannot be delegated to" "\`crewship activity\` could not be read, so the refusal is unproven"
@@ -246,12 +255,13 @@ else
   fi
   rm -f "$neg_before" "$neg_after"
   if printf '%s' "$neg_reply" | grep -qiF "not connected"; then
-    _pass "the unlinked hand-off was attempted and refused by the link check"
+    info "the lead reports the link refusal on ${neg_ident} (agent text, not server evidence)"
   else
-    _fail "the unlinked hand-off was attempted and refused by the link check" \
-      "issue ${neg_ident:-not created} shows no 'crews are not connected' refusal, so enforcement was not exercised"
+    info "the lead's run on ${neg_ident:-the issue} does not quote the link refusal"
   fi
-  if (( morgan_after2 > morgan_before2 )); then
+  if (( neg_ran == 0 )); then
+    _fail "no work reaches an unlinked crew" "the hand-off run never ended, so nothing was tested"
+  elif (( morgan_after2 > morgan_before2 )); then
     _fail "no work reaches an unlinked crew" "a chat for morgan appeared with no link in place ($morgan_before2 → $morgan_after2)"
   else
     _pass "no work reaches an unlinked crew"

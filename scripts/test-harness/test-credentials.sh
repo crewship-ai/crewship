@@ -15,6 +15,7 @@
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$HERE/lib.sh"
+keep_failure_evidence  # #4874: keep transcripts of a failing run before the gauntlet reseed
 
 CRED_NAME="HARNESS_$(nonce CRED | tr '-' '_')"   # env-var-safe unique name
 

@@ -141,6 +141,16 @@ ask_agent() {
 # (docs/cli/issue.mdx). The issue is a durable, traceable record of who asked
 # for what; the run it starts is attributed to it (`crewship issue runs`).
 # Negative scenarios keep the bare prompt on purpose — see each suite.
+#
+# Which run is the agent's own: a non-lead delegate gets a mission task
+# (source=task). A LEAD delegate gets no task — `issue start` triggers lead
+# planning (internal/api/issue_handler_workflow.go), dispatched with
+# LeadPlanning=true so it runs with LEAD privileges and the crew sidecar
+# (internal/orchestrator/mission_tasks_planning.go). Only that run can write
+# CREW.md or /assign across a link (a task run is role AGENT,
+# internal/api/assignments_run.go), and `issue runs` labels it
+# source=delegation. So the run that counts is the one whose agent_slug is the
+# delegate, with source task or delegation.
 
 declare -a _HARNESS_ISSUES=()
 
@@ -163,7 +173,7 @@ issue_work() {
   while (( waited < timeout )); do
     runs="$(cs issue runs "$ident" --format json 2>/dev/null)" || runs="[]"
     status="$(printf '%s' "$runs" | jq -r --arg a "$agent" '
-      [ .[] | select((.source // "task") == "task" and .agent_slug == $a) ]
+      [ .[] | select(.agent_slug == $a and ((.source // "task") == "task" or .source == "delegation")) ]
       | map(select(.status == "COMPLETED" or .status == "FAILED" or .status == "CANCELLED"))
       | (.[0].status // empty)' 2>/dev/null)"
     if [[ -n "$status" ]]; then printf '%s %s\n' "$ident" "$status"; return 0; fi
@@ -187,7 +197,7 @@ issue_work() {
 # the variable is unset.
 
 _HARNESS_SUITE="$(basename "${BASH_SOURCE[1]:-$0}" .sh)"
-_HARNESS_T0="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+_HARNESS_T0="$(date -u +%Y-%m-%dT%H:%M:%S)"  # no zone suffix: compares below any fractional/Z form of the same second
 declare -a _TRACKED_AGENTS=()
 declare -a _HARNESS_SECRETS=()
 
@@ -204,16 +214,35 @@ _redact() {
   local i=0 v
   if (( ${#_HARNESS_SECRETS[@]} == 0 )); then cat; return; fi
   for v in "${_HARNESS_SECRETS[@]}"; do i=$((i+1)); export "_HARNESS_SECRET_$i=$v"; done
+  # One left-to-right pass: at the earliest match the longest value wins, and
+  # the scan resumes after it, so a value that is a prefix of another, or a
+  # substring of "[REDACTED]", can neither leak a tail nor loop.
   awk -v n="$i" 'BEGIN { for (k = 1; k <= n; k++) s[k] = ENVIRON["_HARNESS_SECRET_" k] }
-    { for (k = 1; k <= n; k++) while ((p = index($0, s[k])) > 0)
-        $0 = substr($0, 1, p - 1) "[REDACTED]" substr($0, p + length(s[k])); print }'
+    { line = $0; out = ""
+      while (line != "") {
+        best = 0; bp = 0
+        for (k = 1; k <= n; k++) if (s[k] != "") {
+          p = index(line, s[k])
+          if (p > 0 && (bp == 0 || p < bp || (p == bp && length(s[k]) > length(s[best])))) { bp = p; best = k }
+        }
+        if (!best) { out = out line; break }
+        out = out substr(line, 1, bp - 1) "[REDACTED]"; line = substr(line, bp + length(s[best]))
+      }
+      print out }'
   for ((v = 1; v <= i; v++)); do unset "_HARNESS_SECRET_$v"; done
 }
 
+# keep_failure_evidence — opt a suite in to preserve_evidence. Opt-in, not a
+# default: suites that handle real tokens (test-secretless-github.sh,
+# test-realworld-github.sh) keep them in their own arrays, and a failing run of
+# exactly those suites is when a token may sit in a transcript.
+_HARNESS_KEEP_EVIDENCE=0
+keep_failure_evidence() { _HARNESS_KEEP_EVIDENCE=1; }
+
 preserve_evidence() {
   local root="${HARNESS_DETAIL_DIR:-}" dest a list id ident limit="${HARNESS_DETAIL_CHATS:-12}"
+  (( _HARNESS_KEEP_EVIDENCE == 1 )) || return 0
   [[ -n "$root" && -d "$root" ]] || return 0
-  have jq || return 0
   dest="$root/$_HARNESS_SUITE"
   (
     umask 077
@@ -222,18 +251,21 @@ preserve_evidence() {
       printf 'suite: %s\nstarted: %s\nserver: %s\nfailed:\n' "$_HARNESS_SUITE" "$_HARNESS_T0" "$SERVER"
       printf '  - %s\n' ${_FAILED_NAMES[@]+"${_FAILED_NAMES[@]}"}
     } | _redact >"$dest/failures.txt"
+    have jq || exit 0
     for a in ${_TRACKED_AGENTS[@]+"${_TRACKED_AGENTS[@]}"}; do
+      [[ "$a" =~ ^[A-Za-z0-9_-]+$ ]] || continue
       list="$(cs chat list "$a" --limit "$limit" --format json 2>/dev/null)" || continue
       printf '%s\n' "$list" | _redact >"$dest/chats-$a.json"
       for id in $(printf '%s' "$list" | jq -r --arg t0 "$_HARNESS_T0" \
-          '.[] | select((.created_at // "") >= $t0) | .id' 2>/dev/null); do
+          '.[] | select((.created_at // "" | sub(" "; "T")) >= $t0) | .id' 2>/dev/null); do
         [[ "$id" =~ ^[A-Za-z0-9_-]+$ ]] || continue
         cs chat "$id" --parts --no-markdown 2>&1 | _redact >"$dest/chat-$a-$id.txt"
       done
     done
     for ident in ${_HARNESS_ISSUES[@]+"${_HARNESS_ISSUES[@]}"}; do
       [[ "$ident" =~ ^[A-Za-z0-9_-]+$ ]] || continue
-      { cs issue get "$ident" --format json; cs issue runs "$ident" --format json; } 2>&1 \
+      { cs issue get "$ident" --format json; cs issue runs "$ident" --format json
+        cs issue sessions "$ident" --format json; } 2>&1 \
         | _redact >"$dest/issue-$ident.json"
     done
   )
