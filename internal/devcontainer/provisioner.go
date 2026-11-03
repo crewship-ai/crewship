@@ -253,6 +253,11 @@ type Provisioner struct {
 	// Short TTL so disk reclaim or manual rmi is reflected quickly.
 	imageListMu    sync.Mutex
 	imageListCache imageListCacheEntry
+
+	// cacheTagLocks serialises provisions of one crewship-cache:<hash> tag
+	// (see lockCacheTag). Entries exist only while held or awaited.
+	cacheTagMu    sync.Mutex
+	cacheTagLocks map[string]*cacheTagLock
 }
 
 // TempContainerLabelKey and TempContainerLabelValue identify temporary
@@ -472,6 +477,14 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 
 	hash := configHash(baseImage, cfg, miseConfig, dockerfileGenFingerprint(baseImage, cfg)+requiredBinariesHashSalt(o.requiredBinaries))
 	tag := cacheImageTag(hash)
+
+	// One provision per tag at a time; the cache check below runs under the
+	// lock, so a caller that waited finds the first one's image (#4816).
+	unlockTag, err := p.lockCacheTag(ctx, tag)
+	if err != nil {
+		return fail(ProvStepStart, err)
+	}
+	defer unlockTag()
 
 	// 1. Check cache.
 	exists, err := p.imageExists(ctx, tag)
