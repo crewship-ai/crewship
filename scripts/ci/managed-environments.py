@@ -88,6 +88,7 @@ HOST_TESTS = {
     },
     'internal/server': {
         'TestHostChatRetainedOutputSettlesSameAttemptAfterUnknownReturn',
+        'TestHostChatLeaseExpiredRetainedFailureSettlesOnlyConfirmedEnd',
         'TestLegacyRetainedMetadataCannotInventCompletion',
         'TestRetainedCompletionAcknowledgesUntimedStagedResultWithReceipt',
         'TestRetainedCompletionRejectsStagedTimestampMismatch',

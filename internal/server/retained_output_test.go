@@ -28,6 +28,16 @@ func seedHostOutput(t *testing.T, s *Server, runID string, output ...string) orc
 // finished is false: the execution is still running as far as it shows.
 func seedHostOutputWith(t *testing.T, s *Server, runID, text string, finished bool) orchestrator.RunState {
 	t.Helper()
+	if finished {
+		return seedHostOutputEnded(t, s, runID, text, 0, "exited")
+	}
+	return seedHostOutputEnded(t, s, runID, text, 0, "")
+}
+
+// seedHostOutputEnded records the capture's own end: an empty reason leaves
+// the source without a terminal record.
+func seedHostOutputEnded(t *testing.T, s *Server, runID, text string, code int, reason string) orchestrator.RunState {
+	t.Helper()
 	if uid := os.Geteuid(); os.Getenv("CREWSHIP_HOST_CAPTURE_REQUIRE_UNPRIVILEGED") == "1" && (uid == 0 || uid == 1001 || uid == 1002) {
 		t.Fatal("required capture qualification needs distinct unprivileged host UID")
 	}
@@ -73,8 +83,8 @@ func seedHostOutputWith(t *testing.T, s *Server, runID, text string, finished bo
 	if _, err := store.Write("stdout", []byte(text)); err != nil {
 		t.Fatal(err)
 	}
-	if finished {
-		if err := store.Finish(0, "exited"); err != nil {
+	if reason != "" {
+		if err := store.Finish(code, reason); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -430,5 +440,66 @@ func TestHostChatRetainedOutputSettlesSameAttemptAfterUnknownReturn(t *testing.T
 	}
 	if _, _, err = store.BeginHostChat(t.Context(), next); err != nil {
 		t.Fatalf("actual protected successful exit kept capacity: %v", err)
+	}
+}
+
+// #4820 review: after a server restart parks a host chat turn by lease
+// expiry, its capture may show a forced end (cancel, output limit). The main
+// process is gone, but what it started may still run in the live crew
+// container; settling would free the agent and a server slot under them. A
+// forced end waits for runtime absence or a stop receipt, while a process that
+// exited on its own settles the turn as failed and gives the slot back.
+func TestHostChatLeaseExpiredRetainedFailureSettlesOnlyConfirmedEnd(t *testing.T) {
+	for _, tc := range []struct {
+		name, reason string
+		code         int
+		settles      bool
+	}{
+		{"exited-nonzero", "exited", 1, true},
+		{"cancelled-runtime-live", "execution_cancelled", 137, false},
+		{"output-limit-runtime-live", "output_limit", 137, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestServerWithDeps(t)
+			mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('retained-ws','Recovery','retained-ws')`)
+			mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('retained-agent','retained-ws','Agent','retained','RUNNING')`)
+			clock := time.Now().UTC()
+			store := work.NewStore(s.db).WithClock(func() time.Time { return clock })
+			request := work.HostChatRequest{RunID: "msg_restarted_" + tc.name, WorkspaceID: "retained-ws", AgentID: "retained-agent", ChatID: "chat", UserID: "user", TriggerMessageID: "message"}
+			if _, _, err := store.BeginHostChat(t.Context(), request); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.HostChatPhase(t.Context(), request.RunID, "request"); err != nil {
+				t.Fatal(err)
+			}
+			clock = clock.Add(work.LeaseDuration + time.Second)
+			if out, err := store.RecoverExpiredLeases(t.Context()); err != nil || len(out.Reconciliation) != 1 {
+				t.Fatalf("lease recovery: %+v %v", out, err)
+			}
+			run := seedHostOutputEnded(t, s, request.RunID, "partial\n", tc.code, tc.reason)
+			err := s.projectRetainedOutput(t.Context(), run)
+			binding, _, bErr := store.HostChatAttempt(t.Context(), run.ID)
+			if bErr != nil {
+				t.Fatal(bErr)
+			}
+			next := request
+			next.RunID, next.TriggerMessageID = "msg_next_"+tc.name, "next-message"
+			_, _, admitErr := store.BeginHostChat(t.Context(), next)
+			if tc.settles {
+				if err != nil || binding.State != work.StateFailed {
+					t.Fatalf("exited capture left %s: %v", binding.State, err)
+				}
+				if admitErr != nil {
+					t.Fatalf("settled failure still holds its agent: %v", admitErr)
+				}
+				return
+			}
+			if !errors.Is(err, orchestrator.ErrHostCaptureUnconfirmed) || binding.State != work.StateNeedsReconciliation {
+				t.Fatalf("forced end with live runtime settled: state=%s err=%v", binding.State, err)
+			}
+			if !errors.Is(admitErr, work.ErrNoWork) {
+				t.Fatalf("unconfirmed forced end released its agent: %v", admitErr)
+			}
+		})
 	}
 }
