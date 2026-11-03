@@ -249,8 +249,13 @@ the Design:
    - **write** can change the canvas, save versions and restore them.
 4. To remove access, click **Revoke** next to the grant.
 
-Only the owner or a workspace administrator can change access. Changes apply
-to new requests immediately. A person whose access is removed is disconnected
+Only the owner or a workspace administrator can change access. Workspace
+owners and admins can also open and edit every Design, including a private
+one nobody shared with them. Each time, an entry with the action
+`design.workspace_admin_accessed` is written to the workspace audit log. The
+same audited read applies to every other artifact type (see
+[Sharing and access](/guides/artifacts/sharing-and-access#workspace-owners-and-admins)).
+Changes to access apply to new requests immediately. A person whose access is removed is disconnected
 from the open canvas within a few seconds. Grants for agents do not give an agent permission to run tasks; that is
 controlled separately.
 

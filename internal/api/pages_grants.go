@@ -558,7 +558,7 @@ func (h *PageHandler) grantPage(w http.ResponseWriter, r *http.Request, wsID str
 // grant is written and once every time it is read.
 func (h *PageHandler) mayAdministerGrants(ctx context.Context, wsID, userID, role string, rec *pageRecord) bool {
 	if rec.PrivateAudience {
-		return privatePageViewer(rec, &pageViewer{UserID: userID, Role: role})
+		return privatePageCustodian(rec, &pageViewer{UserID: userID, Role: role})
 	}
 	if canRole(role, "manage") {
 		return true

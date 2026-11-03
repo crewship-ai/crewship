@@ -216,7 +216,14 @@ func (h *PageHandler) artifactProjectComments(r *http.Request, k artifacts.Versi
 		if user == nil {
 			return errArtifactProjectAccess
 		}
+		adminRead := false
 		if owner != user.ID {
+			var e error
+			if adminRead, e = h.artifactAdminReader(ctx, k.WorkspaceID, user.ID, false); e != nil {
+				return e
+			}
+		}
+		if owner != user.ID && !adminRead {
 			sharedOnly = true
 			rec, e := h.loadPageForRead(ctx, k.WorkspaceID, "@"+k.PageID)
 			if e != nil {

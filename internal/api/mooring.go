@@ -79,27 +79,38 @@ func (m *mooringHTTP) begin(r *http.Request) (*sql.Tx, error) {
 	return tx, nil
 }
 func (m *mooringHTTP) human(r *http.Request, tx *sql.Tx, write bool) (appengine.Key, string, error) {
+	k, actor, _, e := m.humanRecord(r, tx, write)
+	return k, actor, e
+}
+
+// humanRecord is human plus the Page record authorized inside tx. A read keeps
+// that record as the custodian of the content it releases: the audit decision
+// must use the owner the content was read under, never a later lookup (a
+// custody transfer to the reader after the read would otherwise skip it).
+func (m *mooringHTTP) humanRecord(r *http.Request, tx *sql.Tx, write bool) (appengine.Key, string, *pageRecord, error) {
 	k := appengine.Key{WorkspaceID: WorkspaceIDFromContext(r.Context())}
 	if !gridcraftHumanCaller(r) {
-		return k, "", appengine.ErrForbidden
+		return k, "", nil, appengine.ErrForbidden
 	}
 	if e := gridcraftCredential(r, tx, write); e != nil {
-		return k, "", e
+		return k, "", nil, e
 	}
 	column, ref := "slug", r.PathValue("slug")
 	if strings.HasPrefix(ref, "@") {
 		column, ref = "id", strings.TrimPrefix(ref, "@")
 	}
 	if tx.QueryRowContext(r.Context(), `SELECT id FROM pages WHERE workspace_id=? AND `+column+`=?`, k.WorkspaceID, ref).Scan(&k.PageID) != nil {
-		return k, "", appengine.ErrNotFound
+		return k, "", nil, appengine.ErrNotFound
 	}
 	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
 	user := UserFromContext(ctx)
 	rec, access, e := m.workbook.pages.workbookHumanAccess(ctx, k.WorkspaceID, k.PageID, user.ID, write)
-	if e != nil || rec == nil || !rec.PrivateAudience || access != workbookOwner || rec.HasWorkbook {
-		return k, "", appengine.ErrForbidden
+	// A read also admits the audited workspace OWNER/ADMIN (PRD §5); the
+	// caller records that audit before releasing the document.
+	if e != nil || rec == nil || !rec.PrivateAudience || rec.HasWorkbook || access != workbookOwner && (write || access != workbookAuditor) {
+		return k, "", nil, appengine.ErrForbidden
 	}
-	return k, "user:" + user.ID, nil
+	return k, "user:" + user.ID, rec, nil
 }
 func (m *mooringHTTP) create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -225,7 +236,7 @@ func (m *mooringHTTP) read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	k, _, e := m.human(r, tx, false)
+	k, _, rec, e := m.humanRecord(r, tx, false)
 	if e != nil {
 		mooringError(w, e)
 		return
@@ -233,6 +244,13 @@ func (m *mooringHTTP) read(w http.ResponseWriter, r *http.Request) {
 	manifest, state, e := m.document(r.Context(), tx, k)
 	if e != nil {
 		mooringError(w, e)
+		return
+	}
+	// Release the read snapshot before the durable audit (one-connection safe).
+	// The audit decision uses rec, the custodian captured in that snapshot.
+	_ = tx.Rollback()
+	privateReadAuditSeam(k.PageID)
+	if !m.workbook.pages.auditPrivateOwnerAccess(w, r, rec) {
 		return
 	}
 	editor := map[string]string{}

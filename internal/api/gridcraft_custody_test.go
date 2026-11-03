@@ -251,7 +251,9 @@ func TestGridCraftWorkbookCustodyOnlyForDepartedOwners(t *testing.T) {
 		if n := transfers(t, f); n != 0 {
 			t.Fatalf("refused custody transfers wrote %d audit rows", n)
 		}
-		wantCode(t, f.do(f.wsAdmin, "GET", read, ""), 404, "ADMIN reads a live member's workbook")
+		// PRD §5 (#4825): reading is the audited administrator read; custody,
+		// transfer and deletion stay refused above and below.
+		wantCode(t, f.do(f.wsAdmin, "GET", read, ""), 200, "ADMIN audited read of a live member's workbook")
 		if code := f.do(f.wsAdmin, "DELETE", "/api/v1/pages/custody-book"+q, "").Code; code != 403 && code != 404 {
 			t.Fatalf("ADMIN DELETE of a live member's workbook = %d, want refusal", code)
 		}

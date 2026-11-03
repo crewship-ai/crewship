@@ -293,7 +293,7 @@ func (h *PageHandler) isPageOwner(ctx context.Context, wsID, userID string, rec 
 // mayEditSpec answers the `write` verb: add, remove and re-arrange panels.
 func (h *PageHandler) mayEditSpec(ctx context.Context, wsID, userID, role string, rec *pageRecord) bool {
 	if rec.PrivateAudience {
-		return privatePageViewer(rec, &pageViewer{UserID: userID, Role: role})
+		return privatePageCustodian(rec, &pageViewer{UserID: userID, Role: role})
 	}
 	if canRole(role, "manage") {
 		return true
@@ -350,7 +350,7 @@ func (h *PageHandler) mayEditSpec(ctx context.Context, wsID, userID, role string
 func (h *PageHandler) mayProduce(ctx context.Context, wsID, userID, role string, rec *pageRecord, panel *panelRecord) (bool, string) {
 	// Read visibility must never turn role management or an ordinary legacy
 	// produce grant into control of another human's private output.
-	if rec.PrivateAudience && !privatePageViewer(rec, &pageViewer{UserID: userID, Role: role}) {
+	if rec.PrivateAudience && !privatePageCustodian(rec, &pageViewer{UserID: userID, Role: role}) {
 		return false, "private output production requires its custodian or workspace OWNER"
 	}
 	viewer, err := h.loadViewer(ctx, wsID, userID)
