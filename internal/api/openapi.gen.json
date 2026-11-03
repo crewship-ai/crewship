@@ -146139,6 +146139,10 @@
                       },
                       "type": "array"
                     },
+                    "can_dispatch": {
+                      "description": "Whether the dispatch endpoint's panel gate admits this caller. False for a workspace ADMIN reading another member's private Page: the actions are readable (audited) but dispatch is refused.",
+                      "type": "boolean"
+                    },
                     "page": {
                       "type": "string"
                     },
@@ -146205,6 +146209,24 @@
               }
             },
             "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "security": [

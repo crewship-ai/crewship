@@ -48,3 +48,10 @@ it("bounds history reads and binds them to the mounted publication", async () =>
   await expect(actions.handleRequest({ id: 3, method: "getPanelHistory", params: { panelId: "mysql", limit: 21 } }, signal)).rejects.toThrow(/limit/)
   expect(api).toHaveBeenCalledTimes(1)
 })
+it("refuses without prompting when the reader cannot dispatch", async () => {
+  api.mockResolvedValueOnce(new Response(JSON.stringify({ can_dispatch: false, actions: [{ id: "check", kind: "call", label: "Check MySQL", routine: "check-mysql" }] })))
+  render(<Harness />)
+  await expect(actions.handleRequest(request, new AbortController().signal)).rejects.toThrow(/cannot run its actions/)
+  expect(screen.queryByRole("dialog")).toBeNull()
+  expect(api).toHaveBeenCalledTimes(1)
+})

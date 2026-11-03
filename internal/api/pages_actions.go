@@ -208,6 +208,13 @@ var errActionNotVisible = errors.New("pages: panel not visible to this caller")
 // resolvePanelForCaller loads the page and the named panel, and refuses with
 // errActionNotVisible when the caller may not see it.
 //
+// It is the DISPATCH resolver: the page is loaded through loadPage, the strict
+// gate, so a private Page admits only its custodian and the workspace OWNER
+// (privatePageCustodian). DispatchAction, DispatchApplicationAction,
+// ApplicationActionStatus and the restricted catalog stay on it. Panel READS
+// use resolvePanelForRead instead; an administrator's read of private output
+// never becomes dispatch (PRD §5, #4867).
+//
 // sql.ErrNoRows means "no such page or panel". Both that and
 // errActionNotVisible become the same 404 at the handler, which is the point:
 // the two are not distinguishable from outside, so a sealed panel cannot be
@@ -217,6 +224,28 @@ func (h *PageHandler) resolvePanelForCaller(ctx context.Context, wsID, userID, s
 	if err != nil {
 		return nil, nil, err
 	}
+	return h.resolvePanelOnPage(ctx, wsID, userID, rec, panelID)
+}
+
+// resolvePanelForRead is resolvePanelForCaller for the panel READ surfaces
+// (declared actions, application panel history). The page is loaded through
+// loadPageForRead, so a private Page admits the PRD §5 read audience: its
+// custodian and a live, trusted workspace OWNER or ADMIN. The caller must
+// audit the read (auditPanelRead) before releasing anything. It grants no
+// dispatch: panelDispatchAllowed answers that through the strict resolver.
+// The not-found and not-visible outcomes are the same as
+// resolvePanelForCaller's, so the 404 stays an indistinguishable answer.
+func (h *PageHandler) resolvePanelForRead(ctx context.Context, wsID, userID, slug, panelID string) (*pageRecord, *panelRecord, error) {
+	rec, err := h.loadPageForRead(ctx, wsID, slug)
+	if err != nil {
+		return nil, nil, err
+	}
+	return h.resolvePanelOnPage(ctx, wsID, userID, rec, panelID)
+}
+
+// resolvePanelOnPage finds panelID on an already-authorized page and applies
+// panel visibility (canSeePanel).
+func (h *PageHandler) resolvePanelOnPage(ctx context.Context, wsID, userID string, rec *pageRecord, panelID string) (*pageRecord, *panelRecord, error) {
 	panels, err := h.loadPanels(ctx, wsID, rec.ID)
 	if err != nil {
 		return nil, nil, err
@@ -239,6 +268,22 @@ func (h *PageHandler) resolvePanelForCaller(ctx context.Context, wsID, userID, s
 		return nil, nil, errActionNotVisible
 	}
 	return rec, panel, nil
+}
+
+// panelDispatchAllowed reports whether the dispatch resolver would admit this
+// caller to the panel that resolvePanelForRead already admitted. The two
+// loaders differ only for a private Page, so any other page answers true
+// without a second load. It is the panel gate only: DispatchAction still runs
+// its remaining gates (action kind, routine, inputs).
+func (h *PageHandler) panelDispatchAllowed(ctx context.Context, wsID, userID string, rec *pageRecord, panelID string) (bool, error) {
+	if !rec.PrivateAudience {
+		return true, nil
+	}
+	_, _, err := h.resolvePanelForCaller(ctx, wsID, userID, "@"+rec.ID, panelID)
+	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, errActionNotVisible) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // storedPanelSpec reads the panel's declaration out of pages.spec_json.
@@ -270,7 +315,10 @@ func (h *PageHandler) storedPanelSpec(ctx context.Context, pageID, panelID strin
 // It exists so a client never has to guess what a panel offers, and so the CLI
 // can show an operator the ids they may dispatch. It reads the same stored spec
 // the dispatch endpoint resolves against — a listing that came from anywhere
-// else could offer a button the dispatcher would then refuse.
+// else could offer a button the dispatcher would then refuse. can_dispatch
+// says whether the panel gate of that dispatcher admits this caller: false for
+// a workspace ADMIN reading another member's private Page, who may read the
+// declared actions (PRD §5, audited) but not run them.
 func (h *PageHandler) ListPanelActions(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -280,9 +328,17 @@ func (h *PageHandler) ListPanelActions(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
 	slug, panelID := r.PathValue("slug"), r.PathValue("panelId")
 
-	rec, panel, err := h.resolvePanelForCaller(r.Context(), wsID, user.ID, slug, panelID)
+	// A read: the PRD §5 audience (custodian, OWNER, ADMIN) of a private Page
+	// reads its declared actions, audited. Whether this caller may also
+	// dispatch them is a separate answer from the strict resolver.
+	rec, panel, err := h.resolvePanelForRead(r.Context(), wsID, user.ID, slug, panelID)
 	if err != nil {
 		h.replyPanelLookupError(w, err, slug, panelID)
+		return
+	}
+	canDispatch, err := h.panelDispatchAllowed(r.Context(), wsID, user.ID, rec, panelID)
+	if err != nil {
+		replyInternalError(w, h.logger, "resolve page panel dispatch authority", err)
 		return
 	}
 	spec, err := h.storedPanelSpec(r.Context(), rec.ID, panelID)
@@ -294,21 +350,22 @@ func (h *PageHandler) ListPanelActions(w http.ResponseWriter, r *http.Request) {
 	for i := range spec.Actions {
 		out = append(out, actionToWire(&spec.Actions[i]))
 	}
-	if !h.annotateApplicationRoutines(w, r, rec, out) {
+	if !h.annotateApplicationRoutines(w, r, rec, out, canDispatch) {
 		return
 	}
 	if !h.auditPanelRead(w, r, rec, panel) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"page":    rec.Slug,
-		"panel":   panelID,
-		"actions": out,
+		"page":         rec.Slug,
+		"panel":        panelID,
+		"actions":      out,
+		"can_dispatch": canDispatch,
 	})
 }
 
 // replyPanelLookupError collapses "no such page", "no such panel" and "not
-// yours to see" onto one 404. See resolvePanelForCaller.
+// yours to see" onto one 404. See resolvePanelForCaller and resolvePanelForRead.
 func (h *PageHandler) replyPanelLookupError(w http.ResponseWriter, err error, slug, panelID string) {
 	if errors.Is(err, sql.ErrNoRows) || errors.Is(err, errActionNotVisible) {
 		replyError(w, http.StatusNotFound, fmt.Sprintf("no panel %q on page %q", panelID, slug))

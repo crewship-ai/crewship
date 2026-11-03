@@ -92,9 +92,11 @@ var pageActionsCmd = &cobra.Command{
 
 The list comes from the page's stored spec — the same list the server
 resolves a click against — so what you see here is exactly what can be
-dispatched. Only "call" actions reach the server; a "link" navigates, a
-"toggle" is client-side panel state, and a "custom" action resolves to a
-handler built into the web client.`,
+dispatched. A workspace admin may read the actions of another member's
+private Page without being able to dispatch them; the listing then says so
+(can_dispatch: false in machine formats). Only "call" actions reach the
+server; a "link" navigates, a "toggle" is client-side panel state, and a
+"custom" action resolves to a handler built into the web client.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		slug, panel, err := splitPagePanelRef(args[0])
@@ -125,7 +127,8 @@ handler built into the web client.`,
 			return pageEmitMachine(f, body, "{}")
 		}
 		var doc struct {
-			Actions []pageActionJSON `json:"actions" yaml:"actions"`
+			Actions     []pageActionJSON `json:"actions" yaml:"actions"`
+			CanDispatch *bool            `json:"can_dispatch" yaml:"can_dispatch"`
 		}
 		if err := json.Unmarshal(body, &doc); err != nil {
 			return fmt.Errorf("decode response: %w", err)
@@ -142,12 +145,14 @@ handler built into the web client.`,
 			fmt.Println("Actions are declared in the page document, never at click time — see docs/cli/page.")
 			return nil
 		}
-		printPageActions(slug, panel, doc.Actions)
+		// An older server omits can_dispatch; only an explicit false
+		// withholds the dispatch hint.
+		printPageActions(slug, panel, doc.Actions, doc.CanDispatch == nil || *doc.CanDispatch)
 		return nil
 	},
 }
 
-func printPageActions(slug, panel string, actions []pageActionJSON) {
+func printPageActions(slug, panel string, actions []pageActionJSON, canDispatch bool) {
 	f := newFormatter()
 	rows := make([][]string, 0, len(actions))
 	for _, a := range actions {
@@ -167,6 +172,12 @@ func printPageActions(slug, panel string, actions []pageActionJSON) {
 		return
 	}
 	fmt.Println()
+	if !canDispatch {
+		// A workspace admin reading another member's private Page: the
+		// actions are readable, but `page action` would be refused.
+		fmt.Println("You can read these actions but not dispatch them: on a private Page only its owner and the workspace owner can.")
+		return
+	}
 	fmt.Printf("Dispatch one:  crewship page action %s/%s <id> [--input k=v]\n", slug, panel)
 }
 

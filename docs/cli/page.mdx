@@ -711,6 +711,14 @@ the page's **stored spec** — the same list the server resolves a click against
 answers `404`, the same answer an unknown panel gives, so an action list is
 never an existence oracle for somebody else's crew.
 
+The response's `can_dispatch` says whether [`page action`](#crewship-page-action)
+would get past the panel gate for you. It is `false` for a workspace admin who
+reads another member's private Page: the admin reads the actions (and, through
+`crewship page project panel-history`, the panel's history), each read is
+written to the audit log as `artifact.private_owner_accessed`, but dispatching
+answers `404`. The table output then ends with a note instead of the dispatch
+hint. Only the Page's owner and the workspace owner dispatch on a private Page.
+
 Only `call` actions reach the server. A `link` navigates to an internal entity
 (`issue`, `run`, `page`, `agent`) and the renderer builds the address — there is
 no URL field anywhere in the schema and there will not be one. A `toggle` is
