@@ -40,7 +40,7 @@ func (o *Orchestrator) SettleRetainedRunUnprojected(ctx context.Context, run Run
 		return fmt.Errorf("%w: retained source has not ended", ErrHostCaptureUnconfirmed)
 	}
 	if snapshot.Result.Reason != "exited" && !o.forcedHostEndConfirmed(ctx, run, snapshot) {
-		return fmt.Errorf("%w: forced process end lacks whole-runtime absence", ErrHostCaptureUnconfirmed)
+		return fmt.Errorf("%w: forced process end lacks whole-runtime absence or a stop receipt", ErrHostCaptureUnconfirmed)
 	}
 	if o.RunLocallyOwned(run.ID) {
 		return fmt.Errorf("%w: local invocation still owns outcome", ErrHostCaptureUnconfirmed)

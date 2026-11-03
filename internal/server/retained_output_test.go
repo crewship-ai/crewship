@@ -453,11 +453,18 @@ func TestHostChatLeaseExpiredRetainedFailureSettlesOnlyConfirmedEnd(t *testing.T
 	for _, tc := range []struct {
 		name, reason string
 		code         int
+		receipt      bool // the provider's whole-tree stop receipt for this execution
 		settles      bool
 	}{
-		{"exited-nonzero", "exited", 1, true},
-		{"cancelled-runtime-live", "execution_cancelled", 137, false},
-		{"output-limit-runtime-live", "output_limit", 137, false},
+		{"exited-nonzero", "exited", 1, false, true},
+		{"cancelled-runtime-live", "execution_cancelled", 137, false, false},
+		{"output-limit-runtime-live", "output_limit", 137, false, false},
+		{"output-error-runtime-live", "output_error", 137, false, false},
+		// #4824: the output cap and a capture error stop the execution through
+		// the same provider stop as a cancellation, so its receipt settles them.
+		{"cancelled-stop-receipt", "execution_cancelled", 137, true, true},
+		{"output-limit-stop-receipt", "output_limit", 137, true, true},
+		{"output-error-stop-receipt", "output_error", 137, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newTestServerWithDeps(t)
@@ -477,6 +484,11 @@ func TestHostChatLeaseExpiredRetainedFailureSettlesOnlyConfirmedEnd(t *testing.T
 				t.Fatalf("lease recovery: %+v %v", out, err)
 			}
 			run := seedHostOutputEnded(t, s, request.RunID, "partial\n", tc.code, tc.reason)
+			if tc.receipt {
+				if err := runoutput.RecordHostStopConfirmed(filepath.Dir(run.Output.Directory), "actual-exec"); err != nil {
+					t.Fatal(err)
+				}
+			}
 			err := s.projectRetainedOutput(t.Context(), run)
 			binding, _, bErr := store.HostChatAttempt(t.Context(), run.ID)
 			if bErr != nil {
@@ -487,7 +499,7 @@ func TestHostChatLeaseExpiredRetainedFailureSettlesOnlyConfirmedEnd(t *testing.T
 			_, _, admitErr := store.BeginHostChat(t.Context(), next)
 			if tc.settles {
 				if err != nil || binding.State != work.StateFailed {
-					t.Fatalf("exited capture left %s: %v", binding.State, err)
+					t.Fatalf("%s capture left %s: %v", tc.reason, binding.State, err)
 				}
 				if admitErr != nil {
 					t.Fatalf("settled failure still holds its agent: %v", admitErr)
