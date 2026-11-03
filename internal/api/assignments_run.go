@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/crewship-ai/crewship/internal/dispatch"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -114,7 +115,13 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// independent of workspace_id above. A bound ws-A token could pass the
 	// workspace check while pointing crew_id/chat_id at ws-B rows, so prove
 	// both belong to the bound workspace before dispatching the sub-agent.
-	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
+	//
+	// crew_id is the TARGET crew (the sidecar forwards /assign's "crew"). A
+	// crew-bound token is about who is calling, so it is enforced on the
+	// assigning chat and agent below; the target only has to be in the bound
+	// workspace here, and the crew-link check further down decides whether
+	// the caller may reach it (#4845).
+	if !assertAssignmentTargetCrewDB(w, r, h.db, h.logger, body.CrewID) {
 		return
 	}
 	if !assertBoundChatWorkspaceDB(w, r, h.db, h.logger, body.ChatID) {
@@ -179,6 +186,17 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		if actorCrewID != "" {
 			assignerCrewID = actorCrewID
 		}
+	}
+
+	// A crew-bound token speaks for its own crew only (#1222, #4845): the chat
+	// it dispatches from and the agent it names as the actor must both be in
+	// that crew, or the crew link below would be evaluated for somebody else.
+	if boundCrew := InternalTokenCrewFromContext(r.Context()); boundCrew != "" && assignerCrewID != boundCrew {
+		h.logger.Warn("internal API assignment refused: caller outside the token's crew",
+			"token_crew", boundCrew, "assigner_crew", assignerCrewID, "chat_id", body.ChatID)
+		replyError(w, http.StatusForbidden,
+			"assigning chat or agent is outside the crew bound to the internal token")
+		return
 	}
 
 	// Delegation caps (#1754) — before anything is written, and before the
@@ -1908,3 +1926,28 @@ func (h *AssignmentHandler) assignmentCancelRequested(ctx context.Context, assig
 
 // List handles GET /api/v1/crews/{crewId}/assignments.
 // Returns all assignments for agents in this crew, sorted by created_at DESC.
+
+// assertAssignmentTargetCrewDB checks the TARGET crew of an internal
+// assignment against the token's workspace binding. Unlike
+// assertBoundCrewWorkspaceDB it does not require a crew-bound caller to name
+// its own crew: crossing a crew link is the point of a cross-crew /assign, and
+// Create enforces the caller's crew and the link separately (#4845). An
+// unknown or foreign crew gets the same 403, so this is not an existence
+// oracle. No-op for master-token callers.
+func assertAssignmentTargetCrewDB(w http.ResponseWriter, r *http.Request, db *sql.DB, logger *slog.Logger, crewID string) bool {
+	bound := InternalTokenWorkspaceFromContext(r.Context())
+	if bound == "" {
+		return true
+	}
+	var wsID string
+	err := db.QueryRowContext(r.Context(), `SELECT workspace_id FROM crews WHERE id = ?`, crewID).Scan(&wsID)
+	if err != nil || wsID != bound {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) && logger != nil {
+			logger.Error("resolve target crew workspace for token binding", "crew_id", crewID, "error", err)
+		}
+		replyError(w, http.StatusForbidden,
+			"crew does not belong to the workspace bound to the internal token")
+		return false
+	}
+	return true
+}
