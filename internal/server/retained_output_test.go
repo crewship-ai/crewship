@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -325,6 +326,35 @@ func TestRetainedOutputSettlesAfterRoutineTerminalWithoutExit(t *testing.T) {
 	}
 	if terminals != 1 {
 		t.Fatalf("terminal rows=%d, want the original one only", terminals)
+	}
+}
+
+// Without an exit code in the receipt, the terminal kind is the only fact left
+// to disagree with: a routine child recorded as failed must never be settled by
+// a captured successful exit, and must stay pending instead.
+func TestRetainedOutputRefusesKindConflictWithReceiptWithoutExit(t *testing.T) {
+	s := newTestServerWithDeps(t)
+	mustExec(t, s.db, `INSERT INTO workspaces(id,name,slug) VALUES('retained-ws','Recovery','retained-ws')`)
+	mustExec(t, s.db, `INSERT INTO agents(id,workspace_id,name,slug,status) VALUES('retained-agent','retained-ws','Agent','retained','RUNNING')`)
+	run := seedHostOutput(t, s, "run_retained_routine_failed")
+	entry := journal.RunTerminalReplay(run.ID, run.WorkspaceID, run.AgentID, run.StartedAt, journal.EntryRunFailed, false, nil, nil, nil)
+	if _, _, err := s.journalWriter.EmitReplaySync(t.Context(), entry); err != nil {
+		t.Fatal(err)
+	}
+	err := s.projectRetainedOutput(t.Context(), run)
+	if err == nil || !strings.Contains(err.Error(), "conflicts with durable terminal receipt") {
+		t.Fatalf("failed receipt settled by a successful capture: %v", err)
+	}
+	raw, err := s.state.Get(t.Context(), "agent_runs", run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var current orchestrator.RunState
+	if err := json.Unmarshal(raw, &current); err != nil {
+		t.Fatal(err)
+	}
+	if current.Status != "running" || current.Output.Acknowledged {
+		t.Fatalf("kind-conflicting source settled: status=%s output=%+v", current.Status, current.Output)
 	}
 }
 
