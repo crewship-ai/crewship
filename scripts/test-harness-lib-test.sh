@@ -196,33 +196,49 @@ xlink_cli() {
 #!/usr/bin/env bash
 state="${XLINK_STATE:?}"
 args=" $* "
-prompt="" save="" prev=""
+prompt="" save="" prev="" desc=""
 for a in "$@"; do
   [ "$prev" = "-p" ] && prompt="$a"
   [ "$prev" = "--save" ] && save="$a"
+  [ "$prev" = "--description" ] && desc="$a"
   prev="$a"
 done
 case "$args" in
   *" crew connect "*) rm -f "$state/unlinked"; exit 0 ;;
-  *" version "*|*" whoami "*|*" crew disconnect "*) exit 0 ;;
+  *" crew disconnect "*) : >"$state/unlinked"; exit 0 ;;
+  *" version "*|*" whoami "*) exit 0 ;;
   *" agent list "*|*" routine list "*) echo row; exit 0 ;;
   *" crew connections "*)
     [ -e "$state/unlinked" ] || echo "link cc_stub engineering ops bidirectional"; exit 0 ;;
   *" chat list "*) echo "[]"; exit 0 ;;
+  *" work list "*) echo '{"items":[]}'; exit 0 ;;
   *" activity "*)
     [ "$XLINK_MODE" = feed-down ] && exit 1
     [ -s "$state/landed" ] && cat "$state/landed"; exit 0 ;;
-  *" ask "*)
-    tag="$(printf '%s' "$prompt" | grep -oE 'XLINK(NEG)?-[A-Z0-9]+' | head -1)"
-    if [ -z "$tag" ]; then printf 'ops\n' >"$save"; exit 0; fi
-    case "$tag" in XLINKNEG-*) : >"$state/unlinked" ;; esac
+  *" issue create "*)
+    n=$(( $(cat "$state/n" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$state/n"
+    printf '%s' "$desc" >"$state/issue-ENG-$n"
+    printf '{"id":"iss_%s","identifier":"ENG-%s"}\n' "$n" "$n"; exit 0 ;;
+  *" issue start "*)
+    id="${args##* issue start }"; id="${id%% *}"
+    tag="$(grep -oE 'XLINK(NEG)?-[A-Z0-9]+' "$state/issue-$id" | head -1)"
     if { [ "$XLINK_MODE" = landed ] && [ ! -e "$state/unlinked" ]; } || [ "$XLINK_MODE" = leaky ]; then
-      printf '{"id":"a-%s","to_slug":"morgan","entry_type":"assignment.created","summary":"assigned alex → Morgan: reply %s-OK"}\n' "$tag" "$tag" >>"$state/landed"
-      printf 'Morgan answered.\n' >"$save"
+      printf '{"id":"a-%s","to_slug":"morgan","entry_type":"assignment.created","summary":"assigned alex → Morgan: Confirm on-call readiness for release %s"}\n' "$tag" "$tag" >>"$state/landed"
+      printf '{"id":"c-%s","to_slug":"morgan","entry_type":"assignment.completed","summary":"morgan completed: Confirm on-call readiness for release %s"}\n' "$tag" "$tag" >>"$state/landed"
+      printf 'Morgan confirmed.' >"$state/result-$id"
+    elif [ -e "$state/unlinked" ] && [ "$XLINK_MODE" != never-tries ]; then
+      printf 'Assignment refused: crews are not connected — create a crew connection first' >"$state/result-$id"
     else
-      printf "Refused by the platform: I could not get Morgan to reply '%s-OK'.\n" "$tag" >"$save"
+      printf "I could not get Morgan to reply %s-OK." "$tag" >"$state/result-$id"
     fi
     exit 0 ;;
+  *" issue runs "*)
+    id="${args##* issue runs }"; id="${id%% *}"
+    jq -nc --arg r "$(cat "$state/result-$id" 2>/dev/null)" '[{status:"COMPLETED",source:"task",agent_slug:"alex",result_summary:$r}]'
+    exit 0 ;;
+  *" issue comments "*|*" issue get "*) exit 0 ;;
+  *" ask "*)
+    printf 'ops\n' >"$save"; exit 0 ;;
 esac
 exit 0
 EOF
@@ -242,15 +258,19 @@ if command -v jq >/dev/null 2>&1; then
   expect_contains "quoted tag without an artifact -> section 3 FAILS" "$out" "FAIL cross-crew delegation over a live link"
   expect_contains "quoted tag without an artifact -> says the echo is not evidence" "$out" "is not evidence"
   expect_not_contains "quoted tag without an artifact -> suite is not green" "$out" "failed: 0"
-  expect_contains "refusal quoting the NEG tag -> unlinked half still PASSES" "$out" "PASS an unlinked crew cannot be delegated to"
 
   out="$(run_crew_links landed)"
   expect_contains "tag-correlated assignment -> section 3 PASSES" "$out" "PASS delegation crossed the link"
+  expect_contains "tag-correlated completion -> result PASSES" "$out" "PASS the cross-crew assignment completed with a result"
+  expect_contains "landed run -> unlinked hand-off refused by the link check" "$out" "PASS the unlinked hand-off was attempted and refused by the link check"
   expect_contains "landed run -> unlinked half PASSES" "$out" "PASS an unlinked crew cannot be delegated to"
   expect_contains "landed run -> suite is green" "$out" "failed: 0"
 
   out="$(run_crew_links leaky)"
   expect_contains "assignment lands with no link -> unlinked half FAILS" "$out" "FAIL an unlinked crew cannot be delegated to"
+
+  out="$(run_crew_links never-tries)"
+  expect_contains "lead never attempts the unlinked hand-off -> enforcement unproven FAILS" "$out" "FAIL the unlinked hand-off was attempted and refused by the link check"
 
   out="$(run_crew_links feed-down)"
   expect_contains "unreadable activity feed -> section 3 names the feed" "$out" "could not be read, so there is no evidence"
@@ -259,6 +279,71 @@ if command -v jq >/dev/null 2>&1; then
 else
   echo "  skip crew-links evidence checks (jq not installed)"
 fi
+
+echo
+echo "== grounded issue work and failure evidence (#4873, #4874) =="
+
+# A stub CLI that records every call, answers the issue lifecycle, and serves
+# one chat created after the suite started plus one created before it.
+ev_cli() {
+  cat >"$1" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${EV_LOG:?}"
+args=" $* "
+case "$args" in
+  *" version "*|*" whoami "*) exit 0 ;;
+  *" issue create "*) echo '{"id":"iss_1","identifier":"OPS-7"}'; exit 0 ;;
+  *" issue start "*) [ "${EV_START:-ok}" = ok ] || exit 1; exit 0 ;;
+  *" issue runs "*) [ "${EV_RUN:-done}" = done ] && echo '[{"status":"FAILED","source":"task","agent_slug":"morgan"}]' || echo '[{"status":"RUNNING","source":"task","agent_slug":"morgan"}]'; exit 0 ;;
+  *" issue get "*) echo '{"identifier":"OPS-7","description":"needs token keeper-gated-secret-value"}'; exit 0 ;;
+  *" chat list "*) printf '[{"id":"chat_new","created_at":"2999-01-01T00:00:00.000Z"},{"id":"chat_old","created_at":"2000-01-01T00:00:00.000Z"}]\n'; exit 0 ;;
+  *" chat chat_new "*) echo "assistant: I used keeper-gated-secret-value"; exit 0 ;;
+  *" chat chat_old "*) echo "old"; exit 0 ;;
+esac
+exit 0
+EOF
+  chmod +x "$1"
+}
+ev_dir="$(mktemp -d -t cs-ev.XXXXXX)"; ev_cli "$ev_dir/crewship"; : >"$ev_dir/log"
+ev_run() { # <script-body> — source lib.sh + owned-escalation.sh in a clean env and run <body>
+  # shellcheck disable=SC2016
+  env -u CREWSHIP_SERVER -u SERVER CREWSHIP="$ev_dir/crewship" EV_LOG="$ev_dir/log" POLL_INTERVAL=1 "$@"
+}
+out="$(ev_run bash -c '. "$1/test-harness/lib.sh"; . "$1/test-harness/owned-escalation.sh"; request_credential_via_issue ops morgan HARNESS_X 5; echo "rc=$?"' _ "$SCRIPT_DIR")"
+expect_contains "grounded credential ask reports the issue and its run status" "$out" "OPS-7 FAILED"
+expect_contains "grounded credential ask returns 0 once the run ended" "$out" "rc=0"
+expect_contains "the issue is delegated to the agent in its crew" "$(cat "$ev_dir/log")" "issue create --crew ops --delegate morgan --status TODO"
+expect_contains "the issue description names the credential and asks for an escalation" "$(cat "$ev_dir/log")" "metadata.name is exactly HARNESS_X"
+expect_contains "the issue is started" "$(cat "$ev_dir/log")" "issue start OPS-7"
+out="$(ev_run env EV_START=fail bash -c '. "$1/test-harness/lib.sh"; issue_work ops morgan t d 5; echo "rc=$?"' _ "$SCRIPT_DIR")"
+expect_contains "a refused start is reported, not waited on" "$out" "OPS-7 START_FAILED"
+expect_contains "a refused start returns 1" "$out" "rc=1"
+out="$(ev_run env EV_RUN=running bash -c '. "$1/test-harness/lib.sh"; issue_work ops morgan t d 2; echo "rc=$?"' _ "$SCRIPT_DIR")"
+expect_contains "a run that never ends times out with rc 2" "$out" "rc=2"
+
+det="$ev_dir/detail"; mkdir -m 700 "$det"
+# shellcheck disable=SC2016
+ev_run env HARNESS_DETAIL_DIR="$det" bash -c '. "$1/test-harness/lib.sh"; register_secret keeper-gated-secret-value; issue_work ops morgan t d 5 >/dev/null; _fail "probe check"; finish' _ "$SCRIPT_DIR" >/dev/null 2>&1
+suite_dir="$det/bash"
+[ -d "$det" ] && suite_dir="$(find "$det" -mindepth 1 -maxdepth 1 -type d | head -1)"
+expect_eq "a failing suite writes its failures list" "1" "$( [ -f "$suite_dir/failures.txt" ] && echo 1 || echo 0)"
+expect_contains "the failures list names the failed check" "$(cat "$suite_dir/failures.txt" 2>/dev/null)" "probe check"
+expect_eq "the chat started during the suite is kept" "1" "$( [ -f "$suite_dir/chat-morgan-chat_new.txt" ] && echo 1 || echo 0)"
+expect_eq "a chat older than the suite is not dumped" "0" "$( [ -f "$suite_dir/chat-morgan-chat_old.txt" ] && echo 1 || echo 0)"
+expect_contains "the issue and its runs are kept" "$(cat "$suite_dir/issue-OPS-7.json" 2>/dev/null)" "\"status\":\"FAILED\""
+expect_not_contains "registered values never reach evidence (chat)" "$(cat "$suite_dir"/chat-* 2>/dev/null)" "keeper-gated-secret-value"
+expect_not_contains "registered values never reach evidence (issue)" "$(cat "$suite_dir"/issue-* 2>/dev/null)" "keeper-gated-secret-value"
+expect_contains "a redacted value is marked" "$(cat "$suite_dir"/chat-* 2>/dev/null)" "[REDACTED]"
+expect_eq "evidence files are owner-only" "" "$(find "$suite_dir" -type f ! -perm 600 2>/dev/null)"
+pass_det="$ev_dir/pass"; mkdir -m 700 "$pass_det"
+# shellcheck disable=SC2016
+ev_run env HARNESS_DETAIL_DIR="$pass_det" bash -c '. "$1/test-harness/lib.sh"; issue_work ops morgan t d 5 >/dev/null; _pass ok; finish' _ "$SCRIPT_DIR" >/dev/null 2>&1
+expect_eq "a passing suite writes no evidence" "" "$(find "$pass_det" -mindepth 1 2>/dev/null)"
+: >"$ev_dir/log"
+# shellcheck disable=SC2016
+ev_run bash -c '. "$1/test-harness/lib.sh"; issue_work ops morgan t d 5 >/dev/null; _fail x; finish' _ "$SCRIPT_DIR" >/dev/null 2>&1
+expect_not_contains "without HARNESS_DETAIL_DIR no transcript is fetched" "$(cat "$ev_dir/log")" "chat chat_new"
+rm -rf "$ev_dir"
 
 echo
 if [ "$FAILURES" -eq 0 ]; then
