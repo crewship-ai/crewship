@@ -31,11 +31,13 @@
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$HERE/lib.sh"
+keep_failure_evidence  # #4874: keep transcripts of a failing run before the gauntlet reseed
 
 preflight
 
 # shellcheck source=owned-escalation.sh
 source "$HERE/owned-escalation.sh"
+register_secret harness-placeholder-not-a-real-token; register_secret audit-v1; register_secret audit-v2  # keep it out of failure evidence (#4874)
 
 AGENT="${AGENT:-morgan}"
 CREW="${CREW:-ops}"
@@ -103,8 +105,8 @@ ESC="HARNESS_ESC_$(nonce PG | tr '-' '_')"
 # turn settles (#4842); a 429 there is correct, so wait instead of racing it.
 wait_agent_idle "$AGENT"
 info "Driving ${AGENT} to raise a credential escalation for ${ESC} ..."
-if ! ask_agent "$AGENT" "You need a ${ESC} API token to read the synthetic pager service's status for this authorized integration probe. Raise a CREDENTIAL escalation with metadata.name exactly ${ESC} and that read-only purpose, without a secret value. Do not contact any external service." >/dev/null; then
-  _fail "approval probe agent run completed"
+if ! esc_work="$(request_credential_via_issue "$CREW" "$AGENT" "$ESC")"; then
+  _fail "approval probe issue ran to an end" "${esc_work:-the issue could not be created or started}"
 fi
 
 if have jq; then
@@ -134,8 +136,8 @@ ESC2="HARNESS_ESCDENY_$(nonce DN | tr '-' '_')"
 # turn settles (#4842); a 429 there is correct, so wait instead of racing it.
 wait_agent_idle "$AGENT"
 info "Driving ${AGENT} to raise a second escalation for ${ESC2}, then DENY it …"
-if ! ask_agent "$AGENT" "You need a ${ESC2} API token to read the synthetic pager service's status for this authorized integration probe. Raise a CREDENTIAL escalation with metadata.name exactly ${ESC2} and that read-only purpose, without a secret value. Do not contact any external service." >/dev/null; then
-  _fail "denial probe agent run completed"
+if ! esc_work="$(request_credential_via_issue "$CREW" "$AGENT" "$ESC2")"; then
+  _fail "denial probe issue ran to an end" "${esc_work:-the issue could not be created or started}"
 fi
 if have jq; then
   detect2="owned_pending_escalation '$CREW' '$AGENT' '$ESC2'"

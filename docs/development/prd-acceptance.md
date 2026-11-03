@@ -110,6 +110,19 @@ reload; then it keeps working, reloads once more and checks the document a
 last time. The row's `result.json` carries the duration, the restart time and
 the SHA-256 of the final document.
 
+A cycle's typing counts as saved only when the server head holds every marker
+it typed (`craft-session/confirm.ts`). The save label is not proof: a step
+earlier in the same cycle (the table, the picture, the second sheet) saves too,
+so its "Uloženo · verze N" can be on screen before the cycle types anything. A
+cycle whose markers are not on the server fails with the label, the baseline
+and the head version, and its markers are not counted as saved work. The Word
+table step types the cell text right after the 2x2 insert and checks on the
+server that it is inside a table cell; when it is not, the step trail records
+that an extra click into the first cell was needed (focus left the document:
+a product/UX finding), and when even that click does not help the row fails
+with "typing after the table insert did not reach the document", not as a lost
+save.
+
 `craft-restart.acceptance.ts` (`A.resilience.restart.word`, `.sheet`) is the
 short form of the restart: unsaved typing, restart, reload, draft offered, no
 duplicate version, editor usable.

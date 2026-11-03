@@ -9,6 +9,7 @@ import * as N from "../outage-lostack/native"
 import { holdsAll, inspectDrafts, newTyping, offerEvidence, placeCaret, saveByAutosaveOrKey, typedMarkers, typeLines, type DraftOffer } from "./draft"
 import { checkDraftCopies, checkLines, holdsAnyLine, lineLedger, type LineCheck } from "./lines"
 import { present, sha256, wordFacts } from "./facts"
+import { baselineBefore, cellInTable, confirmCycle, holdsMarker, type CycleConfirmation } from "./confirm"
 import type { RestartRecord } from "./restart"
 
 export type SessionKind = "wordcraft" | "gridcraft"
@@ -62,16 +63,31 @@ function logConsole(page: Page, trail: CraftCall[]): void {
   page.on("pageerror", (e) => add("pageerror", String(e)))
 }
 
+/** What a cycle's work can report back to the session. */
+interface CycleHooks {
+  step(name: string): void
+  shot(name: string): Promise<void>
+  /**
+   * Call right before the cycle's own marker typing, after the steps that save by
+   * themselves (table, picture): their saves must not count as the cycle's save (#4871).
+   */
+  beforeTyping(): Promise<void>
+  /** An input problem of a step (the person's typing did not reach the document), not a lost save. */
+  fail(problem: string): void
+}
+
 /** What differs between Word and Sheet: how a cycle works and how the saved document is checked. */
 interface Driver {
   app: SessionKind
-  /** One cycle of work; returns the markers it typed and saved by Ctrl+S afterwards. */
-  work(page: Page, f: Frame, cycle: number, frac: number, step: (name: string) => void, shot: (name: string) => Promise<void>): Promise<string[]>
-  /** Optional first action that proves the freshly opened editor takes input (returns the saved version, or undefined). */
-  warmup?(page: Page, f: Frame, after: string): Promise<string | undefined>
+  /** One cycle of work; returns the markers it typed (the session then confirms them on the server). */
+  work(page: Page, f: Frame, cycle: number, frac: number, hooks: CycleHooks): Promise<string[]>
+  /** Optional first action that proves the freshly opened editor takes input: the save label it saw and the markers it typed. */
+  warmup?(page: Page, f: Frame, after: string): Promise<{ label: string | undefined; typed: string[] }>
   /** Problems found in the saved document (empty when it holds everything the session did). */
   verify(text: string, saved: string[], stage: string): string[]
 }
+
+const newer = (a: string, b: string | undefined) => (b !== undefined && BigInt(b) > BigInt(a) ? b : a)
 
 const CYCLE_MS = (minutes: number) => Math.round(Math.min(60_000, Math.max(20_000, (minutes * 60_000) / 12)))
 
@@ -111,18 +127,30 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
     }
   })()
   context.on("close", () => (polling = false))
+  // A cycle's typing counts as saved only when the server head holds every marker; the
+  // label is not trusted, an earlier step's save can already sit on it (confirm.ts, #4871).
+  // A read can race the save the label just announced: re-read for a few seconds.
+  const confirmTyped = async (typed: string[], baseline: string, label: string | undefined): Promise<CycleConfirmation> => {
+    let head = await readHeadText(api, ref)
+    for (const end = Date.now() + 5_000; !typed.every((m) => holdsMarker(head.text, m)) && Date.now() < end; ) {
+      await N.pause(1_000)
+      head = await readHeadText(api, ref)
+    }
+    return confirmCycle({ typed, baseline, label, head })
+  }
   await N.openEditor(page, ref)
   let f = await N.acquire(page, d.app)
   note("editor open, editing")
   if (d.warmup) {
     // A freshly opened grid can drop its first keystrokes: prove it takes input, with up to three tries.
-    let warm: string | undefined
-    for (let attempt = 0; attempt < 3 && !warm; attempt++) {
+    let warm: CycleConfirmation | undefined
+    for (let attempt = 0; attempt < 3 && !warm?.confirmed; attempt++) {
       f = await N.frameOf(page, d.app)
-      warm = await d.warmup(page, f, lastVersion)
+      const w = await d.warmup(page, f, lastVersion)
+      warm = await confirmTyped(w.typed, lastVersion, w.label)
+      lastVersion = newer(newer(lastVersion, w.label), warm.version)
     }
-    if (!warm) failures.push("the freshly opened editor did not take input")
-    else lastVersion = warm
+    if (!warm?.confirmed) failures.push(`the freshly opened editor did not take input: ${warm?.problem ?? "no attempt"}`)
     note("warm-up done")
   }
 
@@ -131,22 +159,30 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
     // The host remounts the editor frame after a save or a lease change: take the current one and focus it.
     f = await N.frameOf(page, d.app)
     await f.locator("canvas").first().click({ position: d.app === "wordcraft" ? { x: 678, y: 324 } : { x: 54, y: 240 } })
-    const typed = await d.work(page, f, cycles, frac, note, async (n) => void (await prd.evidence(`step-${n}.png`, await page.screenshot())))
+    const n = cycles
+    let baseline = lastVersion
+    const typed = await d.work(page, f, n, frac, {
+      step: note,
+      shot: async (name) => void (await prd.evidence(`step-${name}.png`, await page.screenshot())),
+      beforeTyping: async () => {
+        // Let a save of an earlier step finish so its version becomes the baseline.
+        for (const end = Date.now() + 5_000; /^Ukládám/.test(await N.status(page)) && Date.now() < end; ) await N.pause(150)
+        baseline = baselineBefore(lastVersion, await N.status(page))
+      },
+      fail: (problem) => failures.push(`cycle ${n}: ${problem}`),
+    })
     if (cycles < 2) await prd.evidence(`step-cycle-${cycles}-typed.png`, await page.screenshot()).catch(() => {})
     // The editor saves by itself 300 ms after the last keystroke. Take that
     // save when it comes; press Ctrl+S only when it does not (Ctrl+S always
     // sends, so after an autosave it would store identical bytes again).
-    let v = await saveByAutosaveOrKey(page, lastVersion)
-    if (v) lastVersion = v
-    if (!v) {
-      // The label can miss a save that did happen: the server is the judge.
-      const head = await readHeadText(api, ref)
-      if (typed.every((m) => head.text.includes(m))) v = head.version
-    }
-    if (!v) failures.push(`cycle ${cycles}: the save was not confirmed (${(await N.status(page)).slice(0, 80)})`)
-    else saved.push(...typed)
+    const label = await saveByAutosaveOrKey(page, baseline)
+    // The server is the judge, also when the label moved (#4871).
+    const c = await confirmTyped(typed, baseline, label)
+    lastVersion = newer(newer(baseline, label), c.version)
+    if (c.confirmed) saved.push(...typed)
+    else failures.push(`cycle ${n}: ${c.problem} (${(await N.status(page)).slice(0, 80)})`)
     const ui = await N.uiState(page)
-    note(`cycle ${cycles}: ${ui.status.slice(0, 40)}`)
+    note(`cycle ${n}: ${ui.status.slice(0, 40)}${c.confirmed ? ` · server v${c.version} holds the typing` : " · NOT on the server"}`)
     if (ui.alerts.length) failures.push(`cycle ${cycles}: the editor shows an alert: ${ui.alerts.join(" | ").slice(0, 200)}`)
     if (/Pouze čtení|odpojen/.test(ui.status)) {
       await prd.evidence("failure-not-editable.png", await page.screenshot({ fullPage: true })).catch(() => {})
@@ -308,6 +344,10 @@ const WORD_UI = {
   heading1: { x: 918, y: 94 },
   table: { x: 150, y: 94 },
   table2x2: { x: 166, y: 200 },
+  // The first cell of the 2x2 table inserted at the end of the document (RC-4
+  // step-table-after.png, canvas origin at page 241,168). Only a retry target: the
+  // server check after it decides whether the text reached a table cell.
+  firstCell: { x: 443, y: 672 },
   pictures: { x: 218, y: 94 },
 } as const
 
@@ -315,9 +355,23 @@ export function wordSession(input: SessionInput) {
   const tag = Math.random().toString(36).slice(2, 7)
   const m = { heading: `HOURHEAD${tag}`, bold: `HOURBOLD${tag}`, cell: `HOURCELL${tag}`, font: `HOURFONT${tag}` }
   const done = new Set<string>()
+  // Did the cell text reach a table cell of the server head? The editor saves 300 ms
+  // after the last keystroke; an unsaved draft gets Ctrl+S once, as in saveByAutosaveOrKey.
+  const cellSaved = async (page: Page): Promise<boolean> => {
+    let pressed = false
+    for (const start = Date.now(); Date.now() - start < 15_000; ) {
+      if (cellInTable((await readHeadText(input.api, input.ref)).text, m.cell)) return true
+      if (!pressed && Date.now() - start > 4_000 && /^Neuložený koncept/.test(await N.status(page))) {
+        pressed = true
+        await page.keyboard.press("Control+s")
+      }
+      await N.pause(1_000)
+    }
+    return false
+  }
   const driver: Driver = {
     app: "wordcraft",
-    async work(page, f, cycle, frac, step, shot) {
+    async work(page, f, cycle, frac, { step, shot, beforeTyping, fail }) {
       const kb = page.keyboard
       const canvas = f.locator("canvas").first()
       const click = async (at: { x: number; y: number }) => {
@@ -368,7 +422,26 @@ export function wordSession(input: SessionInput) {
         await click(WORD_UI.insertTab)
         await click(WORD_UI.table)
         await click(WORD_UI.table2x2)
+        // The person types into the new table, and the result is checked on the
+        // server, not assumed (#4871: in RC-4 these keystrokes never reached the
+        // document and the table was saved empty).
         await kb.type(m.cell)
+        let landed = await cellSaved(page)
+        if (landed) step("table: the cell text reached a table cell without an extra click")
+        else {
+          // Product/UX evidence, kept visible: after the ribbon's 2x2 insert the caret was not in the table.
+          step(`table: typing right after the 2x2 insert did not reach the document (${(await N.status(page)).slice(0, 36)}); an extra click into the first cell is needed`)
+          await shot("table-no-focus").catch(() => {})
+          await click(WORD_UI.firstCell)
+          await kb.type(m.cell)
+          landed = await cellSaved(page)
+          step(landed ? "table: the cell text reached a table cell after the extra click into the first cell" : "table: the cell text is not in a table cell also after a click into the first cell")
+        }
+        if (!landed) {
+          // An input failure, not a lost save: the table is not checked as saved work.
+          done.delete("table")
+          fail(`typing after the table insert did not reach the document: ${m.cell} is not in a table cell of the server head, also after a click into the first cell`)
+        }
         await kb.press("Control+End")
       })
       await once("image", 0.25, async () => {
@@ -381,6 +454,7 @@ export function wordSession(input: SessionInput) {
         await kb.press("Control+End")
       })
       const marker = `HOUR${tag}C${String(cycle).padStart(3, "0")}`
+      await beforeTyping()
       await kb.press("Control+End")
       await kb.press("Enter")
       await kb.type(`${marker} the quick brown fox jumps over the lazy dog`, { delay: 8 })
@@ -426,9 +500,9 @@ export function sheetSession(input: SessionInput) {
       await goto(page, f, "Z1")
       await page.keyboard.type(`HOUR${tag}WARM`, { delay: 8 })
       await page.keyboard.press("Enter")
-      return saveByAutosaveOrKey(page, after)
+      return { label: await saveByAutosaveOrKey(page, after), typed: [`HOUR${tag}WARM`] }
     },
-    async work(page, f, cycle, frac, step, shot) {
+    async work(page, f, cycle, frac, { step, shot, beforeTyping }) {
       const kb = page.keyboard
       const c = cellOf(cycle)
       for (let k = 0; k < 3; k++) {
@@ -436,6 +510,7 @@ export function sheetSession(input: SessionInput) {
         await f.evaluate(() => new Promise<void>((r) => requestAnimationFrame(() => requestAnimationFrame(() => r()))))
       }
       // One row per cycle: text, number, formula, date, boolean; Tab moves right, Enter ends the row.
+      await beforeTyping()
       await goto(page, f, `A${c.row}`)
       await kb.type(c.marker, { delay: 8 })
       await kb.press("Tab")
