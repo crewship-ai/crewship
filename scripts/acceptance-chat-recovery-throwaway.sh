@@ -4,6 +4,10 @@
 #
 #   CREWSHIP_THROWAWAY_STATE=/protected/dir \
 #   scripts/acceptance-chat-recovery-throwaway.sh --binary /path/to/crewship --evidence DIR [--name NAME]
+#   scripts/acceptance-chat-recovery-throwaway.sh --check-standard-parks WORK_JSON
+#
+# The second form only evaluates phase S check (1) on a saved `work get -f json`
+# of the standard turn (offline; used by throwaway-server-test.sh).
 #
 # The binary's directory must also hold crewship-sidecar (agent-executable).
 # Every server comes from scripts/throwaway-server.sh. The run stops only the
@@ -62,6 +66,32 @@ LEASE_DOWN="${CHAT_RECOVERY_DOWN_SECONDS:-75}"
 DEADLINE_SECS="${CHAT_RECOVERY_DEADLINE_SECONDS:-150}"
 LONG_SECS="${CHAT_RECOVERY_LONG_SECONDS:-900}"
 SETTLE_WAIT="${CHAT_RECOVERY_SETTLE_WAIT:-600}"
+
+# standard_parks_verdict WORK_JSON: phase S check (1). The standard turn must
+# reach needs_reconciliation exactly once, and that park's reason must start
+# with "lease expired". Counts events; the reason text itself may contain ";".
+standard_parks_verdict() {
+  python3 - "$1" <<'EVAL'
+import json, sys
+d = json.load(open(sys.argv[1]))
+parks = [e for e in d.get("events") or [] if e.get("to_state") == "needs_reconciliation"]
+reasons = " | ".join(repr(e.get("reason", "")) for e in parks) or "none"
+if len(parks) != 1:
+    print(f"FAIL [standard] (1) expected exactly one needs_reconciliation park, got {len(parks)}: {reasons}")
+    sys.exit(1)
+reason = parks[0].get("reason", "")
+if not reason.startswith("lease expired"):
+    print(f"FAIL [standard] (1) the one park is not a lease expiry: {reasons}")
+    sys.exit(1)
+print(f"PASS [standard] (1) parked exactly once, by lease expiry after the immediate restart (at {parks[0].get('at', '?')}): {reason}")
+EVAL
+}
+
+if [[ "${1:-}" == --check-standard-parks ]]; then
+  [[ $# -eq 2 && -f "$2" ]] || { echo "usage: $0 --check-standard-parks WORK_JSON" >&2; exit 2; }
+  standard_parks_verdict "$2"
+  exit
+fi
 
 while (($#)); do
   case "$1" in
@@ -496,11 +526,10 @@ else
 fi
 watch_turns "standard:$id_std:$run_std:$crew_standard" || true
 assert_settled standard "$id_std" "$run_std" exited
-std_parks="$(field '"; ".join(e["reason"] for e in d["events"] if e["to_state"] == "needs_reconciliation")' <"$evidence/work-standard-final.json")"
-if [[ "$std_parks" == "lease expired in runtime phase"* && "$std_parks" != *";"* ]]; then
-  pass "[standard] (1) parked by lease expiry after the immediate restart: $std_parks"
+if verdict="$(standard_parks_verdict "$evidence/work-standard-final.json")"; then
+  pass "${verdict#PASS }"
 else
-  fail "[standard] (1) expected exactly one lease-expiry park, got '${std_parks:-none}'"
+  fail "${verdict#FAIL }"
 fi
 slots="$(slot_holders)"
 if [[ "$slots" == 0 ]]; then pass "(3) after the standard restart no work item holds an execution slot"; else fail "(3) $slots slot-holding item(s) remain after the standard restart"; fi

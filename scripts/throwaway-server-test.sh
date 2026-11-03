@@ -514,4 +514,40 @@ d2="$(grep -o 'instance_name: .*' "$tmp/scen/ev4/run-info.txt" || true)"
 check "explicit --name is recorded" "$n1" "instance_name: racer"
 check "default instance names differ between runs" "$([[ -n "$d1" && "$d1" != "$d2" ]] && echo unique)" unique
 
+# --- phase S evaluation, offline ---
+# The standard turn must be parked exactly once, by lease expiry. Fixtures:
+# (a) the standard work item's events from run 20261103T223140Z (fields other
+#     than state and events dropped); the product's lease-expiry reason itself
+#     contains "; a runtime may exist", which the evaluation must accept;
+# (b) the same history with a second park; (c) one park with another reason.
+std_fixture="$here/testdata/chat-recovery/standard-final-20261103T223140Z.json"
+python3 - "$std_fixture" "$tmp/std-two-parks.json" "$tmp/std-other-reason.json" <<'PY2'
+import copy, json, sys
+d = json.load(open(sys.argv[1]))
+two = copy.deepcopy(d)
+park = next(e for e in two["events"] if e["to_state"] == "needs_reconciliation")
+again = [dict(park, seq=park["seq"] + 1, from_state="needs_reconciliation", to_state="running", reason="reconciled: runtime alive"),
+         dict(park, seq=park["seq"] + 2, from_state="running", reason=park["reason"])]
+i = two["events"].index(park) + 1
+two["events"][i:i] = again
+json.dump(two, open(sys.argv[2], "w"))
+other = copy.deepcopy(d)
+next(e for e in other["events"] if e["to_state"] == "needs_reconciliation")["reason"] = "protected host capture awaiting retained result"
+json.dump(other, open(sys.argv[3], "w"))
+PY2
+std_eval() { bash "$here/acceptance-chat-recovery-throwaway.sh" --check-standard-parks "$1" 2>&1; }
+if out="$(std_eval "$std_fixture")"; then r=pass; else r=fail; fi
+check "phase S: saved run 20261103T223140Z (one lease-expiry park) passes" "$r" pass
+check "phase S: the pass names the lease-expiry reason" "$(grep -c '^PASS .*lease expired in runtime phase' <<<"$out" || true)" 1
+if out="$(std_eval "$tmp/std-two-parks.json")"; then r=pass; else r=fail; fi
+check "phase S: two parks fail" "$r" fail
+check "phase S: the failure counts both parks" "$(grep -c '^FAIL .*got 2: ' <<<"$out" || true)" 1
+if out="$(std_eval "$tmp/std-other-reason.json")"; then r=pass; else r=fail; fi
+check "phase S: one park with a non-lease reason fails" "$r" fail
+check "phase S: the failure names the wrong reason" "$(grep -c '^FAIL .*awaiting retained result' <<<"$out" || true)" 1
+if [[ -n "${CHAT_RECOVERY_STANDARD_FINAL:-}" ]]; then
+  if out="$(std_eval "$CHAT_RECOVERY_STANDARD_FINAL")"; then r=pass; else r=fail; fi
+  check "phase S: saved evidence file \$CHAT_RECOVERY_STANDARD_FINAL passes" "$r" pass
+fi
+
 exit "$fail"
