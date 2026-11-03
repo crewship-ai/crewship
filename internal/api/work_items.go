@@ -681,6 +681,11 @@ func (h *WorkItemsHandler) replayAvailability(r *http.Request, workspaceID strin
 	if item.DomainKind == work.DomainAssignment {
 		return "Assignment replay requires a new assignment admission; replaying its terminal domain row is unsupported.", false, nil
 	}
+	if item.DomainKind == work.DomainHostChatTurn {
+		// No dispatcher executes a host chat turn; a queued copy would never
+		// run or finish and would hold workspace ingress capacity (#4799).
+		return "Chat turn replay is unsupported; send the message again in its chat to start a new turn.", false, nil
+	}
 	if item.DomainKind == "restricted_workflow" {
 		return "Private workflow replay requires a new authorized routine or Page admission.", false, nil
 	}
