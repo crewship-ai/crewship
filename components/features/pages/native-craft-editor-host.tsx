@@ -87,6 +87,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
  const [applicationId,setApplicationId]=React.useState<NativeDocumentSnapshot['applicationId']>()
  const mount=React.useRef<HTMLDivElement>(null),control=React.useRef<(action:NativeCraftLeaseAction,body:{generation?:string;request_id?:string})=>void>(()=>{})
  const [view,setView]=React.useState<Lease>(vacant),[busy,setBusy]=React.useState(false),[label,setLabel]=React.useState('Připojuji…'),[savedVersion,setSavedVersion]=React.useState<string>(),[error,setError]=React.useState<string>(),[mismatch,setMismatch]=React.useState<{message:string;address:string}>(),[dirty,setDirty]=React.useState(false),[recoveries,setRecoveries]=React.useState<NativeRecovery[]>([]),[comparison,setComparison]=React.useState<Comparison>(),[ownsEditor,setOwnsEditor]=React.useState(false),[connectionRetired,setConnectionRetired]=React.useState(false),[quota,setQuota]=React.useState<NativeDocumentSnapshot['quota']>()
+ const [saveTrace,setSaveTrace]=React.useState<{phase:string;reason?:string}>()
  useLeaveGuard(dirty)
  React.useEffect(()=>{
   if(!enabled||!humanId||!workspaceId||!pageId)return
@@ -107,7 +108,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    const saved=phase==='saved'&&r.ackedVersion!==undefined&&r.writable&&!r.blocked
    setSavedVersion(saved?r.ackedVersion:undefined)
    setQuotaFull(phase==='draft'&&r.phase?.reason==='quota')
-   setLabel(saved?'Uloženo':phase==='uncertain'?'Výsledek nepotvrzen':phase==='saving'?'Ukládám…':r.blocked?'Koncept zůstává v tomto editoru':r.phase?.dirty?'Neuložený koncept':r.writable?'Připraveno k úpravám':'Pouze čtení')
+   // Phase and reason only (never content): a stalled save is diagnosable from the page (#4852).
+   setSaveTrace(phase?{phase,reason:r.phase?.reason}:undefined)
+   setLabel(saved?'Uloženo':phase==='uncertain'?'Výsledek nepotvrzen':phase==='saving'?'Ukládám…':r.blocked?'Koncept zůstává v tomto editoru':r.phase?.dirty?(phase==='draft'&&r.phase.reason==='storage'?'Neuložený koncept · úložiště prohlížeče neodpovědělo':'Neuložený koncept'):r.writable?'Připraveno k úpravám':'Pouze čtení')
   }
   stopAgent.current=()=>{void(async()=>{
    if(dead||networkRetired||transition||viewNow.can_edit!==true||viewNow.holder?.kind!=='agent'||viewNow.can_stop_agent!==true)return
@@ -521,7 +524,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   {!connectionRetired&&view.can_edit===true&&view.mine&&view.can_write&&!ownsEditor&&<Button disabled={busy} onClick={()=>control.current('acquire',{})}>Převzít úpravy</Button>}
   {!connectionRetired&&view.can_edit===true&&ownsEditor&&<Button variant="outline" disabled={busy} onClick={()=>publishPreview.current()}>Publikovat náhled</Button>}
   {publishedVersion&&<p className="px-3 py-2">Sdílený náhled · verze {publishedVersion}</p>}
-  <div role="status" className="px-3 py-2"><span>{label}</span>{savedVersion&&<span> · verze {savedVersion}</span>}{quota&&<span className="ml-3 text-muted-foreground">Historie {quota.usedBytes} / {quota.limitBytes} B{quota.warning?' · blíží se limit':''}</span>}</div>
+  <div role="status" className="px-3 py-2" data-save-phase={saveTrace?.phase} data-save-reason={saveTrace?.reason}><span>{label}</span>{savedVersion&&<span> · verze {savedVersion}</span>}{quota&&<span className="ml-3 text-muted-foreground">Historie {quota.usedBytes} / {quota.limitBytes} B{quota.warning?' · blíží se limit':''}</span>}</div>
   {quotaFull&&<div role="alert" className="space-y-2 border-y px-3 py-2"><p><b>Kapacita úložiště neumožňuje další uložení.</b> Další verze se neuloží. Všechny dosavadní verze zůstávají a vaše neuložené změny jsou v tomto prohlížeči.</p><p className="text-sm text-muted-foreground">Navýšení ani mazání historie aplikace zatím nenabízí. Práci si stáhněte jako soubor koncept nebo exportem z editoru; koncept se nabídne i po znovuotevření.</p><Button variant="outline" onClick={()=>downloadDraft.current()}>Stáhnout koncept</Button></div>}
   {uncertain&&<Button variant="outline" onClick={()=>reconcile.current()}>Ověřit výsledek</Button>}
   {error&&<p role="alert" className="px-3 py-2">{error}{mismatch&&error===mismatch.message&&<> <a className="underline" href={mismatch.address+window.location.pathname+window.location.search+window.location.hash} rel="noopener noreferrer">Otevřít na {mismatch.address}</a></>}</p>}
