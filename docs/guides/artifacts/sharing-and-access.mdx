@@ -85,7 +85,8 @@ crewship audit --action artifact.workspace_admin_accessed
 ```
 
 Entries about a private artifact are listed only to the workspace owner and
-to the artifact's own owner.
+to the artifact's own owner. They are not written to the workspace journal
+(`crewship journal`), which every member can read.
 
 An open Sheet is not updated live for a workspace admin who is not its owner
 or editor. Reopen it to see later changes; each reopening is a new audited

@@ -500,3 +500,62 @@ func TestWorkspaceAdminReadIsIndependentOfGrants(t *testing.T) {
 		}
 	}
 }
+
+// Review round 3 (#4825): the administrator read of a private artifact is
+// visible only where the audit listing allows it (workspace OWNER and the
+// artifact's owner). It must not reach the workspace journal, which every
+// member reads through GET /api/v1/journal (`crewship journal`). On 52cd78cd
+// the private Project read was chained into journal_entries with the page,
+// its owner and the reader.
+func TestWorkspaceAdminPrivateReadStaysOutOfMemberJournal(t *testing.T) {
+	h, ws, owner, call := artifactProjectFixture(t)
+	if created := call(owner, "POST", "artifacts", `{"slug":"three-screens","name":"Three screens",`+strings.TrimPrefix(artifactProjectBody(0, "Secret plan"), "{")); created.Code != 201 {
+		t.Fatalf("create %d %s", created.Code, created.Body)
+	}
+	var page string
+	if err := h.db.QueryRow(`SELECT id FROM pages WHERE slug='three-screens'`).Scan(&page); err != nil {
+		t.Fatal(err)
+	}
+	execOrFatal(t, h.db, `UPDATE workspace_members SET role='MEMBER' WHERE workspace_id=? AND user_id=?`, ws, owner)
+	pagesSeedUser(t, h, ws, "journal-admin", "journal-admin@example.test", "ADMIN")
+	pagesSeedUser(t, h, ws, "journal-member", "journal-member@example.test", "MEMBER")
+	pagesSeedUser(t, h, ws, "journal-wsowner", "journal-wsowner@example.test", "OWNER")
+	for _, query := range []string{"", "?version=1"} {
+		if got := call("journal-admin", "GET", "three-screens/artifact"+query, ""); got.Code != 200 || !strings.Contains(got.Body.String(), "Secret plan") {
+			t.Fatalf("ADMIN private Project read %d %s", got.Code, got.Body)
+		}
+	}
+	// The compliance row is kept.
+	if n := adminReadAudits(t, h, auditActionPrivateArtifactRead, "journal-admin", page); n != 2 {
+		t.Fatalf("private administrator reads audited %d times, want 2", n)
+	}
+	journalHandler := NewJournalHandler(h.db, newTestLogger(), nil)
+	auditHandler := NewAuditHandler(h.db, newTestLogger())
+	for _, viewer := range []struct{ id, role string }{{"journal-member", "MEMBER"}, {"journal-admin", "ADMIN"}} {
+		rr := httptest.NewRecorder()
+		journalHandler.List(rr, withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/journal?workspace_id="+ws+"&limit=500", nil), viewer.id, ws, viewer.role))
+		if rr.Code != 200 {
+			t.Fatalf("%s journal list %d %s", viewer.id, rr.Code, rr.Body)
+		}
+		for _, secret := range []string{page, auditActionPrivateArtifactRead, "Workspace administrator read an artifact"} {
+			if strings.Contains(rr.Body.String(), secret) {
+				t.Errorf("%s journal reveals the private administrator read (%q): %s", viewer.id, secret, rr.Body)
+			}
+		}
+		listing := httptest.NewRecorder()
+		auditHandler.List(listing, withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/audit?workspace_id="+ws+"&action="+auditActionPrivateArtifactRead, nil), viewer.id, ws, viewer.role))
+		if strings.Contains(listing.Body.String(), page) {
+			t.Errorf("%s audit listing reveals the private administrator read: %s", viewer.id, listing.Body)
+		}
+	}
+	var journaled int
+	if err := h.db.QueryRow(`SELECT count(*) FROM journal_entries WHERE workspace_id=? AND (json_extract(payload,'$.entity_id')=? OR json_extract(refs,'$.entity_id')=?) AND json_extract(payload,'$.action')=?`, ws, page, page, auditActionPrivateArtifactRead).Scan(&journaled); err != nil || journaled != 0 {
+		t.Errorf("private administrator read published to the journal: %d %v", journaled, err)
+	}
+	// The workspace OWNER still lists it.
+	listing := httptest.NewRecorder()
+	auditHandler.List(listing, withWorkspaceUser(httptest.NewRequest("GET", "/api/v1/audit?workspace_id="+ws+"&action="+auditActionPrivateArtifactRead, nil), "journal-wsowner", ws, "OWNER"))
+	if listing.Code != 200 || !strings.Contains(listing.Body.String(), page) {
+		t.Errorf("workspace OWNER cannot list the private administrator read: %d %s", listing.Code, listing.Body)
+	}
+}

@@ -77,6 +77,18 @@ func (h *PageHandler) recordWorkspaceAdminArtifactAccess(ctx context.Context, tx
 	if _, err = tx.ExecContext(ctx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,'page',?,?,?) ON CONFLICT(id) DO NOTHING`, args...); err != nil {
 		return err
 	}
+	// A read of a private artifact stays in audit_logs only, where the audit
+	// listing shows it to the workspace OWNER and the artifact's owner alone.
+	// The journal has no such audience filter (any member reads
+	// GET /api/v1/journal), so publishing there would reveal the private
+	// artifact, its owner and who read it.
+	var private bool
+	if err = tx.QueryRowContext(ctx, `SELECT private_audience FROM pages WHERE workspace_id=? AND id=?`, k.WorkspaceID, k.PageID).Scan(&private); err != nil {
+		return err
+	}
+	if private {
+		return h.acknowledgeWorkspaceAdminArtifactAudit(ctx, tx, args)
+	}
 	if scope.chain == nil {
 		stamp, err := time.Parse(time.RFC3339Nano, scope.created)
 		if err != nil {
@@ -110,8 +122,14 @@ func (h *PageHandler) recordWorkspaceAdminArtifactAccess(ctx context.Context, tx
 	}
 	// Check the compliance row after the chained append too: a journal
 	// trigger may otherwise change a previously acknowledged legacy row.
+	return h.acknowledgeWorkspaceAdminArtifactAudit(ctx, tx, args)
+}
+
+// acknowledgeWorkspaceAdminArtifactAudit verifies the request's exact
+// audit_logs row inside the read's transaction.
+func (h *PageHandler) acknowledgeWorkspaceAdminArtifactAudit(ctx context.Context, tx *sql.Tx, args []any) error {
 	var acknowledged bool
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM audit_logs WHERE id COLLATE BINARY=? AND workspace_id COLLATE BINARY=? AND user_id COLLATE BINARY=? AND action COLLATE BINARY=? AND entity_type='page' AND entity_id COLLATE BINARY=? AND metadata COLLATE BINARY=? AND created_at COLLATE BINARY=? AND ip_address IS NULL AND user_agent IS NULL)`, args...).Scan(&acknowledged)
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM audit_logs WHERE id COLLATE BINARY=? AND workspace_id COLLATE BINARY=? AND user_id COLLATE BINARY=? AND action COLLATE BINARY=? AND entity_type='page' AND entity_id COLLATE BINARY=? AND metadata COLLATE BINARY=? AND created_at COLLATE BINARY=? AND ip_address IS NULL AND user_agent IS NULL)`, args...).Scan(&acknowledged)
 	if err != nil {
 		return err
 	}
