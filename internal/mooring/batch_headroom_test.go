@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
@@ -272,5 +273,74 @@ func TestChangeDiskBytesCoversPersistedRows(t *testing.T) {
 	estimate, err = changeDiskBytes(lease.Key, rejected, result.Changes[0], nil, nil, nil)
 	if err != nil || estimate < grown || grown <= 0 {
 		t.Fatalf("rejected estimate %d < persisted %d (%v)", estimate, grown, err)
+	}
+}
+
+// Review round 3 of #4835: one transaction buffers every change of a batch
+// until commit, so the probe for change N must count the not yet durable
+// bytes of changes 1..N-1 (WAL growth) as well. Here 64 fresh changes each
+// prepare a 64 KiB checkpoint: free disk covers the database copy and any
+// single change's rows, but not the whole batch. The batch is refused with
+// the storage refusal and nothing of it becomes durable.
+func TestBatchCommitManyChangesBelowFreeDiskReserveCountsEarlierWrites(t *testing.T) {
+	s, adapter, owners, _, lease := batchFixture(t)
+	candidate := append([]byte("1"), bytes.Repeat([]byte(" "), 64<<10)...)
+	adapter.apply = func(context.Context, []byte, BatchChange) ([]byte, *PreparedFailure, error) {
+		return candidate, nil, nil
+	}
+	lowFreeDisk(t, s.db, false)
+	before := mooringCollabRows(t, s)
+	var dbBytes int64
+	if err := s.db.QueryRow(`SELECT (SELECT page_count FROM pragma_page_count)*(SELECT page_size FROM pragma_page_size)`).Scan(&dbBytes); err != nil {
+		t.Fatal(err)
+	}
+	const fresh = 64
+	changes := make([]BatchChange, fresh)
+	for i := range changes {
+		id := "many-" + strconv.Itoa(i)
+		changes[i] = testBatchChange(t, lease.Key, id, "", testBatchOp(id))
+	}
+	// One change stores about 175 KiB (encoded checkpoint twice plus rows),
+	// so per-change probing needs the database copy, the batch's new pages
+	// (about 6 MiB of history) and twice one change. 8 MiB of slack covers
+	// that, but not twice the ~11 MiB the whole batch buffers in the WAL.
+	free := uint64(dbBytes) + 8<<20
+	restore := storageheadroom.SetUsageForTest(func(string) (diskusage.Stats, error) {
+		return diskusage.Stats{FreeBytes: free}, nil
+	})
+	defer restore()
+	events := 0
+	s.config.AfterCommit = func(BatchCommitEvent) { events++ }
+	result, err := s.Commit(t.Context(), BatchRequest{lease, "0", changes})
+	wantFreeDiskRefusal(t, "64-change batch", err)
+	if calls := adapter.calls.Load(); calls < 2 || calls >= fresh {
+		t.Fatalf("refusal should come from accumulated writes after earlier changes passed; engine calls=%d", calls)
+	}
+	if len(result.Changes) != 0 || events != 0 {
+		t.Fatalf("refused batch leaked: %+v events=%d", result, events)
+	}
+	if got := mooringCollabRows(t, s); got != before {
+		t.Fatalf("refused batch wrote rows: before=%v after=%v", before, got)
+	}
+	if revision, checkpoint, err := s.ReadCheckpoint(t.Context(), lease.Key); err != nil || revision != "0" || string(checkpoint) != "0" {
+		t.Fatalf("confirmed head changed: %q %d bytes %v", revision, len(checkpoint), err)
+	}
+	if status, err := s.Status(t.Context(), lease.Key, changes[0].Operations[0].ID, changes[0].Operations[0].Fingerprint); err != nil || status != nil {
+		t.Fatalf("first change of the refused batch became terminal: %+v %v", status, err)
+	}
+	// Reads and the owner lease lifecycle stay available below the reserve.
+	renewed, err := owners.Renew(t.Context(), lease)
+	if err != nil {
+		t.Fatalf("lease renew below reserve: %v", err)
+	}
+	if err = owners.Release(t.Context(), renewed); err != nil {
+		t.Fatalf("lease release below reserve: %v", err)
+	}
+	if lease, err = owners.Acquire(t.Context(), lease.Key, "runtime"); err != nil {
+		t.Fatalf("lease acquire below reserve: %v", err)
+	}
+	free = 1 << 62
+	if r, err := s.Commit(t.Context(), BatchRequest{lease, "0", changes}); err != nil || r.Revision != strconv.Itoa(fresh) {
+		t.Fatalf("same batch after space returned = %+v %v", r, err)
 	}
 }

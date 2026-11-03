@@ -253,6 +253,10 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 		for index, r := range known {
 			accepted[index] = r
 		}
+		// pending accumulates the rows of every change this transaction has
+		// written so far: none is durable before commit, so all of them still
+		// grow the WAL together with the next change (#4835).
+		var pending int64
 		for len(done) < len(changes) {
 			next := -1
 			for i := range changes {
@@ -497,7 +501,9 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 			// really persists before the first of them is written (#4835). A
 			// refusal aborts the whole transaction: no Saved and no rejection
 			// becomes durable, and the caller gets the shared storage refusal,
-			// so the change stays a client draft to submit again later.
+			// so the change stays a client draft to submit again later. The probe
+			// covers the earlier changes of this batch too: each fits alone, but
+			// the transaction as a whole must not eat the reserve.
 			var persistedTargets []preparedTargetRow
 			if stored.Status == "saved" {
 				persistedTargets = targetRows
@@ -507,7 +513,8 @@ func (s *BatchStore) commit(ctx context.Context, request BatchRequest, session *
 			if e != nil {
 				return e
 			}
-			if e = storageheadroom.Check(ctx, tx, written); e != nil {
+			pending += written
+			if e = storageheadroom.Check(ctx, tx, pending); e != nil {
 				return e
 			}
 			if stored.Status == "saved" {
