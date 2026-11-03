@@ -191,6 +191,13 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 	hash := configHash(baseImage, cfg, miseConfig, dockerfileGenFingerprint(baseImage, cfg)+requiredBinariesHashSalt(o.requiredBinaries))
 	tag := cacheImageTag(hash)
 
+	// Same per-tag serialisation as the commit path (#4816).
+	unlockTag, err := p.lockCacheTag(ctx, tag)
+	if err != nil {
+		return fail(ProvStepStart, err)
+	}
+	defer unlockTag()
+
 	requirements := p.aggregateFeatureRequirements(resolvedFeatures, cfg.ContainerEnv)
 	requirements.ContainerEnv = ensureAgentToolPath(requirements.ContainerEnv)
 	requirements.AdapterBinaries = SortedBinaries(o.requiredBinaries)

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -149,6 +150,59 @@ func dockerfileGenFingerprint(baseImage string, cfg *Config) string {
 		return ""
 	}
 	return df
+}
+
+// cacheTagLock is one tag's lock: a one-slot channel, so a waiter can give
+// up when its context ends. refs counts holders and waiters, and the entry is
+// dropped when it reaches zero.
+type cacheTagLock struct {
+	slot chan struct{}
+	refs int
+}
+
+// lockCacheTag serialises provisions that would write the same
+// crewship-cache:<hash> tag. Without it, two crews with identical
+// requirements provisioned at once both missed the cache, both built, and
+// both committed the tag; the containerd image store rejects the second with
+// AlreadyExists, failing that crew's provision (#4816). The caller re-checks
+// the cache after taking the lock, so the one that waited is a cache hit.
+// Different tags never wait on each other. The returned unlock must be called
+// exactly once; on a context error nothing is held.
+func (p *Provisioner) lockCacheTag(ctx context.Context, tag string) (func(), error) {
+	p.cacheTagMu.Lock()
+	if p.cacheTagLocks == nil {
+		p.cacheTagLocks = make(map[string]*cacheTagLock)
+	}
+	l := p.cacheTagLocks[tag]
+	if l == nil {
+		l = &cacheTagLock{slot: make(chan struct{}, 1)}
+		p.cacheTagLocks[tag] = l
+	}
+	l.refs++
+	p.cacheTagMu.Unlock()
+
+	release := func() {
+		p.cacheTagMu.Lock()
+		l.refs--
+		if l.refs == 0 {
+			delete(p.cacheTagLocks, tag)
+		}
+		p.cacheTagMu.Unlock()
+	}
+
+	select {
+	case l.slot <- struct{}{}:
+	case <-ctx.Done():
+		release()
+		return nil, fmt.Errorf("waiting for another provision of %s: %w", tag, ctx.Err())
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			<-l.slot
+			release()
+		})
+	}, nil
 }
 
 // IsCached reports whether a cached image for the given config hash exists.
