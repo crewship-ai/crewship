@@ -1435,7 +1435,7 @@ migrated before entering an editor. Unbound slug records (Project source and
 comment drafts from builds before Page-ID keys) are never replayed
 automatically: the project editor shows the signed-in person's own copy as an
 older draft that may belong to another Page, and adopts it only on an explicit
-choice, into an empty Page-ID draft (checked and written in one locked merge;
+choice, into an empty Page-ID draft (a compare-and-set in one IndexedDB transaction;
 a draft another tab stored meanwhile is kept, and so is the slug copy).
 
 A positively verified loss of current Page read erases reachable local drafts;

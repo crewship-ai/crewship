@@ -21,12 +21,14 @@ const local = new Map<string,string>()
 const pageRow = (human:string, kind:string, page="page-123") => JSON.stringify([human, kind, "w", page])
 const oldSource = (content:string) => JSON.stringify({path:"index.html",body:{base_version:1,entrypoint:"index.html",files:[{path:"index.html",media_type:"text/html",content}]}})
 let failPut = false
+let holdPut: Promise<void> | undefined
 beforeEach(() => {
- disk.clear(); local.clear(); failPut = false
+ disk.clear(); local.clear(); failPut = false; holdPut = undefined
  setArtifactDraftStore({
   capture: async () => [], removeCaptured: async rows => { for (const row of rows) disk.delete(JSON.stringify(row.row)) },
   get: async key => disk.get(JSON.stringify(key)),
-  put: async (key, text) => { if (failPut) throw new Error("quota"); disk.set(JSON.stringify(key), text) },
+  put: async (key, text) => { if (holdPut) await holdPut; if (failPut) throw new Error("quota"); disk.set(JSON.stringify(key), text) },
+  putIfAbsent: async (key, text) => { if (holdPut) await holdPut; if (failPut) throw new Error("quota"); if (disk.has(JSON.stringify(key))) return false; disk.set(JSON.stringify(key), text); return true },
   delete: async key => { disk.delete(JSON.stringify(key)) },
   purge: async () => { disk.clear() },
  })
@@ -139,4 +141,20 @@ it.each([
  await screen.findByText(/already has a newer draft in this browser/)
  expect(disk.get(pageRow("owner", kind))).toBe(`sealed:${newer}`)
  expect(local.get(`${kind}:owner:w:demo`)).toBe(slugText)
+})
+
+// Codex #4831 round 2 B2: editing while a source adoption is still being stored.
+it("does not let the editor be used while a source adoption is pending, so no edit is replaced", async () => {
+ local.set("artifact-source:owner:w:demo", oldSource("Old slug draft"))
+ render(<ArtifactProject workspaceId="w" slug="demo" />)
+ await screen.findByRole("region", { name: "Older draft" })
+ await waitFor(() => expect(screen.getByRole("button", { name: "Use old source draft here" })).toBeEnabled())
+ let release!: () => void
+ holdPut = new Promise<void>(resolve => { release = resolve })
+ fireEvent.click(screen.getByRole("button", { name: "Use old source draft here" }))
+ expect(screen.getByRole("button", { name: "Edit source" })).toBeDisabled()
+ fireEvent.click(screen.getByRole("button", { name: "Edit source" }))
+ expect(screen.queryByLabelText("Source file")).toBeNull()
+ release(); holdPut = undefined
+ await waitFor(() => expect(screen.getByLabelText("Source file")).toHaveValue("Old slug draft"))
 })

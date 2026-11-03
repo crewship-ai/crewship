@@ -35,6 +35,9 @@ export interface ArtifactDraftStore {
   /** Privacy migration: retain only sealed rows belonging to other identities. */
   purgeUnsealed?(keep: string | null): Promise<void>
   read?(row: Row): Promise<{ text: string; revision?: string } | undefined>
+  /** Atomic compare-and-set: stores only when no row exists, in one
+   * transaction. Resolves false when a row exists. */
+  putIfAbsent?(row: Row, text: string, revision: string): Promise<boolean>
   capture(human: string, workspace?: string, page?: string): Promise<CapturedArtifactDraft[]>
   removeCaptured(rows: CapturedArtifactDraft[]): Promise<void>
 }
@@ -112,6 +115,16 @@ const indexedDbStore: ArtifactDraftStore = {
   },
   async put(row, text, revision = crypto.randomUUID()) { await transact("readwrite", store => store.put({ key: row, text, revision })) },
   async delete(row) { await transact("readwrite", store => store.delete(row)) },
+  async putIfAbsent(row, text, revision) {
+    let written = false
+    // One readwrite transaction: IndexedDB serializes it against every other
+    // tab's write to this store, so the check and the put cannot be split.
+    await transact("readwrite", store => {
+      const found = store.get(row)
+      found.onsuccess = () => { if (found.result === undefined) { store.put({ key: row, text, revision }); written = true } }
+    })
+    return written
+  },
   async read(row) {
     const found = await transact<{ text?: unknown; revision?: unknown } | undefined>("readonly", store => store.get(row))
     return typeof found?.text === "string" ? { text: found.text, revision: typeof found.revision === "string" ? found.revision : undefined } : undefined
@@ -462,18 +475,26 @@ export function findSlugArtifactDraft(kind: SlugArtifactDraftKind, human: string
     return { key, text, kind, human, workspace, slug }
   } catch { return undefined }
 }
-/** Explicit adoption into an empty Page-ID draft. The destination is read and
- * written in one merge (the draft's lane, under its cross-tab Web Lock), so a
- * draft another tab stored after the offer is kept as it is: "kept-existing",
- * and the slug copy stays too. Only after a durable adoption is the slug copy
- * removed, and only if it is still the one shown. A failed read or write
- * rejects and keeps the slug copy. */
+/** Explicit adoption into an empty Page-ID draft, as a compare-and-set: the
+ * text is sealed first, then written in one IndexedDB transaction only if no
+ * Page-ID row exists. A draft any tab stored meanwhile, including during the
+ * seal, is kept ("kept-existing") and so is the slug copy. Only after a durable
+ * adoption is the slug copy removed, and only if it is still the one shown. A
+ * failure rejects and keeps the slug copy. */
 export async function adoptSlugArtifactDraft(found: SlugArtifactDraft, pageKey: string, text = found.text): Promise<"adopted" | "kept-existing"> {
   const row = parse(pageKey)
   if (!row || row[0] !== found.human || row[1] !== found.kind || row[2] !== found.workspace) throw new Error("Invalid artifact draft key.")
-  let existed = false
-  await mergeArtifactDraft(pageKey, existing => { existed = existing !== ""; return existed ? existing : text })
-  if (existed) return "kept-existing"
+  if (retired(row)) throw retiredError()
+  const store = durable()
+  if (!store?.putIfAbsent || !text) throw new Error("Artifact draft storage is unavailable.")
+  await lanes.get(pageKey)?.tail
+  // A sealed fallback copy of a Page-ID draft is a draft too.
+  if (legacyGet(row) !== undefined) return "kept-existing"
+  const sealed = await (await cipherFor(pageKey, row)).seal(text, row[1])
+  if (retired(row)) throw retiredError()
+  const revision = crypto.randomUUID()
+  if (!(await store.putIfAbsent(row, sealed, revision))) return "kept-existing"
+  successfulWrites.set(pageKey, { text, revision })
   removeCapturedLegacyLocalDrafts([{ key: found.key, text: found.text }])
   return "adopted"
 }
