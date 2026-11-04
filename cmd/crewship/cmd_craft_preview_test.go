@@ -61,6 +61,10 @@ func TestCraftCLIShareBoundExistingVersionAndNoMutationReplay(t *testing.T) {
 }
 
 func TestCraftCLISharedPreviewRedirectsNeverReplay(t *testing.T) {
+	// The subtests' fixtures cannot register the CLI-state reset (guardCLIState
+	// skips subtests), so the parent owns it: the commands run the root
+	// PersistentPreRun, which blanks the colour palette.
+	guardCLIState(t)
 	for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
 		for _, operation := range []string{"preview", "share"} {
 			t.Run(fmt.Sprintf("%s-%d", operation, status), func(t *testing.T) {

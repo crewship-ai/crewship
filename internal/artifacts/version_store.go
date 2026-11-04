@@ -267,6 +267,27 @@ func (s *VersionStore) ReadVersion(ctx context.Context, k VersionKey, version in
 	return
 }
 
+// ReadVersionWithHead reads one stored version and the current head in the
+// same transaction, under the caller's live authority. It never writes: the
+// head is reported so a caller can tell an old version from the current one.
+func (s *VersionStore) ReadVersionWithHead(ctx context.Context, k VersionKey, version int64, a VersionAuthorize) (out VersionManifest, latest int64, err error) {
+	if version < 1 {
+		return VersionManifest{}, 0, fmt.Errorf("%w: version", ErrVersionInvalid)
+	}
+	err = s.transaction(ctx, k, a, func(tx *sql.Tx, _ string) error {
+		var e error
+		if latest, _, e = versionHead(ctx, tx, k); e != nil {
+			return e
+		}
+		out, e = readVersion(ctx, tx, k, version)
+		return e
+	})
+	if err != nil {
+		return VersionManifest{}, 0, err
+	}
+	return
+}
+
 type storedFile struct {
 	Hash      string `json:"hash"`
 	MediaType string `json:"media_type"`
@@ -433,6 +454,52 @@ func (s *VersionStore) Versions(ctx context.Context, k VersionKey, a VersionAuth
 	err = s.transaction(ctx, k, a, func(tx *sql.Tx, _ string) error { var e error; out, e = listVersions(ctx, tx, k); return e })
 	if err != nil {
 		return nil, err
+	}
+	return
+}
+
+// versionRowsQuerier is the part of *sql.Tx the bounded history read needs.
+type versionRowsQuerier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// listRecentVersions scans at most limit+1 rows, newest first. The extra row
+// only tells the caller that older versions exist.
+func listRecentVersions(ctx context.Context, q versionRowsQuerier, k VersionKey, limit int) (out []VersionInfo, err error) {
+	out = []VersionInfo{}
+	rows, e := q.QueryContext(ctx, `SELECT version,json_extract(manifest_json,'$.entry_point'),message,actor,created_at,restored_from FROM artifact_versions WHERE workspace_id=? AND page_id=? ORDER BY version DESC LIMIT ?`, k.WorkspaceID, k.PageID, limit+1)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v VersionInfo
+		if e = rows.Scan(&v.Version, &v.EntryPoint, &v.Message, &v.Actor, &v.CreatedAt, &v.RestoredFrom); e != nil {
+			return nil, e
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// RecentVersions lists at most limit versions, newest first, under the same
+// live authority and writer fence as Read, so a listing is ordered against a
+// concurrent revocation exactly like a document read. The bound is applied in
+// SQL; truncated reports that older versions exist (and remain stored).
+func (s *VersionStore) RecentVersions(ctx context.Context, k VersionKey, limit int, a VersionAuthorize) (out []VersionInfo, truncated bool, err error) {
+	if limit < 1 || limit > 1000 {
+		return nil, false, fmt.Errorf("%w: history limit", ErrVersionInvalid)
+	}
+	err = s.transaction(ctx, k, a, func(tx *sql.Tx, _ string) error {
+		var e error
+		out, e = listRecentVersions(ctx, tx, k, limit)
+		return e
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if len(out) > limit {
+		out, truncated = out[:limit], true
 	}
 	return
 }

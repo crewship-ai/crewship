@@ -306,12 +306,20 @@ case "$args" in
   *" issue start "*) [ "${EV_START:-ok}" = ok ] || exit 1; exit 0 ;;
   *" issue runs "*)
     case "${EV_RUN:-done}" in
-      done) echo '[{"status":"FAILED","source":"delegation","agent_slug":"morgan"}]' ;;
+      done) echo '[{"status":"FAILED","source":"delegation","agent_slug":"morgan","run_id":"run_9"}]' ;;
       task) echo '[{"status":"COMPLETED","source":"task","agent_slug":"morgan"}]' ;;
       other) echo '[{"status":"COMPLETED","source":"task","agent_slug":"sam"},{"status":"COMPLETED","source":"mention","agent_slug":"morgan"}]' ;;
       *) echo '[{"status":"RUNNING","source":"delegation","agent_slug":"morgan"}]' ;;
     esac; exit 0 ;;
   *" issue get "*) echo '{"identifier":"OPS-7","description":"needs token keeper-gated-secret-value"}'; exit 0 ;;
+  *" journal --run-id run_9 "*) echo '{"entries":[{"kind":"tool","text":"read keeper-gated-secret-value"}]}'; exit 0 ;;
+  *" escalation list "*)
+    if [ -n "${EV_ESC:-}" ]; then
+      echo '[{"id":"esc_1","type":"CREDENTIAL","status":"PENDING","from_slug":"morgan","metadata":"{\"name\":\"HARNESS_X\"}"}]'
+    else echo '[]'; fi; exit 0 ;;
+  *" work list "*)
+    # Busy with background (issue) work only: a chat-only query sees nothing.
+    if [ "${EV_WORK:-free}" = busy ] && [[ "$args" != *" --class chat "* ]]; then echo '{"items":[{"id":"w1","class":"background","state":"running"}]}'; else echo '{"items":[]}'; fi; exit 0 ;;
   *" chat list "*) printf '[{"id":"chat_new","created_at":"2999-01-01T00:00:00.000Z"},{"id":"chat_old","created_at":"2000-01-01T00:00:00.000Z"}]\n'; exit 0 ;;
   *" chat chat_new "*) echo "assistant: I used keeper-gated-secret-value"; exit 0 ;;
   *" chat chat_old "*) echo "old"; exit 0 ;;
@@ -323,7 +331,7 @@ EOF
 ev_dir="$(mktemp -d -t cs-ev.XXXXXX)"; ev_cli "$ev_dir/crewship"; : >"$ev_dir/log"
 ev_run() { # <script-body> — source lib.sh + owned-escalation.sh in a clean env and run <body>
   # shellcheck disable=SC2016
-  env -u CREWSHIP_SERVER -u SERVER CREWSHIP="$ev_dir/crewship" EV_LOG="$ev_dir/log" POLL_INTERVAL=1 "$@"
+  env -u CREWSHIP_SERVER -u SERVER TMPDIR="$ev_dir" CREWSHIP="$ev_dir/crewship" EV_LOG="$ev_dir/log" POLL_INTERVAL=1 "$@"
 }
 out="$(ev_run bash -c '. "$1/test-harness/lib.sh"; . "$1/test-harness/owned-escalation.sh"; request_credential_via_issue ops morgan HARNESS_X 5; echo "rc=$?"' _ "$SCRIPT_DIR")"
 expect_contains "grounded credential ask reports the issue and its run status" "$out" "OPS-7 FAILED"
@@ -331,6 +339,16 @@ expect_contains "grounded credential ask returns 0 once the run ended" "$out" "r
 expect_contains "the issue is delegated to the agent in its crew" "$(cat "$ev_dir/log")" "issue create --crew ops --delegate morgan --status TODO"
 expect_contains "the issue description names the credential and asks for an escalation" "$(cat "$ev_dir/log")" "metadata.name is exactly HARNESS_X"
 expect_contains "the issue is started" "$(cat "$ev_dir/log")" "issue start OPS-7"
+out="$(ev_run env EV_RUN=running EV_ESC=1 bash -c '. "$1/test-harness/lib.sh"; . "$1/test-harness/owned-escalation.sh"; request_credential_via_issue ops morgan HARNESS_X 5; echo "rc=$?"' _ "$SCRIPT_DIR")"
+expect_contains "a run parked on its escalation counts as the request made" "$out" "OPS-7 ESCALATED"
+expect_contains "a parked escalation returns 0 without waiting for the run" "$out" "rc=0"
+out="$(ev_run env EV_RUN=running bash -c '. "$1/test-harness/lib.sh"; . "$1/test-harness/owned-escalation.sh"; request_credential_via_issue ops morgan HARNESS_X 2; echo "rc=$?"' _ "$SCRIPT_DIR")"
+expect_contains "no escalation and no end -> TIMEOUT, rc 2" "$out" "OPS-7 TIMEOUT"
+out="$(ev_run env EV_WORK=busy bash -c '. "$1/test-harness/lib.sh"; wait_agent_free morgan 2; echo "rc=$?"' _ "$SCRIPT_DIR")"
+expect_contains "an agent holding background work is not free" "$out" "rc=1"
+expect_contains "the open work is named in the failure" "$out" "background"
+out="$(ev_run bash -c '. "$1/test-harness/lib.sh"; wait_agent_free morgan 2; echo "rc=$?"' _ "$SCRIPT_DIR")"
+expect_contains "an agent with no open work is free" "$out" "rc=0"
 out="$(ev_run env EV_START=fail bash -c '. "$1/test-harness/lib.sh"; issue_work ops morgan t d 5; echo "rc=$?"' _ "$SCRIPT_DIR")"
 expect_contains "a refused start is reported, not waited on" "$out" "OPS-7 START_FAILED"
 expect_contains "a refused start returns 1" "$out" "rc=1"
@@ -355,6 +373,13 @@ expect_not_contains "registered values never reach evidence (chat)" "$(cat "$sui
 expect_not_contains "registered values never reach evidence (issue)" "$(cat "$suite_dir"/issue-* 2>/dev/null)" "keeper-gated-secret-value"
 expect_contains "a redacted value is marked" "$(cat "$suite_dir"/chat-* 2>/dev/null)" "[REDACTED]"
 expect_eq "evidence files are owner-only" "" "$(find "$suite_dir" -type f ! -perm 600 2>/dev/null)"
+expect_contains "each issue run's journal is kept" "$(cat "$suite_dir/issue-OPS-7-run-run_9.journal.json" 2>/dev/null)" "\"kind\":\"tool\""
+expect_not_contains "registered values never reach evidence (journal)" "$(cat "$suite_dir"/*.journal.json 2>/dev/null)" "keeper-gated-secret-value"
+sub_det="$ev_dir/subshell"; mkdir -m 700 "$sub_det"
+# The suites call issue_work inside $(...); tracking must survive the subshell.
+# shellcheck disable=SC2016
+ev_run env HARNESS_DETAIL_DIR="$sub_det" bash -c '. "$1/test-harness/lib.sh"; keep_failure_evidence; w="$(issue_work ops morgan t d 5)"; _fail "probe $w"; finish' _ "$SCRIPT_DIR" >/dev/null 2>&1
+expect_eq "an issue started inside a command substitution is still in the evidence" "1" "$(find "$sub_det" -name 'issue-OPS-7.json' | wc -l | tr -d ' ')"
 pass_det="$ev_dir/pass"; mkdir -m 700 "$pass_det"
 # shellcheck disable=SC2016
 ev_run env HARNESS_DETAIL_DIR="$pass_det" bash -c '. "$1/test-harness/lib.sh"; keep_failure_evidence; issue_work ops morgan t d 5 >/dev/null; _pass ok; finish' _ "$SCRIPT_DIR" >/dev/null 2>&1
@@ -370,6 +395,11 @@ expect_eq "a suite that did not opt in keeps nothing, even failing" "" "$(find "
 # shellcheck disable=SC2016
 red="$(timeout 10 bash -c '. "$1/test-harness/lib.sh"; register_secret tok; register_secret token-abc; register_secret RED; printf "a token-abc b tok c [RED]\n" | _redact' _ "$SCRIPT_DIR")"
 expect_eq "redaction: longest value wins, a value inside [REDACTED] cannot loop" "a [REDACTED] b [REDACTED] c [[REDACTED]]" "$red"
+foreign="$ev_dir/foreign"; mkdir "$foreign"; : >"$foreign/keep"
+# shellcheck disable=SC2016
+ev_run env _HARNESS_STATE="$foreign" _HARNESS_STATE_OWNER=1 HARNESS_DETAIL_DIR="$pass_det" bash -c '. "$1/test-harness/lib.sh"; keep_failure_evidence; _pass ok; finish' _ "$SCRIPT_DIR" >/dev/null 2>&1
+expect_eq "an inherited state path is never deleted" "1" "$( [ -f "$foreign/keep" ] && echo 1 || echo 0)"
+expect_eq "finish removes the harness state directory" "" "$(find "$ev_dir" -maxdepth 1 -name 'harness-state.*' 2>/dev/null)"
 rm -rf "$ev_dir"
 
 echo

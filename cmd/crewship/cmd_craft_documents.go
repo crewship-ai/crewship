@@ -2,11 +2,13 @@ package main
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -99,4 +101,124 @@ type craftShareSelection struct {
 	Generation    string `json:"generation" yaml:"generation"`
 	BaseVersion   string `json:"baseVersion" yaml:"baseVersion"`
 	TargetVersion string `json:"targetVersion" yaml:"targetVersion"`
+}
+
+// craftNativeVersionsLimit bounds one history listing (the server returns at
+// most 200 entries, metadata only).
+const craftNativeVersionsLimit = 1 << 20
+
+// craftReadOnlyAdmission opens one process-local native admission for a
+// read-only command. It never acquires a lease and never prints the token.
+func craftReadOnlyAdmission(cmd *cobra.Command, page string) (*cli.Client, string, error) {
+	c, e := pageClient()
+	if e != nil {
+		return nil, "", e
+	}
+	c = c.WithContext(cmd.Context())
+	httpClient := *c.HTTPClient
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	c.HTTPClient = &httpClient
+	r, e := c.Post("/api/v1/pages/"+pagePathEscape(page)+"/craft/sessions", struct{}{})
+	if e != nil {
+		return nil, "", craftTransportError("native session request failed")
+	}
+	defer r.Body.Close()
+	if r.StatusCode != 201 {
+		if r.StatusCode < 200 || r.StatusCode >= 300 {
+			return nil, "", craftHTTPError(r, "")
+		}
+		return nil, "", fmt.Errorf("native session HTTP %d", r.StatusCode)
+	}
+	raw, e := craftReadJSON(r.Body)
+	if e != nil {
+		return nil, "", e
+	}
+	var admission struct {
+		Token string `json:"session_token" yaml:"session_token"`
+		ID    string `json:"session_id" yaml:"session_id"`
+	}
+	if e = json.Unmarshal(raw, &admission); e != nil || !craftDocumentDigest(admission.Token) || admission.ID == "" || admission.ID == admission.Token {
+		return nil, "", fmt.Errorf("invalid native session response")
+	}
+	return c.WithHeader("X-Craft-Session", admission.Token), admission.Token, nil
+}
+
+// craftVersions opens one process-local native admission, reads the version
+// list under it and exits. It never acquires a lease and never writes; the
+// private session token is never printed.
+func craftVersions(cmd *cobra.Command, args []string) error {
+	c, token, e := craftReadOnlyAdmission(cmd, args[0])
+	if e != nil {
+		return e
+	}
+	response, e := c.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/craft/document/versions")
+	return craftResponseLimit(cmd, response, e, token, craftNativeVersionsLimit)
+}
+
+// craftVersion reads the bytes of one saved native version under the same
+// read-only admission (the authorized diagnostic read). With --output the
+// decoded document is written to that file ("-" for stdout) and only the
+// metadata is printed; otherwise the response, bytes in base64, is printed.
+func craftVersion(cmd *cobra.Command, args []string) error {
+	if _, e := strconv.ParseInt(args[1], 10, 64); e != nil || strings.HasPrefix(args[1], "0") || strings.HasPrefix(args[1], "-") || strings.HasPrefix(args[1], "+") {
+		return fmt.Errorf("version must be a positive integer")
+	}
+	output, _ := cmd.Flags().GetString("output")
+	c, token, e := craftReadOnlyAdmission(cmd, args[0])
+	if e != nil {
+		return e
+	}
+	response, e := c.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/craft/document/versions/" + args[1])
+	if output == "" {
+		return craftResponseLimit(cmd, response, e, token, craftNativeJSONLimit)
+	}
+	if e != nil {
+		return craftTransportError("native request failed")
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return craftHTTPError(response, token)
+	}
+	raw, e := craftReadJSONLimit(response.Body, craftNativeJSONLimit)
+	if e != nil {
+		return e
+	}
+	var document map[string]json.RawMessage
+	var content []byte
+	if e = json.Unmarshal(raw, &document); e != nil || json.Unmarshal(document["bytes"], &content) != nil || len(content) == 0 || len(content) > craftNativeBytesLimit {
+		return fmt.Errorf("invalid native version response")
+	}
+	if output == "-" {
+		_, e = cmd.OutOrStdout().Write(content)
+		return e
+	}
+	if e = craftWritePrivateFile(output, content); e != nil {
+		return e
+	}
+	delete(document, "bytes")
+	meta, e := json.Marshal(document)
+	if e != nil {
+		return e
+	}
+	return craftEmit(cmd, meta, token)
+}
+
+// craftWritePrivateFile writes private document bytes to path as a new 0600
+// file: a temporary file created 0600 in the same directory is renamed over
+// the target, like `api request --output`. An existing file never keeps its
+// old (possibly world-readable) mode, a symlink at path is replaced rather
+// than followed, and an interrupted write leaves the previous file intact.
+func craftWritePrivateFile(path string, content []byte) error {
+	file, err := cli.NewAtomicFile(path)
+	if err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	defer file.Close()
+	if _, err = file.Write(content); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if err = file.Commit(); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
