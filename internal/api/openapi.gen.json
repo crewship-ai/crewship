@@ -139507,7 +139507,7 @@
     },
     "/api/v1/pages/{slug}/design": {
       "get": {
-        "description": "Read the live collaborative canvas, or the historical checkpoint chosen with `version`. Without `version`, authorized readers receive the live canvas too; a non-editor selecting a retained version is limited to the shared version. Requires the `artifacts_design` feature flag.",
+        "description": "Read the canvas or the retained checkpoint chosen with `version`. Editors and separately authorized workspace OWNER/ADMIN readers can read the latest canvas and retained versions. Shared-only readers receive only the shared pin, even without `version`, and receive 404 until one is shared. Foreign administrator access is audited; a read-scoped credential grants no write authority. Requires the `artifacts_design` feature flag.",
         "operationId": "get_api_v1_pages_slug_design",
         "parameters": [
           {
@@ -140658,7 +140658,7 @@
     },
     "/api/v1/pages/{slug}/design/versions": {
       "get": {
-        "description": "List Design versions. Editors receive the full history; read-only callers receive only the shared version.",
+        "description": "List Design versions. Editors and separately authorized workspace OWNER/ADMIN readers receive full history; shared-only readers receive only the shared version. Foreign administrator access is audited; a read-scoped credential grants no write authority.",
         "operationId": "get_api_v1_pages_slug_design_versions",
         "parameters": [
           {
@@ -140800,7 +140800,7 @@
     },
     "/api/v1/pages/{slug}/design/ws": {
       "get": {
-        "description": "Upgrade to a WebSocket that carries standard Yjs sync and awareness frames for the live canvas. Read-only callers receive updates but cannot write. Live edits change the canvas but do not publish a version; use Create Design checkpoint.",
+        "description": "Upgrade to a WebSocket carrying standard Yjs sync and awareness frames. Editors and separately authorized workspace OWNER/ADMIN readers receive live canvas updates. Shared-only readers receive the shared snapshot and presence, without live document updates. Foreign administrator access is audited; read-scoped credentials cannot write. Live edits do not publish a version; use Create Design checkpoint.",
         "operationId": "get_api_v1_pages_slug_design_ws",
         "parameters": [
           {

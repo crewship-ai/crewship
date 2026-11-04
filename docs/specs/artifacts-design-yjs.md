@@ -107,8 +107,12 @@ version without changing it.
 
 **Restore** (`POST .../design/restore` with `version`) changes the live document
 to match an earlier version and publishes that as a new version. The restore is
-applied as a Yjs update to the existing document, so connected browsers stay
-connected and see the result. History is never deleted.
+applied as a Yjs update to the existing document. Connected browsers authorized
+for live reads receive the result; shared-only readers keep the shared snapshot
+and presence until the owner shares another version. Separately authorized
+workspace OWNER/ADMIN live reads remain audited for foreign Designs, including
+with a read-scoped credential, which grants no write authority. History is
+never deleted.
 
 **Share** (`POST .../design/share` with `version`) pins a version for readers.
 Only the Page owner can share; an Edit grant does not allow it.
