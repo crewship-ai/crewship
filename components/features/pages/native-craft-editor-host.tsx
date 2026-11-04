@@ -216,8 +216,15 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    const observed=leaseObservation
    const proof=leaseView(await admission.lease(signal))
    if(dead||authSuspended||signal.aborted||client!==admission)throw Error('native_admission_retired')
-   if(observed!==leaseObservation)return viewNow
-   viewNow=proof;setView(proof);return proof
+   let confirmed=proof
+   if(observed!==leaseObservation){
+    // Arrival order is not server order: neither a delayed HTTP grant nor a
+    // queued stream grant may override the other's denial. Keep the latest
+    // advisory view, but require both to confirm the same writable custody.
+    const latest=viewNow,same=latest.generation===proof.generation&&latest.holder?.actor_id===proof.holder?.actor_id&&latest.holder?.kind===proof.holder?.kind
+    confirmed={...latest,can_edit:latest.can_edit===true&&proof.can_edit===true,mine:same&&latest.mine&&proof.mine,can_write:same&&latest.mine&&proof.mine&&latest.can_write&&proof.can_write,expires_at:same?proof.expires_at:latest.expires_at}
+   }
+   viewNow=confirmed;setView(confirmed);return confirmed
   }
   async function mountEditor(snapshot:NativeDocumentSnapshot,generation:string):Promise<Runtime>{
    if(dead)throw Error('retired')
@@ -277,9 +284,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
      if(!r||!liveMount())throw Error('native_startup_canceled')
      // The original admission checks the current credential, Page authority and
      // session epoch again. Neither ready nor an imported snapshot grants access.
-     const proof=await currentLease(admission,abort.signal)
+     await currentLease(admission,abort.signal)
      if(!r||!liveMount())throw Error('native_startup_canceled')
-     viewNow=proof;setView(proof);r.mountedState=mounted?.nativeState;r.ready=true;setHistoryKey(n=>n+1)
+     r.mountedState=mounted?.nativeState;r.ready=true;setHistoryKey(n=>n+1)
      frame.style.visibility='';frame.removeAttribute('inert');readAccess(true);setRetainedBuffer(false);display(r);resolve(r)
     })().catch(()=>{reject(Error('native_bootstrap_failed'));if(liveMount())stop('Dokument nelze bezpečně otevřít.')})},
    })}catch(cause){finish();frame.remove();throw cause}
@@ -443,13 +450,12 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     if(opened.applicationId!==sessionApplication){readMismatch=true;throw Error('native_application_changed')}
     sessionId=opened.sessionId;watch();if(!valid())return
     if(retained){
-     const proof=await currentLease(admission,operation.signal);if(!valid()||current!==r)return
-     viewNow=proof;setView(proof)
+     await currentLease(admission,operation.signal);if(!valid()||current!==r)return
      // Keep input inert even if native read-only could not be confirmed.
      r!.frame.style.visibility='';readAccess(true);setRetainedBuffer(true)
     }else{
      const snapshot=await admission.read(operation.signal);if(!valid())return
-     const proof=await currentLease(admission,operation.signal);if(!valid())return;viewNow=proof;setView(viewNow)
+     await currentLease(admission,operation.signal);if(!valid())return
      await mountEditor(snapshot,viewNow.generation??'1');if(!valid())return
     }
     networkRetired=false;readOpening=false;setConnectionRetired(false);finishAdmission(startup);setBusy(false)
@@ -508,7 +514,6 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    const response=leaseView(await client.leaseAction('acquire',{},lifetime.signal))
    const proof=await currentLease(client,lifetime.signal)
    if(!owns(response)||!owns(proof,response.generation!))throw Error('lease_not_current')
-   viewNow=proof;setView(proof)
    // Never import an old local draft. A new generation begins from a fresh server whole read.
    const snapshot=await client.read(lifetime.signal),r=await mountEditor(snapshot,proof.generation!)
    const journal=await openNativeDraftJournal({human:humanId,workspace:workspaceId,page:pageId,applicationId:snapshot.applicationId})
@@ -517,7 +522,6 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    const finalProof=await currentLease(client,lifetime.signal)
    if(!live(r)){await journal.close();return}
    if(!owns(finalProof,r.generation)){await journal.close();r.journal=undefined;throw Error('lease_not_current')}
-   viewNow=finalProof;setView(finalProof)
    const coordinator=createSingleEditorSave({workspaceId,pageId,applicationId:snapshot.applicationId,enginePin:snapshot.enginePin,baseVersion:snapshot.version,loaded:{bytes:snapshot.bytes,...(r.mountedState?{mountedState:r.mountedState}:{})},generation:r.generation,sessionId,journal:wrapJournal(journal,r),engine:{snapshot:(signal,id)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.snapshot(signal,id),validate:(draft,signal)=>nativeFailed?Promise.reject(Error('native_engine_retired')):r.port.validate(draft,signal)},transport:client,
     onState(state){r.phase=state;display(r);if(state.phase==='read-only'&&r.writable&&!transition){r.writable=false;freezeInput(r);queueMicrotask(()=>{if(live(r))void retireWrite(r).catch(()=>stop('Zápis byl zastaven; přístup editoru se nepotvrdil.'))})}},
     onReceipt(receipt){
@@ -606,7 +610,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
      if(!await flushBeforeTransfer(r))throw Error('final_save_unconfirmed')
      if(!await retireWrite(r,false))return
      await client.leaseAction(action,body,lifetime.signal)
-     const proof=await currentLease(client,lifetime.signal);viewNow=proof;setView(proof)
+     const proof=await currentLease(client,lifetime.signal)
      if(proof.mine&&proof.generation===r.generation)throw Error('custody_transfer_unconfirmed')
      const startup=armAdmissionDeadline()
      try{await mountEditor(await client.read(lifetime.signal),proof.generation??'1')}finally{finishAdmission(startup)}
@@ -632,7 +636,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    // slow import. Lease events cannot start reader refreshes during bootstrap.
    watch();if(dead||client!==admission)return
    const snapshot=await admission.read(lifetime.signal);if(dead||client!==admission)return
-   const proof=await currentLease(admission,lifetime.signal);if(dead||client!==admission)return;viewNow=proof;setView(viewNow)
+   await currentLease(admission,lifetime.signal);if(dead||client!==admission)return
    await mountEditor(snapshot,viewNow.generation??'1');if(dead||client!==admission)return;finishAdmission(initialStartup);setBusy(false)
    void loadProposals();proposalWatch=setInterval(()=>{if(viewNow.can_edit===true)void loadProposals()},5000)
   })().catch(()=>{if(!dead)stop('Dokument nelze bezpečně otevřít.')})
@@ -650,7 +654,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     if(recheckSince){if(Date.now()-recheckSince>=RECHECK_MS)retire();return}
     if(!holds(viewNow,r.generation)){retire();return}
     const since=Date.now();recheckSince=since
-    void currentLease(own,lifetime.signal).then(raw=>{if(dead||client!==own||!r.writable)return;const next=leaseView(raw);if(!owns(next,r.generation)){retire();return}viewNow=next;setView(next)}).catch(()=>{if(!dead&&client===own&&r.writable)retire()}).finally(()=>{if(recheckSince===since)recheckSince=0})
+    void currentLease(own,lifetime.signal).then(raw=>{if(dead||client!==own||!r.writable)return;const next=leaseView(raw);if(!owns(next,r.generation)){retire();return}}).catch(()=>{if(!dead&&client===own&&r.writable)retire()}).finally(()=>{if(recheckSince===since)recheckSince=0})
    },1000)
    reauthorize=setInterval(()=>{void own.reauthorize(lifetime.signal).catch(()=>{if(!dead&&client===own)void retireConnection('Spojení bylo ukončeno.').catch(()=>stop('Přístup editoru se nepotvrdil.'))})},30000)
    void own.events(lifetime.signal,(event,value)=>{

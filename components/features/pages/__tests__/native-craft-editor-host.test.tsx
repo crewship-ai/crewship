@@ -34,6 +34,28 @@ async function ready(){await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenC
 async function acquire(){fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(ports.at(-1)?.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)))}
 
 describe('native Word host authority and persistence',()=>{
+ it('keeps a freshly confirmed writer when an expired same-custody stream event overtakes its recheck',async()=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   mount();await ready();await acquire();await screen.findByText('Připraveno k úpravám')
+   const port=ports.at(-1)!,checks=client.lease.mock.calls.length,proof=deferred<typeof ownedLease>(),stale={...ownedLease,expires_at:new Date(Date.now()-1000).toISOString()}
+   client.lease.mockReturnValueOnce(proof.promise)
+   act(()=>stream?.('lease',stale));await act(async()=>vi.advanceTimersByTimeAsync(1001));await waitFor(()=>expect(client.lease.mock.calls.length).toBeGreaterThan(checks))
+   act(()=>stream?.('lease',stale));await act(async()=>proof.resolve(ownedLease))
+   expect(port.setReadOnly).not.toHaveBeenCalledWith(true,expect.anything());expect(screen.getByText('Připraveno k úpravám')).toBeInTheDocument();expect(client.save).not.toHaveBeenCalled()
+  }finally{vi.useRealTimers()}
+ })
+
+ it('never unlocks on an older streamed grant when the final fresh HTTP lease proof denies custody',async()=>{
+  mount();await ready();const checks=client.lease.mock.calls.length,proof=deferred<typeof emptyLease>()
+  client.leaseAction.mockImplementation(async()=>{client.lease.mockResolvedValueOnce(ownedLease).mockResolvedValueOnce(ownedLease).mockReturnValueOnce(proof.promise);return ownedLease})
+  fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(client.lease).toHaveBeenCalledTimes(checks+3))
+  act(()=>stream?.('lease',ownedLease))
+  await act(async()=>proof.resolve({...emptyLease,holder:otherPerson,generation:'9007199254740996'}))
+  await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Výsledek akce nebyl potvrzen.'))
+  expect(ports.at(-1)!.setReadOnly).not.toHaveBeenCalledWith(false,expect.anything());expect(client.save).not.toHaveBeenCalled()
+ })
+
  it.each(['stream','retirement','write-revoked','reauthorization'] as const)('M1: hides a failed engine on terminal %s while retaining custody for explicit purge',async failure=>{
   vi.useFakeTimers({shouldAdvanceTime:true})
   try{

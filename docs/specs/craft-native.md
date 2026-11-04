@@ -107,7 +107,11 @@ fetch and iframe import. While a frame bootstraps, lease events update its
 advisory view without starting concurrent reader refreshes; one catch-up refresh
 runs afterwards if needed. A delayed lease HTTP response cannot replace a
 newer streamed lease observation, although successful current-admission proof
-is still mandatory. Read retirement removes the frame and revokes the held
+is still mandatory. If an in-flight lease read overlaps a metadata observation,
+write custody must be confirmed by both; neither source's grant overrides the
+other's denial. For the same confirmed custody, the fresh HTTP expiry is used
+rather than an already expired queued event. Await continuations do not
+republish an older proof over subsequent metadata. Read retirement removes the frame and revokes the held
 private journal. An open journal purges its scope; a closed journal may erase
 only its own persisted row, and a pure viewer has no private journal to purge.
 A terminal monitor failure is uncertainty, not an authoritative Read purge.
