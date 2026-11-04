@@ -82,6 +82,15 @@ func TestOAuthInitiate_Matrix(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
+	// A credential that was never set up for OAuth: its OAuth columns are
+	// NULL, not empty (#4906).
+	if _, err := db.Exec(`
+		INSERT INTO credentials (id, workspace_id, name, type, encrypted_value, status, created_by, created_at, updated_at)
+		VALUES ('cred-apikey', ?, 'ak', 'API_KEY', '', 'ACTIVE', ?, datetime('now'), datetime('now'))`,
+		wsID, userID); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
 	run := func(role, body string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("POST", "/api/v1/oauth/initiate", strings.NewReader(body))
 		req.Host = "crewship.local:8080"
@@ -120,6 +129,11 @@ func TestOAuthInitiate_Matrix(t *testing.T) {
 	t.Run("missing oauth config 400", func(t *testing.T) {
 		if rr := run("OWNER", `{"credential_id":"cred-noconf"}`); rr.Code != http.StatusBadRequest {
 			t.Errorf("status = %d, want 400", rr.Code)
+		}
+	})
+	t.Run("credential without oauth config (NULL columns) 400, not 500", func(t *testing.T) {
+		if rr := run("OWNER", `{"credential_id":"cred-apikey"}`); rr.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
 		}
 	})
 	t.Run("happy path returns auth_url + stores state", func(t *testing.T) {
@@ -269,6 +283,17 @@ func TestOAuthExchange_Matrix(t *testing.T) {
 		rr := run("OWNER", `{"credential_id":"cred-ex","code":"c","state":"state-othercred"}`)
 		if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "does not match credential") {
 			t.Errorf("status=%d body=%q", rr.Code, rr.Body.String())
+		}
+	})
+	t.Run("credential without oauth config 400, not 500 or 502", func(t *testing.T) {
+		if _, err := db.Exec(`
+			INSERT INTO credentials (id, workspace_id, name, type, encrypted_value, status, created_by, created_at, updated_at)
+			VALUES ('cred-ex-apikey', ?, 'ak', 'API_KEY', '', 'ACTIVE', ?, datetime('now'), datetime('now'))`,
+			wsID, userID); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		if rr := run("OWNER", `{"credential_id":"cred-ex-apikey","code":"c"}`); rr.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
 		}
 	})
 	t.Run("unknown credential 404", func(t *testing.T) {

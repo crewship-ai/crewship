@@ -298,6 +298,10 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if cred.ClientID == "" || cred.TokenURL == "" {
+		replyError(w, http.StatusBadRequest, "Credential missing OAuth configuration")
+		return
+	}
 
 	// Exchange code for tokens (with PKCE verifier if available)
 	//
