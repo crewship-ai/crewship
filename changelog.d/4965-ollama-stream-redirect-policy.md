@@ -1,0 +1,1 @@
+- **Ollama streaming could ignore configured redirect restrictions.** Streaming requests now honor the HTTP client’s redirect policy while retaining the existing transport and stream timeout.
