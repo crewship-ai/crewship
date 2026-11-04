@@ -1276,9 +1276,9 @@ Starts the OAuth authorization flow by generating an authorization URL.
 
 `redirect_uri` is optional; when omitted, Crewship uses its backend callback.
 
-A credential that has no OAuth client ID, authorization URL or token URL (for
-example an API-key credential) is refused with `400 Credential missing OAuth
-configuration`; an unknown credential is `404`.
+A credential without an OAuth client ID or authorization URL (for example an
+API-key credential) is refused with `400 Credential missing oauth_client_id or
+oauth_auth_url`; an unknown credential is `404`.
 
 **Response:** `200 OK`
 

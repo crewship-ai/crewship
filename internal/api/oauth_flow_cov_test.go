@@ -359,6 +359,17 @@ func TestOAuthLoopback_ValidationMatrix(t *testing.T) {
 			t.Errorf("status = %d, want 400", rr.Code)
 		}
 	})
+	t.Run("credential without oauth config (NULL columns) 400, not 404", func(t *testing.T) {
+		if _, err := db.Exec(`
+			INSERT INTO credentials (id, workspace_id, name, type, encrypted_value, status, created_by, created_at, updated_at)
+			VALUES ('cred-lb-apikey', ?, 'ak', 'API_KEY', '', 'ACTIVE', ?, datetime('now'), datetime('now'))`,
+			wsID, userID); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		if rr := run("OWNER", `{"credential_id":"cred-lb-apikey"}`); rr.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400; body=%s", rr.Code, rr.Body.String())
+		}
+	})
 }
 
 // covStartLoopback drives Loopback to a 200 and returns the loopback
