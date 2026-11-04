@@ -710,6 +710,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	propH.diffs = r.diffs
 	propH.SetJournal(r.Journal())
 	propH.SetBlobRoot(r.memoryVersionsBlobRoot)
+	propH.SetStorageBasePath(r.outputBasePath)
 	r.authedMut("POST", "/api/v1/consolidate/proposed/{id}/approve", roleManage, propH.Approve)
 	r.authedMut("POST", "/api/v1/consolidate/proposed/{id}/reject", roleManage, propH.Reject)
 	r.mux.Handle("GET /api/v1/consolidate/proposed/{id}/explain", authed(wsCtx(http.HandlerFunc(propH.Explain))))

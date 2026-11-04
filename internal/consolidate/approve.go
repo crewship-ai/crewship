@@ -103,6 +103,12 @@ type ApprovalOptions struct {
 	// Empty disables the post-merge RecordVersion call — approve still
 	// succeeds, just without the v90 audit row.
 	BlobRoot string
+	// StorageRoot is the trusted storage base the crew memory tree lives
+	// under (the consolidator's Config.OutputRoot). When set, the proposal
+	// and canonical files are read with every component below it pinned
+	// and symlinks refused. When empty, the final component is still read
+	// without following a symlink.
+	StorageRoot string
 }
 
 // proposalRow is the in-memory representation of a memory_proposals row
@@ -164,7 +170,11 @@ func ApproveProposal(
 	// section (everything below the "---" separator). The header
 	// portion is proposal-specific scaffolding; the canonical file
 	// has its own header and divider scheme already.
-	body, err := os.ReadFile(row.ProposalPath)
+	//
+	// The .proposed directory sits in a memory tree the crew can write,
+	// so the read must not follow a symlink: approving merges these
+	// bytes into a learned file every agent of the crew reads back.
+	body, err := readStagedNoFollow(opts.StorageRoot, row.ProposalPath)
 	if err != nil {
 		return nil, fmt.Errorf("read proposal body: %w", err)
 	}
@@ -192,7 +202,7 @@ func ApproveProposal(
 	var versionSha string
 	if opts.BlobRoot != "" {
 		auditPath := canonicalAuditPath(row.CrewID, filepath.Base(canonicalPath))
-		if content, rerr := os.ReadFile(canonicalPath); rerr == nil {
+		if content, rerr := readStagedNoFollow(opts.StorageRoot, canonicalPath); rerr == nil {
 			parent, _ := memory.LatestVersionSha(ctx, db, row.WorkspaceID, auditPath)
 			res, verr := memory.RecordVersion(ctx, db, memory.VersionRecord{
 				WorkspaceID: row.WorkspaceID,
@@ -471,9 +481,8 @@ func appendToCanonical(canonicalPath string, now time.Time, body string) error {
 	defer func() { _ = lk.Unlock() }()
 
 	// Refuse a planted final-component symlink before reading anything,
-	// exactly as appendRules does for this same file. os.ReadFile below
-	// FOLLOWS a symlink, and its bytes become the prefix of the file we
-	// write back — so without this check a link dropped at the canonical
+	// exactly as appendRules does for this same file. The prior bytes
+	// become the prefix of the file we write back — so without this check a link dropped at the canonical
 	// path copies its target verbatim into the crew's learned rules,
 	// which the diff endpoint, the audit watcher, every agent projecting
 	// shared memory and the memory_versions blob all read. (The old
@@ -489,7 +498,10 @@ func appendToCanonical(canonicalPath string, now time.Time, body string) error {
 	// serve both the header-vs-divider decision and — since the write
 	// below is a whole-file replace rather than an O_APPEND — the
 	// prefix the new block is appended to.
-	prior, readErr := os.ReadFile(canonicalPath)
+	//
+	// The Lstat above gives the clear error message; the no-follow read
+	// is what actually holds if the entry is swapped between the two.
+	prior, readErr := memory.ReadFileNoFollow(canonicalPath)
 	if readErr != nil && !errors.Is(readErr, fs.ErrNotExist) {
 		// Only "not there yet" may be read as "this is the first
 		// approval of the day". Any other read failure means we do not
@@ -583,4 +595,15 @@ func extractRulesBody(body string) string {
 		return strings.TrimSpace(body)
 	}
 	return strings.TrimSpace(body[idx+len("\n---\n"):])
+}
+
+// readStagedNoFollow reads a file from a crew's memory tree without
+// following symlinks. With a storage root, every component below the root
+// is pinned and must not be a symlink; without one, only the final
+// component is guarded. Non-regular files are refused either way.
+func readStagedNoFollow(storageRoot, path string) ([]byte, error) {
+	if storageRoot != "" {
+		return memory.ReadFileNoFollowRoot(storageRoot, path)
+	}
+	return memory.ReadFileNoFollow(path)
 }
