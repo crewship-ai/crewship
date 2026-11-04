@@ -13,7 +13,8 @@ vi.mock('../workbook-editor-host',()=>({editorFrameSupported:()=>true,createEdit
 const {createNativeEditorPort}=await vi.importActual<typeof import('@/lib/mooring/native-editor-port')>('@/lib/mooring/native-editor-port')
 const bytes=new TextEncoder().encode('{"diagnostic":"synthetic document, no user content"}')
 let client:ReturnType<typeof makeClient>
-let requests:string[],received:string[],closed:ReturnType<typeof vi.fn>,engineReady:boolean,delay:number,stallAt:number|undefined
+let requests:string[],received:string[],engineReady:boolean,delay:number,stallAt:number|undefined
+let closed=vi.fn<()=>void>()
 let hashes:Promise<ArrayBuffer>[]
 const digest=webcrypto.subtle.digest.bind(webcrypto.subtle)
 function makeClient(applicationId:'wordcraft'|'gridcraft'){
@@ -33,7 +34,7 @@ async function mount(applicationId:'wordcraft'|'gridcraft'){
 beforeEach(()=>{
  vi.useFakeTimers();vi.stubGlobal('crypto',webcrypto);hashes=[]
  vi.spyOn(webcrypto.subtle,'digest').mockImplementation((algorithm,data)=>{const hash=digest(algorithm,data);hashes.push(hash);return hash})
- requests=[];received=[];closed=vi.fn();engineReady=true;delay=8000;stallAt=undefined
+ requests=[];received=[];closed=vi.fn<()=>void>();engineReady=true;delay=8000;stallAt=undefined
  mock.port.mockImplementation((options:NativeEditorPortOptions)=>{
   const app=options.applicationId
   let document='welcome'
