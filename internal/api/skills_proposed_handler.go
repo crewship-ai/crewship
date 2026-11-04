@@ -236,7 +236,7 @@ func (h *SkillProposedHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, os.ErrNotExist):
 			replyError(w, http.StatusNotFound, "staged skill not found")
-		case isNoFollowRefusal(full, err):
+		case isNoFollowRefusal(err):
 			h.logger.Warn("skills proposed: refused non-regular staged entry", "file", full, "err", err)
 			replyError(w, http.StatusUnprocessableEntity, "staged skill is not a regular file")
 		default:

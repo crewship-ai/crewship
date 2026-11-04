@@ -14,22 +14,24 @@ import (
 // write. Every host-side read of a staged entry therefore goes through the
 // memory package's no-follow readers, the same ones the listing uses.
 
-// isNoFollowRefusal reports whether a failed no-follow read of path was a
-// refusal of the entry (a symlink, a symlinked parent, or a non-regular
-// file) rather than an I/O failure. The error alone does not always say:
-// os.Root reports a link whose target leaves the root as an escape, not as
-// ELOOP. The Lstat only classifies the failure; it never reads content.
-func isNoFollowRefusal(path string, err error) bool {
+// isNoFollowRefusal reports whether a failed no-follow read was a refusal of
+// the entry (a symlink, a symlinked or non-directory parent, a path outside the
+// storage root, or a non-regular file) rather than an I/O failure. It decides
+// from the error alone and never touches the path again: a second lookup by
+// name would be exactly the path-following access this file exists to avoid.
+// os.Root reports a link whose target leaves the root as an escape ("path
+// escapes from parent"), not as ELOOP, so that text is matched as well.
+func isNoFollowRefusal(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, syscall.ELOOP) ||
-		errors.Is(err, os.ErrPermission) ||
-		strings.Contains(err.Error(), "not a regular file") {
+	if errors.Is(err, syscall.ELOOP) || errors.Is(err, syscall.ENOTDIR) ||
+		errors.Is(err, os.ErrPermission) {
 		return true
 	}
-	info, lerr := os.Lstat(path)
-	return lerr == nil && !info.Mode().IsRegular()
+	msg := err.Error()
+	return strings.Contains(msg, "not a regular file") ||
+		strings.Contains(msg, "path escapes from parent")
 }
 
 // openProposalFileNoFollow opens a staged proposal or canonical learned file

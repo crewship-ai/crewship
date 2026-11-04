@@ -82,8 +82,8 @@ func TestSkillProposed_Approve_RefusesSymlinkedStagedEntry(t *testing.T) {
 			rr := httptest.NewRecorder()
 			h.Approve(rr, req)
 
-			if rr.Code < 400 {
-				t.Fatalf("status = %d, want refusal; body=%s", rr.Code, rr.Body.String())
+			if rr.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want 422; body=%s", rr.Code, rr.Body.String())
 			}
 			if strings.Contains(rr.Body.String(), proposalNoFollowMarker) {
 				t.Fatalf("response leaks the link target: %s", rr.Body.String())

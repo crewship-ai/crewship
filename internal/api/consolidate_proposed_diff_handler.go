@@ -116,7 +116,7 @@ func (h *ProposedHandler) Diff(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusGone, "proposal markdown is missing on disk")
 			return
 		}
-		if isNoFollowRefusal(exp.ProposalPath, err) {
+		if isNoFollowRefusal(err) {
 			h.logger.Warn("proposal diff: refused non-regular proposal file", "proposal_id", proposalID, "error", err)
 			replyError(w, http.StatusUnprocessableEntity, "proposal markdown is not a regular file")
 			return
@@ -151,7 +151,7 @@ func (h *ProposedHandler) Diff(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		canonicalExists = false
-	case isNoFollowRefusal(canonicalPath, err):
+	case isNoFollowRefusal(err):
 		h.logger.Warn("proposal diff: refused non-regular canonical file", "path", canonicalPath, "error", err)
 		replyError(w, http.StatusUnprocessableEntity, "canonical learned file is not a regular file")
 		return
