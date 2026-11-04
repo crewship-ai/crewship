@@ -95,6 +95,9 @@ export function NewArtifactDialog(props: NewArtifactDialogProps) {
 function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, defaultKind, onCreated }: NewArtifactDialogProps) {
   const router = useRouter()
   const client = useQueryClient()
+  // The opener, read while rendering: the Name field's autoFocus moves focus
+  // before the surface's own open handler could see who opened it.
+  const [opener] = useState(() => typeof document !== "undefined" && document.activeElement instanceof HTMLElement ? document.activeElement : null)
   const caps = useArtifactCapabilities(workspaceId)
   const creatable = creatableKinds(caps)
   const coming = comingKinds(caps)
@@ -189,7 +192,7 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
   const primaryLabel = created ? "Open it" : handoff ? "Continue in chat" : busy ? "Creating…" : word.retrying && (kind?.key === "word" || kind?.key === "sheet") ? "Retry initialization" : kind?.make === "panels" ? "Create page" : "Create and edit"
   const refusal = created ? `${created.name} was created but not put in ${created.folder}: ${created.error}` : create.error?.message ?? null
 
-  return <CreateSurface open size="lg" onOpenChange={next => { if (!next) close() }} onSubmit={() => { if (canSubmit) void submit() }} ariaLabel="New artifact">
+  return <CreateSurface open size="lg" restoreOpenerFocus restoreFocusTo={opener} onOpenChange={next => { if (!next) close() }} onSubmit={() => { if (canSubmit) void submit() }} ariaLabel="New artifact">
     <CreateSurfaceHeader icon={Plus} context={folder ? `in ${folder.name}` : "Artifacts"} title="New artifact" description="Pick what you are making. An artifact holds one kind of content." onClose={busy ? undefined : close} />
     <CreateSurfaceBody className="flex flex-col gap-3.5">
       {creatable.length >= SEARCH_FROM && <label className="relative block">
