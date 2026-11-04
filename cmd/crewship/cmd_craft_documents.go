@@ -161,7 +161,7 @@ func craftVersions(cmd *cobra.Command, args []string) error {
 // metadata is printed; otherwise the response, bytes in base64, is printed.
 func craftVersion(cmd *cobra.Command, args []string) error {
 	if _, e := strconv.ParseInt(args[1], 10, 64); e != nil || strings.HasPrefix(args[1], "0") || strings.HasPrefix(args[1], "-") || strings.HasPrefix(args[1], "+") {
-		return fmt.Errorf("version must be a positive integer")
+		return cli.WithExitCode(fmt.Errorf("version must be a positive integer"), cli.ExitValidation)
 	}
 	output, _ := cmd.Flags().GetString("output")
 	c, token, e := craftReadOnlyAdmission(cmd, args[0])
