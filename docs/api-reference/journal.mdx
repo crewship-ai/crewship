@@ -149,7 +149,7 @@ Live tail of the journal over Server-Sent Events, seeded with a recent batch the
 GET /api/v1/journal/stream
 ```
 
-Server-Sent Events feed. Same query-param filters as List (limit is forced to 50 for the seed batch).
+Server-Sent Events feed. Same query-param filters as List (limit is forced to 50 for the seed batch). The list pagination `cursor` query parameter is ignored; stream replay resumes through `Last-Event-ID`, as described below.
 
 Replay and live delivery recheck current account and workspace authority before sending entries. Suspension, membership removal, workspace deletion or a Guest restriction anywhere ends an existing stream without sending later entries. Database failures during this authority check also end the stream. A caller already lacking this authority receives 403 before streaming starts.
 
