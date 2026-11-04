@@ -172,6 +172,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     client.close();return
    }
    if(nativeFailed&&!explicitClose)return
+   readAccess(false)
    dead=true;readOpening=false;readOpeningAbort?.abort();admissionEpoch++;clearTimeout(admissionDeadline);setConnectionRetired(true);lifetime.abort();clearInterval(reauthorize);clearInterval(leaseWatch);clearInterval(proposalWatch);setError(message);setSavedVersion(undefined);setLabel(current?.capture?'Editor odpojen · zachycená místní kopie zůstává':'Editor odpojen');setOwnsEditor(false);setBusy(false)
    if(current){detach(current);void current.coordinator?.close();if(!current.coordinator)void current.journal?.close()}
    client.close()
@@ -396,7 +397,11 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(!dead&&current?.blocked)throw Error('native_auth_draft_capture_unconfirmed')
   }
   async function retireConnection(message:string){
-   if(dead||networkRetired&&!readOpening)return
+   // A failed native port retired writing, not the independent read monitor.
+   // Its terminal failure must still hide the retained buffer and copy UI.
+   if(dead||networkRetired&&!readOpening&&!nativeFailed)return
+   readAccess(false)
+   if(current){freezeInput(current);current.frame.style.visibility='hidden'}
    readOpening=false;readOpeningAbort?.abort()
    networkRetired=true;setConnectionRetired(true);setError(message);clearInterval(reauthorize);clearInterval(leaseWatch)
    const r=current
@@ -463,15 +468,16 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   }
   async function refreshReader(){
    if(dead||networkRetired||transition||current?.writable||current?.blocked||current&&(!current.nativeReadOnly||current.retiring&&!current.retirementFinished))return
-   // A refresh belongs to the admission that started it. After a fresh read
-   // admission replaced the client (#4348), the old GET neither mounts its
-   // snapshot nor fails the successor; the successor starts its own read.
-   const own=client
+   // Both success and failure belong to the reader runtime that started the
+   // request. An acquire can replace it without replacing the client. Its late
+   // failure must not detach that new writer or interrupt a pending capture.
+   const own=client,reader=current
+   const obsolete=()=>client!==own||current!==reader||transition||Boolean(current&&(current.writable||current.retiring&&!current.retirementFinished))
    if(readerRefresh?.client===own)return readerRefresh.done
    const refresh={client:own,done:(async()=>{
     let snapshot:NativeDocumentSnapshot
-    try{snapshot=await own.read(lifetime.signal)}catch(error){if(client!==own)return;throw error}
-    if(client!==own||dead||networkRetired||transition||current?.writable||current?.blocked||current&&(!current.nativeReadOnly||current.retiring&&!current.retirementFinished))return
+    try{snapshot=await own.read(lifetime.signal)}catch(error){if(obsolete())return;throw error}
+    if(obsolete()||dead||networkRetired||current?.blocked||current&&!current.nativeReadOnly)return
     if(snapshot.version!==current?.version){
      setBusy(true)
      try{await mountEditor(snapshot,viewNow.generation??'1')}
@@ -652,6 +658,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     if(event==='session_retired'&&value.draft==='purge'){
      void retirePrivacy().catch(()=>setError('Vymazání místního konceptu nebylo potvrzeno.'));return
     }
+    if(event==='session_retired'&&nativeFailed){void retireConnection('Spojení bylo ukončeno.').catch(()=>stop('Přístup editoru se nepotvrdil.'));return}
     if(event==='session_retired'&&value.reason==='write_revoked'&&(initializing||current&&!current.ready)){stop('Právo upravovat bylo během otevírání odebráno. Dokument se neotevřel.');return}
     if(event==='session_retired'&&value.reason==='write_revoked'){void reopenReadOnly().catch(()=>stop('Přístup editoru se nepotvrdil.'));return}
     if(event==='session_retired'){void retireConnection('Spojení bylo ukončeno.').catch(()=>stop('Přístup editoru se nepotvrdil.'));return}

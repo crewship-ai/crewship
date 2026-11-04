@@ -34,6 +34,92 @@ async function ready(){await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenC
 async function acquire(){fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(ports.at(-1)?.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)))}
 
 describe('native Word host authority and persistence',()=>{
+ it.each(['stream','retirement','write-revoked','reauthorization'] as const)('M1: hides a failed engine on terminal %s while retaining custody for explicit purge',async failure=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   const monitor=deferred<void>();client.events.mockImplementation((_signal,callback)=>{stream=callback;return monitor.promise})
+   mount();await ready();await acquire();const frame=document.querySelector('iframe')
+   act(()=>portOptions.at(-1)!.onError?.('native_protocol'));await waitFor(()=>expect(frame).toHaveAttribute('inert'))
+   if(failure==='stream')await act(async()=>monitor.reject(Error('terminal stream failure')))
+   if(failure==='retirement')await act(async()=>stream?.('session_retired',{delivery:'stopped',draft:'retain',reason:'authority_changed'}))
+   if(failure==='write-revoked')await act(async()=>stream?.('session_retired',{delivery:'stopped',draft:'retain',reason:'write_revoked'}))
+   if(failure==='reauthorization'){client.reauthorize.mockRejectedValue(Error('authority unconfirmed'));await act(async()=>vi.advanceTimersByTimeAsync(30001))}
+   expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveStyle({visibility:'hidden'});expect(client.close).toHaveBeenCalled()
+   expect(journal.revokeRead).not.toHaveBeenCalled();expect(journal.close).not.toHaveBeenCalled();expect(m.createClient).toHaveBeenCalledOnce();expect(screen.queryByText('Uloženo')).not.toBeInTheDocument()
+   await act(async()=>privacyRetire!());expect(document.querySelector('iframe')).toBeNull();expect(journal.revokeRead).toHaveBeenCalled()
+  }finally{vi.useRealTimers()}
+ })
+ it.each(['active','lease-retirement','auth-retirement'] as const)('M2: old read failure preserves new writer during %s and its pending capture',async phase=>{
+  mount();await ready();const pending=deferred<unknown>(),before=client.read.mock.calls.length
+  client.read.mockReturnValueOnce(pending.promise);act(()=>stream?.('lease',emptyLease));await waitFor(()=>expect(client.read).toHaveBeenCalledTimes(before+1))
+  await acquire();await screen.findByText('Připraveno k úpravám')
+  const frame=document.querySelector('iframe'),port=ports.at(-1)!,capture=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>()
+  port.snapshot.mockReturnValue(capture.promise)
+  let suspension:Promise<boolean>|undefined
+  try{
+   act(()=>portOptions.at(-1)!.onChanged('new-writer-buffer','doc'));await waitFor(()=>expect(port.snapshot).toHaveBeenCalled());expect(journal.persist).not.toHaveBeenCalled()
+   if(phase==='lease-retirement')act(()=>stream?.('lease',{...emptyLease,holder:otherPerson,generation:'9007199254740996'}))
+   if(phase==='auth-retirement')act(()=>{suspension=authSuspend!().then(()=>true,()=>false)})
+   if(phase!=='active')await waitFor(()=>expect(frame).toHaveAttribute('inert'))
+   await act(async()=>pending.reject(Error('old read failed')))
+   expect(document.querySelector('iframe')).toBe(frame);expect(journal.revokeRead).not.toHaveBeenCalled();expect(journal.persist).not.toHaveBeenCalled();expect(screen.queryByText('Uloženo')).not.toBeInTheDocument()
+  }finally{await act(async()=>capture.resolve({bytes:new TextEncoder().encode('{"body":["QA pending writer"]}'),editorRevision:'captured',documentId:'doc'}))}
+  await waitFor(()=>expect(journal.persist).toHaveBeenCalled())
+  if(suspension){await expect(suspension).resolves.toBe(true);expect(document.querySelector('iframe')).toBeNull()}
+  else expect(document.querySelector('iframe')).toBe(frame)
+ })
+ it('M2: old read failure does not cancel an acquisition still awaiting its lease action',async()=>{
+  mount();await ready();const frame=document.querySelector('iframe'),pending=deferred<unknown>(),action=deferred<typeof ownedLease>(),reads=client.read.mock.calls.length
+  client.read.mockReturnValueOnce(pending.promise);act(()=>stream?.('lease',emptyLease));await waitFor(()=>expect(client.read).toHaveBeenCalledTimes(reads+1))
+  client.leaseAction.mockReturnValueOnce(action.promise);fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(client.leaseAction).toHaveBeenCalled())
+  try{await act(async()=>pending.reject(Error('old read failed')));expect(document.querySelector('iframe')).toBe(frame)}
+  finally{client.lease.mockResolvedValue(ownedLease);await act(async()=>action.resolve(ownedLease))}
+  await screen.findByText('Připraveno k úpravám');expect(journal.revokeRead).not.toHaveBeenCalled()
+ })
+ it.each(['captured','failed-capture'] as const)('monitor terminal failure hides immediately and preserves %s custody while capture settles',async outcome=>{
+  const monitor=deferred<void>();client.events.mockImplementation((_signal,callback)=>{stream=callback;return monitor.promise})
+  mount();await ready();await acquire();await screen.findByText('Připraveno k úpravám')
+  const frame=document.querySelector('iframe'),capture=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>(),port=ports.at(-1)!
+  port.snapshot.mockReturnValue(capture.promise)
+  if(outcome==='failed-capture')journal.persist.mockRejectedValue(Error('storage unavailable'))
+  act(()=>portOptions.at(-1)!.onChanged('buffer-before-terminal-fault','doc'));await waitFor(()=>expect(port.snapshot).toHaveBeenCalled())
+  try{
+   await act(async()=>monitor.reject(Error('terminal monitor fault')))
+   expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveStyle({visibility:'hidden'});expect(frame).toHaveAttribute('inert')
+   expect(journal.persist).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled();expect(screen.queryByText('Uloženo')).not.toBeInTheDocument()
+  }finally{await act(async()=>capture.resolve({bytes:new TextEncoder().encode('{"body":["retained QA buffer"]}'),editorRevision:'terminal-capture',documentId:'doc'}))}
+  await waitFor(()=>expect(journal.persist).toHaveBeenCalled())
+  expect(client.close).toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled();expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
+  if(outcome==='captured')await waitFor(()=>expect(document.querySelector('iframe')).toBeNull())
+  else {expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveStyle({visibility:'hidden'});expect(journal.close).not.toHaveBeenCalled()}
+ })
+ it('monitor retirement hides confirmed recovery copies without purging them',async()=>{
+  mount();await ready();await acquire();const second=clientRig();m.createClient.mockReturnValueOnce(second)
+  act(()=>{portOptions.at(-1)!.onChanged('before-read-reopen','doc');stream?.('session_retired',{delivery:'stopped',draft:'retain',reason:'write_revoked'})})
+  await screen.findByRole('button',{name:'Kopie konceptu'})
+  await act(async()=>stream?.('session_retired',{delivery:'stopped',draft:'retain',reason:'authority_changed'}))
+  expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument();expect(journal.revokeRead).not.toHaveBeenCalled();expect(second.close).toHaveBeenCalled()
+ })
+ it('authority control confirmed read purge removes even a failed engine and revokes its journal',async()=>{
+  mount();await ready();await acquire();const frame=document.querySelector('iframe')
+  act(()=>portOptions.at(-1)!.onError?.('native_protocol'))
+  await waitFor(()=>expect(frame).toHaveAttribute('inert'))
+  await act(async()=>stream?.('session_retired',{delivery:'stopped',draft:'purge',reason:'authority_changed'}))
+  expect(document.querySelector('iframe')).toBeNull();expect(journal.revokeRead).toHaveBeenCalled();expect(client.close).toHaveBeenCalled()
+ })
+ it('authority control ignores an old failed read after a fresh admission replaces its client',async()=>{
+  mount();await ready();const oldFrame=document.querySelector('iframe'),pending=deferred<unknown>(),reads=client.read.mock.calls.length
+  client.read.mockReturnValueOnce(pending.promise)
+  act(()=>stream?.('lease',emptyLease));await waitFor(()=>expect(client.read).toHaveBeenCalledTimes(reads+1))
+  const second=clientRig();second.open.mockResolvedValue({sessionId:'successor-read',applicationId:'wordcraft'});m.createClient.mockReturnValueOnce(second)
+  act(()=>stream?.('session_retired',{delivery:'stopped',draft:'retain',reason:'write_revoked'}))
+  await waitFor(()=>expect(second.events).toHaveBeenCalledOnce());await waitFor(()=>expect(ports).toHaveLength(2))
+  const next=document.querySelector('iframe');expect(next).not.toBe(oldFrame);await waitFor(()=>expect(next).not.toHaveStyle({visibility:'hidden'}))
+  await act(async()=>pending.reject(Error('old admission read failure')))
+  expect(document.querySelector('iframe')).toBe(next);expect(second.close).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()
+ })
+
+
  it('does not overwrite a newer streamed lease with a delayed bootstrap proof',async()=>{
   const proof=deferred<typeof ownedLease>()
   client.lease.mockResolvedValueOnce(emptyLease).mockReturnValueOnce(proof.promise)
@@ -47,10 +133,10 @@ describe('native Word host authority and persistence',()=>{
  })
  it('never unlocks an acquire after a newer streamed custody loss overtakes final proof',async()=>{
   mount();await ready()
-  const proof=deferred<typeof ownedLease>()
+  const proof=deferred<typeof ownedLease>(),checks=client.lease.mock.calls.length
   client.leaseAction.mockImplementation(async()=>{client.lease.mockResolvedValueOnce(ownedLease).mockResolvedValueOnce(ownedLease).mockReturnValueOnce(proof.promise);return ownedLease})
   fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}))
-  await waitFor(()=>expect(journal.recovery).toHaveBeenCalled())
+  await waitFor(()=>expect(client.lease).toHaveBeenCalledTimes(checks+3))
   act(()=>stream?.('lease',{...emptyLease,can_edit:false}))
   await act(async()=>proof.resolve(ownedLease))
   await screen.findByText('Výsledek akce nebyl potvrzen.')

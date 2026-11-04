@@ -110,6 +110,12 @@ newer streamed lease observation, although successful current-admission proof
 is still mandatory. Read retirement removes the frame and revokes the held
 private journal. An open journal purges its scope; a closed journal may erase
 only its own persisted row, and a pure viewer has no private journal to purge.
+A terminal monitor failure is uncertainty, not an authoritative Read purge.
+It hides content and recovery controls before awaiting capture, retaining the
+exact uncaptured frame/journal if capture fails. Engine failure does not exempt
+the remaining admission monitor from this retirement. Explicit Read retirement
+still revokes the held journal. Temporary metadata transport retries remain
+bounded, admission-specific and mutation-free; they are not Read revocations.
 Write or other
 admission retirement during bootstrap ends that attempt without automatically
 reopening or acquiring another session.
@@ -117,7 +123,10 @@ reopening or acquiring another session.
 The frame is hidden and inert until the native snapshot/open/snapshot identity
 barrier completes and a fresh lease read verifies the original admission's
 current credential, Page rights and authority epoch. Cancellation, a replaced
-admission or changed person/Page/workspace cannot reveal an old completion.
+admission or changed person/Page/workspace cannot reveal an old completion. Reader
+refresh results (including failures) also belong to their original runtime:
+a pending old read cannot stop a successor writer, acquisition or capture,
+even when the admission client has not changed.
 When a retired writer opens a fresh read admission, its previous frame and
 recovery/comparison controls stay hidden until that admission is verified; a
 refused admission retains confirmed rows without exposing them or reviving
@@ -270,10 +279,12 @@ re-grant does not revive it. On `write_revoked` the browser retires local
 writing exactly as on lease loss (input frozen, the unsaved buffer captured to
 the private journal, never sent), closes the old client and requests one fresh
 admission, which the server grants only after a fresh read check. That
-admission reads the current version, shows the same read-only editor a
-non-holder sees and offers the captured draft for compare or copy. A refused
-fresh admission ends in the ordinary disconnected state with the draft kept;
-it is not retried. A later read loss on the fresh admission stops delivery
+admission reads the current version when capture is confirmed, shows the same
+read-only editor a non-holder sees and offers the captured draft for compare or
+copy. With unconfirmed capture it only verifies and monitors reading of the
+same frozen buffer; it never imports over it or revives its writer. A refused
+fresh admission hides content without purging confirmed rows. An uncaptured
+buffer may use an explicit bounded read recheck, not a background retry loop. A later read loss on the fresh admission stops delivery
 like any other (`draft: "purge"`). That purge also erases the draft row the
 retired write journal persisted, even though that journal is already closed:
 a closed handle still refuses a Page-wide purge (it must never erase a fresh
