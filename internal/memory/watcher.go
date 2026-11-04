@@ -34,6 +34,11 @@ type WatchConfig struct {
 	// Set false on Docker Desktop bind-mounts or WSL where events
 	// may not arrive.
 	UseFsnotify bool
+	// EmitInitialSnapshot reports existing paths from the first poll snapshot.
+	// Opt-in for an audit root observed absent at boot; ordinary watchers and
+	// existing-root restarts retain the silent historical baseline. No extra walk.
+	EmitInitialSnapshot bool
+
 	// Logger receives warn/error lines. nil → slog.Default.
 	Logger *slog.Logger
 
@@ -47,8 +52,11 @@ type WatchConfig struct {
 // state, so a leftover watcher goroutine from another test can never
 // observe a swapped function.
 type fsnotifyHooks struct {
-	newWatcher func() (*fsnotify.Watcher, error)
-	add        func(fw *fsnotify.Watcher, path string) error
+	// afterPollSnapshot observes actual completed scans in owned fixtures only.
+	// Nil in production; per-watcher state avoids global hook races.
+	afterPollSnapshot func()
+	newWatcher        func() (*fsnotify.Watcher, error)
+	add               func(fw *fsnotify.Watcher, path string) error
 }
 
 func (h fsnotifyHooks) newFsnotify() (*fsnotify.Watcher, error) {
@@ -273,6 +281,18 @@ func (w *Watcher) runFsnotify(fw *fsnotify.Watcher) {
 func (w *Watcher) runPoll() {
 	defer w.wg.Done()
 	snapshot := w.snapshot()
+	if w.cfg.EmitInitialSnapshot {
+		for path := range snapshot {
+			select {
+			case <-w.stop:
+				return
+			case <-w.ctx.Done():
+				return
+			default:
+			}
+			w.note(path)
+		}
+	}
 	ticker := time.NewTicker(w.cfg.PollInterval)
 	defer ticker.Stop()
 	for {
@@ -316,6 +336,9 @@ func (w *Watcher) snapshot() map[string]time.Time {
 		m[path] = info.ModTime()
 		return nil
 	})
+	if w.cfg.hooks.afterPollSnapshot != nil {
+		w.cfg.hooks.afterPollSnapshot()
+	}
 	return m
 }
 
