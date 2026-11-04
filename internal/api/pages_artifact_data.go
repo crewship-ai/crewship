@@ -37,7 +37,12 @@ func (h *PageHandler) artifactDataAuthority(r *http.Request, k artifacts.Version
 	r = ensureDesignAdminAuditRequest(r, write)
 	authority := h.artifactProjectAuthority(r, k, write, false)
 	if write {
-		authority = h.artifactProjectOwnerMutationAuthority(r, k, version)
+		// Edit = write (#4732): data writes use the same authority as publishing
+		// source, so the owner, the owner's consented run, and a human holding a
+		// current Edit share (artifactProjectHumanEditor) may write. Read and
+		// Comment shares stay read-only. The version check below pins every write
+		// to the latest head, never to the reader pin.
+		authority = h.artifactProjectMutationAuthority(r, k, version)
 	}
 	selected := &artifactDataSelection{}
 	checked := false
@@ -261,7 +266,7 @@ func (h *PageHandler) BatchArtifactData(w http.ResponseWriter, r *http.Request) 
 		artifactDataError(w, err)
 		return
 	}
-	bound, cleanup, e := artifactStorageUpload(w, r, h.artifactProjectStore(r.Context()), k, artifacts.MaxDataBatchBytes, h.artifactProjectOwnerAuthority(r, k))
+	bound, cleanup, e := artifactStorageUpload(w, r, h.artifactProjectStore(r.Context()), k, artifacts.MaxDataBatchBytes, h.artifactProjectAuthority(r, k, true, false))
 	if e != nil {
 		artifactDataError(w, e)
 		return
