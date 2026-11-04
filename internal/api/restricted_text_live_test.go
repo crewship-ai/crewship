@@ -447,7 +447,8 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = store.Replace(t.Context(), owner, user, workspace, "restricted", m, []access.Right{{Kind: "agent", ID: "text-agent", Operation: "run"}}); err != nil {
+		// The action capability does not share a routine: grant this exact fixture.
+		if _, err = store.Replace(t.Context(), owner, user, workspace, "restricted", m, []access.Right{{Kind: "routine", ID: "live-private", Operation: "run"}, {Kind: "agent", ID: "text-agent", Operation: "run"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
