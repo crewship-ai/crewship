@@ -89,7 +89,7 @@ describe('native Word host authority and persistence',()=>{
    expect(journal.persist).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled();expect(screen.queryByText('Uloženo')).not.toBeInTheDocument()
   }finally{await act(async()=>capture.resolve({bytes:new TextEncoder().encode('{"body":["retained QA buffer"]}'),editorRevision:'terminal-capture',documentId:'doc'}))}
   await waitFor(()=>expect(journal.persist).toHaveBeenCalled())
-  expect(client.close).toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled();expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
+  await waitFor(()=>expect(client.close).toHaveBeenCalled());expect(journal.revokeRead).not.toHaveBeenCalled();expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
   if(outcome==='captured')await waitFor(()=>expect(document.querySelector('iframe')).toBeNull())
   else {expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveStyle({visibility:'hidden'});expect(journal.close).not.toHaveBeenCalled()}
  })
