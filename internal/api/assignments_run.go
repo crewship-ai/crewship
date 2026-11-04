@@ -7,16 +7,17 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/dispatch"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/dispatch"
 	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -289,6 +290,24 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !connected {
+			// Attribute the receipt only after the caller, workspace and source
+			// run were verified. Keep task text out of the refusal audit record.
+			if _, emitErr := h.journal.Emit(r.Context(), journal.Entry{
+				WorkspaceID: body.WorkspaceID, CrewID: assignerCrewID,
+				AgentID: assignedByID, TraceID: body.SourceRunID,
+				Type: journal.EntryAssignmentRefused, Severity: journal.SeverityWarn,
+				ActorType: journal.ActorAgent, ActorID: assignedByID,
+				Summary: "assignment refused: crews are not connected",
+				Payload: map[string]any{
+					"reason": "crews_not_connected", "http_status": http.StatusForbidden,
+					"source_crew_id": assignerCrewID, "target_crew_id": body.CrewID,
+					"target_slug": body.TargetSlug,
+					"task_sha256": fmt.Sprintf("%x", sha256.Sum256([]byte(body.Task))),
+				},
+				Refs: map[string]any{"chat_id": body.ChatID},
+			}); emitErr != nil {
+				h.logger.Warn("assignment refusal journal emit failed", "error", emitErr)
+			}
 			writeJSON(w, http.StatusForbidden, map[string]string{
 				"error": "crews are not connected — create a crew connection first",
 			})

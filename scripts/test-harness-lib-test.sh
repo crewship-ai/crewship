@@ -210,6 +210,13 @@ case "$args" in
   *" agent list "*|*" routine list "*) echo row; exit 0 ;;
   *" crew connections "*)
     [ -e "$state/unlinked" ] || echo "link cc_stub engineering ops bidirectional"; exit 0 ;;
+  *" crew get engineering "*) echo '{"id":"eng-id"}'; exit 0 ;;
+  *" crew get ops "*) echo '{"id":"ops-id"}'; exit 0 ;;
+  *" journal --run-id "*)
+    id="${args##* journal --run-id }"; id="${id%% *}"
+    if [ -e "$state/unlinked" ] && [ "$XLINK_MODE" != no-attempt ]; then
+      jq -nc --arg run "$id" '[{entry_type:"assignment.refused",trace_id:$run,actor_id:"alex-id",agent_id:"alex-id",crew_id:"eng-id",payload:{reason:"crews_not_connected",http_status:403,source_crew_id:"eng-id",target_crew_id:"ops-id",target_slug:"morgan"}}]'
+    else echo '[]'; fi; exit 0 ;;
   *" chat list "*) echo "[]"; exit 0 ;;
   *" work list "*) echo '{"items":[]}'; exit 0 ;;
   *" activity "*)
@@ -218,14 +225,17 @@ case "$args" in
   *" issue create "*)
     n=$(( $(cat "$state/n" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$state/n"
     printf '%s' "$desc" >"$state/issue-ENG-$n"
+    if [[ "$args" == *"--crew ops"* ]]; then
+      printf '%s' "$desc" | grep -oE 'VERIFIED-[A-Z0-9]+' >"$state/verification-code"
+    fi
     printf '{"id":"iss_%s","identifier":"ENG-%s"}\n' "$n" "$n"; exit 0 ;;
   *" issue start "*)
     id="${args##* issue start }"; id="${id%% *}"
     tag="$(grep -oE 'XLINK(NEG)?-[A-Z0-9]+' "$state/issue-$id" | head -1)"
     if { [ "$XLINK_MODE" = landed ] && [ ! -e "$state/unlinked" ]; } || [ "$XLINK_MODE" = leaky ]; then
-      printf '{"id":"a-%s","to_slug":"morgan","entry_type":"assignment.created","summary":"assigned alex → Morgan: Confirm on-call readiness for release %s"}\n' "$tag" "$tag" >>"$state/landed"
-      printf '{"id":"c-%s","to_slug":"morgan","entry_type":"assignment.completed","summary":"morgan completed: Confirm on-call readiness for release %s"}\n' "$tag" "$tag" >>"$state/landed"
-      printf 'Morgan confirmed.' >"$state/result-$id"
+      jq -nc --arg tag "$tag" '{id:("a-"+$tag),to_slug:"morgan",entry_type:"assignment.created",payload:{assignment_id:("asn-"+$tag),task:("Read actual record "+$tag)}}' >>"$state/landed"
+      jq -nc --arg tag "$tag" '{id:("c-"+$tag),to_slug:"morgan",entry_type:"assignment.completed",payload:{assignment_id:("asn-"+$tag),outcome:"SUCCEEDED"}}' >>"$state/landed"
+      printf 'Morgan read the record: %s' "$(cat "$state/verification-code")" >"$state/result-$id"
     elif [ -e "$state/unlinked" ]; then
       printf 'Assignment refused: crews are not connected — create a crew connection first' >"$state/result-$id"
     else
@@ -237,7 +247,9 @@ case "$args" in
     st=COMPLETED
     [ "$XLINK_MODE" = neg-hangs ] && grep -q XLINKNEG "$state/issue-$id" && st=RUNNING
     [ "$XLINK_MODE" = neg-failed ] && grep -q XLINKNEG "$state/issue-$id" && st=FAILED
-    jq -nc --arg r "$(cat "$state/result-$id" 2>/dev/null)" --arg st "$st" '[{status:$st,source:"delegation",agent_slug:"alex",result_summary:$r}]'
+    jq -nc --arg r "$(cat "$state/result-$id" 2>/dev/null)" --arg st "$st" --arg id "$id" '
+      [{status:$st,source:"delegation",agent_slug:"alex",agent_id:"alex-id",run_id:("run-"+$id),result_summary:$r}]
+      + (if ($r|contains("Morgan read the record:")) then [{status:"COMPLETED",source:"delegation",agent_slug:"morgan",result_summary:$r}] else [] end)'
     exit 0 ;;
   *" issue comments "*|*" issue get "*) exit 0 ;;
   *" ask "*)
@@ -269,6 +281,11 @@ if command -v jq >/dev/null 2>&1; then
   expect_not_contains "landed run -> the agent's refusal text is never a PASS" "$out" "PASS the unlinked hand-off was attempted"
   expect_contains "landed run -> unlinked half PASSES" "$out" "PASS an unlinked crew cannot be delegated to"
   expect_contains "landed run -> suite is green" "$out" "failed: 0"
+
+  out="$(run_crew_links no-attempt)"
+  expect_contains "completed model refusal without server call -> unlinked half FAILS" "$out" "FAIL an unlinked crew cannot be delegated to"
+  expect_contains "model refusal without server call -> receipt missing" "$out" "no server refusal receipt"
+  expect_contains "model refusal without server call -> no-work unproven" "$out" "FAIL no work reaches an unlinked crew"
 
   out="$(run_crew_links leaky)"
   expect_contains "assignment lands with no link -> unlinked half FAILS" "$out" "FAIL an unlinked crew cannot be delegated to"
@@ -401,6 +418,12 @@ ev_run env _HARNESS_STATE="$foreign" _HARNESS_STATE_OWNER=1 HARNESS_DETAIL_DIR="
 expect_eq "an inherited state path is never deleted" "1" "$( [ -f "$foreign/keep" ] && echo 1 || echo 0)"
 expect_eq "finish removes the harness state directory" "" "$(find "$ev_dir" -maxdepth 1 -name 'harness-state.*' 2>/dev/null)"
 rm -rf "$ev_dir"
+
+if bash "$SCRIPT_DIR/test-harness/crew-links-evidence-test.sh"; then
+  pass "cross-crew completion and refusal evidence rejects false positives"
+else
+  fail "cross-crew completion and refusal evidence rejects false positives"
+fi
 
 echo
 if [ "$FAILURES" -eq 0 ]; then

@@ -92,6 +92,7 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "assignment.running",
     "assignment.completed",
     "assignment.failed",
+    "assignment.refused",
     "assignment.cancelled",
     "assignment.hard_stopped",
     "task.delegated",
