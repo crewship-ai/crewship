@@ -74,7 +74,7 @@ function agentPrompt(kind: ArtifactKindEntry, start: Start, name: string, prompt
   return prompt ? `Create a ${noun}${named}: ${prompt}` : `Create a ${noun}${named}`
 }
 
-interface Created { slug: string; pagesVersion: number }
+interface Created { slug: string; pagesVersion: number; /** The Page ID when the server confirmed it. */ id?: string }
 
 export interface NewArtifactDialogProps {
   workspaceId: string
@@ -82,8 +82,9 @@ export interface NewArtifactDialogProps {
   onOpenChange: (open: boolean) => void
   defaultFolderSlug?: string
   defaultKind?: ArtifactKindKey
-  /** Opens the artifact: the new one, or an existing one the duplicate warning points at. */
-  onCreated: (slug: string) => void
+  /** Opens the artifact: the new one, or an existing one the duplicate warning points at.
+   *  `id` is the new Page's ID when the server confirmed it, so it opens at its own address at once. */
+  onCreated: (slug: string, id?: string) => void
 }
 
 export function NewArtifactDialog(props: NewArtifactDialogProps) {
@@ -110,7 +111,7 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
   const [startPick, setStartPick] = useState<Start>()
   // Only a folder the caller may file into; one marked otherwise starts unfiled.
   const [folderPick, setFolderPick] = useState(() => folders.find(f => f.slug === defaultFolderSlug && f.canAcceptPages !== false)?.slug)
-  const [created, setCreated] = useState<{ slug: string; name: string; folder: string; error: string } | null>(null)
+  const [created, setCreated] = useState<{ slug: string; id?: string; name: string; folder: string; error: string } | null>(null)
   // A Page create has no idempotency key; an unconfirmed one is never repeated.
   const pageIntent = useRef<{ slug: string; created?: Created; uncertain?: boolean }>(undefined)
 
@@ -133,8 +134,10 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
   const duplicate = trimmed && kind ? pages.find(p => artifactKindOfPage(p) === kind.key && (p.folder?.slug ?? "") === (folder?.slug ?? "") && p.name.trim().toLowerCase() === trimmed.toLowerCase()) : undefined
 
   const create = useMutation<Created, Error, ArtifactKindEntry>({ mutationFn: async k => {
-    if (k.key === "word") return word.create.mutateAsync({ name: trimmed, slug: freeSlug(trimmed, "document", pages), format: word.wordFormat })
-    if (k.key === "sheet") return word.create.mutateAsync({ name: trimmed, slug: freeSlug(trimmed, "sheet", pages), format: "sheet" })
+    if (k.key === "word" || k.key === "sheet") {
+      const doc = await word.create.mutateAsync(k.key === "word" ? { name: trimmed, slug: freeSlug(trimmed, "document", pages), format: word.wordFormat } : { name: trimmed, slug: freeSlug(trimmed, "sheet", pages), format: "sheet" })
+      return { slug: doc.slug, pagesVersion: doc.pagesVersion, ...(doc.nativePageId ? { id: doc.nativePageId } : {}) }
+    }
     const intent = pageIntent.current ??= { slug: freeSlug(trimmed, k.key === "design" ? "design" : "page", pages) }
     if (intent.created) return intent.created
     if (intent.uncertain) throw new Error("Page creation could not be confirmed. Check the library before starting again.")
@@ -147,7 +150,7 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
       throw new Error(value?.error ?? "Page creation could not be confirmed.")
     }
     intent.uncertain = false
-    intent.created = { slug: typeof value?.slug === "string" ? value.slug : intent.slug, pagesVersion: typeof value?.pages_version === "number" ? value.pages_version : 0 }
+    intent.created = { slug: typeof value?.slug === "string" ? value.slug : intent.slug, pagesVersion: typeof value?.pages_version === "number" ? value.pages_version : 0, ...(typeof value?.id === "string" && value.id ? { id: value.id } : {}) }
     await client.invalidateQueries({ queryKey: pagesKeys.all(workspaceId) })
     return intent.created
   } })
@@ -155,11 +158,11 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
   const busy = create.isPending
   const frozen = busy || word.frozen || Boolean(pageIntent.current) || Boolean(created)
   const close = () => { if (!busy) onOpenChange(false) }
-  const open = (slug: string) => { onCreated(slug); onOpenChange(false) }
+  const open = (slug: string, id?: string) => { if (id) onCreated(slug, id); else onCreated(slug); onOpenChange(false) }
 
   const submit = async () => {
     if (!kind || busy) return
-    if (created) return open(created.slug)
+    if (created) return open(created.slug, created.id)
     if (handoff) {
       const text = agentPrompt(kind, start, trimmed, prompt.trim(), chosenTemplate)
       // The composer's own creation switch carries the intent; this only fills the draft.
@@ -173,11 +176,11 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
       try {
         await addPage.mutateAsync({ folder: folder.slug, page: made.slug, pagesVersion: made.pagesVersion, aclVersion: folder.aclVersion })
       } catch (error) {
-        setCreated({ slug: made.slug, name: trimmed, folder: folder.name, error: error instanceof Error ? error.message : "the folder refused it" })
+        setCreated({ slug: made.slug, id: made.id, name: trimmed, folder: folder.name, error: error instanceof Error ? error.message : "the folder refused it" })
         return
       }
     }
-    open(made.slug)
+    open(made.slug, made.id)
   }
 
   const canSubmit = Boolean(kind) && !busy && (created ? true

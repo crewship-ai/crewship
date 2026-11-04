@@ -285,62 +285,33 @@ const REFRESH_TIMEOUT_MS = 10_000
 
 /** A refresh rotates the refresh token, and its response carries the only
  *  copy of the new one: the server answers a second use of the old token as
- *  a replay and revokes the session (nextauth.go RefreshToken).
+ *  a replay and revokes the session (nextauth.go RefreshToken). The cookie
+ *  jar is shared by every tab of the origin, but `refreshInflight` above
+ *  single-flights only within one document.
  *
- *  The single flight above holds within one document only. When the page is
- *  replaced while a refresh is in flight (a full load — the exported build
- *  opens /artifacts/<id> as a new document right after the library mounted
- *  the editor), the browser used to drop that response together with its
- *  cookies, and the next document refreshed with the rotated-away token:
- *  "Signed out on this device" seconds after creating a Sheet. Two tabs
- *  refreshing at once collide the same way.
- *
- *  So the request is `keepalive` (the browser completes it and stores its
- *  cookies after the page is gone), and its start is marked in localStorage;
- *  a refresh in another document waits until that one has had time to land
- *  instead of presenting the same token again. */
-const REFRESH_MARK_KEY = "crewship:auth-refresh"
-/** How long a refresh started elsewhere is waited for. Well above a refresh
- *  round trip, well below REFRESH_TIMEOUT_MS; a refresh that finishes sooner
- *  in a live document clears the mark and ends the wait early. */
-export const REFRESH_SETTLE_MS = 3_000
-const REFRESH_SETTLE_POLL_MS = 100
-const REFRESH_REALM = Math.random().toString(36).slice(2)
+ *  - Tabs: the round trip runs under an exclusive Web Lock, held until the
+ *    response (and so its Set-Cookie) has arrived. A refresh in another tab
+ *    waits and then presents the rotated token. Without the Locks API it runs
+ *    unlocked, exactly as before.
+ *  - A document replaced mid-refresh: the request is `keepalive`, so the
+ *    browser completes it and stores its cookies after the page is gone. The
+ *    lock is released at unload, so a new document that refreshes before that
+ *    response lands can still collide; the known trigger (the library opening
+ *    a just-created artifact by slug, mounting the editor, then reloading as
+ *    /artifacts/<id>) is removed in the library. Closing the remaining window
+ *    needs the server (a bounded reuse window), an owner decision (#4902). */
+export const REFRESH_LOCK = "crewship-auth-refresh"
+/** Bound on waiting for another tab's refresh; its own request aborts at REFRESH_TIMEOUT_MS. */
+const REFRESH_LOCK_WAIT_MS = 2 * REFRESH_TIMEOUT_MS
 
-function readRefreshMark(): { at: number; realm: string } | null {
-  try {
-    const raw = typeof localStorage === "undefined" ? null : localStorage.getItem(REFRESH_MARK_KEY)
-    const mark = raw ? (JSON.parse(raw) as { at?: unknown; realm?: unknown }) : null
-    return mark && typeof mark.at === "number" && typeof mark.realm === "string" ? { at: mark.at, realm: mark.realm } : null
-  } catch {
-    return null
-  }
+interface LockManagerLike {
+  request<T>(name: string, options: { mode: "exclusive"; signal?: AbortSignal }, run: () => Promise<T>): Promise<T>
 }
 
-/** Milliseconds a refresh started by another document still deserves, or 0. */
-function foreignRefreshWait(now = Date.now()): number {
-  const mark = readRefreshMark()
-  if (!mark || mark.realm === REFRESH_REALM) return 0
-  const age = now - mark.at
-  // A mark from the future is a clock change, not a refresh in flight.
-  return age >= 0 && age < REFRESH_SETTLE_MS ? REFRESH_SETTLE_MS - age : 0
-}
-
-async function settleForeignRefresh(): Promise<void> {
-  const deadline = Date.now() + foreignRefreshWait()
-  while (Date.now() < deadline && foreignRefreshWait() > 0) {
-    await new Promise((resolve) => setTimeout(resolve, Math.min(REFRESH_SETTLE_POLL_MS, deadline - Date.now())))
-  }
-}
-
-function markRefresh(at: number | null): void {
-  try {
-    if (typeof localStorage === "undefined") return
-    if (at !== null) localStorage.setItem(REFRESH_MARK_KEY, JSON.stringify({ at, realm: REFRESH_REALM }))
-    else if (readRefreshMark()?.realm === REFRESH_REALM) localStorage.removeItem(REFRESH_MARK_KEY)
-  } catch {
-    // Storage unavailable (private mode, quota): keepalive alone still lands the cookies.
-  }
+function refreshLocks(): LockManagerLike | null {
+  if (typeof navigator === "undefined") return null
+  const locks = (navigator as Navigator & { locks?: LockManagerLike }).locks
+  return locks && typeof locks.request === "function" ? locks : null
 }
 
 export async function tryRefresh(): Promise<RefreshResult> {
@@ -349,13 +320,9 @@ export async function tryRefresh(): Promise<RefreshResult> {
 
 function refreshShared(): Promise<RefreshOutcome> {
   if (refreshInflight) return refreshInflight
-  const promise = (async (): Promise<RefreshOutcome> => {
-    // Only a refresh started by another document is awaited; the usual case
-    // sends at once (synchronously, before the first await).
-    if (foreignRefreshWait() > 0) await settleForeignRefresh()
+  const roundTrip = async (): Promise<RefreshOutcome> => {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS)
-    markRefresh(Date.now())
     try {
       // withServerBase: remote-server cookie mode refreshes against the
       // configured server; same-origin default is byte-identical. (Bearer
@@ -381,9 +348,29 @@ function refreshShared(): Promise<RefreshOutcome> {
       return { result: "retryable_failed", reason: null }
     } finally {
       clearTimeout(timer)
-      markRefresh(null)
     }
-  })()
+  }
+  const locks = refreshLocks()
+  const promise: Promise<RefreshOutcome> = locks
+    ? (async () => {
+        // The wait for another tab is bounded separately; the round trip's
+        // own timeout starts once this tab holds the lock.
+        const wait = new AbortController()
+        const timer = setTimeout(() => wait.abort(), REFRESH_LOCK_WAIT_MS)
+        try {
+          return await locks.request(REFRESH_LOCK, { mode: "exclusive", signal: wait.signal }, () => {
+            clearTimeout(timer)
+            return roundTrip()
+          })
+        } catch {
+          // The lock was not granted in time: nothing was sent, so the
+          // cookies are untouched. Transient, like a refresh that timed out.
+          return { result: "retryable_failed", reason: null }
+        } finally {
+          clearTimeout(timer)
+        }
+      })()
+    : roundTrip()
   refreshInflight = promise
   promise.finally(() => {
     if (refreshInflight === promise) refreshInflight = null

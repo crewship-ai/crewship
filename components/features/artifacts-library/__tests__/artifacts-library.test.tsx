@@ -34,9 +34,10 @@ vi.mock("@/components/features/chat/artifact-context/new-artifact/use-artifact-c
   useArtifactCapabilities: () => ({ projects: true, dashboards: false, slides: false, documents: true, sheets: false, pages: true, ...state.caps }),
 }))
 vi.mock("../new-artifact-dialog", () => ({
-  NewArtifactDialog: ({ defaultKind, defaultFolderSlug, onCreated }: { defaultKind?: string; defaultFolderSlug?: string; onCreated: (slug: string) => void }) =>
+  NewArtifactDialog: ({ defaultKind, defaultFolderSlug, onCreated }: { defaultKind?: string; defaultFolderSlug?: string; onCreated: (slug: string, id?: string) => void }) =>
     <div role="dialog" aria-label="New artifact" data-kind={defaultKind ?? ""} data-folder={defaultFolderSlug ?? ""}>
       <button type="button" onClick={() => onCreated("fresh-design")}>Create</button>
+      <button type="button" onClick={() => onCreated("fresh-sheet", "page-id-1")}>Create with ID</button>
     </div>,
 }))
 vi.mock("@/components/layout/secondary-panel", async importOriginal => ({ ...(await importOriginal<typeof import("@/components/layout/secondary-panel")>()), SecondaryPanel: ({ label, children }: { label: string; children: React.ReactNode }) => <aside aria-label={label}>{children}</aside> }))
@@ -152,6 +153,17 @@ it("a just-created artifact opens by its slug, never as an ID, so it does not la
   // The new item is not in the list yet; the route opens it by slug and moves to its ID once it resolves.
   expect(state.select).toHaveBeenCalledWith(null, "fresh-design")
   expect(state.select).not.toHaveBeenCalledWith("fresh-design")
+})
+
+it("opens a just-created artifact with a confirmed ID at its own address, never by slug first (#4902)", () => {
+  // By slug, the library mounted the native editor (whose admission refreshes
+  // the session) and the exported build then reloaded the page as
+  // /artifacts/<id> mid-refresh, which signed the person out.
+  renderLibrary()
+  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  fireEvent.click(screen.getByRole("button", { name: "Create with ID" }))
+  expect(state.select).toHaveBeenCalledWith("page-id-1")
+  expect(state.select).not.toHaveBeenCalledWith(null, "fresh-sheet")
 })
 
 it("searches with operators, filters by kind with counts and switches to a table", () => {
