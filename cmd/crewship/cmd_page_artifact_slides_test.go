@@ -72,6 +72,10 @@ func TestArtifactSlidesCLIRequiresExplicitSafePinAndCommands(t *testing.T) {
 }
 
 func TestArtifactSlidesCLIHumanPDFValidationBeforeReplacingOutput(t *testing.T) {
+	// The subtests' fixtures cannot register the CLI-state reset (guardCLIState
+	// skips subtests), so the parent owns it: the commands run the root
+	// PersistentPreRun, which blanks the colour palette.
+	guardCLIState(t)
 	for _, fixture := range []struct {
 		name, mime, body string
 		ok               bool
