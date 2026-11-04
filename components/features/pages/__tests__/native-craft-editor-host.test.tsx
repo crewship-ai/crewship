@@ -47,7 +47,7 @@ describe('native Word host authority and persistence',()=>{
  })
 
  it('never unlocks on an older streamed grant when the final fresh HTTP lease proof denies custody',async()=>{
-  mount();await ready();const checks=client.lease.mock.calls.length,proof=deferred<typeof emptyLease>()
+  mount();await ready();const checks=client.lease.mock.calls.length,proof=deferred<unknown>()
   client.leaseAction.mockImplementation(async()=>{client.lease.mockResolvedValueOnce(ownedLease).mockResolvedValueOnce(ownedLease).mockReturnValueOnce(proof.promise);return ownedLease})
   fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(client.lease).toHaveBeenCalledTimes(checks+3))
   act(()=>stream?.('lease',ownedLease))
