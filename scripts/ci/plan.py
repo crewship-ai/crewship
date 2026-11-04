@@ -17,6 +17,7 @@ DOC_EXTENSIONS = {'.md', '.mdx', '.txt', '.svg', '.png', '.jpg', '.jpeg', '.gif'
 DOC_ROOT_FILES = {'README.md', 'CHANGELOG.md', 'LICENSE', 'CONTRIBUTING.md', 'AGENTS.md', 'CODEX.md'}
 GO_DOC_TESTS = {
     'docs/configuration/providers.mdx': 'cmd/crewship/cmd_start_provider_order_test.go',
+    'docs/configuration/artifacts.mdx': 'internal/config/docs_artifacts_example_test.go',
     'docs/api-reference/openapi.mdx': 'scripts/docs-inventory/main_test.go',
     'docs/guides/docker-socket-proxy.mdx': 'scripts/docker-api-surface/main_test.go',
 }

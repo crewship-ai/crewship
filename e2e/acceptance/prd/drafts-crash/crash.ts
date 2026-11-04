@@ -257,6 +257,8 @@ export const viewerURL = (slug: string, ws: string) => `/artifacts?item=${encode
 
 export async function openProject(page: Page, slug: string, ws: string): Promise<void> {
   await page.goto(projectURL(slug, ws), { waitUntil: "domcontentloaded" })
+  // A redirect that hijacks the navigation must be reported as such, not as a missing preview (#4875).
+  await expect(page, "the project page stays open").toHaveURL(new RegExp(`/pages/${encodeURIComponent(slug)}`), { timeout: 30_000 })
   await expect(page.getByTitle("Artifact preview")).toBeVisible({ timeout: 60_000 })
 }
 
