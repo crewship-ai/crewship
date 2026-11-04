@@ -270,12 +270,18 @@ func (h *PageHandler) resolvePanelOnPage(ctx context.Context, wsID, userID strin
 	return rec, panel, nil
 }
 
-// panelDispatchAllowed reports whether the dispatch resolver would admit this
-// caller to the panel that resolvePanelForRead already admitted. The two
-// loaders differ only for a private Page, so any other page answers true
-// without a second load. It is the panel gate only: DispatchAction still runs
-// its remaining gates (action kind, routine, inputs).
+// panelDispatchAllowed reports whether resolveDispatch's caller gates admit
+// this caller to a panel that resolvePanelForRead already admitted: the
+// dispatch role floor (pageActionDispatchRoleAllowed, the same predicate
+// resolveDispatch enforces) and the strict panel resolver. The two loaders
+// differ only for a private Page, so any other page needs no second load.
+// It does not answer the per-action gates resolveDispatch applies after these
+// (the action exists and is a call, the routine is active, the inputs
+// validate); those depend on the action and the request, not the caller.
 func (h *PageHandler) panelDispatchAllowed(ctx context.Context, wsID, userID string, rec *pageRecord, panelID string) (bool, error) {
+	if !pageActionDispatchRoleAllowed(ctx) {
+		return false, nil
+	}
 	if !rec.PrivateAudience {
 		return true, nil
 	}
@@ -284,6 +290,14 @@ func (h *PageHandler) panelDispatchAllowed(ctx context.Context, wsID, userID str
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// pageActionDispatchRoleAllowed is the role floor of panel action dispatch:
+// running a routine is MANAGER+ (`create`) on its own endpoint, and a page
+// button is never a cheaper way to run one. resolveDispatch enforces it and
+// panelDispatchAllowed reports it, from this one predicate.
+func pageActionDispatchRoleAllowed(ctx context.Context) bool {
+	return canRole(RoleFromContext(ctx), "create")
 }
 
 // storedPanelSpec reads the panel's declaration out of pages.spec_json.
@@ -316,8 +330,9 @@ func (h *PageHandler) storedPanelSpec(ctx context.Context, pageID, panelID strin
 // can show an operator the ids they may dispatch. It reads the same stored spec
 // the dispatch endpoint resolves against — a listing that came from anywhere
 // else could offer a button the dispatcher would then refuse. can_dispatch
-// says whether the panel gate of that dispatcher admits this caller: false for
-// a workspace ADMIN reading another member's private Page, who may read the
+// says whether that dispatcher's caller gates (role floor and panel custody,
+// panelDispatchAllowed) admit this caller: false for a MEMBER, and for a
+// workspace ADMIN reading another member's private Page, who may read the
 // declared actions (PRD §5, audited) but not run them.
 func (h *PageHandler) ListPanelActions(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
@@ -574,7 +589,8 @@ func (h *PageHandler) resolveDispatch(w http.ResponseWriter, r *http.Request,
 	// Re-applied in the handler as well as in the middleware because the
 	// middleware is not what a handler test exercises, and a gate that only one
 	// of the two paths enforces is a gate that can be removed by accident.
-	if !requireRole(w, r, "create") {
+	if !pageActionDispatchRoleAllowed(r.Context()) {
+		writeProblem(w, r, http.StatusForbidden, "Forbidden")
 		return nil, false
 	}
 	return &resolvedAction{page: rec, panel: panel, spec: spec, action: action}, true

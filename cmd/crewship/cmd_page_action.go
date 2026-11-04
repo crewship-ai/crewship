@@ -92,9 +92,10 @@ var pageActionsCmd = &cobra.Command{
 
 The list comes from the page's stored spec — the same list the server
 resolves a click against — so what you see here is exactly what can be
-dispatched. A workspace admin may read the actions of another member's
-private Page without being able to dispatch them; the listing then says so
-(can_dispatch: false in machine formats). Only "call" actions reach the
+dispatched. Dispatching needs MANAGER or above and, on a private Page, its
+owner or the workspace owner; a caller who may read the actions but not
+dispatch them (a member, or a workspace admin reading another member's
+private Page) is told so (can_dispatch: false in machine formats). Only "call" actions reach the
 server; a "link" navigates, a "toggle" is client-side panel state, and a
 "custom" action resolves to a handler built into the web client.`,
 	Args: cobra.ExactArgs(1),
@@ -173,9 +174,9 @@ func printPageActions(slug, panel string, actions []pageActionJSON, canDispatch 
 	}
 	fmt.Println()
 	if !canDispatch {
-		// A workspace admin reading another member's private Page: the
-		// actions are readable, but `page action` would be refused.
-		fmt.Println("You can read these actions but not dispatch them: on a private Page only its owner and the workspace owner can.")
+		// A member below the dispatch role floor, or a workspace admin reading
+		// another member's private Page: `page action` would be refused.
+		fmt.Println("You can read these actions but not dispatch them: dispatch needs MANAGER or above and, on a private Page, its owner or the workspace owner.")
 		return
 	}
 	fmt.Printf("Dispatch one:  crewship page action %s/%s <id> [--input k=v]\n", slug, panel)

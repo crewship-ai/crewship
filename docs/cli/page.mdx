@@ -712,8 +712,9 @@ answers `404`, the same answer an unknown panel gives, so an action list is
 never an existence oracle for somebody else's crew.
 
 The response's `can_dispatch` says whether [`page action`](#crewship-page-action)
-would get past the panel gate for you. It is `false` for a workspace admin who
-reads another member's private Page: the admin reads the actions (and, through
+would admit you as a caller: dispatching needs MANAGER or above and, on a
+private Page, its owner or the workspace owner. It is `false` for a member,
+and for a workspace admin who reads another member's private Page: the admin reads the actions (and, through
 `crewship page project panel-history`, the panel's history), each read is
 written to the audit log as `artifact.private_owner_accessed`, but dispatching
 answers `404`. The table output then ends with a note instead of the dispatch

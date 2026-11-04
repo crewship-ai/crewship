@@ -174,9 +174,9 @@ func privatePanelSeedReader(t *testing.T, h *PageHandler, ws, custodian string, 
 //     (custodian, OWNER, ADMIN) gets 200; every non-custodian read writes
 //     exactly one audit row; a MEMBER, in the panel's crew or not, gets the
 //     same 404 as a panel that does not exist, and no audit.
-//   - panel-actions advertises can_dispatch only to the dispatch audience,
-//     and the application preflight (?publication=) annotates routines only
-//     for it.
+//   - panel-actions advertises can_dispatch exactly when dispatch answers
+//     202 (custody AND the MANAGER+ role floor), and the application
+//     preflight (?publication=) annotates routines only for that caller.
 //   - Writes (dispatch, application dispatch) and application action status
 //     stay with custody: ADMIN and MEMBER get 404 with nothing queued. The
 //     custodian (a plain MEMBER here) passes the panel gate and is stopped by
@@ -192,6 +192,10 @@ func TestPrivatePagePanelReadAudience(t *testing.T) {
 	for _, reader := range privatePanelReaders {
 		readAllowed := reader.custodian || reader.role == "OWNER" || reader.role == "ADMIN"
 		custody := reader.custodian || reader.role == "OWNER"
+		// can_dispatch is exactly what dispatch admits: custody of the panel
+		// AND the MANAGER+ role floor. Only the non-custodian OWNER has both
+		// here; the custodian is a plain MEMBER.
+		canDispatch := custody && canRole(reader.role, "create")
 		readAudits := 0
 		if readAllowed && !reader.custodian {
 			readAudits = 1
@@ -230,14 +234,14 @@ func TestPrivatePagePanelReadAudience(t *testing.T) {
 				if err := json.Unmarshal(got.Body.Bytes(), &listing); err != nil || listing.CanDispatch == nil {
 					t.Fatalf("%s: %s listing: %v %s", reader.name, surface, err, got.Body)
 				}
-				if *listing.CanDispatch != custody {
-					t.Errorf("%s: %s can_dispatch=%v, want %v", reader.name, surface, *listing.CanDispatch, custody)
+				if *listing.CanDispatch != canDispatch {
+					t.Errorf("%s: %s can_dispatch=%v, want %v", reader.name, surface, *listing.CanDispatch, canDispatch)
 				}
 				annotated := false
 				for _, a := range listing.Actions {
 					annotated = annotated || a.RoutineChanged != nil
 				}
-				if wantAnnotated := custody && surface == "panel-actions-publication"; annotated != wantAnnotated {
+				if wantAnnotated := canDispatch && surface == "panel-actions-publication"; annotated != wantAnnotated {
 					t.Errorf("%s: %s routine annotation=%v, want %v: %s", reader.name, surface, annotated, wantAnnotated, got.Body)
 				}
 			}
@@ -246,9 +250,24 @@ func TestPrivatePagePanelReadAudience(t *testing.T) {
 			t.Run(reader.name+"/"+surface, func(t *testing.T) {
 				h, ws, custodian, id := privatePanelFixture(t)
 				user := privatePanelSeedReader(t, h, ws, custodian, reader)
+				// What the listing advertises must be what dispatch then does.
+				advertised := false
+				if listing := privatePanelCall(t, h, ws, user, reader.role, "panel-actions"); listing.Code == 200 {
+					var wire struct {
+						CanDispatch bool `json:"can_dispatch"`
+					}
+					if err := json.Unmarshal(listing.Body.Bytes(), &wire); err != nil {
+						t.Fatal(err)
+					}
+					advertised = wire.CanDispatch
+				}
+				listed := adminReadAudits(t, h, auditActionPrivateArtifactRead, user, id)
 				got := privatePanelCall(t, h, ws, user, reader.role, surface)
 				queued := pagesPendingRows(t, h)
-				audits := adminReadAudits(t, h, auditActionPrivateArtifactRead, user, id)
+				audits := adminReadAudits(t, h, auditActionPrivateArtifactRead, user, id) - listed
+				if advertised != (got.Code == 202) {
+					t.Errorf("%s: listing advertised can_dispatch=%v but %s answered HTTP%d: %s", reader.name, advertised, surface, got.Code, got.Body)
+				}
 				t.Logf("%s %s: HTTP%d queued=%d audits=%d", reader.name, surface, got.Code, queued, audits)
 				if audits != 0 {
 					t.Errorf("%s: %s wrote %d private-read audits; dispatch is not a read", reader.name, surface, audits)

@@ -146140,7 +146140,7 @@
                       "type": "array"
                     },
                     "can_dispatch": {
-                      "description": "Whether the dispatch endpoint's panel gate admits this caller. False for a workspace ADMIN reading another member's private Page: the actions are readable (audited) but dispatch is refused.",
+                      "description": "Whether the dispatch endpoint's caller gates admit this caller: the MANAGER+ role floor and, on a private Page, custody (its owner or the workspace OWNER). False for a MEMBER, and for a workspace ADMIN reading another member's private Page (the actions are readable, audited, but dispatch is refused). Per-action gates (call kind, active routine, valid inputs) still apply on dispatch.",
                       "type": "boolean"
                     },
                     "page": {

@@ -44,8 +44,9 @@ export function useApplicationActions(workspace: string, slug: string, publicati
     if (typeof inputs !== "object" || inputs === null || Array.isArray(inputs)) throw new Error("Action inputs must be an object.")
     query.set("publication", String(publication))
     const definition = await read(await apiFetch(`${endpoint}/panels/${panel}/actions?${query}`, { signal }))
-    // A workspace admin may read another member's private Page without being
-    // allowed to run its actions; never prompt for a dispatch the server refuses.
+    // A member, or a workspace admin reading another member's private Page, may
+    // read the actions without being allowed to run them; never prompt for a
+    // dispatch the server refuses.
     if (definition.can_dispatch === false) throw new Error("You can view this Page, but you cannot run its actions.")
     const action: DeclaredAction | undefined = definition.actions?.find((value: DeclaredAction) => value.id === request.params.actionId && value.kind === "call")
     if (!action) throw new Error("This Page does not declare that routine action.")
