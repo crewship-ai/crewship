@@ -97,6 +97,18 @@ describe("withAwaitingApproval", () => {
 })
 
 describe("humanizeEntry", () => {
+  it("shows server assignment refusal as a warning without closing its source run", () => {
+    const row = humanizeEntry(entry({
+      entry_type: "assignment.refused",
+      severity: "warn",
+      summary: "assignment refused: crews are not connected",
+      payload: { task_sha256: "private-task-digest", reason: "crews_not_connected", http_status: 403 },
+    }))
+    expect(row).toMatchObject({ tone: "warn", title: "Assignment refused", detail: "assignment refused: crews are not connected" })
+    expect(JSON.stringify(row)).not.toContain("private-task-digest")
+    expect(isRunInFlight(["run.started", "assignment.refused"])).toBe(true)
+  })
+
   it("run.started → active opener with actor", () => {
     const row = humanizeEntry(entry({ entry_type: "run.started", actor_id: "Riley", payload: { trigger_type: "issue" } }))
     expect(row).not.toBeNull()

@@ -140,6 +140,9 @@ func TestActivityRunE_OmitsCrewFilterWhenEmpty(t *testing.T) {
 		t.Fatalf("RunE: %v", err)
 	}
 
+	if !strings.Contains(m.activity, "assignment.refused") {
+		t.Errorf("refused delegations missing from journal request: %q", m.activity)
+	}
 	if !strings.Contains(m.activity, "limit=10") {
 		t.Errorf("limit not propagated: %q", m.activity)
 	}
