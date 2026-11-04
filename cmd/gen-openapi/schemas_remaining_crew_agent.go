@@ -245,7 +245,7 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	addRequest("PUT", "/api/v1/crews/{crewId}/persona", "RemainingCrewPersonaRequestV1", object(map[string]any{"content": str()}))
 	crewPolicyRequest := object(map[string]any{"autonomy_level": str(), "behavior_mode": str(), "whole_run_approval": map[string]any{"type": "boolean", "nullable": true, "description": "Omitted or null preserves the current whole-run approval setting."}, "reason": str()})
 	crewPolicyRequest["required"] = []string{"autonomy_level", "behavior_mode"}
-	crewBudgetRequest := object(map[string]any{"limit_usd": map[string]any{"type": "number", "exclusiveMinimum": 0}, "mode": map[string]any{"type": "string", "enum": []string{"soft", "hard", "tiered"}}})
+	crewBudgetRequest := object(map[string]any{"limit_usd": map[string]any{"type": "number", "minimum": 0, "exclusiveMinimum": true, "maximum": 1e9}, "mode": map[string]any{"type": "string", "enum": []string{"soft", "hard", "tiered"}}})
 	crewBudgetRequest["required"] = []string{"limit_usd"}
 	addRequest("PUT", "/api/v1/crews/{crewId}/budget", "CrewBudgetRequestV1", crewBudgetRequest)
 	addRequest("PUT", "/api/v1/crews/{crewId}/policy", "RemainingCrewPolicyRequestV1", crewPolicyRequest)
