@@ -163,6 +163,17 @@ permissions, keeping the local document and any unsent changes.
 
 ## Who can do what
 
+Live-read/Edit authority means the effective authority of this request, not
+only the Page ownership or grant label. Human CLI reads need `pages:read`;
+write scope alone does not imply read scope. Live/history reads need both
+`pages:read` and `pages:write` (or `pages:*`) plus current Edit permission, or
+current Edit permission through a browser session. Ordinary Read/Comment
+callers and non-admin Page owners/Edit grantees using only `pages:read` are
+shared-only. Separately authorized workspace OWNER/ADMIN readers can read
+latest/history even with read scope, with audit for foreign Designs; that
+credential still cannot write. Agent tools retain their separate exact-run
+mandate, original human credential and live authority checks described below.
+
 | Action | Required |
 |---|---|
 | Create | A human with Page creation permission. Agents cannot create a Design. |

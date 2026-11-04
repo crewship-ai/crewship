@@ -189,8 +189,8 @@ resolve the comment or grant access.
 
 `crewship page design get <slug>` reads the currently permitted view
 (`--version <n>` selects a permitted retained snapshot). For people, current
-Edit authority (browser session or `pages:write` plus Edit permission) permits
-live reads; non-admin owners/Edit grantees using `pages:read` are shared-only,
+Edit permission plus a current browser session, or both CLI `pages:read` and
+`pages:write` scopes (or `pages:*`) plus Edit permission, permits live reads; non-admin owners/Edit grantees using `pages:read` are shared-only,
 with 404 before a shared pin exists. Separately authorized workspace OWNER/ADMIN
 reads include latest/history with audit for foreign Designs and never turn a
 read-scoped credential into write authority.

@@ -2503,12 +2503,13 @@ crewship page design agent checkout --chat-id private-chat-id
 ### `crewship page design watch <slug>`
 
 Watch permitted binary Yjs frames encoded as base64 rows. Current Edit
-authority (`pages:write` plus Edit permission for CLI callers) or separately
+permission plus both CLI `pages:read` and `pages:write` scopes (or `pages:*`) or separately
 authorized workspace OWNER/ADMIN access permits live reads, with foreign
 administrator access audited. Non-admin Page owners/Edit grantees using
 `pages:read` are shared-only: shared snapshot and presence, without live
 document updates. Before a pin exists, upgrade/presence can succeed but the
-initial sync closes with 1008 `Design permissions changed`, reported as an error. Optional `--count`
+initial sync closes with 1008 `Design permissions changed`. This is an error
+if `watch` reaches the close; `--count` can finish on presence frames first. Optional `--count`
 stops after that many binary frames; zero watches until interrupted. JSON and
 NDJSON output use one row per frame; YAML uses one document per frame. This
 stream requires human authentication and the normal server-host credential guard.

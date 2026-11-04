@@ -187,12 +187,13 @@ func init() { pageCmd.AddCommand(newPageDesignCommand()) }
 // format. Consumers receive the original y-protocols frames as base64 NDJSON.
 func newPageDesignWatchCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "watch <slug>", Args: cobra.ExactArgs(1), Short: "Watch permitted Yjs sync and awareness frames as base64 NDJSON", Long: `Watch the Design view permitted by current human authority. Current Edit authority
-requires pages:write plus Edit permission for CLI callers;
+requires both pages:read and pages:write (or pages:*) plus Edit permission for CLI callers;
 separately authorized workspace OWNER/ADMIN readers can read live with audit for
 foreign Designs. Non-admin Page owners and Edit grantees using pages:read are
 shared-only: a shared snapshot and presence, without live document updates.
 Before a shared pin exists, upgrade/presence can succeed but the initial sync
-closes with 1008 Design permissions changed; watch reports that error.
+closes with 1008 Design permissions changed. A --count limit can finish on
+presence frames before watch observes that close.
 Live agent runs use design_get under their exact run mandate, not human watch.`, RunE: func(cmd *cobra.Command, args []string) error {
 		if os.Getenv("CREWSHIP_AGENT_TOKEN") != "" {
 			return fmt.Errorf("live agents read Design through design_get; websocket watch requires human authentication")

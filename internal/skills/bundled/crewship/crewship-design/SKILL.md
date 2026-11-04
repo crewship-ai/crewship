@@ -78,8 +78,9 @@ These agent tools always require the exact live-run Page mandate, current run
 and crew policy, original human authority and the original human credential
 required by run consent. A human `pages:read` CLI-token rule is not an agent
 credential rule. Missing or revoked authority is refused, never replaced by a
-saved human profile. For human CLI callers, non-admin Page owners and Edit
-grantees using `pages:read` are shared-only and receive 404 before a shared
+saved human profile. For human CLI callers, live reads need both `pages:read` and `pages:write`
+(or `pages:*`) plus current Edit permission; write scope alone does not permit
+a read. Non-admin Page owners and Edit grantees using only `pages:read` are shared-only and receive 404 before a shared
 pin; a read-scoped OWNER/ADMIN can separately read latest/history with foreign
 access audit but cannot write.
 

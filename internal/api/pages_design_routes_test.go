@@ -72,14 +72,23 @@ func TestDesignReadScopedMemberEditorsRemainSharedOnly(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(router.Shutdown)
-			request := func(method, suffix, body string) *httptest.ResponseRecorder {
+			requestWithToken := func(token, method, suffix, body string) *httptest.ResponseRecorder {
 				r := httptest.NewRequest(method, "/api/v1/pages/board/design"+suffix, strings.NewReader(body))
-				r.Header.Set("Authorization", "Bearer "+reader)
+				r.Header.Set("Authorization", "Bearer "+token)
 				r.Header.Set("X-Workspace-ID", f.workspace)
 				r.Header.Set("Content-Type", "application/json")
 				w := httptest.NewRecorder()
 				router.ServeHTTP(w, r)
 				return w
+			}
+			request := func(method, suffix, body string) *httptest.ResponseRecorder {
+				return requestWithToken(reader, method, suffix, body)
+			}
+			writeOnly := mintIngressScopedToken(t, f.h.db, user, "member-write-only-"+audience, "pages:write")
+			for _, suffix := range []string{"", "/versions", "/comments"} {
+				if w := requestWithToken(writeOnly, "GET", suffix, ""); w.Code != 403 {
+					t.Fatalf("write scope implied read: %s %d %s", suffix, w.Code, w.Body)
+				}
 			}
 			for _, suffix := range []string{"", "/versions"} {
 				if w := request("GET", suffix, ""); w.Code != 404 {
