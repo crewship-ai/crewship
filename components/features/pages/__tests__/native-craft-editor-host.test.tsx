@@ -37,7 +37,7 @@ describe('retired draft rendered state',()=>{
  it.each(['untouched','edited','unretired'] as const)('write retirement keeps leave guard only for recoverable work (%s)',async(kind)=>{
   rigNativeState='revision:opened'
   const hashes:Promise<ArrayBuffer>[]=[]
-  vi.stubGlobal('crypto',{randomUUID:webcrypto.randomUUID.bind(webcrypto),getRandomValues:webcrypto.getRandomValues.bind(webcrypto),subtle:{digest(algorithm:AlgorithmIdentifier,data:BufferSource){const result=webcrypto.subtle.digest(algorithm,data);hashes.push(result);return result}}})
+  vi.stubGlobal('crypto',{randomUUID:webcrypto.randomUUID.bind(webcrypto),getRandomValues:webcrypto.getRandomValues.bind(webcrypto),subtle:{digest(algorithm:AlgorithmIdentifier,data:Parameters<typeof webcrypto.subtle.digest>[1]){const result=webcrypto.subtle.digest(algorithm,data);hashes.push(result);return result}}})
   const rendered=mount();await ready();await acquire()
   // Complete the baseline hash before retiring so this test isolates dirty
   // state from the independently reproduced pending-seed issue.
