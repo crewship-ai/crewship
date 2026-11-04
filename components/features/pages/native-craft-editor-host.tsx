@@ -486,6 +486,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   control.current=(action,body)=>{
    if(dead||networkRetired||transition||viewNow.can_edit!==true||!current?.ready)return
    transition=true;setBusy(true);setError(undefined)
+   let handoffConfirmed=false
    void(async()=>{
     if(action==='acquire'){await acquire();return}
     if(action==='handoff'||action==='release'){
@@ -503,7 +504,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     // indication to the server's generation and the holder it was sent to.
     if(action==='request-handoff'){
      if(!object(result)||!text(result.request_id)||!validNativeVersion(result.generation)||result.generation==='0'||!holder)throw Error('handoff_request_unconfirmed')
-     if(!dead&&!lifetime.signal.aborted)setHandoffRequest({generation:result.generation,holder})
+     if(dead||networkRetired||lifetime.signal.aborted)return
+     setHandoffRequest({generation:result.generation,holder});handoffConfirmed=true
     }
     await observeLease(await client.lease(lifetime.signal))
    })().catch(async()=>{
@@ -513,7 +515,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
      if(r.writable&&owns(viewNow,r.generation)&&r.phase?.phase!=='read-only')resumeViewing(r)
      else if(!r.nativeReadOnly)await retireWrite(r).catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))
     }
-    if(!dead){setError('Výsledek akce nebyl potvrzen. Koncept zůstává zachován.');setSavedVersion(undefined)}
+    if(!dead){setError(handoffConfirmed?'Žádost byla odeslána, ale aktuální stav úprav nelze načíst. Koncept zůstává zachován.':'Výsledek akce nebyl potvrzen. Koncept zůstává zachován.');setSavedVersion(undefined)}
    }).finally(()=>{transition=false;if(!dead)setBusy(false)})
   }
   void(async()=>{

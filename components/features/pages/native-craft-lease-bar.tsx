@@ -38,7 +38,7 @@ export function NativeCraftLeaseBar({ view, mayEdit, pending = false, requested 
     {!mayEdit && <span className="text-muted-foreground">Pouze čtení</span>}
     {mayEdit && !view.holder && <Button size="sm" disabled={pending} onClick={() => onAction("acquire", {})}>Převzít úpravy</Button>}
     {mayEdit && view.holder && !view.mine && <Button size="sm" variant="outline" disabled={pending || requested} onClick={() => onAction("request-handoff", {})}>{requested ? "Žádost odeslána" : otherSession ? "Požádat jinou kartu o předání" : "Požádat o předání"}</Button>}
-    {mayEdit && view.holder && !view.mine && requested && <span role="status" className="text-muted-foreground">Čeká se na předání úprav.</span>}
+    {mayEdit && view.holder && !view.mine && <span data-slot="handoff-request-status" aria-live="polite" aria-atomic="true" role={requested ? "status" : undefined} className="text-muted-foreground">{requested ? view.holder.kind === "agent" ? "Požadavek zaznamenán. Agent sám úpravy nepředává." : "Čeká se na předání úprav." : ""}</span>}
     {mayEdit && view.holder?.kind === "agent" && view.can_stop_agent === true && onStopAgent && <Button size="sm" variant="outline" disabled={pending} onClick={onStopAgent}>Zastavit agenta</Button>}
     {mine && <>
       <Button size="sm" variant="outline" disabled={pending} onClick={() => onAction("release", { generation })}>Uvolnit úpravy</Button>
