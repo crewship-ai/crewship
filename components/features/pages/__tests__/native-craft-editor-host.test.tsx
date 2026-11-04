@@ -34,6 +34,35 @@ async function ready(){await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenC
 async function acquire(){fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(ports.at(-1)?.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)))}
 
 describe('native Word host authority and persistence',()=>{
+ it('confirms a handoff request only after the server reply and clears it for a new lease generation',async()=>{
+  const held={...ownedLease,mine:false,can_write:false,holder:otherPerson}
+  client.lease.mockResolvedValue(held)
+  const confirmation=deferred<unknown>();client.leaseAction.mockReturnValueOnce(confirmation.promise)
+  mount();const ask=await screen.findByRole('button',{name:'Požádat o předání'})
+  await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled())
+  fireEvent.click(ask)
+  expect(screen.queryByText('Žádost odeslána')).not.toBeInTheDocument()
+  await act(async()=>confirmation.resolve({request_id:'confirmed-request',generation:held.generation}))
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Žádost odeslána'})).toBeDisabled())
+  expect(screen.getByText('Čeká se na předání úprav.')).toHaveAttribute('role','status')
+  expect(ports[0].setReadOnly).not.toHaveBeenCalledWith(false,expect.anything())
+  const next={...held,generation:'9007199254740996'};client.lease.mockResolvedValue(next)
+  await act(async()=>stream?.('lease',next))
+  expect(screen.getByRole('button',{name:'Požádat o předání'})).toBeEnabled()
+  expect(screen.queryByText('Žádost odeslána')).not.toBeInTheDocument()
+ })
+ it.each(['offline','malformed'])('does not claim handoff was requested when the server response is %s',async(failure)=>{
+  client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:otherPerson})
+  if(failure==='offline')client.leaseAction.mockRejectedValueOnce(Error('offline'))
+  else client.leaseAction.mockResolvedValueOnce({request_id:'missing-generation'})
+  mount();const ask=await screen.findByRole('button',{name:'Požádat o předání'})
+  await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled())
+  fireEvent.click(ask)
+  await screen.findByText('Výsledek akce nebyl potvrzen. Koncept zůstává zachován.')
+  expect(screen.getByRole('button',{name:'Požádat o předání'})).toBeEnabled()
+  expect(screen.queryByText('Žádost odeslána')).not.toBeInTheDocument()
+ })
+
  it('keeps the live native frame after failed auth capture and retries local persistence without a save',async()=>{
   mount();await ready();await acquire();const frame=document.querySelector('iframe')
   journal.persist.mockRejectedValueOnce(Error('storage failed'))
