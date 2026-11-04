@@ -1586,11 +1586,14 @@ jobs:
       - uses: ./.github/actions/setup-node-pnpm
         with:
           node-version: ${{ env.NODE_VERSION }}
+      # The helper fixtures take about 90s and have their own execution bound;
+      # they must not consume the full-project analysis deadline.
+      - name: Typecheck helper regressions
+        timeout-minutes: 3
+        run: node --test scripts/typecheck-tests-node-test.mjs
       - name: Type-check tests once
         timeout-minutes: 9
-        run: |
-          node --test scripts/typecheck-tests-node-test.mjs
-          timeout --kill-after=30s 8m pnpm test:types
+        run: timeout --kill-after=30s 8m pnpm test:types
       - name: E2E private artifact security tests
         timeout-minutes: 2
         run: node --test e2e/helpers/private-artifacts.test.mjs
