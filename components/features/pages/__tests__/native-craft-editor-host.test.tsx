@@ -121,6 +121,29 @@ describe('native Word host authority and persistence',()=>{
   await waitFor(()=>expect(screen.getByRole('status')).toHaveAttribute('data-save-phase','saved'))
  })
 
+ it('#4870: a committed save whose local copy could not be removed says it is on the server, not unsaved, and claims no version',async()=>{
+  client.open.mockResolvedValueOnce({sessionId:'private-session',applicationId:'gridcraft'})
+  const base=await client.read(new AbortController().signal)
+  client.read.mockResolvedValue({...base,applicationId:'gridcraft',bytes:new TextEncoder().encode('{"sheets":[]}')})
+  mount();await ready();await acquire()
+  const p=ports.at(-1)!,o=portOptions.at(-1)!
+  // The server commits; the row retirement and its one retry both fail.
+  journal.confirm.mockRejectedValueOnce(Error('storage deadline')).mockRejectedValueOnce(Error('storage deadline'))
+  p.snapshot.mockResolvedValue({bytes:new TextEncoder().encode('{"sheets":[2]}'),editorRevision:'grid:2',documentId:'doc'});act(()=>o.onChanged('grid:2','doc'))
+  await waitFor(()=>expect(journal.confirm).toHaveBeenCalledTimes(2))
+  const status=screen.getByRole('status')
+  await waitFor(()=>expect(status).toHaveAttribute('data-save-reason','unretired'))
+  expect(status).toHaveTextContent('Uloženo na serveru · místní kopie zatím zůstává v prohlížeči')
+  expect(status).not.toHaveTextContent('Neuložený koncept')
+  // No native ACK yet, so no "Uloženo · verze" claim, and nothing sent twice.
+  expect(status).not.toHaveTextContent('verze')
+  expect(p.ack).not.toHaveBeenCalled()
+  expect(client.save).toHaveBeenCalledOnce()
+  // A further edit is genuinely unsaved again.
+  p.snapshot.mockResolvedValue({bytes:new TextEncoder().encode('{"sheets":[3]}'),editorRevision:'grid:3',documentId:'doc'});act(()=>o.onChanged('grid:3','doc'))
+  expect(status).toHaveTextContent('Neuložený koncept')
+ })
+
  it('#4852: after storage recovers with no further edit, the original receipt is acknowledged and publish waits for that ACK',async()=>{
   client.open.mockResolvedValueOnce({sessionId:'private-session',applicationId:'gridcraft'})
   const base=await client.read(new AbortController().signal)

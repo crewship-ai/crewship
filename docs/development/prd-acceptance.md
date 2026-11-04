@@ -116,12 +116,35 @@ earlier in the same cycle (the table, the picture, the second sheet) saves too,
 so its "Uloženo · verze N" can be on screen before the cycle types anything. A
 cycle whose markers are not on the server fails with the label, the baseline
 and the head version, and its markers are not counted as saved work. The Word
-table step types the cell text right after the 2x2 insert and checks on the
-server that it is inside a table cell; when it is not, the step trail records
-that an extra click into the first cell was needed (focus left the document:
-a product/UX finding), and when even that click does not help the row fails
-with "typing after the table insert did not reach the document", not as a lost
-save.
+table step types the cell text (with a space on each side, so it cannot glue
+onto a marker) right after the 2x2 insert and checks on the server, within the
+step, that it is inside a table cell. When it is not, the row records the
+failure "typing right after 2x2 insert did not reach the document" (#4877: the
+ribbon insert does not return the keyboard to the document) and gives the
+keyboard back through a click on the ribbon's Insert tab, never through a
+click at a fixed point of the page; the caret stays where the insert put it.
+Before and after each attempt the step compares every saved marker on the
+server head: a marker split by the cell text is reported as `harness-input`
+with the surrounding text and is not counted as a lost save, and a marker gone
+without the cell text in it stays a possible loss. A failed table step runs at
+most once more in a later cycle, and never again after it changed saved text.
+Failure lines carry the status line with `data-save-phase`/`data-save-reason`,
+and step screenshots are kept per cycle (`step-table-c<cycle>-*.png`).
+
+The hour rows keep their QA workspace (it is not deleted after the row) and
+write its workspace and page ids to `document-ref.json` and `result.json`, so
+the stored versions can be read after a failure. `result.json` also carries a
+compact evidence chain per cycle (`chain`): the status line and save trace the
+editor showed right after the typing (the canvas text itself is not observable
+from the page), every save request of the cycle (SHA-256 of the body, base
+version, time, and the reply status and version as finally answered, with the
+requests still unanswered at the cycle's end listed apart), the stored head after the cycle
+(version, SHA-256, how many saved markers it holds and the first missing ones,
+where the table cell text is), and the label shown after the save; plus
+`checkpoints` before and after the restart and after each reload (version,
+SHA-256, equality with the previous checkpoint, the marker report). The chain
+and checkpoints are also written to `chain.json` however the row ends (a session
+that throws, a failed final assertion, a pass).
 
 `craft-restart.acceptance.ts` (`A.resilience.restart.word`, `.sheet`) is the
 short form of the restart: unsaved typing, restart, reload, draft offered, no

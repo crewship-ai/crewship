@@ -90,6 +90,8 @@ export interface Op {
   sentAt: string
   baseVersion?: string
   contentHash?: string
+  /** SHA-256 of the request body as sent (the snapshot the editor sent, for the evidence chain). */
+  bodySha256?: string
   status?: number
   version?: string
   phase?: string
@@ -108,7 +110,8 @@ export function instrument(ctx: BrowserContext): Op[] {
     try {
       body = req.postDataJSON()
     } catch {}
-    const op: Op = { n: ops.length + 1, kind, sentAt: new Date().toISOString(), baseVersion: body?.baseVersion === undefined ? undefined : String(body.baseVersion), contentHash: body?.contentHash }
+    const raw = req.postDataBuffer()
+    const op: Op = { n: ops.length + 1, kind, sentAt: new Date().toISOString(), baseVersion: body?.baseVersion === undefined ? undefined : String(body.baseVersion), contentHash: body?.contentHash, bodySha256: raw ? sha256(raw) : undefined }
     ops.push(op)
     byReq.set(req, op)
   })

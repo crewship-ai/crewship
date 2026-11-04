@@ -161,7 +161,8 @@ it("flush rejects storage failure while a redundant snapshot is settling", async
   r.confirm.mockImplementationOnce(originalConfirm).mockRejectedValueOnce(Error("storage failed"))
   try {
     await expect(r.controller.flush()).rejects.toThrow("storage")
-    expect(r.states.at(-1)).toMatchObject({ phase: "draft", dirty: true, reason: "storage" })
+    // The server holds exactly these bytes; only the local row is left (#4870).
+    expect(r.states.at(-1)).toMatchObject({ phase: "draft", dirty: true, reason: "unretired" })
     expect(r.requests).toHaveLength(1)
     expect(r.stored).toBeDefined()
   } finally { await r.controller.close() }
