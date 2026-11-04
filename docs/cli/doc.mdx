@@ -1,6 +1,6 @@
 ---
-title: "Document Commands"
-description: "Create, read and update native documents with explicit revision checks."
+title: "Docs Commands"
+description: "Create, read and update structured Docs documents with explicit revision checks."
 icon: "file-text"
 stability: experimental
 tag: Experimental
@@ -8,10 +8,12 @@ tag: Experimental
 
 # crewship doc
 
-Work with a native document in the selected workspace. A document is saved on
-an artifact, and the artifact's slug or `@<artifact-id>` addresses it. With the
-Artifacts library enabled, documents are listed there as **Word**. The service
-rechecks your current credential and document permissions before reading or
+Work with the Docs service's structured document protocol (schemas 2 and 3) in
+the selected workspace. Native WordCraft/GridCraft use a separate whole-snapshot
+and edit-lease profile; these commands operate on Docs documents. A document is
+saved on an artifact, and the artifact's slug or `@<artifact-id>` addresses it.
+With the Artifacts library enabled, Docs documents are listed there as **Word**.
+The service rechecks your current credential and document permissions before reading or
 saving. Scoped credentials need `pages:read` for reads and both `pages:read` and
 `pages:write` for editing; `pages:*` covers both. These scopes do not grant access
 to somebody else's document.
