@@ -1,0 +1,1 @@
+- **Requesting editing access now confirms that the request was sent.** Word and Sheet show a waiting message after the server confirms a handoff request and prevent duplicate clicks for the same holder and lease generation. Failed or unconfirmed requests remain retryable; this confirmation does not grant editing access.

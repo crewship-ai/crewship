@@ -21,7 +21,7 @@ type ActionBody = { generation?: string; request_id?: string }
 
 /** Advisory controls only. Every action is still authorized and fenced by the
  * server; the status never contains the private admission bearer. */
-export function NativeCraftLeaseBar({ view, mayEdit, pending = false, onAction, onStopAgent, self }: { view: NativeCraftLeaseView; mayEdit: boolean; pending?: boolean; onStopAgent?(): void; onAction(action: NativeCraftLeaseAction, body: ActionBody): void; /** The signed-in person's user id. */ self?: string }) {
+export function NativeCraftLeaseBar({ view, mayEdit, pending = false, requested = false, onAction, onStopAgent, self }: { view: NativeCraftLeaseView; mayEdit: boolean; pending?: boolean; /** Server-confirmed request for this holder and generation. */ requested?: boolean; onStopAgent?(): void; onAction(action: NativeCraftLeaseAction, body: ActionBody): void; /** The signed-in person's user id. */ self?: string }) {
   // The same person in another editor session: typically the tab this one
   // replaced by a reload. Its lease is renewed only while that editor is
   // connected, so a closed tab frees it within the TTL; say so instead of
@@ -37,7 +37,8 @@ export function NativeCraftLeaseBar({ view, mayEdit, pending = false, onAction, 
     {otherSession && <span role="status" className="text-muted-foreground">{releaseIn !== null && releaseIn > 0 ? `Pokud jste ji zavřeli nebo obnovili, úpravy se uvolní do ${releaseIn} s.` : "Čekám na uvolnění úprav z jiné karty…"}</span>}
     {!mayEdit && <span className="text-muted-foreground">Pouze čtení</span>}
     {mayEdit && !view.holder && <Button size="sm" disabled={pending} onClick={() => onAction("acquire", {})}>Převzít úpravy</Button>}
-    {mayEdit && view.holder && !view.mine && <Button size="sm" variant="outline" disabled={pending} onClick={() => onAction("request-handoff", {})}>{otherSession ? "Požádat jinou kartu o předání" : "Požádat o předání"}</Button>}
+    {mayEdit && view.holder && !view.mine && <Button size="sm" variant="outline" disabled={pending || requested} onClick={() => onAction("request-handoff", {})}>{requested ? "Žádost odeslána" : otherSession ? "Požádat jinou kartu o předání" : "Požádat o předání"}</Button>}
+    {mayEdit && view.holder && !view.mine && requested && <span role="status" className="text-muted-foreground">Čeká se na předání úprav.</span>}
     {mayEdit && view.holder?.kind === "agent" && view.can_stop_agent === true && onStopAgent && <Button size="sm" variant="outline" disabled={pending} onClick={onStopAgent}>Zastavit agenta</Button>}
     {mine && <>
       <Button size="sm" variant="outline" disabled={pending} onClick={() => onAction("release", { generation })}>Uvolnit úpravy</Button>

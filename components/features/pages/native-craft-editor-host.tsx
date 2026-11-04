@@ -91,10 +91,11 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
  const mount=React.useRef<HTMLDivElement>(null),control=React.useRef<(action:NativeCraftLeaseAction,body:{generation?:string;request_id?:string})=>void>(()=>{})
  const [view,setView]=React.useState<Lease>(vacant),[busy,setBusy]=React.useState(false),[label,setLabel]=React.useState('Připojuji…'),[savedVersion,setSavedVersion]=React.useState<string>(),[error,setError]=React.useState<string>(),[mismatch,setMismatch]=React.useState<{message:string;address:string}>(),[dirty,setDirty]=React.useState(false),[recoveries,setRecoveries]=React.useState<NativeRecovery[]>([]),[comparison,setComparison]=React.useState<Comparison>(),[ownsEditor,setOwnsEditor]=React.useState(false),[connectionRetired,setConnectionRetired]=React.useState(false),[quota,setQuota]=React.useState<NativeDocumentSnapshot['quota']>()
  const [saveTrace,setSaveTrace]=React.useState<{phase:string;reason?:string}>()
+ const [handoffRequest,setHandoffRequest]=React.useState<{generation:string;holder:string}>()
  useLeaveGuard(dirty)
  React.useEffect(()=>{
   if(!enabled||!humanId||!workspaceId||!pageId)return
-  setBusy(true);setConnectionRetired(false)
+  setBusy(true);setConnectionRetired(false);setHandoffRequest(undefined)
   const lifetime=new AbortController()
   // Replaced only by a fresh read admission after the server retires write (#4348).
   let client=createNativeDocumentClient({workspaceId,pageId})
@@ -343,7 +344,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   async function reopenReadOnly(){
    if(dead||networkRetired)return
    const message='Právo upravovat bylo odebráno. Dokument je jen pro čtení; neuložené změny zůstaly jako místní koncept.'
-   networkRetired=true;clearInterval(reauthorize);clearInterval(leaseWatch);viewNow=vacant;setView(vacant);setOwnsEditor(false);setError(message)
+   networkRetired=true;clearInterval(reauthorize);clearInterval(leaseWatch);viewNow=vacant;setView(vacant);setHandoffRequest(undefined);setOwnsEditor(false);setError(message)
    const r=current
    if(r&&(r.writable||r.retiring&&!r.retirementFinished)&&!await retireWrite(r)){client.close();return}
    client.close()
@@ -496,7 +497,15 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
      if(proof.mine&&proof.generation===r.generation)throw Error('custody_transfer_unconfirmed')
      await mountEditor(await client.read(lifetime.signal),proof.generation??'1');return
     }
-    await client.leaseAction(action,body,lifetime.signal);await observeLease(await client.lease(lifetime.signal))
+    const holder=viewNow.holder?.actor_id
+    const result=await client.leaseAction(action,body,lifetime.signal)
+    // A successful POST confirms only a request, never custody. Tie its
+    // indication to the server's generation and the holder it was sent to.
+    if(action==='request-handoff'){
+     if(!object(result)||!text(result.request_id)||!validNativeVersion(result.generation)||result.generation==='0'||!holder)throw Error('handoff_request_unconfirmed')
+     if(!dead&&!lifetime.signal.aborted)setHandoffRequest({generation:result.generation,holder})
+    }
+    await observeLease(await client.lease(lifetime.signal))
    })().catch(async()=>{
     if(dead||nativeFailed)return
     const r=current
@@ -546,7 +555,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
  function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`${draft.applicationId}-recovery.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
  if(!enabled)return <p className="p-6">Nativní editor není zapnutý.</p>
  return <section className="flex h-full min-h-[600px] flex-col" aria-label={applicationId==='gridcraft'?'GridCraft sešit':'WordCraft dokument'}>
-  <NativeCraftLeaseBar view={view} self={humanId} mayEdit={view.can_edit===true&&!connectionRetired} pending={busy} onAction={(action,body)=>control.current(action,body)} onStopAgent={()=>stopAgent.current()}/>
+  <NativeCraftLeaseBar view={view} self={humanId} mayEdit={view.can_edit===true&&!connectionRetired} pending={busy} requested={Boolean(handoffRequest&&!connectionRetired&&!view.mine&&view.generation===handoffRequest.generation&&view.holder?.actor_id===handoffRequest.holder)} onAction={(action,body)=>control.current(action,body)} onStopAgent={()=>stopAgent.current()}/>
   <NativeCraftAgentTaskStatus workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled={view.can_edit===true&&!connectionRetired}/>
   {!connectionRetired&&view.can_edit===true&&view.mine&&view.can_write&&!ownsEditor&&<Button disabled={busy} onClick={()=>control.current('acquire',{})}>Převzít úpravy</Button>}
   {!connectionRetired&&view.can_edit===true&&ownsEditor&&<Button variant="outline" disabled={busy} onClick={()=>publishPreview.current()}>Publikovat náhled</Button>}
