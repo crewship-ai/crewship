@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # No server/model: drive the same predicates with boundary-shaped CLI records.
 set -euo pipefail
+# Pure predicate fixtures never use a caller's real retention directory.
+unset HARNESS_DETAIL_DIR
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=crew-links-evidence.sh
 source "$HERE/crew-links-evidence.sh"
@@ -26,8 +28,8 @@ cs() {
 }
 expect_yes() { "$@" || { echo "expected evidence: $*" >&2; exit 1; }; }
 expect_no() { if "$@"; then echo "false evidence: $*" >&2; exit 1; fi; }
-created='{"to_slug":"morgan","entry_type":"assignment.created","payload":{"assignment_id":"expected","task":"Read record XLINK-1"}}'
-completed='{"to_slug":"morgan","entry_type":"assignment.completed","payload":{"assignment_id":"expected","outcome":"SUCCEEDED"}}'
+created='{"id":"created-entry","to_slug":"morgan","entry_type":"assignment.created","payload":{"assignment_id":"expected","task":"Read record XLINK-1"}}'
+completed='{"id":"completed-entry","to_slug":"morgan","entry_type":"assignment.completed","payload":{"assignment_id":"expected","outcome":"SUCCEEDED"}}'
 mock_feed="$created"
 expect_no xlink_assignment_completed XLINK-1
 mock_feed="$created
@@ -58,7 +60,7 @@ expect_no xlink_result_reported ENG-1 VERIFIED-1 XLINK-1
 mock_runs='[{"id":"expected","agent_slug":"morgan","status":"FAILED","result_summary":"VERIFIED-1"}]'
 expect_no xlink_result_reported ENG-1 VERIFIED-1 XLINK-1
 matching_runs="$(jq -nc --arg preview "${long_prefix:0:200}…" '
-  [{id:"expected",run_id:"journal-run",agent_slug:"morgan",status:"COMPLETED",result_summary:$preview}]')"
+  [{id:"expected",run_id:"journal-run",agent_id:"morgan-id",agent_slug:"morgan",status:"COMPLETED",result_summary:$preview}]')"
 mock_runs="$matching_runs"
 expect_yes xlink_result_reported ENG-1 VERIFIED-1 XLINK-1
 expect_no xlink_result_reported ENG-1 VERIFIED-other XLINK-1
@@ -89,9 +91,9 @@ done
 mock_feed="$created
 $completed"
 mock_results="$good_results"
-mock_runs='[{"agent_slug":"alex","agent_id":"actor","run_id":"source-run","status":"COMPLETED","result_summary":"crews are not connected"}]'
+mock_runs='[{"id":"source-assignment","agent_slug":"alex","agent_id":"actor","run_id":"source-run","status":"COMPLETED","result_summary":"crews are not connected"}]'
 expect_no xlink_refusal_seen ENG-1 eng ops
-receipt='{"entry_type":"assignment.refused","trace_id":"source-run","actor_id":"actor","agent_id":"actor","crew_id":"eng","payload":{"reason":"crews_not_connected","http_status":403,"source_crew_id":"eng","target_crew_id":"ops","target_slug":"morgan"}}'
+receipt='{"id":"refusal-entry","actor_type":"agent","entry_type":"assignment.refused","trace_id":"source-run","actor_id":"actor","agent_id":"actor","crew_id":"eng","payload":{"reason":"crews_not_connected","http_status":403,"source_crew_id":"eng","target_crew_id":"ops","target_slug":"morgan","task_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}'
 mock_entries="[$receipt]"
 expect_yes xlink_refusal_seen ENG-1 eng ops
 for mutation in 'source-run/other-run' 'actor/other-actor' 'crews_not_connected/different_reason' '403/400' 'ops/other-crew' 'morgan/other-target'; do
@@ -104,3 +106,5 @@ expect_no xlink_refusal_seen ENG-1 eng ops
 expect_no xlink_assignment_completed XLINK-1
 expect_no xlink_result_reported ENG-1 VERIFIED-1 XLINK-1
 printf 'crew-links evidence: completion, result and refusal boundaries passed\n'
+
+python3 "$HERE/crew-links-receipt-test.py"

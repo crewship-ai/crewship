@@ -213,16 +213,20 @@ case "$args" in
   *" crew get engineering "*) echo '{"id":"eng-id"}'; exit 0 ;;
   *" crew get ops "*) echo '{"id":"ops-id"}'; exit 0 ;;
   *" journal --run-id "*)
+    printf '%s\n' journal >>"$state/request-categories"
     id="${args##* journal --run-id }"; id="${id%% *}"
     if [ -e "$state/unlinked" ] && [ "$XLINK_MODE" != no-attempt ]; then
-      jq -nc --arg run "$id" '[{entry_type:"assignment.refused",trace_id:$run,actor_id:"alex-id",agent_id:"alex-id",crew_id:"eng-id",payload:{reason:"crews_not_connected",http_status:403,source_crew_id:"eng-id",target_crew_id:"ops-id",target_slug:"morgan"}}]'
+      jq -nc --arg run "$id" --arg mode "$XLINK_MODE" '[{id:("refused-"+$run),actor_type:"agent",entry_type:"assignment.refused",trace_id:$run,actor_id:"alex-id",agent_id:"alex-id",crew_id:"eng-id",payload:{reason:"crews_not_connected",http_status:403,source_crew_id:"eng-id",target_crew_id:"ops-id",target_slug:"morgan",task_sha256:("a"*64)}}]
+        | if $mode == "landed-no-refusal-receipt-id" then map(del(.id)) else . end'
     else echo '[]'; fi; exit 0 ;;
   *" chat list "*) echo "[]"; exit 0 ;;
   *" work list "*) echo '{"items":[]}'; exit 0 ;;
   *" activity "*)
+    printf '%s\n' activity >>"$state/request-categories"
     [ "$XLINK_MODE" = feed-down ] && exit 1
     [ -s "$state/landed" ] && cat "$state/landed"; exit 0 ;;
   *" issue create "*)
+    printf '%s\n' issue-create >>"$state/request-categories"
     n=$(( $(cat "$state/n" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$state/n"
     printf '%s' "$desc" >"$state/issue-ENG-$n"
     if [[ "$args" == *"--crew ops"* ]]; then
@@ -230,10 +234,12 @@ case "$args" in
     fi
     printf '{"id":"iss_%s","identifier":"ENG-%s"}\n' "$n" "$n"; exit 0 ;;
   *" issue start "*)
+    printf '%s\n' issue-start >>"$state/request-categories"
     id="${args##* issue start }"; id="${id%% *}"
     tag="$(grep -oE 'XLINK(NEG)?-[A-Z0-9]+' "$state/issue-$id" | head -1)"
     if { [[ "$XLINK_MODE" == landed* ]] && [ ! -e "$state/unlinked" ]; } || [ "$XLINK_MODE" = leaky ]; then
-      jq -nc --arg tag "$tag" '{id:("a-"+$tag),to_slug:"morgan",entry_type:"assignment.created",payload:{assignment_id:("asn-"+$tag),task:("Read actual record "+$tag)}}' >>"$state/landed"
+      jq -nc --arg tag "$tag" --arg mode "$XLINK_MODE" '{id:("a-"+$tag),to_slug:"morgan",entry_type:"assignment.created",payload:{assignment_id:("asn-"+$tag),task:("Read actual record "+$tag)}}
+        | if $mode == "landed-no-created-receipt-id" then del(.id) else . end' >>"$state/landed"
       if [ "$XLINK_MODE" != landed-no-completion ]; then
         jq -nc --arg tag "$tag" '{id:("c-"+$tag),to_slug:"morgan",entry_type:"assignment.completed",payload:{assignment_id:("asn-"+$tag),outcome:"SUCCEEDED"}}' >>"$state/landed"
       fi
@@ -251,6 +257,7 @@ case "$args" in
     fi
     exit 0 ;;
   *" issue runs "*)
+    printf '%s\n' issue-runs >>"$state/request-categories"
     id="${args##* issue runs }"; id="${id%% *}"
     st=COMPLETED
     [ "$XLINK_MODE" = neg-hangs ] && grep -q XLINKNEG "$state/issue-$id" && st=RUNNING
@@ -259,10 +266,11 @@ case "$args" in
     [ "$XLINK_MODE" = landed-wrong-id ] && assignment="unrelated-$assignment"
     jq -nc --arg r "$(cat "$state/result-$id" 2>/dev/null)" --arg st "$st" --arg id "$id" --arg assignment "$assignment" '
       ($r | if length > 200 then .[:200]+"…" else . end) as $preview
-      | [{status:$st,source:"delegation",agent_slug:"alex",agent_id:"alex-id",run_id:("run-"+$id),result_summary:$preview}]
-      + (if ($r|contains("Morgan read the record:")) then [{id:$assignment,run_id:("morgan-journal-"+$id),status:"COMPLETED",source:"delegation",agent_slug:"morgan",result_summary:$preview}] else [] end)'
+      | [{id:("source-assignment-"+$id),status:$st,source:"delegation",agent_slug:"alex",agent_id:"alex-id",run_id:("run-"+$id),result_summary:$preview}]
+      + (if ($r|contains("Morgan read the record:")) then [{id:$assignment,run_id:("morgan-journal-"+$id),status:"COMPLETED",source:"delegation",agent_id:"morgan-id",agent_slug:"morgan",result_summary:$preview}] else [] end)'
     exit 0 ;;
   *" issue result "*)
+    printf '%s\n' issue-result >>"$state/request-categories"
     id="${args##* issue result }"; assignment="${id#* }"; assignment="${assignment%% *}"; id="${id%% *}"
     [ "$XLINK_MODE" != landed-no-full ] || exit 1
     [ -s "$state/assignment-$id" ] || exit 1
@@ -283,6 +291,9 @@ run_crew_links() { # <mode> — print the suite's output (colour-free, stdout no
   xlink_cli "$dir/crewship"
   env -u CREWSHIP_SERVER -u SERVER CREWSHIP="$dir/crewship" XLINK_STATE="$dir" XLINK_MODE="$1" ASK_TIMEOUT=3 POLL_INTERVAL=1 \
     bash "$SCRIPT_DIR/test-harness/test-crew-links.sh" 2>&1
+  local suite_rc=$?
+  echo "fixture: suite-exit:$suite_rc"
+  if [ -n "${XLINK_REQUEST_TRACE:-}" ]; then cp "$dir/request-categories" "$XLINK_REQUEST_TRACE"; fi
   if [ "$1" = landed ]; then
     local file id assignment preview full code
     for file in "$dir"/assignment-*; do
@@ -310,7 +321,9 @@ if command -v jq >/dev/null 2>&1; then
   expect_contains "quoted tag without an artifact -> says the echo is not evidence" "$out" "is not evidence"
   expect_not_contains "quoted tag without an artifact -> suite is not green" "$out" "failed: 0"
 
-  out="$(run_crew_links landed)"
+  request_trace="$(mktemp -t cs-xlink-requests.XXXXXX)"
+  receipt_trace="$(mktemp -t cs-xlink-receipt-requests.XXXXXX)"
+  out="$(XLINK_REQUEST_TRACE="$request_trace" run_crew_links landed)"
   expect_contains "tag-correlated assignment -> section 3 PASSES" "$out" "PASS delegation crossed the link"
   expect_contains "tag-correlated completion -> result PASSES" "$out" "PASS the cross-crew assignment completed with a result"
   expect_contains "landed run -> the lead's own (lead-planning) run is the one awaited" "$out" "PASS the lead's unlinked hand-off issue ran to an end"
@@ -319,6 +332,72 @@ if command -v jq >/dev/null 2>&1; then
   expect_contains "landed run -> suite is green" "$out" "failed: 0"
   expect_contains "landed fixture -> code is beyond the 201-character preview" "$out" "fixture: bounded preview and full matched result verified"
   expect_contains "landed fixture -> unknown journal identity cannot read the result" "$out" "fixture: journal identity is rejected by full result"
+
+  private_receipt_dir="$(umask 077; mktemp -d -t cs-xlink-private.XXXXXX)"
+  retained_out="$(HARNESS_DETAIL_DIR="$private_receipt_dir" INGEST_SHA="" XLINK_REQUEST_TRACE="$receipt_trace" run_crew_links landed)"
+  expect_contains "receipt failure keeps functional completion observation" "$retained_out" "PASS the cross-crew assignment completed with a result"
+  expect_contains "receipt failure keeps actual server refusal observation" "$retained_out" "PASS an unlinked crew cannot be delegated to"
+  expect_contains "configured receipt failure fails suite" "$retained_out" "fixture: suite-exit:1"
+  expect_contains "configured receipt failure is named separately" "$retained_out" "FAIL crew-link success evidence is durably retained"
+  expect_eq "retention makes no extra API/model requests" "$(cat "$request_trace")" "$(cat "$receipt_trace")"
+  expect_eq "no success receipt after missing source binding" "0" "$(find "$private_receipt_dir" -name success-receipt.v1.json | wc -l | tr -d ' ')"
+  rm -rf "$private_receipt_dir"
+  # Both modes still satisfy the unchanged functional predicates. Only
+  # metadata needed for the private receipt is absent, forcing rc2 after a
+  # successful match rather than the final writer's missing-binding path.
+  for mode in landed-no-created-receipt-id landed-no-refusal-receipt-id; do
+    private_receipt_dir="$(umask 077; mktemp -d -t cs-xlink-private.XXXXXX)"
+    projection_baseline="$(HARNESS_DETAIL_DIR="" XLINK_REQUEST_TRACE="$request_trace" run_crew_links "$mode")"
+    projection_out="$(HARNESS_DETAIL_DIR="$private_receipt_dir" INGEST_SHA="" XLINK_REQUEST_TRACE="$receipt_trace" run_crew_links "$mode")"
+    expect_contains "$mode: original predicate-only suite exits zero" "$projection_baseline" "fixture: suite-exit:0"
+    expect_contains "$mode: original nine functional checks pass" "$projection_baseline" "passed: 9"
+    expect_contains "$mode: configured nine functional checks still pass" "$projection_out" "passed: 9"
+    expect_contains "$mode: full result predicate remains true" "$projection_out" "PASS the cross-crew assignment completed with a result"
+    expect_contains "$mode: actual 403 predicate remains true" "$projection_out" "PASS an unlinked crew cannot be delegated to"
+    expect_contains "$mode: rc2 is a distinct retention failure" "$projection_out" "a passing observation could not be projected"
+    expect_contains "$mode: configured gate actually exits one" "$projection_out" "fixture: suite-exit:1"
+    expect_eq "$mode: rc2 stops without extra API/model/poll requests" "$(cat "$request_trace")" "$(cat "$receipt_trace")"
+    expect_not_contains "$mode: no raw verification code in output" "$projection_out" "VERIFIED-"
+    expect_not_contains "$mode: no full model result in output" "$projection_out" "Morgan read the record"
+    expect_eq "$mode: no forged success receipt" "0" "$(find "$private_receipt_dir" -name success-receipt.v1.json | wc -l | tr -d ' ')"
+    rm -rf "$private_receipt_dir"
+  done
+  rm -f "$request_trace" "$receipt_trace"
+
+  # A committed, owned source fixture exercises the actual suite -> projector ->
+  # writer -> finish cleanup, with no live server or model and no source override.
+  receipt_fixture="$(umask 077; mktemp -d -t cs-xlink-source.XXXXXX)"
+  mkdir -p "$receipt_fixture/repo/scripts/test-harness" "$receipt_fixture/state" "$receipt_fixture/tmp"
+  mkdir -m 700 "$receipt_fixture/private"
+  for file in run-all.sh lib.sh test-crew-links.sh crew-links-evidence.sh crew-links-receipt.py; do
+    cp "$SCRIPT_DIR/test-harness/$file" "$receipt_fixture/repo/scripts/test-harness/$file"
+  done
+  git -C "$receipt_fixture/repo" init -q
+  git -C "$receipt_fixture/repo" add scripts
+  git -C "$receipt_fixture/repo" -c user.name=Fixture -c user.email=fixture@example.invalid commit -qm 'test: synthetic receipt source'
+  receipt_sha="$(git -C "$receipt_fixture/repo" rev-parse HEAD)"
+  xlink_cli "$receipt_fixture/crewship"
+  receipt_out="$(env -u CREWSHIP_SERVER -u SERVER CREWSHIP="$receipt_fixture/crewship" \
+    XLINK_STATE="$receipt_fixture/state" XLINK_MODE=landed ASK_TIMEOUT=3 POLL_INTERVAL=1 \
+    TMPDIR="$receipt_fixture/tmp" HARNESS_DETAIL_DIR="$receipt_fixture/private" \
+    INGEST_SHA="$receipt_sha" SCAN_RUN_ID=fixture-scan STAGE_RUN_ID=fixture-scan CREWSHIP_WORKSPACE=fixture-workspace \
+    bash "$receipt_fixture/repo/scripts/test-harness/test-crew-links.sh" 2>&1)"
+  receipt_rc=$?
+  receipt_file="$receipt_fixture/private/test-crew-links/success-receipt.v1.json"
+  expect_eq "configured success receipt suite actually exits zero" 0 "$receipt_rc"
+  expect_contains "configured success keeps nine functional assertions" "$receipt_out" 'passed: 9'
+  if jq -e --arg sha "$receipt_sha" '.complete == true and .source.sha == $sha and .assertions.passed == 9 and
+      .positive.assignment_id != .positive.journal_run_id and .positive.expected_code_present == true and
+      .negative.refusal.http_status == 403 and .negative.refusal.trace_id == .negative.source_run_id and
+      .negative.refusal.actor_id == .negative.source_actor_id and .topology.link_restored == true' "$receipt_file" >/dev/null 2>&1; then
+    pass "success receipt retains actual full-result/refusal joins before cleanup"
+  else fail "success receipt retains actual full-result/refusal joins before cleanup"; fi
+  code="$(cat "$receipt_fixture/state/verification-code")"
+  if grep -qF "$code" "$receipt_file" 2>/dev/null || grep -qF 'Morgan read the record' "$receipt_file" 2>/dev/null; then
+    fail "success receipt excludes raw code and model text"
+  else pass "success receipt excludes raw code and model text"; fi
+  expect_eq "success receipt survives volatile-state cleanup" "" "$(find "$receipt_fixture/tmp" -name 'harness-state.*')"
+  rm -rf "$receipt_fixture"
 
   for mode in landed-wrong-id landed-no-completion landed-no-code landed-no-full; do
     out="$(run_crew_links "$mode")"
