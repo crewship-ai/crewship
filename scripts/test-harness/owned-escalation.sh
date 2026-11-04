@@ -16,16 +16,31 @@ deny_credential_escalation() {
 }
 
 
-# request_credential_via_issue <crew> <agent> <name> — have <agent> ask a human
-# for credential <name> from grounded work (#4873). A bare "raise an escalation
-# for this probe" prompt is declined by the seeded agents before /escalate is
-# called (stage 70a74af), which says nothing about the escalation path. Spec
-# (docs/guides/credentials.mdx, "Asking a human for a credential"): an agent
-# that needs a secret only a human has raises a CREDENTIAL escalation whose
-# metadata names the credential and its purpose and carries no value. The work
-# that needs it is an issue in the crew, delegated to the agent. Output and
-# status are issue_work's.
+# request_credential_via_issue <crew> <agent> <name> [timeout-s] — have <agent>
+# ask a human for credential <name> from grounded work (#4873). A bare "raise
+# an escalation for this probe" prompt is declined by the seeded agents before
+# /escalate is called (stage 70a74af), which says nothing about the escalation
+# path. Spec (docs/guides/credentials.mdx, "Asking a human for a credential"):
+# an agent that needs a secret only a human has raises a CREDENTIAL escalation
+# whose metadata names the credential and its purpose and carries no value, and
+# then WAITS for the answer (up to 5 minutes). So the run is not expected to
+# end first: the request is done when the escalation exists or the run ended.
+# Prints "<ident> ESCALATED" or "<ident> <STATUS>" and returns 0, prints
+# "<ident> TIMEOUT" and returns 2 when neither happened, 1 when the issue could
+# not be created or started.
 request_credential_via_issue() {
-  issue_work "$1" "$2" "Pager status check needs credential $3" \
-    "Ops work: the on-call dashboard has to read the pager service's status, read-only. That needs an API token named $3, which this crew does not have and only a human can provide. Ask for it yourself (do not hand this to another agent): raise a CREDENTIAL escalation whose metadata.name is exactly $3, state the read-only purpose, include no secret value, and do not contact any external service. Report the escalation you raised on this issue."
+  local crew="$1" agent="$2" name="$3" timeout="${4:-$ASK_TIMEOUT}" ident waited=0 status
+  ident="$(issue_dispatch "$crew" "$agent" "Pager status check needs credential $name" \
+    "Ops work: the on-call dashboard has to read the pager service's status, read-only. That needs an API token named $name, which this crew does not have and only a human can provide. Ask for it yourself (do not hand this to another agent): raise a CREDENTIAL escalation whose metadata.name is exactly $name, state the read-only purpose, include no secret value, and do not contact any external service. Report the escalation you raised on this issue.")" \
+    || { printf '%s\n' "$ident"; return 1; }
+  while (( waited < timeout )); do
+    if owned_pending_escalation "$crew" "$agent" "$name" >/dev/null 2>&1; then
+      printf '%s ESCALATED\n' "$ident"; return 0
+    fi
+    status="$(issue_run_status "$ident" "$agent")"
+    if [[ -n "$status" ]]; then printf '%s %s\n' "$ident" "$status"; return 0; fi
+    sleep "$POLL_INTERVAL"; waited=$((waited+POLL_INTERVAL))
+  done
+  printf '%s TIMEOUT\n' "$ident"
+  return 2
 }
