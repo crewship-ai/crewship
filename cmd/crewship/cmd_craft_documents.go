@@ -134,8 +134,8 @@ func craftReadOnlyAdmission(cmd *cobra.Command, page string) (*cli.Client, strin
 		return nil, "", e
 	}
 	var admission struct {
-		Token string `json:"session_token"`
-		ID    string `json:"session_id"`
+		Token string `json:"session_token" yaml:"session_token"`
+		ID    string `json:"session_id" yaml:"session_id"`
 	}
 	if e = json.Unmarshal(raw, &admission); e != nil || !craftDocumentDigest(admission.Token) || admission.ID == "" || admission.ID == admission.Token {
 		return nil, "", fmt.Errorf("invalid native session response")
