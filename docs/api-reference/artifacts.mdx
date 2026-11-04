@@ -208,7 +208,9 @@ A Dashboard is a project whose version declares JSON collections.
 | POST | `/api/v1/pages/{slug}/artifact/data/{collection}` | Write a batch of documents with `ifVersion` (owner or Edit share, latest version only) |
 
 Writing needs the same authority as saving a version: the owner, the owner's
-consented agent run, or a human with a current Edit share. `base_version` must
+consented agent run, or a human with a current Edit share or inherited folder
+write. A workspace role without a grant (ADMIN included) does not write, and an
+agent run acts only for the owner. `base_version` must
 be the latest version, otherwise `409`. Read and Comment shares get `403`; a
 caller who cannot see the Dashboard gets `404`. Each written document records
 the writer as its `updated_by`, which the API projects as `source_label`.

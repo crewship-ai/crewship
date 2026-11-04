@@ -187,9 +187,12 @@ header, or `latest_version` in the output of
 
 ## Update the data
 
-The Dashboard's owner and anyone with **Edit** access can change its data,
-either directly from the CLI or (for the owner) through an agent run started on
-the owner's behalf. Read and Comment access stay read-only. Writes always target
+The Dashboard's owner and anyone with **Edit** access (an Edit share on the
+Dashboard, or write access to its folder) can change its data, either directly
+from the CLI or (for the owner) through an agent run started on the owner's
+behalf. Read and Comment access stay read-only, and a workspace role alone,
+ADMIN included, does not grant writes. A Dashboard with a private audience
+stays closed even to an Edit share. Writes always target
 the latest layout version: a batch whose `base_version` names any other
 version, including the shared one, fails with `409` and nothing is written. Each
 document records who wrote it, so the source line shows **You** to the writer
