@@ -26,8 +26,14 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 		return map[string]any{"workspaceId": str(), "pageId": str(), "applicationId": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}}, "enginePin": pin(), "sessionId": str(), "generation": version(false), "baseVersion": version(false), "editorRevision": map[string]any{"type": "string", "minLength": 1, "maxLength": 256, "description": "Opaque snapshot revision/RPC correlation binding, at most 256 UTF-8 bytes."}, "contentHash": hash(), "bytes": bytes(), "targetVersion": version(false)}
 	}
 	required := []string{"workspaceId", "pageId", "applicationId", "enginePin", "sessionId", "generation", "baseVersion"}
-	snapshot := obj(properties(), append(append([]string{}, required...), "editorRevision", "contentHash", "bytes")...)
-	reconcile := obj(properties(), append(append([]string{}, required...), "editorRevision", "contentHash")...)
+	// attemptId identifies one save attempt so a reconcile can retire it (#4899).
+	attempt := func() map[string]any {
+		p := properties()
+		p["attemptId"] = map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{8,64}$", "description": "Optional client nonce of one save attempt. Reconcile with it, by the live lease holder, answers 410 when version base+1 is not this attempt and retires the attempt, so it can never commit later; a save of a retired attempt is refused with 409. Without the live lease or beyond 8 retired attempts per page nothing is recorded and reconcile answers 409 (unconfirmed)."}
+		return p
+	}
+	snapshot := obj(attempt(), append(append([]string{}, required...), "editorRevision", "contentHash", "bytes")...)
+	reconcile := obj(attempt(), append(append([]string{}, required...), "editorRevision", "contentHash")...)
 	restore := obj(properties(), append(append([]string{}, required...), "targetVersion")...)
 	receipt := properties()
 	delete(receipt, "bytes")

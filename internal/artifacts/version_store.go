@@ -244,6 +244,21 @@ func (s *VersionStore) Read(ctx context.Context, k VersionKey, a VersionAuthoriz
 	}
 	return
 }
+
+// ReadVersionFenced reads one version inside a transaction that holds the
+// document writer fence, then runs after(tx, manifest, err) in that same
+// transaction before it commits. ErrVersionNotFound is passed to after, not
+// returned, so a caller can record what it proved absent atomically with the
+// read; after's own error rolls the transaction back.
+func (s *VersionStore) ReadVersionFenced(ctx context.Context, k VersionKey, version int64, a VersionAuthorize, after func(*sql.Tx, VersionManifest, error) error) error {
+	return s.transaction(ctx, k, a, func(tx *sql.Tx, _ string) error {
+		m, e := readVersion(ctx, tx, k, version)
+		if e != nil && !errors.Is(e, ErrVersionNotFound) {
+			return e
+		}
+		return after(tx, m, e)
+	})
+}
 func (s *VersionStore) ReadVersion(ctx context.Context, k VersionKey, version int64, a VersionAuthorize) (out VersionManifest, err error) {
 	err = s.transaction(ctx, k, a, func(tx *sql.Tx, _ string) error { var e error; out, e = readVersion(ctx, tx, k, version); return e })
 	if err != nil {

@@ -267,7 +267,7 @@ documented in [`crewship craft`](/cli/craft).
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Import a file as a new version |
 | POST | `/api/v1/pages/{slug}/craft/document/restore` | Restore an old version |
 | POST | `/api/v1/pages/{slug}/craft/document/share` | Share a version |
-| POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Confirm whether an earlier save was stored |
+| POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Confirm whether an earlier save was stored. With the save's `attemptId`, 410 means it did not commit and is retired: it can never commit later, so save the current draft again |
 | POST | `/api/v1/pages/{slug}/craft/tasks` | Start an agent task on the document |
 | GET | `/api/v1/pages/{slug}/craft/tasks/{workID}` | Agent task status |
 | POST | `/api/v1/pages/{slug}/craft/tasks/cancel` | Stop the agent task |

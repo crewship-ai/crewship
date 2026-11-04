@@ -269,6 +269,10 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    copy({bytes:snapshot.bytes,applicationId:sessionApplication!} as NativeDraft)
   })().catch(()=>{if(!dead)setError('Koncept se nepodařilo stáhnout. Zůstává v tomto prohlížeči.')})}
   reconcile.current=()=>{const r=current;if(r&&live(r)&&r.writable&&r.phase?.phase==='uncertain')void r.coordinator?.reconcile()}
+  // Back online, ask the server whether an uncertain save landed, as "Ověřit
+  // výsledek" does. Only the reconcile query runs; nothing is resent unasked.
+  const backOnline=()=>reconcile.current()
+  window.addEventListener('online',backOnline)
   const windowMessage=(event:MessageEvent)=>{current?.port.handleWindowMessage(event)}
   window.addEventListener('message',windowMessage)
   const unregisterPrivacy=registerDocumentDraftWriter(humanId,retirePrivacy,{suspend:suspendForAuth,hasDraft:()=>Boolean(current?.phase?.dirty||current?.capture)})
@@ -537,7 +541,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     void observeLease(value,true).catch(()=>{if(client===own)stop('Aktuální přístup nelze potvrdit. Koncept zachován.')})
    }).catch(()=>{if(!dead&&client===own)void retireConnection('Spojení přerušeno. Zápis není potvrzen.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})
   }
-  return()=>{unregisterPrivacy();window.removeEventListener('message',windowMessage);control.current=()=>{};publishPreview.current=()=>{};history.current={load:async()=>null,loadVersion:async()=>{throw Error('native_editor_closed')},restore:()=>{}};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};stop('Editor uzavřen · koncept zachován',true)}
+  return()=>{unregisterPrivacy();window.removeEventListener('message',windowMessage);window.removeEventListener('online',backOnline);control.current=()=>{};publishPreview.current=()=>{};history.current={load:async()=>null,loadVersion:async()=>{throw Error('native_editor_closed')},restore:()=>{}};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};stop('Editor uzavřen · koncept zachován',true)}
  },[enabled,humanId,workspaceId,pageId])
  function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`${draft.applicationId}-recovery.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
  if(!enabled)return <p className="p-6">Nativní editor není zapnutý.</p>

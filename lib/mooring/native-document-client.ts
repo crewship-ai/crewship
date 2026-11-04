@@ -96,6 +96,8 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
   if(!validNativeDraft(request)||request.baseVersion==="0"||request.workspaceId!==options.workspaceId||request.pageId!==options.pageId||request.sessionId!==sessionId||request.applicationId!==applicationId||!/^sha256:[a-f0-9]{64}$/.test(request.contentHash))throw new Error("invalid_native_snapshot_binding")
   const response=await send(`${base}document/${operation}?${query}`,{method:"POST",cache:"no-store",signal,headers:{"Content-Type":"application/json","X-Craft-Session":token!},body:JSON.stringify({...request,bytes:nativeBase64(request.bytes)})})
   ready()
+  // Only reconcile answers 410: the server retired that attempt; it never commits (#4899).
+  if(operation==="reconcile"&&response.status===410)throw new NativeSaveError("absent")
   if(response.status===409)throw new NativeSaveError("conflict")
   if(response.status===413)throw new NativeSaveError("quota")
   // A refused bearer or write is insufficient evidence to erase readable data.

@@ -14944,6 +14944,11 @@
             ],
             "type": "string"
           },
+          "attemptId": {
+            "description": "Optional client nonce of one save attempt. Reconcile with it, by the live lease holder, answers 410 when version base+1 is not this attempt and retires the attempt, so it can never commit later; a save of a retired attempt is refused with 409. Without the live lease or beyond 8 retired attempts per page nothing is recorded and reconcile answers 409 (unconfirmed).",
+            "pattern": "^[A-Za-z0-9_-]{8,64}$",
+            "type": "string"
+          },
           "baseVersion": {
             "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
             "maxLength": 19,
@@ -15365,6 +15370,11 @@
               "wordcraft",
               "gridcraft"
             ],
+            "type": "string"
+          },
+          "attemptId": {
+            "description": "Optional client nonce of one save attempt. Reconcile with it, by the live lease holder, answers 410 when version base+1 is not this attempt and retires the attempt, so it can never commit later; a save of a retired attempt is refused with 409. Without the live lease or beyond 8 retired attempts per page nothing is recorded and reconcile answers 409 (unconfirmed).",
+            "pattern": "^[A-Za-z0-9_-]{8,64}$",
             "type": "string"
           },
           "baseVersion": {
@@ -135467,6 +135477,24 @@
               }
             },
             "description": "Conflict"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Gone"
           },
           "422": {
             "content": {
