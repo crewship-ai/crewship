@@ -171,7 +171,16 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       await settle(result, attempt)
     } catch (error) {
       if (!active || !writable || pending !== operation) return
-      if (error instanceof NativeSaveError) {
+      if (reconcile && error instanceof NativeSaveError && error.reason === "conflict" && unconfirmed === attempt) {
+        // The server answered: these exact bytes are not its version base+1
+        // (e.g. the browser went offline before the save left it). That ends
+        // the uncertainty without sending the attempt again. The pipeline
+        // resumes with a fresh capture of the current bytes at the same base;
+        // the server fences every save on its base, so a head that moved on
+        // meanwhile still ends in a visible conflict with the draft kept.
+        unconfirmed = undefined; dirty = true
+        emit("dirty", "not_committed")
+      } else if (error instanceof NativeSaveError) {
         blocked = error.reason
         if (error.reason === "read_revoked") { await revokeRead(); return }
         if (error.reason === "write_revoked") { revokeWrite(); return }

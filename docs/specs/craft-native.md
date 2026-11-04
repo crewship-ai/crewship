@@ -65,6 +65,14 @@ unconfirmed attempt once before retiring; a proven commit and an identical
 fresh capture leave no recovery draft, anything else stays offered for
 comparison. The expired generation still cannot save.
 
+While the holder still has write, a reconcile that finds no commit of the
+attempt's exact bytes as base+1 (HTTP 409: the request never reached the
+server, e.g. the browser was offline) ends the uncertainty without resending
+that attempt. The editor resumes with a fresh capture of its current bytes at
+the same base; the server's base fence turns a head that moved on meanwhile into
+a visible conflict with the draft kept. The host runs the same reconcile when
+the browser reports it is back online, as "Ověřit výsledek" does.
+
 Renew/release require `{generation: "1"}`. Handoff requires
 `{generation: "1", request_id: "public-request-id"}`. Other lease mutations use
 `{}`. Generations are canonical positive decimal **strings**, never JavaScript
