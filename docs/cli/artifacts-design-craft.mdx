@@ -78,16 +78,22 @@ exit code follows the status:
 | 422 | 1 | `This workspace has reached its page limit: …` (`pages_limit`; creating a new Design at the workspace page limit) |
 | 503 | 7 | `Design engine is unavailable; changes are not acknowledged` |
 
-`craft` and `mooring connect` use the same envelope, but it holds only
-`message` and `exit_code` (usually `1`). There is no `status`, `detail` or
-`extensions` field and the server's error text is not shown; the message is
-short, such as `native HTTP 409` or `Mooring connection rejected`:
+Craft HTTP refusals use the standard classified codes: `400`/`422` → `2`,
+`401`/`403` → `4`, `404` → `3`, `409` → `5`, `429` → `6`, and `5xx` → `7`.
+A connection failure before a response uses `8`. Human native operations
+include the HTTP status and server error body in the envelope, with the private
+session token removed. Lease and proposal refusals can add context; see
+[Craft errors](/cli/craft).
+
+Native agent task commands keep status-only messages because their refusal
+bodies can describe a private runtime. Their envelope carries only `message`
+and the classified `exit_code`, for example:
 
 ```json
-{ "error": { "message": "native HTTP 503", "exit_code": 1 } }
+{ "error": { "message": "native HTTP 503", "exit_code": 7 } }
 ```
 
-Use the HTTP status inside the message to decide what to do.
+Use the classified exit code when branching in scripts.
 
 `craft version <page> <version>` requires a canonical positive decimal integer
 within the signed 64-bit range. Invalid versions (such as `0`, `01`, `+1`, a
@@ -98,8 +104,10 @@ Pass a negative positional value after `--`, for example
 `crewship craft version @<artifact-id> -- -1`, so it is checked as a version
 instead of parsed as a flag.
 
-Other argument checks described here run before any request and exit with code 1,
-for example `--name is required` or `--version must be a positive safe integer`.
+The local `page design create` check for a missing `--name` and the
+`page design restore`/`share` checks for an invalid `--version` still return
+unclassified code `1` before any request. These specific checks do not define
+the exit code for other commands' argument validation.
 
 ## Design artifacts
 
