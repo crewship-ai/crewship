@@ -40,10 +40,6 @@ Interactive mode (email + password):
 Token mode (API token):
   crewship login --token <api-token>
 
-Google OAuth (browser-based; finishes the flow in the web UI, then
-paste the CLI token printed at the end):
-  crewship login --google
-
 Device-code pairing (paste the code shown in the browser onboarding
 or Settings → Pair CLI):
   crewship login --pair --code=XXXX-XXXX
@@ -51,9 +47,16 @@ or Settings → Pair CLI):
 Non-interactive email+password (systemd timers, CI, test harnesses —
 anywhere a TTY isn't available for the password prompt):
   crewship login --email demo@crewship.ai --password-stdin <<< "$PASSWORD"
-  CREWSHIP_PASSWORD=... crewship login --email demo@crewship.ai`,
+  CREWSHIP_PASSWORD=... crewship login --email demo@crewship.ai
+
+Google sign-in is unavailable. The legacy --google flag fails locally;
+use email/password, --token or --pair instead.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Validate the profile target first: a typo'd --profile/CREWSHIP_PROFILE
+		// Reject the removed mode before config, server resolution or credential input.
+		if loginGoogleFlag {
+			return loginWithGoogle("")
+		}
+		// For supported modes, validate the profile target first: a typo'd --profile/CREWSHIP_PROFILE
 		// should get a clear "unknown profile" message before server resolution
 		// (which would otherwise fail closed with an empty-server error). A
 		// malformed config is left for persistCredential's guard to surface.
@@ -80,9 +83,6 @@ anywhere a TTY isn't available for the password prompt):
 		}
 		if loginTokenFlag != "" {
 			return loginWithToken(server, loginTokenFlag)
-		}
-		if loginGoogleFlag {
-			return loginWithGoogle(server)
 		}
 		return loginInteractive(server)
 	},
@@ -392,7 +392,7 @@ func emitWhoamiJSON(out io.Writer, userEmail, server, activeWS string, workspace
 
 func init() {
 	loginCmd.Flags().StringVar(&loginTokenFlag, "token", "", "API token for non-interactive login")
-	loginCmd.Flags().BoolVar(&loginGoogleFlag, "google", false, "Sign in via Google OAuth (browser flow, finishes in the web UI)")
+	loginCmd.Flags().BoolVar(&loginGoogleFlag, "google", false, "Unavailable: use email/password, --token or --pair instead")
 	loginCmd.Flags().BoolVar(&loginPairFlag, "pair", false, "Redeem a device-code shown in the browser (use with --code)")
 	loginCmd.Flags().StringVar(&loginCodeFlag, "code", "", "Pairing code from the browser (with --pair)")
 	loginCmd.Flags().StringVar(&loginAdapterHint, "adapter", "", "Optional adapter hint (telemetry): CLAUDE_CODE | GEMINI_CLI | CODEX_CLI | OPENCODE | CURSOR_CLI | FACTORY_DROID")
@@ -516,66 +516,11 @@ func loginWithToken(serverURL, token string) error {
 	return nil
 }
 
-// loginWithGoogle drives the browser-based Google OAuth flow. The
-// server-side flow lands cookies on the browser session (see
-// internal/api/auth_google.go) — there is no CLI-poll endpoint that
-// hands back a token after the OAuth round-trip. So the CLI:
-//
-//  1. Checks /api/v1/auth/google/status to confirm OAuth is configured.
-//  2. Opens the user's browser at /api/v1/auth/google/redirect.
-//  3. After the user completes sign-in in the browser, asks them to
-//     mint a CLI token from Settings → CLI tokens and paste it here.
-//  4. Validates and stores the token via the same code path as
-//     `crewship login --token`.
-//
-// Why not a fully headless flow: a loopback redirect would require a
-// new server endpoint that hands a one-shot CLI token to the redirect
-// URI. That endpoint doesn't exist today; building a polling shim
-// against the existing /google/status (which only reports enabled=bool)
-// would be theatre. This hybrid keeps Google sign-in usable from the
-// terminal without inventing server endpoints that don't ship.
-func loginWithGoogle(serverURL string) error {
-	client := cli.NewClient(serverURL, "", "")
-	statusResp, err := client.Get("/api/v1/auth/google/status")
-	if err != nil {
-		return fmt.Errorf("contact server: %w", err)
-	}
-	if err := cli.CheckError(statusResp); err != nil {
-		return fmt.Errorf("google status: %w", err)
-	}
-	var status struct {
-		Enabled bool `json:"enabled" yaml:"enabled"`
-	}
-	if err := cli.ReadJSON(statusResp, &status); err != nil {
-		return fmt.Errorf("parse google status: %w", err)
-	}
-	if !status.Enabled {
-		return fmt.Errorf("Google sign-in is not configured on %s (server returned enabled=false)", serverURL) //nolint:staticcheck // ST1005: user-facing CLI message ("Google" is a proper noun)
-	}
-
-	authURL := strings.TrimRight(serverURL, "/") + "/api/v1/auth/google/redirect"
-	fmt.Printf("Opening browser to complete Google sign-in:\n  %s\n\n", authURL)
-	if err := browserOpen(authURL); err != nil {
-		// Non-fatal: just print the URL and let the user click manually.
-		fmt.Printf("%s(Could not auto-open browser: %v — copy the URL above instead.)%s\n",
-			cli.Dim, err, cli.Reset)
-	}
-	fmt.Printf("After sign-in completes, mint a CLI token at:\n  %s/settings#cli-tokens\n\n",
-		strings.TrimRight(serverURL, "/"))
-
-	// Read the pasted token. Use bufio so we keep working when stdin is
-	// piped — same UX as `login` interactive prompts.
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("Paste CLI token (or Ctrl-C to abort): ")
-	tok, err := reader.ReadString('\n')
-	if err != nil {
-		return fmt.Errorf("read token: %w", err)
-	}
-	tok = strings.TrimSpace(tok)
-	if tok == "" {
-		return fmt.Errorf("no token entered")
-	}
-	return loginWithToken(serverURL, tok)
+// loginWithGoogle retains the legacy flag's explicit error. The server has
+// deliberately removed Google redirect/callback routes; do not contact a
+// server, open a browser or ask for a credential to discover that fact.
+func loginWithGoogle(_ string) error {
+	return errors.New("Google sign-in is unavailable; use email/password with 'crewship login', --token or --pair instead") //nolint:staticcheck // ST1005: Google is a proper noun in a user-facing message.
 }
 
 func loginInteractive(serverURL string) error {

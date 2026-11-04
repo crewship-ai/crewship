@@ -21,9 +21,9 @@ All `/api/v1/auth/*` routes are mounted behind a rate limit of 10 req/min/IP. Ro
 | POST | [`/api/auth/token/refresh`](#post-api-auth-token-refresh) | Rotate the browser session token |
 | GET | [`/api/auth/error`](#get-api-auth-error) | NextAuth error redirect target |
 | POST | [`/api/v1/auth/signup`](#post-api-v1-auth-signup) | Email/password signup |
-| GET | [`/api/v1/auth/google/status`](#get-api-v1-auth-google-status) | Is Google sign-in enabled |
-| GET | [`/api/v1/auth/google/redirect`](#get-api-v1-auth-google-redirect) | Start the Google OAuth2 flow |
-| GET | [`/api/v1/auth/google/callback`](#get-api-v1-auth-google-callback) | Google OAuth2 redirect target |
+| GET | [`/api/v1/auth/google/status`](#get-api-v1-auth-google-status) | Legacy compatibility metadata; always disabled |
+| GET | [`/api/v1/auth/google/redirect`](#get-api-v1-auth-google-redirect) | Unavailable; route is not registered |
+| GET | [`/api/v1/auth/google/callback`](#get-api-v1-auth-google-callback) | Unavailable; route is not registered |
 | POST | [`/api/v1/auth/pair/start`](#post-api-v1-auth-pair-start) | Mint a device-pairing code |
 | GET | [`/api/v1/auth/pair/poll`](#get-api-v1-auth-pair-poll) | Poll a pairing code's status |
 | POST | [`/api/v1/auth/pair/redeem`](#post-api-v1-auth-pair-redeem) | Redeem a code for a CLI token |
@@ -155,58 +155,37 @@ address hashed.
 
 ## Google sign-in
 
-Three endpoints implement the OAuth2 redirect dance. They are wired only when `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set at startup; otherwise `/redirect` and `/callback` are not registered at all and `/status` reports `enabled: false`.
+Google sign-in is deliberately disabled. Redirect and callback routes are not
+registered, even if `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` remain set.
+Current browser login and the CLI do not support Google sign-in. The status
+endpoint remains as compatibility metadata for older clients; it cannot
+start or enable authentication.
 
 ### `GET /api/v1/auth/google/status`
 
-Probe that tells the login page whether to render the "Continue with Google" button.
+Retained compatibility probe. It always returns a definite disabled status.
 
 **Auth:** none.
 
 **Response:** `200 OK`
 
 ```json
-{ "enabled": true }
+{ "enabled": false }
 ```
 
 | Field | Type | Description |
 |---|---|---|
-| `enabled` | boolean | `true` when both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set on the server. |
+| `enabled` | boolean | Always `false`, regardless of Google client configuration. |
 
 ### `GET /api/v1/auth/google/redirect`
 
-Starts the OAuth2 flow. The handler mints a single-use state token (32 random bytes, stored in `oauth_states` with the requested post-login redirect, 15-min TTL) and 307s the browser to `accounts.google.com`.
-
-**Auth:** none.
-
-**Query parameters:**
-
-| Param | Type | Description |
-|---|---|---|
-| `redirect` | string | Optional post-login destination. Validated by `isSafeRedirect`; anything that escapes the local origin falls back to `/`. |
-
-**Response:** `307 Temporary Redirect` to the Google authorization URL. Errors land as `404` ("Google sign-in not configured") when OAuth is disabled or `500` on a state-insert failure.
+Not registered. Requests return `404`; this historical URL does not start an
+OAuth flow.
 
 ### `GET /api/v1/auth/google/callback`
 
-Google's redirect target. Atomically consumes the state token (single-use via `DELETE ... RETURNING`), exchanges the auth code for an access token, fetches the user's profile from `https://www.googleapis.com/oauth2/v3/userinfo`, upserts the row in `users` + `accounts`, and mints a fresh `user_sessions` row plus access/refresh cookies. Then 307s the browser to the validated `redirect_uri` captured during `/redirect`.
-
-**Auth:** none.
-
-**Query parameters:**
-
-| Param | Type | Description |
-|---|---|---|
-| `state` | string | Required. The opaque token from `/redirect`. |
-| `code` | string | Required. Google's authorization code. |
-
-| Status | Condition |
-|---|---|
-| `307` | Success -- session cookies set, browser redirected. |
-| `400` | Missing `state`/`code`, unknown state, state older than 15 min, or Google code exchange failed. |
-| `404` | Google sign-in not configured (env vars missing). |
-| `502` | Userinfo fetch or JSON decode failed. |
-| `500` | DB insert, session create, or token mint failed (a ghost session, if created, is revoked before responding). |
+Not registered. Requests return `404`; this historical URL does not exchange
+codes or create users or sessions.
 
 ---
 
