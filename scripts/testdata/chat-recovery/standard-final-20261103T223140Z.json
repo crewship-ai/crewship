@@ -1,0 +1,51 @@
+{
+ "state": "failed",
+ "state_reason": "protected retained capture confirmed failed execution",
+ "events": [
+  {
+   "seq": 1,
+   "at": "2026-11-03T22:35:25.206934021Z",
+   "from_state": "",
+   "to_state": "queued",
+   "run_id": "",
+   "generation": 0,
+   "reason": "accepted"
+  },
+  {
+   "seq": 2,
+   "at": "2026-11-03T22:35:25.208101436Z",
+   "from_state": "queued",
+   "to_state": "starting",
+   "run_id": "msg_1793745325204111987_3d4c34e78d10f7ce",
+   "generation": 1,
+   "reason": "claimed"
+  },
+  {
+   "seq": 3,
+   "at": "2026-11-03T22:35:27.034900037Z",
+   "from_state": "starting",
+   "to_state": "running",
+   "run_id": "msg_1793745325204111987_3d4c34e78d10f7ce",
+   "generation": 1,
+   "reason": "runtime confirmed"
+  },
+  {
+   "seq": 4,
+   "at": "2026-11-03T22:36:28.480535379Z",
+   "from_state": "running",
+   "to_state": "needs_reconciliation",
+   "run_id": "msg_1793745325204111987_3d4c34e78d10f7ce",
+   "generation": 1,
+   "reason": "lease expired in runtime phase \"confirmed\"; a runtime may exist at \"agent-run:msg_1793745325204111987_3d4c34e78d10f7ce\" and must be checked"
+  },
+  {
+   "seq": 5,
+   "at": "2026-11-03T22:39:28.672845486Z",
+   "from_state": "needs_reconciliation",
+   "to_state": "failed",
+   "run_id": "msg_1793745325204111987_3d4c34e78d10f7ce",
+   "generation": 1,
+   "reason": "protected retained capture confirmed failed execution"
+  }
+ ]
+}
