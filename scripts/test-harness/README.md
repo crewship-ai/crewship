@@ -445,9 +445,31 @@ directory under its run, covered by the report retention), `finish` writes
 `<suite>/failures.txt`, the chat list and every transcript started during the
 suite for each agent it talked to, and each issue it opened with its runs —
 all `0600` under `umask 077`. Values registered with `register_secret` are
-replaced by `[REDACTED]` before anything is written. A passing suite, or one
-run without `HARNESS_DETAIL_DIR`, fetches and writes nothing. These files stay
+replaced by `[REDACTED]` before anything is written. The failure-evidence collector fetches and writes nothing for a passing suite,
+or when `HARNESS_DETAIL_DIR` is unset. These files stay
 on the host; do not attach them to public issues.
+
+**Minimal crew-link success receipt (#4975).** When all crew-link checks pass
+and `HARNESS_DETAIL_DIR` is configured, the suite also writes
+`test-crew-links/success-receipt.v1.json` there, before temporary-state cleanup
+and any fixture reset. This is a small, source-pinned observation receipt:
+assignment/issue/journal-run joins, completion outcomes, hashes of the exact
+full result and expected fixture code, and the matched server refusal's
+actor/trace/crew/403 metadata. It contains no model reply, task, raw code,
+credential, or transcript, and is never printed to the harness log. It is not
+a server-signed attestation and cannot recover discarded response text.
+
+The existing stage caller supplies `INGEST_SHA`, `SCAN_RUN_ID`, optionally the
+matching `STAGE_RUN_ID`, and `CREWSHIP_WORKSPACE`. The writer requires Python3,
+checks the source SHA and exact committed harness files, and requires an existing
+absolute, owner-only `0700` detail directory with no symlink components. It
+creates the suite directory `0700` and receipt `0600`, syncing and publishing
+without replacing an existing file. The receipt inherits the existing private
+report retention. Standalone runs without a detail directory keep their previous
+behavior. A configured receipt/projection failure makes the gate fail; it does
+not retry work or fetch new transcripts. Functional predicates and polling stay unchanged; a successful suite keeps its
+nine functional assertions, while a retention failure adds one named failure. The receipt is projected from the API responses
+already inspected, with no extra API or model requests.
 
 ## Design notes
 

@@ -114,6 +114,8 @@ XLINK_HAVE_JQ=0
 have jq && XLINK_HAVE_JQ=1
 before_ids="$(mktemp)"; after_ids="$(mktemp)"
 xlink_removed=0
+# Invoked indirectly by the EXIT trap below, including early exits.
+# shellcheck disable=SC2317
 restore_xlink() {
   if (( xlink_removed == 1 )); then cs crew connect engineering ops --direction bidirectional >/dev/null 2>&1 || true; fi
 }
@@ -163,8 +165,16 @@ if (( XLINK_HAVE_JQ == 1 )) && (( landed == 0 )); then
   [ -n "$(comm -13 "$before_ids" "$after_ids")" ] && landed=1
 fi
 
+xlink_positive_receipt=""
+xlink_projection_error=0
 xlink_completed() {
-  xlink_assignment_completed "$TAG" && xlink_result_reported "$xlink_ident" "$RECORD_CODE"
+  xlink_assignment_completed "$TAG" || return 1
+  local rc
+  xlink_positive_receipt="$(xlink_result_evidence "$xlink_ident" "$RECORD_CODE" "$TAG")"
+  rc=$?
+  # A projection error ends polling immediately; no extra paid action/retry.
+  if (( rc > 1 )); then xlink_projection_error=1; return 0; fi
+  return "$rc"
 }
 if (( landed == 1 )); then
   _pass "delegation crossed the link — new cross-crew activity addressed to morgan"
@@ -249,6 +259,15 @@ else
 
   neg_refusal_proved=0
   neg_work_landed=0
+  xlink_negative_receipt=""
+  neg_projection_error=0
+  xlink_refusal_observed() {
+    local rc
+    xlink_negative_receipt="$(xlink_refusal_evidence "$neg_ident" "$source_crew_id" "$target_crew_id")"
+    rc=$?
+    if (( rc > 1 )); then neg_projection_error=1; return 0; fi
+    return "$rc"
+  }
 
   # Same evidence rule as section 3: a correct refusal may quote ${NEG}-OK,
   # so the reply text cannot decide. Without jq there is no artifact to read,
@@ -268,10 +287,10 @@ else
       _fail "an unlinked crew cannot be delegated to" "crew identities could not be read"
     else
       waited=0
-      until xlink_refusal_seen "$neg_ident" "$source_crew_id" "$target_crew_id" || (( waited >= ASK_TIMEOUT )); do
+      until xlink_refusal_observed || (( waited >= ASK_TIMEOUT )); do
         sleep "$POLL_INTERVAL"; waited=$((waited+POLL_INTERVAL))
       done
-      if xlink_refusal_seen "$neg_ident" "$source_crew_id" "$target_crew_id"; then
+      if xlink_refusal_observed; then
         neg_refusal_proved=1
         _pass "an unlinked crew cannot be delegated to — verified server 403 receipt"
       else
@@ -300,6 +319,21 @@ else
   if cs crew connect engineering ops --direction bidirectional >/dev/null 2>&1; then xlink_removed=0; fi
   restored="$(cs crew connections 2>/dev/null)"
   assert_contains "the link is restored for the following suites" "$restored" "engineering"
+fi
+
+# Retain success before finish deletes volatile state and the gauntlet reseeds.
+# No response/transcript/code enters this receipt or the public harness output.
+if (( _FAIL == 0 && _SKIP == 0 && _XFAIL == 0 )) && [[ -n "${HARNESS_DETAIL_DIR:-}" ]]; then
+  if (( xlink_projection_error == 1 || neg_projection_error == 1 )); then
+    _HARNESS_KEEP_EVIDENCE=0  # No new API/transcript reads for a retention-only failure.
+    _fail "crew-link success evidence is durably retained" "a passing observation could not be projected; no receipt can certify it"
+  elif ! printf '%s\0' "${xlink_positive_receipt:-}" "${xlink_negative_receipt:-}" \
+       "$ops_record_id" "$ops_record_ident" "${source_crew_id:-}" "${target_crew_id:-}" \
+       "$_HARNESS_T0" "$_PASS" "$xlink_removed" "${neg_work_landed:-1}" | \
+       python3 "$HERE/crew-links-receipt.py" write "$HARNESS_DETAIL_DIR"; then
+    _HARNESS_KEEP_EVIDENCE=0  # Existing functional failures retain their normal evidence.
+    _fail "crew-link success evidence is durably retained" "private receipt persistence failed; the configured gate is incomplete"
+  fi
 fi
 
 finish

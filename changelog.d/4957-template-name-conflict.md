@@ -1,0 +1,1 @@
+- **Duplicate template names returned a server error.** Creating or renaming a workspace template to an existing name now returns HTTP 409 Conflict.

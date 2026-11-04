@@ -23526,6 +23526,15 @@
             "type": "string"
           },
           "status": {
+            "description": "Omitted, null, or empty status defaults to active.",
+            "enum": [
+              "",
+              "active",
+              "completed",
+              "cancelled",
+              null
+            ],
+            "nullable": true,
             "type": "string"
           },
           "target_date": {
@@ -23550,6 +23559,13 @@
             "type": "integer"
           },
           "status": {
+            "description": "Omitted or null status leaves it unchanged when another field is updated; a request without updatable fields is rejected. Empty or unsupported status is rejected.",
+            "enum": [
+              "active",
+              "completed",
+              "cancelled",
+              null
+            ],
             "nullable": true,
             "type": "string"
           },
@@ -165972,6 +165988,36 @@
             },
             "description": "Forbidden"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -166523,6 +166569,36 @@
               }
             },
             "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "500": {
             "content": {
