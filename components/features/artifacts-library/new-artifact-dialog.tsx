@@ -153,7 +153,8 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
       throw new Error(value?.error ?? "Page creation could not be confirmed.")
     }
     intent.uncertain = false
-    intent.created = { slug: typeof value?.slug === "string" ? value.slug : intent.slug, pagesVersion: typeof value?.pages_version === "number" ? value.pages_version : 0, ...(typeof value?.id === "string" && value.id ? { id: value.id } : {}) }
+    const confirmedId = k.key === "design" ? value?.page_id : value?.id
+    intent.created = { slug: typeof value?.slug === "string" ? value.slug : intent.slug, pagesVersion: typeof value?.pages_version === "number" ? value.pages_version : 0, ...(typeof confirmedId === "string" && confirmedId ? { id: confirmedId } : {}) }
     await client.invalidateQueries({ queryKey: pagesKeys.all(workspaceId) })
     return intent.created
   } })
@@ -224,7 +225,7 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
         {duplicate && <div className="flex items-start gap-2 rounded-md border border-warn/30 bg-warn/[0.07] p-2.5 text-xs">
           <TriangleAlert aria-hidden className="mt-px size-3.5 shrink-0 text-warn" />
           <p className="min-w-0 flex-1"><b className="font-semibold">{duplicate.name}</b> already exists here. A second one with the same name is hard to tell apart.</p>
-          <Button type="button" size="sm" variant="secondary" className="h-7 text-xs" onClick={() => open(duplicate.slug)}>Open it</Button>
+          <Button type="button" size="sm" variant="secondary" className="h-7 text-xs" onClick={() => open(duplicate.slug, duplicate.immutablePageId)}>Open it</Button>
         </div>}
 
         <p className="flex items-center gap-2 text-xs text-muted-foreground">

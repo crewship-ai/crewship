@@ -1,0 +1,1 @@
+- **New Designs and existing artifacts opened from the duplicate warning could lose their confirmed identity.** The dialog now passes the Design response’s page ID and an existing artifact’s immutable page ID when opening it.
