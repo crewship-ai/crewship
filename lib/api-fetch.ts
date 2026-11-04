@@ -283,6 +283,66 @@ let refreshInflight: Promise<RefreshOutcome> | null = null
  *  see a transport error instead of an indefinite spinner. */
 const REFRESH_TIMEOUT_MS = 10_000
 
+/** A refresh rotates the refresh token, and its response carries the only
+ *  copy of the new one: the server answers a second use of the old token as
+ *  a replay and revokes the session (nextauth.go RefreshToken).
+ *
+ *  The single flight above holds within one document only. When the page is
+ *  replaced while a refresh is in flight (a full load — the exported build
+ *  opens /artifacts/<id> as a new document right after the library mounted
+ *  the editor), the browser used to drop that response together with its
+ *  cookies, and the next document refreshed with the rotated-away token:
+ *  "Signed out on this device" seconds after creating a Sheet. Two tabs
+ *  refreshing at once collide the same way.
+ *
+ *  So the request is `keepalive` (the browser completes it and stores its
+ *  cookies after the page is gone), and its start is marked in localStorage;
+ *  a refresh in another document waits until that one has had time to land
+ *  instead of presenting the same token again. */
+const REFRESH_MARK_KEY = "crewship:auth-refresh"
+/** How long a refresh started elsewhere is waited for. Well above a refresh
+ *  round trip, well below REFRESH_TIMEOUT_MS; a refresh that finishes sooner
+ *  in a live document clears the mark and ends the wait early. */
+export const REFRESH_SETTLE_MS = 3_000
+const REFRESH_SETTLE_POLL_MS = 100
+const REFRESH_REALM = Math.random().toString(36).slice(2)
+
+function readRefreshMark(): { at: number; realm: string } | null {
+  try {
+    const raw = typeof localStorage === "undefined" ? null : localStorage.getItem(REFRESH_MARK_KEY)
+    const mark = raw ? (JSON.parse(raw) as { at?: unknown; realm?: unknown }) : null
+    return mark && typeof mark.at === "number" && typeof mark.realm === "string" ? { at: mark.at, realm: mark.realm } : null
+  } catch {
+    return null
+  }
+}
+
+/** Milliseconds a refresh started by another document still deserves, or 0. */
+function foreignRefreshWait(now = Date.now()): number {
+  const mark = readRefreshMark()
+  if (!mark || mark.realm === REFRESH_REALM) return 0
+  const age = now - mark.at
+  // A mark from the future is a clock change, not a refresh in flight.
+  return age >= 0 && age < REFRESH_SETTLE_MS ? REFRESH_SETTLE_MS - age : 0
+}
+
+async function settleForeignRefresh(): Promise<void> {
+  const deadline = Date.now() + foreignRefreshWait()
+  while (Date.now() < deadline && foreignRefreshWait() > 0) {
+    await new Promise((resolve) => setTimeout(resolve, Math.min(REFRESH_SETTLE_POLL_MS, deadline - Date.now())))
+  }
+}
+
+function markRefresh(at: number | null): void {
+  try {
+    if (typeof localStorage === "undefined") return
+    if (at !== null) localStorage.setItem(REFRESH_MARK_KEY, JSON.stringify({ at, realm: REFRESH_REALM }))
+    else if (readRefreshMark()?.realm === REFRESH_REALM) localStorage.removeItem(REFRESH_MARK_KEY)
+  } catch {
+    // Storage unavailable (private mode, quota): keepalive alone still lands the cookies.
+  }
+}
+
 export async function tryRefresh(): Promise<RefreshResult> {
   return (await refreshShared()).result
 }
@@ -290,8 +350,12 @@ export async function tryRefresh(): Promise<RefreshResult> {
 function refreshShared(): Promise<RefreshOutcome> {
   if (refreshInflight) return refreshInflight
   const promise = (async (): Promise<RefreshOutcome> => {
+    // Only a refresh started by another document is awaited; the usual case
+    // sends at once (synchronously, before the first await).
+    if (foreignRefreshWait() > 0) await settleForeignRefresh()
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS)
+    markRefresh(Date.now())
     try {
       // withServerBase: remote-server cookie mode refreshes against the
       // configured server; same-origin default is byte-identical. (Bearer
@@ -301,6 +365,7 @@ function refreshShared(): Promise<RefreshOutcome> {
         credentials: "include",
         headers: { Accept: "application/json" },
         signal: controller.signal,
+        keepalive: true,
       })
       if (r.ok) return { result: "ok", reason: null }
       // Only a 401 from the refresh endpoint is "your session is gone".
@@ -316,6 +381,7 @@ function refreshShared(): Promise<RefreshOutcome> {
       return { result: "retryable_failed", reason: null }
     } finally {
       clearTimeout(timer)
+      markRefresh(null)
     }
   })()
   refreshInflight = promise
