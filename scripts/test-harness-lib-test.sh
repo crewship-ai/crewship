@@ -395,6 +395,10 @@ expect_eq "a suite that did not opt in keeps nothing, even failing" "" "$(find "
 # shellcheck disable=SC2016
 red="$(timeout 10 bash -c '. "$1/test-harness/lib.sh"; register_secret tok; register_secret token-abc; register_secret RED; printf "a token-abc b tok c [RED]\n" | _redact' _ "$SCRIPT_DIR")"
 expect_eq "redaction: longest value wins, a value inside [REDACTED] cannot loop" "a [REDACTED] b [REDACTED] c [[REDACTED]]" "$red"
+foreign="$ev_dir/foreign"; mkdir "$foreign"; : >"$foreign/keep"
+# shellcheck disable=SC2016
+ev_run env _HARNESS_STATE="$foreign" _HARNESS_STATE_OWNER=1 HARNESS_DETAIL_DIR="$pass_det" bash -c '. "$1/test-harness/lib.sh"; keep_failure_evidence; _pass ok; finish' _ "$SCRIPT_DIR" >/dev/null 2>&1
+expect_eq "an inherited state path is never deleted" "1" "$( [ -f "$foreign/keep" ] && echo 1 || echo 0)"
 expect_eq "finish removes the harness state directory" "" "$(find "$ev_dir" -maxdepth 1 -name 'harness-state.*' 2>/dev/null)"
 rm -rf "$ev_dir"
 

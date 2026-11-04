@@ -158,17 +158,22 @@ ask_agent() {
 # tracked agent and issue is appended to a file in a private directory. Only a
 # suite that keeps evidence needs it, so keep_failure_evidence creates it, in
 # the suite's own shell, and only when HARNESS_DETAIL_DIR is set; finish and
-# the preflight exits remove it. A second `source` keeps the same directory.
-_HARNESS_STATE="${_HARNESS_STATE:-}"
+# the preflight exits remove it. Only a directory this shell created is used
+# or removed: a value inherited from the environment is dropped, never deleted
+# (a subshell keeps $$ of its parent, so command substitutions still match).
+[[ "${_HARNESS_STATE_OWNER:-}" == "$$" ]] || _HARNESS_STATE=""
 _state_init() {
   [[ -n "$_HARNESS_STATE" && -d "$_HARNESS_STATE" ]] && return 0
-  _HARNESS_STATE="$(umask 077; mktemp -d "${TMPDIR:-/tmp}/harness-state.XXXXXX" 2>/dev/null)" || {
+  _HARNESS_STATE="$(umask 077; mktemp -d "${TMPDIR:-/tmp}/harness-state.XXXXXX" 2>/dev/null)" && _HARNESS_STATE_OWNER=$$ || {
     _HARNESS_STATE=""
     info "cannot create a harness state directory under ${TMPDIR:-/tmp}; failure evidence will not list issues or agents"
   }
   return 0
 }
-_state_cleanup() { [[ -n "$_HARNESS_STATE" ]] && rm -rf "$_HARNESS_STATE"; _HARNESS_STATE=""; return 0; }
+_state_cleanup() {
+  [[ -n "$_HARNESS_STATE" && "${_HARNESS_STATE_OWNER:-}" == "$$" ]] && rm -rf "$_HARNESS_STATE"
+  _HARNESS_STATE=""; return 0
+}
 _state_add() { # <file> <value> — append once
   [[ -n "$_HARNESS_STATE" && -n "${2:-}" ]] || return 0
   grep -qxF -- "$2" "$_HARNESS_STATE/$1" 2>/dev/null || printf '%s\n' "$2" >>"$_HARNESS_STATE/$1"
@@ -375,40 +380,18 @@ poll_until() {
   return 1
 }
 
-# agent_has_no_open_chat <agent-slug> — true once the agent holds no open chat
-# turn. A turn whose ask timed out keeps the agent's slot until its protected
-# capture settles it (#4819), typically ~20 s; asking the same agent inside that
-# window is correctly refused with 429 (#4842).
-agent_has_no_open_chat() {
-  cs work list --open --class chat --agent "$1" --format json 2>/dev/null \
-    | jq -e '(.items // []) | length == 0' >/dev/null
-}
-
-# wait_agent_idle <agent-slug> [timeout-s] — wait for agent_has_no_open_chat
-# before driving the same agent again. Records a failure with the evidence if
-# the agent never frees; returns 0 without asserting when jq is unavailable.
-wait_agent_idle() {
-  local agent="$1" timeout="${2:-120}" waited=0
-  have jq || return 0
-  while (( waited < timeout )); do
-    agent_has_no_open_chat "$agent" && return 0
-    sleep "$POLL_INTERVAL"; waited=$((waited+POLL_INTERVAL))
-  done
-  _fail "$agent frees its previous chat turn" "still open after ${timeout}s: $(cs work list --open --class chat --agent "$agent" --format json 2>/dev/null | jq -c '[(.items // [])[] | {id, state, state_reason}]' 2>/dev/null | head -c 300)"
-  return 1
-}
-
 # agent_has_no_open_work <agent-slug> — 0 when the agent holds no open work of
 # any capacity class. Issue runs are background work, not chat, so a lead still
 # running an issue (or a run parked on a credential, which waits up to 5
-# minutes per docs/guides/credentials.mdx) blocks its next turn although
-# agent_has_no_open_chat is already true.
+# minutes per docs/guides/credentials.mdx) blocks its next turn although it
+# holds no open chat.
 agent_has_no_open_work() {
   cs work list --open --agent "$1" --format json 2>/dev/null \
     | jq -e '(.items // []) | length == 0' >/dev/null
 }
 
-# wait_agent_free <agent-slug> [timeout-s] — like wait_agent_idle, for all work.
+# wait_agent_free <agent-slug> [timeout-s] — wait until the agent holds no open
+# work of any class (chat included); fails the check after the timeout.
 wait_agent_free() {
   local agent="$1" timeout="${2:-360}" waited=0
   have jq || return 0
