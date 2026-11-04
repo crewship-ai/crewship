@@ -114,6 +114,8 @@ XLINK_HAVE_JQ=0
 have jq && XLINK_HAVE_JQ=1
 before_ids="$(mktemp)"; after_ids="$(mktemp)"
 xlink_removed=0
+# Invoked indirectly by the EXIT trap below, including early exits.
+# shellcheck disable=SC2317
 restore_xlink() {
   if (( xlink_removed == 1 )); then cs crew connect engineering ops --direction bidirectional >/dev/null 2>&1 || true; fi
 }
@@ -164,7 +166,7 @@ if (( XLINK_HAVE_JQ == 1 )) && (( landed == 0 )); then
 fi
 
 xlink_completed() {
-  xlink_assignment_completed "$TAG" && xlink_result_reported "$xlink_ident" "$RECORD_CODE"
+  xlink_assignment_completed "$TAG" && xlink_result_reported "$xlink_ident" "$RECORD_CODE" "$TAG"
 }
 if (( landed == 1 )); then
   _pass "delegation crossed the link — new cross-crew activity addressed to morgan"
