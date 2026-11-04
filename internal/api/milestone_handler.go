@@ -141,6 +141,10 @@ func (h *MilestoneHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.Status == "" {
 		req.Status = "active"
 	}
+	if !validMilestoneStatus(req.Status) {
+		writeProblem(w, r, http.StatusBadRequest, "status must be active, completed, or cancelled")
+		return
+	}
 
 	// Determine next position
 	var maxPos int
@@ -221,6 +225,11 @@ func (h *MilestoneHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
+		return
+	}
+
+	if req.Status != nil && !validMilestoneStatus(*req.Status) {
+		writeProblem(w, r, http.StatusBadRequest, "status must be active, completed, or cancelled")
 		return
 	}
 
@@ -344,4 +353,13 @@ func (h *MilestoneHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	broadcastWorkspaceEvent(h.hub, wsID, "milestone.deleted", map[string]string{"id": milestoneID, "project_id": projectID})
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func validMilestoneStatus(status string) bool {
+	switch status {
+	case "active", "completed", "cancelled":
+		return true
+	default:
+		return false
+	}
 }

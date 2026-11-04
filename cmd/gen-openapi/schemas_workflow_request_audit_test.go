@@ -1,6 +1,8 @@
 package main
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestRunRequestDocumentsReviewedDefinitionAndConflict(t *testing.T) {
 	_, components := workflowRequestSchemaCatalog()
@@ -87,5 +89,34 @@ func TestFixtureRequestBodyIsRequired(t *testing.T) {
 	body := doc["paths"].(map[string]any)[path].(map[string]any)["post"].(map[string]any)["requestBody"].(map[string]any)
 	if body["required"] != true {
 		t.Fatalf("fixture request body is optional: %#v", body)
+	}
+}
+
+func TestMilestoneRequestStatusPayloads(t *testing.T) {
+	raw := specBytes(t)
+	for _, tc := range []struct {
+		component, body string
+		valid           bool
+	}{
+		{"WorkflowMilestoneCreateRequest", `{"name":"M"}`, true},
+		{"WorkflowMilestoneCreateRequest", `{"name":"M","status":null}`, true},
+		{"WorkflowMilestoneCreateRequest", `{"name":"M","status":""}`, true},
+		{"WorkflowMilestoneCreateRequest", `{"name":"M","status":"active"}`, true},
+		{"WorkflowMilestoneCreateRequest", `{"name":"M","status":"completed"}`, true},
+		{"WorkflowMilestoneCreateRequest", `{"name":"M","status":"cancelled"}`, true},
+		{"WorkflowMilestoneCreateRequest", `{"name":"M","status":"planned"}`, false},
+		{"WorkflowMilestoneCreateRequest", `{"name":"M","status":"ACTIVE"}`, false},
+		{"WorkflowMilestoneUpdateRequest", `{"description":"changed"}`, true},
+		{"WorkflowMilestoneUpdateRequest", `{"description":"changed","status":null}`, true},
+		{"WorkflowMilestoneUpdateRequest", `{"status":"completed"}`, true},
+		{"WorkflowMilestoneUpdateRequest", `{"status":"cancelled"}`, true},
+		{"WorkflowMilestoneUpdateRequest", `{"status":"active"}`, true},
+		{"WorkflowMilestoneUpdateRequest", `{"status":""}`, false},
+		{"WorkflowMilestoneUpdateRequest", `{"status":"planned"}`, false},
+	} {
+		t.Run(tc.component+tc.body, func(t *testing.T) {
+			schema := compileOAS30At(t, raw, "/components/schemas/"+tc.component)
+			checkNullableData(t, schema, tc.body, tc.valid)
+		})
 	}
 }
