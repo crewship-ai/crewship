@@ -2,6 +2,7 @@ package journal
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -321,6 +322,9 @@ func TestList_BadCursor_ReturnsError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("want bad-cursor error")
+	}
+	if !errors.Is(err, ErrInvalidCursor) {
+		t.Fatalf("bad cursor lost its client-input classification: %v", err)
 	}
 	if !strings.Contains(err.Error(), "cursor") {
 		t.Errorf("want cursor in error message, got %v", err)
