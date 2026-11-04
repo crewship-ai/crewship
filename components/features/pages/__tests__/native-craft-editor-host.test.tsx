@@ -34,12 +34,62 @@ async function ready(){await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenC
 async function acquire(){fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(ports.at(-1)?.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)))}
 
 describe('native Word host authority and persistence',()=>{
+ it('hides a retired writer and its captured copy while the fresh read admission is pending or refused',async()=>{
+  mount();await ready();await acquire()
+  const frame=document.querySelector('iframe'),oldOptions=portOptions.at(-1)!,second=clientRig(),admission=deferred<{sessionId:string;applicationId:string}>()
+  second.open.mockReturnValue(admission.promise);m.createClient.mockReturnValueOnce(second)
+  act(()=>{portOptions.at(-1)!.onChanged('pending-before-retirement','doc');stream?.('session_retired',{draft:'retain',reason:'write_revoked'})})
+  await waitFor(()=>expect(second.open).toHaveBeenCalledOnce())
+  expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveStyle({visibility:'hidden'});expect(frame).toHaveAttribute('inert')
+  expect(journal.persist).toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled();expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
+  const download=vi.spyOn(URL,'createObjectURL')
+  act(()=>oldOptions.onExport?.({name:'old.json',bytes:new Uint8Array([1])}))
+  expect(download).not.toHaveBeenCalled();download.mockRestore()
+  await act(async()=>{admission.resolve({sessionId:'fresh-session',applicationId:'unsupported'})})
+  await waitFor(()=>expect(document.querySelector('iframe')).toBeNull())
+  expect(journal.revokeRead).not.toHaveBeenCalled();expect(client.save).not.toHaveBeenCalled()
+  expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
+ })
+
+ it('purges the captured writer row when read is revoked during the fresh read-only bootstrap',async()=>{
+  mount();await ready();await acquire()
+  const second=clientRig(),opening=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>()
+  m.createClient.mockReturnValueOnce(second)
+  m.createPort.mockImplementationOnce((o:NativeEditorPortOptions)=>{const p=portRig();p.bootstrap.mockReturnValue(opening.promise);ports.push(p);portOptions.push(o);queueMicrotask(()=>o.onReady?.('qualified'));return p})
+  act(()=>{portOptions.at(-1)!.onChanged('before-write-revoke','doc');stream?.('session_retired',{draft:'retain',reason:'write_revoked'})})
+  await waitFor(()=>expect(ports.at(-1)!.bootstrap).toHaveBeenCalled())
+  await waitFor(()=>expect(second.events).toHaveBeenCalledOnce())
+  const fresh=ports.at(-1)!
+  act(()=>stream?.('session_retired',{draft:'purge',reason:'authority_changed'}))
+  await waitFor(()=>expect(document.querySelector('iframe')).toBeNull())
+  expect(journal.revokeRead).toHaveBeenCalled();expect(second.close).toHaveBeenCalled()
+  await act(async()=>opening.resolve({bytes:new TextEncoder().encode('{"body":[1]}'),editorRevision:'late',documentId:'doc'}))
+  expect(document.querySelector('iframe')).toBeNull();expect(fresh.setReadOnly).not.toHaveBeenCalledWith(false,expect.anything());expect(client.save).not.toHaveBeenCalled()
+ })
+ it('makes no captured-draft claim when authentication ends during the initial import',async()=>{
+  const opening=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>()
+  m.createPort.mockImplementationOnce((o:NativeEditorPortOptions)=>{const p=portRig();p.bootstrap.mockReturnValue(opening.promise);ports.push(p);portOptions.push(o);queueMicrotask(()=>o.onReady?.('qualified'));return p})
+  mount();await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled())
+  await act(async()=>authSuspend!())
+  expect(document.querySelector('iframe')).toBeNull();expect(screen.queryByText(/koncept zachován/i)).not.toBeInTheDocument();expect(journal.persist).not.toHaveBeenCalled()
+  await act(async()=>opening.resolve({bytes:new Uint8Array([1]),editorRevision:'late',documentId:'doc'}))
+  expect(document.querySelector('iframe')).toBeNull();expect(client.save).not.toHaveBeenCalled()
+ })
+ it.each(['human','page','workspace'] as const)('never carries recovered draft UI across a changed %s scope',async changed=>{
+  journal.recovery.mockResolvedValueOnce([{draft:{applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'previous',generation:'1',baseVersion:'1',editorRevision:'previous',bytes:new TextEncoder().encode('{"private":"old-person-fixture"}')},actions:['compare','copy']}])
+  const ui=mount();await ready();await acquire();await screen.findByRole('button',{name:'Kopie konceptu'})
+  ui.rerender(<NativeCraftEditorHost workspaceId={changed==='workspace'?'w2':'w'} pageId={changed==='page'?'p2':'p'} humanId={changed==='human'?'human2':'human'} enabled />)
+  expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument();expect(screen.queryByDisplayValue(/old-person-fixture/)).not.toBeInTheDocument()
+  await waitFor(()=>expect(ports.at(-1)!.bootstrap).toHaveBeenCalled())
+  expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
+ })
+
  it('keeps the live native frame after failed auth capture and retries local persistence without a save',async()=>{
   mount();await ready();await acquire();const frame=document.querySelector('iframe')
   journal.persist.mockRejectedValueOnce(Error('storage failed'))
   let pending!:Promise<void>
   act(()=>{portOptions.at(-1)!.onChanged('pending-at-expiry','doc');pending=authSuspend!()})
-  await expect(pending).rejects.toThrow('native_auth_draft_capture_unconfirmed')
+  await act(async()=>{await expect(pending).rejects.toThrow('native_auth_draft_capture_unconfirmed')})
   expect(document.querySelector('iframe')).toBe(frame);expect(journal.close).not.toHaveBeenCalled()
   expect(client.save).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()
   await act(async()=>{await authSuspend!()})
@@ -462,7 +512,7 @@ describe('write access removed while read access remains (#4348)',()=>{
   mount();await ready();await acquire()
   const second=clientRig();second.open.mockRejectedValue(Error('native_session_unavailable'));m.createClient.mockReturnValueOnce(second)
   act(()=>stream?.('session_retired',writeRevoked))
-  await screen.findByText('Editor odpojen · koncept zachován')
+  await screen.findByText('Editor odpojen · zachycená místní kopie zůstává')
   expect(document.querySelector('iframe')).toBeNull();expect(second.open).toHaveBeenCalledOnce();expect(second.read).not.toHaveBeenCalled();expect(m.createClient).toHaveBeenCalledTimes(2)
   expect(journal.revokeRead).not.toHaveBeenCalled()
  })
@@ -517,7 +567,7 @@ describe('write access removed while read access remains (#4348)',()=>{
  it('keeps disconnecting for any other retirement reason',async()=>{
   mount();await ready();await acquire()
   act(()=>stream?.('session_retired',{delivery:'stopped',draft:'retain',reason:'authority_changed'}))
-  await screen.findByText('Editor odpojen · koncept zachován')
+  await screen.findByText('Editor odpojen · zachycená místní kopie zůstává')
   expect(m.createClient).toHaveBeenCalledOnce()
  })
 })

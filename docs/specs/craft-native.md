@@ -100,17 +100,40 @@ Competing acquisition and stale generations return 409. A handoff advances the
 server generation; a late renew or write from the old connection is rejected.
 Neither a display name nor a public request ID establishes write authority.
 
-## Native editor startup deadlines
+## Native editor startup authority and deadlines
 
-The isolated frame has 20 seconds to return its verified read-only ready reply.
-After that reply, the bounded initial snapshot, document import and confirming
-snapshot each have their own 10-second RPC deadline, including snapshot hashing.
-The frame deadline does not overlap this finite import sequence. A stalled RPC,
-failed import or mismatched document identity still retires the connection; startup
-never acquires a lease, acknowledges a save or automatically replays an import.
-A connection timeout advises an explicit page reload for a fresh admission. Before
-bootstrap finishes, the disconnected status makes no claim that a local draft
-was captured.
+A fresh admission starts its authority/lease metadata stream before document
+fetch and iframe import. While a frame bootstraps, lease events update its
+advisory view without starting concurrent reader refreshes. Read retirement
+removes the frame and purges the scoped private draft as usual; write or other
+admission retirement during bootstrap ends that attempt without automatically
+reopening or acquiring another session.
+
+The frame is hidden and inert until the native snapshot/open/snapshot identity
+barrier completes and a fresh lease read verifies the original admission's
+current credential, Page rights and authority epoch. Cancellation, a replaced
+admission or changed person/Page/workspace cannot reveal an old completion.
+When a retired writer opens a fresh read admission, its previous frame and
+recovery/comparison controls stay hidden until that admission is verified; a
+refused admission retains confirmed rows without exposing them or reviving
+callbacks from the old session.
+Acquiring write still requires the separate current lease/generation checks,
+confirmed native access change and draft custody; startup never acknowledges a
+save. A disconnected status claims a retained draft only after a confirmed
+local capture, not merely because bootstrap once completed.
+
+Fresh admission/document loading and acquisition have a 60-second overall
+deadline. Handoff applies that deadline only after the previous writer
+confirmed its final save/capture and retired; it never times out a live
+writer's uncaptured buffer. Each new
+frame has a 50-second overall deadline, including its final authority read;
+inside it, the frame has 20 seconds for verified read-only ready and each of the
+at most three import RPCs keeps its 10-second deadline, including snapshot
+hashing. The connection deadline ends at ready instead of overlapping the
+finite import sequence. Neither metadata events nor progress reset these caps.
+A timeout advises explicit reload for a fresh attempt, without replaying an
+import, mutation or save. Existing captured drafts are not erased on a generic
+timeout or disconnection; only explicit read retirement authorizes their purge.
 
 ## Shared previews and edit capability
 
