@@ -2419,8 +2419,8 @@ crewship page design create checkout --name "Checkout"
 ### `crewship page design get <slug>`
 
 Read nodes and order authorized for the caller. Without `--version` (or with
-zero), callers with current Edit authority (a browser session or a `pages:write`
-credential plus Edit permission) and separately authorized workspace OWNER/ADMIN
+zero), callers with current Edit permission and both CLI `pages:read` and
+`pages:write` scopes (or `pages:*`), and separately authorized workspace OWNER/ADMIN
 readers see the latest canvas; ordinary Read grantees see only the shared pin.
 Positive `--version` selects a retained snapshot; shared-only readers can select only
 the shared pin and receive 404 until one is shared. Foreign administrator
@@ -2435,7 +2435,7 @@ crewship page design get checkout --version 1
 ### `crewship page design versions <slug>`
 
 List authorized retained snapshots. Callers with current Edit authority
-(a browser session or a `pages:write` credential plus Edit permission) and
+(Edit permission plus both `pages:read` and `pages:write`, or `pages:*`) and
 separately authorized workspace OWNER/ADMIN readers see history. Shared-only
 callers, including non-admin Page owners and Edit grantees using `pages:read`,
 see only the shared version and receive 404 before a pin exists. Foreign

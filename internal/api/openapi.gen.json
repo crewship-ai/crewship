@@ -139521,7 +139521,7 @@
     },
     "/api/v1/pages/{slug}/design": {
       "get": {
-        "description": "Read the canvas or the retained checkpoint chosen with `version`. Callers with current Edit authority (a browser session or pages:write credential plus Edit permission) and separately authorized workspace OWNER/ADMIN readers can read the latest canvas and retained versions. Non-admin Page owners and Edit grantees using pages:read credentials are shared-only. Shared-only readers receive only the shared pin, even without `version`, and receive 404 until one is shared. Foreign administrator access is audited; a read-scoped credential grants no write authority. Requires the `artifacts_design` feature flag.",
+        "description": "Read the canvas or a retained checkpoint selected with `version`. Current Edit permission plus a browser session, or a CLI credential carrying both pages:read and pages:write (or pages:*) plus Edit permission, permits latest and retained reads. Separately authorized workspace OWNER/ADMIN readers can also read latest/history; foreign administrator access is audited and read scope never grants write authority. Shared-only callers, including ordinary Read/Comment grantees and non-admin Page owners/Edit grantees using pages:read, receive only the shared pin, or 404 before a pin exists. Requires the `artifacts_design` feature flag.",
         "operationId": "get_api_v1_pages_slug_design",
         "parameters": [
           {
@@ -140672,7 +140672,7 @@
     },
     "/api/v1/pages/{slug}/design/versions": {
       "get": {
-        "description": "List Design versions. Callers with current Edit authority (a browser session or pages:write credential plus Edit permission) and separately authorized workspace OWNER/ADMIN readers receive full history. Non-admin Page owners and Edit grantees using pages:read credentials are shared-only: only the shared version, or 404 before a pin exists. Foreign administrator access is audited; a read-scoped credential grants no write authority.",
+        "description": "List Design versions. Current Edit permission plus a browser session, or both CLI pages:read and pages:write scopes (or pages:*) plus Edit permission, permits full history. Separately authorized workspace OWNER/ADMIN readers also receive full history, including with pages:read; foreign administrator access is audited and read scope never grants write authority. Shared-only callers, including ordinary Read/Comment grantees and non-admin Page owners/Edit grantees using pages:read, receive only the shared version, or 404 before a pin exists.",
         "operationId": "get_api_v1_pages_slug_design_versions",
         "parameters": [
           {
@@ -140814,7 +140814,7 @@
     },
     "/api/v1/pages/{slug}/design/ws": {
       "get": {
-        "description": "Upgrade to a WebSocket carrying standard Yjs sync and awareness frames. Callers with current Edit authority (a browser session or pages:write credential plus Edit permission) and separately authorized workspace OWNER/ADMIN readers receive live canvas updates. Non-admin Page owners and Edit grantees using pages:read credentials are shared-only. With a shared pin they receive that snapshot and presence, without live document updates. Before a pin exists, upgrade and presence can succeed, but sync step 1 closes the socket with 1008 Design permissions changed; the CLI watch command sends that step and reports an error. Foreign administrator access is audited; read-scoped credentials cannot write. Live edits do not publish a version; use Create Design checkpoint.",
+        "description": "Upgrade to standard Yjs sync and awareness frames. Current Edit permission plus a browser session, or both CLI pages:read and pages:write scopes (or pages:*) plus Edit permission, permits live document reads. Separately authorized workspace OWNER/ADMIN readers also receive live updates; foreign administrator access is audited and read-scoped credentials cannot write. Shared-only callers, including ordinary Read/Comment grantees and non-admin Page owners/Edit grantees using pages:read, receive the shared snapshot and presence when a pin exists, without live document updates. Before a pin exists, upgrade/presence can succeed but initial shared-state sync closes1008 Design permissions changed. CLI watch sends that sync; --count may finish on presence frames before observing the close. Changing the pin does not push replacement document state to already-open shared-only sockets; read again or reopen. Live edits do not publish a version.",
         "operationId": "get_api_v1_pages_slug_design_ws",
         "parameters": [
           {
