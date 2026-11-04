@@ -26,7 +26,12 @@ export interface Actor {
 const ROLE = "MANAGER"
 const cleanups: Array<() => Promise<unknown>> = []
 
-export async function isolatedActor(prd: PrdScenario, browser: Browser, title: string, options: BrowserContextOptions = {}): Promise<Actor> {
+/**
+ * `keepWorkspace`: leave the QA workspace in place after the test (the hour rows keep it, so
+ * the stored versions of their document can be inspected after a failure; the row records its
+ * workspace and page ids). PRD_KEEP_WORKSPACES=1 keeps every workspace.
+ */
+export async function isolatedActor(prd: PrdScenario, browser: Browser, title: string, options: BrowserContextOptions = {}, keep: { keepWorkspace?: boolean } = {}): Promise<Actor> {
   const ownerAccount = prd.env.accounts.owner
   if (!ownerAccount) throw new Error("owner account missing")
   // Both API contexts outlive the 15-minute access cookie in the long rows
@@ -35,7 +40,7 @@ export async function isolatedActor(prd: PrdScenario, browser: Browser, title: s
   const owner = withSessionRenewal(await apiAs(prd.origin, await loginStorageState(prd.origin, ownerAccount)), prd.origin)
   cleanups.push(() => owner.dispose())
   const ws = await createQaWorkspace(owner, title)
-  if (process.env.PRD_KEEP_WORKSPACES !== "1") {
+  if (process.env.PRD_KEEP_WORKSPACES !== "1" && !keep.keepWorkspace) {
     // Runs before owner.dispose (cleanups run newest first).
     cleanups.push(async () => {
       const status = await deleteQaWorkspace(owner, ws)

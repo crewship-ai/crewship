@@ -681,6 +681,11 @@ func (s *Server) Shutdown() error {
 		// a wedged LLM call can't hang shutdown past the configured timeout.
 		s.apiRouter.DrainVerdicts(s.cfg.Server.ShutdownTimeout)
 	}
+	// Write queued CLI token last_used_at breadcrumbs (#4847) while the
+	// database is still open; HTTP shutdown above has stopped new ones.
+	if !goapi.FlushCLITokenTouches(ctx) {
+		s.logger.Warn("cli token last_used_at flush did not finish before the shutdown timeout")
+	}
 
 	s.logWriter.Close()
 	s.convStore.Close()

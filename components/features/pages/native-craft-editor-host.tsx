@@ -112,8 +112,11 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    setSavedVersion(saved?r.ackedVersion:undefined)
    setQuotaFull(phase==='draft'&&r.phase?.reason==='quota')
    // Phase and reason only (never content): a stalled save is diagnosable from the page (#4852).
+   // "unretired": the server committed exactly the editor's content, only the
+   // local recovery copy could not be removed yet. It stays dirty (leave guard,
+   // no native ACK) but is not called unsaved (#4870).
    setSaveTrace(phase?{phase,reason:r.phase?.reason}:undefined)
-   setLabel(saved?'Uloženo':phase==='uncertain'?'Výsledek nepotvrzen':phase==='saving'?'Ukládám…':r.blocked?'Koncept zůstává v tomto editoru':r.phase?.dirty?(phase==='draft'&&r.phase.reason==='storage'?'Neuložený koncept · úložiště prohlížeče neodpovědělo':'Neuložený koncept'):r.writable?'Připraveno k úpravám':'Pouze čtení')
+   setLabel(saved?'Uloženo':phase==='uncertain'?'Výsledek nepotvrzen':phase==='saving'?'Ukládám…':r.blocked?'Koncept zůstává v tomto editoru':r.phase?.dirty?(phase==='draft'&&r.phase.reason==='unretired'?'Uloženo na serveru · místní kopie zatím zůstává v prohlížeči':phase==='draft'&&r.phase.reason==='storage'?'Neuložený koncept · úložiště prohlížeče neodpovědělo':'Neuložený koncept'):r.writable?'Připraveno k úpravám':'Pouze čtení')
   }
   stopAgent.current=()=>{void(async()=>{
    if(dead||networkRetired||transition||viewNow.can_edit!==true||viewNow.holder?.kind!=='agent'||viewNow.can_stop_agent!==true)return
