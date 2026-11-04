@@ -1,0 +1,1 @@
+- **Native saving could stay unconfirmed after eight recovered outages in one editing session.** Recovery now reclaims obsolete attempt fences once the document version advances, so later outages can recover while the same lease remains active; delayed originals and same-version attempt spam remain fenced.

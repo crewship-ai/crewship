@@ -74,9 +74,10 @@ own publication transaction, so a request still validating when reconcile
 answered cannot publish afterwards (#4899). Only the current live lease holder
 (that session and generation) can retire, because only it could still publish
 the attempt; every retirement first deletes rows whose lease is no longer live
-(a lapsed generation can never become live again), and a page keeps at most 8
-rows. Without an `attemptId`, without the live lease, or at that limit nothing
-is recorded and reconcile answers 409: the outcome stays unconfirmed, the
+(a lapsed generation can never become live again) or whose base version is
+older than the current document head (the base-version fence permanently
+refuses those saves). A page keeps at most 8 rows. Without an `attemptId`,
+without the live lease, or at that limit nothing is recorded and reconcile answers 409: the outcome stays unconfirmed, the
 editor sends nothing and may ask again later. After a 410 the editor resumes with a fresh
 capture at the same base and always sends it: it never treats bytes equal to
 its old baseline as already saved, because that baseline is no longer proof of
