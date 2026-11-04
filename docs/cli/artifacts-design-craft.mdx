@@ -300,7 +300,7 @@ The chat must be private, created by you and attached to an agent. Any other
 chat ID returns `403 current Design edit permission required`. `get` then
 reports the same `origin` to the owner.
 
-### Watch live changes
+### Watch the permitted view
 
 ```sh
 crewship page design watch launch-hero --count 2
@@ -312,7 +312,14 @@ crewship page design watch launch-hero --count 2
 ```
 
 Each line is one binary Yjs sync or awareness frame, base64-encoded. `--count 0`
-(the default) watches until interrupted. A live agent run reads Design through
+(the default) watches until interrupted. Current Edit authority (`pages:write`
+plus Edit permission for CLI callers) and separately authorized
+workspace OWNER/ADMIN access permit live document updates. Foreign administrator
+access is audited. Non-admin Page owners/Edit grantees with `pages:read` are
+shared-only: the shared snapshot and presence, without live document updates.
+Before a shared pin exists, the socket can upgrade and deliver presence, but
+its initial sync closes with 1008 `Design permissions changed`; `watch` reports
+an error. A live agent run reads Design through
 the `design_get` tool instead; with `CREWSHIP_AGENT_TOKEN` set, `watch` is
 refused.
 

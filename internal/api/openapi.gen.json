@@ -139803,7 +139803,7 @@
     },
     "/api/v1/pages/{slug}/design/comments": {
       "get": {
-        "description": "List Design comments. Callers without edit rights receive only the comments on the shared version.",
+        "description": "List Design comments permitted by current authority. Current Edit authority (a browser session or pages:write credential plus Edit permission) or separately authorized workspace OWNER/ADMIN reads include comments across versions; foreign administrator access is audited, including with pages:read credentials. Shared-only callers, including non-admin Page owners and Edit grantees using pages:read, receive only shared-version comments (an empty list before a shared pin). A read-scoped credential grants no write authority.",
         "operationId": "get_api_v1_pages_slug_design_comments",
         "parameters": [
           {

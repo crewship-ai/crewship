@@ -67,15 +67,26 @@ comment again from the Design editor once it is in place.
 | `design_restore` | `slug`, `version` (both required) | `version` receipt of the new version |
 
 `slug` is the Design's slug, or `@<page_id>` when the host gave you the
-immutable Page ID. Leave out `version` in `design_get` to read the live canvas,
-which is what people see right now. With `version`, you read that retained
-snapshot instead, and both `version` and `latest_version` in the result show
-the version you asked for. Use `design_versions` to learn the real latest
-version.
+immutable Page ID. Leave out `version` in `design_get` to read the view
+permitted by current authority. Live reads require current Edit authority or
+the separately authorized workspace OWNER/ADMIN path (audited for foreign
+Designs); shared-only callers see the shared pin. With `version`, you read a
+permitted retained snapshot, and both `version` and `latest_version` report
+that selected version. Use `design_versions` for the latest visible version.
+
+These agent tools always require the exact live-run Page mandate, current run
+and crew policy, original human authority and the original human credential
+required by run consent. A human `pages:read` CLI-token rule is not an agent
+credential rule. Missing or revoked authority is refused, never replaced by a
+saved human profile. For human CLI callers, non-admin Page owners and Edit
+grantees using `pages:read` are shared-only and receive 404 before a shared
+pin; a read-scoped OWNER/ADMIN can separately read latest/history with foreign
+access audit but cannot write.
 
 ## Procedure
 
-1. Read the live canvas with `design_get`. Check that `can_edit` is `true`.
+1. Read the currently permitted view with `design_get`. Edit only if `can_edit`
+   is `true`; do not treat a shared snapshot as the current editable canvas.
 2. Find the nodes you will change by `id`. Keep every existing ID, including
    the IDs of nodes you only move or recolor.
 3. Send all intended changes in one `design_apply` call with a short
