@@ -29,6 +29,9 @@ func newCraftCommand() *cobra.Command {
 	}})
 	craft.AddCommand(&cobra.Command{Use: "preview <page>", Args: cobra.ExactArgs(1), Short: "Read only the published native preview without opening an editor session", RunE: craftPreview})
 	craft.AddCommand(&cobra.Command{Use: "versions <page>", Args: cobra.ExactArgs(1), Short: "List saved native versions, newest first; read-only (restore through connect)", RunE: craftVersions})
+	version := &cobra.Command{Use: "version <page> <version>", Args: cobra.ExactArgs(2), Short: "Read one saved native version's bytes, read-only (preview or diagnose; restore through connect)", RunE: craftVersion}
+	version.Flags().StringP("output", "o", "", "Write the decoded native document to this file (- for stdout) and print only its metadata")
+	craft.AddCommand(version)
 	craft.AddCommand(&cobra.Command{Use: "connect <page>", Args: cobra.ExactArgs(1), Short: "Read bounded NDJSON actions; watch keeps the lease stream alive", RunE: craftConnect})
 	initialize := &cobra.Command{Use: "initialize <page>", Args: cobra.ExactArgs(1), Short: "Initialize an existing empty owned Page as Word native; keep its admission in this process", RunE: craftInitialize}
 	initialize.Flags().String("file", "", "Native Word document file (or - for stdin, without subsequent actions)")
@@ -265,7 +268,7 @@ func craftEmit(cmd *cobra.Command, raw json.RawMessage, secret string) error {
 	}
 	formatter := resolvedFormatter(cmd)
 	formatter.Writer = cmd.OutOrStdout()
-	if cmd.Name() == "availability" || cmd.Name() == "versions" {
+	if cmd.Name() == "availability" || cmd.Name() == "versions" || cmd.Name() == "version" {
 		return formatter.Machine(clean(value))
 	}
 	return formatter.WriteStreamRow(clean(value))

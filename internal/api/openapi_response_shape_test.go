@@ -80,6 +80,7 @@ var responseShapeContracts = []struct {
 	{name: "NativeCraftProposal", pointer: "/components/schemas/NativeCraftProposal", value: craftNativeProposalResponse{}},
 	{name: "NativeCraftProposalList", pointer: "/components/schemas/NativeCraftProposalList", value: craftNativeProposalListResponse{}},
 	{name: "NativeCraftVersionList", pointer: "/components/schemas/NativeCraftVersionList", value: craftNativeVersionsResponse{}},
+	{name: "NativeCraftVersionDocument", pointer: "/components/schemas/NativeCraftVersionDocument", value: craftNativeVersionDocumentResponse{}},
 	{name: "NativeCraftVersion", pointer: "/components/schemas/NativeCraftVersion", value: craftNativeVersionResponse{}},
 	{name: "NativeCraftVersionAuthor", pointer: "/components/schemas/NativeCraftVersionAuthor", value: craftNativeVersionAuthorResponse{}},
 	{name: "NativeCraftProposalDocument", pointer: "/components/schemas/NativeCraftProposalDocument", value: craftNativeProposalDocumentResponse{}},

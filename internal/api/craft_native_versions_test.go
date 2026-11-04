@@ -19,9 +19,20 @@ import (
 // context bound to that person's own original credential.
 func craftNativeVersionsUser(t *testing.T, f *pagesTransferRig, id, name string, member bool, grant string) context.Context {
 	t.Helper()
-	mustExec(t, f.db, `INSERT INTO users(id,email,full_name) VALUES(?,?,?)`, id, id+"@example.test", name)
+	role := ""
 	if member {
-		mustExec(t, f.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, generateCUID(), f.wsID, id)
+		role = "MEMBER"
+	}
+	return craftNativeVersionsMember(t, f, id, name, role, grant)
+}
+
+// craftNativeVersionsMember is craftNativeVersionsUser with an explicit
+// workspace role ("" for a non-member).
+func craftNativeVersionsMember(t *testing.T, f *pagesTransferRig, id, name, role, grant string) context.Context {
+	t.Helper()
+	mustExec(t, f.db, `INSERT INTO users(id,email,full_name) VALUES(?,?,?)`, id, id+"@example.test", name)
+	if role != "" {
+		mustExec(t, f.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,?)`, generateCUID(), f.wsID, id, role)
 	}
 	if grant != "" {
 		mustExec(t, f.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('native-page','user',?,?,?)`, id, grant, f.userID)

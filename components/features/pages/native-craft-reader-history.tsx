@@ -12,7 +12,8 @@ import { NativeCraftVersionHistory } from "./native-craft-version-history"
  * The history for a person who reads the document without the editor (the
  * Artifacts preview or read-only detail). It checks the workspace flag first,
  * and only then opens its own native admission, read-only: it never acquires
- * the lease and offers no restore.
+ * the lease and offers no restore. Preview and comparison of a saved version
+ * are read-only reads under that same admission.
  *
  * Access follows the sibling shared preview: the privacy retirement registered
  * for this person (sign-out, another person signing in, read revoked), the
@@ -53,6 +54,22 @@ function ReaderHistorySession({ humanId, workspaceId, pageId }: { humanId: strin
       throw cause
     }
   }, [client, workspaceId, retire])
+  // A version read is the same authorized read; a refusal or failure retires
+  // the whole history, preview and comparison included.
+  const loadVersion = React.useCallback(async (version: string, signal: AbortSignal) => {
+    if (dead.current) throw new Error("native_history_retired")
+    try {
+      opened.current ??= client.open(signal)
+      await opened.current
+      const document = await client.version(version, signal)
+      if (dead.current) throw new Error("native_history_retired")
+      return document
+    } catch (cause) {
+      if (!signal.aborted) retire()
+      throw cause
+    }
+  }, [client, retire])
+  const scope = React.useMemo(() => ({ humanId, workspaceId, pageId }), [humanId, workspaceId, pageId])
   if (retired) return null
-  return <NativeCraftVersionHistory load={load} refreshKey={tick} canRestore={false} restoreHint="Obnovit verzi může jen ten, kdo dokument právě upravuje." />
+  return <NativeCraftVersionHistory load={load} loadVersion={loadVersion} scope={scope} refreshKey={tick} canRestore={false} restoreHint="Obnovit verzi může jen ten, kdo dokument právě upravuje." />
 }

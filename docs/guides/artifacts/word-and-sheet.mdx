@@ -264,6 +264,21 @@ Anyone who can read the document sees the list. People with comment-only
 access, and people outside the workspace, don't. The list shows the latest
 200 versions; older ones stay stored, and the panel says so.
 
+### Preview and compare a version
+
+Next to each version, **Náhled** (Preview) opens that version read-only in
+the same editor, below the list; nothing you do there is saved. Next to each
+older version, **Porovnat** (Compare) shows it against the current version:
+how many lines were added and removed, each changed line, and both versions
+side by side. Both are available to everyone who can see the list, and both
+close with **Zavřít** (Close) or <kbd>Esc</kbd>, which returns focus to the
+button you came from.
+
+A workspace owner or admin who reads another member's document, its history
+or one of its versions is recorded in the audit log, as for any other read.
+If your access is removed while a preview or comparison is open, it
+disappears together with the list.
+
 ### Restore an older version
 
 You need edit rights **and** the lease in this editor.
@@ -286,7 +301,9 @@ moved on, nothing is restored and the editor shows *Obnovení verze nebylo
 potvrzeno. Dokument i místní koncept zůstávají zachovány.* ("The restore was
 not confirmed. The document and the local draft are kept.").
 
-From the CLI, `crewship craft versions <page>` lists the same history; see
+From the CLI, `crewship craft versions <page>` lists the same history and
+`crewship craft version <page> <version> --output FILE` saves one version's
+bytes without touching the document; see
 [Craft commands](/cli/craft#version-history).
 
 ## When the connection drops or the browser crashes

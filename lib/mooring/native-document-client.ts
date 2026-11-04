@@ -2,7 +2,7 @@ import { apiFetch,tryRefresh,type RefreshResult } from "../api-fetch"
 import {getAuthMode} from "../server-base"
 import {validNativeDraft,validNativeVersion} from "./native-draft"
 import {NativeSaveError,type NativeSaveRequest} from "./single-editor-save"
-import {parseNativeRestoreReceipt,parseNativeVersionList,type NativeRestoreReceipt,type NativeRestoreRequest,type NativeVersionList} from "./native-versions"
+import {parseNativeRestoreReceipt,parseNativeVersionDocument,parseNativeVersionList,type NativeRestoreReceipt,type NativeRestoreRequest,type NativeVersionDocument,type NativeVersionList} from "./native-versions"
 
 export interface NativeDocumentClientOptions {
  workspaceId:string;pageId:string;fetch?:typeof fetch
@@ -40,6 +40,8 @@ export interface NativeDocumentClient {
  decideProposal(id:string,decision:'accept'|'reject',generation:string|undefined,signal:AbortSignal):Promise<NativeProposal>
  /** Read-only history under this admission's Read authority; null while the workspace flag is off (404). */
  versions(signal:AbortSignal):Promise<NativeVersionList|null>
+ /** One saved version's bytes under this admission's Read authority, read-only; never a lease or a write. */
+ version(version:string,signal:AbortSignal):Promise<NativeVersionDocument>
  /** The existing fenced restore: holder, generation and base version, like a save. Appends a new version. */
  restore(request:NativeRestoreRequest,signal:AbortSignal):Promise<NativeRestoreReceipt>
  save(request: NativeSaveRequest,signal: AbortSignal): Promise<unknown>
@@ -321,6 +323,14 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    const list=parseNativeVersionList(await response.json());ready()
    if(!list)throw new Error('invalid_native_versions')
    return list
+  },
+  async version(version,signal){
+   ready();if(!validNativeVersion(version)||version==='0')throw new Error('invalid_native_version')
+   const response=await send(`${base}document/versions/${version}?${query}`,{method:'GET',cache:'no-store',signal,headers:{'X-Craft-Session':token!}})
+   ready();if(!response.ok)throw new Error('native_version_unavailable')
+   const document=parseNativeVersionDocument(await response.json(),version);ready()
+   if(!document)throw new Error('invalid_native_version')
+   return document
   },
   async restore(request,signal){
    ready()

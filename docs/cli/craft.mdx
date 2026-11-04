@@ -17,6 +17,7 @@ existing explicit native Page and its qualified startup profile.
 crewship craft availability <page>
 crewship craft preview <page>
 crewship craft versions <page>
+crewship craft version <page> <version> [--output FILE]
 crewship craft connect <page>
 ```
 
@@ -113,6 +114,37 @@ crewship craft versions @PAGE_ID --format json
 Versions are newest first; `current` marks the head. At most 200 entries are
 returned; `truncated: true` means older versions exist and remain restorable.
 Entries carry no document bytes.
+
+### Read one saved version
+
+`crewship craft version <page> <version>` opens the same read-only admission,
+reads `GET /api/v1/pages/{slug}/craft/document/versions/{version}` and exits.
+It returns that version's complete bytes (base64 in `bytes`), its time and
+author, whether it is the current version, and the editor profile needed to
+open it read-only. Use it to preview or diagnose an old version without
+touching the document: it never acquires the lease, never writes and never
+changes the shared version.
+
+With `--output FILE` the decoded document is written to `FILE` (mode `0600`;
+`-` writes it to stdout) and only the metadata is printed.
+
+```bash
+crewship craft version @PAGE_ID 2 --format json
+crewship craft version @PAGE_ID 2 --output v2.json --format json
+```
+
+```json
+{"version": "2", "currentVersion": "3", "current": false, "createdAt": "2026-10-31T09:00:00Z", "author": {"actorId": "agent:AGENT_ID", "kind": "agent", "displayName": "Drafting Agent"}, "applicationId": "wordcraft", "enginePin": "…", "editorBundle": "…", "editorURL": "…", "bytes": "eyJ2IjoyfQ=="}
+```
+
+It needs the same rights as `read` and the same `craft_version_history` flag
+as the listing. A comment-only person or a non-member gets `403` (exit code
+`4`); a missing version, or the flag off, gets `404` (exit code `3`), and only
+someone who may read learns that a version does not exist. A workspace owner
+or admin reading another member's document is audited exactly like `read`
+(`artifact.private_owner_accessed` or `artifact.workspace_admin_accessed`); if
+the audit entry cannot be written, nothing is returned. The listing is audited
+the same way.
 
 To restore, use the `restore` action inside `connect` while holding the lease.
 It is the fenced write a save uses (current generation, `baseVersion` equal to

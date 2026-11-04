@@ -136,6 +136,9 @@ func TestAcceptance_CraftVersionsList(t *testing.T) {
 	} else if code != 3 {
 		t.Fatalf("flag-off exit code %d, want 3 (not found): %s", code, stderr)
 	}
+	if out, stderr, code := run(ownerBearer, "", "craft", "version", "@craft-hist-page", "1", "-f", "json"); code != 3 || strings.Contains(out, "bytes") {
+		t.Fatalf("version read with the flag off: exit %d %s %s", code, out, stderr)
+	}
 	if _, err = db.Exec(`INSERT INTO feature_flags(id,key,description,enabled,percentage) VALUES('ff-craft-history-accept',?,'',1,100)`, api.CraftVersionHistoryFlag); err != nil {
 		t.Fatal(err)
 	}
@@ -165,6 +168,58 @@ func TestAcceptance_CraftVersionsList(t *testing.T) {
 		if strings.Contains(out, "session_token") || strings.Contains(out, "bytes") {
 			t.Fatalf("%s output leaked admission or content: %s", who.name, out)
 		}
+	}
+	// One historical version's bytes: the authorized read-only diagnostic.
+	versionsBefore := 0
+	if err = db.QueryRow(`SELECT count(*) FROM artifact_versions WHERE page_id='craft-hist-page'`).Scan(&versionsBefore); err != nil {
+		t.Fatal(err)
+	}
+	type versionDocument struct {
+		Version        string `json:"version"`
+		CurrentVersion string `json:"currentVersion"`
+		Current        bool   `json:"current"`
+		Bytes          []byte `json:"bytes"`
+		Author         struct {
+			Kind        string `json:"kind"`
+			DisplayName string `json:"displayName"`
+		} `json:"author"`
+	}
+	for _, who := range []struct{ name, bearer string }{{"owner", ownerBearer}, {"reader", readerBearer}} {
+		out, stderr, code := run(who.bearer, "", "craft", "version", "@craft-hist-page", "2", "-f", "json")
+		if code != 0 {
+			t.Fatalf("%s version exit %d: %s", who.name, code, stderr)
+		}
+		var got versionDocument
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("%s version output %q: %v", who.name, out, err)
+		}
+		if got.Version != "2" || got.CurrentVersion != "3" || got.Current || string(got.Bytes) != `{"v":2}` || got.Author.Kind != "agent" || got.Author.DisplayName != "Drafting Agent" || strings.Contains(out, "session_token") {
+			t.Fatalf("%s version 2: %+v %s", who.name, got, out)
+		}
+		file := filepath.Join(t.TempDir(), "v1.json")
+		out, stderr, code = run(who.bearer, "", "craft", "version", "@craft-hist-page", "1", "--output", file, "-f", "json")
+		if code != 0 {
+			t.Fatalf("%s version --output exit %d: %s", who.name, code, stderr)
+		}
+		if written, err := os.ReadFile(file); err != nil || string(written) != `{"v":1}` {
+			t.Fatalf("%s wrote %q %v", who.name, written, err)
+		}
+		if strings.Contains(out, "bytes") || !strings.Contains(out, `"version": "1"`) && !strings.Contains(out, `"version":"1"`) {
+			t.Fatalf("%s --output must print metadata only: %s", who.name, out)
+		}
+		if out, _, code = run(who.bearer, "", "craft", "version", "@craft-hist-page", "99"); code != 3 || strings.Contains(out, "bytes") {
+			t.Fatalf("%s missing version exit %d: %s", who.name, code, out)
+		}
+		if _, _, code = run(who.bearer, "", "craft", "version", "@craft-hist-page", "01"); code == 0 {
+			t.Fatalf("%s non-canonical version accepted", who.name)
+		}
+	}
+	versionsAfter := 0
+	if err = db.QueryRow(`SELECT count(*) FROM artifact_versions WHERE page_id='craft-hist-page'`).Scan(&versionsAfter); err != nil || versionsAfter != versionsBefore {
+		t.Fatalf("version reads wrote history: %d -> %d %v", versionsBefore, versionsAfter, err)
+	}
+	if out, stderr, code := run(outsiderBearer, "", "craft", "version", "@craft-hist-page", "1", "-f", "json"); code != 4 || strings.Contains(out, "bytes") {
+		t.Fatalf("outsider version read: exit %d %s %s", code, out, stderr)
 	}
 	_, _, readCode := run(outsiderBearer, `{"action":"read"}`+"\n", "craft", "connect", "@craft-hist-page")
 	out, stderr, code := run(outsiderBearer, "")

@@ -2,7 +2,7 @@ import {render,screen,fireEvent,act,waitFor} from "@testing-library/react"
 import {describe,it,expect,vi,beforeEach} from "vitest"
 import type {NativeVersionList} from "@/lib/mooring/native-versions"
 
-const m=vi.hoisted(()=>({apiFetch:vi.fn(),client:{open:vi.fn(),versions:vi.fn(),close:vi.fn()},privacy:vi.fn(),retire:undefined as undefined|(()=>Promise<void>),handlers:new Map<string,Array<(event:{type:string;payload:Record<string,unknown>})=>void>>()}))
+const m=vi.hoisted(()=>({apiFetch:vi.fn(),client:{open:vi.fn(),versions:vi.fn(),version:vi.fn(),close:vi.fn()},privacy:vi.fn(),retire:undefined as undefined|(()=>Promise<void>),handlers:new Map<string,Array<(event:{type:string;payload:Record<string,unknown>})=>void>>()}))
 vi.mock("@/lib/api-fetch",()=>({apiFetch:m.apiFetch}))
 vi.mock("@/lib/mooring/native-document-client",()=>({createNativeDocumentClient:()=>m.client}))
 vi.mock("@/lib/document-queue",()=>({registerDocumentDraftWriter:m.privacy}))
@@ -55,5 +55,21 @@ describe("reader version history access retirement",()=>{
   emit("realtime.reconnected")
   await waitFor(()=>expect(m.client.versions).toHaveBeenCalledTimes(calls+1))
   expect(screen.getByText(/Private Pavel/)).toBeInTheDocument()
+ })
+ it("retires everything when a version read for comparison is refused",async()=>{
+  await shown()
+  m.client.version.mockRejectedValue(new Error("native_version_unavailable"))
+  fireEvent.click(screen.getByRole("button",{name:"Porovnat verzi 1 s aktuální"}))
+  await waitFor(wiped)
+  expect(m.client.close).toHaveBeenCalled()
+ })
+ it("compares a version under the same read-only admission",async()=>{
+  const bytes=(text:string)=>new TextEncoder().encode(text)
+  m.client.version.mockImplementation(async(version:string)=>({version,currentVersion:"2",current:version==="2",createdAt:"x",author:{actorId:"u",kind:"human",displayName:"P"},applicationId:"wordcraft",enginePin:"e".repeat(64),editorBundle:"c".repeat(64),editorURL:"/b/"+"c".repeat(64)+"/index.html",bytes:bytes(version==="1"?'{"t":"old"}':'{"t":"new"}')}))
+  await shown()
+  fireEvent.click(screen.getByRole("button",{name:"Porovnat verzi 1 s aktuální"}))
+  expect(await screen.findByLabelText("Obsah verze 1")).toHaveValue('{\n "t": "old"\n}')
+  expect(m.client.open).toHaveBeenCalledTimes(1)
+  expect(screen.queryByRole("button",{name:/Obnovit jako/})).not.toBeInTheDocument()
  })
 })

@@ -232,6 +232,16 @@ func (s *NativeStore) Versions(ctx context.Context, k EditLeaseScope, limit int)
 	}
 	return s.versions.RecentVersions(ctx, nativeVersionKey(k), limit, s.authority(k, nil, "read"))
 }
+
+// ReadVersion returns the bytes of one saved native version and the current
+// head, under exactly the live Read authority and immutable profile check of
+// Read. It is read-only: no lease, no write, no change to the shared pin.
+func (s *NativeStore) ReadVersion(ctx context.Context, k EditLeaseScope, version int64) (artifacts.VersionManifest, int64, error) {
+	if err := s.ready(); err != nil {
+		return artifacts.VersionManifest{}, 0, err
+	}
+	return s.versions.ReadVersionWithHead(ctx, nativeVersionKey(k), version, s.authority(k, nil, "read"))
+}
 func (s *NativeStore) Restore(ctx context.Context, l EditLease, base, target int64) (artifacts.VersionReceipt, error) {
 	if err := s.ready(); err != nil {
 		return artifacts.VersionReceipt{}, err

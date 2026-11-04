@@ -252,6 +252,27 @@ func (s *VersionStore) ReadVersion(ctx context.Context, k VersionKey, version in
 	return
 }
 
+// ReadVersionWithHead reads one stored version and the current head in the
+// same transaction, under the caller's live authority. It never writes: the
+// head is reported so a caller can tell an old version from the current one.
+func (s *VersionStore) ReadVersionWithHead(ctx context.Context, k VersionKey, version int64, a VersionAuthorize) (out VersionManifest, latest int64, err error) {
+	if version < 1 {
+		return VersionManifest{}, 0, fmt.Errorf("%w: version", ErrVersionInvalid)
+	}
+	err = s.transaction(ctx, k, a, func(tx *sql.Tx, _ string) error {
+		var e error
+		if latest, _, e = versionHead(ctx, tx, k); e != nil {
+			return e
+		}
+		out, e = readVersion(ctx, tx, k, version)
+		return e
+	})
+	if err != nil {
+		return VersionManifest{}, 0, err
+	}
+	return
+}
+
 type storedFile struct {
 	Hash      string `json:"hash"`
 	MediaType string `json:"media_type"`
