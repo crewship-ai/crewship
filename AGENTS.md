@@ -72,7 +72,12 @@ screenshot pass): start them only with
 container prefix and installation identity, and on exit removes exactly the
 containers and volumes that server created before deleting its data. A server
 started by hand and its data directory deleted leaves containers no
-installation can find again.
+installation can find again. `restart NAME [--down-seconds N]` stops only the
+server process and starts it again on the same data, port and identity (no
+reseed); `scripts/acceptance-chat-recovery-throwaway.sh` uses it to prove host
+chat recovery (#4824). Protected host capture needs a state root whose
+ancestors are not group-writable (`CREWSHIP_THROWAWAY_STATE`); otherwise the
+server silently uses the legacy exec transport.
 
 **`web/out` embed:** `web/embed.go` embeds the Next.js export, so `web/out/`
 must exist for *any* Go build to compile. It is tracked-by-one-file
