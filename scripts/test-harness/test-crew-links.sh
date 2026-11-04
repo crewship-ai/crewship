@@ -221,7 +221,6 @@ else
   # the lead's run on this issue ran to an end, and no work for morgan landed.
   # A run that never ended tests nothing, so it fails both checks. The lead's
   # own account of the refusal is printed as information only.
-  wait_agent_idle alex
   wait_agent_free alex
   neg_ran=1
   neg_work="$(issue_work engineering alex "Ops confirmation needed ($NEG)" \

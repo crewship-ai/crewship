@@ -155,8 +155,20 @@ ask_agent() {
 # State that must survive command substitution. Suites call these helpers as
 # `x="$(issue_work …)"`, which runs them in a subshell, so an array appended
 # there is lost (stage run 20261103T231949Z kept no issue evidence). Every
-# tracked agent and issue is appended to a file in a private directory.
-_HARNESS_STATE="$(umask 077; mktemp -d "${TMPDIR:-/tmp}/harness-state.XXXXXX" 2>/dev/null)" || _HARNESS_STATE=""
+# tracked agent and issue is appended to a file in a private directory. Only a
+# suite that keeps evidence needs it, so keep_failure_evidence creates it, in
+# the suite's own shell, and only when HARNESS_DETAIL_DIR is set; finish and
+# the preflight exits remove it. A second `source` keeps the same directory.
+_HARNESS_STATE="${_HARNESS_STATE:-}"
+_state_init() {
+  [[ -n "$_HARNESS_STATE" && -d "$_HARNESS_STATE" ]] && return 0
+  _HARNESS_STATE="$(umask 077; mktemp -d "${TMPDIR:-/tmp}/harness-state.XXXXXX" 2>/dev/null)" || {
+    _HARNESS_STATE=""
+    info "cannot create a harness state directory under ${TMPDIR:-/tmp}; failure evidence will not list issues or agents"
+  }
+  return 0
+}
+_state_cleanup() { [[ -n "$_HARNESS_STATE" ]] && rm -rf "$_HARNESS_STATE"; _HARNESS_STATE=""; return 0; }
 _state_add() { # <file> <value> — append once
   [[ -n "$_HARNESS_STATE" && -n "${2:-}" ]] || return 0
   grep -qxF -- "$2" "$_HARNESS_STATE/$1" 2>/dev/null || printf '%s\n' "$2" >>"$_HARNESS_STATE/$1"
@@ -252,7 +264,7 @@ _redact() {
 # test-realworld-github.sh) keep them in their own arrays, and a failing run of
 # exactly those suites is when a token may sit in a transcript.
 _HARNESS_KEEP_EVIDENCE=0
-keep_failure_evidence() { _HARNESS_KEEP_EVIDENCE=1; }
+keep_failure_evidence() { _HARNESS_KEEP_EVIDENCE=1; [[ -z "${HARNESS_DETAIL_DIR:-}" ]] || _state_init; }
 
 preserve_evidence() {
   local root="${HARNESS_DETAIL_DIR:-}" dest a list id ident limit="${HARNESS_DETAIL_CHATS:-12}"
@@ -286,7 +298,7 @@ preserve_evidence() {
       # messages"); the run's own record is its journal.
       for id in $(cs issue runs "$ident" --format json 2>/dev/null | jq -r '.[] | (.run_id // .trace_id // empty)' 2>/dev/null); do
         [[ "$id" =~ ^[A-Za-z0-9_-]+$ ]] || continue
-        cs journal --run-id "$id" --format json 2>&1 | _redact >"$dest/issue-$ident-run-$id.journal.json"
+        cs journal --run-id "$id" --lines 500 --exclude-type container.metrics --format json 2>&1 | _redact >"$dest/issue-$ident-run-$id.journal.json"
       done
     done
   )
@@ -420,6 +432,7 @@ preflight() {
     printf '     go build -o crewship ./cmd/crewship\n'
     printf '   or install the CLI on PATH, or point the harness at one:\n'
     printf '     CREWSHIP=/path/to/crewship %s\n' "$(basename "${BASH_SOURCE[1]:-run-all.sh}")"
+    _state_cleanup
     exit 2
   fi
   if ! cs whoami >/dev/null 2>&1; then
@@ -428,6 +441,7 @@ preflight() {
     printf '     crewship login --email <email> --password-stdin <<< "$PASSWORD"\n'
     printf '   and make sure the workspace is seeded:\n'
     printf '     crewship seed --nuke --with-memory --with-users --wait-provision\n'
+    _state_cleanup
     exit 2
   fi
   info "whoami OK · agents: $(cs agent list 2>/dev/null | grep -c . || echo '?') · routines: $(cs routine list 2>/dev/null | grep -c . || echo '?')"
@@ -448,9 +462,9 @@ finish() {
     printf '  %sfailures:%s\n' "$_C_RED" "$_C_OFF"
     printf '    - %s\n' "${_FAILED_NAMES[@]}"
     preserve_evidence
-    [[ -n "$_HARNESS_STATE" ]] && rm -rf "$_HARNESS_STATE"
+    _state_cleanup
     exit 1
   fi
-  [[ -n "$_HARNESS_STATE" ]] && rm -rf "$_HARNESS_STATE"
+  _state_cleanup
   exit 0
 }

@@ -318,7 +318,8 @@ case "$args" in
       echo '[{"id":"esc_1","type":"CREDENTIAL","status":"PENDING","from_slug":"morgan","metadata":"{\"name\":\"HARNESS_X\"}"}]'
     else echo '[]'; fi; exit 0 ;;
   *" work list "*)
-    if [ "${EV_WORK:-free}" = busy ]; then echo '{"items":[{"id":"w1","class":"background","state":"running"}]}'; else echo '{"items":[]}'; fi; exit 0 ;;
+    # Busy with background (issue) work only: a chat-only query sees nothing.
+    if [ "${EV_WORK:-free}" = busy ] && [[ "$args" != *" --class chat "* ]]; then echo '{"items":[{"id":"w1","class":"background","state":"running"}]}'; else echo '{"items":[]}'; fi; exit 0 ;;
   *" chat list "*) printf '[{"id":"chat_new","created_at":"2999-01-01T00:00:00.000Z"},{"id":"chat_old","created_at":"2000-01-01T00:00:00.000Z"}]\n'; exit 0 ;;
   *" chat chat_new "*) echo "assistant: I used keeper-gated-secret-value"; exit 0 ;;
   *" chat chat_old "*) echo "old"; exit 0 ;;
@@ -330,7 +331,7 @@ EOF
 ev_dir="$(mktemp -d -t cs-ev.XXXXXX)"; ev_cli "$ev_dir/crewship"; : >"$ev_dir/log"
 ev_run() { # <script-body> — source lib.sh + owned-escalation.sh in a clean env and run <body>
   # shellcheck disable=SC2016
-  env -u CREWSHIP_SERVER -u SERVER CREWSHIP="$ev_dir/crewship" EV_LOG="$ev_dir/log" POLL_INTERVAL=1 "$@"
+  env -u CREWSHIP_SERVER -u SERVER TMPDIR="$ev_dir" CREWSHIP="$ev_dir/crewship" EV_LOG="$ev_dir/log" POLL_INTERVAL=1 "$@"
 }
 out="$(ev_run bash -c '. "$1/test-harness/lib.sh"; . "$1/test-harness/owned-escalation.sh"; request_credential_via_issue ops morgan HARNESS_X 5; echo "rc=$?"' _ "$SCRIPT_DIR")"
 expect_contains "grounded credential ask reports the issue and its run status" "$out" "OPS-7 FAILED"
@@ -394,6 +395,7 @@ expect_eq "a suite that did not opt in keeps nothing, even failing" "" "$(find "
 # shellcheck disable=SC2016
 red="$(timeout 10 bash -c '. "$1/test-harness/lib.sh"; register_secret tok; register_secret token-abc; register_secret RED; printf "a token-abc b tok c [RED]\n" | _redact' _ "$SCRIPT_DIR")"
 expect_eq "redaction: longest value wins, a value inside [REDACTED] cannot loop" "a [REDACTED] b [REDACTED] c [[REDACTED]]" "$red"
+expect_eq "finish removes the harness state directory" "" "$(find "$ev_dir" -maxdepth 1 -name 'harness-state.*' 2>/dev/null)"
 rm -rf "$ev_dir"
 
 echo
