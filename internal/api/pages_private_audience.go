@@ -297,23 +297,17 @@ func (h *PageHandler) auditPageDocumentRead(w http.ResponseWriter, r *http.Reque
 }
 
 // auditPanelRead is the audit of a single panel's read (its declared actions,
-// its application payload history). resolvePanelForCaller admitted the
-// caller by panel visibility; a plain member sees a panel only through its
-// owning crew.
+// its application payload history). resolvePanelForRead admitted the caller.
+// On a private Page that admission is the PRD §5 read audience only (the
+// custodian, a workspace OWNER or ADMIN); no crew or grant reaches it, so
+// every non-custodian reader is an administrator read and is audited by
+// auditPrivateOwnerAccess, which also refuses (404, nothing released) a
+// caller who is no longer a live administrator and fails closed when the
+// audit row cannot be written. On any other Page a plain member sees a panel
+// through its owning crew; an administrator who sees it only through the
+// role is audited.
 func (h *PageHandler) auditPanelRead(w http.ResponseWriter, r *http.Request, rec *pageRecord, panel *panelRecord) bool {
 	if rec.PrivateAudience {
-		user := UserFromContext(r.Context())
-		if user == nil || user.ID == rec.OwnerUserID {
-			return true
-		}
-		role, err := h.liveContentHumanRole(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			replyInternalError(w, h.logger, "authorize private panel audit", err)
-			return false
-		}
-		if !workspaceArtifactReader(role) {
-			return true // admitted by its crew, as before; not an administrator read
-		}
 		return h.auditPrivateOwnerAccess(w, r, rec)
 	}
 	return h.auditWorkspaceAdminReadBeyond(w, r, rec, func(ctx context.Context, workspace, userID string) (bool, error) {
