@@ -55,6 +55,13 @@ var unregisteredSpawnSites = map[string]string{
 		"than beginBackgroundWork's: the ledger is settled by the time the caller continues, which " +
 		"TestVerticalServer_ShutdownLeavesNoSupervisorOutsideTheLedger asserts with no polling at all.",
 
+	"cli_token_touch.go:touch": "CLI token last_used_at writer (#4847): at most one per database " +
+		"with queued touches, it exits once its queue is empty (about cliTokenTouchDelay, 1 s, after " +
+		"the first touch). Server shutdown joins it through FlushCLITokenTouches before the DB closes; " +
+		"tests that assert the write flush it the same way. Against a closed test DB it fails at once " +
+		"and silently, writing nothing. Registering it would make every fixture teardown in the " +
+		"package wait out that delay for any token used anywhere.",
+
 	// Not daemons, but genuinely not drainable — each for its own reason.
 	"background.go:waitForBackgroundWork": "the waiter's own helper; registering it would make it wait for itself",
 	"oauth_flow.go:Loopback": "loopback callback server: lives until the browser redirect arrives or " +
