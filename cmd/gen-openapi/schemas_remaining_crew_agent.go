@@ -240,9 +240,18 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	// older domain catalogs. Optional fields are intentionally not marked
 	// required: handlers apply defaults and validate presence themselves.
 	addRequest("POST", "/api/v1/workspaces/{workspaceId}/members", "RemainingWorkspaceMemberRequestV1", object(map[string]any{"user_id": str(), "role": str()}))
-	addRequest("PUT", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaRequestV1", object(map[string]any{"content": str()}))
+	// Persona content is required and must contain a non-whitespace rune.
+	// This character class mirrors strings.TrimSpace (Unicode White_Space),
+	// including NEL and excluding BOM; ECMAScript \s has different semantics.
+	personaRequest := object(map[string]any{"content": map[string]any{
+		"type": "string", "minLength": 1,
+		"pattern":     "[^\\t\\n\\v\\f\\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]",
+		"description": "Persona text containing at least one non-whitespace character. Use DELETE to reset a persona.",
+	}})
+	personaRequest["required"] = []string{"content"}
+	addRequest("PUT", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaRequestV1", personaRequest)
 	addRequest("PATCH", "/api/v1/agents/{agentId}/learning", "RemainingAgentLearningRequestV1", object(map[string]any{"enabled": boolean(), "mode": str()}))
-	addRequest("PUT", "/api/v1/crews/{crewId}/persona", "RemainingCrewPersonaRequestV1", object(map[string]any{"content": str()}))
+	addRequest("PUT", "/api/v1/crews/{crewId}/persona", "RemainingCrewPersonaRequestV1", personaRequest)
 	crewPolicyRequest := object(map[string]any{"autonomy_level": str(), "behavior_mode": str(), "whole_run_approval": map[string]any{"type": "boolean", "nullable": true, "description": "Omitted or null preserves the current whole-run approval setting."}, "reason": str()})
 	crewPolicyRequest["required"] = []string{"autonomy_level", "behavior_mode"}
 	crewBudgetRequest := object(map[string]any{"limit_usd": map[string]any{"type": "number", "minimum": 0, "exclusiveMinimum": true, "maximum": 1e9}, "mode": map[string]any{"type": "string", "enum": []string{"soft", "hard", "tiered"}}})
