@@ -52,7 +52,7 @@ anywhere a TTY isn't available for the password prompt):
 Google sign-in is unavailable. The legacy --google flag fails locally;
 use email/password, --token or --pair instead.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Reject the removed mode before config, server resolution or credential input.
+		// Reject the removed mode before login-specific config, server resolution or credential input.
 		if loginGoogleFlag {
 			return loginWithGoogle("")
 		}

@@ -81,6 +81,9 @@ func TestAcceptanceLoginGoogleUnavailable(t *testing.T) {
 		command := exec.CommandContext(t.Context(), binary, args...)
 		command.Dir = home
 		command.Env = []string{"HOME=" + home, "XDG_CONFIG_HOME=" + filepath.Join(home, "config"), "PATH=" + filepath.Join(home, "bin"), "CREWSHIP_CONFIG=" + config, "NO_COLOR=1", "CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE="}
+		if dir := os.Getenv("TEST_CREWSHIP_CLI_COVERAGE_DIR"); dir != "" {
+			command.Env = append(command.Env, "GOCOVERDIR="+dir)
+		}
 		command.Stdin = strings.NewReader("")
 		var stdout, stderr bytes.Buffer
 		command.Stdout, command.Stderr = &stdout, &stderr
