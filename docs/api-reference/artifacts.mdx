@@ -85,7 +85,7 @@ comments.
 | Project | Add a comment | The owner, someone with write access, or a person with a `comment` grant | `pages:write` |
 | Project | Reply to a comment | The owner only | `pages:write` |
 | Dashboard | Write data | The owner only | `pages:write` |
-| Design | Read and version history | Anyone the Design is shared with reads it; everyone with write access also gets the full version history. REST reads without `version` return the live canvas; explicit version reads by non-editors are restricted to the shared version | `pages:read` |
+| Design | Read and version history | Shared-only readers receive the shared snapshot and only that retained version. Live reads and full retained history require Edit authority or the separately audited administrative read path | `pages:read` |
 | Design | Apply changes, save a snapshot, restore | The owner, or someone with write access | `pages:write` |
 | Design | Add a comment | The owner, someone with write access, or a person with a `comment` grant | `pages:write` |
 | Design | Share a version | The owner only | `pages:write` |
@@ -111,10 +111,11 @@ nothing in history is deleted. Each family guards its writes differently.
   returns `409 artifact_version_conflict`.
 - **Shared version.** The latest version and the shared version are separate.
   For Project, Dashboard and Slides, the owner and editors read latest; other
-  readers get the shared version. Design’s REST `get` without a `version`
-  parameter returns the live canvas to an authorized reader; explicitly
-  selecting a retained version restricts a non-editor to the shared version.
-  Its read-only WebSocket clients can receive live updates but cannot write.
+  readers get the shared version. Shared-only Design readers receive the shared
+  snapshot on REST and WebSocket reads, even without an explicit `version`,
+  plus presence. Live reads and document broadcasts require Edit authority or
+  the separately audited administrative read path. Read-only credentials do
+  not gain write authority.
 - **Dashboard data** is versioned per JSON document. Each write in a batch
   carries `ifVersion` (`0` creates the document), and the batch names the
   project's current `base_version`. One stale `ifVersion` fails the whole batch

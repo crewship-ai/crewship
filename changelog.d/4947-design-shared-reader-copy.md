@@ -1,0 +1,1 @@
+- **Read-only Design views no longer promise live canvas updates.** Their connected status and toolbar use neutral viewing labels, and the public guides distinguish shared snapshots with presence from editable or separately audited administrative live reads. Authorization and synchronization behavior are unchanged.

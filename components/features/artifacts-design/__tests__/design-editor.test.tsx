@@ -4,7 +4,7 @@ vi.mock("@/lib/local-draft-seal", () => ({
  forgetLocalDraftPage() {}, isSealedLocalDraft: () => true, LocalDraftReadRevoked: class extends Error {},
 }))
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import * as Y from "yjs"
 import { DesignEditor } from "../design-editor"
 import { designNodes, upsertDesignNode } from "../design-document"
@@ -50,13 +50,26 @@ describe("Design editor controls", () => {
   expect(screen.getByTitle("Marie")).toHaveStyle({ backgroundColor: "#047857" })
   expect(screen.getByLabelText("Marie cursor").querySelector("rect")).toHaveAttribute("fill", "#047857")
  })
- it("does not offer edit or save controls to readers", async () => {
+ it("keeps the reader canvas and presence usable without edit controls or a live-update promise", () => {
   state.editable = false
+  upsertDesignNode(state.doc!, { id: "shared-text", type: "text", text: "Shared snapshot content", x: 10, y: 20, width: 200, height: 40 })
+  const original = designNodes(state.doc!)
   render(<DesignEditor workspaceId="workspace" slug="shop" />)
   expect(screen.getByText("Read only")).toBeInTheDocument()
   expect(screen.queryByRole("button", { name: "Screen" })).not.toBeInTheDocument()
   expect(screen.queryByRole("button", { name: "Save version" })).not.toBeInTheDocument()
   expect(screen.getByLabelText("Marie cursor")).toBeInTheDocument()
+  const canvas = screen.getByRole("img", { name: "Design canvas" })
+  expect(within(canvas).getByText("Shared snapshot content")).toBeInTheDocument()
+  expect(screen.getByRole("status")).toHaveTextContent("Connected · read only")
+  expect(within(screen.getByLabelText("Design tools")).getByText("View canvas")).toBeInTheDocument()
+  expect(screen.queryByText("Follow changes live")).not.toBeInTheDocument()
+  // Read-only selection/pointer interaction must not mutate the displayed model.
+  const node = canvas.querySelector('[data-design-node="shared-text"]')!
+  fireEvent.pointerDown(node, { clientX: 10, clientY: 20, pointerId: 1 })
+  fireEvent.pointerMove(canvas, { clientX: 110, clientY: 120, pointerId: 1 })
+  fireEvent.pointerUp(canvas, { pointerId: 1 })
+  expect(designNodes(state.doc!)).toEqual(original)
  })
 })
 

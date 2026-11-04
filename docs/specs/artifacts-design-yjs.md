@@ -71,10 +71,11 @@ transactions:
    increased. If `revision` changed in the meantime, the request answers `409`
    and nothing is written.
 
-In both paths the server then sends the resulting Yjs update to every connected
-browser. A change that fails validation, permission or revision checks is not
-written and not broadcast. Connected browsers only ever receive committed
-state.
+In both paths the server sends the committed Yjs update only to connections
+with live-read authority: editors and the separately audited administrative
+read path. Shared-only readers synchronize the shared snapshot and receive
+presence, without receiving later live document updates. A change that fails
+validation, permission or revision checks is not written or broadcast.
 
 ## Operations and snapshots
 
@@ -181,8 +182,9 @@ only that version by number. Tokens need `pages:read` for reads and
 Agents use the MCP tools `design_get`, `design_apply`, `design_snapshot`,
 `design_versions` and `design_restore`. They reach the same server path as
 people, under the exact Page chosen by the human who started the run. An agent
-applying operations does not need an open browser; people who have the canvas
-open see the change immediately. When the run was started from a comment, its
+applying operations does not need an open browser; connections with live-read
+authority receive the committed update. Shared-only readers keep the shared
+snapshot until the owner shares a different version. When the run was started from a comment, its
 first successful operations request answers that comment.
 
 The CLI equivalents are the `crewship page design` commands; see the

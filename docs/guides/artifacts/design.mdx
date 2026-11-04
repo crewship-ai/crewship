@@ -129,8 +129,8 @@ People with read access see a **Read only** badge next to the status.
 5. To remove the selection, click **Delete layer**. Deleting a screen with
    **Delete screen and layers** also removes every layer inside it.
 
-Every change goes to the other people on the canvas as you make it. The editor
-also keeps a copy of your unsaved canvas in this browser, so a crash or a lost
+Live updates reach the people authorized to view the live canvas. Shared-only
+readers keep seeing the shared version. The editor also keeps a copy of your unsaved canvas in this browser, so a crash or a lost
 connection does not discard it. If browser storage is full or blocked, the
 editor says so; keep the window open until it is connected and save a version.
 
@@ -206,15 +206,16 @@ canvas with a number and a message.
    and the canvas cannot be edited.
 3. Click **Restore** under a version to bring it back. Crewship saves the
    restored canvas as a new version on top of the history, so nothing is
-   overwritten, and everyone on the canvas sees it immediately.
+   overwritten. Live readers receive the change; shared-only readers keep seeing
+   the shared version until the owner shares another one.
 4. Click **Live canvas** to return to the editable canvas.
 
 **Restore** and **Share** are shown only to people who can edit the Design.
 
 ## Share a version with readers
 
-Readers do not see your working history. They see the live canvas and the one
-version that the owner has shared.
+Shared-only readers see the version the owner has shared, not the live canvas
+or other working versions. They can still see presence on the canvas.
 
 1. Open **History**.
 2. Click **Share** under the version you want readers to see. Only the owner of
@@ -245,7 +246,7 @@ the Design:
 2. Choose the subject: a **user**, a **crew**, an **agent** or
    **Everyone in this workspace**. For a user, enter their email address.
 3. Choose the level and click **Grant**:
-   - **read** follows the live canvas and sees the shared version.
+   - **read** shows the shared snapshot and presence, without live canvas edits.
    - **write** can change the canvas, save versions and restore them.
 4. To remove access, click **Revoke** next to the grant.
 
@@ -261,9 +262,9 @@ controlled separately.
 
 ## What a reader sees
 
-A person with **read** access who opens the Design sees:
+A person with shared-only **read** access who opens the Design sees:
 
-- the live canvas, with a **Read only** badge and **Follow changes live** in the
+- the shared snapshot, with a **Read only** badge and **View canvas** in the
   toolbar,
 - the cursors and initials of the people editing,
 - in **History**, only the shared version,
