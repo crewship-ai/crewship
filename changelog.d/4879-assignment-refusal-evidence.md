@@ -1,0 +1,1 @@
+- **Blocked cross-crew delegations now leave an audit receipt.** Activity and the run journal identify the calling agent, source and target crew, and the server's link-check refusal, while storing only a digest of the task. Cross-crew acceptance verifies a real Ops record, joins completion to the original assignment, and requires a server refusal for the unlinked case.

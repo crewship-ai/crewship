@@ -68,6 +68,8 @@ const (
 	EntryAssignmentDone   EntryType = "assignment.completed"
 	EntryAssignmentFail   EntryType = "assignment.failed"
 	EntryAssignmentCancel EntryType = "assignment.cancelled"
+	// EntryAssignmentRefused records an attempted delegation denied before admission.
+	EntryAssignmentRefused EntryType = "assignment.refused"
 	// EntryAssignmentHardStop records one Tier 2 hard-termination attempt
 	// (PRD-ISSUES-AND-ROUTINES-2026 §10.3, work package B7): what was
 	// signalled (container_id, exec_id, pid, signal — TERM then, if still
