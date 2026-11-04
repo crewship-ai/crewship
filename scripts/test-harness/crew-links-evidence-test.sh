@@ -26,6 +26,11 @@ expect_no xlink_assignment_completed XLINK-1
 mock_feed="$created
 $completed"
 expect_yes xlink_assignment_completed XLINK-1
+for outcome in NO_CHANGE WORK_CREATED; do
+  mock_feed="$created
+${completed/SUCCEEDED/$outcome}"
+  expect_yes xlink_assignment_completed XLINK-1
+done
 expect_no xlink_assignment_completed XLINK-other
 mock_feed="$created
 ${completed/expected/unrelated}"

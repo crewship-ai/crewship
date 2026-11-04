@@ -9,7 +9,8 @@ xlink_assignment_completed() { # <tag>
     [ .[] | select(.to_slug == "morgan" and .entry_type == "assignment.created")
       | select((.payload.task // "") | contains($tag))
       | .payload.assignment_id | select(type == "string" and length > 0) ] as $ids
-    | any(.[]; .entry_type == "assignment.completed" and .payload.outcome == "SUCCEEDED" and
+    | any(.[]; .entry_type == "assignment.completed" and
+        (.payload.outcome | . == "SUCCEEDED" or . == "NO_CHANGE" or . == "WORK_CREATED") and
         (.payload.assignment_id as $id | $ids | index($id)) != null)' >/dev/null 2>&1
 }
 
