@@ -152,30 +152,49 @@ ask_agent() {
 # source=delegation. So the run that counts is the one whose agent_slug is the
 # delegate, with source task or delegation.
 
-declare -a _HARNESS_ISSUES=()
+# State that must survive command substitution. Suites call these helpers as
+# `x="$(issue_work …)"`, which runs them in a subshell, so an array appended
+# there is lost (stage run 20261103T231949Z kept no issue evidence). Every
+# tracked agent and issue is appended to a file in a private directory.
+_HARNESS_STATE="$(umask 077; mktemp -d "${TMPDIR:-/tmp}/harness-state.XXXXXX" 2>/dev/null)" || _HARNESS_STATE=""
+_state_add() { # <file> <value> — append once
+  [[ -n "$_HARNESS_STATE" && -n "${2:-}" ]] || return 0
+  grep -qxF -- "$2" "$_HARNESS_STATE/$1" 2>/dev/null || printf '%s\n' "$2" >>"$_HARNESS_STATE/$1"
+}
+_state_list() { [[ -n "$_HARNESS_STATE" ]] && cat "$_HARNESS_STATE/$1" 2>/dev/null; return 0; }
 
-# issue_work <crew> <agent> <title> <description> [timeout-s] — create a TODO
-# issue in <crew> delegated to <agent>, start it, and wait for the agent's own
-# run (source "task") to end. Prints "<identifier> <status>" on stdout.
-# Returns 1 when the issue could not be created or started, 2 when no run
-# ended within the timeout. The run's STATUS is reported, not judged: callers
-# assert on the server-side effect the work was supposed to have.
-issue_work() {
-  local crew="$1" agent="$2" title="$3" desc="$4" timeout="${5:-$ASK_TIMEOUT}"
-  local created ident waited=0 runs status
+# issue_dispatch <crew> <agent> <title> <description> — create a TODO issue
+# delegated to <agent> and start it. Prints the identifier; returns 1 when the
+# issue could not be created or started (prints "<ident> START_FAILED").
+issue_dispatch() {
+  local crew="$1" agent="$2" title="$3" desc="$4" created ident
   track_agent "$agent"
   created="$(cs issue create --crew "$crew" --delegate "$agent" --status TODO \
     --title "$title" --description "$desc" --format json 2>/dev/null)" || return 1
   ident="$(printf '%s' "$created" | jq -r '.identifier // .id // empty' 2>/dev/null)"
   [[ -n "$ident" ]] || return 1
-  _HARNESS_ISSUES+=("$ident")
+  _state_add issues "$ident"
   cs issue start "$ident" >/dev/null 2>&1 || { printf '%s START_FAILED\n' "$ident"; return 1; }
+  printf '%s\n' "$ident"
+}
+
+# issue_run_status <ident> <agent> — the terminal status of <agent>'s own run on
+# the issue (task or lead-planning delegation), empty while it is not over.
+issue_run_status() {
+  cs issue runs "$1" --format json 2>/dev/null | jq -r --arg a "$2" '
+    [ .[] | select(.agent_slug == $a and ((.source // "task") == "task" or .source == "delegation")) ]
+    | map(select(.status == "COMPLETED" or .status == "FAILED" or .status == "CANCELLED"))
+    | (.[0].status // empty)' 2>/dev/null
+}
+
+# issue_work <crew> <agent> <title> <description> [timeout-s] — dispatch, then
+# wait for the delegate's own run to end. Prints "<ident> <STATUS>"; returns 0
+# when it ended, 1 when the issue could not be created or started, 2 on timeout.
+issue_work() {
+  local agent="$2" timeout="${5:-$ASK_TIMEOUT}" ident waited=0 status
+  ident="$(issue_dispatch "$1" "$2" "$3" "$4")" || { printf '%s\n' "$ident"; return 1; }
   while (( waited < timeout )); do
-    runs="$(cs issue runs "$ident" --format json 2>/dev/null)" || runs="[]"
-    status="$(printf '%s' "$runs" | jq -r --arg a "$agent" '
-      [ .[] | select(.agent_slug == $a and ((.source // "task") == "task" or .source == "delegation")) ]
-      | map(select(.status == "COMPLETED" or .status == "FAILED" or .status == "CANCELLED"))
-      | (.[0].status // empty)' 2>/dev/null)"
+    status="$(issue_run_status "$ident" "$agent")"
     if [[ -n "$status" ]]; then printf '%s %s\n' "$ident" "$status"; return 0; fi
     sleep "$POLL_INTERVAL"; waited=$((waited+POLL_INTERVAL))
   done
@@ -198,14 +217,10 @@ issue_work() {
 
 _HARNESS_SUITE="$(basename "${BASH_SOURCE[1]:-$0}" .sh)"
 _HARNESS_T0="$(date -u +%Y-%m-%dT%H:%M:%S)"  # no zone suffix: compares below any fractional/Z form of the same second
-declare -a _TRACKED_AGENTS=()
+
 declare -a _HARNESS_SECRETS=()
 
-track_agent() {
-  local a
-  for a in ${_TRACKED_AGENTS[@]+"${_TRACKED_AGENTS[@]}"}; do [[ "$a" == "$1" ]] && return 0; done
-  _TRACKED_AGENTS+=("$1")
-}
+track_agent() { _state_add agents "$1"; }
 
 # register_secret <value> — never let <value> reach an evidence file.
 register_secret() { [[ -n "${1:-}" ]] && _HARNESS_SECRETS+=("$1"); return 0; }
@@ -252,7 +267,7 @@ preserve_evidence() {
       printf '  - %s\n' ${_FAILED_NAMES[@]+"${_FAILED_NAMES[@]}"}
     } | _redact >"$dest/failures.txt"
     have jq || exit 0
-    for a in ${_TRACKED_AGENTS[@]+"${_TRACKED_AGENTS[@]}"}; do
+    for a in $(_state_list agents); do
       [[ "$a" =~ ^[A-Za-z0-9_-]+$ ]] || continue
       list="$(cs chat list "$a" --limit "$limit" --format json 2>/dev/null)" || continue
       printf '%s\n' "$list" | _redact >"$dest/chats-$a.json"
@@ -262,11 +277,17 @@ preserve_evidence() {
         cs chat "$id" --parts --no-markdown 2>&1 | _redact >"$dest/chat-$a-$id.txt"
       done
     done
-    for ident in ${_HARNESS_ISSUES[@]+"${_HARNESS_ISSUES[@]}"}; do
+    for ident in $(_state_list issues); do
       [[ "$ident" =~ ^[A-Za-z0-9_-]+$ ]] || continue
       { cs issue get "$ident" --format json; cs issue runs "$ident" --format json
         cs issue sessions "$ident" --format json; } 2>&1 \
         | _redact >"$dest/issue-$ident.json"
+      # An issue run's transcript is not a chat (its chat shows "No
+      # messages"); the run's own record is its journal.
+      for id in $(cs issue runs "$ident" --format json 2>/dev/null | jq -r '.[] | (.run_id // .trace_id // empty)' 2>/dev/null); do
+        [[ "$id" =~ ^[A-Za-z0-9_-]+$ ]] || continue
+        cs journal --run-id "$id" --format json 2>&1 | _redact >"$dest/issue-$ident-run-$id.journal.json"
+      done
     done
   )
   info "evidence for the failed checks: $dest"
@@ -365,6 +386,28 @@ wait_agent_idle() {
   return 1
 }
 
+# agent_has_no_open_work <agent-slug> — 0 when the agent holds no open work of
+# any capacity class. Issue runs are background work, not chat, so a lead still
+# running an issue (or a run parked on a credential, which waits up to 5
+# minutes per docs/guides/credentials.mdx) blocks its next turn although
+# agent_has_no_open_chat is already true.
+agent_has_no_open_work() {
+  cs work list --open --agent "$1" --format json 2>/dev/null \
+    | jq -e '(.items // []) | length == 0' >/dev/null
+}
+
+# wait_agent_free <agent-slug> [timeout-s] — like wait_agent_idle, for all work.
+wait_agent_free() {
+  local agent="$1" timeout="${2:-360}" waited=0
+  have jq || return 0
+  while (( waited < timeout )); do
+    agent_has_no_open_work "$agent" && return 0
+    sleep "$POLL_INTERVAL"; waited=$((waited+POLL_INTERVAL))
+  done
+  _fail "$agent frees its previous work" "still open after ${timeout}s: $(cs work list --open --agent "$agent" --format json 2>/dev/null | jq -c '[(.items // [])[] | {id, class, state, state_reason}]' 2>/dev/null | head -c 300)"
+  return 1
+}
+
 # preflight — confirm the CLI is reachable and the workspace is seeded.
 #
 # The two failure modes are reported separately on purpose: "no binary" is a
@@ -405,7 +448,9 @@ finish() {
     printf '  %sfailures:%s\n' "$_C_RED" "$_C_OFF"
     printf '    - %s\n' "${_FAILED_NAMES[@]}"
     preserve_evidence
+    [[ -n "$_HARNESS_STATE" ]] && rm -rf "$_HARNESS_STATE"
     exit 1
   fi
+  [[ -n "$_HARNESS_STATE" ]] && rm -rf "$_HARNESS_STATE"
   exit 0
 }

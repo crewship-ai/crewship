@@ -104,9 +104,10 @@ ESC="HARNESS_ESC_$(nonce PG | tr '-' '_')"
 # The previous suite or section may still hold this agent until its timed-out
 # turn settles (#4842); a 429 there is correct, so wait instead of racing it.
 wait_agent_idle "$AGENT"
+wait_agent_free "$AGENT"
 info "Driving ${AGENT} to raise a credential escalation for ${ESC} ..."
 if ! esc_work="$(request_credential_via_issue "$CREW" "$AGENT" "$ESC")"; then
-  _fail "approval probe issue ran to an end" "${esc_work:-the issue could not be created or started}"
+  _fail "approval probe issue reached an escalation or an end" "${esc_work:-the issue could not be created or started}"
 fi
 
 if have jq; then
@@ -135,9 +136,10 @@ ESC2="HARNESS_ESCDENY_$(nonce DN | tr '-' '_')"
 # The previous suite or section may still hold this agent until its timed-out
 # turn settles (#4842); a 429 there is correct, so wait instead of racing it.
 wait_agent_idle "$AGENT"
+wait_agent_free "$AGENT"
 info "Driving ${AGENT} to raise a second escalation for ${ESC2}, then DENY it …"
 if ! esc_work="$(request_credential_via_issue "$CREW" "$AGENT" "$ESC2")"; then
-  _fail "denial probe issue ran to an end" "${esc_work:-the issue could not be created or started}"
+  _fail "denial probe issue reached an escalation or an end" "${esc_work:-the issue could not be created or started}"
 fi
 if have jq; then
   detect2="owned_pending_escalation '$CREW' '$AGENT' '$ESC2'"
