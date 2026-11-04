@@ -34,7 +34,7 @@ Everything on this page is off by default.
 |---|---|---|
 | Design API and CLI | Workspace flag `artifacts_design`: `crewship feature-flag enable artifacts_design`. Operators can force it on for every workspace with `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true`. | Every `page design` call returns `404 design not found`. |
 | Design canvas in the web app | Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN=true` (the Artifacts library itself needs `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true`). | The CLI still works; the canvas is hidden. |
-| Native Craft sessions, lease, preview, initialize | Instance switch `CREWSHIP_CRAFT_NATIVE_ENABLED=true` plus a qualified Word profile (`CREWSHIP_CRAFT_NATIVE_WORD_*`). | `craft availability` reports `enabled: false`; other `craft` commands fail with `native HTTP 503`. |
+| Native Craft sessions, lease, preview, initialize | Instance switch `CREWSHIP_CRAFT_NATIVE_ENABLED=true` plus a qualified Word profile (`CREWSHIP_CRAFT_NATIVE_WORD_*`). | `craft availability` reports `enabled: false`; human native operations return HTTP 503 with the server error text (for example, `API error (503): native Craft unavailable`). |
 | Native Craft agent tasks | `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true` in addition to the above and a configured agent runtime. | `craft task …` fails with `native HTTP 503`. |
 | Craft lease bar in chat | Build-time `NEXT_PUBLIC_CHAT_CRAFT_LEASE=true`. | No lease controls in chat; the CLI is unaffected. |
 | Mooring sessions | Instance switch `CREWSHIP_MOORING_ENABLED=true`. | Routes are not registered: `mooring session` returns `404`, `mooring connect` prints `Mooring connection rejected`. |
@@ -75,7 +75,7 @@ exit code follows the status:
 | 404 | 3 | `design not found` (also when the flag is off or the version does not exist) |
 | 409 | 5 | `Design changed; reload and reapply` |
 | 413 | 1 | `Design capacity is full; existing work is retained` (a Design version or history is full) |
-| 422 | 1 | `This workspace has reached its page limit: …` (`pages_limit`; creating a new Design at the workspace page limit) |
+| 422 | 2 | `This workspace has reached its page limit: …` (`pages_limit`; creating a new Design at the workspace page limit) |
 | 503 | 7 | `Design engine is unavailable; changes are not acknowledged` |
 
 `craft` and `mooring connect` use the same envelope, but it holds only
@@ -333,8 +333,9 @@ crewship craft availability <artifact-slug> -f json
 
 `availability` never fails for a missing artifact; it reports `false` values.
 Run it first. `enabled` is `false` when the instance switch is off (the other
-commands then return `native HTTP 503`), and also when the artifact is not a
-native document or you cannot read it (then expect a 403; `connect` reports `native session HTTP 403`).
+human commands then report HTTP 503 and the server error text), and also when
+the artifact is not a native document or you cannot read it (then expect HTTP 403;
+`connect` reports `API error (403): native Craft access denied`).
 
 ### Read the shared preview
 
@@ -458,17 +459,39 @@ from a human holder.
 
 ### Craft errors
 
-| Message | Meaning |
+Human native operations preserve the HTTP status and server error text after
+redacting the private session token. A typical refusal is
+`API error (503): native Craft unavailable`. The structured error envelope can
+include `status`, `detail` and `extensions`; lease conflicts can add the current
+holder, and proposal conflicts can add their state. Exact detail depends on the
+refused operation. The table describes the HTTP refusal, rather than promising a
+fixed status-only message:
+
+| HTTP / exit code | Meaning |
 |---|---|
-| `native HTTP 503`, `native session HTTP 503`, `native initialization HTTP 503` | Native Craft (or agent tasks) is switched off on this instance. |
-| `native HTTP 400` | The snapshot does not match the document, for example `workspaceId` holds a slug instead of the workspace ID, or another binding field differs from the session. |
-| `native HTTP 403` | No edit rights on the artifact, or the lease action is not allowed for you. |
-| `native HTTP 409` | The lease or document changed (busy, stale generation or newer version). Read the lease and document again; keep your local draft. |
-| `native HTTP 413` | The native history quota is full; existing versions are kept. |
-| `native HTTP 422` | The native document bytes are invalid. |
-| `native document must contain 1 to32MiB of native bytes` | `initialize --file` was empty or larger than 32 MiB. |
+| 503 / 7 | Native Craft is switched off or unavailable on this instance. |
+| 400 / 2 | The snapshot or request does not match the document, for example `workspaceId` holds a slug instead of the workspace ID, or another binding field differs from the session. |
+| 403 / 4 | No edit rights on the artifact, or the lease action is not allowed for you. |
+| 409 / 5 | The lease or document changed (busy, stale generation or newer version). Read the lease and document again; keep your local draft. |
+| 413 / 1 | The native history quota is full; existing versions are kept. |
+| 422 / 2 | The native document bytes are invalid. |
+
+Native agent task refusals deliberately omit their potentially private server
+body. These commands keep `native HTTP <status>` with the classified exit code;
+for example, `native HTTP 503` exits with `7`. This status-only form is separate
+from the human operations above.
+
+The local `initialize --file` size check reports
+`native document must contain 1 to32MiB of native bytes` when the file is empty
+or larger than 32 MiB, before native initialization.
 
 ## Mooring connect
+
+The transport-specific errors listed below remain unclassified exit code `1`.
+Their structured stderr envelope contains only `message` and `exit_code`; a
+refused WebSocket upgrade does not expose its HTTP status or server body.
+Earlier login, workspace or token-host checks can still return their own
+classified errors. Do not infer an HTTP status from `Mooring connection rejected`.
 
 `crewship mooring connect` joins a Mooring collaboration session that
 `crewship mooring session` admitted. It needs a human login; an agent token is
