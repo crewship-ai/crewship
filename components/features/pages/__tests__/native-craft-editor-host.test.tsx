@@ -128,6 +128,15 @@ describe('native Word host authority and persistence',()=>{
   await act(async()=>{snapshot.resolve({bytes:new TextEncoder().encode('{"body":["captured-QA"]}'),editorRevision:'pending-capture',documentId:'doc'});await suspended})
   expect(m.createClient).toHaveBeenCalledOnce();expect(document.querySelector('iframe')).toBeNull();expect(journal.persist).toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()
  })
+ it('rejects auth suspension when an in-flight retirement cannot capture and never reveals or reopens',async()=>{
+  mount();await ready();await acquire();const frame=document.querySelector('iframe'),port=ports.at(-1)!,snapshot=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>()
+  port.snapshot.mockReturnValue(snapshot.promise);journal.persist.mockRejectedValue(Error('storage unavailable'))
+  act(()=>{portOptions.at(-1)!.onChanged('pending','doc');stream?.('session_retired',{draft:'retain',reason:'write_revoked'})})
+  let suspended!:Promise<unknown>;act(()=>{suspended=authSuspend!().catch(cause=>cause)})
+  expect(frame).toHaveStyle({visibility:'hidden'})
+  await act(async()=>{snapshot.resolve({bytes:new TextEncoder().encode('{"body":["pending"]}'),editorRevision:'pending',documentId:'doc'});expect(await suspended).toEqual(Error('native_auth_draft_capture_unconfirmed'))})
+  expect(m.createClient).toHaveBeenCalledOnce();expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveAttribute('inert');expect(frame).toHaveStyle({visibility:'hidden'});expect(journal.revokeRead).not.toHaveBeenCalled();expect(port.close).not.toHaveBeenCalled();expect(screen.queryByText('Uloženo')).not.toBeInTheDocument()
+ })
  it('catches up one metadata change observed during initial bootstrap',async()=>{
   const opening=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>()
   m.createPort.mockImplementationOnce((o:NativeEditorPortOptions)=>{const p=portRig();p.bootstrap.mockReturnValue(opening.promise);ports.push(p);portOptions.push(o);queueMicrotask(()=>o.onReady?.('qualified'));return p})
