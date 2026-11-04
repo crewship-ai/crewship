@@ -34,7 +34,8 @@ default and needs the build-time `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true`.
 
 The `design_get`, `design_apply`, `design_snapshot`, `design_versions` and
 `design_restore` tools are always listed, but a listed tool grants nothing.
-Every call succeeds only when all of these hold:
+Every call checks these prerequisites, together with the current rights for
+the requested operation:
 
 - Design is enabled for the workspace: the `artifacts_design` workspace flag
   (`crewship feature-flag enable artifacts_design`) or the instance switch
@@ -49,7 +50,8 @@ Every call succeeds only when all of these hold:
 - This run comes from a Design comment the owner sent from the editor to
   their connected private chat with you, and that request names this exact
   Design. The mandate covers that one Design for this run only.
-- The owner still has edit rights to the Design.
+- Current authority permits this operation. Writes require current Edit
+  permission; a read-only response does not authorize an edit.
 
 You never choose a person, workspace, server or other Design in tool
 arguments. If a call returns `403` or `404`, do not try another slug or
@@ -79,7 +81,7 @@ and crew policy, original human authority and the original human credential
 required by run consent. A human `pages:read` CLI-token rule is not an agent
 credential rule. Missing or revoked authority is refused, never replaced by a
 saved human profile. For human CLI callers, live reads need both `pages:read` and `pages:write`
-(or `pages:*`) plus current Edit permission; write scope alone does not permit
+(or `pages:*`, `*`, or an unscoped full-role token) plus current Edit permission; write scope alone does not permit
 a read. Non-admin Page owners and Edit grantees using only `pages:read` are shared-only and receive 404 before a shared
 pin; a read-scoped OWNER/ADMIN can separately read latest/history with foreign
 access audit but cannot write.
@@ -123,12 +125,14 @@ retained version. Do not call `design_snapshot` after your own apply.
 Use `design_snapshot` only when the owner asks you to keep the current live
 canvas, for example after people edited it in the browser.
 
-`design_restore` copies a retained version into a new version and pushes it to
-everyone on the canvas. It never deletes history. Read `design_versions` first
+`design_restore` copies a retained version into a new version and broadcasts
+the result to live-authorized clients. Shared-only readers keep their snapshot. It never deletes history. Read `design_versions` first
 and restore only the version the owner named.
 
-Readers can see the live Design canvas without edit rights. Their retained
-version reads, history and comments are limited to the shared version. Your
+Shared-only canvas reads return the shared snapshot, or 404 before a pin exists;
+their retained reads, history and comments are limited to that pin. Live
+content requires current Edit authority or separately authorized workspace
+OWNER/ADMIN access, audited for foreign Designs. Your
 applies, snapshots and restores never change that shared pin. Only a person
 can share a version.
 

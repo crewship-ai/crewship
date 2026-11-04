@@ -2418,8 +2418,15 @@ crewship page design create checkout --name "Checkout"
 
 ### `crewship page design get <slug>`
 
-Read the live nodes and order. Optional `--version` selects a positive retained
-snapshot; zero reads the live canvas. A reader can select only its shared pin.
+Read nodes and order authorized for the caller. Without `--version` (or with
+zero), callers with current Edit permission and both CLI `pages:read` and
+`pages:write` scopes (or `pages:*`, `*`, or an unscoped full-role token), and separately authorized workspace OWNER/ADMIN
+readers see the latest canvas; ordinary Read grantees see only the shared pin.
+Positive `--version` selects a retained snapshot; shared-only readers can select only
+the shared pin and receive 404 until one is shared. Foreign administrator
+access is audited. Non-admin Page owners and Edit grantees narrowed to `pages:read`
+credentials are also shared-only. A read-scoped credential never grants write
+authority.
 
 ```bash
 crewship page design get checkout --version 1
@@ -2427,8 +2434,13 @@ crewship page design get checkout --version 1
 
 ### `crewship page design versions <slug>`
 
-List authorized retained snapshots. Editors see history; readers see their
-shared version. This command has no additional flags.
+List authorized retained snapshots. Current Edit permission and a credential
+covering both `pages:read` and `pages:write` (explicitly, through `pages:*` or
+`*`, or as an unscoped full-role token) permit history reads. Separately
+authorized workspace OWNER/ADMIN readers can also read history. Shared-only
+callers, including non-admin Page owners and Edit grantees narrowed to `pages:read`,
+see only the shared version and receive 404 before a pin exists. Foreign
+administrator access is audited. This command has no additional flags.
 
 ### `crewship page design apply <slug>`
 
@@ -2503,9 +2515,9 @@ crewship page design agent checkout --chat-id private-chat-id
 ### `crewship page design watch <slug>`
 
 Watch permitted binary Yjs frames encoded as base64 rows. Current Edit
-permission plus both CLI `pages:read` and `pages:write` scopes (or `pages:*`) or separately
+permission plus both CLI `pages:read` and `pages:write` scopes (or `pages:*`, `*`, or an unscoped full-role token) or separately
 authorized workspace OWNER/ADMIN access permits live reads, with foreign
-administrator access audited. Non-admin Page owners/Edit grantees using
+administrator access audited. Non-admin Page owners/Edit grantees narrowed to
 `pages:read` are shared-only: shared snapshot and presence, without live
 document updates. Before a pin exists, upgrade/presence can succeed but the
 initial sync closes with 1008 `Design permissions changed`. This is an error

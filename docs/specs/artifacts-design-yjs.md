@@ -164,15 +164,19 @@ permissions, keeping the local document and any unsent changes.
 ## Who can do what
 
 Live-read/Edit authority means the effective authority of this request, not
-only the Page ownership or grant label. Human CLI reads need `pages:read`;
+only the Page ownership or grant label. Human CLI reads need a read-capable
+credential: `pages:read`, `pages:*`, `*`, or an unscoped full-role token;
 write scope alone does not imply read scope. Live/history reads need both
-`pages:read` and `pages:write` (or `pages:*`) plus current Edit permission, or
+`pages:read` and `pages:write` (or `pages:*`, `*`, or an unscoped full-role token) plus current Edit permission, or
 current Edit permission through a browser session. Ordinary Read/Comment
 callers and non-admin Page owners/Edit grantees using only `pages:read` are
 shared-only. Separately authorized workspace OWNER/ADMIN readers can read
 latest/history even with read scope, with audit for foreign Designs; that
 credential still cannot write. Agent tools retain their separate exact-run
-mandate, original human credential and live authority checks described below.
+mandate, original human credential and live authority checks; these human CLI
+scope examples do not replace agent credential validation. Every credential
+form still requires live membership and current Page permission; a wildcard
+or unscoped full-role token does not confer Edit by itself.
 
 | Action | Required |
 |---|---|
@@ -184,8 +188,9 @@ mandate, original human credential and live authority checks described below.
 
 Readers see the live canvas read-only and receive live updates. The version
 list and comments they see are limited to the shared version, and they can open
-only that version by number. Tokens need `pages:read` for reads and
-`pages:write` for changes.
+only that version by number. Narrowed tokens are checked for `pages:read`
+on reads and `pages:write` on changes; matching wildcards and unscoped
+full-role alternatives apply as described above.
 
 ## Agents
 

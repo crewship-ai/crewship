@@ -95,6 +95,13 @@ func TestDesignReadScopedMemberEditorsRemainSharedOnly(t *testing.T) {
 					t.Fatalf("read-scoped %s exposed unshared %s: %d %s", audience, suffix, w.Code, w.Body)
 				}
 			}
+			var beforePin struct {
+				Comments []json.RawMessage `json:"comments"`
+			}
+			w := request("GET", "/comments", "")
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &beforePin) != nil || len(beforePin.Comments) != 0 {
+				t.Fatalf("pre-pin comments were not empty: %d %s", w.Code, w.Body)
+			}
 			for _, step := range []struct{ op, body string }{
 				{"apply", `{"operations":[{"op":"upsert","node":{"id":"title","type":"text","x":0,"y":0,"width":200,"height":30,"text":"PUBLIC_PIN_CANARY"}}]}`},
 				{"share", `{"version":2}`},
@@ -103,11 +110,45 @@ func TestDesignReadScopedMemberEditorsRemainSharedOnly(t *testing.T) {
 				if w := f.call(t, f.owner, step.op, step.body); w.Code != 200 {
 					t.Fatal(step.op, w.Code, w.Body)
 				}
+				if step.op == "share" {
+					if w := f.call(t, f.owner, "comment", `{"version":2,"path":"design.json","selector":"title","quote":"PUBLIC_PIN_CANARY","text":"PUBLIC_COMMENT_CANARY"}`); w.Code != 201 {
+						t.Fatal("shared comment setup", w.Code, w.Body)
+					}
+				}
+			}
+			for _, comment := range []string{
+				`{"version":3,"path":"design.json","selector":"title","quote":"PRIVATE_SAVED_CANARY","text":"PRIVATE_COMMENT_CANARY"}`,
+			} {
+				if w := f.call(t, f.owner, "comment", comment); w.Code != 201 {
+					t.Fatal("comment setup", w.Code, w.Body)
+				}
 			}
 			f.liveOnly(t, `[{"op":"upsert","node":{"id":"secret-live","type":"text","x":0,"y":40,"width":200,"height":30,"text":"PRIVATE_LIVE_CANARY"}}]`)
-			w := request("GET", "", "")
+			w = request("GET", "", "")
 			if w.Code != 200 || !strings.Contains(w.Body.String(), "PUBLIC_PIN_CANARY") || strings.Contains(w.Body.String(), "PRIVATE_") || !strings.Contains(w.Body.String(), `"can_edit":false`) || !strings.Contains(w.Body.String(), `"version":2`) {
 				t.Fatalf("read-scoped %s escaped pin: %d %s", audience, w.Code, w.Body)
+			}
+			if w := request("GET", "/comments", ""); w.Code != 200 || !strings.Contains(w.Body.String(), "PUBLIC_COMMENT_CANARY") || strings.Contains(w.Body.String(), "PRIVATE_") {
+				t.Fatalf("read-scoped comments escaped shared pin: %d %s", w.Code, w.Body)
+			}
+			fullRole := mintIngressScopedToken(t, f.h.db, user, "member-unscoped-"+audience, "pages:read")
+			mustExec(t, f.h.db, `UPDATE cli_tokens SET scopes='[]' WHERE id=?`, "clt-ingress-scoped-member-unscoped-"+audience)
+			legacyNull := mintIngressScopedToken(t, f.h.db, user, "member-legacy-null-"+audience, "pages:read")
+			mustExec(t, f.h.db, `UPDATE cli_tokens SET scopes=NULL WHERE id=?`, "clt-ingress-scoped-member-legacy-null-"+audience)
+			for _, profile := range []struct{ name, token string }{
+				{"pages:*", mintIngressScopedToken(t, f.h.db, user, "member-pages-all-"+audience, "pages:*")},
+				{"*", mintIngressScopedToken(t, f.h.db, user, "member-all-"+audience, "*")},
+				{"unscoped-empty", fullRole},
+				{"unscoped-null", legacyNull},
+			} {
+				w := requestWithToken(profile.token, "GET", "", "")
+				if w.Code != 200 || !strings.Contains(w.Body.String(), "PRIVATE_LIVE_CANARY") || !strings.Contains(w.Body.String(), "PRIVATE_SAVED_CANARY") || !strings.Contains(w.Body.String(), `"can_edit":true`) {
+					t.Fatalf("same MEMBER %s %s lost authorized live view: %d %s", audience, profile.name, w.Code, w.Body)
+				}
+				w = requestWithToken(profile.token, "GET", "/comments", "")
+				if w.Code != 200 || !strings.Contains(w.Body.String(), "PUBLIC_COMMENT_CANARY") || !strings.Contains(w.Body.String(), "PRIVATE_COMMENT_CANARY") {
+					t.Fatalf("same MEMBER %s %s lost authorized comments: %d %s", audience, profile.name, w.Code, w.Body)
+				}
 			}
 			if w := request("GET", "?version=3", ""); w.Code != 404 {
 				t.Fatalf("private version exposed: %d %s", w.Code, w.Body)

@@ -187,9 +187,9 @@ func init() { pageCmd.AddCommand(newPageDesignCommand()) }
 // format. Consumers receive the original y-protocols frames as base64 NDJSON.
 func newPageDesignWatchCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "watch <slug>", Args: cobra.ExactArgs(1), Short: "Watch permitted Yjs sync and awareness frames as base64 NDJSON", Long: `Watch the Design view permitted by current human authority. Current Edit authority
-requires both pages:read and pages:write (or pages:*) plus Edit permission for CLI callers;
+requires both pages:read and pages:write (or pages:*, *, or an unscoped full-role token) plus Edit permission for CLI callers;
 separately authorized workspace OWNER/ADMIN readers can read live with audit for
-foreign Designs. Non-admin Page owners and Edit grantees using pages:read are
+foreign Designs. Non-admin Page owners and Edit grantees narrowed to pages:read are
 shared-only: a shared snapshot and presence, without live document updates.
 Before a shared pin exists, upgrade/presence can succeed but the initial sync
 closes with 1008 Design permissions changed. A --count limit can finish on
