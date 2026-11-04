@@ -48,7 +48,8 @@ async function fixtures(page: Page, opts: { failCalendar?: boolean } = {}) {
 // The Mine/Workspace choice is a per-user server preference, so it carries
 // over from whichever test (or person) last touched it. The fixture routines
 // have no author, so under Mine they are all filtered away; a test that needs
-// the grid picks Workspace itself instead of inheriting it.
+// the grid picks Workspace itself instead of inheriting it. CAL-08 explicitly
+// mocks that preference so both possible starting scopes are exercised.
 async function workspaceScope(page: Page) {
   // COM-05: at tablet width the panel starts closed; open it, pick the scope,
   // and let it float away again (Escape inside it closes it).
@@ -205,17 +206,32 @@ test.describe("desktop", () => {
     await expect(filter).toBeFocused()
   })
 
-  test("CAL-08 route abort shows Retry and keeps the view", async ({ page }) => {
-    await seed(page, PINNED)
-    await fixtures(page, { failCalendar: true })
-    await page.goto("/calendar?view=month")
-    await expect(page.getByText("The calendar could not be loaded")).toBeVisible()
-    await page.unroute(/\/api\/v1\/workspaces\/[^/]+\/pipelines\/calendar\?/)
-    await fixtures(page)
-    await page.getByRole("button", { name: "Retry" }).click()
-    await expect(page.getByRole("grid", { name: "Month" })).toBeVisible()
-    expect(new URL(page.url()).searchParams.get("view")).toBe("month")
-  })
+  for (const initialScope of ["mine", "workspace"] as const) {
+    test(`CAL-08 route abort shows Retry and keeps the view (${initialScope})`, async ({ page }) => {
+      await seed(page, PINNED)
+      // The preference survives browser contexts on the server. Start in
+      // either scope explicitly; fixture routines have no author, so Mine
+      // correctly has no dates even after a successful Retry (#4913).
+      let calendarScope: string = initialScope
+      await page.route("**/api/v1/me/preferences", (route) =>
+        route.fulfill({ json: { "calendar.view": { scope: calendarScope } } }),
+      )
+      await page.route("**/api/v1/me/preferences/calendar.view", async (route) => {
+        calendarScope = route.request().postDataJSON().scope
+        await route.fulfill({ json: { scope: calendarScope } })
+      })
+      await fixtures(page, { failCalendar: true })
+      await page.goto("/calendar?view=month")
+      await expect(page.getByText("The calendar could not be loaded")).toBeVisible()
+      await expect(page.getByTestId("calendar-summary")).toContainText(initialScope === "mine" ? "Mine" : "Workspace")
+      await workspaceScope(page)
+      await page.unroute(/\/api\/v1\/workspaces\/[^/]+\/pipelines\/calendar\?/)
+      await fixtures(page)
+      await page.getByRole("button", { name: "Retry" }).click()
+      await expect(page.getByRole("grid", { name: "Month" })).toBeVisible()
+      expect(new URL(page.url()).searchParams.get("view")).toBe("month")
+    })
+  }
 
   test("CAL-09 the Routines overview opens the Calendar destination, not a tab (PAR-046)", async ({ page }) => {
     await seed(page, PINNED)
