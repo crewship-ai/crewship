@@ -663,7 +663,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
-- **Native Word and Sheet can finish a progressing import while current access remains verified.** Startup monitors authority before import, keeps the frame hidden until a fresh admission check, and rejects revoked or superseded completions. Separate connection/RPC deadlines retain a finite overall cap; failed startup never claims an unconfirmed captured draft.
+- **Native Word and Sheet can finish a progressing import while current access remains verified.** Startup monitors authority before import, keeps the frame hidden until a fresh admission check, and rejects revoked or superseded completions. Separate connection/RPC deadlines retain a finite overall cap; failed startup never claims an unconfirmed captured draft. A failed retirement capture keeps the original buffer frozen and requires fresh monitored read permission before displaying or downloading it; it never restores the old writer.
 
 - **An identical Mooring create retry no longer returns a private document after its author loses access.** The existing transaction-local author check now runs before looking up the saved result as well as before committing a new document.
 

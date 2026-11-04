@@ -162,6 +162,7 @@ describe('authority and cancellation throughout slow initialization',()=>{
   }
   await tick(16000)
   expect(adapters.flatMap(port=>vi.mocked(port.setReadOnly).mock.calls).some(([readOnly])=>readOnly===false)).toBe(false)
+  expect(client.lease).toHaveBeenCalled();expect(screen.getByRole('alert')).toBeInTheDocument()
   expect(client.save).not.toHaveBeenCalled();expect(screen.queryByText(/^Uloženo/)).not.toBeInTheDocument()
  })
  it('ignores save/change signals until import and current authority both finish',async()=>{

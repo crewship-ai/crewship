@@ -104,8 +104,13 @@ Neither a display name nor a public request ID establishes write authority.
 
 A fresh admission starts its authority/lease metadata stream before document
 fetch and iframe import. While a frame bootstraps, lease events update its
-advisory view without starting concurrent reader refreshes. Read retirement
-removes the frame and purges the scoped private draft as usual; write or other
+advisory view without starting concurrent reader refreshes; one catch-up refresh
+runs afterwards if needed. A delayed lease HTTP response cannot replace a
+newer streamed lease observation, although successful current-admission proof
+is still mandatory. Read retirement removes the frame and revokes the held
+private journal. An open journal purges its scope; a closed journal may erase
+only its own persisted row, and a pure viewer has no private journal to purge.
+Write or other
 admission retirement during bootstrap ends that attempt without automatically
 reopening or acquiring another session.
 
@@ -117,6 +122,28 @@ When a retired writer opens a fresh read admission, its previous frame and
 recovery/comparison controls stay hidden until that admission is verified; a
 refused admission retains confirmed rows without exposing them or reviving
 callbacks from the old session.
+If capturing a retired writer fails, its exact native frame and journal remain
+held, hidden and inert while reading is unconfirmed. A fresh monitored read
+admission may reveal that same frozen buffer and enable a local download; it
+never imports a new document, acquires custody or revives the old writer.
+Failure hides it again and offers an explicit bounded read recheck. Auth
+suspension is terminal for this mount, including during capture or read reopen;
+only a new authorized mount can proceed. Explicit read retirement still removes
+the frame and revokes the held journal. No copy is downloaded after its read
+authority or scope has changed.
+
+| Transition | Required authority and effect |
+| --- | --- |
+| New scope → starting | Fresh admission; monitor before document delivery; hidden inert frame. |
+| Starting → readable | Snapshot/open/snapshot identity barrier and successful original-admission proof; current scope/client/session; no cancellation. |
+| Readable → writable | Current lease generation, fresh proof, draft custody and confirmed native access change; never from a retained buffer. |
+| Writer → retiring | Input frozen; finish capture/reconciliation before transfer; no premature Saved. |
+| Retired writer → fresh reader | Old writer stays retired; hide content during fresh monitored admission and proof. |
+| Failed capture → retained buffer | Keep exact inert frame/journal; reveal/copy only with fresh monitored read proof; no import or write. |
+| Monitor failure → disconnected | Cancel opening; remove captured reader or hide uncaptured buffer; retain confirmed rows without claiming latest changes captured. |
+| Any live state → read retired | Hide/remove immediately; revoke held journal; no late response or download may reveal content. |
+| Any live state → auth suspended / scope closed | Hide immediately; fence old callbacks; suspension waits for capture and rejects if unconfirmed; no successor admission in this mount. |
+
 Acquiring write still requires the separate current lease/generation checks,
 confirmed native access change and draft custody; startup never acknowledges a
 save. A disconnected status claims a retained draft only after a confirmed

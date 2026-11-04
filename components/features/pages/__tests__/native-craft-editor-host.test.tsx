@@ -12,7 +12,7 @@ vi.mock("@/lib/mooring/native-editor-port",()=>({createNativeEditorPort:m.create
 vi.mock("@/lib/mooring/native-draft",async()=>({...await vi.importActual("@/lib/mooring/native-draft"),openNativeDraftJournal:m.openJournal}))
 vi.mock("@/lib/document-queue",async()=>({...await vi.importActual("@/lib/document-queue"),registerDocumentDraftWriter:m.registerPrivacy,purgeDocumentDrafts:m.purge}))
 vi.mock("../workbook-editor-host",()=>({editorFrameSupported:()=>true,createEditorFrame:(doc:Document,src:string,onLoad:()=>void)=>{const f=doc.createElement('iframe');f.setAttribute('sandbox','allow-scripts');f.setAttribute('credentialless','');f.setAttribute('referrerpolicy','no-referrer');f.srcdoc='';f.src=src;queueMicrotask(onLoad);return f}}))
-const deferred=<T,>()=>{let resolve!:(v:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve}}
+const deferred=<T,>()=>{let resolve!:(v:T)=>void,reject!:(cause:unknown)=>void;const promise=new Promise<T>((r,f)=>{resolve=r;reject=f});return {promise,resolve,reject}}
 const emptyLease={can_edit:true,holder:null,mine:false,generation:null,can_write:false,acquired_at:null,expires_at:null,handoff_requested_by:[]}
 const ownedLease={...emptyLease,holder:{actor_id:"user:human",display_name:"Pavel",kind:"human"},mine:true,generation:"9007199254740995",can_write:true,expires_at:'2099-01-01T00:00:00Z'}
 // Another person (a holder with the viewer's own actor id is the viewer's other tab).
@@ -34,6 +34,134 @@ async function ready(){await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenC
 async function acquire(){fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(ports.at(-1)?.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)))}
 
 describe('native Word host authority and persistence',()=>{
+ it('does not overwrite a newer streamed lease with a delayed bootstrap proof',async()=>{
+  const proof=deferred<typeof ownedLease>()
+  client.lease.mockResolvedValueOnce(emptyLease).mockReturnValueOnce(proof.promise)
+  mount();await waitFor(()=>expect(client.lease).toHaveBeenCalledTimes(2))
+  const revoked={...emptyLease,can_edit:false}
+  act(()=>stream?.('lease',revoked))
+  await act(async()=>proof.resolve(ownedLease))
+  await waitFor(()=>expect(document.querySelector('iframe')).not.toHaveStyle({visibility:'hidden'}))
+  expect(screen.queryByRole('button',{name:'Převzít úpravy'})).not.toBeInTheDocument()
+  expect(ports[0].setReadOnly).not.toHaveBeenCalledWith(false,expect.anything())
+ })
+ it('never unlocks an acquire after a newer streamed custody loss overtakes final proof',async()=>{
+  mount();await ready()
+  const proof=deferred<typeof ownedLease>()
+  client.leaseAction.mockImplementation(async()=>{client.lease.mockResolvedValueOnce(ownedLease).mockResolvedValueOnce(ownedLease).mockReturnValueOnce(proof.promise);return ownedLease})
+  fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}))
+  await waitFor(()=>expect(journal.recovery).toHaveBeenCalled())
+  act(()=>stream?.('lease',{...emptyLease,can_edit:false}))
+  await act(async()=>proof.resolve(ownedLease))
+  await screen.findByText('Výsledek akce nebyl potvrzen.')
+  expect(ports.at(-1)!.setReadOnly).not.toHaveBeenCalledWith(false,expect.anything());expect(client.save).not.toHaveBeenCalled()
+ })
+ it('bounds a retained-buffer read admission and ignores its late proof without dropping the buffer',async()=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   mount();await ready();await acquire();const frame=document.querySelector('iframe'),port=ports.at(-1)!
+   journal.persist.mockRejectedValue(Error('storage unavailable'))
+   const second=clientRig(),proof=deferred<typeof emptyLease>();second.lease.mockReturnValue(proof.promise);m.createClient.mockReturnValueOnce(second)
+   act(()=>{portOptions.at(-1)!.onChanged('uncaptured','doc');stream?.('session_retired',{draft:'retain',reason:'write_revoked'})})
+   await waitFor(()=>expect(second.lease).toHaveBeenCalled())
+   await act(async()=>vi.advanceTimersByTimeAsync(60001))
+   expect(frame).toHaveStyle({visibility:'hidden'});expect(frame).toHaveAttribute('inert');expect(second.close).toHaveBeenCalled()
+   expect(screen.getByRole('button',{name:'Znovu ověřit přístup'})).toBeEnabled()
+   await act(async()=>proof.resolve(emptyLease))
+   expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveStyle({visibility:'hidden'});expect(port.close).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()
+  }finally{vi.useRealTimers()}
+ })
+ it('hides the retained buffer on monitor failure and drops a pending copy after read revocation',async()=>{
+  mount();await ready();await acquire();const frame=document.querySelector('iframe'),port=ports.at(-1)!
+  journal.persist.mockRejectedValue(Error('storage unavailable'))
+  const second=clientRig(),monitor=deferred<void>();second.events.mockImplementation((_signal,callback)=>{stream=callback;return monitor.promise});m.createClient.mockReturnValueOnce(second)
+  act(()=>{portOptions.at(-1)!.onChanged('uncaptured','doc');stream?.('session_retired',{draft:'retain',reason:'write_revoked'})})
+  await screen.findByRole('button',{name:'Stáhnout místní kopii'})
+  await act(async()=>monitor.reject(Error('stream ended')))
+  expect(frame).toHaveStyle({visibility:'hidden'});expect(screen.queryByRole('button',{name:'Stáhnout místní kopii'})).not.toBeInTheDocument()
+  const third=clientRig();m.createClient.mockReturnValueOnce(third);fireEvent.click(screen.getByRole('button',{name:'Znovu ověřit přístup'}))
+  await screen.findByRole('button',{name:'Stáhnout místní kopii'})
+  const snapshot=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>();port.snapshot.mockReturnValueOnce(snapshot.promise)
+  const copy=vi.fn();vi.stubGlobal('URL',Object.assign(class extends URL {},{createObjectURL:copy,revokeObjectURL:vi.fn()}))
+  fireEvent.click(screen.getByRole('button',{name:'Stáhnout místní kopii'}))
+  act(()=>stream?.('session_retired',{draft:'purge',reason:'authority_changed'}))
+  await act(async()=>snapshot.resolve({bytes:new Uint8Array([1]),editorRevision:'late',documentId:'doc'}))
+  expect(copy).not.toHaveBeenCalled();expect(document.querySelector('iframe')).toBeNull();expect(journal.revokeRead).toHaveBeenCalled()
+ })
+
+ it.each(['stream','retirement','reauthorization','auth-suspend'] as const)('retires a fresh read bootstrap on %s failure and ignores its late completion',async failure=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  try{
+   mount();await ready();await acquire()
+   const second=clientRig(),opening=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>(),transport=deferred<void>()
+   second.events.mockImplementation((_signal,callback)=>{stream=callback;return transport.promise})
+   m.createClient.mockReturnValueOnce(second)
+   m.createPort.mockImplementationOnce((o:NativeEditorPortOptions)=>{const p=portRig();p.bootstrap.mockReturnValue(opening.promise);ports.push(p);portOptions.push(o);queueMicrotask(()=>o.onReady?.('qualified'));return p})
+   act(()=>{portOptions.at(-1)!.onChanged('before-retirement','doc');stream?.('session_retired',{draft:'retain',reason:'write_revoked'})})
+   await waitFor(()=>expect(second.events).toHaveBeenCalledOnce());await waitFor(()=>expect(ports.at(-1)!.bootstrap).toHaveBeenCalled())
+   if(failure==='stream')await act(async()=>transport.reject(Error('fresh stream refused')))
+   if(failure==='retirement')act(()=>stream?.('session_retired',{draft:'retain',reason:'authority_changed'}))
+   if(failure==='reauthorization'){second.reauthorize.mockRejectedValue(Error('fresh reauthorization refused'));await act(async()=>vi.advanceTimersByTimeAsync(30001))}
+   if(failure==='auth-suspend')await act(async()=>authSuspend!())
+   await waitFor(()=>expect(document.querySelector('iframe')).toBeNull())
+   expect(second.close).toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled();expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
+   await act(async()=>opening.resolve({bytes:new Uint8Array([1]),editorRevision:'late',documentId:'doc'}))
+   expect(document.querySelector('iframe')).toBeNull();expect(client.save).not.toHaveBeenCalled();expect(second.leaseAction).not.toHaveBeenCalled()
+  }finally{vi.useRealTimers()}
+ })
+ it('does not continue a pending fresh admission after auth suspension',async()=>{
+  mount();await ready();await acquire()
+  const second=clientRig(),admission=deferred<{sessionId:string;applicationId:string}>()
+  second.open.mockReturnValue(admission.promise);m.createClient.mockReturnValueOnce(second)
+  act(()=>stream?.('session_retired',{draft:'retain',reason:'write_revoked'}))
+  await waitFor(()=>expect(second.open).toHaveBeenCalledOnce())
+  await act(async()=>authSuspend!());expect(document.querySelector('iframe')).toBeNull()
+  await act(async()=>admission.resolve({sessionId:'fresh',applicationId:'wordcraft'}))
+  expect(second.read).not.toHaveBeenCalled();expect(second.events).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()
+ })
+ it('waits for in-flight retirement on auth suspension and never starts its fresh admission',async()=>{
+  mount();await ready();await acquire()
+  const snapshot=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>()
+  ports.at(-1)!.snapshot.mockReturnValue(snapshot.promise)
+  act(()=>{portOptions.at(-1)!.onChanged('capture-pending','doc');stream?.('session_retired',{draft:'retain',reason:'write_revoked'})})
+  let suspended!:Promise<void>;act(()=>{suspended=authSuspend!()})
+  await act(async()=>{snapshot.resolve({bytes:new TextEncoder().encode('{"body":["captured-QA"]}'),editorRevision:'pending-capture',documentId:'doc'});await suspended})
+  expect(m.createClient).toHaveBeenCalledOnce();expect(document.querySelector('iframe')).toBeNull();expect(journal.persist).toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()
+ })
+ it('catches up one metadata change observed during initial bootstrap',async()=>{
+  const opening=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>()
+  m.createPort.mockImplementationOnce((o:NativeEditorPortOptions)=>{const p=portRig();p.bootstrap.mockReturnValue(opening.promise);ports.push(p);portOptions.push(o);queueMicrotask(()=>o.onReady?.('qualified'));return p})
+  mount();await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled())
+  const newer={...await client.read(),version:'2'};client.read.mockResolvedValue(newer);client.read.mockClear()
+  act(()=>{stream?.('lease',emptyLease);stream?.('lease',emptyLease)})
+  expect(client.read).not.toHaveBeenCalled()
+  await act(async()=>opening.resolve({bytes:new Uint8Array([1]),editorRevision:'opened',documentId:'doc'}))
+  await waitFor(()=>expect(ports).toHaveLength(2));expect(client.read).toHaveBeenCalledOnce()
+  expect(ports[1].bootstrap).toHaveBeenCalledWith(newer.bytes,expect.any(AbortSignal))
+ })
+ it('retains an uncaptured buffer without importing over it and monitors a fresh read admission',async()=>{
+  mount();await ready();await acquire();const frame=document.querySelector('iframe'),port=ports.at(-1)!,count=ports.length
+  journal.persist.mockRejectedValue(Error('local storage unavailable'))
+  const second=clientRig();second.lease.mockResolvedValue({...emptyLease,can_edit:false});m.createClient.mockReturnValueOnce(second)
+  act(()=>{portOptions.at(-1)!.onChanged('uncaptured','doc');stream?.('session_retired',{draft:'retain',reason:'write_revoked'})})
+  await waitFor(()=>expect(second.events).toHaveBeenCalledOnce());await waitFor(()=>expect(screen.getByRole('button',{name:'Stáhnout místní kopii'})).toBeEnabled())
+  expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveAttribute('inert');expect(frame).not.toHaveStyle({visibility:'hidden'});expect(ports).toHaveLength(count)
+  expect(second.read).not.toHaveBeenCalled();expect(second.leaseAction).not.toHaveBeenCalled();expect(client.save).not.toHaveBeenCalled();expect(port.close).not.toHaveBeenCalled()
+  act(()=>stream?.('session_retired',{draft:'purge',reason:'authority_changed'}))
+  await waitFor(()=>expect(document.querySelector('iframe')).toBeNull());expect(journal.revokeRead).toHaveBeenCalled()
+ })
+ it('keeps an uncaptured buffer hidden on refused read and permits one bounded explicit recheck',async()=>{
+  mount();await ready();await acquire();const frame=document.querySelector('iframe'),count=ports.length
+  journal.persist.mockRejectedValue(Error('storage unavailable'))
+  const second=clientRig();second.open.mockRejectedValue(Error('read unconfirmed'));m.createClient.mockReturnValueOnce(second)
+  act(()=>{portOptions.at(-1)!.onChanged('uncaptured','doc');stream?.('session_retired',{draft:'retain',reason:'write_revoked'})})
+  const retry=await screen.findByRole('button',{name:'Znovu ověřit přístup'})
+  expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveStyle({visibility:'hidden'});expect(journal.revokeRead).not.toHaveBeenCalled()
+  const third=clientRig();third.lease.mockResolvedValue({...emptyLease,can_edit:false});m.createClient.mockReturnValueOnce(third)
+  fireEvent.click(retry);await screen.findByRole('button',{name:'Stáhnout místní kopii'})
+  expect(document.querySelector('iframe')).toBe(frame);expect(ports).toHaveLength(count);expect(third.read).not.toHaveBeenCalled();expect(third.leaseAction).not.toHaveBeenCalled();expect(client.save).not.toHaveBeenCalled()
+ })
+
  it('hides a retired writer and its captured copy while the fresh read admission is pending or refused',async()=>{
   mount();await ready();await acquire()
   const frame=document.querySelector('iframe'),oldOptions=portOptions.at(-1)!,second=clientRig(),admission=deferred<{sessionId:string;applicationId:string}>()
