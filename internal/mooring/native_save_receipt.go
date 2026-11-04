@@ -3,6 +3,7 @@ package mooring
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,26 @@ import (
 )
 
 var ErrNativeUnconfirmed = errors.New("native snapshot has no matching committed receipt")
+
+// ErrNativeAttemptAbsent: reconcile proved that the identified save attempt
+// is not committed and retired it, so it can never commit later (#4899).
+var ErrNativeAttemptAbsent = errors.New("native save attempt did not commit and never will")
+
+// ErrNativeAttemptRetired refuses a save whose attempt an earlier reconcile retired.
+var ErrNativeAttemptRetired = errors.New("native save attempt was retired by reconcile")
+
+// validNativeAttemptID accepts an opaque client nonce (a UUID in the editor).
+func validNativeAttemptID(id string) bool {
+	if len(id) < 8 || len(id) > 64 {
+		return false
+	}
+	for _, c := range id {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
 
 // NativeSaveReceipt binds confirmation to one exact editor snapshot and its
 // successor version. All SQL int64 values cross the browser boundary as strings.
@@ -61,14 +82,42 @@ func (s *NativeStore) snapshotReceipt(l EditLease, base int64, revision, hash st
 }
 
 func (s *NativeStore) SaveSnapshot(ctx context.Context, l EditLease, base int64, editorRevision, contentHash string, raw []byte) (NativeSaveReceipt, error) {
+	return s.SaveAttempt(ctx, l, base, editorRevision, contentHash, raw, "")
+}
+
+// SaveAttempt is SaveSnapshot for one identified attempt. A non-empty
+// attemptID that a reconcile retired is refused inside the publication
+// transaction, after the writer fence, so validation that was still running
+// when the reconcile answered cannot publish afterwards.
+func (s *NativeStore) SaveAttempt(ctx context.Context, l EditLease, base int64, editorRevision, contentHash string, raw []byte, attemptID string) (NativeSaveReceipt, error) {
 	if err := s.ready(); err != nil {
 		return NativeSaveReceipt{}, err
+	}
+	if attemptID != "" && !validNativeAttemptID(attemptID) {
+		return NativeSaveReceipt{}, ErrInvalid
 	}
 	message, err := s.snapshotMessage(l, base, editorRevision, contentHash)
 	if err != nil {
 		return NativeSaveReceipt{}, err
 	}
 	a := s.authority(l.Scope, &l, "write")
+	if attemptID != "" {
+		write := a
+		a = func(ctx context.Context, tx *sql.Tx) (string, error) {
+			actor, err := write(ctx, tx)
+			if err != nil {
+				return "", err
+			}
+			var retired int
+			if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM craft_native_retired_attempts WHERE page_id=? AND session_id=? AND attempt_id=?`, l.Scope.ArtifactID, l.Holder.SessionID, attemptID).Scan(&retired); err != nil {
+				return "", err
+			}
+			if retired > 0 {
+				return "", ErrNativeAttemptRetired
+			}
+			return actor, nil
+		}
+	}
 	if _, err = s.versions.Quota(ctx, nativeVersionKey(l.Scope), a); err != nil {
 		return NativeSaveReceipt{}, err
 	}
@@ -95,24 +144,52 @@ func (s *NativeStore) SaveSnapshot(ctx context.Context, l EditLease, base int64,
 // checked again; the lease need not be live, so a reply lost during an outage
 // longer than the lease TTL stays provable. That lease still cannot save.
 func (s *NativeStore) ReconcileSnapshot(ctx context.Context, l EditLease, base int64, editorRevision, contentHash string) (NativeSaveReceipt, error) {
+	return s.ReconcileAttempt(ctx, l, base, editorRevision, contentHash, "")
+}
+
+// ReconcileAttempt is ReconcileSnapshot for one identified attempt. When
+// version base+1 is not exactly that attempt, it records the attempt as
+// retired in the same fenced transaction and reports ErrNativeAttemptAbsent:
+// the attempt has not committed and now never will (#4899). Without an
+// attemptID nothing can be retired, and the answer stays ErrNativeUnconfirmed.
+func (s *NativeStore) ReconcileAttempt(ctx context.Context, l EditLease, base int64, editorRevision, contentHash, attemptID string) (NativeSaveReceipt, error) {
 	if err := s.ready(); err != nil {
 		return NativeSaveReceipt{}, err
+	}
+	if attemptID != "" && !validNativeAttemptID(attemptID) {
+		return NativeSaveReceipt{}, ErrInvalid
 	}
 	message, err := s.snapshotMessage(l, base, editorRevision, contentHash)
 	if err != nil {
 		return NativeSaveReceipt{}, err
 	}
-	m, err := s.versions.ReadVersion(ctx, nativeVersionKey(l.Scope), base+1, s.holderAuthority(l, "write"))
-	if errors.Is(err, artifacts.ErrVersionNotFound) {
-		return NativeSaveReceipt{}, ErrNativeUnconfirmed
-	}
+	var version int64
+	absent := false
+	err = s.versions.ReadVersionFenced(ctx, nativeVersionKey(l.Scope), base+1, s.holderAuthority(l, "write"), func(tx *sql.Tx, m artifacts.VersionManifest, readErr error) error {
+		if readErr == nil {
+			file, ok := m.Files["document.json"]
+			hash := sha256.Sum256(file.Content)
+			if m.Message == message && m.Actor == l.Holder.ActorID && m.EntryPoint == "document.json" && len(m.Files) == 1 && ok && file.MediaType == "application/json" && "sha256:"+hex.EncodeToString(hash[:]) == contentHash {
+				version = m.Version
+				return nil
+			}
+		}
+		if attemptID == "" {
+			return ErrNativeUnconfirmed
+		}
+		// Not this attempt at base+1. Retire it under this fence: a pending
+		// publication of it checks this row after taking the same fence.
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO craft_native_retired_attempts(page_id,workspace_id,session_id,attempt_id,generation,base_version) VALUES(?,?,?,?,?,?)`, l.Scope.ArtifactID, l.Scope.WorkspaceID, l.Holder.SessionID, attemptID, l.Generation, base); err != nil {
+			return err
+		}
+		absent = true
+		return nil
+	})
 	if err != nil {
 		return NativeSaveReceipt{}, err
 	}
-	file, ok := m.Files["document.json"]
-	hash := sha256.Sum256(file.Content)
-	if m.Message != message || m.Actor != l.Holder.ActorID || m.EntryPoint != "document.json" || len(m.Files) != 1 || !ok || file.MediaType != "application/json" || "sha256:"+hex.EncodeToString(hash[:]) != contentHash {
-		return NativeSaveReceipt{}, ErrNativeUnconfirmed
+	if absent {
+		return NativeSaveReceipt{}, ErrNativeAttemptAbsent
 	}
-	return s.snapshotReceipt(l, base, editorRevision, contentHash, m.Version), nil
+	return s.snapshotReceipt(l, base, editorRevision, contentHash, version), nil
 }

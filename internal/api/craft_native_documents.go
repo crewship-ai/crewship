@@ -44,6 +44,9 @@ type craftNativeSnapshotBody struct {
 	ContentHash    string `json:"contentHash"`
 	Bytes          []byte `json:"bytes"`
 	TargetVersion  string `json:"targetVersion"`
+	// AttemptID is an optional client nonce for one save attempt; reconcile
+	// with it can retire an attempt that did not commit (#4899).
+	AttemptID string `json:"attemptId"`
 }
 
 func craftNativeVersion(raw string) (int64, error) {
@@ -83,7 +86,9 @@ func craftNativeDocumentError(w http.ResponseWriter, err error) {
 		replyError(w, 503, "native documents unavailable")
 	case errors.Is(err, artifacts.ErrVersionQuota):
 		replyError(w, 413, "native history quota reached; existing versions retained")
-	case errors.Is(err, mooring.ErrEditLeaseBusy), errors.Is(err, mooring.ErrEditLeaseStale), errors.Is(err, artifacts.ErrVersionConflict), errors.Is(err, mooring.ErrNativeUnconfirmed):
+	case errors.Is(err, mooring.ErrNativeAttemptAbsent):
+		replyError(w, 410, "native save attempt did not commit and never will; save the current draft again")
+	case errors.Is(err, mooring.ErrEditLeaseBusy), errors.Is(err, mooring.ErrEditLeaseStale), errors.Is(err, artifacts.ErrVersionConflict), errors.Is(err, mooring.ErrNativeUnconfirmed), errors.Is(err, mooring.ErrNativeAttemptRetired):
 		replyError(w, 409, "native document or lease changed; keep the local draft")
 	case errors.Is(err, mooring.ErrNativeValidation), errors.Is(err, mooring.ErrInvalid), errors.Is(err, artifacts.ErrVersionInvalid):
 		replyError(w, 422, "invalid native document")
@@ -191,14 +196,14 @@ func (d *craftNativeDocumentsHTTP) mutateSnapshot(w http.ResponseWriter, r *http
 	w.Header().Set("Cache-Control", "no-store")
 	switch operation {
 	case "save":
-		receipt, e := s.SaveSnapshot(r.Context(), lease, base, body.EditorRevision, body.ContentHash, body.Bytes)
+		receipt, e := s.SaveAttempt(r.Context(), lease, base, body.EditorRevision, body.ContentHash, body.Bytes, body.AttemptID)
 		if e != nil {
 			craftNativeDocumentError(w, e)
 			return
 		}
 		writeJSON(w, 200, receipt)
 	case "reconcile":
-		receipt, e := s.ReconcileSnapshot(r.Context(), lease, base, body.EditorRevision, body.ContentHash)
+		receipt, e := s.ReconcileAttempt(r.Context(), lease, base, body.EditorRevision, body.ContentHash, body.AttemptID)
 		if e != nil {
 			craftNativeDocumentError(w, e)
 			return

@@ -159,3 +159,16 @@ describe('native shared preview publication',()=>{
   await expect(client.share(share,signal())).rejects.toThrow();expect(send).toHaveBeenCalledTimes(2)
  })
 })
+
+describe("native save attempt retirement (#4899)",()=>{
+ const admission=()=>new Response(JSON.stringify({session_token:"b".repeat(64),session_id:"public-session",application_id:"wordcraft",page_id:"page"}))
+ it("maps only a reconcile 410 to absent and sends the attempt id",async()=>{
+  const send=vi.fn().mockResolvedValueOnce(admission()).mockResolvedValueOnce(new Response('{}',{status:410})).mockResolvedValueOnce(new Response('{}',{status:410}))
+  const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send});await client.open(signal())
+  const attempt={...request,attemptId:"attempt-0001"}
+  await expect(client.reconcile(attempt,signal())).rejects.toMatchObject({reason:"absent"})
+  expect(JSON.parse(String(send.mock.calls[1][1].body)).attemptId).toBe("attempt-0001")
+  // A save never reports absent; 410 there stays an unconfirmed outcome.
+  const saving=client.save(attempt,signal());await expect(saving).rejects.toThrow("native_snapshot_unconfirmed");await expect(saving).rejects.not.toBeInstanceOf(NativeSaveError)
+ })
+})

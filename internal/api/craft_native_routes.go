@@ -98,7 +98,7 @@ func (r *Router) registerCraftNativeRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/document/import", roleSelf, d.importSnapshot)
 	// openapi: responses 200,400,401,403,409,413,422,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/document/restore", roleSelf, d.restoreSnapshot)
-	// openapi: responses 200,400,401,403,409,422,503
+	// openapi: responses 200,400,401,403,409,410,422,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/document/reconcile", roleSelf, d.reconcileSnapshot)
 	// Agent proposals prepared while a human holds the lease (#4480).
 	// openapi: responses 200,401,403,409,503

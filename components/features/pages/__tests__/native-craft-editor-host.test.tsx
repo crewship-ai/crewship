@@ -243,13 +243,13 @@ describe('native Word host authority and persistence',()=>{
  it('retires a recovered draft whose bytes the server already holds instead of offering it',async()=>{const same={applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'0',editorRevision:'lost-ack',bytes:new TextEncoder().encode('{"body":[]}')},other={...same,editorRevision:'later',bytes:new Uint8Array([99])};journal.recovery.mockResolvedValueOnce([{draft:same,actions:['compare','copy']},{draft:other,actions:['compare','copy']}]);mount();await ready();await acquire();await waitFor(()=>expect(journal.discardRecovered).toHaveBeenCalledWith(expect.objectContaining({draft:same})));expect(journal.discardRecovered).not.toHaveBeenCalledWith(expect.objectContaining({draft:other}));expect(screen.getAllByRole('button',{name:'Porovnat'})).toHaveLength(1);expect(client.save).not.toHaveBeenCalled()})
  it('reconciles the lost save before closing the client when the connection retires',async()=>{mount();await ready();await acquire();client.save.mockImplementationOnce(()=>new Promise(()=>{}));client.reconcile.mockImplementation(async(r:NativeSaveRequest)=>receipt(r));act(()=>portOptions.at(-1)!.onChanged('pending','doc'));await waitFor(()=>expect(client.save).toHaveBeenCalledOnce());act(()=>stream?.('session_retired',{delivery:'stopped',reason:'session_closed'}));await waitFor(()=>expect(client.close).toHaveBeenCalled());expect(client.reconcile).toHaveBeenCalled();expect(client.reconcile.mock.invocationCallOrder[0]).toBeLessThan(client.close.mock.invocationCallOrder[0])})
  // UX walkthrough RC-4 R05: offline before the save left the browser. The
- // server holds nothing at base+1 (reconcile 409); the editor must resume
+ // server retires the attempt that never landed (reconcile 410); the editor must resume
  // saving instead of staying unsaved forever, and coming back online asks
  // the server by itself.
  it('resumes saving after an outage whose save never reached the server',async()=>{
   mount();await ready();await acquire()
   client.save.mockRejectedValueOnce(new TypeError('Failed to fetch'))
-  client.reconcile.mockRejectedValueOnce(new NativeSaveError('conflict'))
+  client.reconcile.mockRejectedValueOnce(new NativeSaveError('absent'))
   act(()=>portOptions.at(-1)!.onChanged('during-outage','doc'))
   await screen.findByText('Výsledek nepotvrzen');expect(screen.getByRole('button',{name:'Ověřit výsledek'})).toBeVisible()
   act(()=>{window.dispatchEvent(new Event('online'))})
@@ -258,6 +258,10 @@ describe('native Word host authority and persistence',()=>{
   await screen.findByText('Uloženo');expect(screen.queryByRole('button',{name:'Ověřit výsledek'})).not.toBeInTheDocument()
   // The new save is a fresh capture at the unchanged base, not the lost ticket replayed.
   expect(client.save.mock.calls[1][0]).toMatchObject({baseVersion:'1'})
+  // Reconcile names exactly the lost attempt; the resumed save is a new attempt.
+  const lost=client.save.mock.calls[0][0].attemptId
+  expect(lost).toMatch(/^[A-Za-z0-9_-]{8,64}$/);expect(client.reconcile.mock.calls[0][0].attemptId).toBe(lost)
+  expect(client.save.mock.calls[1][0].attemptId).not.toBe(lost)
   ports.at(-1)!.snapshot.mockResolvedValue({bytes:new TextEncoder().encode('{"body":[2]}'),editorRevision:'snapshot-2',documentId:'doc'})
   act(()=>portOptions.at(-1)!.onChanged('after-outage','doc'))
   await waitFor(()=>expect(client.save).toHaveBeenCalledTimes(3))

@@ -44,7 +44,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | GET | `/api/v1/pages/{slug}/craft/document` | Craft admission header. | Complete base64 native bytes, version and pinned editor/engine metadata, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/save` | Bound whole snapshot described below. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Same whole snapshot contract; existing explicit native Page only. | Exact committed snapshot receipt, 200. |
-| POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Exact original snapshot binding and hash; no blind retry. Current write rights and the original admission; the original lease may have expired or moved. | Original pinned commit receipt,200; never an arbitrary latest head. |
+| POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Exact original snapshot binding and hash, plus the attempt's `attemptId`; no blind retry. Current write rights and the original admission; the original lease may have expired or moved. | Original pinned commit receipt,200; never an arbitrary latest head. 410 when base+1 is not this attempt: the attempt is retired and can never commit. |
 | POST | `/api/v1/pages/{slug}/craft/document/restore` | Current binding and targetVersion. | New committed version and node durability, 200. |
 | GET | `/api/v1/pages/{slug}/craft/proposals` | Craft admission header; Page read. | `{proposals: [...]}` open and decided agent proposals, 200. |
 | GET | `/api/v1/pages/{slug}/craft/proposals/{proposalID}` | Craft admission header; `ncp_` id. | `{proposal, bytes, content_hash, engine_pin}` candidate, 200; 404 when absent. |
@@ -65,13 +65,19 @@ unconfirmed attempt once before retiring; a proven commit and an identical
 fresh capture leave no recovery draft, anything else stays offered for
 comparison. The expired generation still cannot save.
 
-While the holder still has write, a reconcile that finds no commit of the
-attempt's exact bytes as base+1 (HTTP 409: the request never reached the
-server, e.g. the browser was offline) ends the uncertainty without resending
-that attempt. The editor resumes with a fresh capture of its current bytes at
-the same base; the server's base fence turns a head that moved on meanwhile into
-a visible conflict with the draft kept. The host runs the same reconcile when
-the browser reports it is back online, as "Ověřit výsledek" does.
+Every save carries a fresh opaque `attemptId` (8–64 of `[A-Za-z0-9_-]`), and
+reconcile sends the lost attempt's id. When version base+1 is not exactly that
+attempt, reconcile records the attempt in `craft_native_retired_attempts`
+inside the same writer-fenced transaction and answers **410**: it did not
+commit and never will. A save of a retired attempt is refused (409) inside its
+own publication transaction, so a request still validating when reconcile
+answered cannot publish afterwards (#4899). Without an `attemptId` reconcile
+keeps answering 409 (unconfirmed). After a 410 the editor resumes with a fresh
+capture at the same base and always sends it: it never treats bytes equal to
+its old baseline as already saved, because that baseline is no longer proof of
+the head. The server's base fence then decides between a new version and a
+visible conflict with the draft kept. The host runs the same reconcile when the
+browser reports it is back online, as "Ověřit výsledek" does.
 
 Renew/release require `{generation: "1"}`. Handoff requires
 `{generation: "1", request_id: "public-request-id"}`. Other lease mutations use

@@ -44,7 +44,9 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 function server(initial: string) {
   const versions = new Map<number, { text: string; hash: string; editorRevision: string }>([[2, { text: initial, hash: "", editorRevision: "seed" }]])
   let head = 2, online = true
-  const calls: string[] = []
+  let hold: Promise<void> | undefined
+  const calls: string[] = [], retired = new Set<string>()
+  const conflict = () => json({ error: "native document or lease changed; keep the local draft" }, 409)
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input), path = url.split("?")[0]
     // context.setOffline: nothing leaves the browser.
@@ -55,38 +57,50 @@ function server(initial: string) {
     calls.push(op)
     const body = JSON.parse(String(init?.body)) as Record<string, string>
     const bytes = new Uint8Array(Buffer.from(body.bytes, "base64")), base = Number(body.baseVersion)
-    const receipt = (version: number) => ({ ...body, bytes: undefined, version: String(version), durability: "node", issuedBy: "crewship", phase: "committed", candidateHash: body.contentHash })
+    const receipt = (version: number) => ({ ...body, bytes: undefined, attemptId: undefined, version: String(version), durability: "node", issuedBy: "crewship", phase: "committed", candidateHash: body.contentHash })
     if (op === "save") {
       if (await sha(bytes) !== body.contentHash) return json({ error: "invalid" }, 422)
-      if (base !== head) return json({ error: "native document or lease changed; keep the local draft" }, 409)
+      // Validation runs outside the publication transaction: a save can wait here.
+      if (hold) { const paused = hold; hold = undefined; await paused }
+      // Publication (under the writer fence): a retired attempt never commits.
+      if (body.attemptId && retired.has(body.attemptId)) return conflict()
+      if (base !== head) return conflict()
       versions.set(++head, { text: new TextDecoder().decode(bytes), hash: body.contentHash, editorRevision: body.editorRevision })
       return json(receipt(head))
     }
     const landed = versions.get(base + 1)
-    if (!landed || landed.hash !== body.contentHash || landed.editorRevision !== body.editorRevision) return json({ error: "native document or lease changed; keep the local draft" }, 409)
-    return json(receipt(base + 1))
+    if (landed && landed.hash === body.contentHash && landed.editorRevision === body.editorRevision) return json(receipt(base + 1))
+    // Under the same fence: record the attempt as retired, then say so (410).
+    // Without an attempt id nothing can be retired: unconfirmed (409), as before.
+    if (!body.attemptId) return conflict()
+    retired.add(body.attemptId)
+    return json({ error: "native save attempt did not commit and never will" }, 410)
   })
   const commitOther = async (text: string) => { versions.set(++head, { text, hash: await sha(new TextEncoder().encode(text)), editorRevision: "other" }) }
-  return { fetch, calls, commitOther, setOffline: (value: boolean) => { online = !value }, head: () => ({ version: head, text: versions.get(head)!.text }) }
+  // The next save waits after validation until the returned release is called.
+  const pauseNextSave = () => { let release!: () => void; hold = new Promise<void>(done => { release = done }); return release }
+  return { fetch, calls, commitOther, pauseNextSave, setOffline: (value: boolean) => { online = !value }, head: () => ({ version: head, text: versions.get(head)!.text }) }
 }
 
-async function editor() {
-  const remote = server("Pred vypadkem")
+async function editor(timeoutMs = 2_000) {
+  const initial = "Pred vypadkem", remote = server(initial)
   const client = createNativeDocumentClient({ workspaceId: "ws", pageId: "page", fetch: remote.fetch as unknown as typeof fetch })
   await client.open(new AbortController().signal)
   const journal = await openNativeDraftJournal({ human: "h", workspace: "ws", page: "page", applicationId: "wordcraft" })
-  let text = "Pred vypadkem", revision = 0
+  let text = initial, revision = 0
   const states: NativeSaveState[] = []
   const controller = createSingleEditorSave({
     workspaceId: "ws", pageId: "page", applicationId: "wordcraft", enginePin: "e".repeat(64), baseVersion: "2", generation: "1", sessionId: "tab-a",
-    loaded: { bytes: new TextEncoder().encode(text) }, journal, idleMs: 5, timeoutMs: 2_000,
+    loaded: { bytes: new TextEncoder().encode(text) }, journal, idleMs: 5, timeoutMs,
     engine: { snapshot: async () => ({ bytes: new TextEncoder().encode(text), editorRevision: `doc:${revision}` }), validate: async () => {} },
     transport: client,
     onState: state => { states.push(state) },
   })
   const type = (more: string) => { text += more; revision++; controller.edited() }
+  // Ctrl+Z back to exactly the loaded (server version 2) bytes.
+  const undo = () => { text = initial; revision++; controller.edited() }
   const last = () => states.at(-1)!
-  return { remote, controller, journal, type, last, states }
+  return { remote, controller, journal, type, undo, last, states, text: () => text }
 }
 
 it("resumes saving after an outage in which the uncertain save never reached the server", async () => {
@@ -158,6 +172,44 @@ it("a head that moved on is still a visible conflict after reconcile, with the d
   await vi.waitFor(() => expect(e.last()).toMatchObject({ phase: "draft", reason: "conflict" }))
   expect(e.remote.head()).toEqual({ version: 3, text: "jiny" })
   // The unsaved draft stays in the browser for compare/copy.
+  expect(store.rows.size).toBe(1)
+  await e.controller.close()
+})
+
+// Review #4900 blocker 1: the original save is still pending on the server
+// (validated, not yet published) when reconcile runs. "Nothing landed" must
+// be made true, and the editor must not call itself saved against a baseline
+// the server has not confirmed again.
+it("a save still pending on the server when reconcile answers can never commit afterwards", async () => {
+  const e = await editor(200)
+  const release = e.remote.pauseNextSave()
+  e.type(" behem vypadku")
+  await vi.waitFor(() => expect(e.last()).toMatchObject({ phase: "uncertain" }))
+  // The person undoes back to the loaded text while the result is unknown.
+  e.undo()
+  await e.controller.reconcile()
+  await vi.waitFor(() => expect(e.last()).toMatchObject({ phase: "saved", dirty: false }))
+  release()
+  await new Promise(resolve => setTimeout(resolve, 50))
+  // The server holds exactly what the editor shows as saved.
+  expect(e.remote.head().text).toBe(e.text())
+  expect(store.rows.size).toBe(0)
+})
+
+// Review #4900 blocker 2: offline edit, undo to the loaded bytes, and another
+// holder commits version 3. Resuming must not take the unchanged-content
+// shortcut against the stale version-2 baseline: it is a visible conflict.
+it("after resuming, bytes equal to a stale baseline are still sent with the base-version fence", async () => {
+  const e = await editor()
+  e.remote.setOffline(true)
+  e.type(" behem vypadku")
+  await vi.waitFor(() => expect(e.last()).toMatchObject({ phase: "uncertain" }))
+  e.undo()
+  e.remote.setOffline(false)
+  await e.remote.commitOther("jiny")
+  await e.controller.reconcile()
+  await vi.waitFor(() => expect(e.last()).toMatchObject({ phase: "draft", reason: "conflict" }))
+  expect(e.remote.head()).toEqual({ version: 3, text: "jiny" })
   expect(store.rows.size).toBe(1)
   await e.controller.close()
 })

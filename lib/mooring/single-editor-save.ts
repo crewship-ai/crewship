@@ -1,14 +1,17 @@
 import { type NativeDraft, type NativeDraftJournal, validNativeDraft, validNativeVersion } from "./native-draft"
 
-export interface NativeSaveRequest extends NativeDraft { workspaceId: string; pageId: string; contentHash: string }
-export interface NativeSaveReceipt extends Omit<NativeSaveRequest, "bytes"> {
+/** `attemptId` is a fresh nonce per transmitted save; reconcile sends the same
+ * one so the server can retire an attempt that did not commit (#4899). */
+export interface NativeSaveRequest extends NativeDraft { workspaceId: string; pageId: string; contentHash: string; attemptId?: string }
+export interface NativeSaveReceipt extends Omit<NativeSaveRequest, "bytes" | "attemptId"> {
   version: string
   durability: "node"
   issuedBy: "crewship"
   phase: "committed"
   candidateHash: string
 }
-export type NativeSaveFailure = "conflict" | "quota" | "write_revoked" | "read_revoked"
+/** `absent` (reconcile only): the server retired the attempt; it did not commit and never will. */
+export type NativeSaveFailure = "conflict" | "quota" | "write_revoked" | "read_revoked" | "absent"
 export class NativeSaveError extends Error {
   constructor(readonly reason: NativeSaveFailure) { super(reason) }
 }
@@ -74,6 +77,10 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   // the receipt observer (the native ACK) once that row is retired, or
   // superseded by a newer receipt; it is never sent again (#4852).
   let owedReceipt: NativeSaveReceipt | undefined
+  // After a retired attempt the confirmed baseline is no longer proof of the
+  // server head (another holder may have committed meanwhile). Until a new
+  // receipt, every capture is sent with the base-version fence (#4900 review).
+  let baselineStale = false
   const lifetime = new AbortController()
   let lastState: NativeSaveState = { phase: "idle", dirty: false }
   const stateWaiters = new Set<() => void>()
@@ -97,7 +104,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   const seedVersion = options.baseVersion
   const seeding: Promise<void> = options.loaded
     ? crypto.subtle.digest("SHA-256", new Uint8Array(options.loaded.bytes)).then(digest => {
-      if (active && !confirmed) confirmed = { nativeState: undefined, seeded: true, mountedState: options.loaded?.mountedState, version: seedVersion, contentHash: `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("")}` }
+      if (active && !confirmed && !baselineStale) confirmed = { nativeState: undefined, seeded: true, mountedState: options.loaded?.mountedState, version: seedVersion, contentHash: `sha256:${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("")}` }
     }, () => {})
     : Promise.resolve()
   emit("idle")
@@ -133,17 +140,21 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       // baseline so the retry retires the row instead of sending a duplicate
       // version. The fence lifts on the next durable capture (#4852).
       if (!active || !writable) return
-      confirmed = { nativeState: attempt.nativeState, contentHash: attempt.draft.contentHash, version: receipt.version }
+      confirmed = { nativeState: attempt.nativeState, contentHash: attempt.draft.contentHash, version: receipt.version }; baselineStale = false
       owedReceipt = receipt
       blocked = "storage"; emit("draft", "storage"); return
     }
     if (!active || !writable) return
-    confirmed = { nativeState: attempt.nativeState, contentHash: attempt.draft.contentHash, version: receipt.version }
+    confirmed = { nativeState: attempt.nativeState, contentHash: attempt.draft.contentHash, version: receipt.version }; baselineStale = false
     owedReceipt = undefined
     deliver(receipt)
     if (!active || !writable) return
     dirty = preparingCount > 0 || lastFailedPreparation > (latest?.sequence ?? 0) || edits !== attempt.epoch || latest?.draft.contentHash !== attempt.draft.contentHash || latest?.draft.editorRevision !== attempt.draft.editorRevision
     emit(dirty ? "dirty" : "saved")
+  }
+  function attemptNonce(): string {
+    if (typeof crypto.randomUUID === "function") return crypto.randomUUID()
+    return Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("")
   }
   function deliver(receipt: NativeSaveReceipt) {
     try { void Promise.resolve(options.onReceipt?.(receipt)).catch(() => {}) } catch { /* Receipt observers cannot change persistence. */ }
@@ -162,6 +173,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   }
   async function transmit(attempt: Prepared, reconcile: boolean) {
     if (!active || !writable || pending) return
+    if (!reconcile) attempt = { ...attempt, draft: { ...attempt.draft, attemptId: attemptNonce() } }
     let complete!: () => void
     const operation = { attempt, abort: new AbortController(), done: new Promise<void>(resolve => { complete = resolve }) }; pending = operation
     emit("saving")
@@ -171,14 +183,15 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       await settle(result, attempt)
     } catch (error) {
       if (!active || !writable || pending !== operation) return
-      if (reconcile && error instanceof NativeSaveError && error.reason === "conflict" && unconfirmed === attempt) {
-        // The server answered: these exact bytes are not its version base+1
-        // (e.g. the browser went offline before the save left it). That ends
-        // the uncertainty without sending the attempt again. The pipeline
-        // resumes with a fresh capture of the current bytes at the same base;
-        // the server fences every save on its base, so a head that moved on
-        // meanwhile still ends in a visible conflict with the draft kept.
-        unconfirmed = undefined; dirty = true
+      if (reconcile && error instanceof NativeSaveError && error.reason === "absent" && unconfirmed === attempt) {
+        // The server retired this exact attempt under its writer fence: it did
+        // not commit and never will, even if its request is still pending (e.g.
+        // the browser went offline before it left). That ends the uncertainty
+        // without sending it again. The pipeline resumes with a fresh capture
+        // at the same base, never judged "unchanged" against the old baseline,
+        // so the server's base fence decides: saved, or a visible conflict
+        // with the draft kept (#4899). A plain 409 stays a conflict.
+        unconfirmed = undefined; confirmed = undefined; baselineStale = true; dirty = true
         emit("dirty", "not_committed")
       } else if (error instanceof NativeSaveError) {
         blocked = error.reason
