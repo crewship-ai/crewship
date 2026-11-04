@@ -16,7 +16,7 @@ MessagePort helper or a Yjs payload does not make two profiles interchangeable.
 | Profile | Existing client surface | Content and concurrency | Confirmation and recovery |
 |---|---|---|---|
 | Pilot JSON application | `lib/mooring/index.ts`, `createEditorSDK`; `MooringEditorHost` | Protocol-1 isolated editor, manifest-declared JSON commands, personal-document revision/generation CAS. Shared DIRECT operations are refused. | A command is saved only after its receipt and confirmed revision; uncertain retries keep the exact mutation ID and packet. The generic pilot does not promise recovery of drafts after forced closure. |
-| Pilot native workbook adapter | `createEditorSDK` native overload; `lib/mooring/native-profile.ts`, `lib/workbooks/bridge.ts` | Shares the pilot connection core while carrying the original workbook envelopes. The workbook model owns cells, pending mutations, drafts and undo. | Native applied revision/status is reported through the bridge; a transport failure overrides Saved. This is separate from the whole-native Craft profile below. |
+| Pilot native workbook adapter | `createEditorSDK` native overload; `lib/mooring/native-profile.ts`, `lib/workbooks/bridge.ts` | Shares the pilot connection core while carrying the original workbook envelopes. The workbook model owns cells, pending mutations, drafts and undo. | The native model reports its applied revision/status through the adapter's `reportStatus`, which invokes the local `onStatus` callback; a transport failure overrides Saved. This is separate from the whole-native Craft profile below. |
 | Whole-native Word and Sheet | `lib/mooring/native-editor-port.ts`, `native-document-client.ts`, `single-editor-save.ts`, `native-draft.ts` | Whole native snapshots under one server EditLease, with session, generation, pinned engine, base version and content hash. Multiple live writers are not merged. | Validated node-durable receipt, editor acknowledgement and local draft custody. An uncertain save uses the original attempt's reconciliation path; a recovered draft is offered for compare/copy, not automatically written over a new holder. |
 | Multi-file artifact project | `hooks/use-artifact-project.ts`; existing project API and CLI | One immutable version manifest covers the complete file set. `base_version` CAS rejects concurrent publication. No native EditLease or CRDT merge is implied. | Publication/reconciliation and restore use the artifact version store; restore creates a new version. Project drafts have their own lifecycle rather than the native journal API. |
 | Design canvas | `components/features/artifacts-design/use-design.ts`, `design-document.ts`; existing Design API and CLI | Server-authorized Yjs sync/awareness for the live canvas. Versioned operations, snapshots and restore are separate from live sync. Reader projections follow shared-version visibility. | The server persists accepted live updates; retained artifact versions capture the canvas. A live update and a retained version are different confirmations. Reconnect/draft recovery remains specific to Design. |
@@ -62,9 +62,8 @@ handshake and editor lifecycle.
 Native HTTP admission, snapshot saving, draft journals and version operations
 are separate host modules. They are not exports of that root SDK. Project,
 Design, Dashboard and Docs clients also retain their existing profile-specific
-entrypoints. There is no shipped common `lib/mooring/sdk` facade or packaged
-NoteCraft application to import from this inventory. Adding a wrapper must
-preserve the underlying profile's authority, receipts and recovery behavior.
+entrypoints. There is no shipped common `lib/mooring/sdk` facade to import from
+this inventory. Adding a wrapper must preserve the underlying profile's authority, receipts and recovery behavior.
 
 ## Profile limits are separate
 
@@ -74,7 +73,7 @@ refuse a smaller request as well.
 
 | Profile boundary | Implemented bound |
 |---|---|
-| Pilot JSON channel | 64 KiB JSON messages; the JSON profile retains at most 1,000 revisions per document. |
+| Pilot JSON channel | 64 KiB port messages; command arguments are limited to 32,768 bytes (32 KiB), and `replace-state` uses those arguments as the whole next state. New commands are refused once the revision reaches 1,000; existing revisions are not pruned. |
 | Pilot native workbook adapter | 1 MiB snapshot body plus 16 KiB host-message metadata; outgoing editor messages remain 64 KiB. |
 | Whole-native Word/Sheet | 32 MiB native bytes, 45 MiB encoded JSON request; native artifact history defaults to 16 GiB. |
 | Artifact project version | 256 files and 32 MiB total file bytes; artifact history defaults to 256 MiB. |
@@ -83,8 +82,11 @@ refuse a smaller request as well.
 | Structured Docs validation | 1 MiB binary document; admitted position-history metadata has its own 64 KiB bound within that document. |
 
 The source constants and owning contracts remain authoritative:
-`lib/mooring/channel.ts`, `native-profile.ts`, `native-editor-port.ts`,
-`internal/artifacts/version_store.go`, `data_store.go` and the
+`lib/mooring/channel.ts`, `lib/mooring/native-profile.ts`,
+`lib/mooring/native-editor-port.ts`, `internal/mooring/store.go`,
+`internal/mooring/native_store.go`, `internal/api/craft_native_documents.go`,
+`internal/artifacts/version_store.go`, `internal/artifacts/data_store.go`,
+`internal/design/engine.mjs` and the
 [Docs engine compatibility contract](../../tools/docs-service/README.md).
 A quota check, a free-disk probe and an actual reservation are different
 properties; a payload limit does not establish either disk admission guarantee.
