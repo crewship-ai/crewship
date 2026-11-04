@@ -196,13 +196,26 @@ func TestAcceptance_CraftVersionsList(t *testing.T) {
 		if got.Version != "2" || got.CurrentVersion != "3" || got.Current || string(got.Bytes) != `{"v":2}` || got.Author.Kind != "agent" || got.Author.DisplayName != "Drafting Agent" || strings.Contains(out, "session_token") {
 			t.Fatalf("%s version 2: %+v %s", who.name, got, out)
 		}
+		// The destination already exists world-readable: the private bytes
+		// must still land in a 0600 file.
 		file := filepath.Join(t.TempDir(), "v1.json")
+		if err := os.WriteFile(file, []byte("stale"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(file, 0o644); err != nil {
+			t.Fatal(err)
+		}
 		out, stderr, code = run(who.bearer, "", "craft", "version", "@craft-hist-page", "1", "--output", file, "-f", "json")
 		if code != 0 {
 			t.Fatalf("%s version --output exit %d: %s", who.name, code, stderr)
 		}
 		if written, err := os.ReadFile(file); err != nil || string(written) != `{"v":1}` {
 			t.Fatalf("%s wrote %q %v", who.name, written, err)
+		}
+		if info, err := os.Stat(file); err != nil {
+			t.Fatal(err)
+		} else if info.Mode().Perm() != 0o600 {
+			t.Fatalf("%s --output left mode %o", who.name, info.Mode().Perm())
 		}
 		if strings.Contains(out, "bytes") || !strings.Contains(out, `"version": "1"`) && !strings.Contains(out, `"version":"1"`) {
 			t.Fatalf("%s --output must print metadata only: %s", who.name, out)

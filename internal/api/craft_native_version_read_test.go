@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -312,5 +314,57 @@ func TestCraftNativeVersionRestorePreservesNewerVersionsAndStorageLimits(t *test
 		if r.Code != 200 || string(got.Bytes) != want.bytes || got.RestoredFrom != want.restoredFrom || got.Current != (want.version == "3") || got.CurrentVersion != "3" {
 			t.Fatalf("after restore, version %s: %d %+v", want.version, r.Code, got)
 		}
+	}
+}
+
+// The whole save → restore → reopen sequence through the HTTP handlers: two
+// saves (v2, v3), restore v2 as v4, then every version and the reopened
+// document read return exactly the bytes they were saved with.
+func TestCraftNativeVersionSaveRestoreReopenKeepsEveryVersion(t *testing.T) {
+	f, _, d, owner, ownerToken, ownerID, body := craftNativeDocumentsFixture(t)
+	craftNativeEnableVersionHistory(t, f.db, true)
+	save := func(base, revision string, raw []byte) {
+		t.Helper()
+		next := map[string]any{}
+		for k, v := range body {
+			next[k] = v
+		}
+		next["baseVersion"], next["editorRevision"], next["contentHash"], next["bytes"] = base, revision, fmt.Sprintf("sha256:%x", sha256.Sum256(raw)), raw
+		if w := craftNativeDocumentCall(t, d, owner, ownerToken, "save", next); w.Code != 200 {
+			t.Fatalf("save on %s: %d %s", base, w.Code, w.Body)
+		}
+	}
+	save("1", "10:47:3", []byte(`{"v":2}`))
+	save("2", "11:47:3", []byte(`{"v":3}`))
+	restore := map[string]any{}
+	for k, v := range body {
+		if k != "bytes" && k != "editorRevision" && k != "contentHash" {
+			restore[k] = v
+		}
+	}
+	restore["baseVersion"], restore["targetVersion"], restore["sessionId"] = "3", "2", ownerID
+	if w := craftNativeDocumentCall(t, d, owner, ownerToken, "restore", restore); w.Code != 200 || !strings.Contains(w.Body.String(), `"version":"4"`) {
+		t.Fatalf("restore v2 on v3: %d %s", w.Code, w.Body)
+	}
+	for _, want := range []struct{ version, bytes, restoredFrom string }{{"1", `{"v":1}`, ""}, {"2", `{"v":2}`, ""}, {"3", `{"v":3}`, ""}, {"4", `{"v":2}`, "2"}} {
+		r := craftNativeVersionReadCall(d, owner, ownerToken, want.version)
+		got := decodeCraftNativeVersionDocument(t, r)
+		if r.Code != 200 || string(got.Bytes) != want.bytes || got.RestoredFrom != want.restoredFrom || got.CurrentVersion != "4" || got.Current != (want.version == "4") {
+			t.Fatalf("version %s: %d %+v", want.version, r.Code, got)
+		}
+	}
+	// Reopen: the document read is the restored head with v2's bytes.
+	read := craftNativeDocumentCall(t, d, owner, ownerToken, "read", nil)
+	var state struct {
+		Version string `json:"version"`
+		Bytes   []byte `json:"bytes"`
+	}
+	if err := json.Unmarshal(read.Body.Bytes(), &state); err != nil || read.Code != 200 || state.Version != "4" || string(state.Bytes) != `{"v":2}` {
+		t.Fatalf("reopened document: %d %+v %v", read.Code, state, err)
+	}
+	// The history lists all four, newest first, nothing removed.
+	list := decodeCraftNativeVersions(t, craftNativeVersionsCall(d, owner, ownerToken))
+	if list.CurrentVersion != "4" || len(list.Versions) != 4 || list.Versions[0].RestoredFrom != "2" || list.Versions[3].Version != "1" {
+		t.Fatalf("history after restore: %+v", list)
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 
@@ -193,8 +192,8 @@ func craftVersion(cmd *cobra.Command, args []string) error {
 		_, e = cmd.OutOrStdout().Write(content)
 		return e
 	}
-	if e = os.WriteFile(output, content, 0o600); e != nil {
-		return fmt.Errorf("write %s: %w", output, e)
+	if e = craftWritePrivateFile(output, content); e != nil {
+		return e
 	}
 	delete(document, "bytes")
 	meta, e := json.Marshal(document)
@@ -202,4 +201,24 @@ func craftVersion(cmd *cobra.Command, args []string) error {
 		return e
 	}
 	return craftEmit(cmd, meta, token)
+}
+
+// craftWritePrivateFile writes private document bytes to path as a new 0600
+// file: a temporary file created 0600 in the same directory is renamed over
+// the target, like `api request --output`. An existing file never keeps its
+// old (possibly world-readable) mode, a symlink at path is replaced rather
+// than followed, and an interrupted write leaves the previous file intact.
+func craftWritePrivateFile(path string, content []byte) error {
+	file, err := cli.NewAtomicFile(path)
+	if err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	defer file.Close()
+	if _, err = file.Write(content); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	if err = file.Commit(); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }
