@@ -289,13 +289,21 @@ These are off by default and intended for operators debugging performance.
 |----------|---------|-------------|
 | `GOOGLE_CLIENT_ID` | (unset) | Retained compatibility value loaded into `auth.google_client_id`. Setting it does not enable Google sign-in: its redirect and callback routes are deliberately unregistered. |
 | `GOOGLE_CLIENT_SECRET` | (unset) | Retained compatibility value paired with the client ID. Neither value enables Google sign-in, even when both are set. |
-| `CREWSHIP_GEMINI_OAUTH_CLIENT_ID` | (unset — imported Gemini grant refresh disabled) | Server-only OAuth client ID matching the client that issued an imported Gemini CLI grant. Separate from Crewship web sign-in. Configure together with its client secret and restart the server. |
-| `CREWSHIP_GEMINI_OAUTH_CLIENT_SECRET` | (unset) | Server-only secret for that Gemini OAuth client. Never put it in browser configuration or agent credentials. Crewship does not bundle or automatically download an upstream client's identity. |
 
 The retained Google sign-in status endpoint always reports `enabled: false`,
 regardless of these settings. Credential-provider OAuth connections and the
-Gemini grant-refresh settings above are separate features, not switches for
+Gemini grant-refresh settings below are separate features, not switches for
 Crewship user sign-in.
+
+## Imported Gemini grant refresh
+
+These live server-side settings configure refresh of imported Gemini CLI
+grants. They are separate from the disabled Crewship Google sign-in settings.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_GEMINI_OAUTH_CLIENT_ID` | (unset — imported Gemini grant refresh disabled) | Server-only OAuth client ID matching the client that issued an imported Gemini CLI grant. Separate from Crewship web sign-in. Configure together with its client secret and restart the server. |
+| `CREWSHIP_GEMINI_OAUTH_CLIENT_SECRET` | (unset) | Server-only secret for that Gemini OAuth client. Never put it in browser configuration or agent credentials. Crewship does not bundle or automatically download an upstream client's identity. |
 
 ## Logging
 

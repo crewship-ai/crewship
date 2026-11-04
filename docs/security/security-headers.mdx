@@ -198,10 +198,19 @@ State handling in `oauth_flow.go` and `oauth_creds.go`:
 
 - **Single-use** — the callback consumes the row with `DELETE … RETURNING`;
   a missing or previously consumed state returns `400 Invalid or expired state token`.
-- **Age checks** — a successfully parsed creation time older than 15 minutes
-  is rejected. Creating a state also sweeps rows older than 15 minutes.
+- **Age check (Callback only)** — the callback rejects a state older than
+  15 minutes only when its stored creation time can be parsed successfully.
+  Normal stored creation times use the supported format; this check does
+  not give the other connection modes a uniform 15-minute expiration.
 - **PKCE** — the verifier is encrypted before storage and read for the code
   exchange. This is separate from the disabled Google sign-in handler.
+
+Manual `Exchange` consumes a provided stored state only when no code verifier
+was supplied; that branch does not check the state's age. `Initiate` and
+auto-connect attempt cleanup of old SQL state rows when creating another SQL
+state. Loopback keeps its state separately in memory, outside that SQL
+cleanup. Do not rely on a uniform 15-minute state lifetime across these
+connection modes.
 
 ### State lifecycle
 
@@ -222,8 +231,8 @@ GET /api/v1/oauth/callback?state=<token>&code=<code>
 | Symptom | Likely cause |
 |---|---|
 | `429 Too Many Requests` on `/api/auth/login` after 10 attempts | Auth rate limiter (10 req/min). Retry after 60 s or behind a different IP. |
-| `400 OAuth state expired` after leaving the sign-in tab open | State row older than 15 minutes. Retry from the start. |
-| `400 Invalid or expired state` on back-button replay | State row already consumed — single-use. |
+| `400 OAuth state expired` in the credential-connection tab | Callback rejected a successfully parsed creation time older than 15 minutes. This is Callback's check, not a uniform age limit for manual Exchange or loopback. Restart the credential connection. |
+| `400 Invalid or expired state token` from the credential callback on back-button replay | Callback could not find the state row, for example because it was already consumed. Restart the credential connection. |
 | Legitimate internal caller rate-limited | Request hit the `/api/*` bucket because it was not sent under `/api/v1/internal/*`. Fix the route prefix; internal callers go through `X-Internal-Token` auth. |
 | `crewship seed` / template import 429s mid-run | Should not happen with a valid CLI token — the authenticated-CLI exemption (#1333) covers this. If it still 429s, confirm the CLI is actually sending `Authorization: Bearer crewship_cli_…`/`crewship_admin_…` and that the token isn't revoked/expired. `CREWSHIP_RATELIMIT_DISABLED` is no longer needed for seeding. |
 
