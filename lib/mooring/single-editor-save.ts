@@ -450,7 +450,15 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   async function retireUntouched() {
     const capture = latest
     if (!active || !capture || unconfirmed || !untouched(capture)) return
-    try { await confirmRow(capture.draft) } catch { /* It remains a draft to compare. */ }
+    try {
+      await confirmRow(capture.draft)
+      // Confirmation may race another capture, an edit or privacy retirement.
+      // Only this exact, still untouched final capture can release the guard.
+      if (active && latest === capture && !unconfirmed && !newerThan(capture) && untouched(capture)) {
+        dirty = false
+        emit("read-only", "write_revoked")
+      }
+    } catch { /* It remains a draft to compare. */ }
   }
   // A final capture with exactly the bytes of a committed save whose row could
   // not be retired is that server version; retire it instead of offering it.
