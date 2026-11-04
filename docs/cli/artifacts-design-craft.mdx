@@ -79,7 +79,7 @@ exit code follows the status:
 | 503 | 7 | `Design engine is unavailable; changes are not acknowledged` |
 
 `craft` and `mooring connect` use the same envelope, but it holds only
-`message` and `exit_code` (always `1`). There is no `status`, `detail` or
+`message` and `exit_code` (usually `1`). There is no `status`, `detail` or
 `extensions` field and the server's error text is not shown; the message is
 short, such as `native HTTP 409` or `Mooring connection rejected`:
 
@@ -89,8 +89,17 @@ short, such as `native HTTP 409` or `Mooring connection rejected`:
 
 Use the HTTP status inside the message to decide what to do.
 
-Argument checks run before any request and exit with code 1, for example
-`--name is required` or `--version must be a positive safe integer`.
+`craft version <page> <version>` requires a canonical positive decimal integer
+within the signed 64-bit range. Invalid versions (such as `0`, `01`, `+1`, a
+negative value or an overflowing number) exit with validation code `2` before
+authentication or any HTTP request; the error envelope also carries
+`exit_code: 2`.
+Pass a negative positional value after `--`, for example
+`crewship craft version @<artifact-id> -- -1`, so it is checked as a version
+instead of parsed as a flag.
+
+Other argument checks described here run before any request and exit with code 1,
+for example `--name is required` or `--version must be a positive safe integer`.
 
 ## Design artifacts
 
