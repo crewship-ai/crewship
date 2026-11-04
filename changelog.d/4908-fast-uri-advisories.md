@@ -1,0 +1,1 @@
+- **fast-uri (used by ajv for URI validation) is raised to 4.2.3 (#4908).** Version 4.2.1 had four advisories (GHSA-w74x-v6f9-j3xg and GHSA-wjr9-j795-jxcr, both moderate; GHSA-333x-w4r6-6crp and GHSA-xhq7-xmqj-769h, both low). They cover scheme injection and spoofing, host confusion, and path equivalence. The existing `ajv>fast-uri` override now requires `^4.2.3`.
