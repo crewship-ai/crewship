@@ -206,6 +206,8 @@ func (s *NativeStore) ReconcileAttempt(ctx context.Context, l EditLease, base in
 //   - only the current live holder may retire (any other answer: unconfirmed);
 //   - every row whose lease is no longer live for its session and generation
 //     is deleted first (admission expiry, release, handoff, takeover, restart);
+//   - rows below the current head are deleted too: the version fence already
+//     makes their original attempts permanently unpublishable;
 //   - a page keeps at most nativeRetiredAttemptsPerPage rows; beyond that
 //     nothing is recorded and the answer is ErrNativeRetirementLimit (409).
 //
@@ -225,7 +227,10 @@ func (s *NativeStore) retireAttempt(ctx context.Context, tx *sql.Tx, l EditLease
 	if _, err = tx.ExecContext(ctx, `DELETE FROM craft_native_retired_attempts WHERE NOT EXISTS (
  SELECT 1 FROM mooring_edit_leases e WHERE e.page_id=craft_native_retired_attempts.page_id AND e.workspace_id=craft_native_retired_attempts.workspace_id
   AND e.session_id=craft_native_retired_attempts.session_id AND e.generation=craft_native_retired_attempts.generation
-  AND e.actor_id<>'' AND e.session_id<>'' AND e.boot_id=? AND e.expires_ns>?)`, boot, now); err != nil {
+  AND e.actor_id<>'' AND e.session_id<>'' AND e.boot_id=? AND e.expires_ns>?)
+ OR EXISTS (SELECT 1 FROM artifact_version_heads h
+  WHERE h.workspace_id=craft_native_retired_attempts.workspace_id AND h.page_id=craft_native_retired_attempts.page_id
+   AND h.latest_version>craft_native_retired_attempts.base_version)`, boot, now); err != nil {
 		return err
 	}
 	var existing, rows int
