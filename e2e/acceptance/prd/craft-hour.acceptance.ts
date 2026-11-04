@@ -73,10 +73,13 @@ for (const { app, label } of KINDS) {
       } catch (err) {
         await prd.evidence("failure-craft-calls.json", trail).catch(() => {})
         await prd.evidence("failure-steps.json", steps).catch(() => {})
-        await prd.evidence("failure-chain.json", { workspaceId: ws.id, pageId: ref.pageId, ...evidence }).catch(() => {})
         // Every save/reconcile the editor sent, answered or not: the trail above only holds answers.
         await prd.evidence("failure-ops.json", ops).catch(() => {})
         throw err
+      } finally {
+        // The evidence chain on disk however the row ends (a thrown session, a failed
+        // assertion below, a pass), written after the run so late replies are in it.
+        await prd.evidence("chain.json", { workspaceId: ws.id, pageId: ref.pageId, ...evidence }).catch(() => {})
       }
       const head = await readHeadText(api, ref)
       await prd.evidence("result.json", { ...result, finalVersion: head.version, finalHash: head.hash })

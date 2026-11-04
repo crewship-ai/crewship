@@ -137,12 +137,14 @@ the stored versions can be read after a failure. `result.json` also carries a
 compact evidence chain per cycle (`chain`): the status line and save trace the
 editor showed right after the typing (the canvas text itself is not observable
 from the page), every save request of the cycle (SHA-256 of the body, base
-version, time, reply status and version), the stored head after the cycle
+version, time, and the reply status and version as finally answered, with the
+requests still unanswered at the cycle's end listed apart), the stored head after the cycle
 (version, SHA-256, how many saved markers it holds and the first missing ones,
 where the table cell text is), and the label shown after the save; plus
 `checkpoints` before and after the restart and after each reload (version,
-SHA-256, equality with the previous checkpoint, the marker report). A failed
-run writes the same as `failure-chain.json`.
+SHA-256, equality with the previous checkpoint, the marker report). The chain
+and checkpoints are also written to `chain.json` however the row ends (a session
+that throws, a failed final assertion, a pass).
 
 `craft-restart.acceptance.ts` (`A.resilience.restart.word`, `.sheet`) is the
 short form of the restart: unsaved typing, restart, reload, draft offered, no

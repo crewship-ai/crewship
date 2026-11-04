@@ -9,7 +9,7 @@ import * as N from "../outage-lostack/native"
 import { holdsAll, inspectDrafts, newTyping, offerEvidence, placeCaret, saveByAutosaveOrKey, typedMarkers, typeLines, type DraftOffer } from "./draft"
 import { checkDraftCopies, checkLines, holdsAnyLine, lineLedger, type LineCheck } from "./lines"
 import { present, sha256, wordFacts } from "./facts"
-import { auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, markerReport, tableRunsLeft, type CycleConfirmation, type MarkerReport } from "./confirm"
+import { auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, markerReport, pendingReplies, sentSince, tableRunsLeft, type CycleConfirmation, type MarkerReport } from "./confirm"
 import type { RestartRecord } from "./restart"
 
 export type SessionKind = "wordcraft" | "gridcraft"
@@ -63,7 +63,10 @@ export interface CycleChain {
   cycle: number
   typed: string[]
   local: { observed: string; status: string; savePhase: string | null; saveReason: string | null }
-  sent: Array<Pick<N.Op, "n" | "kind" | "sentAt" | "baseVersion" | "bodySha256" | "status" | "version" | "phase" | "failed">>
+  /** The recorded requests themselves (not copies): a reply that arrives later is in the chain when it is written. */
+  sent: N.Op[]
+  /** Requests without a reply or failure when the cycle ended (their final state is in `sent`). */
+  pendingAtCycleEnd: number[]
   head: { version: string; sha256: string; markers: MarkerReport }
   confirmed: boolean
   editor: { label: string | null; status: string; savePhase: string | null; saveReason: string | null }
@@ -265,7 +268,8 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
       cycle: n,
       typed,
       local: { observed: "status line only; the canvas text is not observable from the page", ...local },
-      sent: ops.slice(opsAt).map(({ n: i, kind, sentAt, baseVersion, bodySha256, status, version, phase, failed }) => ({ n: i, kind, sentAt, baseVersion, bodySha256, status, version, phase, failed })),
+      sent: sentSince(ops, opsAt),
+      pendingAtCycleEnd: pendingReplies(ops.slice(opsAt)),
       head: { version: head.version, sha256: head.hash, markers: markerReport(head.text, saved, d.cell) },
       confirmed: c.confirmed,
       editor: { label: label ?? null, ...shown },

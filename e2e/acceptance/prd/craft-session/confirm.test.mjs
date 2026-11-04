@@ -2,7 +2,7 @@
 // (also run by e2e/acceptance/prd/report.test.mjs, the PRD runner step in CI)
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, labelVersion, markerReport, splitBy, tableRunsLeft } from "./confirm.ts"
+import { auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, labelVersion, markerReport, pendingReplies, sentSince, splitBy, tableRunsLeft } from "./confirm.ts"
 
 const word = (paras) => JSON.stringify({ body: paras.map((text) => ({ kind: "para", text, runs: [{ len: text.length }] })) })
 const C = "HOURf9vyrC010"
@@ -135,4 +135,16 @@ test("the marker report counts whole tokens, caps the missing list and places th
   assert.equal(markerReport(word([` ${CELL} `]), [], CELL).cell, "elsewhere")
   assert.equal(markerReport(word(["x"]), [], CELL).cell, "absent")
   assert.equal(markerReport(word(["x"]), []).cell, undefined)
+})
+
+test("the chain keeps the requests themselves, so a reply after the cycle end still shows", () => {
+  const ops = [{ n: 1, status: 200 }, { n: 2 }, { n: 3 }]
+  const sent = sentSince(ops, 1)
+  assert.deepEqual(pendingReplies(sent), [2, 3], "both pending at the cycle end")
+  ops[1].status = 200
+  ops[1].version = "15"
+  ops[2].failed = "net::ERR_CONNECTION_RESET"
+  assert.equal(sent[0].version, "15", "the late reply is in the chain")
+  assert.deepEqual(pendingReplies(sent), [])
+  assert.deepEqual(JSON.parse(JSON.stringify(sent)), [{ n: 2, status: 200, version: "15" }, { n: 3, failed: "net::ERR_CONNECTION_RESET" }])
 })

@@ -174,3 +174,23 @@ export function markerReport(text: string, saved: string[], cell?: string, limit
   if (cell) out.cell = cellInTable(text, cell) ? "in-table" : holdsMarker(text, cell) ? "elsewhere" : "absent"
   return out
 }
+
+/** A save/reconcile request as instrument() records it; its reply fields fill in when the answer arrives. */
+export interface SentOp {
+  n: number
+  status?: number
+  failed?: string
+}
+
+/**
+ * The requests sent since index `from`, as the same objects (not copies): a reply that
+ * arrives after the cycle ended still shows in the chain when result.json is written.
+ */
+export function sentSince<T extends SentOp>(ops: T[], from: number): T[] {
+  return ops.slice(from)
+}
+
+/** The numbers of the requests that had neither a reply nor a failure yet. */
+export function pendingReplies(ops: SentOp[]): number[] {
+  return ops.filter((o) => o.status === undefined && o.failed === undefined).map((o) => o.n)
+}
