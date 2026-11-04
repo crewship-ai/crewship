@@ -18,6 +18,10 @@ import (
 // Exercise the actual HTTP boundary: the save commits and sends 201 headers,
 // but the connection closes before its advertised body is complete.
 func TestPageArtifactPublishReconcilesTruncatedSuccess(t *testing.T) {
+	// The subtests' fixtures cannot register the CLI-state reset (guardCLIState
+	// skips subtests), so the parent owns it: the commands run the root
+	// PersistentPreRun, which blanks the colour palette.
+	guardCLIState(t)
 	for _, scenario := range []string{"matching", "different", "absent", "read-fails", "definitive-refusal", "rejected-refusal", "rate-refusal", "clean-partial", "conflict-unreadable"} {
 		t.Run(scenario, func(t *testing.T) {
 			guardCLIState(t)

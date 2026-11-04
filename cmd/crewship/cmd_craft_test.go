@@ -245,6 +245,10 @@ func TestCraftCLIConnectYAMLIsSeparatedStreamWithoutBearer(t *testing.T) {
 }
 
 func TestCraftCLIProposalActions(t *testing.T) {
+	// The subtests' fixtures cannot register the CLI-state reset (guardCLIState
+	// skips subtests), so the parent owns it: the commands run the root
+	// PersistentPreRun, which blanks the colour palette.
+	guardCLIState(t)
 	const id = "ncp_0123456789abcdef01234567"
 	base := "/api/v1/pages/health/craft"
 	secret := strings.Repeat("d", 64)
