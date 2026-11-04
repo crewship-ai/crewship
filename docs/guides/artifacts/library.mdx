@@ -70,6 +70,8 @@ Other chips mark an item as **Private**, **Empty**, **Test** or **Archived**.
    **Recently opened**), then **Views** and **Folders**.
 
 An empty workspace shows **No artifacts yet** with a **New artifact** button.
+If the workspace holds only blank items, the message says how many are in
+**Empty** and offers **Show empty**.
 
 ## Find an artifact
 
@@ -120,7 +122,10 @@ name contains "sales". If you search from **Home**, the library switches to
 - **Archive**: archived artifacts.
 
 Empty, test and archived items appear only in their own view, never in
-**All artifacts**, **Mine** or **Favorites**. **Clean up**, **Test items**,
+**All artifacts**, **Mine** or **Favorites**. One exception: a blank item you
+created yourself with **New artifact**, such as a new **Page with panels**,
+stays in **All artifacts**, **Mine** and search, so you can find it again
+before crews fill it. It also stays in **Empty**. **Clean up**, **Test items**,
 **Empty** and **Archive** appear in the panel only when they hold something.
 Nothing in these views is deleted.
 
@@ -198,7 +203,9 @@ same.
 1. Click **New artifact** in the top bar, or a kind under **Make something**
    on Home.
 2. In **New artifact**, pick a kind. Kinds that this workspace can't create
-   are listed under **Coming**.
+   are listed under **Coming**. **Word** is offered when the server confirms a
+   document format, native Word (`wordcraft_native`) included; **Sheet** when
+   it confirms native Sheet (`gridcraft_native`).
 3. Enter a **Name**. Pick a **Folder**, or leave it **Unfiled**. If an
    artifact of the same kind and name is already in that folder, a warning
    offers **Open it** instead.
@@ -338,7 +345,7 @@ place. A version with more than 256 files is refused as invalid.
 
 Both lists are personal. They follow you to other devices and nobody else
 sees them. **Favorites** and **Recently opened** leave out empty, test and
-archived items.
+archived items, except a blank item you created yourself.
 
 ## Troubleshooting
 

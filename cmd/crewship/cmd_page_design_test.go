@@ -37,6 +37,10 @@ func TestPageDesignApplyUsesAuthenticatedAPI(t *testing.T) {
 }
 
 func TestPageDesignRejectsAmbiguousJSONBeforeNetwork(t *testing.T) {
+	// The subtests' fixtures cannot register the CLI-state reset (guardCLIState
+	// skips subtests), so the parent owns it: the commands run the root
+	// PersistentPreRun, which blanks the colour palette.
+	guardCLIState(t)
 	for _, raw := range []string{`{"operations":[],"operations":[]}`, `{"operations":[{"op":"delete","id":"a","id":"b"}]}`, `{"operations":[],"human_user_id":"victim"}`} {
 		t.Run(raw, func(t *testing.T) {
 			stub := pageStub(t)

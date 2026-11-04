@@ -655,7 +655,9 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		},
 
 		"GET /api/v1/pages/{slug}/panels/{panelId}/actions": {
-			Response: obj(map[string]any{"page": str(), "panel": str(), "actions": arr(action)}),
+			Response: obj(map[string]any{"page": str(), "panel": str(), "actions": arr(action),
+				"can_dispatch": map[string]any{"type": "boolean",
+					"description": "Whether the dispatch endpoint's caller gates admit this caller: the MANAGER+ role floor and, on a private Page, custody (its owner or the workspace OWNER). False for a MEMBER, and for a workspace ADMIN reading another member's private Page (the actions are readable, audited, but dispatch is refused). Per-action gates (call kind, active routine, valid inputs) still apply on dispatch."}}),
 		},
 		"POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}": {
 			Request: obj(map[string]any{

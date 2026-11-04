@@ -65,7 +65,7 @@ section "2. Agent raises a CREDENTIAL escalation → human grants it"
 ESC_NAME="HARNESS_$(nonce PAGER | tr '-' '_')"
 info "Opening an ops issue whose work needs a credential only a human has ($ESC_NAME)…"
 if ! esc_work="$(request_credential_via_issue ops morgan "$ESC_NAME")"; then
-  _fail "credential request issue ran to an end" "${esc_work:-the issue could not be created or started}"
+  _fail "credential request issue reached an escalation or an end" "${esc_work:-the issue could not be created or started}"
 fi
 
 if have jq; then
@@ -85,6 +85,9 @@ if have jq; then
 else
   _fail "credential escalation ownership checks require jq"
 fi
+# The supplied answer resumes morgan's parked run (the agent waits up to 5
+# minutes for it); let that run end before later sections drive morgan again.
+wait_agent_free morgan
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "3. Agent self-service credential (probe — may be a gap)"

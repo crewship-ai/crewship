@@ -64,8 +64,10 @@ Credentials and roles:
   restoring, sharing and data writes need `pages:write`.
 - Creating an artifact needs the OWNER, ADMIN or MANAGER role, or a MEMBER
   with the page-create capability.
-- Restore, share, replies, data writes, retained history and archive belong to the artifact owner
+- Restore, share, replies, retained history and archive belong to the artifact owner
   (or an authorized workspace admin for archive).
+- Saving a version and data writes are open to the owner and to anyone with an
+  Edit share, always against the latest version. Read and Comment shares are read-only.
 - `workspace artifact-policy` needs OWNER or ADMIN and a token with the
   `workspace:admin` scope.
 - Someone who has no grant on a private artifact receives `404`, not `403`,
@@ -481,8 +483,10 @@ crewship page artifact create sales-dashboard --name "Sales dashboard" --file da
 Data is versioned per document, separately from code versions. Writing data
 does not create a code version, and restoring code does not rewind data.
 Every read names an exact code version, and only collections declared by that
-version are reachable. Shared readers can read the collections of the shared
-version and cannot write.
+version are reachable. The owner and Edit-share holders read and write at the
+latest version; a batch whose `base_version` is not the latest version returns
+`409` and writes nothing. Shared readers (Read or Comment) can read the
+collections of the shared version and cannot write (`403`).
 
 Limits: 256 KiB per document, 50 writes and 1 MiB per batch, 4096 documents
 and 8 MiB per collection, 32 collections per artifact. Collection and document

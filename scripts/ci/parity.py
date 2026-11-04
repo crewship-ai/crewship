@@ -13,6 +13,7 @@ TESTS = {
     },
     './internal/notify': {'TestFrontendCategoriesMatchBackend'},
     './internal/backup': {'TestContentCategories_MatchTheConsole'},
+    './internal/config': {'TestArtifactsConfigurationDocExamplesLoad'},
     './scripts/docs-inventory': {'TestOpenAPIReferenceQuotesTheCurrentSpec'},
     './scripts/docker-api-surface': {'TestRealTreeMatchesDeclaration'},
 }

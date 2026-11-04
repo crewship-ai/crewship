@@ -33,7 +33,7 @@ it("keeps saving later edits after one committed save could not retire its local
   try {
     r.edit(2)
     await vi.waitFor(() => expect(r.requests).toHaveLength(1))
-    await vi.waitFor(() => expect(r.states).toContainEqual({ phase: "draft", dirty: true, reason: "storage" }))
+    await vi.waitFor(() => expect(r.states).toContainEqual({ phase: "draft", dirty: true, reason: "unretired" }))
     // The next edit is a new capture: it must reach the transport again.
     r.edit(3)
     await vi.waitFor(() => expect(r.requests).toHaveLength(2))
@@ -49,7 +49,7 @@ it("a native Ctrl+S ticket still transmits after a failed row retirement", async
   r.confirm.mockRejectedValueOnce(Error("storage deadline"))
   try {
     r.edit(2)
-    await vi.waitFor(() => expect(r.states).toContainEqual({ phase: "draft", dirty: true, reason: "storage" }))
+    await vi.waitFor(() => expect(r.states).toContainEqual({ phase: "draft", dirty: true, reason: "unretired" }))
     r.edit(3)
     await r.controller.save("ctrl-s")
     expect(r.requests.at(-1)?.editorRevision).toBe("ctrl-s")
@@ -62,7 +62,7 @@ it("surfaces the failed retirement, then retires the row itself without a duplic
   r.confirm.mockRejectedValueOnce(Error("storage deadline"))
   try {
     r.edit(2)
-    await vi.waitFor(() => expect(r.states).toContainEqual({ phase: "draft", dirty: true, reason: "storage" }))
+    await vi.waitFor(() => expect(r.states).toContainEqual({ phase: "draft", dirty: true, reason: "unretired" }))
     // No further edit: the bounded retry captures the same bytes, finds them
     // committed, retires the row and reports Saved. It never sends them again.
     await vi.waitFor(() => expect(last(r)).toEqual({ phase: "saved", dirty: false }))
@@ -81,7 +81,7 @@ it("a host flush after storage recovers delivers the owed receipt before it reso
   r.confirm.mockRejectedValueOnce(Error("storage deadline"))
   try {
     await r.controller.save()
-    expect(last(r)).toEqual({ phase: "draft", dirty: true, reason: "storage" })
+    expect(last(r)).toEqual({ phase: "draft", dirty: true, reason: "unretired" })
     expect(r.onReceipt).not.toHaveBeenCalled()
     await r.controller.flush()
     expect(r.requests).toHaveLength(1)
