@@ -49,7 +49,7 @@ function puts() {
 }
 function renderSync(workspaceDefault?: unknown) {
   return renderHook(() => {
-    useAppearanceSync(true, workspaceDefault)
+    useAppearanceSync(true, workspaceDefault, "Alice")
     return useAppearance()
   })
 }

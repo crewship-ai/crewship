@@ -1,3 +1,5 @@
+import { RequestSessionChangedError } from "@/lib/workspace-availability"
+
 /**
  * Server writes for the appearance preference keys (#3334).
  *
@@ -10,7 +12,8 @@
  * renders Harbor for that pair until the rest arrives).
  *
  * - One pending body per key; a newer one replaces it.
- * - Pending writes are kept in localStorage and replayed on the next load.
+ * - Pending writes are stored per account and server for that owner's next load.
+ *   Unknown legacy unscoped data is preserved untouched, never adopted.
  * - A transient failure (network, 5xx, 401, 408, 429) is retried after 5 s,
  *   30 s and 2 min, then waits for a kick (page load, focus, back online).
  * - Any other 4xx is permanent: the entry stays, flagged, the status becomes
@@ -28,6 +31,11 @@
  */
 
 export const OUTBOX_STORAGE_KEY = "crewship-appearance-outbox"
+export interface AppearanceOutboxOwner { humanId: string; serverBase: string }
+/** Legacy unscoped storage is deliberately never read, reassigned or removed. */
+export function appearanceOutboxStorageKey(owner: AppearanceOutboxOwner): string {
+  return `${OUTBOX_STORAGE_KEY}.v2.${encodeURIComponent(JSON.stringify([owner.serverBase, owner.humanId]))}`
+}
 export const RETRY_DELAYS_MS = [5000, 30000, 120000] as const
 
 /** Write order: lower first. Unknown keys go last. */
@@ -47,6 +55,7 @@ interface StorageLike {
 }
 
 export interface OutboxDeps {
+  owner: AppearanceOutboxOwner
   storage: StorageLike
   send: (key: string, body: string, keepalive: boolean) => Promise<{ ok: boolean; status: number }>
   /** Runs `fn` after `ms`; returns a function that cancels it. */
@@ -59,6 +68,7 @@ function transient(status: number): boolean {
 }
 
 export function createAppearanceOutbox(deps: OutboxDeps) {
+  const storageKey = appearanceOutboxStorageKey(deps.owner)
   let entries: Entry[] = load()
   let attempt = 0
   let running: Promise<void> | null = null
@@ -68,7 +78,7 @@ export function createAppearanceOutbox(deps: OutboxDeps) {
 
   function load(): Entry[] {
     try {
-      const raw = deps.storage.getItem(OUTBOX_STORAGE_KEY)
+      const raw = deps.storage.getItem(storageKey)
       const v = raw ? JSON.parse(raw) : []
       return Array.isArray(v) ? v.filter((e) => e && typeof e.key === "string" && typeof e.body === "string") : []
     } catch {
@@ -77,7 +87,7 @@ export function createAppearanceOutbox(deps: OutboxDeps) {
   }
   function save(): void {
     try {
-      deps.storage.setItem(OUTBOX_STORAGE_KEY, JSON.stringify(entries))
+      deps.storage.setItem(storageKey, JSON.stringify(entries))
     } catch {
       // Blocked storage: pending writes live for this page only.
     }
@@ -116,7 +126,16 @@ export function createAppearanceOutbox(deps: OutboxDeps) {
       let res: { ok: boolean; status: number }
       try {
         res = await deps.send(e.key, e.body, keepalive)
-      } catch {
+      } catch (error) {
+        if (error instanceof RequestSessionChangedError) {
+          // A different observed account is not a network outage. Preserve
+          // this owner's entries, but retire every automatic retry.
+          paused = true
+          cancelRetry?.()
+          cancelRetry = null
+          report()
+          return
+        }
         res = { ok: false, status: 0 }
       }
       if (res.ok) {
@@ -189,6 +208,9 @@ export function createAppearanceOutbox(deps: OutboxDeps) {
     /** Sync switched on again; call `kick()` to send what is owed. */
     resume(): void {
       paused = false
+    },
+    pendingBody(key: string): string | null {
+      return entries.find((e) => e.key === key)?.body ?? null
     },
     pending(key: string): boolean {
       return entries.some((e) => e.key === key)

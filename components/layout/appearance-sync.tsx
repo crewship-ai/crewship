@@ -19,7 +19,7 @@ export function AppearanceSync() {
   const { session } = useAuth()
   const { workspaceId, workspace } = useWorkspace()
   // undefined until the workspace is known: nothing is inherited before that.
-  useAppearanceSync(true, workspace ? (workspace.appearance_default ?? null) : undefined)
+  useAppearanceSync(true, workspace ? (workspace.appearance_default ?? null) : undefined, session?.user?.id)
   useSoundPreferencesSync(true, session?.user?.id, workspaceId)
   return null
 }

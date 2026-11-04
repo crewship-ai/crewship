@@ -51,7 +51,7 @@ const DEFAULT_B = { style: "ink", accent: "teal", theme: "dark" }
 
 function renderWith(initial: unknown) {
   return renderHook(({ d }) => {
-    useAppearanceSync(true, d)
+    useAppearanceSync(true, d, "Alice")
     return useAppearance()
   }, { initialProps: { d: initial } })
 }

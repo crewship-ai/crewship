@@ -15,7 +15,7 @@ describe("appearance outbox: review regressions", () => {
     const sent: string[] = []
     let release!: () => void
     const held = new Promise<void>((resolve) => { release = resolve })
-    const outbox = createAppearanceOutbox({
+    const outbox = createAppearanceOutbox({ owner: { humanId: "Alice", serverBase: "test-server" },
       storage: storage(),
       send: async (_key, body) => { sent.push(body); if (body === "first") await held; return { ok: true, status: 204 } },
       schedule: () => () => {}, onStatus: () => {},
@@ -32,7 +32,7 @@ describe("appearance outbox: review regressions", () => {
 
   it("does not send style if the required appearance write is rejected", async () => {
     const sent: string[] = []
-    const outbox = createAppearanceOutbox({
+    const outbox = createAppearanceOutbox({ owner: { humanId: "Alice", serverBase: "test-server" },
       storage: storage(),
       send: async (key) => { sent.push(key); return key === "appearance" ? { ok: false, status: 400 } : { ok: true, status: 204 } },
       schedule: () => () => {}, onStatus: () => {},
@@ -49,7 +49,7 @@ describe("appearance outbox: review regressions", () => {
     const sent: string[] = []
     const timers: { fn: () => Promise<void>; cancelled: boolean }[] = []
     let fail = true
-    const outbox = createAppearanceOutbox({
+    const outbox = createAppearanceOutbox({ owner: { humanId: "Alice", serverBase: "test-server" },
       storage: storage(),
       send: async (key) => { sent.push(key); return fail ? { ok: false, status: 503 } : { ok: true, status: 204 } },
       schedule: (fn) => { const t = { fn, cancelled: false }; timers.push(t); return () => { t.cancelled = true } },
@@ -80,7 +80,7 @@ describe("appearance outbox: review regressions", () => {
     const sent: string[] = []
     let release!: () => void
     const held = new Promise<void>((resolve) => { release = resolve })
-    const outbox = createAppearanceOutbox({
+    const outbox = createAppearanceOutbox({ owner: { humanId: "Alice", serverBase: "test-server" },
       storage: storage(),
       send: async (key) => { sent.push(key); if (key === "appearance") await held; return { ok: true, status: 204 } },
       schedule: () => () => {}, onStatus: () => {},
@@ -104,7 +104,7 @@ describe("appearance outbox: review regressions", () => {
     const sent: string[] = []
     let release!: () => void
     const held = new Promise<void>((resolve) => { release = resolve })
-    const outbox = createAppearanceOutbox({
+    const outbox = createAppearanceOutbox({ owner: { humanId: "Alice", serverBase: "test-server" },
       storage: storage(),
       send: async (key) => { sent.push(key); if (key === "appearance") { await held; return { ok: false, status: 400 } } return { ok: true, status: 204 } },
       schedule: () => () => {}, onStatus: () => {},
@@ -122,7 +122,7 @@ describe("appearance outbox: review regressions", () => {
 
   it("keepalive sends style after appearance is accepted, both with keepalive", async () => {
     const sent: [string, boolean][] = []
-    const outbox = createAppearanceOutbox({
+    const outbox = createAppearanceOutbox({ owner: { humanId: "Alice", serverBase: "test-server" },
       storage: storage(),
       send: async (key, _body, keepalive) => { sent.push([key, keepalive]); return { ok: true, status: 204 } },
       schedule: () => () => {}, onStatus: () => {},
@@ -140,7 +140,7 @@ describe("appearance outbox: review regressions", () => {
     const sent: [string, boolean][] = []
     let release!: () => void
     const held = new Promise<void>((resolve) => { release = resolve })
-    const outbox = createAppearanceOutbox({
+    const outbox = createAppearanceOutbox({ owner: { humanId: "Alice", serverBase: "test-server" },
       storage: storage(),
       send: async (key, _body, keepalive) => { sent.push([key, keepalive]); if (key === "appearance" && !keepalive) { await held; return { ok: false, status: 400 } } return { ok: key !== "appearance", status: key === "appearance" ? 400 : 204 } },
       schedule: () => () => {}, onStatus: () => {},

@@ -53,7 +53,7 @@ function puts() {
 /** The sync hook plus a picker's view of the same store, as in the app. */
 function renderSync(enabled = true) {
   return renderHook(({ on }) => {
-    useAppearanceSync(on)
+    useAppearanceSync(on, undefined, "Alice")
     return useAppearance()
   }, { initialProps: { on: enabled } })
 }
@@ -218,7 +218,7 @@ describe("useAppearanceSync", () => {
 
 // ── Harbor 2: the style key and the outbox (#3334) ──────────────────────
 import { STYLE_STORAGE_KEY } from "@/lib/theme/appearance-style"
-import { OUTBOX_STORAGE_KEY } from "@/lib/theme/appearance-outbox"
+import { appearanceOutboxStorageKey } from "@/lib/theme/appearance-outbox"
 import { retryAppearanceSync, useAppearanceSyncStatus } from "../use-appearance-sync"
 
 const STYLE_PUT = "/api/v1/me/preferences/appearance.style"
@@ -245,7 +245,7 @@ describe("useAppearanceSync — appearance.style", () => {
 
   it("a style change still waiting in the outbox beats the server's value", async () => {
     store.set(STYLE_STORAGE_KEY, '{"v":1,"style":"harbor","knobs":{"radius":"sharp"}}')
-    store.set(OUTBOX_STORAGE_KEY, JSON.stringify([{ key: "appearance.style", body: '{"v":1,"style":"harbor","knobs":{"radius":"sharp"}}' }]))
+    store.set(appearanceOutboxStorageKey({ humanId: "Alice", serverBase: window.location.origin }), JSON.stringify([{ key: "appearance.style", body: '{"v":1,"style":"harbor","knobs":{"radius":"sharp"}}' }]))
     apiFetch.mockResolvedValue(ok({ appearance: fullAppearance, "appearance.style": { v: 1, style: "harbor", knobs: {} } }))
     renderSync()
     await waitFor(() => expect(stylePuts()).toHaveLength(1))

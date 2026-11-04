@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest"
 
-import { createAppearanceOutbox, OUTBOX_STORAGE_KEY, RETRY_DELAYS_MS } from "../appearance-outbox"
+import { createAppearanceOutbox, appearanceOutboxStorageKey, RETRY_DELAYS_MS } from "../appearance-outbox"
 
 // Server writes for the two appearance keys (#3334, APR-06, APR-10).
 
@@ -15,7 +15,7 @@ let responder: (key: string) => Res | Error
 let timers: { fn: () => Promise<void>; ms: number }[]
 function make(storage = memoryStorage()) {
   const statuses: string[] = []
-  const ob = createAppearanceOutbox({
+  const ob = createAppearanceOutbox({ owner: { humanId: "Alice", serverBase: "test-server" },
     storage,
     send: async (key, body, keepalive) => {
       calls.push({ key, body, keepalive })
@@ -59,7 +59,7 @@ describe("appearance outbox", () => {
     a.ob.enqueue("appearance", "A")
     a.ob.enqueue("appearance.style", "S")
     await a.ob.flush()
-    expect(JSON.parse(storage.m.get(OUTBOX_STORAGE_KEY)!)).toHaveLength(2)
+    expect(JSON.parse(storage.m.get(appearanceOutboxStorageKey({ humanId: "Alice", serverBase: "test-server" }))!)).toHaveLength(2)
 
     calls = []
     responder = () => ({ ok: true, status: 204 })
@@ -67,7 +67,7 @@ describe("appearance outbox", () => {
     expect(b.ob.pending("appearance.style")).toBe(true)
     await b.ob.flush()
     expect(calls.map((c) => c.body)).toEqual(["A", "S"])
-    expect(storage.m.get(OUTBOX_STORAGE_KEY)).toBe("[]")
+    expect(storage.m.get(appearanceOutboxStorageKey({ humanId: "Alice", serverBase: "test-server" }))).toBe("[]")
   })
 
   it("retries a transient failure after 5 s, 30 s and 2 min, then waits for a kick", async () => {
@@ -138,7 +138,7 @@ describe("three clients (APR-06)", () => {
       server.set(key, body)
       return { ok: true, status: 204 }
     }
-    const mk = () => createAppearanceOutbox({ storage: memoryStorage(), send, schedule: () => undefined, onStatus: () => undefined })
+    const mk = () => createAppearanceOutbox({ owner: { humanId: "Alice", serverBase: "test-server" }, storage: memoryStorage(), send, schedule: () => undefined, onStatus: () => undefined })
 
     const newer = mk()
     newer.enqueue("appearance", JSON.stringify({ theme: "dark", accent: "indigo" }))

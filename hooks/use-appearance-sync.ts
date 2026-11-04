@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { useTheme } from "next-themes"
 
+import { getServerBase } from "@/lib/server-base"
+import { captureRequestSession, assertRequestSession, RequestSessionChangedError } from "@/lib/workspace-availability"
 import { apiFetch } from "@/lib/api-fetch"
 import { useAppearance } from "@/hooks/use-appearance"
 import { DEFAULT_ACCENT } from "@/lib/theme/accents"
@@ -31,7 +33,7 @@ import {
   serializeStyleState,
   writeStyleState,
 } from "@/lib/theme/appearance-style"
-import { createAppearanceOutbox, type AppearanceOutbox, type OutboxStatus } from "@/lib/theme/appearance-outbox"
+import { appearanceOutboxStorageKey, createAppearanceOutbox, type AppearanceOutbox, type OutboxStatus } from "@/lib/theme/appearance-outbox"
 
 /** Same tail as useUserPreference: a run of clicks through the accents is one write. */
 export const APPEARANCE_SYNC_DEBOUNCE_MS = 400
@@ -139,15 +141,24 @@ function readStyleRaw(): string | null {
  * Here the source of truth for the local look stays where the pickers and the
  * boot scripts already read it.
  *
+ * `humanId` comes from the existing trusted auth session; absent identity
+ * cannot activate a queue. The legacy unscoped queue is preserved inert.
  * `enabled` is the caller's gate on the session: pass false for anything but a
  * trusted session. The preference routes are not on the restricted allowlist
  * (internal/api/restricted_surfaces.go), so a restricted session must never
  * send them.
  */
-export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown): void {
+export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown, humanId?: string): void {
   const { theme, accent, density, motion, textSize, sidebar, avatarAnimation, syncEnabled, explicit } = useAppearance()
   const { resolvedTheme, setTheme: setNextTheme } = useTheme()
-  const active = enabled && syncEnabled
+  const serverBase = getServerBase() || (typeof window === "undefined" ? "" : window.location.origin)
+  const owner = humanId ? { humanId, serverBase } : null
+  const ownerKey = owner ? appearanceOutboxStorageKey(owner) : null
+  const ownerKeyRef = useRef(ownerKey)
+  ownerKeyRef.current = ownerKey
+  const active = enabled && syncEnabled && ownerKey !== null
+  const activeRef = useRef(active)
+  activeRef.current = active
 
   // The explicit part of the look as it would be stored; null until
   // next-themes knows the theme.
@@ -173,27 +184,9 @@ export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown):
   const lastSentRef = useRef<string | null>(null)
   const lastStyleSentRef = useRef<string | null>(null)
   const pendingRef = useRef<{ appearance: string | null; style: string | null }>({ appearance: null, style: null })
-  const [ready, setReady] = useState(false)
-
+  const [readyOwner, setReadyOwner] = useState<string | null>(null)
+  const ready = ownerKey !== null && readyOwner === ownerKey
   const outboxRef = useRef<AppearanceOutbox | null>(null)
-  function outbox(): AppearanceOutbox {
-    if (!outboxRef.current) {
-      outboxRef.current = createAppearanceOutbox({
-        storage: storageForOutbox(),
-        send: (key, body, keepalive) =>
-          apiFetch(prefUrl(key), { method: "PUT", keepalive, headers: { "Content-Type": "application/json" }, body }).then((r) => ({
-            ok: Boolean(r?.ok),
-            status: typeof r?.status === "number" ? r.status : r?.ok ? 200 : 0,
-          })),
-        schedule: (fn, ms) => {
-          const t = setTimeout(() => void fn(), ms)
-          return () => clearTimeout(t)
-        },
-        onStatus: setSyncStatus,
-      })
-    }
-    return outboxRef.current
-  }
 
   // Paint the style that can actually be shown (Harbor for an unknown style
   // or one without a palette for the current scheme), sync on or off.
@@ -205,50 +198,70 @@ export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown):
   // Pull once per activation (mount, sign-in, or the switch turned on).
   useEffect(() => {
     if (!active) {
-      setReady(false)
+      setReadyOwner(null)
       // APR-05: sync off stops every request, a scheduled retry included.
       outboxRef.current?.pause()
       return
     }
-    activeOutbox = outbox()
-    outbox().resume()
+    if (!owner || !ownerKey) return
+    const generation = captureRequestSession()
+    const assertOwner = () => {
+      assertRequestSession(generation)
+      if (ownerKeyRef.current !== ownerKey || (getServerBase() || window.location.origin) !== owner.serverBase) {
+        throw new RequestSessionChangedError()
+      }
+    }
+    const ob = createAppearanceOutbox({
+      owner,
+      storage: storageForOutbox(),
+      send: async (key, body, keepalive) => {
+        assertOwner()
+        const r = await apiFetch(prefUrl(key), { method: "PUT", keepalive, headers: { "Content-Type": "application/json" }, body })
+        assertOwner()
+        return { ok: Boolean(r?.ok), status: typeof r?.status === "number" ? r.status : r?.ok ? 200 : 0 }
+      },
+      schedule: (fn, ms) => {
+        const t = setTimeout(() => void fn(), ms)
+        return () => clearTimeout(t)
+      },
+      onStatus: (status) => { if (activeOutbox === ob) setSyncStatus(status) },
+    })
+    outboxRef.current = ob
+    activeOutbox = ob
+    setSyncStatus(ob.status())
+    ob.resume()
     let cancelled = false
     apiFetch("/api/v1/me/preferences")
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data: unknown) => {
         if (cancelled) return
+        assertOwner()
         const map = data && typeof data === "object" ? (data as Record<string, unknown>) : {}
-        const remote = parseAppearance(map[APPEARANCE_PREFERENCE_KEY])
+        const pendingAppearance = ob.pendingBody(APPEARANCE_PREFERENCE_KEY)
+        const remote = parseAppearance(pendingAppearance === null ? map[APPEARANCE_PREFERENCE_KEY] : JSON.parse(pendingAppearance))
         const local = fullRef.current
-        if (outbox().pending(APPEARANCE_PREFERENCE_KEY)) {
-          // A local change the server has not received yet (sync was off, or
-          // the write is still retrying) wins over the server's older value,
-          // as it does for the style below; the outbox sends it next.
-          lastSentRef.current = null
-        } else {
-          // Whatever the server holds is something the user chose on some
-          // device: apply it and keep it as this device's explicit value.
-          // Raw setters: applying must not look like a local change.
-          if (remote.theme) { markExplicit("theme"); if (remote.theme !== local?.theme) setNextTheme(remote.theme) }
-          if (remote.accent) { markExplicit("accent"); if (remote.accent !== local?.accent) setAccentChoice(remote.accent) }
-          if (remote.density) { markExplicit("density"); if (remote.density !== local?.density) setDensity(remote.density) }
-          if (remote.motion) { markExplicit("motion"); if (remote.motion !== local?.motion) setMotion(remote.motion) }
-          if (remote.textSize) { markExplicit("textSize"); if (remote.textSize !== local?.textSize) setTextSize(remote.textSize) }
-          if (remote.sidebar) { markExplicit("sidebar"); if (remote.sidebar !== local?.sidebar) setSidebarChoice(remote.sidebar) }
-          // Animated avatars (#3789) syncs like the rest; it has no workspace
-          // default, so the inherit step below never touches it.
-          if (remote.avatarAnimation) { markExplicit("avatarAnimation"); if (remote.avatarAnimation !== local?.avatarAnimation) setAvatarAnimation(remote.avatarAnimation) }
-          // The server's value is what the server holds, so it is not sent
-          // back; a local explicit field it lacks is, by the push effect.
-          lastSentRef.current = canonicalAppearance(remote)
-        }
+        // Whatever the server holds is something the user chose on some
+        // device: apply it and keep it as this device's explicit value.
+        // Raw setters: applying must not look like a local change.
+        if (remote.theme) { markExplicit("theme"); if (remote.theme !== local?.theme) setNextTheme(remote.theme) }
+        if (remote.accent) { markExplicit("accent"); if (remote.accent !== local?.accent) setAccentChoice(remote.accent) }
+        if (remote.density) { markExplicit("density"); if (remote.density !== local?.density) setDensity(remote.density) }
+        if (remote.motion) { markExplicit("motion"); if (remote.motion !== local?.motion) setMotion(remote.motion) }
+        if (remote.textSize) { markExplicit("textSize"); if (remote.textSize !== local?.textSize) setTextSize(remote.textSize) }
+        if (remote.sidebar) { markExplicit("sidebar"); if (remote.sidebar !== local?.sidebar) setSidebarChoice(remote.sidebar) }
+        // Animated avatars (#3789) syncs like the rest; it has no workspace
+        // default, so the inherit step below never touches it.
+        if (remote.avatarAnimation) { markExplicit("avatarAnimation"); if (remote.avatarAnimation !== local?.avatarAnimation) setAvatarAnimation(remote.avatarAnimation) }
+        // Browser-local explicit values are display state, not a fresh
+        // cloud-write intent for the account that just activated. Pending
+        // owned values above hydrate the display before this baseline.
+        lastSentRef.current = canonicalAppearance({ ...(local ? explicitOnly(local, readExplicit()) : {}), ...remote })
         // The style: a local change still waiting in the outbox wins; else the
         // server's value is adopted; an empty server stays empty — only a
         // style the user picked is ever written.
-        const remoteStyle = parseStyleState(map[STYLE_PREFERENCE_KEY])
-        if (outbox().pending(STYLE_PREFERENCE_KEY)) {
-          lastStyleSentRef.current = null
-        } else if (remoteStyle) {
+        const pendingStyle = ob.pendingBody(STYLE_PREFERENCE_KEY)
+        const remoteStyle = parseStyleState(pendingStyle === null ? map[STYLE_PREFERENCE_KEY] : JSON.parse(pendingStyle))
+        if (remoteStyle) {
           const r = serializeStyleState(remoteStyle)
           markExplicit("style")
           if (r !== readStyleRaw()) {
@@ -257,10 +270,10 @@ export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown):
           }
           lastStyleSentRef.current = r
         } else {
-          lastStyleSentRef.current = EMPTY
+          lastStyleSentRef.current = styleOutRef.current
         }
-        setReady(true)
-        void outbox().kick()
+        setReadyOwner(ownerKey)
+        void ob.kick()
       })
       .catch(() => {
         if (cancelled) return
@@ -268,19 +281,29 @@ export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown):
         // treat it as already sent, so only a real change is written later.
         lastSentRef.current = serializedRef.current
         lastStyleSentRef.current = styleOutRef.current
-        setReady(true)
+        setReadyOwner(ownerKey)
       })
-    const kick = () => void outbox().kick()
+    const kick = () => void ob.kick()
     window.addEventListener("online", kick)
     window.addEventListener("focus", kick)
     return () => {
       cancelled = true
+      // Capture this activation's box, including a just-debounced write.
+      // A new account cannot inherit or flush it through a fresh invocation.
+      const p = pendingRef.current
+      if (p.appearance) ob.enqueue(APPEARANCE_PREFERENCE_KEY, p.appearance)
+      if (p.style) ob.enqueue(STYLE_PREFERENCE_KEY, p.style)
+      if (activeRef.current && (p.appearance || p.style)) ob.flushKeepalive()
+      pendingRef.current = { appearance: null, style: null }
+      ob.pause()
+      if (activeOutbox === ob) activeOutbox = null
+      if (outboxRef.current === ob) outboxRef.current = null
       window.removeEventListener("online", kick)
       window.removeEventListener("focus", kick)
     }
     // The setters are stable (module functions, next-themes' memoised setter).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active])
+  }, [active, ownerKey])
 
   // The workspace default (WSD-03/04): applied to every theme/accent/style the
   // user has not chosen. Runs with sync on or off; with sync on it waits for
@@ -344,7 +367,8 @@ export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown):
     }
     pendingRef.current = { appearance: appearanceOwed ? serialized : null, style: styleOwed ? style : null }
     const t = setTimeout(() => {
-      const ob = outbox()
+      const ob = outboxRef.current
+      if (!ob || ownerKeyRef.current !== ownerKey) return
       if (appearanceOwed && serialized) {
         lastSentRef.current = serialized
         ob.enqueue(APPEARANCE_PREFERENCE_KEY, serialized)
@@ -357,23 +381,5 @@ export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown):
       void ob.flush()
     }, APPEARANCE_SYNC_DEBOUNCE_MS)
     return () => clearTimeout(t)
-  }, [active, ready, serialized, style])
-
-  // A change made just before the shell unmounts (sign-out, a hard
-  // navigation) still reaches the server: keepalive lets the request outlive
-  // the page; anything unsent stays in the outbox for the next load.
-  useEffect(() => {
-    return () => {
-      const p = pendingRef.current
-      if (p.appearance || p.style) {
-        const ob = outbox()
-        if (p.appearance) ob.enqueue(APPEARANCE_PREFERENCE_KEY, p.appearance)
-        if (p.style) ob.enqueue(STYLE_PREFERENCE_KEY, p.style)
-        ob.flushKeepalive()
-      }
-      pendingRef.current = { appearance: null, style: null }
-      if (activeOutbox === outboxRef.current) activeOutbox = null
-    }
-  }, [])
+  }, [active, ready, serialized, style, ownerKey])
 }
-
