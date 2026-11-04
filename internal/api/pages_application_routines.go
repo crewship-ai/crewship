@@ -16,7 +16,15 @@ type pageRoutineChecks struct {
 	Definitions map[string]string `json:"routine_definitions"`
 }
 
-func (h *PageHandler) annotateApplicationRoutines(w http.ResponseWriter, r *http.Request, rec *pageRecord, actions []actionWire) bool {
+// annotateApplicationRoutines is the dispatch preflight of an application's
+// action listing (`?publication=`): it fences the listing to the publication
+// and, for a caller who may dispatch, marks each call action whose routine
+// changed since publication. A reader without dispatch authority (a MEMBER
+// below the role floor, or a workspace ADMIN reading another member's private
+// Page, PRD §5; see panelDispatchAllowed) gets the fence but no
+// routine annotation: the listing says can_dispatch=false and must not read
+// as a prompt to run something DispatchApplicationAction would refuse.
+func (h *PageHandler) annotateApplicationRoutines(w http.ResponseWriter, r *http.Request, rec *pageRecord, actions []actionWire, canDispatch bool) bool {
 	value := r.URL.Query().Get("publication")
 	if value == "" {
 		return true
@@ -35,6 +43,9 @@ func (h *PageHandler) annotateApplicationRoutines(w http.ResponseWriter, r *http
 	if err := json.Unmarshal([]byte(raw), &checks); err != nil {
 		replyInternalError(w, h.logger, "read application routine review", err)
 		return false
+	}
+	if !canDispatch {
+		return true
 	}
 	for i := range actions {
 		a := &actions[i]

@@ -31,6 +31,10 @@ func TestPageArtifactCommentSendsExactAnchorOnce(t *testing.T) {
 }
 
 func TestPageArtifactCommentInvalidInputAndAgentCannotFallBack(t *testing.T) {
+	// The subtests' fixtures cannot register the CLI-state reset (guardCLIState
+	// skips subtests), so the parent owns it: the commands run the root
+	// PersistentPreRun, which blanks the colour palette.
+	guardCLIState(t)
 	for _, tc := range []struct{ name, version, selector, quote, text, agent string }{
 		{"missing-version", "0", "#hero", "Title", "Change", ""},
 		{"missing-selector", "1", "", "Title", "Change", ""},

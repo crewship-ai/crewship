@@ -38,7 +38,7 @@ import { AccessTab } from "./sharing/access-tab"
 import { FolderSettingsDialog } from "./sharing/folder-settings-dialog"
 import { BulkBar, MoveToFolderDialog } from "./sharing/bulk-actions"
 import {
-  applyFilters, EMPTY_FILTERS, groupItems, inView, needsAttention, sortItems, versioned,
+  applyFilters, EMPTY_FILTERS, groupItems, hiddenAsEmpty, inView, needsAttention, sortItems, versioned,
   type GroupKey, type LibraryFilters, type Personal, type SortKey,
 } from "./library-filter"
 import { LibraryPanel } from "./library-panel"
@@ -189,7 +189,7 @@ function LibraryHome({ items, creatable, personal, onNew, onOpen, onShow, peeked
   items: LibraryItem[]; creatable: ArtifactKindKey[]; personal: Personal
   onNew: (kind: ArtifactKindKey) => void; onOpen: (slug: string) => void; onShow: (view: "all" | "opened") => void; peeked?: string | null
 }) {
-  const visible = items.filter(item => !item.empty)
+  const visible = items.filter(item => !hiddenAsEmpty(item, personal))
   const attention = visible.filter(needsAttention).slice(0, 5)
   const opened = inView(items, "opened", personal)
   // Each item once on Home: what waits on its owner is not repeated below.
@@ -559,10 +559,13 @@ export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanoni
   // Per person, synced across devices: what they opened and what they starred. Never shared with others.
   const [recent, setRecent] = useUserPreference<{ slug: string; at: number }[]>(`artifacts.${workspaceId}.recentlyOpened`, [])
   const [favorites, setFavorites] = useUserPreference<string[]>(`artifacts.${workspaceId}.favorites`, [])
+  // What this person made from New artifact: a blank Page they just created is still theirs to find.
+  const [madeHere, setMadeHere] = useUserPreference<string[]>(`artifacts.${workspaceId}.created`, [])
   const personal = useMemo<Personal>(() => ({
     opened: new Map(Array.isArray(recent) ? recent.filter(entry => typeof entry?.slug === "string" && Number.isFinite(entry?.at)).map(entry => [entry.slug, entry.at]) : []),
     favorites: new Set(Array.isArray(favorites) ? favorites.filter(slug => typeof slug === "string") : []),
-  }), [recent, favorites])
+    created: new Set(Array.isArray(madeHere) ? madeHere.filter(slug => typeof slug === "string") : []),
+  }), [recent, favorites, madeHere])
   // An ID address fails closed: it never falls back to a slug, which another artifact may hold now.
   const selected = item === null ? null : items.find(entry => bySlug ? entry.slug === item : entry.pageId === item) ?? null
   const canonical = bySlug ? selected?.pageId : undefined
@@ -609,10 +612,15 @@ export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanoni
         <p>This artifact is not available.</p>
         <div><Button type="button" size="sm" variant="outline" onClick={() => onSelect(null)}><ArrowLeft aria-hidden />All artifacts</Button></div>
       </div>
-  } else if (!inView(items, "all").length && !VIEW_NOTE[filters.view]) {
+  } else if (!inView(items, "all", personal).length && !VIEW_NOTE[filters.view]) {
+    // Blank items are only hidden, never gone: say where they are.
+    const blank = inView(items, "empty", personal).length
     content = <PageEmpty icon={Library} title="No artifacts yet"
-      description="Ask an agent in Chat to make a project or a dashboard, or start a document here."
-      primary={creatable.length ? { label: "New artifact", icon: Plus, onClick: () => setNewKind(null) } : undefined} />
+      description={blank
+        ? `${blank === 1 ? "1 blank item is" : `${blank} blank items are`} in Empty. Ask an agent in Chat to make a project or a dashboard, or start a document here.`
+        : "Ask an agent in Chat to make a project or a dashboard, or start a document here."}
+      primary={creatable.length ? { label: "New artifact", icon: Plus, onClick: () => setNewKind(null) } : undefined}
+      secondary={blank ? { label: `Show empty (${blank})`, onClick: () => setFilters({ ...EMPTY_FILTERS, view: "empty" }) } : undefined} />
   } else if (filters.view === "home") {
     content = <LibraryHome items={items} creatable={creatable} personal={personal} onNew={kind => setNewKind(kind)} onOpen={pick}
       onShow={view => setFilters({ ...filters, view })} peeked={peeked?.slug} />
@@ -680,6 +688,12 @@ export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanoni
         the page as /artifacts/<id>, losing that refresh's cookies and signing the person out (#4902). */}
     {newKind !== undefined && <NewArtifactDialog workspaceId={workspaceId} open onOpenChange={open => { if (!open) setNewKind(undefined) }}
       defaultKind={newKind ?? undefined} defaultFolderSlug={filters.folder || undefined}
-      onCreated={(slug, id) => { setNewKind(undefined); refresh(); if (id) onSelect(id); else if (slug) onSelect(null, slug) }} />}
+      onCreated={(slug, id) => {
+        setNewKind(undefined)
+        if (slug) setMadeHere([slug, ...(Array.isArray(madeHere) ? madeHere : []).filter(entry => entry !== slug)].slice(0, 50))
+        refresh()
+        if (id) onSelect(id)
+        else if (slug) onSelect(null, slug)
+      }} />}
   </div>
 }

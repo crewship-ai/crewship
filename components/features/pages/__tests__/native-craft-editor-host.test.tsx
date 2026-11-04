@@ -15,6 +15,8 @@ vi.mock("../workbook-editor-host",()=>({editorFrameSupported:()=>true,createEdit
 const deferred=<T,>()=>{let resolve!:(v:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve}}
 const emptyLease={can_edit:true,holder:null,mine:false,generation:null,can_write:false,acquired_at:null,expires_at:null,handoff_requested_by:[]}
 const ownedLease={...emptyLease,holder:{actor_id:"user:human",display_name:"Pavel",kind:"human"},mine:true,generation:"9007199254740995",can_write:true,expires_at:'2099-01-01T00:00:00Z'}
+// Another person (a holder with the viewer's own actor id is the viewer's other tab).
+const otherPerson={actor_id:"user:pavel",display_name:"Pavel",kind:"human"}
 const receipt=(r:NativeSaveRequest)=>({...r,bytes:undefined,version:(BigInt(r.baseVersion)+1n).toString(),candidateHash:r.contentHash,durability:"node",issuedBy:"crewship",phase:"committed"})
 let authSuspend:(()=>Promise<void>)|undefined
 let privacyRetire:(()=>Promise<void>)|undefined
@@ -72,7 +74,7 @@ describe('native Word host authority and persistence',()=>{
   expect(screen.queryByRole('button',{name:'Převzít úpravy'})).not.toBeInTheDocument()
   expect(screen.queryByRole('button',{name:'Požádat o předání'})).not.toBeInTheDocument()
   expect(client.leaseAction).not.toHaveBeenCalled();expect(client.save).not.toHaveBeenCalled();expect(client.share).not.toHaveBeenCalled();expect(screen.queryByRole('button',{name:'Publikovat náhled'})).not.toBeInTheDocument();expect(m.openJournal).not.toHaveBeenCalled()
-  act(()=>stream?.('lease',{...ownedLease,mine:false,can_write:false,can_edit:canEdit}))
+  act(()=>stream?.('lease',{...ownedLease,holder:otherPerson,mine:false,can_write:false,can_edit:canEdit}))
   await screen.findByText('Upravuje Pavel')
   expect(screen.queryByRole('button',{name:'Požádat o předání'})).not.toBeInTheDocument()
   expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false)
@@ -119,6 +121,29 @@ describe('native Word host authority and persistence',()=>{
   await waitFor(()=>expect(client.save).toHaveBeenCalledTimes(3))
   expect(p.saveFailed).not.toHaveBeenCalled()
   await waitFor(()=>expect(screen.getByRole('status')).toHaveAttribute('data-save-phase','saved'))
+ })
+
+ it('#4870: a committed save whose local copy could not be removed says it is on the server, not unsaved, and claims no version',async()=>{
+  client.open.mockResolvedValueOnce({sessionId:'private-session',applicationId:'gridcraft'})
+  const base=await client.read(new AbortController().signal)
+  client.read.mockResolvedValue({...base,applicationId:'gridcraft',bytes:new TextEncoder().encode('{"sheets":[]}')})
+  mount();await ready();await acquire()
+  const p=ports.at(-1)!,o=portOptions.at(-1)!
+  // The server commits; the row retirement and its one retry both fail.
+  journal.confirm.mockRejectedValueOnce(Error('storage deadline')).mockRejectedValueOnce(Error('storage deadline'))
+  p.snapshot.mockResolvedValue({bytes:new TextEncoder().encode('{"sheets":[2]}'),editorRevision:'grid:2',documentId:'doc'});act(()=>o.onChanged('grid:2','doc'))
+  await waitFor(()=>expect(journal.confirm).toHaveBeenCalledTimes(2))
+  const status=screen.getByRole('status')
+  await waitFor(()=>expect(status).toHaveAttribute('data-save-reason','unretired'))
+  expect(status).toHaveTextContent('Uloženo na serveru · místní kopie zatím zůstává v prohlížeči')
+  expect(status).not.toHaveTextContent('Neuložený koncept')
+  // No native ACK yet, so no "Uloženo · verze" claim, and nothing sent twice.
+  expect(status).not.toHaveTextContent('verze')
+  expect(p.ack).not.toHaveBeenCalled()
+  expect(client.save).toHaveBeenCalledOnce()
+  // A further edit is genuinely unsaved again.
+  p.snapshot.mockResolvedValue({bytes:new TextEncoder().encode('{"sheets":[3]}'),editorRevision:'grid:3',documentId:'doc'});act(()=>o.onChanged('grid:3','doc'))
+  expect(status).toHaveTextContent('Neuložený koncept')
  })
 
  it('#4852: after storage recovers with no further edit, the original receipt is acknowledged and publish waits for that ACK',async()=>{
@@ -227,7 +252,7 @@ describe('native Word host authority and persistence',()=>{
   expect(blob).not.toHaveBeenCalled()
   }finally{if(originalCreate)Object.defineProperty(URL,'createObjectURL',originalCreate);else Reflect.deleteProperty(URL,'createObjectURL')}
  })
- it('shows the exact named editor to another human without acquiring a write',async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false});mount();await screen.findByText('Upravuje Pavel');expect(screen.getByRole('button',{name:'Požádat o předání'})).toBeEnabled();expect(client.leaseAction).not.toHaveBeenCalled();expect(m.openJournal).not.toHaveBeenCalled();expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false)})
+ it('shows the exact named editor to another human without acquiring a write',async()=>{client.lease.mockResolvedValue({...ownedLease,holder:otherPerson,mine:false,can_write:false});mount();await screen.findByText('Upravuje Pavel');expect(screen.getByRole('button',{name:'Požádat o předání'})).toBeEnabled();expect(client.leaseAction).not.toHaveBeenCalled();expect(m.openJournal).not.toHaveBeenCalled();expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false)})
  it('cannot unlock from an acquire response without a fresh matching current lease proof',async()=>{mount();await ready();client.leaseAction.mockImplementationOnce(async()=>ownedLease);fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(client.leaseAction).toHaveBeenCalled());await waitFor(()=>expect(screen.getByRole('alert')).toBeInTheDocument());expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);expect(client.save).not.toHaveBeenCalled()})
  it('reports Uloženo only after durable local persist, engine validation, server receipt and editor ACK',async()=>{mount();await ready();await acquire();const p=ports.at(-1)!,ack=deferred<boolean>();p.ack.mockReturnValueOnce(ack.promise);act(()=>portOptions.at(-1)!.onChanged('r2','doc'));await waitFor(()=>expect(p.ack).toHaveBeenCalledOnce());expect(journal.persist.mock.invocationCallOrder[0]).toBeLessThan(p.validate.mock.invocationCallOrder[0]);expect(p.validate.mock.invocationCallOrder[0]).toBeLessThan(client.save.mock.invocationCallOrder[0]);expect(screen.queryByText('Uloženo')).not.toBeInTheDocument();await act(async()=>ack.resolve(true));await screen.findByText('Uloženo')})
  it('retains the frozen engine and tells the truth when native failure precedes idle capture',async()=>{journal.recovery.mockResolvedValueOnce([{draft:{applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'1',editorRevision:'old',bytes:new Uint8Array([99])},actions:['compare','copy']}]);mount();await ready();await acquire();const p=ports.at(-1)!,frame=document.querySelector('iframe');act(()=>{portOptions.at(-1)!.onChanged('not-yet-durable','doc');portOptions.at(-1)!.onError('native_port_closed')});await screen.findByText('Zachycení posledních změn nebylo potvrzeno');expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveAttribute('inert');expect(p.close).toHaveBeenCalled();expect(p.snapshot).not.toHaveBeenCalled();expect(journal.persist).not.toHaveBeenCalled();expect(journal.close).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled();expect(client.close).not.toHaveBeenCalled();expect(screen.getByRole('button',{name:'Kopie konceptu'})).toBeInTheDocument();expect(screen.queryByText('Uloženo')).not.toBeInTheDocument();expect(screen.queryByText(/koncept zachován/i)).not.toBeInTheDocument()})

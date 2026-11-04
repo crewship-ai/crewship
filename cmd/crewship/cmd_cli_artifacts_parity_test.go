@@ -75,6 +75,10 @@ func parityLatest(latest int, canWrite bool) []byte {
 const parityServerFiles = `[{"path":"index.html","content":"<h1>Draft</h1>","media_type":"text/html"},{"path":"styles.css","content":"h1{}","media_type":"text/css"}]`
 
 func TestPageArtifactPublishReconcilesLostReply(t *testing.T) {
+	// The subtests' fixtures cannot register the CLI-state reset (guardCLIState
+	// skips subtests), so the parent owns it: the commands run the root
+	// PersistentPreRun, which blanks the colour palette.
+	guardCLIState(t)
 	for _, status := range []int{502, 409} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			stub := pageStub(t)
@@ -116,6 +120,10 @@ func TestPageArtifactPublishKeepsConflictWhenSuccessorDiffers(t *testing.T) {
 }
 
 func TestPageArtifactReconcileCommand(t *testing.T) {
+	// The subtests' fixtures cannot register the CLI-state reset (guardCLIState
+	// skips subtests), so the parent owns it: the commands run the root
+	// PersistentPreRun, which blanks the colour palette.
+	guardCLIState(t)
 	for _, tc := range []struct {
 		name   string
 		status int
@@ -203,6 +211,10 @@ func TestPageArtifactReconcileRequiresBase(t *testing.T) {
 // ─── Design: --test-item and --authority-revision ──────────────────────────
 
 func TestPageDesignCreateTestItem(t *testing.T) {
+	// The subtests' fixtures cannot register the CLI-state reset (guardCLIState
+	// skips subtests), so the parent owns it: the commands run the root
+	// PersistentPreRun, which blanks the colour palette.
+	guardCLIState(t)
 	for _, tc := range []struct {
 		args []string
 		want any
@@ -251,6 +263,10 @@ func TestPageDesignWatchAuthorityRevision(t *testing.T) {
 // ─── craft: server bodies, exit codes, redaction ───────────────────────────
 
 func TestCraftErrorsCarryServerBodyAndExitCode(t *testing.T) {
+	// The subtests' fixtures cannot register the CLI-state reset (guardCLIState
+	// skips subtests), so the parent owns it: the commands run the root
+	// PersistentPreRun, which blanks the colour palette.
+	guardCLIState(t)
 	for _, tc := range []struct {
 		status int
 		body   string

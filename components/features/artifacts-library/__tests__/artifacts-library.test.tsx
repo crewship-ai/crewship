@@ -486,3 +486,22 @@ it("a chosen folder has its settings", () => {
   fireEvent.click(screen.getByRole("button", { name: "Folder settings" }))
   expect(screen.getByRole("dialog", { name: "Settings for Sales" })).toBeTruthy()
 })
+
+// #4898: New artifact → Page with panels makes a blank Page; it must not vanish
+// from the library the person made it in, and hidden blanks are pointed to.
+it("keeps a blank Page the person just created in the library and points to hidden blank items", () => {
+  state.pages = [wire({ slug: "fresh-design", id: "page-fresh", name: "UX walkthrough page" })]
+  renderLibrary()
+  expect(screen.getByText("No artifacts yet")).toBeTruthy()
+  expect(screen.getByText(/1 blank item is in Empty/)).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Show empty (1)" }))
+  expect(screen.getAllByText("UX walkthrough page").length).toBeGreaterThan(0)
+  cleanup()
+
+  renderLibrary()
+  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  fireEvent.click(within(screen.getByRole("dialog", { name: "New artifact" })).getByRole("button", { name: "Create" }))
+  expect(state.select).toHaveBeenCalledWith(null, "fresh-design")
+  expect(screen.queryByText("No artifacts yet")).toBeNull()
+  expect(screen.getAllByText("UX walkthrough page").length).toBeGreaterThan(0)
+})
