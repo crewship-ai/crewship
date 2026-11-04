@@ -102,3 +102,21 @@ it("gridcraft: no engine revision state -> a differing export is still saved", a
   const r = mounted("gridcraft")
   try { await r.controller.flush(); expect(r.requests.map(q => q.bytes[0])).toEqual([5]) } finally { await r.controller.close() }
 })
+
+it("wordcraft: an untouched final capture retires while the loaded seed digest is still pending", async () => {
+  let releaseSeed!: () => void, delayedSeed = false
+  const seedGate = new Promise<void>(resolve => { releaseSeed = resolve })
+  const digest = webcrypto.subtle.digest.bind(webcrypto.subtle)
+  const spy = vi.spyOn(webcrypto.subtle, "digest").mockImplementation((algorithm, data) => {
+    const bytes = ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data)
+    if (bytes.length === 1 && bytes[0] === 3) { delayedSeed = true; return seedGate.then(() => digest(algorithm, data)) }
+    return digest(algorithm, data)
+  })
+  const r = mounted("wordcraft")
+  try {
+    expect(delayedSeed).toBe(true)
+    expect(await r.controller.revokeWrite()).toBe(true)
+    expect(r.requests).toHaveLength(0)
+    expect(r.confirmed).toEqual([5])
+  } finally { releaseSeed(); spy.mockRestore(); await r.controller.close() }
+})

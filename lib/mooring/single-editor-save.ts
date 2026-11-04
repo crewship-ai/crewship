@@ -392,8 +392,12 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   // receipt since, no edit before the capture and the engine's own state
   // unchanged since bootstrap.
   function untouched(attempt: Prepared): boolean {
-    return confirmed?.seeded === true && confirmed.mountedState !== undefined && attempt.epoch === 0 && edits === 0
-      && attempt.nativeState === confirmed.mountedState && attempt.draft.baseVersion === confirmed.version
+    // The trusted mount identity is available before its background hash.
+    // Write retirement must not leave an untouched recovery row merely because
+    // that hash has not settled. A receipt or proven-absent baseline excludes it.
+    return options.loaded?.mountedState !== undefined && !baselineStale && baseVersion === seedVersion
+      && attempt.epoch === 0 && edits === 0 && attempt.nativeState === options.loaded.mountedState
+      && attempt.draft.baseVersion === seedVersion
   }
   function revokeWrite(): Promise<boolean> {
     if (!active) return Promise.resolve(false)
