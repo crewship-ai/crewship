@@ -15,3 +15,13 @@ it("offers Sheet only when the server advertises gridcraft_native", () => {
   m.docs = { ...m.docs, gridcraftNative: true }
   expect(renderHook(() => useArtifactCapabilities("ws1")).result.current.sheets).toBe(true)
 })
+
+// #4897: dev3 serves native Word (wordcraft_native) with the legacy document
+// flag off; Word must be offered exactly as Sheet is, and withdrawn otherwise.
+it("offers Word when the server advertises wordcraft_native and only then", () => {
+  expect(renderHook(() => useArtifactCapabilities("ws1")).result.current.documents).toBe(false)
+  m.docs = { ...m.docs, wordcraftNative: true }
+  expect(renderHook(() => useArtifactCapabilities("ws1")).result.current.documents).toBe(true)
+  m.docs = { ...m.docs, wordcraftNative: undefined }
+  expect(renderHook(() => useArtifactCapabilities("ws1")).result.current.documents).toBe(false)
+})

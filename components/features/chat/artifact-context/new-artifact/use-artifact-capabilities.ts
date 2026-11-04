@@ -17,7 +17,10 @@ export function useArtifactCapabilities(workspaceId: string): ArtifactCapabiliti
     dashboards: artifactDashboards(),
     designs: artifactsDesign(),
     slides: artifactSlides(),
-    documents: documents.data === true || Boolean(documents.wordcraftSDKPrefix) || documents.wordcraftCommands,
+    // Word is offered for any confirmed format, the native WordCraft profile
+    // (wordcraft_native) included, exactly as Sheet follows gridcraft_native;
+    // unconfirmed or failed reads withdraw it.
+    documents: documents.data === true || documents.wordcraftNative === true || Boolean(documents.wordcraftSDKPrefix) || documents.wordcraftCommands === true,
     // Sheet is offered only when the server advertises the native GridCraft
     // profile (gridcraft_native); unconfirmed or failed reads withdraw it.
     sheets: documents.gridcraftNative === true,
