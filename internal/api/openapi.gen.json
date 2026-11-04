@@ -6717,7 +6717,9 @@
       "CrewBudgetRequestV1": {
         "properties": {
           "limit_usd": {
-            "exclusiveMinimum": 0,
+            "exclusiveMinimum": true,
+            "maximum": 1000000000,
+            "minimum": 0,
             "type": "number"
           },
           "mode": {
