@@ -373,14 +373,20 @@ quietly into production events.
 
 ## Branch protection
 
-`main` is protected; configure via `scripts/setup-branch-protection.sh`
-(run once with repo-admin gh credentials). Required checks (must match
-the names emitted in the workflow files exactly — see the setup script
-for the canonical list): **Frontend**, **Backend (Go)**, **Lint
-migrations**, **Security**, **End-to-end (devcontainer)**. One approval
-needed (use auto-approve for trivial dep bumps via Renovate).
-Force-push is disallowed; linear history is required;
-`enforce_admins=true` (admins can't bypass the gate).
+Changes to `main` go through a pull request and the merge queue. Follow
+[Review before merge](CONTRIBUTING.md#review-before-merge),
+[Review scaled by risk](CONTRIBUTING.md#review-scaled-by-risk) and
+[Merge through the queue](CONTRIBUTING.md#merge-through-the-queue) for the
+required aggregate checks, review evidence and exact-head submission procedure.
+A formal approval count or a green PR run does not replace that procedure or
+the queue's checks.
+
+See the [CI/CD runbook](docs/runbooks/ci-cd-implementation-2026-09-11.md) for
+exact-SHA release verification and the authorized repository-policy workflow.
+When auditing live protection, inspect the branch's
+[effective rules](https://docs.github.com/en/rest/repos/rules#get-rules-for-a-branch).
+A missing classic branch-protection API response alone does not mean `main`
+is unprotected: rulesets also enforce branch policy.
 
 ## Cadence
 
