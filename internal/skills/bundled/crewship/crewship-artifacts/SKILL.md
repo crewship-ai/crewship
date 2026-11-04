@@ -183,8 +183,14 @@ accepts the Page slug or that bound Page ID, with or without `@`; it never selec
 another Page.
 
 Read `design_get` first. It returns `nodes`, `order`, `can_edit`, `version`,
-`latest_version` and `shared_version`; a positive `version` reads a retained
-snapshot instead of the live canvas. Then call `design_apply` with 1–500
+`latest_version` and `shared_version`. Without `version`, it reads the
+currently permitted view: live state requires current Edit authority or
+separately authorized workspace OWNER/ADMIN access, audited for foreign
+Designs. Shared-only readers see the shared snapshot, or get 404 before a
+pin exists. A positive `version` selects a permitted retained snapshot.
+Edit only when `can_edit` is true; read access alone does not permit a write.
+The exact run mandate and original human authority checks still apply.
+Then call `design_apply` with 1–500
 `operations`:
 
 ```json
@@ -201,7 +207,7 @@ at most 1,000,000 and non-negative size. Keep existing node IDs when changing
 color, text or geometry. A canvas holds at most 2000 nodes and 4 MiB of
 encoded state; arguments are bounded to 1 MiB.
 
-`design_apply` changes the same live Yjs document people see, also without an
+`design_apply` changes the live Yjs document seen by live-authorized people, also without an
 open browser, and each successful call publishes a new retained version
 returned as `version`. `design_snapshot` saves the current live canvas,
 including browser edits, as a retained version. `design_restore` takes only the

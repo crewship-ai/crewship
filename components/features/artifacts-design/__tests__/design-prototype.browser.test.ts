@@ -41,6 +41,15 @@ it.skipIf(!existsSync(chromium.executablePath()))("plays three linked screens A 
   await page.route("https://design-prototype.test/**", route => route.fulfill({ body: '<!doctype html><div id="root"></div>', contentType: "text/html" }))
   await page.goto("https://design-prototype.test/flow")
   await page.addScriptTag({ content: bundle.outputFiles[0].text })
+  // This real browser fixture is read-only: presence connectivity must not
+  // promise that the shared canvas receives live document updates.
+  await page.getByText("Connected · read only", { exact: true }).waitFor()
+  expect(await page.getByLabel("Design tools").getByText("View canvas", { exact: true }).count()).toBe(1)
+  expect(await page.getByText("Follow changes live", { exact: true }).count()).toBe(0)
+  await page.getByRole("button", { name: /History/ }).click()
+  const history = page.getByLabel("Version history")
+  expect(await history.getByRole("button", { name: "Current view", exact: true }).count()).toBe(1)
+  expect(await history.getByRole("button", { name: "Live canvas", exact: true }).count()).toBe(0)
   await page.getByRole("button", { name: "Play" }).click()
   const player = page.getByRole("dialog", { name: "Prototype playback" })
   await player.getByRole("heading", { name: "Screen A" }).waitFor()

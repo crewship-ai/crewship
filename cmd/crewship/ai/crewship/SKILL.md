@@ -187,8 +187,21 @@ resolve the comment or grant access.
 
 ### Design
 
-`crewship page design get <slug>` reads the live canvas (`--version <n>` reads
-a retained snapshot). `apply <slug> --file changes.json` takes
+`crewship page design get <slug>` reads the currently permitted view
+(`--version <n>` selects a permitted retained snapshot). For people, current
+Edit permission plus a current browser session, or both CLI `pages:read` and
+`pages:write` scopes (or `pages:*`, `*`, or an unscoped full-role token) plus Edit permission, permits live reads; non-admin owners/Edit grantees narrowed to `pages:read` are shared-only,
+with 404 before a shared pin exists. Separately authorized workspace OWNER/ADMIN
+reads include latest/history with audit for foreign Designs and never turn a
+read-scoped credential into write authority.
+
+For a live agent, CLI routes through the original MCP/run principal and exact
+Page mandate. Current run/crew policy, original human authority and the
+original human credential required for run consent are checked; a human CLI
+read-scope rule must not be applied to an agent credential. Missing/revoked
+mandates are refused, not replaced by a saved human profile. Check `can_edit`
+before editing; the tool's availability alone grants no access.
+`apply <slug> --file changes.json` takes
 `{"operations":[...],"message":"..."}` with 1-500 operations: `upsert` a
 `node` (id, type `frame|rect|text|image`, name, x, y, width, height, fill,
 optional parentId, text, src), `delete` an `id`, or `reorder` with `order`.

@@ -31,9 +31,9 @@ function AccessBody({ workspaceId, slug, onClose, humanId }: Props & { humanId?:
  const grants = usePageGrants(workspaceId, slug, Boolean(humanId))
  const canManage = Boolean(humanId) && !grants.loading && !grants.refusal && !grants.error
  return <CreateSurface open size="md" restoreOpenerFocus onOpenChange={open => { if (!open) onClose() }}>
-  <CreateSurfaceHeader title="Design access" description="Invite people to view or edit the live canvas. Agent task permissions stay separate." onClose={onClose} />
+  <CreateSurfaceHeader title="Design access" description="Invite people to view or edit this Design. Agent task permissions stay separate." onClose={onClose} />
   <CreateSurfaceBody>
-  {!canManage ? <p role={grants.loading ? "status" : "alert"} className="text-sm">{grants.loading ? "Checking sharing permissions…" : grants.refusal ?? grants.error ?? "Sharing permissions are unavailable."}</p> : <AccessCard workspaceId={workspaceId} slug={slug} panelIDs={[]} documentContent canManage manageRefusal="Only the owner or a workspace administrator may change sharing." footer="Read follows changes live. Edit can change the canvas. Changes take effect immediately." />}
+  {!canManage ? <p role={grants.loading ? "status" : "alert"} className="text-sm">{grants.loading ? "Checking sharing permissions…" : grants.refusal ?? grants.error ?? "Sharing permissions are unavailable."}</p> : <AccessCard workspaceId={workspaceId} slug={slug} panelIDs={[]} documentContent canManage manageRefusal="Only the owner or a workspace administrator may change sharing." footer="Read sees the shared version and presence. Edit can change the canvas. Workspace administrators have separate audited access to the latest canvas. Access changes take effect immediately." />}
   </CreateSurfaceBody>
  </CreateSurface>
 }
