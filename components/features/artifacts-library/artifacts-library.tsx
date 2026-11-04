@@ -683,14 +683,17 @@ export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanoni
       </>}
     </div>
     {folderSettings && <FolderSettingsDialog workspaceId={workspaceId} folder={folderSettings} open onOpenChange={open => { if (!open) setFolderSettings(null) }} />}
-    {/* A just-created artifact is not in the list yet: it opens by slug and the route moves to its ID once it resolves. */}
+    {/* A just-created artifact is not in the list yet. With its ID it opens at /artifacts/<id> at once: opening it by
+        slug first mounted the editor (whose admission refreshes the session) right before the exported build reloaded
+        the page as /artifacts/<id>, losing that refresh's cookies and signing the person out (#4902). */}
     {newKind !== undefined && <NewArtifactDialog workspaceId={workspaceId} open onOpenChange={open => { if (!open) setNewKind(undefined) }}
       defaultKind={newKind ?? undefined} defaultFolderSlug={filters.folder || undefined}
-      onCreated={slug => {
+      onCreated={(slug, id) => {
         setNewKind(undefined)
         if (slug) setMadeHere([slug, ...(Array.isArray(madeHere) ? madeHere : []).filter(entry => entry !== slug)].slice(0, 50))
         refresh()
-        if (slug) onSelect(null, slug)
+        if (id) onSelect(id)
+        else if (slug) onSelect(null, slug)
       }} />}
   </div>
 }
