@@ -100,6 +100,18 @@ Competing acquisition and stale generations return 409. A handoff advances the
 server generation; a late renew or write from the old connection is rejected.
 Neither a display name nor a public request ID establishes write authority.
 
+## Native editor startup deadlines
+
+The isolated frame has 20 seconds to return its verified read-only ready reply.
+After that reply, the bounded initial snapshot, document import and confirming
+snapshot each have their own 10-second RPC deadline, including snapshot hashing.
+The frame deadline does not overlap this finite import sequence. A stalled RPC,
+failed import or mismatched document identity still retires the connection; startup
+never acquires a lease, acknowledges a save or automatically replays an import.
+A connection timeout advises an explicit page reload for a fresh admission. Before
+bootstrap finishes, the disconnected status makes no claim that a local draft
+was captured.
+
 ## Shared previews and edit capability
 
 `can_edit` is current original-credential and Page edit authority, independent of

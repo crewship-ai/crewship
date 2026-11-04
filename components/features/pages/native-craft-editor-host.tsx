@@ -138,7 +138,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   function detach(r:Runtime){r.abort.abort();r.port.close();r.frame.remove()}
   function stop(message:string,explicitClose=false){
    if(dead||nativeFailed&&!explicitClose)return
-   dead=true;setConnectionRetired(true);lifetime.abort();clearInterval(reauthorize);clearInterval(leaseWatch);clearInterval(proposalWatch);setError(message);setSavedVersion(undefined);setLabel('Editor odpojen · koncept zachován');setOwnsEditor(false);setBusy(false)
+   dead=true;setConnectionRetired(true);lifetime.abort();clearInterval(reauthorize);clearInterval(leaseWatch);clearInterval(proposalWatch);setError(message);setSavedVersion(undefined);setLabel(current?.ready?'Editor odpojen · koncept zachován':'Editor odpojen');setOwnsEditor(false);setBusy(false)
    if(current){detach(current);void current.coordinator?.close();if(!current.coordinator)void current.journal?.close()}
    client.close()
   }
@@ -196,7 +196,10 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    frame.title=snapshot.applicationId==='gridcraft'?'GridCraft editor':'WordCraft editor';setApplicationId(snapshot.applicationId);setQuota(snapshot.quota);setHistoryKey(n=>n+1)
    let resolve!:(r:Runtime)=>void,reject!:(e:Error)=>void
    const ready=new Promise<Runtime>((done,fail)=>{resolve=done;reject=fail})
-   const timer=setTimeout(()=>{reject(Error('native_bootstrap_timeout'));if(r&&live(r))stop('Editor se bezpečně nepřipojil. Koncept nebyl označen jako uložený.')},20000)
+   // This deadline covers frame loading and the verified read-only ready reply.
+   // Import is a finite snapshot/open/snapshot sequence with its own 10s RPC
+   // deadlines; an overlapping wall deadline must not cancel progressing RPCs.
+   const timer=setTimeout(()=>{reject(Error('native_bootstrap_timeout'));if(r&&live(r))stop('Editor se bezpečně nepřipojil. Koncept nebyl označen jako uložený. Pro nový pokus obnovte stránku.')},20000)
    // A page opened on another origin than the configured editor origin has the frame
    // refused by CSP at once; say so instead of waiting for the bootstrap timeout.
    // Reporting only: the policy and the draft are untouched.
@@ -219,7 +222,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     onChanged(){if(r&&live(r)&&r.ready&&r.writable&&!r.blocked){r.edit++;r.ackedVersion=undefined;r.coordinator?.edited();display(r)}},
     onSaveRequest(request){if(r&&live(r)&&r.writable&&!r.blocked&&r.coordinator){r.ackedVersion=undefined;void r.coordinator.save(request.requestId).catch(()=>{if(r&&live(r)){if(request.requestId)r.port.saveFailed(request.requestId,'Uložení nebylo potvrzeno.');display(r)}})}},
     onError(){clearTimeout(timer);reject(Error('native_lifecycle_failure'));if(r&&live(r))failNative(r,'Spojení s editorem skončilo. Poslední změny nejsou potvrzené; původní editor zůstává uzamčený.')},
-    onReady(){if(!r||!live(r))return;void port.bootstrap(snapshot.bytes,abort.signal).then(mounted=>{if(r&&live(r)){r.mountedState=mounted?.nativeState;r.ready=true;clearTimeout(timer);display(r);resolve(r)}}).catch(()=>{clearTimeout(timer);reject(Error('native_bootstrap_failed'));if(r&&live(r))stop('Dokument nelze bezpečně otevřít.')})},
+    onReady(){if(!r||!live(r))return;clearTimeout(timer);void port.bootstrap(snapshot.bytes,abort.signal).then(mounted=>{if(r&&live(r)){r.mountedState=mounted?.nativeState;r.ready=true;clearTimeout(timer);display(r);resolve(r)}}).catch(()=>{clearTimeout(timer);reject(Error('native_bootstrap_failed'));if(r&&live(r))stop('Dokument nelze bezpečně otevřít.')})},
    })}catch(cause){clearTimeout(timer);frame.remove();throw cause}
    r={enginePin:snapshot.enginePin,port,frame,abort,version:snapshot.version,generation,ready:false,writable:false,nativeReadOnly:true,edit:0,blocked:false};current=r
    return ready

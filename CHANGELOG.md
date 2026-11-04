@@ -663,6 +663,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- **Native Word and Sheet can finish a progressing document import after the frame connects.** The frame startup deadline now ends at the verified read-only ready reply; each import RPC retains its existing timeout and identity checks.
+
 - **An identical Mooring create retry no longer returns a private document after its author loses access.** The existing transaction-local author check now runs before looking up the saved result as well as before committing a new document.
 
 - **Workbook creation now rechecks the original author’s current rights in its transaction.** Lost membership, restricted access or removed Page-create rights refuse both creation and identical retries; a rights change during insertion rolls back the staged Page.

@@ -537,7 +537,7 @@ describe('editor origin mismatch (#4649)',()=>{
    expect(within(alert).getByRole('link')).toHaveAttribute('href','https://studio.example.test'+here.pathname+here.search+here.hash)
    expect(screen.queryByText(/Editor se bezpečně nepřipojil/)).toBeNull()
    expect(journal.revokeRead).not.toHaveBeenCalled();expect(m.purge).not.toHaveBeenCalled()
-   expect(screen.getByText('Editor odpojen · koncept zachován')).toBeInTheDocument()
+   expect(screen.getByText('Editor odpojen')).toBeInTheDocument()
   }finally{vi.useRealTimers()}
  })
  it('still explains the mismatch without a link when the policy names no origin',async()=>{
