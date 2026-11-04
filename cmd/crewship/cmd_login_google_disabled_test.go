@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -54,5 +58,69 @@ func TestLoginGoogleUnavailableBeforeServerValidation(t *testing.T) {
 	err := loginCmd.RunE(loginCmd, nil)
 	if err == nil || !strings.Contains(err.Error(), "Google sign-in is unavailable") {
 		t.Fatalf("expected local unavailable result before resolving server, got %v", err)
+	}
+}
+
+// Use the existing built-binary acceptance seam, including main/Cobra and
+// PersistentPreRun. Each child has an explicit owned environment and config.
+func TestAcceptanceLoginGoogleUnavailable(t *testing.T) {
+	binary := buildCrewshipBinary(t)
+	binaryBytes, err := os.ReadFile(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("candidate binary SHA256=%x", sha256.Sum256(binaryBytes))
+	home := t.TempDir()
+	config := filepath.Join(home, "cli-config.yaml")
+	initial := []byte("server: https://unused.example.invalid\n")
+	if err := os.WriteFile(config, initial, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) (int, string, string) {
+		t.Helper()
+		command := exec.CommandContext(t.Context(), binary, args...)
+		command.Dir = home
+		command.Env = []string{"HOME=" + home, "XDG_CONFIG_HOME=" + filepath.Join(home, "config"), "PATH=" + filepath.Join(home, "bin"), "CREWSHIP_CONFIG=" + config, "NO_COLOR=1", "CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE="}
+		command.Stdin = strings.NewReader("")
+		var stdout, stderr bytes.Buffer
+		command.Stdout, command.Stderr = &stdout, &stderr
+		result := command.Run()
+		code := 0
+		if result != nil {
+			code = exitCodeOf(t, result)
+		}
+		return code, stdout.String(), stderr.String()
+	}
+	code, stdout, stderr := run("login", "--help")
+	t.Logf("login --help process exit=%d", code)
+	if code != 0 || stderr != "" {
+		t.Fatalf("help exit=%d stderr=%q", code, stderr)
+	}
+	for _, expected := range []string{"email + password", "--token", "--pair", "Google sign-in is unavailable"} {
+		if !strings.Contains(stdout, expected) {
+			t.Errorf("help missing %q", expected)
+		}
+	}
+	if strings.Contains(stdout, "Sign in via Google OAuth") {
+		t.Error("help still advertises Google login")
+	}
+	code, stdout, stderr = run("login", "--google", "--server", "://invalid")
+	t.Logf("login --google --server ://invalid process exit=%d stderr=%q", code, stderr)
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "Google sign-in is unavailable") {
+		t.Errorf("offline unavailable entry result: exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if strings.Contains(stderr, "invalid --server") || strings.Contains(stderr, "contact server") {
+		t.Error("unavailable mode reached server handling")
+	}
+	after, err := os.ReadFile(config)
+	if err != nil || !bytes.Equal(initial, after) {
+		t.Errorf("owned settings changed: %v", err)
+	}
+	entries, err := os.ReadDir(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "cli-config.yaml" {
+		t.Error("login created files in owned home")
 	}
 }

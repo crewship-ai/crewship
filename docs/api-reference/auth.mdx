@@ -1,6 +1,6 @@
 ---
 title: "Authentication"
-description: "Email/password signup, Google sign-in, device pairing for the CLI, active-session management, long-lived CLI tokens, and email-based password recovery."
+description: "Email/password signup, device pairing for the CLI, active-session management, CLI tokens, password recovery, and disabled Google legacy metadata."
 icon: "lock"
 stability: experimental
 tag: Experimental
@@ -10,7 +10,7 @@ tag: Experimental
 {/* docs-inventory: ignore-api /api/v1/auth/google/callback reason=historical-removed-route */}
 # Authentication
 
-Authentication surface in Crewship is split across several flows. The interactive web flow is `/api/auth/*` (NextAuth-compatible -- see [Internal API](/api-reference/internal)); everything covered on this page is the `/api/v1/auth/*` surface that wraps email/password signup, Google sign-in, CLI pairing, active session listing/revocation, long-lived CLI tokens, and password recovery.
+Authentication surface in Crewship is split across several flows. The interactive web flow is `/api/auth/*` (NextAuth-compatible -- see [Internal API](/api-reference/internal)); everything covered on this page is the `/api/v1/auth/*` surface that wraps email/password signup, CLI pairing, active session listing/revocation, long-lived CLI tokens, and password recovery. Google sign-in is disabled; only its legacy always-false status metadata remains.
 
 All `/api/v1/auth/*` routes are mounted behind a rate limit of 10 req/min/IP. Routes marked **auth required** read the caller's identity from the session cookie issued by `/api/auth/callback/credentials`; the rest are intentionally unauthenticated because the request body (a state token, pairing code, or reset token) IS the credential.
 
