@@ -237,3 +237,18 @@ it("creates a Design through its canvas endpoint while preserving the shared fol
   expect(m.addPage).toHaveBeenCalledWith(expect.objectContaining({ folder: "sales", page: "checkout", pagesVersion: 0 }))
   expect(m.wordCreate).not.toHaveBeenCalled()
 })
+
+it("returns focus to the New artifact button that opened it once the library unmounts the dialog", async () => {
+  // The library mounts the dialog only while it is open and has no Radix trigger,
+  // so without restoreOpenerFocus Escape left keyboard focus on <body>.
+  const opener = document.createElement("button")
+  opener.textContent = "New artifact"
+  document.body.append(opener)
+  opener.focus()
+  const client = new QueryClient()
+  const { unmount } = render(<QueryClientProvider client={client}><NewArtifactDialog workspaceId="ws1" open onOpenChange={vi.fn()} onCreated={vi.fn()} /></QueryClientProvider>)
+  expect(document.activeElement).not.toBe(opener)
+  unmount()
+  await waitFor(() => expect(document.activeElement).toBe(opener))
+  opener.remove()
+})

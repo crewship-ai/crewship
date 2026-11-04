@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
 const flags = vi.hoisted(() => ({ mock: true, fetch: vi.fn((): Promise<Response> => { throw new Error("no HTTP in the mock") }) }))
@@ -20,7 +20,7 @@ const renderDialog = (onOpenChange = vi.fn()) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const ui = (open: boolean) => <QueryClientProvider client={client}><FolderSettingsDialog workspaceId="ws1" folder={FOLDER} open={open} onOpenChange={onOpenChange} /></QueryClientProvider>
   const view = render(ui(true))
-  return { reopen: () => { view.rerender(ui(false)); view.rerender(ui(true)) } }
+  return { reopen: () => { view.rerender(ui(false)); view.rerender(ui(true)) }, unmount: view.unmount }
 }
 const change = (label: string, value: string) => fireEvent.change(screen.getByRole("combobox", { name: label }), { target: { value } })
 
@@ -89,4 +89,16 @@ it("on the server, offers only what #4444 serves: Read or Edit, no default audie
   expect(writes.map(([url, init]) => [new URL(url, "http://h").pathname, JSON.parse(String(init!.body))])).toEqual([
     ["/api/v1/page-folders/design/acl", { subject_type: "user", subject_id: "u2", can_write: true }],
   ])
+})
+
+it("returns focus to the control that opened it once the library unmounts the dialog", async () => {
+  const opener = document.createElement("button")
+  opener.textContent = "Folder settings"
+  document.body.append(opener)
+  opener.focus()
+  const { unmount } = renderDialog()
+  expect(document.activeElement).not.toBe(opener)
+  unmount()
+  await waitFor(() => expect(document.activeElement).toBe(opener))
+  opener.remove()
 })
