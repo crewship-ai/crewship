@@ -11,7 +11,7 @@
 // head == base (else 409); reconcile returns the receipt only for exactly
 // those bytes at base+1, else ErrNativeUnconfirmed → 409.
 import { Buffer } from "node:buffer"
-import { webcrypto } from "node:crypto"
+import { createHash, webcrypto } from "node:crypto"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import type { DocumentDraft } from "../document-queue"
 import { createNativeDocumentClient } from "./native-document-client"
@@ -38,7 +38,7 @@ vi.mock("../protected-document-drafts", () => ({ openProtectedDocumentDrafts: vi
 beforeEach(() => { vi.stubGlobal("crypto", webcrypto); store.rows.clear() })
 afterEach(() => { vi.unstubAllGlobals() })
 
-const sha = async (bytes: Uint8Array) => "sha256:" + Buffer.from(await webcrypto.subtle.digest("SHA-256", bytes)).toString("hex")
+const sha = async (bytes: Uint8Array) => "sha256:" + createHash("sha256").update(bytes).digest("hex")
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status })
 
 function server(initial: string) {
