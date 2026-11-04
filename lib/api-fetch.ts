@@ -23,7 +23,7 @@
  * fetch-with-retry.ts.
  */
 
-import { assertWorkspaceRequest, captureWorkspaceRequest, workspaceFetch } from "./workspace-availability"
+import { assertRequestSession, assertWorkspaceRequest, captureRequestSession, captureWorkspaceRequest, workspaceFetch } from "./workspace-availability"
 import { bodyIsReplayable, inputIsReplayable } from "./fetch-with-retry"
 import { getAuthMode, getBearerToken, getServerOrigin, withServerBase } from "./server-base"
 
@@ -126,7 +126,14 @@ function reportBadStatus(target: RequestInfo | URL, res: Response): void {
 
 export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): Promise<Response> {
   assertSameOrigin(input)
+  const requestSession = captureRequestSession()
   const workspaceRequest = captureWorkspaceRequest(input, init)
+  const assertCurrentAccount = () => {
+    // Preserve the existing domain error when both fences retired. A workspace
+    // change alone must not retire an account-level request or its auth result.
+    if (captureRequestSession() !== requestSession) assertWorkspaceRequest(workspaceRequest)
+    assertRequestSession(requestSession)
+  }
   // Remote-server mode (desktop shell): prefix relative /api/* string paths
   // with the configured base. Same-origin default leaves input untouched.
   const target: RequestInfo | URL = typeof input === "string" ? withServerBase(input) : input
@@ -147,13 +154,16 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
   }
 
   const res = await workspaceFetch(target, initWithCreds)
+  if (res.status === 401 && !init?.skipRefresh) assertCurrentAccount()
   reportBadStatus(target, res)
   // Bearer tokens are long-lived CLI-class credentials: there is no cookie
   // rotation to attempt, so a 401 is terminal for this request. Emit the
   // session-expired signal so the shell can re-pair.
   if (bearer) {
     if (res.status === 401 && !init?.skipRefresh) {
-      emitSessionExpired((await peekReason(res)) ?? "session_expired")
+      const reason = await peekReason(res)
+      assertCurrentAccount()
+      emitSessionExpired(reason ?? "session_expired")
     }
     return res
   }
@@ -163,6 +173,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
   // alongside the WWW-Authenticate header. session_revoked / session_invalid
   // are terminal: refresh will not save us, redirect immediately.
   const reason = await peekReason(res)
+  assertCurrentAccount()
   if (reason === "session_revoked" || reason === "session_invalid") {
     emitSessionExpired(reason)
     return res
@@ -176,6 +187,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
   // the caller and let the page recover when the backend comes back,
   // rather than evicting valid sessions on every blip.
   const { result: refreshResult, reason: refreshReason } = await refreshShared()
+  assertCurrentAccount()
   if (refreshResult === "auth_failed") {
     // The refresh's own reason decides what happened to the session: a
     // dropped access cookie (no_credentials on the request) over a dead
@@ -225,6 +237,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: ApiFetchInit): P
 
   // Refresh wrote new cookies; the retry inherits them via the same
   // `credentials: include` and lands on a fresh access token.
+  assertCurrentAccount()
   assertWorkspaceRequest(workspaceRequest)
   return workspaceFetch(target, initWithCreds)
 }

@@ -1,0 +1,1 @@
+- **Pending API retries retire after an observed account change.** Old requests stop before retrying or emitting authentication-expiry signals for a newly bound account, including account ABA. Workspace-only changes keep global requests working. This does not change refresh-cookie policy or cover cookie changes before binding and already committed requests.

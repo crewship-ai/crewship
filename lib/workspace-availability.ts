@@ -3,11 +3,21 @@ let workspaceId: string | null = null
 let sessionId: string | null = null
 let available = true
 let epoch = 0
+let sessionGeneration = 0
 const pending = new Map<AbortController, number>()
 
 export class WorkspaceUnavailableError extends Error {
   readonly code = "WORKSPACE_UNAVAILABLE"
   constructor() { super("The selected workspace is unavailable. Retry or choose a workspace."); this.name = "WorkspaceUnavailableError" }
+}
+/** Observed account binding only; independent of workspace availability and cookies. */
+export class RequestSessionChangedError extends Error {
+  readonly code = "REQUEST_SESSION_CHANGED"
+  constructor() { super("The signed-in account changed. Retry from the current account."); this.name = "RequestSessionChangedError" }
+}
+export function captureRequestSession(): number { return sessionGeneration }
+export function assertRequestSession(captured: number) {
+  if (captured !== sessionGeneration) throw new RequestSessionChangedError()
 }
 function advance() {
   epoch++
@@ -17,6 +27,7 @@ function advance() {
 export function setWorkspaceRequestSession(id: string | null) {
   if (sessionId === id) return
   sessionId = id
+  sessionGeneration++
   available = id === null
   advance()
 }
