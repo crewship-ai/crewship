@@ -128,6 +128,14 @@ changes the shared version.
 With `--output FILE` the decoded document is written to `FILE` (mode `0600`;
 `-` writes it to stdout) and only the metadata is printed.
 
+The version must be a canonical positive decimal integer within the signed
+64-bit range. A non-positive, non-canonical or overflowing version returns
+validation exit code `2` before authentication, admission or any HTTP request;
+machine-readable errors also carry `error.exit_code: 2`. For a negative
+positional value, place it after `--` (for example,
+`crewship craft version @PAGE_ID -- -1`) so it is checked as a version rather
+than parsed as a flag.
+
 ```bash
 crewship craft version @PAGE_ID 2 --format json
 crewship craft version @PAGE_ID 2 --output v2.json --format json
