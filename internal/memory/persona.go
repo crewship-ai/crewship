@@ -55,6 +55,9 @@ import (
 // asserts they stay in sync.
 const PersonaCapBytes = capPersonaBytes
 
+// ErrPersonaEmpty reports a rejected empty write; reset the layer to clear it.
+var ErrPersonaEmpty = errors.New("persona: empty content rejected (use ResetPersona to clear)")
+
 // PersonaLayer enumerates which layer a write targets. Two values,
 // no inheritance, no special "both" enum — callers know which file
 // they're touching at the API boundary.
@@ -179,7 +182,7 @@ func DefaultPersona(agentRole, roleTitle string) ResolvedPersona {
 // bug — agents must go through SuggestPersona (inbox proposal).
 func WritePersona(p PersonaPaths, layer PersonaLayer, content string) error {
 	if strings.TrimSpace(content) == "" {
-		return errors.New("persona: empty content rejected (use ResetPersona to clear)")
+		return ErrPersonaEmpty
 	}
 	if len(content) > PersonaCapBytes {
 		return fmt.Errorf("persona: content %d bytes exceeds cap %d", len(content), PersonaCapBytes)
@@ -214,6 +217,11 @@ func ResetPersona(p PersonaPaths, layer PersonaLayer) error {
 	}
 	lk := NewFileLock(path + ".lock")
 	if err := lk.Lock(); err != nil {
+		// The lock is created beside the persona. A missing parent means
+		// this layer has never been written, so it is already reset.
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		return fmt.Errorf("persona: lock: %w", err)
 	}
 	defer func() { _ = lk.Unlock() }()
