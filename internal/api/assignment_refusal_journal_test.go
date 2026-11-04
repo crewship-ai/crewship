@@ -79,3 +79,15 @@ func TestAssignmentRefusalJournalUsesVerifiedSource(t *testing.T) {
 		t.Fatalf("denied request admitted work: count=%d err=%v", count, err)
 	}
 }
+
+func TestSidecarCannotForgeAssignmentRefusal(t *testing.T) {
+	emitter := &emitRecorder{}
+	router := newJournalTestRouter(emitter)
+	body := map[string]any{"workspace_id": "ws1", "type": "assignment.refused", "summary": "claimed refusal", "payload": map[string]any{"reason": "crews_not_connected", "http_status": 403}}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/journal/emit", jsonBody(body))
+	rec := httptest.NewRecorder()
+	router.handleSidecarEmit(rec, req)
+	if rec.Code != http.StatusBadRequest || len(emitter.entries) != 0 {
+		t.Fatalf("sidecar forged server receipt: status=%d emitted=%d", rec.Code, len(emitter.entries))
+	}
+}

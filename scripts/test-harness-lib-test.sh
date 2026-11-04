@@ -285,6 +285,7 @@ if command -v jq >/dev/null 2>&1; then
   out="$(run_crew_links no-attempt)"
   expect_contains "completed model refusal without server call -> unlinked half FAILS" "$out" "FAIL an unlinked crew cannot be delegated to"
   expect_contains "model refusal without server call -> receipt missing" "$out" "no server refusal receipt"
+  expect_contains "model refusal without server call -> no-work unproven" "$out" "FAIL no work reaches an unlinked crew"
 
   out="$(run_crew_links leaky)"
   expect_contains "assignment lands with no link -> unlinked half FAILS" "$out" "FAIL an unlinked crew cannot be delegated to"
