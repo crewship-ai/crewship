@@ -137,6 +137,11 @@ When someone else is editing:
 
 1. Open the editor and keep that tab open. Choose **Požádat o předání**
    (Ask for handoff) there. The request is bound to this editor session.
+   Once the server confirms it, **Žádost odeslána** (Request sent) and a waiting
+   message appear; the request button stays disabled for that holder and lease
+   generation. This confirms the request, not editing access. If the next status
+   read fails, the confirmation remains and a separate message explains that the
+   current editing status could not be read.
 2. The editor of the person holding the lease shows a button
    **Předat uživateli *your name*** (Hand over to *your name*).
 3. When they choose it, their last change is saved and their editor becomes
@@ -146,6 +151,11 @@ When someone else is editing:
 4. Choose that **Převzít úpravy** to start typing. You don't wait for the bar
    to show **Volné**; the lease is already yours. The editor loads the latest
    saved version first.
+
+An agent holder does not perform this human handoff flow. Its confirmation says
+that the request was recorded and that the agent does not hand over on its own.
+**Zastavit agenta** (Stop agent) appears only when the server authorizes you to
+stop that agent; recording a handoff request does not grant this permission.
 
 The holder doesn't get a decline button: if they never hand over, your
 request lapses when the lease changes hands or ends. A request made for one
