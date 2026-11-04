@@ -44,7 +44,7 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 function server(initial: string) {
   const versions = new Map<number, { text: string; hash: string; editorRevision: string }>([[2, { text: initial, hash: "", editorRevision: "seed" }]])
   let head = 2, online = true
-  let hold: Promise<void> | undefined
+  let hold: Promise<void> | undefined, refuseRetirement = false
   const calls: string[] = [], retired = new Set<string>()
   const conflict = () => json({ error: "native document or lease changed; keep the local draft" }, 409)
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -72,14 +72,15 @@ function server(initial: string) {
     if (landed && landed.hash === body.contentHash && landed.editorRevision === body.editorRevision) return json(receipt(base + 1))
     // Under the same fence: record the attempt as retired, then say so (410).
     // Without an attempt id nothing can be retired: unconfirmed (409), as before.
-    if (!body.attemptId) return conflict()
+    // No attempt id, no live lease, or the page's retirement limit: nothing recorded (409).
+    if (!body.attemptId || refuseRetirement) return conflict()
     retired.add(body.attemptId)
     return json({ error: "native save attempt did not commit and never will" }, 410)
   })
   const commitOther = async (text: string) => { versions.set(++head, { text, hash: await sha(new TextEncoder().encode(text)), editorRevision: "other" }) }
   // The next save waits after validation until the returned release is called.
   const pauseNextSave = () => { let release!: () => void; hold = new Promise<void>(done => { release = done }); return release }
-  return { fetch, calls, commitOther, pauseNextSave, setOffline: (value: boolean) => { online = !value }, head: () => ({ version: head, text: versions.get(head)!.text }) }
+  return { fetch, calls, commitOther, pauseNextSave, refuseRetirement: (value: boolean) => { refuseRetirement = value }, setOffline: (value: boolean) => { online = !value }, head: () => ({ version: head, text: versions.get(head)!.text }) }
 }
 
 async function editor(timeoutMs = 2_000) {
@@ -211,5 +212,28 @@ it("after resuming, bytes equal to a stale baseline are still sent with the base
   await vi.waitFor(() => expect(e.last()).toMatchObject({ phase: "draft", reason: "conflict" }))
   expect(e.remote.head()).toEqual({ version: 3, text: "jiny" })
   expect(store.rows.size).toBe(1)
+  await e.controller.close()
+})
+
+// Review round 2: when the server records nothing (lease lost, retirement
+// limit), reconcile answers 409. The outcome stays unknown: no save is sent and
+// a later check may still resolve it; it is never a permanent conflict block.
+it("a reconcile that records nothing keeps the save unconfirmed and can be asked again", async () => {
+  const e = await editor()
+  e.remote.setOffline(true)
+  e.type(" behem vypadku")
+  await vi.waitFor(() => expect(e.last()).toMatchObject({ phase: "uncertain" }))
+  e.remote.setOffline(false)
+  e.remote.refuseRetirement(true)
+  await e.controller.reconcile()
+  expect(e.last()).toMatchObject({ phase: "uncertain", reason: "unconfirmed" })
+  e.type(" dal")
+  await new Promise(resolve => setTimeout(resolve, 50))
+  expect(e.remote.calls).toEqual(["reconcile"])
+  expect(e.remote.head().version).toBe(2)
+  e.remote.refuseRetirement(false)
+  await e.controller.reconcile()
+  await vi.waitFor(() => expect(e.remote.head()).toEqual({ version: 3, text: "Pred vypadkem behem vypadku dal" }))
+  expect(e.remote.calls).toEqual(["reconcile", "reconcile", "save"])
   await e.controller.close()
 })

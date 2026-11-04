@@ -88,7 +88,7 @@ func craftNativeDocumentError(w http.ResponseWriter, err error) {
 		replyError(w, 413, "native history quota reached; existing versions retained")
 	case errors.Is(err, mooring.ErrNativeAttemptAbsent):
 		replyError(w, 410, "native save attempt did not commit and never will; save the current draft again")
-	case errors.Is(err, mooring.ErrEditLeaseBusy), errors.Is(err, mooring.ErrEditLeaseStale), errors.Is(err, artifacts.ErrVersionConflict), errors.Is(err, mooring.ErrNativeUnconfirmed), errors.Is(err, mooring.ErrNativeAttemptRetired):
+	case errors.Is(err, mooring.ErrEditLeaseBusy), errors.Is(err, mooring.ErrEditLeaseStale), errors.Is(err, artifacts.ErrVersionConflict), errors.Is(err, mooring.ErrNativeUnconfirmed), errors.Is(err, mooring.ErrNativeAttemptRetired), errors.Is(err, mooring.ErrNativeRetirementLimit):
 		replyError(w, 409, "native document or lease changed; keep the local draft")
 	case errors.Is(err, mooring.ErrNativeValidation), errors.Is(err, mooring.ErrInvalid), errors.Is(err, artifacts.ErrVersionInvalid):
 		replyError(w, 422, "invalid native document")

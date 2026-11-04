@@ -223,6 +223,11 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         // with the draft kept (#4899). A plain 409 stays a conflict.
         unconfirmed = undefined; confirmed = undefined; baselineStale = true; dirty = true
         emit("dirty", "not_committed")
+      } else if (reconcile && error instanceof NativeSaveError && error.reason === "conflict") {
+        // Reconcile proved nothing and recorded nothing (lease lost, retirement
+        // limit, or no attempt id): the outcome stays unknown. Keep the attempt
+        // unconfirmed, send nothing, and let a later check ask again.
+        unconfirmed = attempt; emit("uncertain", "unconfirmed")
       } else if (error instanceof NativeSaveError) {
         blocked = error.reason
         if (error.reason === "read_revoked") { await revokeRead(); return }

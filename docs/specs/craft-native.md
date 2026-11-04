@@ -71,8 +71,13 @@ attempt, reconcile records the attempt in `craft_native_retired_attempts`
 inside the same writer-fenced transaction and answers **410**: it did not
 commit and never will. A save of a retired attempt is refused (409) inside its
 own publication transaction, so a request still validating when reconcile
-answered cannot publish afterwards (#4899). Without an `attemptId` reconcile
-keeps answering 409 (unconfirmed). After a 410 the editor resumes with a fresh
+answered cannot publish afterwards (#4899). Only the current live lease holder
+(that session and generation) can retire, because only it could still publish
+the attempt; every retirement first deletes rows whose lease is no longer live
+(a lapsed generation can never become live again), and a page keeps at most 8
+rows. Without an `attemptId`, without the live lease, or at that limit nothing
+is recorded and reconcile answers 409: the outcome stays unconfirmed, the
+editor sends nothing and may ask again later. After a 410 the editor resumes with a fresh
 capture at the same base and always sends it: it never treats bytes equal to
 its old baseline as already saved, because that baseline is no longer proof of
 the head. The server's base fence then decides between a new version and a

@@ -24,6 +24,15 @@ var ErrNativeAttemptAbsent = errors.New("native save attempt did not commit and 
 // ErrNativeAttemptRetired refuses a save whose attempt an earlier reconcile retired.
 var ErrNativeAttemptRetired = errors.New("native save attempt was retired by reconcile")
 
+// ErrNativeRetirementLimit: the page already holds the maximum number of
+// retired attempts for its live lease. Nothing was recorded, so the attempt
+// stays unconfirmed (never "absent").
+var ErrNativeRetirementLimit = errors.New("native save attempt retirement limit reached; outcome stays unconfirmed")
+
+// nativeRetiredAttemptsPerPage bounds retirement rows for a page's one live
+// lease generation. An editor has at most one unconfirmed save at a time.
+const nativeRetiredAttemptsPerPage = 8
+
 // validNativeAttemptID accepts an opaque client nonce (a UUID in the editor).
 func validNativeAttemptID(id string) bool {
 	if len(id) < 8 || len(id) > 64 {
@@ -177,13 +186,7 @@ func (s *NativeStore) ReconcileAttempt(ctx context.Context, l EditLease, base in
 		if attemptID == "" {
 			return ErrNativeUnconfirmed
 		}
-		// Not this attempt at base+1. Retire it under this fence: a pending
-		// publication of it checks this row after taking the same fence.
-		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO craft_native_retired_attempts(page_id,workspace_id,session_id,attempt_id,generation,base_version) VALUES(?,?,?,?,?,?)`, l.Scope.ArtifactID, l.Scope.WorkspaceID, l.Holder.SessionID, attemptID, l.Generation, base); err != nil {
-			return err
-		}
-		absent = true
-		return nil
+		return s.retireAttempt(ctx, tx, l, base, attemptID, &absent)
 	})
 	if err != nil {
 		return NativeSaveReceipt{}, err
@@ -192,4 +195,54 @@ func (s *NativeStore) ReconcileAttempt(ctx context.Context, l EditLease, base in
 		return NativeSaveReceipt{}, ErrNativeAttemptAbsent
 	}
 	return s.snapshotReceipt(l, base, editorRevision, contentHash, version), nil
+}
+
+// retireAttempt records attemptID as retired, inside the writer-fenced
+// reconcile transaction. A retired row only matters while its attempt could
+// still publish, and publication requires the live lease of exactly that
+// holder session and generation (CheckWrite). A lapsed lease never becomes
+// live again: renewal needs a live lease and acquisition bumps the
+// generation. So:
+//   - only the current live holder may retire (any other answer: unconfirmed);
+//   - every row whose lease is no longer live for its session and generation
+//     is deleted first (admission expiry, release, handoff, takeover, restart);
+//   - a page keeps at most nativeRetiredAttemptsPerPage rows; beyond that
+//     nothing is recorded and the answer is ErrNativeRetirementLimit (409).
+//
+// The table therefore holds at most nativeRetiredAttemptsPerPage rows per page
+// with a live lease after every retirement, independent of request volume.
+func (s *NativeStore) retireAttempt(ctx context.Context, tx *sql.Tx, l EditLease, base int64, attemptID string, absent *bool) error {
+	if err := s.config.Leases.CheckWrite(ctx, tx, l); err != nil {
+		if errors.Is(err, ErrEditLeaseStale) || errors.Is(err, ErrEditLeaseBusy) || errors.Is(err, ErrEditLeaseDenied) {
+			return ErrNativeUnconfirmed
+		}
+		return err
+	}
+	boot, now, err := s.config.Leases.clock()
+	if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM craft_native_retired_attempts WHERE NOT EXISTS (
+ SELECT 1 FROM mooring_edit_leases e WHERE e.page_id=craft_native_retired_attempts.page_id AND e.workspace_id=craft_native_retired_attempts.workspace_id
+  AND e.session_id=craft_native_retired_attempts.session_id AND e.generation=craft_native_retired_attempts.generation
+  AND e.actor_id<>'' AND e.session_id<>'' AND e.boot_id=? AND e.expires_ns>?)`, boot, now); err != nil {
+		return err
+	}
+	var existing, rows int
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM craft_native_retired_attempts WHERE page_id=? AND session_id=? AND attempt_id=?`, l.Scope.ArtifactID, l.Holder.SessionID, attemptID).Scan(&existing); err != nil {
+		return err
+	}
+	if existing == 0 {
+		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM craft_native_retired_attempts WHERE page_id=?`, l.Scope.ArtifactID).Scan(&rows); err != nil {
+			return err
+		}
+		if rows >= nativeRetiredAttemptsPerPage {
+			return ErrNativeRetirementLimit
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO craft_native_retired_attempts(page_id,workspace_id,session_id,attempt_id,generation,base_version) VALUES(?,?,?,?,?,?)`, l.Scope.ArtifactID, l.Scope.WorkspaceID, l.Holder.SessionID, attemptID, l.Generation, base); err != nil {
+			return err
+		}
+	}
+	*absent = true
+	return nil
 }
