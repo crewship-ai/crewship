@@ -20,7 +20,7 @@ var AllEntryTypes = []EntryType{
 	EntryAgentError,
 	EntryAgentMentioned,
 	EntryAgentStatus,
-	EntryType("approval.auto_tuning_reset"), // journalApprovalAutoTuningReset, internal/api/approvals_handler.go:29:7
+	EntryType("approval.auto_tuning_reset"), // journalApprovalAutoTuningReset, internal/api/approvals_handler.go:28:7
 	EntryApprovalCancelled,
 	EntryApprovalDenied,
 	EntryApprovalGranted,
@@ -29,16 +29,17 @@ var AllEntryTypes = []EntryType{
 	EntryApprovalTimeout,
 	EntryTrustGranted,
 	EntryTrustRevoked,
-	EntryType("artifact.mooring_committed"),        // mooringCommitted, internal/api/mooring.go:22:2
-	EntryType("artifact.mooring_created"),          // mooringCreated, internal/api/mooring.go:21:2
-	EntryType("artifact.mooring_mandate_admitted"), // mooringMandateAdmitted, internal/api/mooring.go:23:2
-	EntryType("artifact.mooring_mandate_revoked"),  // mooringMandateRevoked, internal/api/mooring.go:24:2
+	EntryType("artifact.mooring_committed"),        // mooringCommitted, internal/api/mooring.go:23:2
+	EntryType("artifact.mooring_created"),          // mooringCreated, internal/api/mooring.go:22:2
+	EntryType("artifact.mooring_mandate_admitted"), // mooringMandateAdmitted, internal/api/mooring.go:24:2
+	EntryType("artifact.mooring_mandate_revoked"),  // mooringMandateRevoked, internal/api/mooring.go:25:2
 	EntryType("artifact.project_shared"),           // journalArtifactProjectShared, internal/api/pages_artifact_project.go:23:7
 	EntryAssignmentCancel,
 	EntryAssignmentDone,
 	EntryAssignmentCreate,
 	EntryAssignmentFail,
 	EntryAssignmentHardStop,
+	EntryAssignmentRefused,
 	EntryAssignmentRun,
 	EntryAuditEntityCreated,
 	EntryAuditEntityDeleted,

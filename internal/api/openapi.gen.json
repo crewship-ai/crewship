@@ -6717,7 +6717,9 @@
       "CrewBudgetRequestV1": {
         "properties": {
           "limit_usd": {
-            "exclusiveMinimum": 0,
+            "exclusiveMinimum": true,
+            "maximum": 1000000000,
+            "minimum": 0,
             "type": "number"
           },
           "mode": {
@@ -17531,9 +17533,15 @@
       "RemainingAgentPersonaRequestV1": {
         "properties": {
           "content": {
+            "description": "Persona text containing at least one non-whitespace character. Use DELETE to reset a persona.",
+            "minLength": 1,
+            "pattern": "[^\\t\\n\\v\\f\\r    - \u2028\u2029  　]",
             "type": "string"
           }
         },
+        "required": [
+          "content"
+        ],
         "type": "object"
       },
       "RemainingAgentPersonaSuggestionV1": {
@@ -18164,9 +18172,15 @@
       "RemainingCrewPersonaRequestV1": {
         "properties": {
           "content": {
+            "description": "Persona text containing at least one non-whitespace character. Use DELETE to reset a persona.",
+            "minLength": 1,
+            "pattern": "[^\\t\\n\\v\\f\\r    - \u2028\u2029  　]",
             "type": "string"
           }
         },
+        "required": [
+          "content"
+        ],
         "type": "object"
       },
       "RemainingCrewPersonaUpdatedV1": {

@@ -15,7 +15,8 @@ import (
 
 // activityEntryTypes is the set of journal entry types that make up the
 // cross-crew "activity" view: peer queries, escalations, and the full
-// assignment lifecycle (created → running → completed/failed). This is the
+// assignment lifecycle (created → running → completed/failed), plus refused
+// attempts before admission. This is the
 // journal-native replacement for the retired /api/v1/activity aggregator
 // (which merged three tables server-side and silently dropped a whole
 // source on any query error). The terminal rows matter: without
@@ -24,7 +25,7 @@ import (
 // the parallel run.completed/run.failed entries (keyed by trace_id), which
 // this feed deliberately excludes so it stays scoped to assignments rather
 // than every routine/pipeline run.
-const activityEntryTypes = "peer.conversation,peer.escalation,assignment.created,assignment.running,assignment.completed,assignment.failed"
+const activityEntryTypes = "peer.conversation,peer.escalation,assignment.created,assignment.running,assignment.completed,assignment.failed,assignment.refused"
 
 // activityMaxLines mirrors the journal List handler's server-side page cap
 // (internal/api/journal_handler.go: limit must be 1..500). Kept in sync so
