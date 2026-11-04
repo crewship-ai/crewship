@@ -109,6 +109,7 @@ func TestAcceptance_DemoRBACMatrix(t *testing.T) {
 		return raw
 	}
 	accounts := append(slices.Clone(roster), demoUser{Email: "owner@matrix.invalid", Password: ownerPassword, Role: "OWNER"})
+	fixtureHashes := make(map[string]string, len(accounts))
 	for i, u := range accounts {
 		t.Run(strings.TrimSuffix(u.Email, "@crewship.local"), func(t *testing.T) {
 			session, err := exchangeCredentialsForSession(cli.NewClient(srv.URL, "", ""), srv.URL, u.Email, u.Password)
@@ -138,6 +139,18 @@ func TestAcceptance_DemoRBACMatrix(t *testing.T) {
 					t.Fatalf("signed-in capability set: %v, want %v", actual, expected)
 				}
 			}
+			// Provisioning and this first login used the real password setup
+			// and authentication handlers. Repeated idempotence logins below
+			// exercise the same passwords without paying production bcrypt
+			// strength in a race-instrumented test fixture on every seed.
+			// Keep the resulting hash as an exact preservation assertion, so
+			// a seed that resets an existing password still fails this test.
+			fixtureHash, err := bcrypt.GenerateFromPassword([]byte(u.Password), bcrypt.MinCost)
+			if err != nil {
+				t.Fatal(err)
+			}
+			execSQL(`UPDATE users SET hashed_password=? WHERE email=?`, string(fixtureHash), u.Email)
+			fixtureHashes[u.Email] = string(fixtureHash)
 			// Independent expected policy: role OR grant for creation, ADMIN+ OR
 			// grant for rotation; reveal additionally has a MANAGER role floor.
 			manager := u.Role == "MANAGER" || u.Role == "ADMIN" || u.Role == "OWNER"
@@ -180,24 +193,43 @@ func TestAcceptance_DemoRBACMatrix(t *testing.T) {
 			request(t, foreign, "POST", "/api/v1/workspaces/matrix-other/pipelines/matrix-probe/run?workspace_id=matrix-other", map[string]any{}, 403)
 		})
 	}
+	assertFixtureHashesPreserved := func(phase string) {
+		t.Helper()
+		for email, want := range fixtureHashes {
+			var got string
+			if err := db.QueryRow(`SELECT hashed_password FROM users WHERE email=?`, email).Scan(&got); err != nil {
+				t.Fatal(err)
+			}
+			if got != want {
+				t.Errorf("%s changed existing fixture password hash for %s", phase, email)
+			}
+		}
+	}
 	// The shipped additive CLI works without provider credentials or --nuke.
 	cfg := filepath.Join(t.TempDir(), "cli.yaml")
 	if err := os.WriteFile(cfg, []byte("server: "+srv.URL+"\nworkspace: matrix-ws\ntoken: "+token+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	buildStarted := time.Now()
 	binary := buildCrewshipBinary(t)
+	t.Logf("measurement CLI build elapsed=%s", time.Since(buildStarted))
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
 	command := exec.CommandContext(ctx, binary, "seed", "rbac-matrix", "--server", srv.URL, "--workspace", "matrix-ws")
 	command.Dir = t.TempDir()
 	command.Env = append(os.Environ(), "CREWSHIP_CONFIG="+cfg, "SEED_ANTHROPIC_API_KEY=", "SEED_CODEX_AUTH_FILE=")
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("additive CLI: %v: %s", err, output)
+	subprocessStarted := time.Now()
+	output, runErr := command.CombinedOutput()
+	t.Logf("measurement additive CLI elapsed=%s context_error=%v", time.Since(subprocessStarted), ctx.Err())
+	if runErr != nil {
+		t.Fatalf("additive CLI: %v: %s", runErr, output)
 	}
+	assertFixtureHashesPreserved("additive CLI")
 	// A second seed proves existing logins work and preserves all identities.
 	if err := seedUserRoster(t.Context(), owner, roster); err != nil {
 		t.Fatal(err)
 	}
+	assertFixtureHashesPreserved("repeated seed")
 	var users int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&users); err != nil || users != len(roster)+1 {
 		t.Fatalf("non-idempotent user seed: %d %v", users, err)
