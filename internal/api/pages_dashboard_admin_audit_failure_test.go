@@ -93,7 +93,14 @@ func TestDashboardAdministratorReadAuditFailureReleasesNothing(t *testing.T) {
 						statement = "UPDATE audit_logs SET metadata='{}' WHERE id=NEW.id;"
 					}
 					mustExec(t, h.db, `CREATE TRIGGER fail_dashboard_admin_audit `+timing+` INSERT ON audit_logs WHEN NEW.user_id='`+admin+`' AND NEW.action='`+action+`' BEGIN `+statement+` END`)
-					t.Cleanup(func() { mustExec(t, h.db, `DROP TRIGGER fail_dashboard_admin_audit`) })
+					t.Cleanup(func() {
+						mustExec(t, h.db, `DROP TRIGGER fail_dashboard_admin_audit`)
+						for _, metadata := range []bool{true, false} {
+							if got := read(metadata); got.Code != http.StatusOK {
+								t.Errorf("recalibrate metadata=%t after %s: HTTP %d: %s", metadata, fault, got.Code, got.Body)
+							}
+						}
+					})
 					for _, metadata := range []bool{true, false} {
 						before := audits()
 						got := read(metadata)
@@ -107,6 +114,56 @@ func TestDashboardAdministratorReadAuditFailureReleasesNothing(t *testing.T) {
 						}
 						if n := audits(); n != before {
 							t.Errorf("failed audit persisted rows: %d before, %d after", before, n)
+						}
+					}
+				})
+			}
+			// The capacity probe commits an admission receipt before the data
+			// read starts another transaction. Corrupt that existing receipt on
+			// its next verification, so an initial successful audit cannot bless
+			// content released after a later audit failure.
+			for _, fault := range []string{"delete", "rewrite"} {
+				t.Run("after-admission/"+fault, func(t *testing.T) {
+					mustExec(t, h.db, `CREATE TABLE dashboard_audit_probe(n INTEGER NOT NULL)`)
+					mustExec(t, h.db, `INSERT INTO dashboard_audit_probe VALUES(0)`)
+					// Count the actual transaction fences, rather than repeated
+					// authority callbacks inside the first transaction.
+					mustExec(t, h.db, `CREATE TRIGGER count_dashboard_audit_transactions BEFORE UPDATE ON document_writer_fence BEGIN UPDATE dashboard_audit_probe SET n=n+1; END`)
+					statement := `DELETE FROM audit_logs WHERE id=NEW.id AND (SELECT n FROM dashboard_audit_probe)>1; SELECT RAISE(IGNORE) WHERE (SELECT n FROM dashboard_audit_probe)>1;`
+					if fault == "rewrite" {
+						statement = `UPDATE audit_logs SET metadata='{}' WHERE id=NEW.id AND (SELECT n FROM dashboard_audit_probe)>1;`
+					}
+					mustExec(t, h.db, `CREATE TRIGGER fail_dashboard_admin_audit BEFORE INSERT ON audit_logs WHEN NEW.user_id='`+admin+`' AND NEW.action='`+action+`' BEGIN `+statement+` END`)
+					t.Cleanup(func() {
+						mustExec(t, h.db, `DROP TRIGGER fail_dashboard_admin_audit`)
+						mustExec(t, h.db, `DROP TRIGGER count_dashboard_audit_transactions`)
+						mustExec(t, h.db, `DROP TABLE dashboard_audit_probe`)
+						for _, metadata := range []bool{true, false} {
+							if got := read(metadata); got.Code != http.StatusOK {
+								t.Errorf("recalibrate after later %s: HTTP %d: %s", fault, got.Code, got.Body)
+							}
+						}
+					})
+					for _, metadata := range []bool{true, false} {
+						mustExec(t, h.db, `UPDATE dashboard_audit_probe SET n=0`)
+						before := audits()
+						got := read(metadata)
+						if got.Code != http.StatusInternalServerError {
+							t.Errorf("later fault metadata=%t HTTP %d, want 500: %s", metadata, got.Code, got.Body)
+						}
+						for _, secret := range []string{collection, rowID, value} {
+							if strings.Contains(got.Body.String(), secret) {
+								t.Errorf("later fault metadata=%t disclosed %q", metadata, secret)
+							}
+						}
+						// The first transaction's genuine receipt remains. The
+						// failed data transaction must roll back its corruption.
+						if n := audits(); n != before+1 {
+							t.Errorf("admission audit count %d, want %d", n, before+1)
+						}
+						var probes int
+						if err := h.db.QueryRow(`SELECT n FROM dashboard_audit_probe`).Scan(&probes); err != nil || probes != 1 {
+							t.Errorf("failed verification did not roll back: probes=%d err=%v", probes, err)
 						}
 					}
 				})
