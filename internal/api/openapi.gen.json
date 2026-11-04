@@ -139507,7 +139507,7 @@
     },
     "/api/v1/pages/{slug}/design": {
       "get": {
-        "description": "Read the canvas or the retained checkpoint chosen with `version`. Editors and separately authorized workspace OWNER/ADMIN readers can read the latest canvas and retained versions. Shared-only readers receive only the shared pin, even without `version`, and receive 404 until one is shared. Foreign administrator access is audited; a read-scoped credential grants no write authority. Requires the `artifacts_design` feature flag.",
+        "description": "Read the canvas or the retained checkpoint chosen with `version`. Callers with current Edit authority (a browser session or pages:write credential plus Edit permission) and separately authorized workspace OWNER/ADMIN readers can read the latest canvas and retained versions. Non-admin Page owners and Edit grantees using pages:read credentials are shared-only. Shared-only readers receive only the shared pin, even without `version`, and receive 404 until one is shared. Foreign administrator access is audited; a read-scoped credential grants no write authority. Requires the `artifacts_design` feature flag.",
         "operationId": "get_api_v1_pages_slug_design",
         "parameters": [
           {
@@ -140658,7 +140658,7 @@
     },
     "/api/v1/pages/{slug}/design/versions": {
       "get": {
-        "description": "List Design versions. Editors and separately authorized workspace OWNER/ADMIN readers receive full history; shared-only readers receive only the shared version. Foreign administrator access is audited; a read-scoped credential grants no write authority.",
+        "description": "List Design versions. Callers with current Edit authority (a browser session or pages:write credential plus Edit permission) and separately authorized workspace OWNER/ADMIN readers receive full history. Non-admin Page owners and Edit grantees using pages:read credentials are shared-only: only the shared version, or 404 before a pin exists. Foreign administrator access is audited; a read-scoped credential grants no write authority.",
         "operationId": "get_api_v1_pages_slug_design_versions",
         "parameters": [
           {
@@ -140800,7 +140800,7 @@
     },
     "/api/v1/pages/{slug}/design/ws": {
       "get": {
-        "description": "Upgrade to a WebSocket carrying standard Yjs sync and awareness frames. Editors and separately authorized workspace OWNER/ADMIN readers receive live canvas updates. Shared-only readers receive the shared snapshot and presence, without live document updates. Foreign administrator access is audited; read-scoped credentials cannot write. Live edits do not publish a version; use Create Design checkpoint.",
+        "description": "Upgrade to a WebSocket carrying standard Yjs sync and awareness frames. Callers with current Edit authority (a browser session or pages:write credential plus Edit permission) and separately authorized workspace OWNER/ADMIN readers receive live canvas updates. Non-admin Page owners and Edit grantees using pages:read credentials are shared-only. With a shared pin they receive that snapshot and presence, without live document updates. Before a pin exists, upgrade and presence can succeed, but sync step 1 closes the socket with 1008 Design permissions changed; the CLI watch command sends that step and reports an error. Foreign administrator access is audited; read-scoped credentials cannot write. Live edits do not publish a version; use Create Design checkpoint.",
         "operationId": "get_api_v1_pages_slug_design_ws",
         "parameters": [
           {

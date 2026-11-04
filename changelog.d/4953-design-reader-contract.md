@@ -1,1 +1,0 @@
-- **Design API and CLI descriptions distinguish shared snapshots from live reads.** Ordinary readers see the shared version and presence; editors and separately authorized workspace administrators can read the latest canvas. Foreign administrative access is audited, and a read-scoped credential grants no write authority. Runtime behavior is unchanged.

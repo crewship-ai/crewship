@@ -180,11 +180,13 @@ crewship page design get launch-hero --version 1 -f json
 }
 ```
 
-`--version 0` (the default) reads the latest canvas for editors and separately
-authorized workspace OWNER/ADMIN readers. Ordinary Read grantees receive only
-the shared version, and 404 until one is shared. A positive `--version N` is
-limited to that shared pin for shared-only readers. Foreign administrator
-access is audited; a read-scoped administrator credential can read the latest
+`--version 0` (the default) reads the latest canvas for callers with current
+Edit authority (a browser session or a `pages:write` credential plus Edit
+permission) and separately authorized workspace OWNER/ADMIN readers. Ordinary
+Read grantees receive only the shared version, and 404 until one is shared. A positive `--version N` is
+limited to that shared pin for shared-only readers. Non-admin Page owners
+and Edit grantees using `pages:read` credentials are shared-only too. Foreign
+administrator access is audited; a read-scoped administrator credential can read the latest
 canvas and history but cannot write. With a selected retained version, the
 `version` and `latest_version` fields both report that version; use
 `page design versions` for the latest version visible to the caller.
