@@ -232,10 +232,18 @@ case "$args" in
   *" issue start "*)
     id="${args##* issue start }"; id="${id%% *}"
     tag="$(grep -oE 'XLINK(NEG)?-[A-Z0-9]+' "$state/issue-$id" | head -1)"
-    if { [ "$XLINK_MODE" = landed ] && [ ! -e "$state/unlinked" ]; } || [ "$XLINK_MODE" = leaky ]; then
+    if { [[ "$XLINK_MODE" == landed* ]] && [ ! -e "$state/unlinked" ]; } || [ "$XLINK_MODE" = leaky ]; then
       jq -nc --arg tag "$tag" '{id:("a-"+$tag),to_slug:"morgan",entry_type:"assignment.created",payload:{assignment_id:("asn-"+$tag),task:("Read actual record "+$tag)}}' >>"$state/landed"
-      jq -nc --arg tag "$tag" '{id:("c-"+$tag),to_slug:"morgan",entry_type:"assignment.completed",payload:{assignment_id:("asn-"+$tag),outcome:"SUCCEEDED"}}' >>"$state/landed"
-      printf 'Morgan read the record: %s' "$(cat "$state/verification-code")" >"$state/result-$id"
+      if [ "$XLINK_MODE" != landed-no-completion ]; then
+        jq -nc --arg tag "$tag" '{id:("c-"+$tag),to_slug:"morgan",entry_type:"assignment.completed",payload:{assignment_id:("asn-"+$tag),outcome:"SUCCEEDED"}}' >>"$state/landed"
+      fi
+      printf '%s' "asn-$tag" >"$state/assignment-$id"
+      # The real list exposes only 200 characters plus an ellipsis. Keep the
+      # independent code past that boundary; only the full-result route has it.
+      printf '%0250d Morgan read the record: ' 0 >"$state/result-$id"
+      if [ "$XLINK_MODE" != landed-no-code ]; then
+        cat "$state/verification-code" >>"$state/result-$id"
+      fi
     elif [ -e "$state/unlinked" ]; then
       printf 'Assignment refused: crews are not connected — create a crew connection first' >"$state/result-$id"
     else
@@ -247,9 +255,19 @@ case "$args" in
     st=COMPLETED
     [ "$XLINK_MODE" = neg-hangs ] && grep -q XLINKNEG "$state/issue-$id" && st=RUNNING
     [ "$XLINK_MODE" = neg-failed ] && grep -q XLINKNEG "$state/issue-$id" && st=FAILED
-    jq -nc --arg r "$(cat "$state/result-$id" 2>/dev/null)" --arg st "$st" --arg id "$id" '
-      [{status:$st,source:"delegation",agent_slug:"alex",agent_id:"alex-id",run_id:("run-"+$id),result_summary:$r}]
-      + (if ($r|contains("Morgan read the record:")) then [{status:"COMPLETED",source:"delegation",agent_slug:"morgan",result_summary:$r}] else [] end)'
+    assignment="$(cat "$state/assignment-$id" 2>/dev/null)"
+    [ "$XLINK_MODE" = landed-wrong-id ] && assignment="unrelated-$assignment"
+    jq -nc --arg r "$(cat "$state/result-$id" 2>/dev/null)" --arg st "$st" --arg id "$id" --arg assignment "$assignment" '
+      ($r | if length > 200 then .[:200]+"…" else . end) as $preview
+      | [{status:$st,source:"delegation",agent_slug:"alex",agent_id:"alex-id",run_id:("run-"+$id),result_summary:$preview}]
+      + (if ($r|contains("Morgan read the record:")) then [{id:$assignment,run_id:("morgan-journal-"+$id),status:"COMPLETED",source:"delegation",agent_slug:"morgan",result_summary:$preview}] else [] end)'
+    exit 0 ;;
+  *" issue result "*)
+    id="${args##* issue result }"; assignment="${id#* }"; assignment="${assignment%% *}"; id="${id%% *}"
+    [ "$XLINK_MODE" != landed-no-full ] || exit 1
+    [ -s "$state/assignment-$id" ] || exit 1
+    [ "$assignment" = "$(cat "$state/assignment-$id")" ] || exit 1
+    jq -nc --arg r "$(cat "$state/result-$id")" '{status:"COMPLETED",outcome:"SUCCEEDED",result_summary:$r}'
     exit 0 ;;
   *" issue comments "*|*" issue get "*) exit 0 ;;
   *" ask "*)
@@ -265,6 +283,24 @@ run_crew_links() { # <mode> — print the suite's output (colour-free, stdout no
   xlink_cli "$dir/crewship"
   env -u CREWSHIP_SERVER -u SERVER CREWSHIP="$dir/crewship" XLINK_STATE="$dir" XLINK_MODE="$1" ASK_TIMEOUT=3 POLL_INTERVAL=1 \
     bash "$SCRIPT_DIR/test-harness/test-crew-links.sh" 2>&1
+  if [ "$1" = landed ]; then
+    local file id assignment preview full code
+    for file in "$dir"/assignment-*; do
+      id="${file##*/assignment-}"; assignment="$(cat "$file")"; code="$(cat "$dir/verification-code")"
+      preview="$(XLINK_STATE="$dir" XLINK_MODE=landed "$dir/crewship" issue runs "$id" --format json)"
+      full="$(XLINK_STATE="$dir" XLINK_MODE=landed "$dir/crewship" issue result "$id" "$assignment" --format json)"
+      if printf '%s\n' "$preview" | jq -e --arg code "$code" --arg assignment "$assignment" '
+        any(.[]; .id == $assignment and .run_id != $assignment and
+          (.result_summary|length) == 201 and (.result_summary|contains($code)|not))' >/dev/null &&
+        printf '%s\n' "$full" | jq -e --arg code "$code" '
+          (.result_summary|length) > 250 and (.result_summary|contains($code))' >/dev/null; then
+        echo "fixture: bounded preview and full matched result verified"
+      fi
+      if ! XLINK_STATE="$dir" XLINK_MODE=landed "$dir/crewship" issue result "$id" "morgan-journal-$id" --format json >/dev/null 2>&1; then
+        echo "fixture: journal identity is rejected by full result"
+      fi
+    done
+  fi
   rm -rf "$dir"
 }
 
@@ -281,6 +317,14 @@ if command -v jq >/dev/null 2>&1; then
   expect_not_contains "landed run -> the agent's refusal text is never a PASS" "$out" "PASS the unlinked hand-off was attempted"
   expect_contains "landed run -> unlinked half PASSES" "$out" "PASS an unlinked crew cannot be delegated to"
   expect_contains "landed run -> suite is green" "$out" "failed: 0"
+  expect_contains "landed fixture -> code is beyond the 201-character preview" "$out" "fixture: bounded preview and full matched result verified"
+  expect_contains "landed fixture -> unknown journal identity cannot read the result" "$out" "fixture: journal identity is rejected by full result"
+
+  for mode in landed-wrong-id landed-no-completion landed-no-code landed-no-full; do
+    out="$(run_crew_links "$mode")"
+    expect_contains "$mode -> full matched completion is required" "$out" "FAIL the cross-crew assignment completed with a result"
+    expect_not_contains "$mode -> suite cannot be green" "$out" "failed: 0"
+  done
 
   out="$(run_crew_links no-attempt)"
   expect_contains "completed model refusal without server call -> unlinked half FAILS" "$out" "FAIL an unlinked crew cannot be delegated to"
