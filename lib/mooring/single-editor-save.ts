@@ -67,6 +67,8 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   let timer: ReturnType<typeof setTimeout> | undefined
   let preparations = Promise.resolve(), draftWrites = Promise.resolve()
   let lastPersistedSequence = 0, manualCount = 0
+  // Sequences whose journal write has not settled, including ones past the deadline.
+  const unsettledWrites = new Set<number>()
   let preparingCount = 0
   let nextPreparation = 0, lastFailedPreparation = 0, nextAutosave = 0
   let writeRetirement: Promise<boolean> | undefined
@@ -214,13 +216,26 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   }
   // Preserve the newest durable recovery row when an older queued manual
   // snapshot rebases. Test the sequence inside this queue, after prior writes.
+  // A write that missed the controller deadline still runs in the journal and
+  // may land later: when it does, it advances the fence like any durable
+  // write, and while it is unsettled no older snapshot may be written behind
+  // it (the journal is serial, so that older write would replace the newer
+  // row and a later confirm would retire it). Such an older write fails as
+  // storage instead; it never overwrites a newer draft (#4887 review).
   function persistDraft(draft: NativeDraft, sequence: number): Promise<void> {
     const writing = draftWrites.then(async () => {
       if (!active || sequence < lastPersistedSequence) return
-      await journalStep(() => options.journal.persist(draft))
-      lastPersistedSequence = sequence
-      // Storage answered durably again: an earlier failed row retirement must
-      // not stop every later save while the lease is held (#4852).
+      if ([...unsettledWrites].some(newer => newer > sequence)) throw new Error("newer_draft_unsettled")
+      const write = Promise.resolve().then(() => options.journal.persist(draft))
+      unsettledWrites.add(sequence)
+      void write.then(() => {
+        if (sequence > lastPersistedSequence) lastPersistedSequence = sequence
+        // Storage answered durably again: an earlier failed row retirement must
+        // not stop every later save while the lease is held (#4852).
+        if (blocked === "storage") blocked = undefined
+      }, () => {}).finally(() => { unsettledWrites.delete(sequence) })
+      await journalStep(() => write)
+      if (sequence > lastPersistedSequence) lastPersistedSequence = sequence
       if (blocked === "storage") blocked = undefined
     })
     draftWrites = writing.catch(() => {})

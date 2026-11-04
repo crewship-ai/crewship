@@ -236,3 +236,89 @@ it("an identity switch while a row retirement hangs: the deadline afterwards cap
   expect(r.snapshot).toHaveBeenCalledOnce()
   expect(r.requests).toHaveLength(1)
 })
+
+it("a timed-out persist that lands late is never overwritten or retired by an older queued manual ticket", async () => {
+  // Codex review of #4887, blocker 1. A is in flight; manual ticket B is
+  // captured and waits behind A; newer edit C's local write misses the
+  // controller deadline but lands later, before A's confirmation (which
+  // queues behind it in the journal) answers. B must then neither rebase over
+  // C's newer row nor retire it: a reload must still find C.
+  // Only the controller's timers are faked, so each deadline is placed exactly.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+  const settle = async (done: () => boolean) => { for (let i = 0; i < 1000 && !done(); i++) await new Promise(resolve => setImmediate(resolve)); expect(done()).toBe(true) }
+  const base = await openNativeDraftJournal({ human: "alice", workspace: "w", page: "p", applicationId: "gridcraft" })
+  const journal = { ...base, confirm: vi.fn((d: NativeDraft) => base.confirm(d)) }
+  const r = await rig({ journal, timeoutMs: 100, idleMs: 1000 })
+  let releaseA!: () => void
+  r.send.mockImplementationOnce(req => new Promise(resolve => { releaseA = () => resolve(receipt(req)) }))
+  try {
+    r.edit(2)
+    const a = r.controller.save()
+    await settle(() => r.requests.length === 1)
+    let bDone = false
+    const b = r.controller.save("ticket-b").then(() => "sent", (error: Error) => error.message).finally(() => { bDone = true })
+    await settle(() => store.put.mock.calls.length === 2)
+    // C: a newer edit whose IndexedDB write hangs past the controller deadline.
+    let landC!: () => void, rowC: DocumentDraft | undefined
+    store.put.mockImplementationOnce((row: DocumentDraft) => new Promise<void>(resolve => { rowC = row; landC = () => { rows.set(row.id, row); resolve() } }))
+    r.edit(3)
+    let cDone = false
+    void r.controller.save().finally(() => { cDone = true })
+    await settle(() => store.put.mock.calls.length === 3)
+    await vi.advanceTimersByTimeAsync(50)
+    // A commits; its confirmation queues in the journal behind C's write.
+    releaseA()
+    await settle(() => journal.confirm.mock.calls.length === 1)
+    // C's controller deadline passes (A's confirmation still has 50 ms) ...
+    await vi.advanceTimersByTimeAsync(60)
+    await settle(() => cDone)
+    expect(bDone).toBe(false)
+    // ... and only then does C's write land, before A's confirmation deadline.
+    landC()
+    await a
+    await settle(() => bDone)
+    await b
+    // Whatever B did, C's newer content stays recoverable from this browser.
+    expect(rowC).toBeDefined()
+    expect([...rows.values()].map(row => row.snapshot)).toEqual([rowC!.snapshot])
+    expect(r.requests.map(q => q.bytes[0])).not.toContain(3)
+  } finally { vi.useRealTimers(); await r.controller.close() }
+})
+
+it("an older manual ticket never writes behind a newer local write that has not settled yet", async () => {
+  // Same interleaving, but C's write is still in the journal when B rebases:
+  // B cannot know whether C will land, so it fails visibly instead of queueing
+  // an older row behind C. Nothing is sent for B; C lands and stays.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+  const settle = async (done: () => boolean) => { for (let i = 0; i < 1000 && !done(); i++) await new Promise(resolve => setImmediate(resolve)); expect(done()).toBe(true) }
+  const base = await openNativeDraftJournal({ human: "alice", workspace: "w", page: "p", applicationId: "gridcraft" })
+  // A's confirmation answers on its own; it is not queued behind C here.
+  const journal = { ...base, confirm: vi.fn(async () => {}) }
+  const r = await rig({ journal, timeoutMs: 100, idleMs: 1000 })
+  let releaseA!: () => void
+  r.send.mockImplementationOnce(req => new Promise(resolve => { releaseA = () => resolve(receipt(req)) }))
+  let landC: (() => void) | undefined, rowC: DocumentDraft | undefined
+  try {
+    r.edit(2)
+    const a = r.controller.save()
+    await settle(() => r.requests.length === 1)
+    let bOutcome: string | undefined
+    const b = r.controller.save("ticket-b").then(() => "sent", (error: Error) => error.message).then(outcome => { bOutcome = outcome })
+    await settle(() => store.put.mock.calls.length === 2)
+      store.put.mockImplementationOnce((row: DocumentDraft) => new Promise<void>(resolve => { rowC = row; landC = () => { rows.set(row.id, row); resolve() } }))
+    r.edit(3)
+    let cDone = false
+    void r.controller.save().finally(() => { cDone = true })
+    await settle(() => store.put.mock.calls.length === 3)
+    await vi.advanceTimersByTimeAsync(50)
+    releaseA()
+    await a
+    await vi.advanceTimersByTimeAsync(60)
+    await settle(() => cDone && bOutcome !== undefined)
+    await b
+    expect(bOutcome).toBe("storage")
+    expect(r.requests).toHaveLength(1)
+    landC!()
+    await settle(() => rows.size === 1 && [...rows.values()][0].snapshot === rowC?.snapshot)
+  } finally { landC?.(); vi.useRealTimers(); await r.controller.close() }
+})
