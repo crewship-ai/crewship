@@ -54,7 +54,7 @@ function subscribeStatus(l: () => void): () => void {
   statusListeners.add(l)
   return () => void statusListeners.delete(l)
 }
-/** Whether this browser's appearance has reached the server. */
+/** Whether this account's queued appearance choices have reached the server. */
 export function useAppearanceSyncStatus(): OutboxStatus {
   return useSyncExternalStore(subscribeStatus, () => syncStatus, () => "synced")
 }
@@ -182,11 +182,16 @@ export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown, 
   // What the server is known to hold. A local value equal to it is not sent:
   // that is how applying the server's own value does not echo it back.
   const lastSentRef = useRef<string | null>(null)
+  // Browser display is not account authority. Only fields changed after the
+  // activation baseline are merged into this owner's cloud value.
+  const displayBaselineRef = useRef<Partial<Appearance>>({})
+  const ownedAppearanceRef = useRef<Partial<Appearance>>({})
   const lastStyleSentRef = useRef<string | null>(null)
   const pendingRef = useRef<{ appearance: string | null; style: string | null }>({ appearance: null, style: null })
   const [readyOwner, setReadyOwner] = useState<string | null>(null)
   const ready = ownerKey !== null && readyOwner === ownerKey
   const outboxRef = useRef<AppearanceOutbox | null>(null)
+  const retiredBoxesRef = useRef(new Map<string, AppearanceOutbox>())
 
   // Paint the style that can actually be shown (Harbor for an unknown style
   // or one without a palette for the current scheme), sync on or off.
@@ -213,6 +218,7 @@ export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown, 
     }
     const ob = createAppearanceOutbox({
       owner,
+      initialEntries: retiredBoxesRef.current.get(ownerKey)?.snapshot(),
       storage: storageForOutbox(),
       send: async (key, body, keepalive) => {
         assertOwner()
@@ -226,6 +232,7 @@ export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown, 
       },
       onStatus: (status) => { if (activeOutbox === ob) setSyncStatus(status) },
     })
+    retiredBoxesRef.current.delete(ownerKey)
     outboxRef.current = ob
     activeOutbox = ob
     setSyncStatus(ob.status())
@@ -255,7 +262,9 @@ export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown, 
         // Browser-local explicit values are display state, not a fresh
         // cloud-write intent for the account that just activated. Pending
         // owned values above hydrate the display before this baseline.
-        lastSentRef.current = canonicalAppearance({ ...(local ? explicitOnly(local, readExplicit()) : {}), ...remote })
+        displayBaselineRef.current = { ...(local ? explicitOnly(local, readExplicit()) : {}), ...remote }
+        ownedAppearanceRef.current = { ...remote }
+        lastSentRef.current = canonicalAppearance(remote)
         // The style: a local change still waiting in the outbox wins; else the
         // server's value is adopted; an empty server stays empty — only a
         // style the user picked is ever written.
@@ -279,7 +288,9 @@ export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown, 
         if (cancelled) return
         // Offline, 5xx, or a response that is not JSON. Keep the local look and
         // treat it as already sent, so only a real change is written later.
-        lastSentRef.current = serializedRef.current
+        displayBaselineRef.current = serializedRef.current ? JSON.parse(serializedRef.current) : {}
+        ownedAppearanceRef.current = {}
+        lastSentRef.current = EMPTY
         lastStyleSentRef.current = styleOutRef.current
         setReadyOwner(ownerKey)
       })
@@ -288,6 +299,7 @@ export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown, 
     window.addEventListener("focus", kick)
     return () => {
       cancelled = true
+      setReadyOwner(null)
       // Capture this activation's box, including a just-debounced write.
       // A new account cannot inherit or flush it through a fresh invocation.
       const p = pendingRef.current
@@ -296,6 +308,7 @@ export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown, 
       if (activeRef.current && (p.appearance || p.style)) ob.flushKeepalive()
       pendingRef.current = { appearance: null, style: null }
       ob.pause()
+      retiredBoxesRef.current.set(ownerKey, ob)
       if (activeOutbox === ob) activeOutbox = null
       if (outboxRef.current === ob) outboxRef.current = null
       window.removeEventListener("online", kick)
@@ -357,21 +370,32 @@ export function useAppearanceSync(enabled: boolean, workspaceDefault?: unknown, 
   // keep its order. Each new value clears the previous timer, so a value that
   // was only on screen for one render is never sent.
   useEffect(() => {
-    const appearanceOwed = Boolean(serialized) && serialized !== lastSentRef.current
+    if (!active || !ready) return
+    const display: Partial<Appearance> = serialized ? JSON.parse(serialized) : {}
+    const owned = { ...ownedAppearanceRef.current }
+    for (const field of APPEARANCE_FIELDS) {
+      if (display[field] === displayBaselineRef.current[field]) continue
+      if (display[field] === undefined) delete owned[field]
+      else Object.assign(owned, { [field]: display[field] })
+    }
+    displayBaselineRef.current = display
+    ownedAppearanceRef.current = owned
+    const payload = canonicalAppearance(owned)
+    const appearanceOwed = payload !== lastSentRef.current
     const styleOwed = style !== lastStyleSentRef.current
-    if (!active || !ready || (!appearanceOwed && !styleOwed)) {
+    if (!appearanceOwed && !styleOwed) {
       // Nothing owed: a value that was replaced before its timer fired, or a
       // switch turned off, must not be flushed on unmount either.
       pendingRef.current = { appearance: null, style: null }
       return
     }
-    pendingRef.current = { appearance: appearanceOwed ? serialized : null, style: styleOwed ? style : null }
+    pendingRef.current = { appearance: appearanceOwed ? payload : null, style: styleOwed ? style : null }
     const t = setTimeout(() => {
       const ob = outboxRef.current
       if (!ob || ownerKeyRef.current !== ownerKey) return
-      if (appearanceOwed && serialized) {
-        lastSentRef.current = serialized
-        ob.enqueue(APPEARANCE_PREFERENCE_KEY, serialized)
+      if (appearanceOwed) {
+        lastSentRef.current = payload
+        ob.enqueue(APPEARANCE_PREFERENCE_KEY, payload)
       }
       if (styleOwed) {
         lastStyleSentRef.current = style

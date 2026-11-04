@@ -129,3 +129,60 @@ it("can render the client hook on the server before a browser exists", () => {
  function Probe() { useAppearanceSync(true, undefined, "Alice"); return null }
  try { expect(() => renderToString(createElement(Probe))).not.toThrow() } finally { vi.stubGlobal("window", browser) }
 })
+
+it.each([false, true])("does not promote Alice's browser accent through Bob's density choice (remote=%s)", async (existing) => {
+ const alice = await changeDuringAwait(); alice.unmount(); await tick()
+ if (existing) server.set("Bob", { motion: "on" })
+ const bob = mount("Bob"); await tick(600)
+ if (existing) expect(bob.result.current.motion).toBe("on")
+ act(() => bob.result.current.setDensity("compact")); await tick(400)
+ expect(JSON.parse(writes.at(-1)!.body)).toEqual(existing ? { motion: "on", density: "compact" } : { density: "compact" })
+ expect(writes.at(-1)!.human).toBe("Bob")
+ bob.unmount(); act(() => bind("Alice")); const returned = mount("Alice"); await tick(600)
+ expect(returned.result.current.accent).toBe("teal")
+ expect(JSON.parse(writes.at(-1)!.body)).toEqual({ accent: "teal" })
+ act(() => returned.result.current.setTextSize("large")); await tick(400)
+ expect(JSON.parse(writes.at(-1)!.body)).toEqual({ accent: "teal", textSize: "large" })
+ returned.unmount()
+})
+it("preserves a pending pick through sync off/on when storage is blocked", async () => {
+ fail = false
+ // Only the outbox key is denied; the appearance store itself still works.
+ const original = localStorage
+ vi.stubGlobal("localStorage", { getItem: (k: string) => k.startsWith(OUTBOX_STORAGE_KEY) ? null : original.getItem(k), setItem: (k: string, v: string) => { if (k.startsWith(OUTBOX_STORAGE_KEY)) throw new Error("blocked"); original.setItem(k, v) } })
+ const hook = mount("Alice"); await tick()
+ act(() => hook.result.current.setAccent("teal"))
+ act(() => hook.result.current.setSyncEnabled(false)); await tick(1000)
+ expect(writes).toEqual([])
+ act(() => hook.result.current.setSyncEnabled(true)); await tick(600)
+ expect(writes.map(w => JSON.parse(w.body))).toEqual([{ accent: "teal" }])
+ hook.unmount()
+})
+it("ignores Alice's late pull after the same instance binds Bob", async () => {
+ fail = false; const late = deferred<Response>(); const fetcher = fetch
+ vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => !init?.method && human === "Alice" ? late.promise : fetcher(input, init)))
+ const hook = mount("Alice"); await tick()
+ act(() => bind("Bob")); hook.rerender({ account: "Bob" }); await tick()
+ late.resolve(json(200, { appearance: { accent: "teal" } })); await tick(600)
+ expect(hook.result.current.accent).not.toBe("teal"); expect(writes).toEqual([])
+ act(() => hook.result.current.setDensity("compact")); await tick(400)
+ expect(writes.map(w => ({ human: w.human, body: JSON.parse(w.body) }))).toEqual([{ human: "Bob", body: { density: "compact" } }])
+ hook.unmount()
+})
+it("keeps Alice's uncertain late successful PUT in her queue after Bob binds", async () => {
+ fail = false; const late = deferred<Response>(); const fetcher = fetch
+ vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+  if (init?.method === "PUT" && human === "Alice") { writes.push({ human, body: String(init.body) }); return late.promise }
+  return fetcher(input, init)
+ }))
+ const hook = mount("Alice"); await tick()
+ act(() => hook.result.current.setAccent("teal")); await tick(400)
+ act(() => bind("Bob")); hook.rerender({ account: "Bob" }); await tick()
+ late.resolve(json(200, {})); await tick(6000)
+ expect(writes.map(w => w.human)).toEqual(["Alice"])
+ vi.stubGlobal("fetch", fetcher)
+ act(() => bind("Alice")); hook.rerender({ account: "Alice" }); await tick(600)
+ expect(writes.map(w => w.human)).toEqual(["Alice", "Alice"])
+ expect(JSON.parse(writes.at(-1)!.body)).toEqual({ accent: "teal" })
+ hook.unmount()
+})

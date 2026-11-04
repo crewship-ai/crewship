@@ -155,3 +155,19 @@ describe("three clients (APR-06)", () => {
     expect(JSON.parse(server.get("appearance.style")!)).toEqual({ v: 1, style: "harbor", knobs: { radius: "round" } })
   })
 })
+
+it.each([[true, false], [false, false], [true, true], [false, true]])("late paused completion cannot save over newer same-owner storage (ok=%s, delivered=%s)", async (ok, delivered) => {
+ const storage = memoryStorage()
+ let finish!: (r: Res) => void
+ const old = createAppearanceOutbox({ owner: { humanId: "Alice", serverBase: "test-server" }, storage,
+  send: () => new Promise<Res>(r => { finish = r }), schedule: () => undefined, onStatus: () => undefined })
+ old.enqueue("appearance", "old")
+ const flight = old.flush(); old.pause()
+ const newer = make(storage); newer.ob.enqueue("appearance", "new")
+ if (delivered) await newer.ob.flush()
+ const before = storage.getItem(appearanceOutboxStorageKey({ humanId: "Alice", serverBase: "test-server" }))
+ finish({ ok, status: ok ? 200 : 400 }); await flight
+ expect(storage.getItem(appearanceOutboxStorageKey({ humanId: "Alice", serverBase: "test-server" }))).toBe(before)
+ const reloaded = make(storage)
+ expect(reloaded.ob.pendingBody("appearance")).toBe(delivered ? null : "new")
+})

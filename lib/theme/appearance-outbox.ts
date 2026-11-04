@@ -43,11 +43,13 @@ const ORDER: Record<string, number> = { appearance: 0, "appearance.style": 1 }
 
 export type OutboxStatus = "synced" | "pending" | "failed"
 
-interface Entry {
+export interface AppearanceOutboxEntry {
   key: string
   body: string
   failed?: boolean
 }
+
+type Entry = AppearanceOutboxEntry
 
 interface StorageLike {
   getItem(k: string): string | null
@@ -56,6 +58,8 @@ interface StorageLike {
 
 export interface OutboxDeps {
   owner: AppearanceOutboxOwner
+  /** Retained by the owning hook across activation when storage is blocked. */
+  initialEntries?: readonly AppearanceOutboxEntry[]
   storage: StorageLike
   send: (key: string, body: string, keepalive: boolean) => Promise<{ ok: boolean; status: number }>
   /** Runs `fn` after `ms`; returns a function that cancels it. */
@@ -69,7 +73,7 @@ function transient(status: number): boolean {
 
 export function createAppearanceOutbox(deps: OutboxDeps) {
   const storageKey = appearanceOutboxStorageKey(deps.owner)
-  let entries: Entry[] = load()
+  let entries: Entry[] = deps.initialEntries?.map(e => ({ ...e })) ?? load()
   let attempt = 0
   let running: Promise<void> | null = null
   let paused = false
@@ -137,6 +141,14 @@ export function createAppearanceOutbox(deps: OutboxDeps) {
           return
         }
         res = { ok: false, status: 0 }
+      }
+      // A retired activation has no custody of its successor's durable queue.
+      // An acknowledged body can leave this box's memory, but must not save
+      // over storage now owned by a replacement activation.
+      if (paused) {
+        if (res.ok) entries = entries.filter(x => x !== e)
+        report()
+        return
       }
       if (res.ok) {
         // A newer body for the same key may have replaced `e` meanwhile; it
@@ -208,6 +220,9 @@ export function createAppearanceOutbox(deps: OutboxDeps) {
     /** Sync switched on again; call `kick()` to send what is owed. */
     resume(): void {
       paused = false
+    },
+    snapshot(): AppearanceOutboxEntry[] {
+      return entries.map(e => ({ ...e }))
     },
     pendingBody(key: string): string | null {
       return entries.find((e) => e.key === key)?.body ?? null
