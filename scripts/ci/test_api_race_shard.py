@@ -216,7 +216,9 @@ sys.exit(int(os.environ['TEST_EXIT']))
                     if alarm is None:
                         os.environ.pop('RACE_COMBINED_ALARM_SECONDS', None)
                     return shard.report(root, 4, 30), output.getvalue()
-        self.assertEqual(run('push', None), (0, run('push', None)[1]))
+        code, out = run('push', None)
+        self.assertEqual(code, 0)
+        self.assertIn('erosion alarm: 48s', out)
         code, out = run('push', '39')
         self.assertEqual(code, 1)
         self.assertIn('erosion alarm: 39s', out)
@@ -228,6 +230,9 @@ sys.exit(int(os.environ['TEST_EXIT']))
         for bad in ('', '29', '-5', '4.5e3', 'x'):
             with self.assertRaises(ValueError):
                 run('push', bad)
+        with patch.dict(os.environ):
+            os.environ.pop('RACE_COMBINED_ALARM_SECONDS', None)
+            self.assertEqual(shard.combined_alarm(2100), 3360)
         partial = self.manifests()[:-1]
         with self.assertRaises(ValueError):
             run('push', '5200', partial)

@@ -2356,8 +2356,8 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3, 4, 5]
     # Preserve the existing 2x full-package hang bound while measuring the
-    # new partitions. The aggregate below retains the full-package erosion
-    # alarm over SUMMED durations, including each process's setup/cleanup.
+    # new partitions. The hang bound keeps its own basis; the combined budget
+    # is a separate measured limit over SUMMED durations in the go-race-api job.
     timeout-minutes: 85
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
