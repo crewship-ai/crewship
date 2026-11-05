@@ -357,7 +357,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     const snapshot=await client.read(lifetime.signal);viewNow=leaseView(await client.lease(lifetime.signal));setView(viewNow)
     if(dead)return
     await mountEditor(snapshot,viewNow.generation??'1')
-   }catch{stop(message);return}
+   }catch{stop('Právo upravovat bylo odebráno. Neuložené změny zůstaly jako místní koncept. Sdílenou verzi zobrazíte obnovením stránky.');return}
    if(dead)return
    networkRetired=false;setBusy(false);setError(message);watch()
   }

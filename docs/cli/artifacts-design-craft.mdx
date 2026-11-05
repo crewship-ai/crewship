@@ -362,7 +362,9 @@ crewship craft preview <artifact-slug>
 
 Returns the shared version without opening a session or taking the lease. If no
 version is shared the command fails; it never falls back to the latest private
-content.
+content. This is the only way a Read or Comment grantee reads a native document:
+`craft version`, `craft versions` and the `read` action of `craft connect` need
+edit rights or the workspace owner or admin read rule, and otherwise answer 403.
 
 ### Edit with a lease: acquire, read, save, release
 

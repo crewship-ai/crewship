@@ -491,6 +491,19 @@ describe('write access removed while read access remains (#4348)',()=>{
  const writeRevoked={delivery:'stopped',draft:'retain',reason:'write_revoked'}
  // A queued fresh client must not leak into the next test when the host never asked for it.
  afterEach(()=>{m.createClient.mockReset()})
+ it('a refused private read removes the frame and keeps the draft offered',async()=>{
+  mount();await ready();await acquire()
+  const second=clientRig();second.lease.mockResolvedValue(readerLease);second.read.mockRejectedValue(Error('native_read_unavailable'));m.createClient.mockReturnValueOnce(second)
+  act(()=>portOptions.at(-1)!.onChanged('unsaved-before-revoke','doc'))
+  act(()=>stream?.('session_retired',writeRevoked))
+  await waitFor(()=>expect(second.read).toHaveBeenCalledOnce())
+  await waitFor(()=>expect(document.querySelectorAll('iframe')).toHaveLength(0))
+  expect(screen.getByRole('alert')).toHaveTextContent('Sdílenou verzi zobrazíte obnovením stránky')
+  expect(screen.getByRole('status')).toHaveTextContent('Editor odpojen')
+  expect(screen.getByRole('button',{name:'Kopie konceptu'})).toBeInTheDocument()
+  expect(journal.revokeRead).not.toHaveBeenCalled()
+  expect(second.save).not.toHaveBeenCalled();expect(second.leaseAction).not.toHaveBeenCalled()
+ })
  it('reopens read-only under a fresh read admission and keeps the unsaved draft for copy or compare',async()=>{
   mount();await ready();await acquire()
   const first=client,second=clientRig(),writer=ports.length;second.lease.mockResolvedValue(readerLease);m.createClient.mockReturnValueOnce(second)

@@ -136153,7 +136153,7 @@
     },
     "/api/v1/pages/{slug}/craft/document/versions": {
       "get": {
-        "description": "List the saved versions of a native Word or Sheet document, newest first, with time, author (person or agent) and the current version marked. Requires the private `X-Craft-Session` admission and current Page Read rights, exactly like Read Craft document; a reader may list but only the lease holder may restore through Restore Craft document. Answers 404 while the `craft_version_history` workspace feature flag is off.",
+        "description": "List the saved versions of a native Word or Sheet document, newest first, with time, author (person or agent) and the current version marked. Requires the private `X-Craft-Session` admission and current Edit rights or the workspace OWNER/ADMIN read rule, exactly like Read Craft document; Read and Comment grantees get 403 and only the lease holder may restore through Restore Craft document. Answers 404 to permitted callers while the `craft_version_history` workspace feature flag is off.",
         "operationId": "get_api_v1_pages_slug_craft_document_versions",
         "parameters": [
           {
@@ -136342,7 +136342,7 @@
     },
     "/api/v1/pages/{slug}/craft/document/versions/{version}": {
       "get": {
-        "description": "Read the complete bytes of one saved version of a native Word or Sheet document, with its time, author and whether it is the current version, read-only. Same private `X-Craft-Session` admission, current Page Read rights and workspace OWNER/ADMIN read audit as Read Craft document; Comment-only access is refused. Never acquires the lease, writes or changes the shared version; restoring stays Restore Craft document. Answers 404 while the `craft_version_history` workspace feature flag is off or when the version does not exist.",
+        "description": "Read the complete bytes of one saved version of a native Word or Sheet document, with its time, author and whether it is the current version, read-only. Same private `X-Craft-Session` admission, Edit-or-administrator authority and workspace OWNER/ADMIN read audit as Read Craft document; Read and Comment grantees are refused for every version. Never acquires the lease, writes or changes the shared version; restoring stays Restore Craft document. Answers 404 to permitted callers while the `craft_version_history` workspace feature flag is off or when the version does not exist.",
         "operationId": "get_api_v1_pages_slug_craft_document_versions_version",
         "parameters": [
           {
