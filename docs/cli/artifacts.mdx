@@ -109,7 +109,8 @@ whose `extensions.code` carries the machine-readable reason:
 | 409 | 5 | `artifact_anchor_mismatch` | The comment quote does not match the selected element |
 | 409 | 5 | `artifact_data_conflict` | A document's `ifVersion` is stale |
 | 409 | 5 | `stale_policy` | `artifact-policy set` with an old `--base-version` |
-| 413 | 1 | `artifact_history_quota`, `artifact_data_quota`, `artifact_slides_limit` | Version history, dataset or Slides limits are full |
+| 413 | 2 | `artifact_history_quota`, `artifact_storage_quota` | Version history or workspace storage is full; nothing was saved |
+| 413 | 1 | `artifact_data_quota`, `artifact_slides_limit` | Dataset or Slides limits are full |
 | 422 | 2 | `artifact_slides_overflow` | Slide content does not fit its frame |
 
 A conflict or quota error never discards anything: earlier versions and data

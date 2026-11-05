@@ -2513,6 +2513,8 @@ stream requires human authentication and the normal server-host credential guard
 Optional `--authority-revision` (the `authority_revision` from `page design get`)
 admits the socket only if the workspace's grants have not changed since that
 read; a changed revision is refused (exit `4`) instead of replaying the canvas.
+Without edit rights the stream sends the shared version and never the live
+canvas; with no shared version it closes with exit `1`.
 
 ```bash
 crewship page design watch checkout --count 1

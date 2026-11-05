@@ -116,7 +116,7 @@ the exit code for other commands' argument validation.
 | Command | Needs |
 |---|---|
 | `create` | A human login with `pages:write` and a workspace role that may create artifacts. Agent runs cannot create a Design. |
-| `get`, `versions`, `comments`, `watch` | `pages:read` and visibility of the artifact. Without edit rights, `get --version` accepts only the shared version, `comments` lists only comments on the shared version and `watch` sends no initial canvas. |
+| `get`, `versions`, `comments`, `watch` | `pages:read` and visibility of the artifact. Without edit rights, `get --version` accepts only the shared version, `comments` lists only comments on the shared version and `watch` sends the shared version and never the live canvas; with no shared version it closes with exit `1`. |
 | `apply`, `snapshot`, `restore` | `pages:write` and edit rights on the artifact. |
 | `share` | Edit rights **and** ownership of the artifact. An Edit grant does not allow changing the shared version. |
 | `comment` | Edit rights, or `pages:write` with a Comment grant. `--send-to-agent` additionally needs edit rights. |
