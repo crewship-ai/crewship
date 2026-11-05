@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -33,7 +35,7 @@ func newPageArtifactCommand() *cobra.Command {
 			if action == "create" {
 				name, _ := cmd.Flags().GetString("name")
 				if name == "" {
-					return fmt.Errorf("--name is required")
+					return cli.WithExitCode(errors.New("--name is required"), cli.ExitValidation)
 				}
 				body["slug"], body["name"] = args[0], name
 				if cmd.Flags().Changed("test-item") {
@@ -44,7 +46,7 @@ func newPageArtifactCommand() *cobra.Command {
 			} else {
 				base, _ := cmd.Flags().GetInt64("base-version")
 				if base < 1 || !cmd.Flags().Changed("base-version") {
-					return fmt.Errorf("--base-version must be the exact positive latest version; use create for a new project")
+					return cli.WithExitCode(errors.New("--base-version must be the exact positive latest version; use create for a new project"), cli.ExitValidation)
 				}
 				body["base_version"] = base
 				if os.Getenv("CREWSHIP_AGENT_TOKEN") == "" {
@@ -72,7 +74,7 @@ func newPageArtifactCommand() *cobra.Command {
 			if action != "versions" {
 				version, _ := cmd.Flags().GetInt64("version")
 				if version < 0 {
-					return fmt.Errorf("version must be nonnegative")
+					return cli.WithExitCode(errors.New("version must be nonnegative"), cli.ExitValidation)
 				}
 				if version > 0 {
 					endpoint += "?version=" + strconv.FormatInt(version, 10)
@@ -91,7 +93,7 @@ func newPageArtifactCommand() *cobra.Command {
 			base, _ := cmd.Flags().GetInt64("base-version")
 			version, _ := cmd.Flags().GetInt64("version")
 			if base < 1 || version < 1 {
-				return fmt.Errorf("--base-version and --version are required positive versions")
+				return cli.WithExitCode(errors.New("--base-version and --version are required positive versions"), cli.ExitValidation)
 			}
 			return artifactCLIRequest(cmd, "POST", "/api/v1/pages/"+pagePathEscape(args[0])+"/artifact/"+action, map[string]any{"base_version": base, "version": version})
 		}}
@@ -103,7 +105,7 @@ func newPageArtifactCommand() *cobra.Command {
 		text, _ := cmd.Flags().GetString("text")
 		version, _ := cmd.Flags().GetInt64("version")
 		if text == "" || version < 1 {
-			return fmt.Errorf("--text and positive --version are required")
+			return cli.WithExitCode(errors.New("--text and positive --version are required"), cli.ExitValidation)
 		}
 		clarification, _ := cmd.Flags().GetBool("needs-clarification")
 		return artifactCLIRequest(cmd, "POST", "/api/v1/pages/"+pagePathEscape(args[0])+"/artifact/comments/"+pagePathEscape(args[1])+"/reply", map[string]any{"text": text, "version": version, "needs_clarification": clarification})
@@ -128,7 +130,17 @@ func newPageArtifactCommand() *cobra.Command {
 	return cmd
 }
 
+// readArtifactCLIManifest loads --file. Every refusal is a usage error (exit 2):
+// nothing has reached the server yet.
 func readArtifactCLIManifest(cmd *cobra.Command) (map[string]any, error) {
+	body, err := loadArtifactCLIManifest(cmd)
+	if err != nil {
+		return nil, cli.WithExitCode(err, cli.ExitValidation)
+	}
+	return body, nil
+}
+
+func loadArtifactCLIManifest(cmd *cobra.Command) (map[string]any, error) {
 	file, _ := cmd.Flags().GetString("file")
 	if file == "" {
 		return nil, fmt.Errorf("--file is required")
