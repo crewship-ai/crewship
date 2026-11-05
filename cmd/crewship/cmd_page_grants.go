@@ -12,7 +12,7 @@ package main
 //	crewship page grant  fleet-201 --agent watcher --level produce --panels sluzby,zatizeni
 //	crewship page grant  fleet-201 --crew  lookout --level read
 //	crewship page grant  fleet-201 --user  ada@example.com --level write
-//	crewship page grant  fleet-201 --workspace --level read
+//	crewship page grant  fleet-201 --everyone --level read
 //	crewship page revoke fleet-201 --agent watcher
 //	crewship page grants fleet-201
 //
@@ -87,9 +87,9 @@ var pageGrantCmd = &cobra.Command{
   crewship page grant fleet-201 --agent watcher --level produce --panels sluzby
   crewship page grant fleet-201 --crew lookout --level read
   crewship page grant fleet-201 --user ada@example.com --level write
-  crewship page grant fleet-201 --workspace --level read
+  crewship page grant fleet-201 --everyone --level read
 
---workspace grants to every current member of the workspace (never to an
+--everyone grants to every current member of the workspace (never to an
 agent), and carries read or write only: produce names a producer, and
 everyone is not one.
 
@@ -106,7 +106,7 @@ Two rules the server enforces and this command cannot talk it out of:
 An agent's authority is a subset of yours and is re-checked every time it
 is used: if you lose access to a crew, every grant you issued narrows
 with you. "crewship page grants <slug>" shows which rows are still live.`,
-	Args: cobra.ExactArgs(1),
+	Args: pageGrantArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		subjectType, subject, err := pageGrantSubjectFromFlags(cmd)
 		if err != nil {
@@ -180,7 +180,7 @@ flags, the same references.
 With no --level, every level that subject holds on the page is withdrawn —
 "this agent no longer reaches this page" is the thing you mean during an
 incident, and having to name each of three grants is how one gets missed.`,
-	Args: cobra.ExactArgs(1),
+	Args: pageGrantArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		subjectType, subject, err := pageGrantSubjectFromFlags(cmd)
 		if err != nil {
@@ -318,8 +318,8 @@ func pageGrantSubjectFromFlags(cmd *cobra.Command) (subjectType, subject string,
 			subjectType, subject = kind, ref
 		}
 	}
-	if everyone, _ := cmd.Flags().GetBool("workspace"); everyone {
-		found = append(found, "workspace")
+	if everyone, _ := cmd.Flags().GetBool("everyone"); everyone {
+		found = append(found, "everyone")
 		subjectType, subject = "workspace", ""
 	}
 	switch len(found) {
@@ -327,12 +327,36 @@ func pageGrantSubjectFromFlags(cmd *cobra.Command) (subjectType, subject string,
 		return subjectType, subject, nil
 	case 0:
 		return "", "", cli.WithExitCode(errors.New(
-			"name the subject: --user <email>, --crew <slug>, --agent <slug> or --workspace"), cli.ExitValidation)
+			"name the subject: --user <email>, --crew <slug>, --agent <slug> or --everyone"), cli.ExitValidation)
 	default:
 		return "", "", cli.WithExitCode(fmt.Errorf(
 			"--%s and --%s were both given; a grant has exactly one subject, so run one command per subject",
 			found[0], found[1]), cli.ExitValidation)
 	}
+}
+
+// pageGrantOldWorkspaceSubject is the refusal for the retired boolean subject:
+// --workspace is the global workspace selector and takes a value.
+var pageGrantOldWorkspaceSubject = cli.WithExitCode(errors.New(
+	"--workspace selects a workspace and takes a value; to name everyone in the workspace as the subject, use --everyone"),
+	cli.ExitValidation)
+
+// pageGrantArgs refuses the old boolean spelling. Without this check the global
+// string flag would swallow the next flag as a workspace name.
+func pageGrantArgs(cmd *cobra.Command, args []string) error {
+	if strings.HasPrefix(flagWorkspace, "-") {
+		return pageGrantOldWorkspaceSubject
+	}
+	return cobra.ExactArgs(1)(cmd, args)
+}
+
+// pageGrantFlagError names the replacement when the old spelling ends the
+// command line, where the global flag has no value to swallow.
+func pageGrantFlagError(_ *cobra.Command, err error) error {
+	if strings.Contains(err.Error(), "needs an argument") && strings.Contains(err.Error(), "--workspace") {
+		return pageGrantOldWorkspaceSubject
+	}
+	return err
 }
 
 // pageGrantCleanPanels drops blanks and duplicates while keeping the order
@@ -359,8 +383,10 @@ func init() {
 		c.Flags().String("user", "", "Subject: a workspace member, by email or id")
 		c.Flags().String("crew", "", "Subject: a crew, by slug or id")
 		c.Flags().String("agent", "", "Subject: an agent, by slug or id")
-		c.Flags().Bool("workspace", false, "Subject: everyone in the workspace (read, comment or write only, never produce)")
+		c.Flags().Bool("everyone", false, "Subject: everyone in the workspace (read, comment or write only, never produce)")
 	}
+	pageGrantCmd.SetFlagErrorFunc(pageGrantFlagError)
+	pageRevokeCmd.SetFlagErrorFunc(pageGrantFlagError)
 	pageGrantCmd.Flags().String("level", "", `What is granted: "read", "comment", "produce" or "write"`)
 	pageGrantCmd.Flags().StringSlice("panels", nil,
 		"Panel ids a produce grant covers (comma-separated, or repeat the flag); omit to cover every panel")

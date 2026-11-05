@@ -112,18 +112,20 @@ whose `extensions.code` carries the machine-readable reason:
 | 409 | 5 | `artifact_anchor_mismatch` | The comment quote does not match the selected element |
 | 409 | 5 | `artifact_data_conflict` | A document's `ifVersion` is stale |
 | 409 | 5 | `stale_policy` | `artifact-policy set` with an old `--base-version` |
-| 413 | 1 | `artifact_history_quota`, `artifact_data_quota`, `artifact_slides_limit` | Version history, dataset or Slides limits are full |
+| 413 | 2 | `artifact_history_quota`, `artifact_storage_quota` | Version history or workspace storage is full; nothing was saved |
+| 413 | 1 | `artifact_data_quota`, `artifact_slides_limit` | Dataset or Slides limits are full |
 | 422 | 2 | `artifact_slides_overflow` | Slide content does not fit its frame |
 
 A conflict or quota error never discards anything: earlier versions and data
 are kept, and the CLI never retries with a newer base. Keep your local file,
 read the current state and decide what to save. Validation that happens in the
-CLI before any request (a missing flag, a manifest over 9 MiB, a data batch
-over its limit) exits with `1` or `2`. It prints the message only, or with
-`-f json` an envelope without `status` or `extensions`:
+CLI before any request (a missing or invalid flag, a manifest that cannot be
+read, is not valid or is over 9 MiB) exits with `2`; the local checks of
+`page artifact data` and the Slides commands still exit with `1`. It prints the
+message only, or with `-f json` an envelope without `status` or `extensions`:
 
 ```json
-{"error": {"message": "--base-version must be the exact positive latest version; use create for a new project", "exit_code": 1}}
+{"error": {"message": "--base-version must be the exact positive latest version; use create for a new project", "exit_code": 2}}
 ```
 
 ## Create and save versions
@@ -384,6 +386,10 @@ the server returns `409 artifact_anchor_mismatch`.
 | `--send-to-agent` | Also queue the comment as a task for the agent. |
 | `--wait` | With `--send-to-agent`: deliver the task to the artifact's source chat, then wait for the agent's answer. |
 | `--wait-timeout <duration>` | With `--wait`: stop waiting after this long, for example `5m` (default `15m`). The task stays queued. |
+
+A comment has no idempotency key. If the reply is lost, run
+`crewship page artifact comments <slug>` before sending it again: a retry after
+a commit stores a second comment.
 
 ```bash
 crewship page artifact comment quarterly-review --version 3 --path index.html \
