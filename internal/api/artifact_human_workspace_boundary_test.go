@@ -106,6 +106,14 @@ func TestTypedArtifactHumanRouterWorkspaceBoundary(t *testing.T) {
 				if got.Code != 200 || !strings.Contains(got.Body.String(), marker) {
 					t.Fatalf("positive %s %s: %d %s", kind, ref, got.Code, got.Body)
 				}
+				if kind == "design" {
+					var view struct {
+						CanEdit *bool `json:"can_edit"`
+					}
+					if err := json.Unmarshal(got.Body.Bytes(), &view); err != nil || view.CanEdit == nil || *view.CanEdit {
+						t.Fatalf("read-scoped Design owner must be explicitly read only: %s", got.Body)
+					}
+				}
 			}
 			slug := "typed-boundary-" + kind
 			ownMarker, foreignMarker, collisionMarker := kind+"-own-canary", kind+"-foreign-canary", kind+"-collision-canary"
@@ -118,6 +126,7 @@ func TestTypedArtifactHumanRouterWorkspaceBoundary(t *testing.T) {
 			assertOwn(people[0], slug, ownMarker)
 			assertOwn(people[0], foreignID, collisionMarker)
 			assertOwn(people[1], "@"+foreignID, foreignMarker)
+			assertOwn(people[1], slug, foreignMarker)
 			missing := read(people[0], "@missing-typed-boundary-"+kind)
 			foreign := read(people[0], "@"+foreignID)
 			if missing.Code != 404 || foreign.Code != 404 || missing.Body.String() != foreign.Body.String() {
