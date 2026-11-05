@@ -274,7 +274,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    let port:NativeEditorPort
    try{port=createNativeEditorPort({applicationId:snapshot.applicationId,enginePin:snapshot.enginePin,bundle:snapshot.editorBundle,frame:frame.contentWindow,scope:{workspaceId,pageId,sessionId,baseVersion:snapshot.version,generation},requireAccessProtocol:true,
     onExport(file){
-     if(!r||!liveMount()||!r.ready||r.blocked)return
+     if(!r||!liveMount()||!r.ready||r.blocked||!readable||networkRetired)return
      try{downloadNativeExport(file)}catch{setError('Export se nepodařilo stáhnout. Dokument zůstává otevřený.')}
     },
     onChanged(){if(r&&liveMount()&&r.ready&&r.writable&&!r.blocked){r.edit++;r.ackedVersion=undefined;r.coordinator?.edited();display(r)}},

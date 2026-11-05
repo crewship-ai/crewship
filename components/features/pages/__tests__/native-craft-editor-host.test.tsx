@@ -176,6 +176,23 @@ describe('native Word host authority and persistence',()=>{
   if(outcome==='captured')await waitFor(()=>expect(document.querySelector('iframe')).toBeNull())
   else {expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveStyle({visibility:'hidden'});expect(journal.close).not.toHaveBeenCalled()}
  })
+ it.each(['stream','reauthorization'] as const)('delivers no engine export while terminal %s retirement awaits capture',async failure=>{
+  vi.useFakeTimers({shouldAdvanceTime:true})
+  const monitor=deferred<void>();client.events.mockImplementation((_signal,callback)=>{stream=callback;return monitor.promise})
+  const capture=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>()
+  const download=vi.spyOn(URL,'createObjectURL')
+  try{
+   mount();await ready();await acquire();await screen.findByText('Připraveno k úpravám')
+   const frame=document.querySelector('iframe'),port=ports.at(-1)!,options=portOptions.at(-1)!
+   port.snapshot.mockReturnValue(capture.promise)
+   act(()=>options.onChanged('buffer-before-export','doc'));await waitFor(()=>expect(port.snapshot).toHaveBeenCalled())
+   if(failure==='stream')await act(async()=>monitor.reject(Error('terminal monitor fault')))
+   else{client.reauthorize.mockRejectedValue(Error('authority unconfirmed'));await act(async()=>vi.advanceTimersByTimeAsync(30001))}
+   expect(frame).toHaveStyle({visibility:'hidden'})
+   act(()=>options.onExport?.({name:'late.docx',bytes:new Uint8Array([80,75,3,4])}))
+   expect(download).not.toHaveBeenCalled()
+  }finally{download.mockRestore();await act(async()=>capture.resolve({bytes:new TextEncoder().encode('{"body":["retained"]}'),editorRevision:'terminal-capture',documentId:'doc'}));vi.useRealTimers()}
+ })
  it('monitor retirement hides confirmed recovery copies without purging them',async()=>{
   mount();await ready();await acquire();const second=clientRig();m.createClient.mockReturnValueOnce(second)
   act(()=>{portOptions.at(-1)!.onChanged('before-read-reopen','doc');stream?.('session_retired',{delivery:'stopped',draft:'retain',reason:'write_revoked'})})
