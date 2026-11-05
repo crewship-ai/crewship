@@ -35,6 +35,8 @@ test.describe("project default", () => {
     },
     async ({ prd, request, page, context }) => {
       test.setTimeout(Math.max(test.info().timeout, 10 * 60_000))
+      // A reused PRD_WORKSPACE_ID may carry an earlier choice; this row proves a new one.
+      expect(prd.env.workspaceId, "B.project.default-on needs a new workspace: unset PRD_WORKSPACE_ID").toBeNull()
       const ws = await prd.qaWorkspace()
       const q = wsQuery(ws.id)
 
