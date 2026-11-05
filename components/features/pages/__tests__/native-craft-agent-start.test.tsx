@@ -3,11 +3,11 @@ import {afterEach,beforeEach,describe,expect,it,vi} from "vitest"
 
 // The real chat client runs here: only its socket is replaced, so the message
 // id the task binds to comes from the same persisted echo the product receives.
-const transport=vi.hoisted(()=>({send:vi.fn(),onMessage:undefined as undefined|((message:unknown)=>void)}))
+const transport=vi.hoisted(()=>({send:vi.fn(),connected:true,onMessage:undefined as undefined|((message:unknown)=>void)}))
 const m=vi.hoisted(()=>({fetch:vi.fn()}))
 vi.mock("@/hooks/use-websocket",async importOriginal=>({
  ...await importOriginal<typeof import("@/hooks/use-websocket")>(),
- useWebSocket:(options:{enabled?:boolean;onMessage?:(message:unknown)=>void})=>{transport.onMessage=options.onMessage;return {status:options.enabled?"connected":"disconnected",send:transport.send,retry:vi.fn()}},
+ useWebSocket:(options:{enabled?:boolean;onMessage?:(message:unknown)=>void})=>{transport.onMessage=options.onMessage;return {status:options.enabled&&transport.connected?"connected":"disconnected",send:transport.send,retry:vi.fn()}},
 }))
 vi.mock("@/lib/server-base",()=>({resolveWsBase:()=>"ws://t"}))
 vi.mock("@/lib/api-fetch",async importOriginal=>({...await importOriginal<typeof import("@/lib/api-fetch")>(),apiFetch:m.fetch}))
@@ -25,11 +25,11 @@ const consent=()=>fireEvent.click(screen.getByRole("checkbox",{name:"Agent smí 
 const sends=()=>transport.send.mock.calls.map(([frame])=>frame as {type:string;payload:string}).filter(frame=>frame.type==="send_message")
 async function sent(){
  await waitFor(()=>expect(sends()).toHaveLength(1))
- return JSON.parse(sends()[0].payload) as {session_id:string;content:string}
+ return JSON.parse(sends()[0].payload) as {session_id:string;content:string;metadata?:unknown}
 }
 const event=(seq:number,payload:unknown)=>({type:"chat_event",channel:"session:chat-1",seq,payload})
 const echo=(content:string,id="message-1",seq=41)=>act(()=>{transport.onMessage?.({type:"run_begin",channel:"session:chat-1",seq:seq-1,payload:{from_seq:seq-1}});transport.onMessage?.(event(seq,{type:"user_message",content,metadata:{author_user_id:"human",message_id:id}}))})
-const done=(seq=42)=>act(()=>{transport.onMessage?.(event(seq,{type:"done",content:"",metadata:{}}))})
+const done=(seq=42)=>act(()=>{transport.onMessage?.(event(seq,{type:"done",content:"",metadata:{no_reply:true}}))})
 
 beforeEach(()=>{
  availability=()=>json({enabled:true,can_edit:true,preview_enabled:true,agents_enabled:true})
@@ -43,7 +43,7 @@ beforeEach(()=>{
   return json({token:"t"})
  })
 })
-afterEach(()=>{cleanup();vi.useRealTimers();transport.send.mockReset();m.fetch.mockReset();props.onStarted.mockReset()})
+afterEach(()=>{cleanup();vi.useRealTimers();transport.connected=true;transport.send.mockReset();m.fetch.mockReset();props.onStarted.mockReset()})
 
 describe("native agent start control",()=>{
  it.each([
@@ -74,11 +74,11 @@ describe("native agent start control",()=>{
   fireEvent.click(start());expect(calls("/chats")).toHaveLength(0)
   consent();expect(start()).toBeEnabled()
  })
- it("sends the instruction through the chat and binds the task to the persisted message once the turn ended",async()=>{
+ it("records the instruction without a chat turn and binds the task to the persisted message once the send settled",async()=>{
   render(<NativeCraftAgentStart {...props}/>);await openForm();consent();fireEvent.click(start())
   const payload=await sent()
   expect(calls("/api/v1/agents/agent-1/chats?workspace_id=w")[0][1]).toMatchObject({method:"POST",body:JSON.stringify({origin:"UI"})})
-  expect(payload.session_id).toBe("chat-1");expect(payload.content).toContain("Doplň shrnutí")
+  expect(payload).toEqual({session_id:"chat-1",content:"Doplň shrnutí",metadata:{native_craft_instruction:true}})
   echo(payload.content)
   expect(taskCalls()).toHaveLength(0)
   done()
@@ -109,7 +109,7 @@ describe("native agent start control",()=>{
   expect(await screen.findByRole("alert")).toHaveTextContent("Úloha nevznikla")
   expect(sends()).toHaveLength(0);expect(taskCalls()).toHaveLength(0)
  })
- it("abandons the start when the host stops allowing it during the chat turn",async()=>{
+ it("abandons the start when the host stops allowing it before the send settled",async()=>{
   const view=render(<NativeCraftAgentStart {...props}/>);await openForm();consent();fireEvent.click(start())
   const payload=await sent();echo(payload.content)
   view.rerender(<NativeCraftAgentStart {...props} enabled={false}/>)
@@ -118,6 +118,25 @@ describe("native agent start control",()=>{
   expect(taskCalls()).toHaveLength(0)
   view.rerender(<NativeCraftAgentStart {...props}/>)
   expect(await screen.findByRole("alert")).toHaveTextContent("Úloha nevznikla")
+ })
+ it("posts nothing when the echo, the end of the chat and the retirement commit in the same render",async()=>{
+  const view=render(<NativeCraftAgentStart {...props}/>);await openForm();consent();fireEvent.click(start())
+  const payload=await sent()
+  await act(async()=>{
+   transport.onMessage?.({type:"run_begin",channel:"session:chat-1",seq:40,payload:{from_seq:40}})
+   transport.onMessage?.(event(41,{type:"user_message",content:payload.content,metadata:{author_user_id:"human",message_id:"message-1"}}))
+   transport.onMessage?.(event(42,{type:"done",content:"",metadata:{no_reply:true}}))
+   view.rerender(<NativeCraftAgentStart {...props} enabled={false}/>)
+  })
+  await act(async()=>{await Promise.resolve()})
+  expect(taskCalls()).toHaveLength(0);expect(props.onStarted).not.toHaveBeenCalled()
+ })
+ it("sends nothing when the connection opens in the render that retires the host",async()=>{
+  transport.connected=false
+  const view=render(<NativeCraftAgentStart {...props}/>);await openForm();consent();fireEvent.click(start())
+  await screen.findByRole("status");transport.connected=true
+  await act(async()=>{view.rerender(<NativeCraftAgentStart {...props} enabled={false}/>)})
+  expect(sends()).toHaveLength(0)
  })
  it("does not resend a refused or unconfirmed task",async()=>{
   task=()=>json({error:"denied"},403);render(<NativeCraftAgentStart {...props}/>);await openForm();consent();fireEvent.click(start())
@@ -132,11 +151,11 @@ describe("native agent start control",()=>{
   const payload=await sent();echo(payload.content);done()
   expect(await screen.findByRole("alert")).toHaveTextContent("nebylo potvrzeno");expect(props.onStarted).not.toHaveBeenCalled()
  })
- it("gives up when the chat turn never ends",async()=>{
+ it("gives up when the send never settles",async()=>{
   vi.useFakeTimers({shouldAdvanceTime:true})
   render(<NativeCraftAgentStart {...props}/>);await openForm();consent();fireEvent.click(start())
   const payload=await sent();echo(payload.content)
-  await act(async()=>{await vi.advanceTimersByTimeAsync(240_000)})
+  await act(async()=>{await vi.advanceTimersByTimeAsync(30_000)})
   expect(screen.getByRole("alert")).toHaveTextContent("Úloha nevznikla");expect(taskCalls()).toHaveLength(0)
  })
  it("explains the proposal route on a document a person holds and starts the same way",async()=>{

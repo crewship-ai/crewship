@@ -151,6 +151,24 @@ func TestCraftNativeAgentTaskAdmittedWhileHumanHoldsLease(t *testing.T) {
 	}
 }
 
+// The browser persists the instruction without a chat turn; a task still binds
+// only this human's own user message in this agent's chat.
+func TestCraftNativeAgentTaskRefusesMessageItsCallerDidNotAuthor(t *testing.T) {
+	for name, sql := range map[string]string{
+		"another author":  `UPDATE conversation_messages SET author_user_id='other-member' WHERE id=?`,
+		"not a user turn": `UPDATE conversation_messages SET role='assistant' WHERE id=?`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, m, ctx := nativeAgentAdmissionFixture(t)
+			mustExec(t, f.rig.db, sql, f.a.MessageID)
+			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true})
+			if !errors.Is(err, errCraftNativeAgentDenied) || accepted.WorkID != "" {
+				t.Fatalf("task bound a message the caller did not author: receipt=%+v err=%v", accepted, err)
+			}
+		})
+	}
+}
+
 func TestCraftNativeAgentCapturedGrantNeverRefreshesChangedEpochOrRegistry(t *testing.T) {
 	f, m, ctx := nativeAgentAdmissionFixture(t)
 	accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true})

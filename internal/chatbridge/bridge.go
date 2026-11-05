@@ -590,6 +590,15 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return errors.New("artifact project admission unavailable")
 	}
 	msgOpt.ArtifactProjectIntent = artifactProject
+	// Refused before persistence: each of these other purposes expects a run.
+	instructionOnly, err := nativeCraftInstruction(msgOpt.Metadata)
+	if err == nil && instructionOnly && (hasPage || askEnvelope != nil || documentCreation != nil || documentIteration != nil || artifactProject != nil) {
+		err = errNativeCraftInstruction
+	}
+	if err != nil {
+		streamFn(ws.ChatEvent{Type: "error", Content: "Native Craft instruction is invalid"})
+		return err
+	}
 	// Replay the original human submission after provisioning; server Page
 	// context is rebuilt only after current form and access checks run again.
 	originalContent := content
@@ -742,8 +751,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// image build or container start. In a group chat the agent stays silent
 	// unless @mentioned; the human line is still persisted + broadcast + counted
 	// so the shared transcript records it, and a clean "done" settles the
-	// sender's UI. Private (1:1) chats always respond.
-	if !ShouldAgentRespond(info.Visibility, content, info.AgentSlug) {
+	// sender's UI. Private (1:1) chats always respond, except a native Craft
+	// instruction, which only records the message its explicit task binds to.
+	if instructionOnly || !ShouldAgentRespond(info.Visibility, content, info.AgentSlug) {
 		if err := persistUserMsg(); err != nil {
 			b.logger.Error("failed to persist user message", "error", err)
 			streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})

@@ -17,14 +17,14 @@ export interface NativeCraftAgentStartProps {
  holder?:'human'|'agent'|null
  onStarted(workId:string):void
 }
-interface Attempt {chatId:string;content:string;sent:boolean;messageId?:string}
+interface Attempt {life:number;chatId:string;content:string;sent:boolean;messageId?:string}
 const object=(value:unknown):value is Record<string,unknown>=>Boolean(value)&&typeof value==='object'&&!Array.isArray(value)
 const id=(value:unknown):value is string=>typeof value==='string'&&value.length>0&&value.length<=256&&!value.includes('\0')
 const JSON_HEADERS={'Content-Type':'application/json'}
-/** The ordinary chat turn this message starts only acknowledges; the native task edits. */
-const CHAT_TURN_NOTE='Úloha pro nativní dokument (v běžném chatu stačí jednou větou potvrdit, úpravu provede samostatná nativní úloha). '
-/** The same bound the acceptance run gives a chat turn. */
-const TURN_LIMIT_MS=240_000
+/** Records the message without a chat turn, so a private instruction reaches no agent log. */
+const INSTRUCTION_ONLY={native_craft_instruction:true}
+/** No run follows this send, so only its delivery can stall. */
+const DELIVERY_LIMIT_MS=30_000
 const MAX_INSTRUCTION=4000
 const NOT_CREATED='Úloha nevznikla.'
 
@@ -47,15 +47,18 @@ export function NativeCraftAgentStart(props:NativeCraftAgentStartProps){
  return flag?<AgentStartForm {...props}/>:null
 }
 
-/** One deliberate start: a new chat, the person's persisted message, then the
- * unchanged task contract bound to that message. Nothing is ever replayed. */
+/** One deliberate start: a new chat, the person's persisted message without a
+ * chat turn, then the unchanged task contract bound to that message. Nothing is
+ * ever replayed. */
 function AgentStartForm({workspaceId,pageId,humanId,enabled,holder=null,onStarted}:NativeCraftAgentStartProps){
  const [open,setOpen]=React.useState(false),[agentId,setAgentId]=React.useState(''),[text,setText]=React.useState(''),[consent,setConsent]=React.useState(false)
  const [preparing,setPreparing]=React.useState(false),[attempt,setAttempt]=React.useState<Attempt>(),[error,setError]=React.useState<string>()
  const directory=useWorkspaceAgentDirectory(open?workspaceId:undefined)
  // Synchronous guards: a second press and a re-render must not start or post twice.
  const claimed=React.useRef(false),posted=React.useRef(false),call=React.useRef<AbortController|undefined>(undefined)
- const finish=React.useCallback((message?:string)=>{claimed.current=false;posted.current=false;setPreparing(false);setAttempt(undefined);setConsent(false);setError(message)},[])
+ // Ending an attempt invalidates it at once, also for effects of the same commit.
+ const lifetime=React.useRef(0)
+ const finish=React.useCallback((message?:string)=>{lifetime.current++;claimed.current=false;posted.current=false;setPreparing(false);setAttempt(undefined);setConsent(false);setError(message)},[])
  const query=new URLSearchParams({workspace_id:workspaceId})
  const getToken=React.useCallback(async()=>{
   const response=await apiFetch('/api/v1/ws-token')
@@ -67,7 +70,7 @@ function AgentStartForm({workspaceId,pageId,humanId,enabled,holder=null,onStarte
  const chat=useChat({workspaceId,sessionId:attempt?.chatId??'',currentUserId:humanId,wsUrl:base?`${base}/ws`:'',getToken,realtimeEnabled:Boolean(attempt),canSend:Boolean(attempt),executionProfile:attempt?'trusted':'pending',
   // The server assigns this id only after it persisted the message.
   onOwnMessageSaved(content,metadata){setAttempt(current=>current?.sent&&!current.messageId&&content===current.content&&id(metadata?.message_id)?{...current,messageId:metadata.message_id}:current)},
-  onSendRefused(){finish(`Agent teď nepřijímá zadání. ${NOT_CREATED}`)},
+  onSendRefused(){if(claimed.current)finish(`Agent teď nepřijímá zadání. ${NOT_CREATED}`)},
  })
  const {connectionStatus,isStreaming,markHistoryUnavailable,sendMessage}=chat
  React.useEffect(()=>()=>call.current?.abort(),[])
@@ -77,21 +80,21 @@ function AgentStartForm({workspaceId,pageId,humanId,enabled,holder=null,onStarte
   call.current?.abort();finish(`Spuštění agenta bylo přerušeno. ${NOT_CREATED}`)
  },[enabled,finish])
  React.useEffect(()=>{
-  if(!attempt||attempt.sent||connectionStatus!=='connected')return
+  if(!enabled||!attempt||attempt.life!==lifetime.current||attempt.sent||connectionStatus!=='connected')return
   // This control renders no transcript; the sequenced echo must still be applied.
   markHistoryUnavailable()
-  if(sendMessage(attempt.content)===false){finish(`Zadání se nepodařilo odeslat. ${NOT_CREATED}`);return}
+  if(sendMessage(attempt.content,INSTRUCTION_ONLY)===false){finish(`Zadání se nepodařilo odeslat. ${NOT_CREATED}`);return}
   setAttempt(current=>current&&{...current,sent:true})
- },[attempt,connectionStatus,markHistoryUnavailable,sendMessage,finish])
+ },[enabled,attempt,connectionStatus,markHistoryUnavailable,sendMessage,finish])
  const chatId=attempt?.chatId
  React.useEffect(()=>{
   if(!chatId)return
-  const timer=setTimeout(()=>{if(!posted.current)finish(`Agent na zadání neodpověděl. ${NOT_CREATED}`)},TURN_LIMIT_MS)
+  const timer=setTimeout(()=>{if(!posted.current)finish(`Zadání se nepodařilo potvrdit. ${NOT_CREATED}`)},DELIVERY_LIMIT_MS)
   return()=>clearTimeout(timer)
  },[chatId,finish])
- // A task never overlaps the ordinary chat turn the same message started.
+ // The server's done settles the send; the task binds what its echo named.
  React.useEffect(()=>{
-  if(!attempt?.sent||isStreaming||posted.current)return
+  if(!enabled||!attempt?.sent||attempt.life!==lifetime.current||isStreaming||posted.current)return
   if(!attempt.messageId){finish(`Zadání se v chatu neuložilo. ${NOT_CREATED}`);return}
   posted.current=true
   const abort=new AbortController();call.current=abort
@@ -109,7 +112,7 @@ function AgentStartForm({workspaceId,pageId,humanId,enabled,holder=null,onStarte
    }catch{/* Reported below; a lost reply is never sent again. */}
    if(!abort.signal.aborted)finish(message)
   })()
- },[attempt,isStreaming,pageId,workspaceId,onStarted,finish])
+ },[enabled,attempt,isStreaming,pageId,workspaceId,onStarted,finish])
  const instruction=text.trim()
  const agentHolds=holder==='agent'
  const pending=preparing||Boolean(attempt)
@@ -117,6 +120,7 @@ function AgentStartForm({workspaceId,pageId,humanId,enabled,holder=null,onStarte
  async function start(){
   if(!ready||claimed.current)return
   claimed.current=true
+  const life=++lifetime.current
   const abort=new AbortController();call.current=abort
   setError(undefined);setPreparing(true)
   try{
@@ -126,8 +130,8 @@ function AgentStartForm({workspaceId,pageId,humanId,enabled,holder=null,onStarte
    const profile=await apiFetch(`/api/v1/chats/${encodeURIComponent(body.id)}/execution-profile?${query}`,{signal:abort.signal,cache:'no-store'})
    const mode:unknown=profile.ok?await profile.json():null
    if(!object(mode)||mode.mode!=='trusted')throw Error('native_agent_chat_not_trusted')
-   if(abort.signal.aborted)return
-   setPreparing(false);setAttempt({chatId:body.id,content:CHAT_TURN_NOTE+instruction,sent:false})
+   if(abort.signal.aborted||life!==lifetime.current)return
+   setPreparing(false);setAttempt({life,chatId:body.id,content:instruction,sent:false})
   }catch{if(!abort.signal.aborted)finish(`Chat s agentem se nepodařilo připravit. ${NOT_CREATED}`)}
  }
  if(!enabled)return null
@@ -145,12 +149,12 @@ function AgentStartForm({workspaceId,pageId,humanId,enabled,holder=null,onStarte
    {holder==='human'&&<p className="text-muted-foreground">Dokument teď někdo upravuje. Agent ho nezmění, jen připraví návrh ke schválení.</p>}
    {agentHolds&&<p className="text-muted-foreground">Dokument právě upravuje agent. Další úlohu spustíte, až skončí.</p>}
    <label className="flex items-center gap-2"><input type="checkbox" checked={consent} disabled={pending} onChange={event=>setConsent(event.target.checked)}/>Agent smí upravit celý dokument</label>
-   <p className="text-muted-foreground">Zadání se odešle do nového chatu s agentem a agent na něj nejdřív odpoví. Úprava začne po jeho odpovědi.</p>
+   <p className="text-muted-foreground">Zadání se uloží do nového chatu s agentem a úprava začne hned potom.</p>
    <div className="flex gap-2">
     <Button size="sm" disabled={!ready} onClick={()=>void start()}>Spustit agenta</Button>
     <Button size="sm" variant="outline" disabled={pending} onClick={()=>setOpen(false)}>Zrušit</Button>
    </div>
-   {pending&&<p role="status">Agent přijímá zadání…</p>}
+   {pending&&<p role="status">Ukládám zadání…</p>}
   </>}
   {error&&<p role="alert">{error}</p>}
  </div>

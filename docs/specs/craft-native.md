@@ -366,12 +366,16 @@ person picks an agent, writes the instruction and ticks "Agent sm√≠ upravit cel√
 dokument"; nothing is created before that deliberate action and consent is never
 remembered for a later start. Starting opens a new private chat with that agent
 (`POST /api/v1/agents/{agentId}/chats`) and sends the instruction with the normal
-chat client. The instruction reaches the ordinary chat turn too, with a fixed
-note asking only for a one-sentence acknowledgement. Once the server's echo has
-named the persisted `message_id` and that turn has ended, the editor sends the
-task request above exactly once; a task never overlaps its own chat turn, and a
-turn that does not end within 240 seconds starts no task. Any refusal or lost
-reply is reported and not repeated, because a message can launch only one task.
+chat client, marked `metadata.native_craft_instruction: true`. That literal flag
+persists and echoes the message but starts no chat turn, so the instruction
+reaches no ordinary run, agent log or other member's diagnostics; the flag cannot
+be combined with Page context, an ask form or a document intent. Once the echo
+has named the persisted `message_id` and the send has settled with `done`, the
+editor sends the task request above exactly once. An end of the attempt
+invalidates it synchronously, so a host that retires in the same render neither
+sends nor posts. Any refusal or lost reply is reported and not repeated, because
+a message can launch only one task. The chat itself stays ordinary: a later
+message the person writes there starts a normal turn.
 The outcome appears in the task status panel, and `craft_task_id` is added to the
 URL. A document a person holds is started the same way: admission does not
 consult the lease, the run's `craft_acquire` gets 409 and it records a proposal,
