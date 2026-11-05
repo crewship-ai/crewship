@@ -35,7 +35,7 @@ vi.mock("../design-provider", () => ({ DesignProvider: class {
  admittedEdit: boolean
  editable: boolean
  destroyed = false
- constructor(_doc: unknown, url: string, editable: boolean, _user: unknown, private status: (status: "connected" | "denied") => void, _dirty: () => void, readonly prepare?: () => Promise<string>) {
+ constructor(_doc: unknown, url: string, editable: boolean, _user: unknown, private status: (status: "connected" | "denied") => void, readonly dirty: (offline: boolean) => void, readonly prepare?: () => Promise<string>, readonly synced?: (conflicts: unknown[]) => void) {
   this.admittedEdit = editable
   this.editable = editable
   server.urls.push(url)
@@ -75,6 +75,19 @@ function mount() {
  return renderHook(() => useDesign("same-workspace", "reused-slug"), { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> })
 }
 afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear()); drafts.clear(); vi.mocked(localStorage.getItem).mockReturnValue(null); vi.mocked(localStorage.setItem).mockImplementation(() => {}); vi.mocked(localStorage.removeItem).mockImplementation(() => {}) })
+describe("Design unsynced work", () => {
+ it("counts only an edit that missed the socket, until the reconnect reconciles it", async () => {
+  const view = mount()
+  await waitFor(() => expect(view.result.current.doc).not.toBeNull())
+  const provider = server.providers[0] as unknown as { dirty: (offline: boolean) => void; synced: (conflicts: unknown[]) => void }
+  act(() => provider.dirty(false))
+  expect(view.result.current).toMatchObject({ dirty: true, unsynced: false })
+  act(() => provider.dirty(true))
+  expect(view.result.current.unsynced).toBe(true)
+  act(() => provider.synced([]))
+  expect(view.result.current.unsynced).toBe(false)
+ })
+})
 describe("Design local draft identity", () => {
  it("reconnects an editor only after fresh metadata advances the authority revision", async () => {
   server.pageId = "old-private-page"

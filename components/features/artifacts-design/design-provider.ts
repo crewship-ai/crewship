@@ -36,14 +36,14 @@ export class DesignProvider {
  // both sides changed from one this side simply missed.
  private stale: { base: Uint8Array; local?: DesignNode[]; remote?: Y.Doc } | null = null
 
- constructor(readonly doc: Y.Doc, private url: string, editable: boolean, user: { name: string; color: string }, private status: (status: DesignConnection) => void, private dirty: () => void, private prepare?: () => Promise<DesignAdmission>, private synced?: (conflicts: DesignConflict[]) => void) {
+ constructor(readonly doc: Y.Doc, private url: string, editable: boolean, user: { name: string; color: string }, private status: (status: DesignConnection) => void, private dirty: (offline: boolean) => void, private prepare?: () => Promise<DesignAdmission>, private synced?: (conflicts: DesignConflict[]) => void) {
   this.canEdit = editable
   this.admittedEdit = editable
   this.awareness = new Awareness(doc)
   this.awareness.setLocalStateField("user", user)
   this.changeListener = (update, origin) => {
    if (origin === REMOTE || !this.canEdit) return
-   this.dirty()
+   this.dirty(this.stale !== null)
    if (this.full) return
    this.queuedUpdates.push(update)
    if (!this.updateTimer) this.updateTimer = setTimeout(() => this.flushUpdates(), 75)

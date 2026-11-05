@@ -13,7 +13,7 @@ vi.mock("@/lib/api-fetch",async()=>{
  const actual=await vi.importActual<typeof import("@/lib/api-fetch")>("@/lib/api-fetch")
  return {...actual,apiFetch:(...args:Parameters<typeof actual.apiFetch>)=>copying.real?actual.apiFetch(...args):copying.send(...args)}
 })
-const state = vi.hoisted(() => ({ editable: true, doc: null as Y.Doc | null, pageId: "old-private-page", user: false, peerColor: "#2563eb", saveError: null as (Error & { status?: number }) | null, restoreError: null as (Error & { status?: number }) | null, conflicts: [] as unknown[], dismiss: vi.fn() }))
+const state = vi.hoisted(() => ({ editable: true, doc: null as Y.Doc | null, pageId: "old-private-page", user: false, peerColor: "#2563eb", saveError: null as (Error & { status?: number }) | null, restoreError: null as (Error & { status?: number }) | null, conflicts: [] as unknown[], dismiss: vi.fn(), dirty: false, unsynced: false }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => state.user ? { data: { user: { id: "same-user" } } } : null }))
 vi.mock("@/hooks/use-artifact-agent-dispatch", () => ({ useArtifactAgentDispatch: () => ({ ready: false, dispatch: vi.fn() }) }))
 vi.mock("../use-design", () => ({ useDesign: () => {
@@ -22,11 +22,11 @@ vi.mock("../use-design", () => ({ useDesign: () => {
   query: { data: { page_id: state.pageId, can_edit: state.editable, can_comment: state.editable, latest_version: 1, comments: [] }, isError: false },
   comments: { data: { comments: [] }, isError: false },
   versions: { data: { versions: [{ version: 1 }], shared_version: 1 }, isError: false },
-  doc: state.doc, nodes: designNodes(state.doc!), peers: [{ clientId: 2, name: "Marie", color: state.peerColor, cursor: { x: 12, y: 24 } }], connection: "connected", editable: state.editable, dirty: false, draftError: false,
+  doc: state.doc, nodes: designNodes(state.doc!), peers: [{ clientId: 2, name: "Marie", color: state.peerColor, cursor: { x: 12, y: 24 } }], connection: "connected", editable: state.editable, dirty: state.dirty, unsynced: state.unsynced, draftError: false,
   save: { ...mutation, error: state.saveError }, restore: { ...mutation, error: state.restoreError }, share: mutation, comment: mutation, connectAgent: mutation, setCursor: vi.fn(), conflicts: state.conflicts, dismissConflict: state.dismiss,
  }
 } }))
-beforeEach(() => { copying.real=false;copying.send.mockReset(); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true"); state.editable = true; state.pageId = "old-private-page"; state.user = false; state.peerColor = "#2563eb"; state.conflicts = []; state.dismiss.mockReset(); state.saveError = null; state.restoreError = null; state.doc = new Y.Doc() })
+beforeEach(() => { copying.real=false;copying.send.mockReset(); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true"); state.editable = true; state.pageId = "old-private-page"; state.user = false; state.peerColor = "#2563eb"; state.conflicts = []; state.dismiss.mockReset(); state.dirty = false; state.unsynced = false; state.saveError = null; state.restoreError = null; state.doc = new Y.Doc() })
 afterEach(() => { cleanup(); state.doc?.destroy(); vi.unstubAllEnvs();vi.unstubAllGlobals() })
 describe("Design editor controls", () => {
  it("clears private unsent feedback when the same slug resolves to a new Page", async () => {
@@ -197,6 +197,25 @@ it("never refreshes and replays new Design creation after 401 through the real a
  await waitFor(()=>expect(screen.queryByText("Creating…")).not.toBeInTheDocument())
  expect(creates).toBe(1);expect(refreshes).toBe(0)
  expect(screen.queryByRole("link",{name:"Open new Design"})).not.toBeInTheDocument()
+})
+
+describe("Design status after the write right went",()=>{
+ it("never says changes are saved over unsynced work",()=>{
+  state.editable=false;state.dirty=true;state.unsynced=true
+  render(<DesignEditor workspaceId="workspace" slug="shop"/>)
+  expect(screen.queryByText(/saved as you work/)).toBeNull()
+  expect(screen.getByRole("status")).toHaveTextContent("neodeslané změny zůstaly v tomto prohlížeči")
+ })
+ it("reports synced work as up to date, not as still being saved",()=>{
+  state.editable=false;state.dirty=true
+  render(<DesignEditor workspaceId="workspace" slug="shop"/>)
+  expect(screen.getByRole("status")).toHaveTextContent("Live · up to date")
+ })
+ it("keeps the live status for an editor",()=>{
+  state.dirty=true
+  render(<DesignEditor workspaceId="workspace" slug="shop"/>)
+  expect(screen.getByRole("status")).toHaveTextContent("Live · changes saved as you work")
+ })
 })
 
 describe("Design conflict notice",()=>{

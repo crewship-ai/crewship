@@ -66,6 +66,9 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const [peers, setPeers] = useState<DesignPeer[]>([])
  const [connection, setConnection] = useState<DesignConnection>("connecting")
  const [dirty, setDirty] = useState(false)
+ // An edit made while the socket was down: it is only in this browser until a
+ // reconnect reconciles it. dirty alone means "since the last saved version".
+ const [unsynced, setUnsynced] = useState(false)
  const [readRevokedPage, setReadRevokedPage] = useState<string>()
  const [draftError, setDraftError] = useState(false)
  const provider = useRef<DesignProvider | null>(null)
@@ -131,6 +134,8 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
   }
   if (!active) return
   setDraftReady(true)
+  // With the right back the stored draft is what this socket sends.
+  if (initialCanEdit) setUnsynced(false)
   const capture = initialCanEdit ? admittedArtifactDraftCapture(storageKey) : undefined
   let localDirty = false
   const snapshot = () => {
@@ -155,7 +160,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
   const live = new DesignProvider(document, `${resolveWsBase()}/api/v1/pages/@${encodeURIComponent(pageId)}/design/ws?workspace_id=${encodeURIComponent(workspaceId)}&authority_revision=${encodeURIComponent(authorityRevision!)}`, initialCanEdit, { name: actorName, color }, status => {
    setConnection(status)
    if (status === "denied") void client.invalidateQueries({ queryKey: ["artifact-design", workspaceId, slug, userId] })
-  }, () => setDirty(true), async () => {
+  }, offline => { setDirty(true); if (offline) setUnsynced(true) }, async () => {
    if (getAuthMode() !== "bearer") {
     const refreshed = await tryRefresh()
     if (!active) return "denied"
@@ -175,7 +180,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
     const status = (error as { status?: number }).status
     return status === 401 || status === 403 || status === 404 ? "denied" : "retry"
    }
-  }, found => { if (found.length) storeConflictsRef.current(current => [...current, ...found]) })
+  }, found => { setUnsynced(false); if (found.length) storeConflictsRef.current(current => [...current, ...found]) })
   provider.current = live
   const awareness = () => setPeers([...live.awareness.getStates()].flatMap(([clientId, state]) => {
    if (clientId === document.clientID || !state.user) return []
@@ -222,5 +227,5 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const connectAgent = useMutation({ mutationFn: (chat_id: string) => pinnedRequest("/agent", { chat_id }), onSuccess: invalidate })
  const comment = useMutation({ mutationFn: (body: { version: number; path: string; selector: string; quote: string; text: string; send_to_agent: boolean }) => pinnedRequest<ArtifactComment>("/comments", body), onSuccess: invalidate })
  const share = useMutation({ mutationFn: (version: number) => pinnedRequest("/share", { version }), onSuccess: invalidate })
- return { readRevoked: readRevokedPage === pageId, query, versions, comments, doc, nodes: selectedVersion || query.data?.can_edit === false ? query.data?.nodes ?? [] : nodes, peers, connection, editable, dirty, draftError, save, restore, share, comment, connectAgent, conflicts, dismissConflict: (conflict: DesignConflict) => storeConflicts(current => current.filter(item => item !== conflict && JSON.stringify(item) !== JSON.stringify(conflict))), setCursor: (cursor: { x: number; y: number } | null) => provider.current?.setCursor(cursor) }
+ return { readRevoked: readRevokedPage === pageId, query, versions, comments, doc, nodes: selectedVersion || query.data?.can_edit === false ? query.data?.nodes ?? [] : nodes, peers, connection, editable, dirty, unsynced, draftError, save, restore, share, comment, connectAgent, conflicts, dismissConflict: (conflict: DesignConflict) => storeConflicts(current => current.filter(item => item !== conflict && JSON.stringify(item) !== JSON.stringify(conflict))), setCursor: (cursor: { x: number; y: number } | null) => provider.current?.setCursor(cursor) }
 }

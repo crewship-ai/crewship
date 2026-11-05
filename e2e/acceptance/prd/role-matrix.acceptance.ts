@@ -858,6 +858,7 @@ test.describe("role matrix", () => {
       })
       if (refused) expect(REFUSED, `the late save → ${refused.status()}`).toContain(refused.status())
       expect(shown, "the visible draft holds the typed text").toContain(MARK)
+      if (refused) expect(messages.join(" | "), "the refusal is a sentence, not the API's error").toContain("Nemáte oprávnění tuto změnu uložit")
       expect(mid.latest_version, "nothing reached the server").toBe(1)
       expect(back, "the restored draft is what the person typed").toBe(typed)
       expect(resavedStatus, "with the right back the draft saves").toBe(200)
@@ -944,11 +945,12 @@ test.describe("role matrix", () => {
       const headAfter = returned
         ? await expect.poll(async () => (await getDesign(request, ws.id, d.slug)).nodes.some((n) => n.text === WORK), { timeout: 30_000 }).toBe(true).then(() => true, () => false)
         : false
-      const toldKept = messages.some((m) => /draft|kept in this browser|not saved|unsaved/i.test(m))
+      const toldKept = messages.some((m) => /neodeslané změny zůstaly v tomto prohlížeči/.test(m))
       await prd.evidence("result.json", {
         mode: prd.mode, appSha: prd.appSha, workspace: ws.id, design: d.slug, messages, workStillOnCanvas: onCanvas.includes(WORK), serverTookWork: midOnServer, returnedAfterRegrant: returned, serverHasItAfterRegrant: headAfter,
       })
       expect(midOnServer, "the server took nothing from a person without the right").toBe(false)
+      expect(messages.join(" | "), "the status never claims unsynced work is saved").not.toContain("changes saved")
       expect.soft(returned, "the work comes back with the right").toBe(true)
       expect.soft(headAfter, "the work reaches the server once the right is back").toBe(true)
       expect(onCanvas.includes(WORK) || toldKept, `the page shows the work or says it is kept; the page said: ${messages.join(" | ")}`).toBe(true)

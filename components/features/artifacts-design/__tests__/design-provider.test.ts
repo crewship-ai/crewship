@@ -227,6 +227,15 @@ describe("Design provider after a stale canvas", () => {
   expect(synced.mock.calls.at(-1)?.[0]).toEqual([])
   expect(designNodes(doc)[0].text).toBe("Mine")
  })
+ it("tells the dirty callback that an edit missed the socket", () => {
+  const { doc, dirty, server, synced } = offline()
+  upsertDesignNode(doc, { id: "label", text: "Mine" })
+  expect(dirty).toHaveBeenLastCalledWith(true)
+  reconnect().receive(server, 2)
+  expect(synced).toHaveBeenCalledTimes(1)
+  upsertDesignNode(doc, { id: "label", text: "Live" })
+  expect(dirty).toHaveBeenLastCalledWith(false)
+ })
  it("still compares against the last synced canvas after a second drop", () => {
   const { doc, server, synced } = offline()
   upsertDesignNode(doc, { id: "label", text: "Mine" })
