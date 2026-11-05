@@ -268,3 +268,45 @@ func TestNativeRetiredAttemptSurvivesAStoreRestart(t *testing.T) {
 		t.Fatalf("rows %d", n)
 	}
 }
+
+// A long-lived editor may recover from more than eight network failures over
+// its lifetime. Once a fresh save advances the head, older attempts cannot
+// publish through their base fence and must not consume the retirement limit.
+func TestNativeRetirementRecoversRepeatedOutagesWithTheSameLease(t *testing.T) {
+	s, _, db, _, scope, p := nativeStoreFixture(t)
+	l, _, err := s.Initialize(t.Context(), scope, p, []byte(`{"v":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var firstReceipt NativeSaveReceipt
+	for i := 0; i < 3*nativeRetiredAttemptsPerPage; i++ {
+		base := int64(i + 1)
+		raw := []byte(fmt.Sprintf(`{"v":%d}`, base+1))
+		attempt := fmt.Sprintf("outage-attempt-%04d", i)
+		if _, err := s.ReconcileAttempt(t.Context(), l, base, "r", nativeReceiptHash(raw), attempt); !errors.Is(err, ErrNativeAttemptAbsent) {
+			t.Fatalf("outage %d at base %d: %v", i+1, base, err)
+		}
+		if _, err := s.SaveAttempt(t.Context(), l, base, "r", nativeReceiptHash(raw), raw, attempt); !errors.Is(err, ErrNativeAttemptRetired) {
+			t.Fatalf("retired current-base attempt %d published: %v", i, err)
+		}
+		receipt, err := s.SaveAttempt(t.Context(), l, base, "r", nativeReceiptHash(raw), raw, fmt.Sprintf("fresh-attempt-%04d", i))
+		if err != nil {
+			t.Fatalf("fresh capture %d: %v", i, err)
+		}
+		if i == 0 {
+			firstReceipt = receipt
+		}
+		if n := nativeRetiredRows(t, db); n > nativeRetiredAttemptsPerPage {
+			t.Fatalf("unbounded retired rows: %d", n)
+		}
+	}
+	// Pruning an old row never makes its delayed original publishable.
+	old := []byte(`{"v":2}`)
+	if _, err := s.SaveAttempt(t.Context(), l, 1, "r", nativeReceiptHash(old), old, "outage-attempt-0000"); !errors.Is(err, artifacts.ErrVersionConflict) {
+		t.Fatalf("pruned stale-base attempt was not fenced: %v", err)
+	}
+	// Pruning changes only runtime fences, never the exact historical receipt.
+	if receipt, err := s.ReconcileAttempt(t.Context(), l, 1, "r", nativeReceiptHash(old), "fresh-attempt-0000"); err != nil || receipt != firstReceipt {
+		t.Fatalf("historical committed receipt changed after pruning: %+v %v", receipt, err)
+	}
+}
