@@ -80,6 +80,8 @@ async function retireCommitted(journal:NativeDraftJournal,rows:NativeRecovery[],
 interface Runtime {enginePin:string;port:NativeEditorPort;frame:HTMLIFrameElement;abort:AbortController;version:string;generation:string;ready:boolean;writable:boolean;nativeReadOnly:boolean;coordinator?:Coordinator;journal?:NativeDraftJournal;phase?:NativeSaveState;ackedVersion?:string;receiptAck?:Promise<boolean>;receiptVersion?:string;lastAck?:Promise<boolean>;lastAckVersion?:string;edit:number;blocked:boolean;capture?:NativeDraft;retiring?:Promise<boolean>;retirementFinished?:boolean;mountedState?:string}
 
 /** One authenticated client/session owns both lease controls and the isolated full Craft editor. */
+const READ_ONLY_REFUSED='Právo upravovat bylo odebráno. Neuložené změny zůstaly jako místní koncept. Sdílenou verzi zobrazíte obnovením stránky.'
+const METADATA_RETRY_MS=5000
 export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}:Props){
  const publishPreview=React.useRef<()=>void>(()=>{}),[publishedVersion,setPublishedVersion]=React.useState<string>()
  const stopAgent=React.useRef<()=>void>(()=>{})
@@ -100,6 +102,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   // Replaced only by a fresh read admission after the server retires write (#4348).
   let client=createNativeDocumentClient({workspaceId,pageId})
   let sessionApplication:NativeDocumentSnapshot['applicationId']|undefined
+  // metadataOnly: the frame is gone after a refused private read, and the lease
+  // admission stays open only so an explicit read loss can still purge the draft.
+  let closed=false,metadataOnly=false,metadataRetry:ReturnType<typeof setTimeout>|undefined
   let dead=false,networkRetired=false,nativeFailed=false,sessionId='',current:Runtime|undefined,transition=false,viewNow=vacant,readerRefresh:{client:typeof client,done:Promise<void>}|undefined
   let privacyJournal:NativeDraftJournal|undefined,privacyRetirement:Promise<void>|undefined
   let reauthorize:ReturnType<typeof setInterval>|undefined,leaseWatch:ReturnType<typeof setInterval>|undefined,proposalWatch:ReturnType<typeof setInterval>|undefined
@@ -139,7 +144,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   function detach(r:Runtime){r.abort.abort();r.port.close();r.frame.remove()}
   function stop(message:string,explicitClose=false){
    if(dead||nativeFailed&&!explicitClose)return
-   dead=true;setConnectionRetired(true);lifetime.abort();clearInterval(reauthorize);clearInterval(leaseWatch);clearInterval(proposalWatch);setError(message);setSavedVersion(undefined);setLabel('Editor odpojen · koncept zachován');setOwnsEditor(false);setBusy(false)
+   dead=true;clearTimeout(metadataRetry);setConnectionRetired(true);lifetime.abort();clearInterval(reauthorize);clearInterval(leaseWatch);clearInterval(proposalWatch);setError(message);setSavedVersion(undefined);setLabel('Editor odpojen · koncept zachován');setOwnsEditor(false);setBusy(false)
    if(current){detach(current);void current.coordinator?.close();if(!current.coordinator)void current.journal?.close()}
    client.close()
   }
@@ -161,11 +166,13 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   }
   function retirePrivacy():Promise<void>{
    if(privacyRetirement)return privacyRetirement
-   if(dead)return Promise.resolve()
+   // Only unmounting ends this duty: drafts outlive a stopped connection.
+   if(closed)return Promise.resolve()
+   const stopped=dead
    // Publish the shared barrier before detach/state callbacks can reenter.
    let resolve!:()=>void,reject!:(cause:unknown)=>void
    privacyRetirement=new Promise<void>((done,fail)=>{resolve=done;reject=fail})
-   const r=current;dead=true;lifetime.abort();clearInterval(reauthorize);clearInterval(leaseWatch)
+   const r=current;dead=true;clearTimeout(metadataRetry);lifetime.abort();clearInterval(reauthorize);clearInterval(leaseWatch)
    if(r){detach(r);r.capture=undefined;current=undefined}
    // Keep the precise custody handle even after write retirement closed it.
    // Its closed-journal fence rejects a scope purge (an old handle never
@@ -173,7 +180,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    // it erases exactly that own row (#4348). A pure viewer never acquired a
    // private journal to retire here.
    const journalPurge=(j:NativeDraftJournal)=>j.revokeRead().catch((cause:unknown)=>j.eraseOwnRow?j.eraseOwnRow():Promise.reject(cause))
-   const purged=r?.coordinator?r.coordinator.revokeRead():privacyJournal?journalPurge(privacyJournal):Promise.resolve()
+   const purged=r?.coordinator&&!stopped?r.coordinator.revokeRead():privacyJournal?journalPurge(privacyJournal):Promise.resolve()
+   if(stopped||metadataOnly)setError(undefined)
    client.close();setView(vacant);setQuota(undefined);setConnectionRetired(true);setUncertain(false);setRecoveries([]);setComparison(undefined);setDirty(false);setSavedVersion(undefined);setOwnsEditor(false);setLabel('Přístup ke čtení byl odebrán')
    void purged.then(resolve,reject)
    return privacyRetirement
@@ -276,7 +284,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   window.addEventListener('online',backOnline)
   const windowMessage=(event:MessageEvent)=>{current?.port.handleWindowMessage(event)}
   window.addEventListener('message',windowMessage)
-  const unregisterPrivacy=registerDocumentDraftWriter(humanId,retirePrivacy,{suspend:suspendForAuth,hasDraft:()=>Boolean(current?.phase?.dirty||current?.capture)})
+  const unregisterPrivacy=registerDocumentDraftWriter(humanId,retirePrivacy,{suspend:suspendForAuth,hasDraft:()=>Boolean(metadataOnly||current?.phase?.dirty||current?.capture)})
   function wrapJournal(journal:NativeDraftJournal,r:Runtime):NativeDraftJournal{return {...journal,
    async persist(draft){await journal.persist(draft);if(live(r))r.capture={...draft,bytes:draft.bytes.slice()}},
    confirm:async(draft)=>{await journal.confirm(draft);if(r.capture?.editorRevision===draft.editorRevision)r.capture=undefined},
@@ -339,12 +347,14 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   // #4348: the server retired this admission because Page write was removed
   // while read remains. Retire local writing exactly as on lease loss (capture
   // the draft, never send it), then ask the server for a FRESH read admission.
-  // Nothing of the old token or lease generation is reused; any refusal ends
-  // in the ordinary disconnected state with the draft kept.
+  // Nothing of the old token or lease generation is reused. A refused private
+  // read keeps the admission for lease status; any other refusal ends in the
+  // ordinary disconnected state with the draft kept.
   async function reopenReadOnly(){
    if(dead||networkRetired)return
    const message='Právo upravovat bylo odebráno. Dokument je jen pro čtení; neuložené změny zůstaly jako místní koncept.'
-   networkRetired=true;clearInterval(reauthorize);clearInterval(leaseWatch);viewNow=vacant;setView(vacant);setHandoffRequest(undefined);setOwnsEditor(false);setError(message)
+   networkRetired=true;clearInterval(reauthorize);clearInterval(leaseWatch);viewNow=vacant;setView(vacant);setHandoffRequest(undefined);setOwnsEditor(false)
+   if(!metadataOnly)setError(message)
    const r=current
    if(r&&(r.writable||r.retiring&&!r.retirementFinished)&&!await retireWrite(r)){client.close();return}
    client.close()
@@ -354,15 +364,36 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     const opened=await client.open(lifetime.signal)
     if(opened.applicationId!==sessionApplication)throw Error('native_application_changed')
     sessionId=opened.sessionId
-    const snapshot=await client.read(lifetime.signal);viewNow=leaseView(await client.lease(lifetime.signal));setView(viewNow)
+    let snapshot:NativeDocumentSnapshot
+    try{snapshot=await client.read(lifetime.signal)}
+    catch(cause){if(!(cause instanceof Error)||cause.message!=='native_private_read_refused')throw cause;await holdMetadata();return}
+    viewNow=leaseView(await client.lease(lifetime.signal));setView(viewNow)
     if(dead)return
     await mountEditor(snapshot,viewNow.generation??'1')
-   }catch{stop('Právo upravovat bylo odebráno. Neuložené změny zůstaly jako místní koncept. Sdílenou verzi zobrazíte obnovením stránky.');return}
+   }catch{if(metadataOnly)retryMetadata();else stop(READ_ONLY_REFUSED);return}
    if(dead)return
-   networkRetired=false;setBusy(false);setError(message);watch()
+   metadataOnly=false;networkRetired=false;setConnectionRetired(false);setBusy(false);setError(message);watch()
+  }
+  // No frame or private request survives this; only lease status and the
+  // explicit read-loss event still reach this person, and the draft stays theirs.
+  async function holdMetadata(){
+   const r=current
+   metadataOnly=true
+   if(r){await r.coordinator?.close();if(!r.coordinator)await r.journal?.close();detach(r);current=undefined}
+   if(dead)return
+   setConnectionRetired(true);setOwnsEditor(false);setSavedVersion(undefined);setQuota(undefined);setUncertain(false);setLabel('Editor odpojen · koncept zachován');setError(READ_ONLY_REFUSED);setBusy(false)
+   viewNow=leaseView(await client.lease(lifetime.signal));setView(viewNow)
+   if(dead)return
+   networkRetired=false;watch()
+  }
+  // A lost metadata admission must not end the watch while a draft is held.
+  function retryMetadata(){
+   if(dead)return
+   networkRetired=true;clearInterval(reauthorize);client.close();clearTimeout(metadataRetry)
+   metadataRetry=setTimeout(()=>{networkRetired=false;void reopenReadOnly().catch(retryMetadata)},METADATA_RETRY_MS)
   }
   async function refreshReader(){
-   if(dead||networkRetired||transition||current?.writable||current?.blocked||current&&(!current.nativeReadOnly||current.retiring&&!current.retirementFinished))return
+   if(dead||metadataOnly||networkRetired||transition||current?.writable||current?.blocked||current&&(!current.nativeReadOnly||current.retiring&&!current.retirementFinished))return
    // A refresh belongs to the admission that started it. After a fresh read
    // admission replaced the client (#4348), the old GET neither mounts its
    // snapshot nor fails the successor; the successor starts its own read.
@@ -541,18 +572,19 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     const since=Date.now();recheckSince=since
     void own.lease(lifetime.signal).then(raw=>{if(dead||client!==own||!r.writable)return;const next=leaseView(raw);if(!owns(next,r.generation)){retire();return}viewNow=next;setView(next)}).catch(()=>{if(!dead&&client===own&&r.writable)retire()}).finally(()=>{if(recheckSince===since)recheckSince=0})
    },1000)
-   reauthorize=setInterval(()=>{void own.reauthorize(lifetime.signal).catch(()=>{if(!dead&&client===own)void retireConnection('Spojení bylo ukončeno. Koncept zůstává zachován.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})},30000)
+   reauthorize=setInterval(()=>{void own.reauthorize(lifetime.signal).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Spojení bylo ukončeno. Koncept zůstává zachován.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})},30000)
    void own.events(lifetime.signal,(event,value)=>{
     if(dead||client!==own)return
     if(event==='session_retired'&&value.draft==='purge'){
      void retirePrivacy().catch(()=>setError('Vymazání místního konceptu nebylo potvrzeno.'));return
     }
     if(event==='session_retired'&&value.reason==='write_revoked'){void reopenReadOnly().catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'));return}
+    if(event==='session_retired'&&metadataOnly){retryMetadata();return}
     if(event==='session_retired'){void retireConnection('Spojení bylo ukončeno. Koncept zachován.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'));return}
     void observeLease(value,true).catch(()=>{if(client===own)stop('Aktuální přístup nelze potvrdit. Koncept zachován.')})
-   }).catch(()=>{if(!dead&&client===own)void retireConnection('Spojení přerušeno. Zápis není potvrzen.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})
+   }).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Spojení přerušeno. Zápis není potvrzen.').catch(()=>stop('Přístup editoru se nepotvrdil. Koncept zachován.'))})
   }
-  return()=>{unregisterPrivacy();window.removeEventListener('message',windowMessage);window.removeEventListener('online',backOnline);control.current=()=>{};publishPreview.current=()=>{};history.current={load:async()=>null,loadVersion:async()=>{throw Error('native_editor_closed')},restore:()=>{}};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};stop('Editor uzavřen · koncept zachován',true)}
+  return()=>{closed=true;unregisterPrivacy();window.removeEventListener('message',windowMessage);window.removeEventListener('online',backOnline);control.current=()=>{};publishPreview.current=()=>{};history.current={load:async()=>null,loadVersion:async()=>{throw Error('native_editor_closed')},restore:()=>{}};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};stop('Editor uzavřen · koncept zachován',true)}
  },[enabled,humanId,workspaceId,pageId])
  function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`${draft.applicationId}-recovery.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
  if(!enabled)return <p className="p-6">Nativní editor není zapnutý.</p>

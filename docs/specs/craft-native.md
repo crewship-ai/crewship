@@ -232,10 +232,15 @@ the private journal, never sent), closes the old client and requests one fresh
 admission, which the server grants only after a fresh read check. A person
 who keeps private read (an administrator on a private Page) reads the current
 version, sees the same read-only editor a non-holder sees and is offered the
-captured draft for compare or copy. A Read grantee is refused the private read:
-the frame is removed and the host ends in the ordinary disconnected state with
-the draft kept and offered; it is not retried, and a reload opens the shared
-preview. A later read loss on the fresh admission stops delivery
+captured draft for compare or copy. A Read grantee is refused the private read
+(403 on an otherwise valid admission): the frame is removed and the draft stays
+offered for copy, while that admission keeps the event stream open for lease
+status only. If the admission retires or the stream drops without a read loss,
+the host opens a fresh one, so a later read loss still reaches it; a reload
+opens the shared preview. Any other refused fresh admission ends in the ordinary
+disconnected state with the draft kept; it is not retried, and a privacy
+retirement (sign-out, another person) still erases the draft and the recovery
+and comparison material. A later read loss on the fresh admission stops delivery
 like any other (`draft: "purge"`). That purge also erases the draft row the
 retired write journal persisted, even though that journal is already closed:
 a closed handle still refuses a Page-wide purge (it must never erase a fresh
