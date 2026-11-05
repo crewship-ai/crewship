@@ -221,8 +221,10 @@ release and report, and the RC gate does not count them.
   text by client order, so the row checks the notice whichever side won.
 - `role.*.revoke-draft`, `role.project.revoke-read-draft`: the right goes with
   unsaved work open. The server takes nothing, the work stays visible, and it
-  returns with the right; when the read right goes too, the page has to say what
-  happened to the draft.
+  returns with the right. When the read right goes too, the page has to say the
+  draft was deleted: the row proves its storage probe sees the draft first, then
+  requires it gone from the screen and from IndexedDB and localStorage, and
+  absent after the right returns.
 
 ## Cleanup
 

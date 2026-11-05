@@ -206,6 +206,13 @@ describe("Design status after the write right went",()=>{
   expect(screen.queryByText(/saved as you work/)).toBeNull()
   expect(screen.getByRole("status")).toHaveTextContent("neodeslané změny zůstaly v tomto prohlížeči")
  })
+ it("does not call a connected canvas up to date while the server has not confirmed the work",()=>{
+  state.unsynced=true
+  render(<DesignEditor workspaceId="workspace" slug="shop"/>)
+  expect(screen.getByRole("status")).toHaveTextContent("Live · sending changes")
+  expect(screen.getByRole("status")).not.toHaveTextContent("up to date")
+  expect(screen.getByRole("status")).not.toHaveTextContent("saved as you work")
+ })
  it("reports synced work as up to date, not as still being saved",()=>{
   state.editable=false;state.dirty=true
   render(<DesignEditor workspaceId="workspace" slug="shop"/>)
@@ -220,7 +227,7 @@ describe("Design status after the write right went",()=>{
 
 describe("Design conflict notice",()=>{
  const node={id:"label",type:"text" as const,name:"Nadpis",text:"Základ",x:0,y:0,width:200,height:40,fill:"#111111"}
- const conflict=(kept:"mine"|"theirs")=>({id:"label",name:"Nadpis",mine:"Můj text",theirs:"Cizí text",kept,restore:{...node,text:kept==="mine"?"Cizí text":"Můj text"}})
+ const conflict=(kept:"mine"|"theirs")=>({id:"label",name:"Nadpis",mine:"Můj text",theirs:"Cizí text",kept,left:kept==="mine"?"Můj text":"Cizí text",restore:{...node,text:kept==="mine"?"Cizí text":"Můj text"}})
  it("shows the person who lost their text and restores it",()=>{
   upsertDesignNode(state.doc!,{...node,text:"Cizí text"})
   state.conflicts=[conflict("theirs")]
@@ -233,6 +240,13 @@ describe("Design conflict notice",()=>{
   expect(designNodes(state.doc!)[0].text).toBe("Můj text")
   expect(state.dismiss).toHaveBeenCalledWith(state.conflicts[0])
  })
+ it("restores only the text, keeping what changed on the layer since",()=>{
+  upsertDesignNode(state.doc!,{...node,text:"Cizí text",x:77,fill:"#ff0000",name:"Přejmenováno"})
+  state.conflicts=[conflict("theirs")]
+  render(<DesignEditor workspaceId="workspace" slug="shop"/>)
+  fireEvent.click(screen.getByRole("button",{name:"Obnovit tento text"}))
+  expect(designNodes(state.doc!)).toMatchObject([{text:"Můj text",x:77,fill:"#ff0000",name:"Přejmenováno"}])
+ })
  it("says the other person's text was overwritten and may exist nowhere else",()=>{
   state.conflicts=[conflict("mine")]
   render(<DesignEditor workspaceId="workspace" slug="shop"/>)
@@ -240,6 +254,15 @@ describe("Design conflict notice",()=>{
   expect(alert).toHaveTextContent("Text druhého člověka byl přepsán")
   expect(alert).toHaveTextContent("v historii zůstává, jen pokud byl uložen ve verzi")
   expect(alert).toHaveTextContent("Cizí text")
+ })
+ it("does not claim a text stayed on a layer that was deleted",()=>{
+  state.conflicts=[{...conflict("theirs"),left:undefined,theirs:""}]
+  render(<DesignEditor workspaceId="workspace" slug="shop"/>)
+  const alert=screen.getByRole("alert")
+  expect(alert).toHaveTextContent("Vrstva je mezitím smazaná")
+  expect(alert).not.toHaveTextContent("Na plátně zůstal")
+  fireEvent.click(screen.getByRole("button",{name:"Obnovit tento text"}))
+  expect(designNodes(state.doc!)).toMatchObject([{id:"label",text:"Můj text"}])
  })
  it("copies the text and keeps the notice when a person only dismisses it",async()=>{
   const writeText=vi.fn(async()=>{})
