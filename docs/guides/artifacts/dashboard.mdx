@@ -13,22 +13,21 @@ version for every change. Every value on screen carries its source: who last
 wrote it and when.
 
 <Note>
-Dashboards are off by default. All of the following must be on:
+Dashboards are off by default. All of the following must be on
+(`artifact_projects` already is, unless someone turned it off):
 
 | Switch | Kind | What it does |
 |---|---|---|
-| `artifact_projects` | Workspace flag | Project artifacts, the base every Dashboard is built on. |
+| `artifact_projects` | Workspace flag | Project artifacts, the base every Dashboard is built on. On by default. |
 | `artifact_dashboard_data` | Workspace flag | The data collections and the **Dashboard** kind in the library. |
 | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS=true` | Web build variable | The live Dashboard preview in the browser. |
 | `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` | Web build variable | The Artifacts library at `/artifacts`, where you open a Dashboard. |
 | `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true` | Web build variable | Project previews in the library and the project kinds (including **Dashboard**) under **New artifact**. The default production build sets it to `false`. |
 
-A workspace owner or admin turns on the workspace flags with
-`crewship feature-flag enable artifact_projects` and
+A workspace owner or admin turns on the data flag with
 `crewship feature-flag enable artifact_dashboard_data` (see
-[feature-flag](/cli/feature-flag)). An operator can switch them on for every
-workspace instead with `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` and
-`CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED=true`. The `NEXT_PUBLIC_*` variables
+[feature-flag](/cli/feature-flag)). An operator can switch it on for every
+workspace instead with `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED=true`. The `NEXT_PUBLIC_*` variables
 are read when the web app is built, so changing them needs a rebuild.
 
 When `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` is off, the app requests no data, and

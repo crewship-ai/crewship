@@ -310,6 +310,15 @@
       "alwaysRerun": true
     },
     {
+      "id": "B.project.default-on",
+      "origin": "artifacts",
+      "alwaysRerun": true
+    },
+    {
+      "id": "B.project.artifacts-links",
+      "origin": "artifacts"
+    },
+    {
       "id": "B.durability.outage",
       "origin": "artifacts",
       "alwaysRerun": true

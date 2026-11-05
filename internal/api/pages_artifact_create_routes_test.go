@@ -37,6 +37,8 @@ func TestArtifactProjectCreateRoutesRequireWorkspaceFlagAndWriteScope(t *testing
 	}
 	body := `{"slug":"three-screens","name":"Create route",` + strings.TrimPrefix(artifactProjectBody(0, "Original content"), "{")
 	t.Setenv("CREWSHIP_ARTIFACT_PROJECTS_ENABLED", "false")
+	// Projects are on by default (#4994); an admin's instance off hides them.
+	mustExec(t, h.db, `UPDATE feature_flags SET enabled=0, updated_at='2026-11-05T10:00:00Z' WHERE key='artifact_projects'`)
 	availability(false)
 	if out := request(writer, "POST", "/api/v1/pages/artifacts", body); out.Code != 404 {
 		t.Fatalf("disabled create %d: %s", out.Code, out.Body)

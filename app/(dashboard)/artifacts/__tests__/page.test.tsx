@@ -6,11 +6,11 @@ const nav = vi.hoisted(() => ({ params: new URLSearchParams("workspace_id=ws1"),
 vi.mock("next/navigation", () => ({ useSearchParams: () => nav.params, useParams: () => ({ id: "_" }), usePathname: () => window.location.pathname, useRouter: () => ({ replace: nav.replace, push: nav.push }) }))
 vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ workspaceId: "ws1", loading: false, linkUnavailable: false }) }))
 vi.mock("@/components/features/artifacts-library/artifacts-library", () => ({
-  ArtifactsLibrary: ({ workspaceId, item, bySlug, onSelect, onCanonical, filters, onFiltersChange }: {
-    workspaceId: string; item: string | null; bySlug?: boolean; onSelect: (id: string | null, slug?: string) => void
+  ArtifactsLibrary: ({ workspaceId, item, version, bySlug, onSelect, onCanonical, filters, onFiltersChange }: {
+    workspaceId: string; item: string | null; version?: number; bySlug?: boolean; onSelect: (id: string | null, slug?: string) => void
     onCanonical: (id: string) => void; filters: { view: string; q: string }; onFiltersChange: (next: unknown) => void
   }) =>
-    <div data-testid="library" data-ws={workspaceId} data-item={item ?? ""} data-by-slug={String(Boolean(bySlug))} data-view={filters.view} data-q={filters.q}>
+    <div data-testid="library" data-ws={workspaceId} data-item={item ?? ""} data-version={version ?? ""} data-by-slug={String(Boolean(bySlug))} data-view={filters.view} data-q={filters.q}>
       <button onClick={() => onSelect("page-site")}>pick</button><button onClick={() => onSelect(null)}>back</button>
       <button onClick={() => onSelect(null, "no-id")}>pick without ID</button><button onClick={() => onCanonical("page-brief")}>resolved</button>
       <button onClick={() => onFiltersChange({ ...filters, view: "all", q: "kind:word" })}>search</button>
@@ -91,4 +91,31 @@ it("opens a shared Design version full screen instead of moving the link", () =>
   render(<ArtifactsPage />)
   expect(screen.getByTestId("design").dataset).toMatchObject({ slug: "wireframe", version: "2" })
   expect(nav.replace).not.toHaveBeenCalled()
+})
+
+// #4995: the API returns /artifacts/<page_id>?workspace_id=…[&version=N] for projects.
+it("opens the version a project link pins, and only for that artifact", () => {
+  nav.params = new URLSearchParams("workspace_id=ws1&version=2")
+  at("/artifacts/page-site")
+  render(<ArtifactRoute />)
+  expect(screen.getByTestId("library").dataset).toMatchObject({ ws: "ws1", item: "page-site", version: "2" })
+  cleanup()
+  for (const bad of ["0", "-1", "1.5", "bogus"]) {
+    nav.params = new URLSearchParams(`workspace_id=ws1&version=${bad}`)
+    render(<ArtifactRoute />)
+    expect(screen.getByTestId("library").dataset.version, bad).toBe("")
+    cleanup()
+  }
+  nav.params = new URLSearchParams("workspace_id=ws1&version=2")
+  at("/artifacts")
+  render(<ArtifactsPage />)
+  expect(screen.getByTestId("library").dataset.version).toBe("")
+})
+
+it("without the library keeps a project link's identity, workspace and pin on Pages", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "false")
+  nav.params = new URLSearchParams("workspace_id=ws1&version=2")
+  at("/artifacts/page-site")
+  render(<ArtifactRoute />)
+  expect(nav.replace).toHaveBeenCalledWith("/pages/%40page-site?workspace_id=ws1&artifact=1&version=2")
 })

@@ -12,14 +12,16 @@ place, and restoring an old version creates a new one. People read one
 version that the owner chose to share, while the owner keeps working on the
 latest one.
 
-<Warning>
-Artifact projects are **off by default**. They need the `artifact_projects`
-feature flag for the workspace (`crewship feature-flag enable artifact_projects`)
-or `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` on the server. While they are
-off, the create, version and comment routes answer `404`.
+<Note>
+Artifact projects are **on by default** through the `artifact_projects`
+feature flag. A workspace manager can turn them off for one workspace
+(`crewship feature-flag disable artifact_projects`), and an instance admin for
+every workspace without an override (see
+[Turning Projects off](/configuration/artifacts#turning-projects-off)). While
+they are off, the create, version and comment routes answer `404`.
 `crewship page artifact availability` reports `{"enabled": true}` or
 `{"enabled": false}` for the current workspace.
-</Warning>
+</Note>
 
 ## The Artifacts library
 
