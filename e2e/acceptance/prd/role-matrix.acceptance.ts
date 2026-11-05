@@ -756,10 +756,12 @@ test.describe("role matrix", () => {
 
       const saved = page.waitForResponse((r) => r.url().includes("/design/snapshots") && r.request().method() === "POST" && r.ok(), { timeout: 45_000 })
       await page.getByRole("button", { name: "Save version", exact: true }).click()
-      await saved
-      const head = await getDesign(request, ws.id, d.slug)
+      const receipt = (await (await saved).json()) as { version: number }
+      expect(receipt.version, "the save returns the version it stored").toBeGreaterThan(0)
+      const head = await getDesign(request, ws.id, d.slug, receipt.version)
+      expect(head.version, "the read is the saved version, not the live canvas").toBe(receipt.version)
       const texts = head.nodes.map((n) => n.text)
-      await prd.evidence("result.json", { mode: prd.mode, appSha: prd.appSha, workspace: ws.id, design: d.slug, latest: head.latest_version, texts })
+      await prd.evidence("result.json", { mode: prd.mode, appSha: prd.appSha, workspace: ws.id, design: d.slug, savedVersion: receipt.version, texts })
       expect(texts, "the saved canvas holds the first person's change").toContain(OWNER)
       expect(texts, "the saved canvas holds the second person's change").toContain(SECOND)
     },

@@ -12,7 +12,7 @@ import { registerDocumentDraftWriter } from "@/lib/document-queue"
 import { apiFetch, tryRefresh } from "@/lib/api-fetch"
 import { getAuthMode, resolveWsBase } from "@/lib/server-base"
 import { DesignProvider, type DesignConnection, type DesignPeer } from "./design-provider"
-import { designConflictIdentity, designNodes, mergeDesignConflictRecord, parseDesignConflictRecord, type DesignConflict, type DesignNode } from "./design-document"
+import { designConflictIdentity, designNodes, designWorkCovered, mergeDesignConflictRecord, parseDesignConflictRecord, type DesignConflict, type DesignNode } from "./design-document"
 
 interface DesignState {
  page_id: string
@@ -38,11 +38,14 @@ function encodeDraft(bytes: Uint8Array) {
  for (let index = 0; index < bytes.length; index += 8192) value += String.fromCharCode(...bytes.subarray(index, index + 8192))
  return btoa(value)
 }
+const decodeDraft = (value: string) => Uint8Array.from(atob(value), char => char.charCodeAt(0))
 /** Unconfirmed work per tab: only a marker and a comparison base, never the work itself (that is the canvas draft). */
-function readPendingRecord(text: string): Record<string, string> {
+interface PendingMark { baseline: string; work: string }
+function readPendingRecord(text: string): Record<string, PendingMark> {
  try {
   const saved: unknown = JSON.parse(text || "{}")
-  return saved && typeof saved === "object" && !Array.isArray(saved) ? saved as Record<string, string> : {}
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return {}
+  return Object.fromEntries(Object.entries(saved as Record<string, PendingMark>).filter(([, mark]) => typeof mark?.baseline === "string" && typeof mark.work === "string"))
  } catch { return {} }
 }
 /** Conflicts on screen: the durable list, plus changes this tab could not store yet. */
@@ -132,11 +135,14 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const storeConflictsRef = useRef(storeConflicts)
  useEffect(() => { storeConflictsRef.current = storeConflicts }, [storeConflicts])
  const pendingWriter = useRef("")
- const storePending = useCallback((target: string, baseline: string | null, adopted: readonly string[]) => mergeArtifactDraft(target, existing => {
+ // Marks this tab's work generation, or clears every generation the confirmed
+ // document holds. Decided against the record as stored at that moment: a mark
+ // for work this document never contained stays with its own tab's draft.
+ const storePending = useCallback((target: string, change: PendingMark | Y.Snapshot) => mergeArtifactDraft(target, existing => {
   pendingWriter.current ||= crypto.randomUUID()
   const record = readPendingRecord(existing)
-  if (baseline !== null) record[pendingWriter.current] = baseline
-  else for (const writer of [pendingWriter.current, ...adopted]) delete record[writer]
+  if ("work" in change) record[pendingWriter.current] = change
+  else for (const [writer, mark] of Object.entries(record)) if (designWorkCovered(change, decodeDraft(mark.work))) delete record[writer]
   return Object.keys(record).length ? JSON.stringify(record) : ""
  }), [])
  const conflicts = designConflictView(conflictKey && ledger?.key === conflictKey && readRevokedPage !== pageId ? ledger : undefined)
@@ -178,10 +184,13 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
    return ""
   }))
   if (!active) return
-  if (draft) Y.applyUpdate(document, Uint8Array.from(atob(draft), char => char.charCodeAt(0)))
+  if (draft) Y.applyUpdate(document, decodeDraft(draft))
   setDraftReady(true)
   let adopted = Object.keys(marked)
-  const stored = marked[pendingWriter.current] ?? marked[adopted[0]], unconfirmed = initialCanEdit && Boolean(draft || adopted.length)
+  // Compare only from a baseline whose work this document holds.
+  const loaded = Y.snapshot(document)
+  const stored = [marked[pendingWriter.current], ...Object.values(marked)].find(mark => mark && designWorkCovered(loaded, decodeDraft(mark.work)))
+  const unconfirmed = initialCanEdit && Boolean(draft || adopted.length)
   // A stored draft is unconfirmed until this socket's barrier says otherwise.
   if (draft || adopted.length) setUnsyncedPage(pageId)
   else if (initialCanEdit) setUnsyncedPage(current => current === pageId ? undefined : current)
@@ -226,13 +235,14 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
    }
   }, {
    unconfirmed,
-   baseline: unconfirmed && stored ? Uint8Array.from(atob(stored), char => char.charCodeAt(0)) : undefined,
+   baseline: unconfirmed && stored ? decodeDraft(stored.baseline) : undefined,
    pending: baseline => {
     if (baseline) setUnsyncedPage(pageId)
     else setUnsyncedPage(current => current === pageId ? undefined : current)
     if (!baseline && !wroteMark && !adopted.length) return
     wroteMark = baseline !== null
-    try { void storePending(markerKey, baseline ? encodeDraft(baseline) : null, adopted).catch(() => setDraftError(true)) }
+    // Taken now: the document may move on before the merge runs.
+    try { void storePending(markerKey, baseline ? { baseline: encodeDraft(baseline), work: encodeDraft(Y.encodeSnapshot(Y.snapshot(document))) } : Y.snapshot(document)).catch(() => setDraftError(true)) }
     catch { setDraftError(true) }
     if (!baseline) adopted = []
    },

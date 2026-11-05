@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import * as Y from "yjs"
-import { designConflictIdentity, designConflicts, designNodes, mergeDesignConflictRecord, restoreDesignConflict, upsertDesignNode, removeDesignNode, type DesignConflict } from "../design-document"
+import { designConflictIdentity, designConflicts, designNodes, designWorkCovered, mergeDesignConflictRecord, restoreDesignConflict, upsertDesignNode, removeDesignNode, type DesignConflict } from "../design-document"
 
 describe("Design Yjs document", () => {
  it("merges concurrent changes to different properties and preserves children", () => {
@@ -141,5 +141,33 @@ describe("the durable conflict record", () => {
  })
  it("refuses to overwrite a record it cannot read", () => {
   expect(() => mergeDesignConflictRecord("not json", [one("a")], [])).toThrow()
+ })
+})
+
+describe("a stored work generation", () => {
+ const layer = { id: "label", type: "text" as const, text: "Base", x: 0, y: 0, width: 1, height: 1, fill: "#000" }
+ const fork = (doc: Y.Doc) => { const copy = new Y.Doc(); Y.applyUpdate(copy, Y.encodeStateAsUpdate(doc)); return copy }
+ const work = (doc: Y.Doc) => Y.encodeSnapshot(Y.snapshot(doc))
+ const shared = () => { const doc = new Y.Doc(); upsertDesignNode(doc, layer); return doc }
+ it("is covered by a document holding that work", () => {
+  const writer = shared()
+  upsertDesignNode(writer, { id: "label", text: "Work" })
+  expect(designWorkCovered(Y.snapshot(fork(writer)), work(writer))).toBe(true)
+ })
+ it("is not covered by a document without that work", () => {
+  const base = shared(), writer = fork(base)
+  upsertDesignNode(writer, { id: "label", text: "Work" })
+  expect(designWorkCovered(Y.snapshot(base), work(writer))).toBe(false)
+ })
+ it("sees work that is only a deletion, which the state vector does not", () => {
+  const base = shared(), writer = fork(base)
+  removeDesignNode(writer, "label")
+  expect(Y.encodeStateVector(writer)).toEqual(Y.encodeStateVector(base))
+  expect(designWorkCovered(Y.snapshot(base), work(writer))).toBe(false)
+  Y.applyUpdate(base, Y.encodeStateAsUpdate(writer))
+  expect(designWorkCovered(Y.snapshot(base), work(writer))).toBe(true)
+ })
+ it("counts as not covered when it cannot be read", () => {
+  expect(designWorkCovered(Y.snapshot(shared()), new Uint8Array([255, 255]))).toBe(false)
  })
 })

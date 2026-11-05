@@ -10,6 +10,7 @@ vi.mock("@/lib/artifact-drafts", () => ({
  loadArtifactDraft: async (key: string) => { await store.reads.get(key); if (store.failRead === key) throw new Error("storage"); return drafts.get(key) ?? "" },
  mergeArtifactDraft: async (key: string, merge: (existing: string) => string) => {
   store.merges.push(key)
+  await store.mergeGate
   if (store.failMerges) throw new Error("storage")
   const text = merge(drafts.get(key) ?? "")
   if (text) drafts.set(key, text); else drafts.delete(key)
@@ -27,7 +28,7 @@ vi.mock("@/lib/local-draft-seal", () => {
   return { close() {} }
  } }
 })
-const store = vi.hoisted(() => ({ reads: new Map<string, Promise<unknown>>(), failRead: "", failMerges: false, merges: [] as string[] }))
+const store = vi.hoisted(() => ({ mergeGate: Promise.resolve() as Promise<unknown>, reads: new Map<string, Promise<unknown>>(), failRead: "", failMerges: false, merges: [] as string[] }))
 const server = vi.hoisted(() => ({ status: 200, post401: false, actorId: "same-user", bearer: false, pageId: "old-private-page", authorityRevision: "1", canEdit: true, nodes: [] as Record<string, unknown>[], providers: [] as { admittedEdit: boolean; editable: boolean; destroyed: boolean; deny: () => void; connect: () => void; prepare?: () => Promise<string>; dirty: () => void; tracking?: { baseline?: Uint8Array; unconfirmed?: boolean; pending?: (base: Uint8Array | null) => void; conflicts?: (found: unknown[]) => void } }[], urls: [] as string[], calls: [] as { url: string; method: string; skipRefresh?: boolean }[] }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "same-user", name: "Owner" } } }) }))
 vi.mock("@/lib/server-base", () => ({ resolveWsBase: () => "ws://localhost", getAuthMode: () => server.bearer ? "bearer" : "cookie" }))
@@ -69,7 +70,7 @@ beforeEach(() => {
  server.status = 200
  server.actorId = "same-user"
  server.bearer = false
- store.reads.clear(); store.failRead = ""; store.failMerges = false; store.merges = []
+ store.mergeGate = Promise.resolve(); store.reads.clear(); store.failRead = ""; store.failMerges = false; store.merges = []
  vi.mocked(tryRefresh).mockClear().mockResolvedValue("ok")
  server.authorityRevision = "1"
  server.canEdit = true
@@ -89,6 +90,7 @@ const pendingKey = "design-pending:same-user:same-workspace:old-private-page"
 const conflictKey = "design-conflict:same-user:same-workspace:old-private-page"
 const canvasKey = "crewship-design:v2:same-user:same-workspace:old-private-page"
 const lost = (over: Record<string, unknown> = {}) => ({ id: "label", name: "Title", mine: "Mine", theirs: "Theirs", kept: "theirs", left: "Theirs", restore: { id: "label", type: "text", text: "Mine" }, ...over })
+const mark = (doc: Y.Doc) => ({ baseline: "AQ==", work: btoa(String.fromCharCode(...Y.encodeSnapshot(Y.snapshot(doc)))) })
 const encoded = (doc: Y.Doc) => btoa(String.fromCharCode(...Y.encodeStateAsUpdate(doc)))
 async function mounted() {
  const view = mount()
@@ -145,15 +147,49 @@ describe("Design unsynced work", () => {
   await waitFor(() => expect(again.result.current.unsynced).toBe(true))
   expect(server.providers.at(-1)!.tracking?.unconfirmed).toBeFalsy()
  })
- it("removes only this tab's mark when another tab still has unsent work", async () => {
+ it("keeps another writer's mark for work the confirmed document does not hold", async () => {
+  const other = new Y.Doc(); upsertDesignNode(other, { id: "their-work", type: "text", text: "Other tab" })
+  drafts.set(canvasKey, encoded(new Y.Doc()))
+  drafts.set(pendingKey, JSON.stringify({ "other-tab": mark(other) }))
+  const view = await mounted()
+  expect(server.providers[0].tracking?.baseline).toBeUndefined()
+  await act(async () => server.providers[0].tracking!.pending!(null))
+  expect(view.result.current.unsynced).toBe(false)
+  await waitFor(() => expect(store.merges).toContain(pendingKey))
+  await waitFor(() => expect(Object.keys(JSON.parse(drafts.get(pendingKey)!))).toEqual(["other-tab"]))
+ })
+ it("clears an adopted mark once the confirmed document holds exactly that work", async () => {
+  const stored = new Y.Doc(); upsertDesignNode(stored, { id: "stored-work", type: "text", text: "Stored" })
+  drafts.set(canvasKey, encoded(stored))
+  drafts.set(pendingKey, JSON.stringify({ "closed-tab": mark(stored) }))
+  await mounted()
+  expect(server.providers[0].tracking?.baseline).toEqual(new Uint8Array([1]))
+  await act(async () => server.providers[0].tracking!.pending!(null))
+  await waitFor(() => expect(drafts.has(pendingKey)).toBe(false))
+ })
+ it("clears this tab's mark and keeps a mark for newer work written meanwhile", async () => {
   const view = await mounted()
   await act(async () => server.providers[0].tracking!.pending!(new Uint8Array([1])))
   await waitFor(() => expect(drafts.get(pendingKey)).toBeTruthy())
-  const other = JSON.stringify({ ...JSON.parse(drafts.get(pendingKey)!), "other-tab": "AQ==" })
-  drafts.set(pendingKey, other)
+  const other = new Y.Doc(); upsertDesignNode(other, { id: "their-work", type: "text", text: "Other tab" })
+  drafts.set(pendingKey, JSON.stringify({ ...JSON.parse(drafts.get(pendingKey)!), "other-tab": mark(other) }))
   await act(async () => server.providers[0].tracking!.pending!(null))
   await waitFor(() => expect(Object.keys(JSON.parse(drafts.get(pendingKey)!))).toEqual(["other-tab"]))
   expect(view.result.current.unsynced).toBe(false)
+ })
+ it("judges coverage by the confirmed document, not by an edit made after it", async () => {
+  const view = await mounted()
+  let open = () => {}
+  store.mergeGate = new Promise<void>(resolve => { open = resolve })
+  const after = new Y.Doc(); Y.applyUpdate(after, Y.encodeStateAsUpdate(view.result.current.doc!))
+  await act(async () => server.providers[0].tracking!.pending!(new Uint8Array([1])))
+  await act(async () => server.providers[0].tracking!.pending!(null))
+  act(() => upsertDesignNode(view.result.current.doc!, { id: "later", type: "text", text: "Later", x: 0, y: 0, width: 1, height: 1 }))
+  const later = new Y.Doc(); Y.applyUpdate(later, Y.encodeStateAsUpdate(view.result.current.doc!))
+  drafts.set(pendingKey, JSON.stringify({ "other-tab": mark(later) }))
+  store.mergeGate = Promise.resolve()
+  await act(async () => { open(); await Promise.resolve() })
+  await waitFor(() => expect(Object.keys(JSON.parse(drafts.get(pendingKey) ?? "{}"))).toContain("other-tab"))
  })
  it("does not touch the pending record when nothing was marked", async () => {
   await mounted()

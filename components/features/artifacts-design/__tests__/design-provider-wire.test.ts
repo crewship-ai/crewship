@@ -139,6 +139,58 @@ describe("Design providers against the room's frame order", () => {
   expect(second.confirmed()).toBe(true)
   expect(text(room.current.doc)).toBe(text(doc))
  })
+ it("does not report an unconfirmed text the room already holds when a peer changes something else", () => {
+  upsertDesignNode(room.current.doc, { ...label, id: "other" })
+  const anna = person("anna")
+  const peer = person("peer")
+  settle()
+  upsertDesignNode(anna.doc, { id: "label", text: "Anna" })
+  settle(90)
+  upsertDesignNode(peer.doc, { id: "other", text: "Peer elsewhere" })
+  settle(200)
+  expect(text(room.current.doc)).toBe("Anna")
+  expect(anna.conflicts).toEqual([])
+  expect(peer.conflicts).toEqual([])
+ })
+ it("tells the person whose text lost a race on one layer, with that text", () => {
+  const anna = person("anna")
+  const peer = person("peer")
+  settle()
+  upsertDesignNode(anna.doc, { id: "label", text: "Anna" })
+  upsertDesignNode(peer.doc, { id: "label", text: "Peer" })
+  settle(3000)
+  const left = text(room.current.doc)
+  expect(text(anna.doc)).toBe(left)
+  expect(text(peer.doc)).toBe(left)
+  const loser = left === "Anna" ? peer : anna
+  expect(loser.conflicts).toMatchObject([{ mine: left === "Anna" ? "Peer" : "Anna", left }])
+  expect(loser.conflicts[0].kept).toBe("theirs")
+ })
+ it("keeps the socket through rapid saves, each still covering its own edit", async () => {
+  const anna = person("anna")
+  settle()
+  const admitted = [...room.current.clients][0]
+  for (let save = 0; save < 12; save++) {
+   upsertDesignNode(anna.doc, { id: "label", text: `Save ${save}` })
+   const saved = anna.provider.synchronize()
+   await vi.advanceTimersByTimeAsync(40)
+   let done = false
+   void saved.then(() => { done = true }, () => { done = true })
+   for (let wait = 0; wait < 40 && !done; wait++) await vi.advanceTimersByTimeAsync(100)
+   await saved
+   expect(text(room.current.doc)).toBe(`Save ${save}`)
+  }
+  expect([...room.current.clients]).toEqual([admitted])
+ })
+ it("keeps the socket when saves overlap with background barriers", async () => {
+  const anna = person("anna")
+  settle()
+  const saves: Promise<void>[] = []
+  for (let save = 0; save < 12; save++) { upsertDesignNode(anna.doc, { id: "label", text: `Overlap ${save}` }); saves.push(anna.provider.synchronize()) }
+  await vi.advanceTimersByTimeAsync(20_000)
+  await Promise.all(saves)
+  expect(room.current.clients.size).toBe(1)
+ })
  it("does not exhaust the room's sync budget during long typing", () => {
   const anna = person("anna")
   settle()

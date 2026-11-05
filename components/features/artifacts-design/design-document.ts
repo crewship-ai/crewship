@@ -81,7 +81,10 @@ export function designConflicts(base: DesignNode[], mine: DesignNode[], theirs: 
  return [...new Set([...was.keys(), ...local.keys(), ...remote.keys()])].flatMap(id => {
   const before = was.get(id), my = local.get(id), their = remote.get(id)
   const isText = (my ?? their)?.type === "text"
-  if (!before || !isText || my?.text === before.text || their?.text === before.text || my?.text === their?.text) return []
+  // A live layer without a text says nothing: a frame carries the server's whole
+  // delete set, so the confirmed side loses a text to a local edit it lacks. Only
+  // a missing layer is a change.
+  if (!before || !isText || my?.text === before.text || their?.text === before.text || my?.text === their?.text || (their && their.text === undefined)) return []
   const kept = now.get(id)?.text === my?.text ? "mine" : "theirs"
   const restore = kept === "mine" ? their : my
   if (!restore) return []
@@ -127,6 +130,24 @@ export function restoreDesignConflict(doc: Y.Doc, conflict: DesignConflict): "te
  const { linkTo: _linkTo, ...layer } = { ...current.toJSON(), id: conflict.id } as DesignNode
  upsertDesignNode(doc, { ...layer, id: crypto.randomUUID(), name: `${layer.name || conflict.name} (obnovený text)`, y: (Number(layer.y) || 0) + (Number(layer.height) || 0) + 8, text: lost })
  return "layer"
+}
+
+/**
+ * Whether a document holds a stored work generation (an encoded Y.Snapshot).
+ * Compares the delete set too: work that is only a deletion leaves the state
+ * vector alone. An unreadable generation is not covered.
+ */
+export function designWorkCovered(document: Y.Snapshot, work: Uint8Array): boolean {
+ try {
+  const stored = Y.decodeSnapshot(work)
+  for (const [client, clock] of stored.sv) if (clock > (document.sv.get(client) ?? 0)) return false
+  for (const [client, ranges] of stored.ds.clients) {
+   for (const range of ranges) {
+    for (let clock = range.clock; clock < range.clock + range.len; clock++) if (!Y.isDeleted(document.ds, Y.createID(client, clock))) return false
+   }
+  }
+  return true
+ } catch { return false }
 }
 
 export function removeDesignNode(doc: Y.Doc, id: string) {

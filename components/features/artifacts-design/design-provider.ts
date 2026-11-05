@@ -9,8 +9,12 @@ export type DesignConnection = "connecting" | "connected" | "offline" | "denied"
 export type DesignAdmission = "ready" | "denied" | "retry"
 export interface DesignPeer { clientId: number; name: string; color: string; cursor?: { x: number; y: number } }
 const REMOTE = "design-server"
-// The server spends one sync request per barrier: a burst of 5, then 1 a second.
+// A paced turn refreshes the stored mark and sends a barrier. Every sync request
+// spends from the server's bucket: a burst of 5, then 1 a second, and it closes
+// the socket with 4429 when empty. The client keeps one token in reserve.
 const BARRIER_MS = 1500
+const REQUEST_BURST = 4
+const REQUEST_REFILL_MS = 1000
 
 /** How a provider reports work the server has not confirmed, and takes it over from a replaced one. */
 export interface DesignTracking {
@@ -66,6 +70,10 @@ export class DesignProvider {
  // The newest update already covered by a barrier on this socket.
  private asked = 0
  private barrierTimer: ReturnType<typeof setTimeout> | undefined
+ // The newest update the stored mark knows about.
+ private reported = 0
+ private tokens = REQUEST_BURST
+ private refilled = 0
  // One entry per step 1 sent on this socket: the server replies to them in order.
  private requests: { seq: number; waiter?: Waiter }[] = []
  private tracking: DesignTracking
@@ -95,6 +103,7 @@ export class DesignProvider {
    if (origin === REMOTE || !this.admittedEdit) return
    this.pending.push({ seq: ++this.seq, update })
    if (this.pending.length === 1) this.reportPending()
+   else this.pace()
    if (!this.canEdit) return
    this.dirty()
    if (this.full) return
@@ -127,10 +136,26 @@ export class DesignProvider {
   this.send(encoding.toUint8Array(encoder))
   if (delivered) {
    this.sent = this.seq
-   this.barrierTimer ??= setTimeout(() => { this.barrierTimer = undefined; this.barrier() }, BARRIER_MS)
+   this.pace()
   }
  }
+ private pace(delay = BARRIER_MS) {
+  this.barrierTimer ??= setTimeout(() => {
+   this.barrierTimer = undefined
+   if (this.pending.length && this.seq > this.reported) this.reportPending()
+   this.barrier()
+  }, delay)
+ }
+ /** Milliseconds until the server's bucket can take another sync request. */
+ private requestDelay() {
+  const now = Date.now()
+  this.tokens = Math.min(REQUEST_BURST, this.tokens + (now - this.refilled) / REQUEST_REFILL_MS)
+  this.refilled = now
+  return this.tokens >= 1 ? 0 : Math.ceil((1 - this.tokens) * REQUEST_REFILL_MS)
+ }
  private request(waiter?: Waiter) {
+  this.requestDelay()
+  this.tokens -= 1
   this.asked = this.sent
   this.requests.push({ seq: this.sent, waiter })
   const encoder = encoding.createEncoder()
@@ -139,9 +164,13 @@ export class DesignProvider {
   this.send(encoding.toUint8Array(encoder))
  }
  private barrier() {
-  if (this.answered && this.socket?.readyState === WebSocket.OPEN && this.pending.some(item => item.seq > this.asked && item.seq <= this.sent)) this.request()
+  if (!this.answered || this.socket?.readyState !== WebSocket.OPEN || !this.pending.some(item => item.seq > this.asked && item.seq <= this.sent)) return
+  const wait = this.requestDelay()
+  if (wait) this.pace(wait)
+  else this.request()
  }
  private reportPending() {
+  this.reported = this.seq
   if (this.confirmed) this.tracking.pending?.(Y.encodeStateAsUpdate(this.confirmed))
  }
  private confirmThrough(seq: number) {
@@ -161,12 +190,13 @@ export class DesignProvider {
  private applyRemote(decoder: decoding.Decoder) {
   const confirmed = this.pending.length ? this.confirmed : null
   if (!confirmed) { sync.readSyncStep2(decoder, this.doc, REMOTE); return }
-  const base = designNodes(confirmed), mine = designNodes(this.doc), before = Y.encodeStateVector(confirmed)
+  const base = designNodes(confirmed), mine = designNodes(this.doc)
   sync.readSyncStep2(decoding.clone(decoder), confirmed, REMOTE)
   sync.readSyncStep2(decoder, this.doc, REMOTE)
-  const after = Y.encodeStateVector(confirmed)
-  if (before.length === after.length && before.every((byte, index) => byte === after[index])) return
-  const found = designConflicts(base, mine, designNodes(confirmed), designNodes(this.doc))
+  // By content: a deletion-only frame leaves the state vector alone.
+  const theirs = designNodes(confirmed)
+  if (JSON.stringify(theirs) === JSON.stringify(base)) return
+  const found = designConflicts(base, mine, theirs, designNodes(this.doc))
   if (found.length) this.tracking.conflicts?.(found)
   this.reportPending()
  }
@@ -177,6 +207,11 @@ export class DesignProvider {
  }
  private async synchronizeNow(): Promise<void> {
   if (!this.ready) throw new Error("Reconnect before saving a version.")
+  // A save shares the bucket with background barriers and waits its turn.
+  for (let wait = this.requestDelay(); wait; wait = this.requestDelay()) {
+   await new Promise(resolve => setTimeout(resolve, wait))
+   if (this.stopped || !this.ready) throw new Error("Reconnect before saving a version.")
+  }
   this.flushUpdates()
   return new Promise<void>((resolve, reject) => {
    const waiter: Waiter = { resolve, reject, timer: setTimeout(() => { this.waiters.delete(waiter); reject(new Error("The canvas is still reconnecting. Your changes remain in this browser.")) }, 5000) }
@@ -223,6 +258,8 @@ export class DesignProvider {
    this.sent = this.asked = 0
    this.answered = false
    this.requests = []
+   this.tokens = REQUEST_BURST
+   this.refilled = Date.now()
    this.request()
    const awareness = encoding.createEncoder()
    encoding.writeVarUint(awareness, 1)

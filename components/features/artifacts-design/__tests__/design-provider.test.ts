@@ -4,7 +4,7 @@ import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
 import * as sync from "y-protocols/sync"
 import { DesignProvider } from "../design-provider"
-import { designNodes, upsertDesignNode } from "../design-document"
+import { designNodes, removeDesignNode, upsertDesignNode } from "../design-document"
 
 class Socket {
  static OPEN = 1
@@ -265,6 +265,33 @@ describe("Design provider work the server has not confirmed", () => {
   upsertDesignNode(server, { id: "label", text: "Theirs" })
   socket.receive(server, 3)
   expect(found(conflicts)).toMatchObject([{ mine: "Mine", theirs: "Theirs" }])
+ })
+ it("reports an unsent text against a deletion-only frame, which leaves the state vector alone", () => {
+  const { doc, socket, server, conflicts, pending } = live()
+  upsertDesignNode(doc, { id: "label", text: "Unsent" })
+  removeDesignNode(server, "label")
+  const before = pending.mock.calls.length
+  socket.receive(server, 3, doc)
+  expect(designNodes(doc)).toEqual([])
+  expect(found(conflicts)).toMatchObject([{ mine: "Unsent", left: undefined }])
+  expect(pending.mock.calls.length).toBe(before + 1)
+ })
+ it("reports a remote text against this person's unsent deletion", () => {
+  const { doc, socket, server, conflicts } = live()
+  removeDesignNode(doc, "label")
+  upsertDesignNode(server, { id: "label", text: "Theirs" })
+  socket.receive(server, 3, doc)
+  expect(found(conflicts)).toMatchObject([{ theirs: "Theirs", left: undefined }])
+ })
+ it("refreshes the mark as work grows, offline too, paced rather than per edit", () => {
+  const { doc, pending } = offline()
+  for (let step = 0; step < 30; step++) { upsertDesignNode(doc, { id: "label", text: `Typing ${step}` }); vi.advanceTimersByTime(100) }
+  const calls = pending.mock.calls.length
+  expect(calls).toBeGreaterThan(1)
+  expect(calls).toBeLessThanOrEqual(4)
+  vi.advanceTimersByTime(2000)
+  expect(pending.mock.calls.length).toBeGreaterThan(calls - 1)
+  expect(pending).not.toHaveBeenCalledWith(null)
  })
  it("does not report a later change over a text the server already confirmed", () => {
   const { doc, socket, server, conflicts } = live()
