@@ -8,14 +8,14 @@
 import { apiAs, loginStorageState } from "./auth"
 import { requireNative } from "./craft-lease/helpers"
 import { NativePage, sessionUserId, type LeaseView } from "./craft-lease/native"
-import { EXPECTED_CELLS, EXPECTED_SHEETS, readFacts, richWorkbook } from "./craft-lease/sheet-workbook"
+import { EXPECTED_CELLS, EXPECTED_SHEETS, EXPECTED_DATE_SYSTEM, readFacts, richWorkbook } from "./craft-lease/sheet-workbook"
 import * as native from "./drafts-crash/native"
 import { expect, prdRequirement, test } from "./fixtures"
 
-const REQ = prdRequirement("A.craft.sheet.data-roundtrip", "Sheet: formulas, number formats and multiple sheets survive save, reload and reopen")
+const REQ = prdRequirement("A.craft.sheet.data-roundtrip", "Sheet: date, Bool, Text, numbers, formulas, formats and multiple sheets survive save, reload and reopen")
 
 test.describe("Sheet data classes", () => {
-  test("formulas, number formats and sheets survive save, reload and reopen", { annotation: REQ }, async ({ prd, request }) => {
+  test("typed values, dates, formulas, formats and sheets survive save, reload and reopen", { annotation: REQ }, async ({ prd, request }) => {
     const cleanup: Array<() => Promise<void>> = []
     try {
       const ws = await prd.qaWorkspace()
@@ -41,6 +41,7 @@ test.describe("Sheet data classes", () => {
       expect(reloaded.version).toBe(receipt.version)
       const afterReload = readFacts(Buffer.from(reloaded.bytes, "base64"))
       expect(afterReload.sheets, "sheets after reload").toEqual(EXPECTED_SHEETS)
+      expect(afterReload.dateSystem, "date system after reload").toBe(EXPECTED_DATE_SYSTEM)
       expect(afterReload.cells, "cells after reload").toEqual(EXPECTED_CELLS)
 
       // Reopen: the custody is released and a new login opens the workbook.
@@ -56,8 +57,9 @@ test.describe("Sheet data classes", () => {
       expect(reopened.version).toBe(receipt.version)
       const afterReopen = readFacts(Buffer.from(reopened.bytes, "base64"))
       expect(afterReopen.sheets, "sheets after reopen").toEqual(EXPECTED_SHEETS)
+      expect(afterReopen.dateSystem, "date system after reopen").toBe(EXPECTED_DATE_SYSTEM)
       expect(afterReopen.cells, "cells after reopen").toEqual(EXPECTED_CELLS)
-      log.api = { savedVersion: receipt.version, sheets: afterReopen.sheets, cells: afterReopen.cells }
+      log.api = { savedVersion: receipt.version, sheets: afterReopen.sheets, dateSystem: afterReopen.dateSystem, cells: afterReopen.cells }
 
       // The real editor opens the saved workbook (full mode: needs the bundle).
       if (prd.mode === "full") {
