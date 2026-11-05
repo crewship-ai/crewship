@@ -314,6 +314,8 @@ class WorkflowContracts(unittest.TestCase):
         self.assertEqual(len(re.findall(r'^\s*RACE_COMBINED_ALARM_SECONDS:', ci, re.M)), 1)
         env_block = re.search(r'^        env:\n((?:          .*\n)+)        run: python3 scripts/ci/api-race-shard\.py report ', report_step, re.M).group(1)
         alarm = int(re.fullmatch(r'          RACE_COMBINED_ALARM_SECONDS: "(\d+)"\n', env_block).group(1))
+        self.assertRegex(report_step, r'(?m)^        run: python3 scripts/ci/api-race-shard\.py report \.ci-api-shards 6 4166 \.ci-api-template$')
+        self.assertNotIn('shell:', report_step)
         self.assertEqual((count, report_baseline, alarm), (6, 4166, 5200))
         self.assertGreater(alarm, report_baseline)
         self.assertEqual(int(re.search(r'timeout-minutes: (\d+)', api).group(1)), 5)
@@ -326,12 +328,14 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('RACE_CLI_TIMEOUT_BASIS_SECONDS: "1100"', cli_workers)
         self.assertIn('JOB_CAP_MINUTES: "45"', cli_workers)
         self.assertIn('JOB_OVERHEAD_MINUTES: "6"', cli_workers)
+        self.assertEqual(int(re.search(r'timeout-minutes: (\d+)', cli_workers).group(1)), 45)
         self.assertEqual(int(re.search(r'timeout-minutes: (\d+)', bootstrap).group(1)), 85)
         cap = int(re.search(r'timeout-minutes: (\d+)', workers).group(1))
         self.assertEqual(cap, 85)
         env_cap = int(re.search(r'JOB_CAP_MINUTES: "(\d+)"', workers).group(1))
         overhead = int(re.search(r'JOB_OVERHEAD_MINUTES: "(\d+)"', workers).group(1))
         self.assertEqual(cap, env_cap)
+        self.assertEqual(overhead, 6)
         self.assertGreater(cap * 60, baseline * 2 + overhead * 60)
 
     def test_managed_environment_lane_is_required_and_credential_free(self):
