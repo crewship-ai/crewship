@@ -224,7 +224,9 @@ crewship page design versions launch-hero -f json
 ```
 
 `snapshot` (alias `save`) records the live canvas as a new version even when it
-is unchanged since the last one. Take `latest_version` from `versions` whenever
+is unchanged since the last one, and it has no idempotency key: a retry after a
+lost reply adds a second version with the same content, so read `versions`
+before sending it again. Take `latest_version` from `versions` whenever
 a command below needs the latest version.
 
 ### Share a version

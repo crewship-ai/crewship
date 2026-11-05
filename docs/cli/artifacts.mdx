@@ -381,6 +381,10 @@ the server returns `409 artifact_anchor_mismatch`.
 | `--wait` | With `--send-to-agent`: deliver the task to the artifact's source chat, then wait for the agent's answer. |
 | `--wait-timeout <duration>` | With `--wait`: stop waiting after this long, for example `5m` (default `15m`). The task stays queued. |
 
+A comment has no idempotency key. If the reply is lost, run
+`crewship page artifact comments <slug>` before sending it again: a retry after
+a commit stores a second comment.
+
 ```bash
 crewship page artifact comment quarterly-review --version 3 --path index.html \
   --selector '#hero' --quote 'Quarterly review' --text 'Add the year to the title'
