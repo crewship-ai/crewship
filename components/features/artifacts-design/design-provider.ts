@@ -3,11 +3,27 @@ import * as sync from "y-protocols/sync"
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from "y-protocols/awareness"
 import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
+import { designConflicts, designNodes, type DesignConflict } from "./design-document"
 
 export type DesignConnection = "connecting" | "connected" | "offline" | "denied" | "rejected" | "quota"
 export type DesignAdmission = "ready" | "denied" | "retry"
 export interface DesignPeer { clientId: number; name: string; color: string; cursor?: { x: number; y: number } }
 const REMOTE = "design-server"
+// The server spends one sync request per barrier: a burst of 5, then 1 a second.
+const BARRIER_MS = 1500
+
+/** How a provider reports work the server has not confirmed, and takes it over from a replaced one. */
+export interface DesignTracking {
+ /** The document already holds work the server may lack (a stored draft). */
+ unconfirmed?: boolean
+ /** The confirmed canvas that work was made from, as last given to `pending`. Without it nothing can be compared. */
+ baseline?: Uint8Array
+ /** The confirmed canvas while work is unconfirmed; null once the server confirmed all of it. */
+ pending?: (baseline: Uint8Array | null) => void
+ /** Texts a merge dropped. */
+ conflicts?: (found: DesignConflict[]) => void
+}
+type Waiter = { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
 
 /** Carries the standard y-websocket sync and awareness envelopes through Crewship auth. */
 export class DesignProvider {
@@ -28,17 +44,58 @@ export class DesignProvider {
  private cursorTimer: ReturnType<typeof setTimeout> | undefined
  private cursor: { x: number; y: number } | null = null
  private syncQueue: Promise<void> = Promise.resolve()
- private waiters = new Set<{ resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
+ private waiters = new Set<Waiter>()
  private changeListener: (update: Uint8Array, origin: unknown) => void
  private awarenessListener: (changes: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) => void
+ private beforeEdit: (transaction: Y.Transaction) => void
+ // Local updates the server has not confirmed. The server handles one socket's
+ // frames in order and never echoes a sender's update, so the only confirmation
+ // is the reply to a sync step 1 sent after them: a barrier. A closed socket
+ // proves nothing about what it delivered, so they stay until a barrier on a
+ // live socket covers them, across reconnects, rotation and revocation.
+ private pending: { seq: number; update: Uint8Array }[] = []
+ // What the server is known to hold while `pending` is not empty: the canvas
+ // before the first unconfirmed edit plus every remote frame since. Local edits
+ // never enter it until confirmed, so a text both sides changed is visible.
+ private confirmed: Y.Doc | null = null
+ private seq = 0
+ // The newest local update this socket has received, in causal order.
+ private sent = 0
+ // Set once this socket answered the server's step 1: everything local is sent.
+ private answered = false
+ // The newest update already covered by a barrier on this socket.
+ private asked = 0
+ private barrierTimer: ReturnType<typeof setTimeout> | undefined
+ // One entry per step 1 sent on this socket: the server replies to them in order.
+ private requests: { seq: number; waiter?: Waiter }[] = []
+ private tracking: DesignTracking
 
- constructor(readonly doc: Y.Doc, private url: string, editable: boolean, user: { name: string; color: string }, private status: (status: DesignConnection) => void, private dirty: () => void, private prepare?: () => Promise<DesignAdmission>) {
+ constructor(readonly doc: Y.Doc, private url: string, editable: boolean, user: { name: string; color: string }, private status: (status: DesignConnection) => void, private dirty: () => void, private prepare?: () => Promise<DesignAdmission>, tracking: DesignTracking = {}) {
   this.canEdit = editable
   this.admittedEdit = editable
+  this.tracking = tracking
+  if (editable && tracking.unconfirmed) {
+   this.pending = [{ seq: ++this.seq, update: Y.encodeStateAsUpdate(doc) }]
+   if (tracking.baseline) {
+    this.confirmed = new Y.Doc()
+    Y.applyUpdate(this.confirmed, tracking.baseline, REMOTE)
+   }
+  }
   this.awareness = new Awareness(doc)
   this.awareness.setLocalStateField("user", user)
+  this.beforeEdit = transaction => {
+   // Clean, the document is what the server holds. Copied only for the edit
+   // that starts a period of unconfirmed work.
+   if (transaction.origin === REMOTE || !this.admittedEdit || this.pending.length) return
+   this.confirmed?.destroy()
+   this.confirmed = new Y.Doc()
+   Y.applyUpdate(this.confirmed, Y.encodeStateAsUpdate(doc), REMOTE)
+  }
   this.changeListener = (update, origin) => {
-   if (origin === REMOTE || !this.canEdit) return
+   if (origin === REMOTE || !this.admittedEdit) return
+   this.pending.push({ seq: ++this.seq, update })
+   if (this.pending.length === 1) this.reportPending()
+   if (!this.canEdit) return
    this.dirty()
    if (this.full) return
    this.queuedUpdates.push(update)
@@ -51,6 +108,7 @@ export class DesignProvider {
    encoding.writeVarUint8Array(encoder, encodeAwarenessUpdate(this.awareness, [...added, ...updated, ...removed]))
    this.send(encoding.toUint8Array(encoder))
   }
+  doc.on("beforeTransaction", this.beforeEdit)
   doc.on("update", this.changeListener)
   this.awareness.on("update", this.awarenessListener)
   this.connect()
@@ -64,7 +122,53 @@ export class DesignProvider {
   encoding.writeVarUint(encoder, 0)
   sync.writeUpdate(encoder, Y.mergeUpdates(this.queuedUpdates))
   this.queuedUpdates = []
+  // Before the sync step 2 the server may lack what this update builds on.
+  const delivered = this.answered && this.socket?.readyState === WebSocket.OPEN
   this.send(encoding.toUint8Array(encoder))
+  if (delivered) {
+   this.sent = this.seq
+   this.barrierTimer ??= setTimeout(() => { this.barrierTimer = undefined; this.barrier() }, BARRIER_MS)
+  }
+ }
+ private request(waiter?: Waiter) {
+  this.asked = this.sent
+  this.requests.push({ seq: this.sent, waiter })
+  const encoder = encoding.createEncoder()
+  encoding.writeVarUint(encoder, 0)
+  sync.writeSyncStep1(encoder, this.doc)
+  this.send(encoding.toUint8Array(encoder))
+ }
+ private barrier() {
+  if (this.answered && this.socket?.readyState === WebSocket.OPEN && this.pending.some(item => item.seq > this.asked && item.seq <= this.sent)) this.request()
+ }
+ private reportPending() {
+  if (this.confirmed) this.tracking.pending?.(Y.encodeStateAsUpdate(this.confirmed))
+ }
+ private confirmThrough(seq: number) {
+  const left = this.pending.filter(item => item.seq > seq)
+  if (left.length === this.pending.length) return
+  if (!left.length) {
+   this.pending = []
+   this.confirmed?.destroy()
+   this.confirmed = null
+   this.tracking.pending?.(null)
+   return
+  }
+  if (this.confirmed) for (const item of this.pending) if (item.seq <= seq) Y.applyUpdate(this.confirmed, item.update, REMOTE)
+  this.pending = left
+ }
+ /** A remote frame goes to the document and, while work is unconfirmed, to the confirmed canvas beside it. */
+ private applyRemote(decoder: decoding.Decoder) {
+  const confirmed = this.pending.length ? this.confirmed : null
+  if (!confirmed) { sync.readSyncStep2(decoder, this.doc, REMOTE); return }
+  const base = designNodes(confirmed), mine = designNodes(this.doc), before = Y.encodeStateVector(confirmed)
+  sync.readSyncStep2(decoding.clone(decoder), confirmed, REMOTE)
+  sync.readSyncStep2(decoder, this.doc, REMOTE)
+  const after = Y.encodeStateVector(confirmed)
+  if (before.length === after.length && before.every((byte, index) => byte === after[index])) return
+  const found = designConflicts(base, mine, designNodes(confirmed), designNodes(this.doc))
+  if (found.length) this.tracking.conflicts?.(found)
+  this.reportPending()
  }
  synchronize(): Promise<void> {
   const next = this.syncQueue.then(() => this.synchronizeNow())
@@ -75,15 +179,18 @@ export class DesignProvider {
   if (!this.ready) throw new Error("Reconnect before saving a version.")
   this.flushUpdates()
   return new Promise<void>((resolve, reject) => {
-   const waiter = { resolve, reject, timer: setTimeout(() => { this.waiters.delete(waiter); reject(new Error("The canvas is still reconnecting. Your changes remain in this browser.")) }, 5000) }
+   const waiter: Waiter = { resolve, reject, timer: setTimeout(() => { this.waiters.delete(waiter); reject(new Error("The canvas is still reconnecting. Your changes remain in this browser.")) }, 5000) }
    this.waiters.add(waiter)
-   const encoder = encoding.createEncoder()
-   encoding.writeVarUint(encoder, 0)
-   sync.writeSyncStep1(encoder, this.doc)
-   this.send(encoding.toUint8Array(encoder))
+   this.request(waiter)
   })
  }
- setEditable(editable: boolean) { this.canEdit = editable }
+ setEditable(editable: boolean) {
+  this.canEdit = editable
+  // Work dropped from the queue while editing was off: the socket never had it.
+  if (!editable || !this.answered || !this.pending.some(item => item.seq > this.sent)) return
+  this.queuedUpdates = this.pending.map(item => item.update)
+  this.updateTimer ??= setTimeout(() => this.flushUpdates(), 75)
+ }
  setCursor(cursor: { x: number; y: number } | null) {
   this.cursor = cursor
   if (!this.cursorTimer) this.cursorTimer = setTimeout(() => { this.cursorTimer = undefined; this.awareness.setLocalStateField("cursor", this.cursor) }, 50)
@@ -113,10 +220,10 @@ export class DesignProvider {
    this.connected = true
    this.status("connected")
    if (this.prepare) this.renewal = setTimeout(() => this.rotate(), 5 * 60 * 1000)
-   const encoder = encoding.createEncoder()
-   encoding.writeVarUint(encoder, 0)
-   sync.writeSyncStep1(encoder, this.doc)
-   this.send(encoding.toUint8Array(encoder))
+   this.sent = this.asked = 0
+   this.answered = false
+   this.requests = []
+   this.request()
    const awareness = encoding.createEncoder()
    encoding.writeVarUint(awareness, 1)
    encoding.writeVarUint8Array(awareness, encodeAwarenessUpdate(this.awareness, [this.doc.clientID]))
@@ -137,13 +244,17 @@ export class DesignProvider {
        encoding.writeVarUint(encoder, 0)
        sync.readSyncStep1(decoder, encoder, this.doc)
        this.send(encoding.toUint8Array(encoder))
+       this.answered = true
+       this.sent = this.seq
+       this.barrier()
       }
      } else if (subtype === sync.messageYjsSyncStep2 || subtype === sync.messageYjsUpdate) {
-      sync.readSyncStep2(decoder, this.doc, REMOTE)
+      this.applyRemote(decoder)
       this.acknowledged = true
       if (subtype === sync.messageYjsSyncStep2) {
-       for (const waiter of this.waiters) { clearTimeout(waiter.timer); waiter.resolve() }
-       this.waiters.clear()
+       const reply = this.requests.shift()
+       if (reply) this.confirmThrough(reply.seq)
+       if (reply?.waiter) { clearTimeout(reply.waiter.timer); this.waiters.delete(reply.waiter); reply.waiter.resolve() }
       }
      }
     } else if (type === 1) applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), REMOTE)
@@ -205,8 +316,12 @@ export class DesignProvider {
   for (const waiter of this.waiters) { clearTimeout(waiter.timer); waiter.reject(new Error("Canvas closed before the version was saved.")) }
   this.waiters.clear()
   clearTimeout(this.retry)
+  clearTimeout(this.barrierTimer)
+  this.confirmed?.destroy()
+  this.confirmed = null
   this.awareness.setLocalState(null)
   this.socket?.close()
+  this.doc.off("beforeTransaction", this.beforeEdit)
   this.doc.off("update", this.changeListener)
   this.awareness.off("update", this.awarenessListener)
   this.awareness.destroy()

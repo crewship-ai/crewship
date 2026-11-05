@@ -218,6 +218,33 @@ whose administrator turned the `artifact_projects` default off the row fails by
 design. The other project scenarios keep calling `enableProjects()`, which is a
 no-op on a default instance.
 
+## Role matrix rows
+
+`role-matrix.acceptance.ts` (`role.*`) changes a person's right on a Project or a
+Design while it is open, in the disposable QA workspace with provisioned people.
+It needs no agent or model key. The rows are diagnostic: they run on a deployed
+release and report, and the RC gate does not count them.
+
+- `role.project.comment-*`: a Comment grant reads the shared version and saves
+  comments; every content change is refused and offered nowhere.
+- `role.design.read-*`: a Read grant reads the shared version; REST writes and a
+  raw socket update are refused, and unshared live edits never reach the browser.
+- `role.*.revoke-open`, `role.*.member-removal`: the open tab drops the content
+  and says so, a later read, a reload and a new socket are refused. Each row
+  first proves that the tab follows new content while the right holds, and
+  records every sighting of later content in HTTP bodies and socket frames.
+- `role.design.stale-merge`, `role.design.conflict`: one person's Design socket
+  is cut in the browser (`routeWebSocket`, HTTP stays up) and both keep working.
+  The Design routes take no base version, so a stale person never gets a `409`;
+  the only way to a conflict is a stale live canvas. Yjs picks the surviving
+  text by client order, so the row checks the notice whichever side won.
+- `role.*.revoke-draft`, `role.project.revoke-read-draft`: the right goes with
+  unsaved work open. The server takes nothing, the work stays visible, and it
+  returns with the right. When the read right goes too, the page has to say the
+  draft was deleted: the row proves its storage probe sees the draft first, then
+  requires it gone from the screen and from IndexedDB and localStorage, and
+  absent after the right returns.
+
 ## Cleanup
 
 Tests delete what they create: pages, Designs and Projects are registered
@@ -366,8 +393,8 @@ Unit tests for the runner's table and arguments:
 `node --test e2e/acceptance/prd/report.test.mjs`. The same file checks the
 IDs statically (`emitted-ids.mjs` reads the `prdRequirement(...)` calls of the
 spec sources): every ID a spec emits must be in `required-ids.json`, either
-as a row or under `diagnostic` (the `harness.*` smoke rows, which the RC gate
-does not count); every required ID must be emitted by exactly one call; and a
+as a row or under `diagnostic` (the `harness.*` smoke rows and the `role.*`
+rows, which the RC gate does not count); every required ID must be emitted by exactly one call; and a
 `${...}` placeholder in an ID must be one of the known Word/Sheet loop
 variables in `PLACEHOLDERS`. A renamed or forgotten row therefore fails in CI,
 not as `missing` on the RC.

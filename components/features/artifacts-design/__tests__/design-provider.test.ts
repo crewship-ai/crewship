@@ -4,6 +4,7 @@ import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
 import * as sync from "y-protocols/sync"
 import { DesignProvider } from "../design-provider"
+import { designNodes, upsertDesignNode } from "../design-document"
 
 class Socket {
  static OPEN = 1
@@ -18,26 +19,27 @@ class Socket {
  constructor(readonly url: string) { Socket.instances.push(this) }
  send(bytes: ArrayBuffer) { this.sent.push(new Uint8Array(bytes)) }
  close(code = 1000) { this.onclose?.({ code }) }
- receive(doc: Y.Doc, step = 1) {
+ /** `since`: what the frame leaves out, as the server's update or step 2 diff does. */
+ receive(doc: Y.Doc, step = 1, since?: Y.Doc) {
   const encoder = encoding.createEncoder()
   encoding.writeVarUint(encoder, 0)
   if (step === 1) sync.writeSyncStep1(encoder, doc)
-  else if (step === 2) sync.writeSyncStep2(encoder, doc)
-  else sync.writeUpdate(encoder, Y.encodeStateAsUpdate(doc))
+  else if (step === 2) sync.writeSyncStep2(encoder, doc, since && Y.encodeStateVector(since))
+  else sync.writeUpdate(encoder, Y.encodeStateAsUpdate(doc, since && Y.encodeStateVector(since)))
   const bytes = encoding.toUint8Array(encoder)
   this.onmessage?.({ data: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer })
  }
 }
 const active: DesignProvider[] = []
 afterEach(() => { active.splice(0).forEach(provider => provider.destroy()); vi.unstubAllGlobals(); vi.useRealTimers(); Socket.instances = [] })
-function setup(editable: boolean, url = "ws://localhost/design/ws") {
+function setup(editable: boolean, url = "ws://localhost/design/ws", start: { doc?: Y.Doc; baseline?: Uint8Array; unconfirmed?: boolean; prepare?: () => Promise<"ready"> } = {}) {
  vi.stubGlobal("WebSocket", Socket)
- const doc = new Y.Doc(), status = vi.fn(), dirty = vi.fn()
- const provider = new DesignProvider(doc, url, editable, { name: "Test", color: "#2563eb" }, status, dirty)
+ const doc = start.doc ?? new Y.Doc(), status = vi.fn(), dirty = vi.fn(), pending = vi.fn(), conflicts = vi.fn()
+ const provider = new DesignProvider(doc, url, editable, { name: "Test", color: "#2563eb" }, status, dirty, start.prepare, { baseline: start.baseline, unconfirmed: start.unconfirmed, pending, conflicts })
  active.push(provider)
- const socket = Socket.instances.at(-1)!
- socket.onopen?.()
- return { doc, provider, socket, status, dirty }
+ const socket = Socket.instances.at(-1)
+ socket?.onopen?.()
+ return { doc, provider, socket: socket!, status, dirty, pending, conflicts }
 }
 function documentFrames(socket: Socket) {
  return socket.sent.flatMap(bytes => { const decoder = decoding.createDecoder(bytes); return decoding.readVarUint(decoder) === 0 ? [decoding.readVarUint(decoder)] : [] })
@@ -189,5 +191,232 @@ describe("Design authenticated transport renewal", () => {
   active.push(provider);provider.destroy();finish("ready")
   await Promise.resolve();await Promise.resolve()
   expect(Socket.instances).toHaveLength(0)
+ })
+})
+
+describe("Design provider work the server has not confirmed", () => {
+ const label = { id: "label", type: "text" as const, name: "Title", text: "Base", x: 0, y: 0, width: 200, height: 40, fill: "#111111" }
+ /** Connected and fully synced with the server's doc: Hello answered, first reply in. */
+ function live() {
+  const ctx = setup(true)
+  const server = new Y.Doc()
+  upsertDesignNode(server, label)
+  ctx.socket.receive(server, 1)
+  ctx.socket.receive(server, 2)
+  vi.useFakeTimers()
+  return { ...ctx, server }
+ }
+ function offline() {
+  const ctx = live()
+  ctx.socket.close(1006)
+  return ctx
+ }
+ const reconnect = () => {
+  vi.advanceTimersByTime(2000)
+  const socket = Socket.instances.at(-1)!
+  socket.onopen?.()
+  return socket
+ }
+ const found = (conflicts: ReturnType<typeof vi.fn>) => conflicts.mock.calls.flatMap(call => call[0] as { id: string; mine: string; theirs: string; kept: string; left?: string }[])
+ it("reports the local text the merge dropped, with the other text beside it", () => {
+  const { doc, server, conflicts } = offline()
+  upsertDesignNode(doc, { id: "label", text: "Mine" })
+  upsertDesignNode(server, { id: "label", text: "Theirs" })
+  const socket = reconnect()
+  socket.receive(server, 1)
+  socket.receive(server, 2)
+  const merged = designNodes(doc)[0].text
+  expect(found(conflicts)).toMatchObject([{ id: "label", mine: "Mine", theirs: "Theirs", kept: merged === "Mine" ? "mine" : "theirs", left: merged }])
+ })
+ it("reports no conflict when only this person changed the layer", () => {
+  const { doc, server, conflicts } = offline()
+  upsertDesignNode(doc, { id: "label", text: "Mine" })
+  const socket = reconnect()
+  socket.receive(server, 1)
+  socket.receive(server, 2)
+  expect(conflicts).not.toHaveBeenCalled()
+  expect(designNodes(doc)[0].text).toBe("Mine")
+ })
+ it("compares an edit still queued when the socket dropped against the confirmed canvas", () => {
+  const { doc, socket, server, conflicts } = live()
+  upsertDesignNode(doc, { id: "label", text: "Queued" })
+  socket.close(1006)
+  upsertDesignNode(server, { id: "label", text: "Theirs" })
+  const next = reconnect()
+  next.receive(server, 1)
+  next.receive(server, 2)
+  expect(found(conflicts)).toMatchObject([{ mine: "Queued", theirs: "Theirs" }])
+ })
+ it("compares an edit sent but not confirmed when the socket dropped", () => {
+  const { doc, socket, server, conflicts } = live()
+  upsertDesignNode(doc, { id: "label", text: "Sent" })
+  vi.advanceTimersByTime(100)
+  socket.close(1006)
+  upsertDesignNode(server, { id: "label", text: "Theirs" })
+  const next = reconnect()
+  next.receive(server, 1)
+  next.receive(server, 2)
+  expect(found(conflicts)).toMatchObject([{ mine: "Sent", theirs: "Theirs" }])
+ })
+ it("reports a text that lost to a frame arriving while connected", () => {
+  const { doc, socket, server, conflicts } = live()
+  upsertDesignNode(doc, { id: "label", text: "Mine" })
+  vi.advanceTimersByTime(100)
+  upsertDesignNode(server, { id: "label", text: "Theirs" })
+  socket.receive(server, 3)
+  expect(found(conflicts)).toMatchObject([{ mine: "Mine", theirs: "Theirs" }])
+ })
+ it("does not report a later change over a text the server already confirmed", () => {
+  const { doc, socket, server, conflicts } = live()
+  upsertDesignNode(doc, { id: "label", text: "Mine" })
+  vi.advanceTimersByTime(2000)
+  Y.applyUpdate(server, Y.encodeStateAsUpdate(doc))
+  socket.receive(server, 2)
+  socket.close(1006)
+  upsertDesignNode(server, { id: "label", text: "After" })
+  const next = reconnect()
+  next.receive(server, 1)
+  next.receive(server, 2)
+  expect(conflicts).not.toHaveBeenCalled()
+ })
+ it("does not report a change made on top of this person's unconfirmed text", () => {
+  const { doc, socket, server, conflicts } = live()
+  upsertDesignNode(doc, { id: "label", text: "Mine" })
+  vi.advanceTimersByTime(100)
+  Y.applyUpdate(server, Y.encodeStateAsUpdate(doc))
+  upsertDesignNode(server, { id: "label", text: "On top" })
+  socket.receive(server, 3, doc)
+  expect(conflicts).not.toHaveBeenCalled()
+  expect(designNodes(doc)[0].text).toBe("On top")
+ })
+ it("reports pending at the first edit and clears it only on the reply to a barrier sent after it", () => {
+  const { doc, socket, server, pending } = live()
+  upsertDesignNode(doc, { id: "label", text: "Mine" })
+  expect(pending).toHaveBeenCalledTimes(1)
+  expect(pending.mock.calls[0][0]).toBeInstanceOf(Uint8Array)
+  socket.receive(server, 3)
+  vi.advanceTimersByTime(100)
+  socket.receive(server, 3)
+  expect(pending).not.toHaveBeenCalledWith(null)
+  vi.advanceTimersByTime(2000)
+  expect(documentFrames(socket).at(-1)).toBe(sync.messageYjsSyncStep1)
+  socket.receive(server, 2)
+  expect(pending).toHaveBeenLastCalledWith(null)
+ })
+ it("does not count the reply to a step 1 sent before the edit", () => {
+  const ctx = setup(true)
+  const server = new Y.Doc()
+  ctx.socket.receive(server, 1)
+  vi.useFakeTimers()
+  upsertDesignNode(ctx.doc, label)
+  vi.advanceTimersByTime(100)
+  ctx.socket.receive(server, 2)
+  expect(ctx.pending).not.toHaveBeenCalledWith(null)
+  vi.advanceTimersByTime(2000)
+  ctx.socket.receive(server, 2)
+  expect(ctx.pending).toHaveBeenLastCalledWith(null)
+ })
+ it("keeps pending through a reconnect until the sync step 2 sent to the server is confirmed", () => {
+  const { doc, server, pending } = offline()
+  upsertDesignNode(doc, { id: "label", text: "Mine" })
+  const socket = reconnect()
+  socket.receive(server, 2)
+  expect(pending).not.toHaveBeenCalledWith(null)
+  socket.receive(server, 1)
+  expect(documentFrames(socket).slice(-2)).toEqual([sync.messageYjsSyncStep2, sync.messageYjsSyncStep1])
+  expect(pending).not.toHaveBeenCalledWith(null)
+  socket.receive(server, 2)
+  expect(pending).toHaveBeenLastCalledWith(null)
+ })
+ it("keeps an edit queued at revocation pending, and sends it when editing returns", () => {
+  const { doc, provider, socket, server, pending } = live()
+  upsertDesignNode(doc, { id: "label", text: "Queued" })
+  provider.setEditable(false)
+  vi.advanceTimersByTime(3000)
+  expect(documentFrames(socket)).not.toContain(sync.messageYjsUpdate)
+  expect(pending).not.toHaveBeenCalledWith(null)
+  upsertDesignNode(doc, { id: "label", text: "Queued, then more" })
+  provider.setEditable(true)
+  vi.advanceTimersByTime(100)
+  expect(documentFrames(socket)).toContain(sync.messageYjsUpdate)
+  vi.advanceTimersByTime(2000)
+  socket.receive(server, 2)
+  expect(pending).toHaveBeenLastCalledWith(null)
+ })
+ it("keeps pending when a permission close stops the socket", () => {
+  const { doc, socket, pending } = live()
+  upsertDesignNode(doc, { id: "label", text: "Mine" })
+  vi.advanceTimersByTime(100)
+  socket.close(4403)
+  expect(pending).not.toHaveBeenCalledWith(null)
+ })
+ it("keeps comparing across a credential rotation, which closes the socket without a drop", async () => {
+  vi.useFakeTimers()
+  const prepare = vi.fn(async () => "ready" as const)
+  const server = new Y.Doc(); upsertDesignNode(server, label)
+  const { doc, pending, conflicts } = setup(true, undefined, { prepare })
+  await vi.advanceTimersByTimeAsync(0)
+  const first = Socket.instances.at(-1)!
+  first.onopen?.()
+  first.receive(server, 1)
+  first.receive(server, 2)
+  upsertDesignNode(doc, { id: "label", text: "Mine" })
+  vi.advanceTimersByTime(100)
+  first.sent = []
+  await vi.advanceTimersByTimeAsync(5 * 60 * 1000)
+  const second = Socket.instances.at(-1)!
+  expect(second).not.toBe(first)
+  second.onopen?.()
+  upsertDesignNode(server, { id: "label", text: "Theirs" })
+  second.receive(server, 1)
+  second.receive(server, 2)
+  expect(pending).not.toHaveBeenCalledWith(null)
+  expect(found(conflicts)).toMatchObject([{ mine: "Mine", theirs: "Theirs" }])
+ })
+ it("takes over a stored baseline and draft from a replaced provider", () => {
+  const server = new Y.Doc(); upsertDesignNode(server, label)
+  const baseline = Y.encodeStateAsUpdate(server)
+  const doc = new Y.Doc(); Y.applyUpdate(doc, baseline)
+  upsertDesignNode(doc, { id: "label", text: "Mine" })
+  const { socket, pending, conflicts } = setup(true, undefined, { doc, baseline, unconfirmed: true })
+  vi.useFakeTimers()
+  upsertDesignNode(server, { id: "label", text: "Theirs" })
+  socket.receive(server, 1)
+  socket.receive(server, 2)
+  expect(found(conflicts)).toMatchObject([{ mine: "Mine", theirs: "Theirs" }])
+  expect(pending).not.toHaveBeenCalledWith(null)
+  socket.receive(server, 2)
+  expect(pending).toHaveBeenLastCalledWith(null)
+ })
+ it("treats a stored draft without a baseline as unconfirmed, without inventing conflicts", () => {
+  const server = new Y.Doc(); upsertDesignNode(server, label)
+  const doc = new Y.Doc(); Y.applyUpdate(doc, Y.encodeStateAsUpdate(server))
+  const { socket, pending, conflicts } = setup(true, undefined, { doc, unconfirmed: true })
+  socket.receive(server, 1)
+  socket.receive(server, 2)
+  socket.receive(server, 2)
+  expect(pending).toHaveBeenLastCalledWith(null)
+  expect(conflicts).not.toHaveBeenCalled()
+ })
+ it("stays under the server's sync request budget while a person types", () => {
+  const { doc, socket } = live()
+  const before = documentFrames(socket).filter(type => type === sync.messageYjsSyncStep1).length
+  for (let step = 0; step < 100; step++) { upsertDesignNode(doc, { id: "label", text: `Typing ${step}` }); vi.advanceTimersByTime(100) }
+  expect(documentFrames(socket).filter(type => type === sync.messageYjsSyncStep1).length - before).toBeLessThanOrEqual(8)
+ })
+ it("releases a snapshot barrier only on the reply to its own request", async () => {
+  const ctx = setup(true)
+  const server = new Y.Doc()
+  ctx.socket.receive(server, 1)
+  ctx.socket.receive(server, 3)
+  let released = false
+  const barrier = ctx.provider.synchronize().then(() => { released = true })
+  await new Promise(resolve => setTimeout(resolve, 0))
+  ctx.socket.receive(server, 2)
+  await new Promise(resolve => setTimeout(resolve, 0))
+  expect(released).toBe(false)
+  ctx.socket.receive(server, 2)
+  await barrier
+  expect(released).toBe(true)
  })
 })
