@@ -6,7 +6,8 @@ import {NativeSaveError,type NativeSaveRequest} from "@/lib/mooring/single-edito
 import {NativeCraftEditorHost,nativeCraftFrameURL} from "../native-craft-editor-host"
 
 const m=vi.hoisted(()=>({apiFetch:vi.fn(),createClient:vi.fn(),openJournal:vi.fn(),createPort:vi.fn(),registerPrivacy:vi.fn(),purge:vi.fn()}))
-vi.mock("@/lib/api-fetch",()=>({apiFetch:m.apiFetch}))
+vi.mock("@/lib/api-fetch",()=>({apiFetch:m.apiFetch,AUTH_EVENT:"unit-native-auth-retired"}))
+vi.mock("../native-craft-agent-start",()=>({NativeCraftAgentStart:(p:{enabled:boolean;holder:string|null;onStarted(id:string):void})=><button data-testid="agent-start" data-enabled={String(p.enabled)} data-holder={String(p.holder)} onClick={()=>p.onStarted("work-7")}/>}))
 vi.mock("@/lib/mooring/native-document-client",()=>({createNativeDocumentClient:m.createClient}))
 vi.mock("@/lib/mooring/native-editor-port",()=>({createNativeEditorPort:m.createPort}))
 vi.mock("@/lib/mooring/native-draft",async()=>({...await vi.importActual("@/lib/mooring/native-draft"),openNativeDraftJournal:m.openJournal}))
@@ -1283,5 +1284,30 @@ describe('native host lease expiry re-verification',()=>{
   act(()=>stream?.('lease',{...ownedLease,...loss}))
   await waitFor(()=>expect(p.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal)),{timeout:500})
   expect(client.lease.mock.calls.slice(checks).length).toBe(0)
+ })
+})
+
+describe('native agent start gating',()=>{
+ const start=()=>screen.getByTestId('agent-start')
+ const allowed=(value:boolean)=>waitFor(()=>expect(start()).toHaveAttribute('data-enabled',String(value)))
+ afterEach(()=>window.history.replaceState(null,'','/'))
+ it('allows a start on a free document for a person with write access',async()=>{mount();await ready();await allowed(true);expect(start()).toHaveAttribute('data-holder','null')})
+ it('allows a start while a person holds the document and names the holder kind',async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:otherPerson});mount();await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled());await allowed(true);expect(start()).toHaveAttribute('data-holder','human')})
+ it('allows no start on a read-only document',async()=>{client.lease.mockResolvedValue({...emptyLease,can_edit:false});mount();await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled());await screen.findByText('Pouze čtení',{selector:'[role="status"] span'});expect(start()).toHaveAttribute('data-enabled','false')})
+ it('withdraws the start once the connection is retired',async()=>{mount();await ready();await allowed(true);await act(async()=>stream?.('session_retired',{}));await allowed(false)})
+ it('withdraws the start while a blocked host keeps an uncaptured draft',async()=>{mount();await ready();await acquire();await allowed(true);journal.persist.mockResolvedValueOnce(undefined).mockRejectedValueOnce(Error('disk full'));act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}));fireEvent.click(await screen.findByRole('button',{name:'Předat uživateli Jana'}));await screen.findByText('Koncept nelze bezpečně zachytit. Předání neproběhlo.');await allowed(false)})
+ it('withdraws the start until retiring the write has finished',async()=>{
+  mount();await ready();await acquire();await allowed(true)
+  const capture=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>();ports.at(-1)!.snapshot.mockReturnValue(capture.promise)
+  await act(async()=>stream?.('lease',{...ownedLease,mine:false,can_write:false,holder:otherPerson}))
+  await allowed(false)
+  await act(async()=>capture.resolve({bytes:new TextEncoder().encode('{"body":[1]}'),editorRevision:'snapshot-1',documentId:'doc'}))
+  await allowed(true)
+ })
+ it('follows a started task in the status component and keeps it across a reload',async()=>{
+  m.apiFetch.mockImplementation(async()=>new Response(JSON.stringify({work_id:'work-7',state:'queued',agent_id:'agent',run_id:'',application:'wordcraft',uncertain:false,operation_inflight:false,events:[]})))
+  mount();await ready();await allowed(true);fireEvent.click(start())
+  expect(await screen.findByText('Úloha agenta čeká')).toBeInTheDocument()
+  expect(new URLSearchParams(window.location.search).get('craft_task_id')).toBe('work-7')
  })
 })

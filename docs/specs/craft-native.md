@@ -436,6 +436,30 @@ by default. These human commands do not use the native editor session or agent
 credentials. Stop reports the actual cancellation/termination fields, rather
 than assuming the process has stopped. Mutations are not replayed on failure.
 
+The native editor offers the same start in the browser ("Upravit agentem")
+without any further endpoint. It appears only when `/craft/availability` answers
+a literal true for `agents_enabled` and `can_edit`, and never while the host is
+read-only, retired, blocked on an uncaptured draft or retiring its write. The
+person picks an agent, writes the instruction and ticks "Agent smí upravit celý
+dokument"; nothing is created before that deliberate action and consent is never
+remembered for a later start. Starting opens a new private chat with that agent
+(`POST /api/v1/agents/{agentId}/chats`) and sends the instruction with the normal
+chat client, marked `metadata.native_craft_instruction: true`. That literal flag
+persists and echoes the message but starts no chat turn, so the instruction
+reaches no ordinary run, agent log or other member's diagnostics; the flag cannot
+be combined with Page context, an ask form or a document intent. Once the echo
+has named the persisted `message_id` and the send has settled with `done`, the
+editor sends the task request above exactly once. An end of the attempt
+invalidates it synchronously, so a host that retires in the same render neither
+sends nor posts. Any refusal or lost reply is reported and not repeated, because
+a message can launch only one task. The chat itself stays ordinary: a later
+message the person writes there starts a normal turn.
+The outcome appears in the task status panel, and `craft_task_id` is added to the
+URL. A document a person holds is started the same way: admission does not
+consult the lease, the run's `craft_acquire` gets 409 and it records a proposal,
+which the status names. The control refuses to start while an agent holds the
+lease, because that run's refusal has no defined proposal route.
+
 The accepted response is `{work_id, status: "queued"}`, HTTP 202. It is not proof
 of execution or a save. The same original human can inspect
 `GET /api/v1/pages/{slug}/craft/tasks/{workID}?workspace_id=…` under fresh current
