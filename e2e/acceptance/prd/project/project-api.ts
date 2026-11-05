@@ -38,6 +38,8 @@ export interface ProjectSnapshot {
   can_share?: boolean
   can_restore?: boolean
   can_send_to_agent?: boolean
+  can_comment?: boolean
+  origin?: unknown
   versions: ProjectVersion[]
   comments: ProjectComment[]
   manifest: { version: number; entrypoint: string; files: Array<{ path: string; content?: string }> }

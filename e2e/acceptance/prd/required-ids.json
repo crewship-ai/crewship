@@ -440,6 +440,19 @@
   "diagnostic": [
     "harness.reach",
     "harness.identity",
-    "harness.full-inputs"
+    "harness.full-inputs",
+    "role.project.comment-api",
+    "role.project.comment-browser",
+    "role.design.read-api",
+    "role.design.read-browser",
+    "role.project.revoke-open",
+    "role.design.revoke-open",
+    "role.project.member-removal",
+    "role.design.member-removal",
+    "role.design.stale-merge",
+    "role.design.conflict",
+    "role.project.revoke-draft",
+    "role.project.revoke-read-draft",
+    "role.design.revoke-draft"
   ]
 }
