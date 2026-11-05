@@ -25,9 +25,10 @@ new instance version.
 
 Use the `artifact_create`, `artifact_versions`, `artifact_publish`,
 `artifact_restore`, `artifact_comments` and `artifact_reply` tools from the
-Crewship sidecar. Artifact projects are disabled by default: the workspace
-`artifact_projects` feature flag (or server `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true`)
-must be on, and the workspace must allow this crew. A tool being listed does
+Crewship sidecar. Artifact projects are on by default, but an admin can turn
+the workspace `artifact_projects` feature flag off; it (or server
+`CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true`) must be on, and the workspace must
+allow this crew. A tool being listed does
 not mean the feature is enabled. The owner must explicitly authorize the exact live chat
 run for either one new project or one existing project. A captured conversation
 identity alone is not permission. If permission is missing, ask the owner to

@@ -120,7 +120,10 @@ func TestArtifactFeedbackHTTPDefaultOffAndWriteScope(t *testing.T) {
 			}
 		}
 	}
+	// Projects are on by default (#4994); the routes close once the operator
+	// switch is gone and an admin has turned the instance flag off.
 	t.Setenv("CREWSHIP_ARTIFACT_PROJECTS_ENABLED", "false")
+	mustExec(t, h.db, `UPDATE feature_flags SET enabled=0, updated_at='2026-11-05T10:00:00Z' WHERE key='artifact_projects'`)
 	for _, suffix := range []string{"/comments", "/restore", "/share", "/comments/absent/reply"} {
 		method := "POST"
 		if suffix == "/comments" {

@@ -12,8 +12,8 @@ import { RestrictedPages } from "@/components/features/pages/restricted-pages"
 import { useAccessMode } from "@/hooks/use-access-mode"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { usePage, type PageView } from "@/hooks/use-pages"
-import { pagesOpenArtifacts } from "@/lib/feature-flags"
-import { libraryItems } from "@/components/features/artifacts-library/library-items"
+import { artifactsLibrary, chatArtifactProjects, pagesOpenArtifacts } from "@/lib/feature-flags"
+import { artifactsProjectHref, libraryItems, viewsProjectInline } from "@/components/features/artifacts-library/library-items"
 
 // /pages/<slug> — one page's panel grid (docs/specs/pages.md §9).
 //
@@ -46,7 +46,10 @@ export function PageDetailClient() {
   const value = Number(search.get("version"))
   const initialVersion = Number.isSafeInteger(value) && value > 0 ? value : undefined
   if (search.get("artifact") === "1") {
-    return <ArtifactProject key={`${workspaceId}:${slug}:${initialVersion ?? "latest"}`} workspaceId={workspaceId} slug={slug} initialVersion={initialVersion} />
+    const viewer = <ArtifactProject key={`${workspaceId}:${slug}:${initialVersion ?? "latest"}`} workspaceId={workspaceId} slug={slug} initialVersion={initialVersion} />
+    // An old project link (#4995) moves to its Artifacts detail with the same
+    // page, workspace and pinned version; without the library it opens here.
+    return artifactsLibrary() ? <ProjectLinkToArtifacts key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} version={initialVersion}>{viewer}</ProjectLinkToArtifacts> : viewer
   }
   const layout = <PagesLayout workspaceId={workspaceId} slug={slug} {...(initialVersion === undefined ? {} : { initialArtifactVersion: initialVersion })} />
   // Behind its switch one page opens in the Artifacts library too. A reference
@@ -98,6 +101,30 @@ function ResolveArtifact({ workspaceId, slug, onStay }: { workspaceId: string; s
     else onStay()
   }, [settled, id]) // eslint-disable-line react-hooks/exhaustive-deps
   return <DetailSkeleton />
+}
+
+/**
+ * /pages/<slug>?artifact=1[&version=N], the address the API returned before
+ * #4995: resolve the page once and replace the entry with
+ * /artifacts/<id>?workspace_id=…[&version=N], so a shared-version link still
+ * opens that version and never Latest. Fails closed into the Pages project
+ * viewer: a refused or failed read, no usable ID, or a kind the Artifacts
+ * detail does not show in its project viewer stays here.
+ */
+function ProjectLinkToArtifacts({ workspaceId, slug, version, children }: { workspaceId: string; slug: string; version?: number; children: ReactNode }) {
+  const router = useRouter()
+  const [entry] = useState(slug)
+  const [stay, setStay] = useState(false)
+  const detail = usePage(workspaceId, entry)
+  const settled = Boolean(detail.error || detail.accessDenied) || !detail.loading
+  const [item] = settled && !detail.error && !detail.accessDenied && detail.page?.immutablePageId ? libraryItems([detail.page]) : []
+  const id = item && chatArtifactProjects() && viewsProjectInline(item) ? detail.page?.immutablePageId : undefined
+  useEffect(() => {
+    if (!settled) return
+    if (id) router.replace(artifactsProjectHref(id, workspaceId, version))
+    else setStay(true)
+  }, [settled, id]) // eslint-disable-line react-hooks/exhaustive-deps
+  return stay ? <>{children}</> : <DetailSkeleton />
 }
 
 function DetailSkeleton() {

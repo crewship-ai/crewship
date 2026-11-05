@@ -128882,7 +128882,7 @@
     },
     "/api/v1/pages/artifacts/availability": {
       "get": {
-        "description": "Report whether Artifacts are enabled for the selected workspace. Artifacts are off by default: enable the `artifact_projects` workspace feature flag, or set CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true for every workspace on the instance. Pass the optional `agent_id` query parameter to also learn whether that agent may create artifact projects: `can_create` is false with `code` `artifact_crew_not_allowed` when its crew is outside the workspace artifact-creation policy.",
+        "description": "Report whether Artifacts are enabled for the selected workspace. Artifact projects are on by default; `enabled` is false when the `artifact_projects` feature flag is off for this workspace (a workspace override, or the instance default turned off by an administrator). CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true turns them on for every workspace on the instance. Pass the optional `agent_id` query parameter to also learn whether that agent may create artifact projects: `can_create` is false with `code` `artifact_crew_not_allowed` when its crew is outside the workspace artifact-creation policy.",
         "operationId": "get_api_v1_pages_artifacts_availability",
         "parameters": [
           {
