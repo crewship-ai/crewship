@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -120,6 +122,32 @@ func TestCraftNativeAgentTaskCapturesNativeConsentWithoutD1Subject(t *testing.T)
 	}
 	if _, err = m.produceTask(ctx, "@native-agent-page", input); err == nil {
 		t.Fatal("same message/document silently launched twice")
+	}
+}
+
+// The browser control offers a start on a document a person holds: admission
+// does not consult the lease, and the run's own acquire then routes to a
+// proposal (TestCraftNativeAgentToolHumanBusyThenRealAgentReceiptAndExactRetry).
+func TestCraftNativeAgentTaskAdmittedWhileHumanHoldsLease(t *testing.T) {
+	f, m, human := nativeAgentAdmissionFixture(t)
+	mustExec(t, f.rig.db, `PRAGMA synchronous=FULL`)
+	m.human.agents = m
+	r := httptest.NewRequest("POST", "/", strings.NewReader(`{}`)).WithContext(human)
+	r.SetPathValue("slug", "@native-agent-page")
+	w := httptest.NewRecorder()
+	m.human.sessions(w, r)
+	var session struct {
+		Token string `json:"session_token"`
+	}
+	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &session) != nil {
+		t.Fatal("human admission", w.Code, w.Body)
+	}
+	if held := craftNativeLeaseCall(m.human, human, session.Token, "@native-agent-page", "acquire", `{}`); held.Code != 200 {
+		t.Fatal("human acquire", held.Code, held.Body)
+	}
+	accepted, err := m.produceTask(human, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true})
+	if err != nil || accepted.WorkID == "" {
+		t.Fatalf("task refused on a held document: receipt=%+v err=%v", accepted, err)
 	}
 }
 

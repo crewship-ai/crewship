@@ -4,6 +4,7 @@ import * as React from "react"
 import {registerDocumentDraftWriter} from "@/lib/document-queue"
 import {Button} from "@/components/ui/button"
 import {apiFetch} from "@/lib/api-fetch"
+import {NativeCraftAgentStart} from "./native-craft-agent-start"
 import {NativeCraftAgentTaskStatus} from "./native-craft-agent-task-status"
 import {useLeaveGuard} from "@/lib/editor-lifecycle/use-leave-guard"
 import {createNativeDocumentClient,type NativeDocumentSnapshot,type NativeProposal} from "@/lib/mooring/native-document-client"
@@ -92,6 +93,11 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
  const [view,setView]=React.useState<Lease>(vacant),[busy,setBusy]=React.useState(false),[label,setLabel]=React.useState('Připojuji…'),[savedVersion,setSavedVersion]=React.useState<string>(),[error,setError]=React.useState<string>(),[mismatch,setMismatch]=React.useState<{message:string;address:string}>(),[dirty,setDirty]=React.useState(false),[recoveries,setRecoveries]=React.useState<NativeRecovery[]>([]),[comparison,setComparison]=React.useState<Comparison>(),[ownsEditor,setOwnsEditor]=React.useState(false),[connectionRetired,setConnectionRetired]=React.useState(false),[quota,setQuota]=React.useState<NativeDocumentSnapshot['quota']>()
  const [saveTrace,setSaveTrace]=React.useState<{phase:string;reason?:string}>()
  const [handoffRequest,setHandoffRequest]=React.useState<{generation:string;holder:string}>()
+ const [agentWork,setAgentWork]=React.useState<string>(),[hostBlocked,setHostBlocked]=React.useState(false),[hostRetiring,setHostRetiring]=React.useState(false)
+ const agentStarted=React.useCallback((workId:string)=>{
+  setAgentWork(workId)
+  const url=new URL(window.location.href);url.searchParams.set('craft_task_id',workId);window.history.replaceState(window.history.state,'',url)
+ },[])
  useLeaveGuard(dirty)
  React.useEffect(()=>{
   if(!enabled||!humanId||!workspaceId||!pageId)return
@@ -108,6 +114,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(!live(r))return
    const phase=r.phase?.phase
    setUncertain(phase==='uncertain')
+   setHostBlocked(r.blocked)
    setDirty(r.phase?.dirty??false)
    const saved=phase==='saved'&&r.ackedVersion!==undefined&&r.writable&&!r.blocked
    setSavedVersion(saved?r.ackedVersion:undefined)
@@ -303,7 +310,10 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(closeJournal){await r.coordinator?.close();if(!r.coordinator)await r.journal?.close();r.coordinator=undefined;r.journal=undefined}
    r.retirementFinished=true;resumeViewing(r);display(r);return true
    })()
-   r.retiring=retiring;return retiring
+   r.retiring=retiring;setHostRetiring(true)
+   // A failed retirement stays closed; its callers end in a disconnected editor.
+   void retiring.then(()=>{if(r.retirementFinished)setHostRetiring(false)},()=>{})
+   return retiring
   }
   async function suspendForAuth(){
    const r=current
@@ -431,7 +441,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(!owns(viewNow,r.generation)){
     const captured=await coordinator.revokeWrite()
     if(await r.port.setReadOnly(true,r.abort.signal)!==true)throw Error('native_read_only_unconfirmed')
-    r.nativeReadOnly=true;r.blocked=!captured;resumeViewing(r);throw Error('lease_not_current')
+    r.nativeReadOnly=true;r.blocked=!captured;setHostBlocked(r.blocked);resumeViewing(r);throw Error('lease_not_current')
    }
    r.writable=true;setOwnsEditor(true);resumeViewing(r);display(r)
   }
@@ -558,7 +568,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
  if(!enabled)return <p className="p-6">Nativní editor není zapnutý.</p>
  return <section className="flex h-full min-h-[600px] flex-col" aria-label={applicationId==='gridcraft'?'GridCraft sešit':'WordCraft dokument'}>
   <NativeCraftLeaseBar view={view} self={humanId} mayEdit={view.can_edit===true&&!connectionRetired} pending={busy} requested={Boolean(handoffRequest&&!connectionRetired&&!view.mine&&view.generation===handoffRequest.generation&&view.holder?.actor_id===handoffRequest.holder)} onAction={(action,body)=>control.current(action,body)} onStopAgent={()=>stopAgent.current()}/>
-  <NativeCraftAgentTaskStatus workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled={view.can_edit===true&&!connectionRetired}/>
+  <NativeCraftAgentTaskStatus workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled={view.can_edit===true&&!connectionRetired} workId={agentWork}/>
+  <NativeCraftAgentStart workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled={view.can_edit===true&&!connectionRetired&&applicationId!==undefined&&!hostBlocked&&!hostRetiring} holder={view.holder?.kind??null} onStarted={agentStarted}/>
   {!connectionRetired&&view.can_edit===true&&view.mine&&view.can_write&&!ownsEditor&&<Button disabled={busy} onClick={()=>control.current('acquire',{})}>Převzít úpravy</Button>}
   {!connectionRetired&&view.can_edit===true&&ownsEditor&&<Button variant="outline" disabled={busy} onClick={()=>publishPreview.current()}>Publikovat náhled</Button>}
   {publishedVersion&&<p className="px-3 py-2">Sdílený náhled · verze {publishedVersion}</p>}

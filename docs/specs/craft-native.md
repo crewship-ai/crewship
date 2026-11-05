@@ -358,6 +358,26 @@ by default. These human commands do not use the native editor session or agent
 credentials. Stop reports the actual cancellation/termination fields, rather
 than assuming the process has stopped. Mutations are not replayed on failure.
 
+The native editor offers the same start in the browser ("Upravit agentem")
+without any further endpoint. It appears only when `/craft/availability` answers
+a literal true for `agents_enabled` and `can_edit`, and never while the host is
+read-only, retired, blocked on an uncaptured draft or retiring its write. The
+person picks an agent, writes the instruction and ticks "Agent smí upravit celý
+dokument"; nothing is created before that deliberate action and consent is never
+remembered for a later start. Starting opens a new private chat with that agent
+(`POST /api/v1/agents/{agentId}/chats`) and sends the instruction with the normal
+chat client. The instruction reaches the ordinary chat turn too, with a fixed
+note asking only for a one-sentence acknowledgement. Once the server's echo has
+named the persisted `message_id` and that turn has ended, the editor sends the
+task request above exactly once; a task never overlaps its own chat turn, and a
+turn that does not end within 240 seconds starts no task. Any refusal or lost
+reply is reported and not repeated, because a message can launch only one task.
+The outcome appears in the task status panel, and `craft_task_id` is added to the
+URL. A document a person holds is started the same way: admission does not
+consult the lease, the run's `craft_acquire` gets 409 and it records a proposal,
+which the status names. The control refuses to start while an agent holds the
+lease, because that run's refusal has no defined proposal route.
+
 The accepted response is `{work_id, status: "queued"}`, HTTP 202. It is not proof
 of execution or a save. The same original human can inspect
 `GET /api/v1/pages/{slug}/craft/tasks/{workID}?workspace_id=…` under fresh current

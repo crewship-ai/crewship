@@ -21,6 +21,21 @@ describe('native agent task private projection',()=>{
  it('is default-off when the optional enabled flag is absent',async()=>{
   render(<NativeCraftAgentTaskStatus workspaceId="workspace" pageId="page" humanId="original-human"/>);await flush();expect(m.fetch).not.toHaveBeenCalled()
  })
+ it('follows a task handed over by the editor without a URL selector',async()=>{
+  window.history.replaceState(null,'','/')
+  m.fetch.mockResolvedValue(response(payload({work_id:'started'})));render(<NativeCraftAgentTaskStatus {...scope} workId="started"/>);await flush()
+  expect(m.fetch).toHaveBeenCalledWith('/api/v1/pages/%40page/craft/tasks/started?workspace_id=workspace',expect.anything())
+  expect(screen.getByText('Agent pracuje')).toBeInTheDocument()
+ })
+ it('says a run ended in a proposal rather than a saved version',async()=>{
+  m.fetch.mockResolvedValue(response(payload({state:'succeeded',outcome:'proposal',proposal_id:'proposal'})));render(<NativeCraftAgentTaskStatus {...scope}/>);await flush()
+  expect(screen.getByText('Agent připravil návrh ke schválení.')).toBeInTheDocument()
+  expect(screen.queryByText(/Poslední potvrzená verze/)).toBeNull()
+ })
+ it('refuses an unknown outcome',async()=>{
+  m.fetch.mockResolvedValue(response(payload({outcome:'published'})));render(<NativeCraftAgentTaskStatus {...scope}/>);await flush()
+  expect(screen.getByRole('alert')).toBeInTheDocument()
+ })
  it('fetches only the selected scoped task and displays exact Node receipt version',async()=>{
   m.fetch.mockResolvedValue(response(payload({last_committed_receipt:receipt})));render(<NativeCraftAgentTaskStatus {...scope}/>);await flush()
   expect(m.fetch).toHaveBeenCalledWith('/api/v1/pages/%40page/craft/tasks/work?workspace_id=workspace',expect.objectContaining({method:'GET',cache:'no-store',redirect:'error',skipRefresh:true,signal:expect.any(AbortSignal)}))
