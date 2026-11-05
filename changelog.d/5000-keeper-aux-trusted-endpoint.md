@@ -1,0 +1,1 @@
+- **Keeper evaluators use the trusted endpoint client for Ollama (#5000).** An `ollama` evaluator slot now dials the instance judge endpoint the same way the judge itself does: blocked addresses stay unreachable and redirects are not followed.
