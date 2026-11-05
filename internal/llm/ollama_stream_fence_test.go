@@ -1,7 +1,10 @@
 package llm
 
 import (
+	"context"
 	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
@@ -45,4 +48,26 @@ type markerTransport struct{}
 
 func (markerTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, http.ErrUseLastResponse
+}
+
+// The transport alone is half the fence: a client that refuses redirects must
+// keep refusing them on the stream, or a completion body is replayed elsewhere.
+func TestNewOllamaWithClient_StreamKeepsTheRedirectPolicy(t *testing.T) {
+	var bounced atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { bounced.Add(1) }))
+	defer target.Close()
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer endpoint.Close()
+
+	client := &http.Client{
+		Transport:     http.DefaultTransport,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	o := NewOllamaWithClient(endpoint.URL, "m", client)
+	_, _ = o.Stream(context.Background(), Request{Messages: []Message{{Role: "user", Content: "ping"}}}, func(StreamEvent) error { return nil })
+	if got := bounced.Load(); got != 0 {
+		t.Fatalf("the stream followed the redirect %d time(s)", got)
+	}
 }
