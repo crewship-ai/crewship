@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Synthetic subprocess timeout/owned metadata only; no product/model/server."""
 import importlib.util
+import errno
 import json
 import os
 from pathlib import Path
@@ -100,7 +101,7 @@ class MetadataTests(unittest.TestCase):
 
 
 class TimeoutProcessTests(unittest.TestCase):
-    def fixture(self, directory):
+    def fixture(self, directory, pause_before_signal_mask=False):
         # Optional baseline path lets the SAME assertion demonstrate RED on the
         # previous source without weakening the expected retained proof.
         source = Path(os.environ.get("HARNESS_FIXTURE_SOURCE", str(HERE)))
@@ -138,6 +139,17 @@ class TimeoutProcessTests(unittest.TestCase):
   *" issue comments "*) exit 0 ;;''')
         cli.write_text(text)
         cli.chmod(0o700)
+        if pause_before_signal_mask:
+            # Pause the actual EXIT handler before its signal mask. The real
+            # timeout signals the group and run-all also forwards to its child;
+            # make that legal second delivery deterministic, not a timing bet.
+            suite = harness/"test-crew-links.sh"
+            text = suite.read_text()
+            needle = "  trap - EXIT\n"
+            self.assertEqual(text.count(needle), 1)
+            suite.write_text(text.replace(needle, needle + '''  printf 'ready\\n' > "$XLINK_STATE/exit-ready"
+  IFS= read -r _continue < "$XLINK_STATE/exit-continue"
+'''))
         # A genuine committed fixture exercises the real source-binding helper.
         for argv in (["git", "init", "-q", str(root)], ["git", "-C", str(root), "add", "scripts"],
                      ["git", "-C", str(root), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]):
@@ -155,6 +167,54 @@ class TimeoutProcessTests(unittest.TestCase):
                "INGEST_SHA": sha, "SCAN_RUN_ID": "fixture", "STAGE_RUN_ID": "fixture", "CREWSHIP_WORKSPACE": "fixture",
                "ASK_TIMEOUT": "3", "POLL_INTERVAL": "1", "WITH_OLLAMA": "0", "TMPDIR": str(owned_tmp)}
         return root, harness, state, trace, detail, env
+
+    def test_repeated_term_during_exit_preserves_receipt_before_restore(self):
+        # First calibrate the barrier under one TERM; only a second TERM differs.
+        for second_term in (False, True):
+            with self.subTest(second_term=second_term), tempfile.TemporaryDirectory() as temp:
+                root, harness, state, trace, detail, env = self.fixture(Path(temp), pause_before_signal_mask=True)
+                os.mkfifo(state/"exit-continue", 0o600)
+                child = subprocess.Popen(["bash", str(harness/"test-crew-links.sh")], env=env,
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                try:
+                    until = time.monotonic()+5
+                    while not (state/"blocked-pid").exists() and time.monotonic() < until:
+                        time.sleep(0.01)
+                    self.assertTrue((state/"blocked-pid").exists(), "fixture never reached the owned negative request")
+                    os.killpg(child.pid, signal.SIGTERM)
+                    until = time.monotonic()+5
+                    while not (state/"exit-ready").exists() and time.monotonic() < until:
+                        time.sleep(0.01)
+                    self.assertTrue((state/"exit-ready").exists(), "EXIT handler barrier not reached")
+                    if second_term:
+                        os.kill(child.pid, signal.SIGTERM)
+                    # Nonblocking open also handles the regression: the second
+                    # TERM may have already aborted the handler's FIFO reader.
+                    try:
+                        fd = os.open(state/"exit-continue", os.O_WRONLY | os.O_NONBLOCK)
+                    except OSError as error:
+                        if error.errno != errno.ENXIO:  # No reader after interrupted EXIT.
+                            raise
+                    else:
+                        try:
+                            os.write(fd, b"continue\n")
+                        except BrokenPipeError:
+                            pass
+                        finally:
+                            os.close(fd)
+                    self.assertEqual(child.wait(timeout=20), 143)
+                    receipt = detail/"test-crew-links/interruption-receipt.v1.json"
+                    self.assertTrue(receipt.is_file(), "receipt missing after repeated TERM at EXIT entry")
+                    value = json.loads(receipt.read_bytes())
+                    self.assertEqual(value["original_exit_status"], 143)
+                    self.assertTrue(value["complete"])
+                    self.assertEqual(value["owned_issue_count"], 3)
+                    self.assertEqual(trace.read_text().splitlines(), ["blocked", "receipt-before-restore", "restore"])
+                    self.assertFalse((state/"unlinked").exists())
+                finally:
+                    if child.poll() is None:
+                        os.killpg(child.pid, signal.SIGKILL)
+                        child.wait()
 
     def test_actual_timeout_preserves_receipt_restore_reset_order_and124(self):
         with tempfile.TemporaryDirectory() as temp:
