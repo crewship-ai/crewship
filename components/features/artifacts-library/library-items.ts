@@ -117,6 +117,17 @@ export function artifactsProjectHref(id: string, workspaceId: string, version?: 
   return `/artifacts/${encodeURIComponent(id)}?${query}`
 }
 
+/** The Pages address of an item; a project keeps the version its address pins. */
+export function openInPagesHref(workspaceId: string, item: Pick<LibraryItem, "slug" | "pageId" | "projectBacked">, version?: number): string {
+  const query = new URLSearchParams({ workspace_id: workspaceId })
+  if (item.projectBacked) {
+    query.set("artifact", "1")
+    if (version !== undefined) query.set("version", String(version))
+  }
+  const reference = item.projectBacked && item.pageId ? "@" + item.pageId : item.slug
+  return `/pages/${encodeURIComponent(reference)}?${query}`
+}
+
 /**
  * Whether the Artifacts detail shows this versioned item in its own project
  * viewer (a Project, and a Dashboard or Slides behind their build switches).

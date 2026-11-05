@@ -31,7 +31,7 @@ import { useArtifactCapabilities } from "@/components/features/chat/artifact-con
 import { NewArtifactDialog } from "./new-artifact-dialog"
 import { ArtifactPageContent } from "./page-content"
 import { ArtifactNativeEditor } from "./native-editor"
-import { kindLabel, libraryItems, viewsProjectInline, withLibraryState, type LibraryItem, type LibraryKind } from "./library-items"
+import { kindLabel, libraryItems, openInPagesHref, viewsProjectInline, withLibraryState, type LibraryItem, type LibraryKind } from "./library-items"
 import { sharingKeys, useSharingApi } from "./sharing/sharing-api"
 import { ShareDialog } from "./sharing/share-dialog"
 import { AccessTab } from "./sharing/access-tab"
@@ -229,11 +229,8 @@ function LibraryHome({ items, creatable, personal, onNew, onOpen, onShow, peeked
   </div>
 }
 
-function OpenInPages({ workspaceId, item }: { workspaceId: string; item: LibraryItem }) {
-  const query = new URLSearchParams({ workspace_id: workspaceId })
-  if (item.projectBacked) query.set("artifact", "1")
-  const reference = item.projectBacked && item.pageId ? "@" + item.pageId : item.slug
-  const href = `/pages/${encodeURIComponent(reference)}?${query}`
+function OpenInPages({ workspaceId, item, version }: { workspaceId: string; item: LibraryItem; version?: number }) {
+  const href = openInPagesHref(workspaceId, item, version)
   return <Button asChild size="sm" variant="outline" className="coarse:min-h-[44px]">
     <a href={href}>{item.kind === "page" ? "Open page" : "Open in Pages"}<ExternalLink aria-hidden /></a>
   </Button>
@@ -359,7 +356,7 @@ function ArtifactDetail({ workspaceId, item, version, folders, onBack, favorite,
         <h1 className="truncate text-xl font-semibold">{item.name}</h1>
         <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><KindBadge kind={item.kind} /><StateChips item={item} /><span>{meta(item)}</span></p>
       </div>
-      {item.kind !== "design" && !nativeEditor && pagesOpensIt && <OpenInPages workspaceId={workspaceId} item={item} />}
+      {item.kind !== "design" && !nativeEditor && pagesOpensIt && <OpenInPages workspaceId={workspaceId} item={item} version={version} />}
     </header>}
     {dialog === "share" && <ShareDialog workspaceId={workspaceId} item={item} open onOpenChange={open => { if (!open) setDialog(null) }} />}
     {dialog === "move" && <MoveToFolderDialog workspaceId={workspaceId} item={item} folders={folders} open

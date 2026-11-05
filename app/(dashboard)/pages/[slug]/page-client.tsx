@@ -12,7 +12,7 @@ import { RestrictedPages } from "@/components/features/pages/restricted-pages"
 import { useAccessMode } from "@/hooks/use-access-mode"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { usePage, type PageView } from "@/hooks/use-pages"
-import { artifactsLibrary, pagesOpenArtifacts } from "@/lib/feature-flags"
+import { artifactsLibrary, chatArtifactProjects, pagesOpenArtifacts } from "@/lib/feature-flags"
 import { artifactsProjectHref, libraryItems, viewsProjectInline } from "@/components/features/artifacts-library/library-items"
 
 // /pages/<slug> — one page's panel grid (docs/specs/pages.md §9).
@@ -118,7 +118,7 @@ function ProjectLinkToArtifacts({ workspaceId, slug, version, children }: { work
   const detail = usePage(workspaceId, entry)
   const settled = Boolean(detail.error || detail.accessDenied) || !detail.loading
   const [item] = settled && !detail.error && !detail.accessDenied && detail.page?.immutablePageId ? libraryItems([detail.page]) : []
-  const id = item && viewsProjectInline(item) ? detail.page?.immutablePageId : undefined
+  const id = item && chatArtifactProjects() && viewsProjectInline(item) ? detail.page?.immutablePageId : undefined
   useEffect(() => {
     if (!settled) return
     if (id) router.replace(artifactsProjectHref(id, workspaceId, version))

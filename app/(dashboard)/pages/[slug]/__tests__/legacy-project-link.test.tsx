@@ -38,6 +38,7 @@ beforeEach(() => {
   Object.assign(state, { query: "artifact=1&workspace_id=ws1", slug: "brief", wire: project(), loading: false, error: null, denied: false })
   state.replace.mockReset(); state.read.mockReset()
   vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true")
 })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
@@ -103,4 +104,12 @@ it("follows the address: a later link is resolved for its own page, never the fi
   expect(state.read).toHaveBeenLastCalledWith("ws1", "second")
   expect(state.replace).toHaveBeenCalledWith("/artifacts/page-second?workspace_id=ws1")
   expect(state.replace).not.toHaveBeenCalledWith("/artifacts/page-brief?workspace_id=ws1")
+})
+
+it("stays on Pages when the build has no project viewer to land on", () => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "false")
+  state.query = "artifact=1&version=1&workspace_id=ws1"
+  render(<PageDetailClient />)
+  expect(state.replace).not.toHaveBeenCalled()
+  expect(screen.getByTestId("legacy").dataset).toMatchObject({ page: "brief", pin: "1" })
 })
