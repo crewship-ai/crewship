@@ -116,9 +116,10 @@ whose `extensions.code` carries the machine-readable reason:
 A conflict or quota error never discards anything: earlier versions and data
 are kept, and the CLI never retries with a newer base. Keep your local file,
 read the current state and decide what to save. Validation that happens in the
-CLI before any request (a missing or invalid flag, a manifest that cannot be
-read, is not valid or is over 9 MiB) exits with `2`; the local checks of
-`page artifact data` and the Slides commands still exit with `1`. It prints the
+CLI before any request (a missing, unknown or invalid flag, a manifest that
+cannot be read, is not valid or is over 9 MiB) exits with `2`. Two exceptions
+exit with `1`: a data batch file that cannot be read or decoded, and a parsed
+value that `page artifact data` or the Slides commands refuse. It prints the
 message only, or with `-f json` an envelope without `status` or `extensions`:
 
 ```json

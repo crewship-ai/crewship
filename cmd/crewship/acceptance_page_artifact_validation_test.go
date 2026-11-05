@@ -56,6 +56,10 @@ func TestAcceptance_PageArtifactLocalValidationExitsTwo(t *testing.T) {
 		{"restore without versions (A-23)", []string{"restore", "demo"}, "--base-version"},
 		{"share without versions", []string{"share", "demo"}, "--base-version"},
 		{"reply without a version", []string{"reply", "demo", "comment-1", "--text", "hi"}, "--version"},
+		{"version is not a number", []string{"get", "demo", "--version", "banana"}, "--version"},
+		{"version has no value", []string{"get", "demo", "--version"}, "--version"},
+		{"unknown flag", []string{"get", "demo", "--surprise"}, "--surprise"},
+		{"data version is not a number", []string{"data", "collections", "demo", "--version", "banana"}, "--version"},
 		{"comment without fields (A-30)", []string{"comment", "demo", "--text", "hi"}, "required"},
 	} {
 		t.Run(c.name, func(t *testing.T) {

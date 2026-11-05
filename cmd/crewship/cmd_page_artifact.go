@@ -21,6 +21,10 @@ import (
 // publish reply it only reads base+1 to confirm its own save (reconcile).
 func newPageArtifactCommand() *cobra.Command {
 	cmd := &cobra.Command{Use: "artifact", Short: "Create, version and discuss a multi-screen Page artifact"}
+	// Cobra asks the parent chain, so this covers every subcommand.
+	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return cli.WithExitCode(err, cli.ExitValidation)
+	})
 	cmd.AddCommand(newArtifactDataCommand())
 	cmd.AddCommand(newArtifactSlidesCommands()...)
 	cmd.AddCommand(newPageArchiveCommands()...)
