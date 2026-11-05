@@ -127,6 +127,28 @@ async function visibleMessages(page: Page): Promise<string[]> {
 }
 
 /** The shell always holds an empty alert region; only one with text says anything. */
+/** Project source drafts of one person in one workspace, in IndexedDB and in the localStorage fallback. */
+async function storedSourceDrafts(page: Page, userId: string, workspaceId: string): Promise<number> {
+  return page.evaluate(async ({ userId, workspaceId }) => {
+    const fallback = Object.keys(localStorage).filter((name) => name.startsWith("artifact-source:") && name.includes(userId)).length
+    if (!(await indexedDB.databases()).some((item) => item.name === "crewship-artifact-drafts")) return fallback
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const open = indexedDB.open("crewship-artifact-drafts")
+      open.onsuccess = () => resolve(open.result)
+      open.onerror = () => reject(open.error)
+    })
+    try {
+      if (!db.objectStoreNames.contains("drafts")) return fallback
+      const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
+        const all = db.transaction("drafts").objectStore("drafts").getAllKeys()
+        all.onsuccess = () => resolve(all.result)
+        all.onerror = () => reject(all.error)
+      })
+      return fallback + keys.filter((key) => Array.isArray(key) && key[0] === userId && key[1] === "artifact-source" && key[2] === workspaceId).length
+    } finally { db.close() }
+  }, { userId, workspaceId })
+}
+
 const spokenAlert = (page: Page) => page.getByRole("alert").filter({ hasText: /\S/ }).first()
 
 /** Fails unless the open Project tab shows no preview and says that access is gone. */
@@ -867,8 +889,8 @@ test.describe("role matrix", () => {
   )
 
   test(
-    "losing every right on a Project with an unsaved source draft: the page says what happened to it",
-    { annotation: prdRequirement("role.project.revoke-read-draft", "Read right withdrawn with a Project source draft open: the page says the access went, the draft leaves the screen, and it either returns with the access or the page said it was deleted") },
+    "losing every right on a Project with an unsaved source draft: the draft is gone from the screen and the browser, and stays gone",
+    { annotation: prdRequirement("role.project.revoke-read-draft", "Read right withdrawn with a Project source draft open: the page says the access went and the draft was deleted, it leaves the screen and browser storage, and it does not come back with the access") },
     async ({ prd, request }) => {
       const ws = await prd.qaWorkspace()
       await enableProjects(request, ws.id)
@@ -886,11 +908,11 @@ test.describe("role matrix", () => {
       const typed = (await box.inputValue()).replace("Fresh coffee every morning.", MARK)
       await box.fill(typed)
       await expect(who.page.getByText(/Kept in this browser until you save or discard/)).toBeVisible()
-      await pause(1_000)
+      await expect.poll(() => storedSourceDrafts(who.page, who.userId, ws.id), { timeout: 15_000, message: "the probe sees the draft while the person may read it" }).toBeGreaterThan(0)
 
       await revoke(request, ws.id, slug, who.userId)
       await expect(spokenAlert(who.page), "the page says the access went").toBeVisible({ timeout: TAB_LOSES_ACCESS_MS })
-      await pause(3_000)
+      const purged = await expect.poll(() => storedSourceDrafts(who.page, who.userId, ws.id), { timeout: TAB_LOSES_ACCESS_MS }).toBe(0).then(() => true, () => false)
       const said = (await who.page.getByRole("alert").allInnerTexts()).map((s) => s.trim()).filter(Boolean).join(" | ")
       const inTab = await who.page.locator("body").innerText()
       const fieldValues = await who.page.locator("textarea").evaluateAll((els) => els.map((el) => (el as HTMLTextAreaElement).value))
@@ -902,10 +924,18 @@ test.describe("role matrix", () => {
       await expect(who.page.getByRole("button", { name: /Edit source|Restore source draft/ }).first(), "the editor is back").toBeVisible({ timeout: 60_000 })
       await pause(2_500)
       const offered = await who.page.getByRole("button", { name: "Restore source draft", exact: true }).count()
-      const announced = /draft/i.test(said)
+      const onScreenAfter = (await who.page.locator("body").innerText()).includes(MARK)
+      const storedAfter = await storedSourceDrafts(who.page, who.userId, ws.id)
+      if (!offered) await who.page.getByRole("button", { name: "Edit source", exact: true }).click({ timeout: 60_000 })
+      const editorAfter = offered ? "" : await sourceBox(who.page).inputValue()
       const kept = fieldValues.some((v) => v.includes(MARK)) || inTab.includes(MARK)
-      await prd.evidence("result.json", { mode: prd.mode, appSha: prd.appSha, workspace: ws.id, slug, said, draftStillOnScreen: kept, offeredAfterRegrant: offered, announced })
-      expect(offered > 0 || announced, `the draft returns, or the page said what happened to it; the page said: ${said}`).toBe(true)
+      await prd.evidence("result.json", { mode: prd.mode, appSha: prd.appSha, workspace: ws.id, slug, said, draftStillOnScreen: kept, purged, offeredAfterRegrant: offered, onScreenAfter, storedAfter })
+      expect(said, "the page says the draft was deleted").toMatch(/draft has been deleted/i)
+      expect(kept, "the draft left the screen").toBe(false)
+      expect(purged, "the draft left browser storage").toBe(true)
+      expect(offered, "no draft is offered after the access returns").toBe(0)
+      expect(onScreenAfter || editorAfter.includes(MARK), "the draft is not on screen after the access returns").toBe(false)
+      expect(storedAfter, "the draft did not reappear in browser storage").toBe(0)
     },
   )
 
