@@ -90,6 +90,10 @@ test.describe("Sheet data classes", () => {
         // And it opens again from that engine-written version.
         await page.reload()
         await native.frameOf(page, "gridcraft")
+        // A visible canvas precedes document bootstrap; the take control only follows a completed open.
+        await expect(page.getByRole("button", { name: "Převzít úpravy", exact: true }), "the edited workbook finished opening").toBeEnabled({ timeout: 45_000 })
+        const reopened = await native.readNative(request, ws.id, doc.pageId)
+        expect(reopened.version, "reopening does not change the edited version").toBe(edited.version)
         expect((await page.getByRole("alert").allInnerTexts()).filter(Boolean), "the edited workbook reopens without an error").toEqual([])
         await prd.evidence("editor-after-edit.png", await page.screenshot({ fullPage: true }))
         log.editor = { opened: true, editedVersion: edited.version, editorVersion, marker, cells: afterEditor.cells }
