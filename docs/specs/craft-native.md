@@ -45,7 +45,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | POST | `/api/v1/pages/{slug}/craft/document/save` | Bound whole snapshot described below. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Same whole snapshot contract; existing explicit native Page only. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Exact original snapshot binding and hash, plus the attempt's `attemptId`; no blind retry. Current write rights and the original admission; the original lease may have expired or moved. | Original pinned commit receipt,200; never an arbitrary latest head. 410 when base+1 is not this attempt: the attempt is retired and can never commit. |
-| POST | `/api/v1/pages/{slug}/craft/document/restore` | Current binding and targetVersion. | New committed version and node durability, 200. |
+| POST | `/api/v1/pages/{slug}/craft/document/restore` | Current binding and targetVersion. | New committed version and node durability, 200; 404 to the lease holder when the target does not exist. |
 | GET | `/api/v1/pages/{slug}/craft/proposals` | Craft admission header; Page read. | `{proposals: [...]}` open and decided agent proposals, 200. |
 | GET | `/api/v1/pages/{slug}/craft/proposals/{proposalID}` | Craft admission header; `ncp_` id. | `{proposal, bytes, content_hash, engine_pin}` candidate, 200; 404 when absent. |
 | POST | `/api/v1/pages/{slug}/craft/proposals/{proposalID}/accept` | `{generation: "1"}` of this admission's lease; Page write. | `{proposal, receipt}` with the new committed version, 200; 409 `stale` when the content changed after base. |

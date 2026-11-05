@@ -216,6 +216,11 @@ func (d *craftNativeDocumentsHTTP) mutateSnapshot(w http.ResponseWriter, r *http
 			return
 		}
 		receipt, e := s.Restore(r.Context(), lease, base, target)
+		if errors.Is(e, artifacts.ErrVersionNotFound) {
+			// Write and lease authority ran first, so only the holder learns this.
+			replyError(w, 404, "native version not found")
+			return
+		}
 		if e != nil {
 			craftNativeDocumentError(w, e)
 			return
