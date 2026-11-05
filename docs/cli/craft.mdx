@@ -202,11 +202,12 @@ reacquisition. EOF does not save content or release/reacquire a lease; send an
 explicit `release` when wanted. Reauthorization uses the current CLI credential
 and cannot revive an expired admission or replace its original authority.
 
-## Initialize one owned Word Page
+## Initialize one owned Word or Sheet Page
 
-`crewship craft initialize <page> --file <native.json>` calls
-`POST /api/v1/pages/{slug}/craft/initialize` with Word native bytes (at most
-32 MiB). The Page must already exist, be empty, and be personally owned by the
+`crewship craft initialize <page> [--application word|sheet] --file <native.json>`
+calls `POST /api/v1/pages/{slug}/craft/initialize` with native bytes (at most
+32 MiB). `--application` defaults to `word`; any other value than `word` or
+`sheet` exits 2 before a request. The Page must already exist, be empty, and be personally owned by the
 current human with `pages:write`. The server chooses all qualified pins and
 atomically creates its initial native version and lease. This does not convert
 legacy content or create a Page.

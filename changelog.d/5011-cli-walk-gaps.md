@@ -1,1 +1,2 @@
 - **`crewship page grant` and `page revoke` now act in the workspace named by `--workspace`.** The commands had a local boolean `--workspace` that hid the global flag, so they could only reach the configured workspace. ⚠️ **Behaviour change:** the subject "everyone in the workspace" is now `--everyone`. The old boolean form is refused with exit 2 and changes nothing.
+- **`crewship craft initialize` can now create a Sheet.** `--application sheet` starts an empty artifact as a Sheet. Word stays the default, and an unknown application exits 2.

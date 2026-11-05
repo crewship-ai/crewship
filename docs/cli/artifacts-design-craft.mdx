@@ -440,17 +440,19 @@ The person who wants the lease sends `{"action":"request-handoff"}` and gets a
 The target is always the server-issued request, never a user named on the
 command line.
 
-### Initialize an empty artifact as Word
+### Initialize an empty artifact as Word or Sheet
 
 ```sh
 crewship craft initialize <artifact-slug> --file document.json
+crewship craft initialize <artifact-slug> --application sheet --file workbook.json
 ```
 
 The artifact must exist, be empty and be owned by you, and you need
-`pages:write`. `document.json` is not a `.docx` file: it is the Word editor's
-native document, a single JSON object (1 byte to 32 MiB) that the instance's
-Word profile validates; anything else is refused. Only Word
-(`wordcraft`) can be initialized. The command prints `session_id`,
+`pages:write`. The native file is not a `.docx` or `.xlsx` file: it is the
+editor's native document, a single JSON object (1 byte to 32 MiB) that the
+instance's profile for that application validates; anything else is refused.
+`--application` is `word` (the default, `wordcraft`) or `sheet` (`gridcraft`);
+any other value exits 2 before a request. The command prints `session_id`,
 `application_id`, `page_id`, `generation` and `version` (`"1"`), holds the new
 lease, and then reads actions from stdin one line at a time exactly like
 `connect`; use the printed `generation`, `page_id` and `session_id` in them.
