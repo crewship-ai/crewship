@@ -271,6 +271,17 @@ _redact() {
 _HARNESS_KEEP_EVIDENCE=0
 keep_failure_evidence() { _HARNESS_KEEP_EVIDENCE=1; [[ -z "${HARNESS_DETAIL_DIR:-}" ]] || _state_init; }
 
+# Signal-only metadata hook. The caller composes this before topology restore;
+# it never invokes finish or the unbounded transcript-preservation path.
+preserve_interrupted_issues() {
+  local original="$1"
+  (( _HARNESS_KEEP_EVIDENCE == 1 )) || return 0
+  [[ -n "${HARNESS_DETAIL_DIR:-}" && -n "$_HARNESS_STATE" ]] || return 0
+  _state_list issues | CREWSHIP="$CREWSHIP" SERVER="$SERVER" \
+    timeout --signal=TERM --kill-after=1s 14s python3 "$_HARNESS_DIR/crew-links-interrupted.py" "$original" \
+    || info "interrupted owned-issue metadata capture incomplete"
+}
+
 preserve_evidence() {
   local root="${HARNESS_DETAIL_DIR:-}" dest a list id ident limit="${HARNESS_DETAIL_CHATS:-12}"
   (( _HARNESS_KEEP_EVIDENCE == 1 )) || return 0
