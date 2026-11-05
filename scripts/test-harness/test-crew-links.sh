@@ -117,9 +117,27 @@ xlink_removed=0
 # Invoked indirectly by the EXIT trap below, including early exits.
 # shellcheck disable=SC2317
 restore_xlink() {
-  if (( xlink_removed == 1 )); then cs crew connect engineering ops --direction bidirectional >/dev/null 2>&1 || true; fi
+  if (( xlink_removed == 1 )); then
+    timeout --signal=TERM --kill-after=1s 3s "$CREWSHIP" --server "$SERVER" \
+      ${_CS_ARGS[@]+"${_CS_ARGS[@]}"} crew connect engineering ops --direction bidirectional >/dev/null 2>&1 || true
+  fi
 }
-trap 'rm -f "$before_ids" "$after_ids"; restore_xlink' EXIT
+# One composed EXIT handler: capture before restoring and retain signal status.
+# The parent run-all waits for this registered child before the scan can reseed.
+# shellcheck disable=SC2317
+crew_links_exit() {
+  local original=$?
+  trap - EXIT
+  trap '' TERM INT
+  if (( original == 143 || original == 130 )); then preserve_interrupted_issues "$original"; fi
+  restore_xlink
+  rm -f "$before_ids" "$after_ids"
+  _state_cleanup  # Existing $$ owner guard: never another suite's state.
+  return "$original"
+}
+trap crew_links_exit EXIT
+trap 'exit 143' TERM
+trap 'exit 130' INT
 feed_ok=1
 if (( XLINK_HAVE_JQ == 1 )); then xlink_to_morgan_ids > "$before_ids" || feed_ok=0; fi
 

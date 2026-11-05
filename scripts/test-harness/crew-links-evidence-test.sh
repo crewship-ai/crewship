@@ -108,3 +108,4 @@ expect_no xlink_result_reported ENG-1 VERIFIED-1 XLINK-1
 printf 'crew-links evidence: completion, result and refusal boundaries passed\n'
 
 python3 "$HERE/crew-links-receipt-test.py"
+python3 "$HERE/crew-links-interrupted-test.py"
