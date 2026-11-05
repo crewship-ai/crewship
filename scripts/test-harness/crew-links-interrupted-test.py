@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Synthetic subprocess timeout/owned metadata only; no product/model/server."""
 import importlib.util
-import errno
 import json
 import os
 from pathlib import Path
@@ -148,7 +147,7 @@ class TimeoutProcessTests(unittest.TestCase):
             needle = "  trap - EXIT\n"
             self.assertEqual(text.count(needle), 1)
             suite.write_text(text.replace(needle, needle + '''  printf 'ready\\n' > "$XLINK_STATE/exit-ready"
-  IFS= read -r _continue < "$XLINK_STATE/exit-continue"
+  while [[ ! -f "$XLINK_STATE/exit-continue" ]]; do sleep 0.01; done
 '''))
         # A genuine committed fixture exercises the real source-binding helper.
         for argv in (["git", "init", "-q", str(root)], ["git", "-C", str(root), "add", "scripts"],
@@ -173,7 +172,6 @@ class TimeoutProcessTests(unittest.TestCase):
         for second_term in (False, True):
             with self.subTest(second_term=second_term), tempfile.TemporaryDirectory() as temp:
                 root, harness, state, trace, detail, env = self.fixture(Path(temp), pause_before_signal_mask=True)
-                os.mkfifo(state/"exit-continue", 0o600)
                 child = subprocess.Popen(["bash", str(harness/"test-crew-links.sh")], env=env,
                                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
                 try:
@@ -188,20 +186,10 @@ class TimeoutProcessTests(unittest.TestCase):
                     self.assertTrue((state/"exit-ready").exists(), "EXIT handler barrier not reached")
                     if second_term:
                         os.kill(child.pid, signal.SIGTERM)
-                    # Nonblocking open also handles the regression: the second
-                    # TERM may have already aborted the handler's FIFO reader.
-                    try:
-                        fd = os.open(state/"exit-continue", os.O_WRONLY | os.O_NONBLOCK)
-                    except OSError as error:
-                        if error.errno != errno.ENXIO:  # No reader after interrupted EXIT.
-                            raise
-                    else:
-                        try:
-                            os.write(fd, b"continue\n")
-                        except BrokenPipeError:
-                            pass
-                        finally:
-                            os.close(fd)
+                    # A durable sentinel cannot be missed if the child has not
+                    # entered its wait yet. No FIFO open/no-reader race. The
+                    # existing20s parent wait/finally bounds only this owned group.
+                    (state/"exit-continue").touch()
                     self.assertEqual(child.wait(timeout=20), 143)
                     receipt = detail/"test-crew-links/interruption-receipt.v1.json"
                     self.assertTrue(receipt.is_file(), "receipt missing after repeated TERM at EXIT entry")
