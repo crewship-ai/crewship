@@ -189,7 +189,8 @@ func ApproveProposal(
 	}
 	canonicalPath := filepath.Join(canonicalDir, "learned-"+now.Format("2006-01-02")+".md")
 
-	if err := mergeIntoCanonical(opts.StorageRoot, canonicalPath, now, rulesBlock); err != nil {
+	published, err := mergeIntoCanonical(opts.StorageRoot, canonicalPath, now, rulesBlock)
+	if err != nil {
 		return nil, fmt.Errorf("append to canonical: %w", err)
 	}
 
@@ -202,7 +203,7 @@ func ApproveProposal(
 	var versionSha string
 	if opts.BlobRoot != "" {
 		auditPath := canonicalAuditPath(row.CrewID, filepath.Base(canonicalPath))
-		if content, rerr := readStagedNoFollow(opts.StorageRoot, canonicalPath); rerr == nil {
+		if content := published; content != nil {
 			parent, _ := memory.LatestVersionSha(ctx, db, row.WorkspaceID, auditPath)
 			res, verr := memory.RecordVersion(ctx, db, memory.VersionRecord{
 				WorkspaceID: row.WorkspaceID,
@@ -220,8 +221,8 @@ func ApproveProposal(
 				versionSha = res.Sha256
 			}
 		} else {
-			logger.Warn("approve: read canonical for version record failed",
-				"err", rerr, "path", canonicalPath)
+			logger.Warn("approve: canonical bytes unavailable for version record",
+				"path", canonicalPath)
 		}
 	}
 
@@ -436,10 +437,16 @@ func markProposalDecided(ctx context.Context, db *sql.DB, proposalID, status, us
 
 // mergeIntoCanonical is appendToCanonical pinned to the storage root when one
 // is configured, so the lock, the read and the write share one directory
-// handle. The crew can write this tree; only trusted callers run unrooted.
-func mergeIntoCanonical(storageRoot, canonicalPath string, now time.Time, body string) error {
+// handle, and returns the published bytes so the version snapshot records
+// exactly them. The crew can write this tree; only trusted callers run unrooted.
+func mergeIntoCanonical(storageRoot, canonicalPath string, now time.Time, body string) ([]byte, error) {
 	if storageRoot == "" {
-		return appendToCanonical(canonicalPath, now, body)
+		if err := appendToCanonical(canonicalPath, now, body); err != nil {
+			return nil, err
+		}
+		// The merge landed; the snapshot that follows is best-effort.
+		content, _ := readStagedNoFollow("", canonicalPath)
+		return content, nil
 	}
 	return memory.UpdateFileRooted(storageRoot, canonicalPath, func(prior []byte, exists bool) ([]byte, error) {
 		block := BuildCanonicalAppendBlock(exists, now, body)

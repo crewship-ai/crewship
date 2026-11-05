@@ -3,6 +3,7 @@ package consolidate
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,7 +31,12 @@ func TestMergeIntoCanonicalIgnoresAParentSwappedDuringTheLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
-	go func() { done <- mergeIntoCanonical(base, canonical, time.Now().UTC(), "rule\n") }()
+	var published []byte
+	go func() {
+		content, err := mergeIntoCanonical(base, canonical, time.Now().UTC(), "rule\n")
+		published = content
+		done <- err
+	}()
 	time.Sleep(100 * time.Millisecond)
 	if err := os.Rename(mine, mine+".moved"); err != nil {
 		t.Fatal(err)
@@ -41,7 +47,12 @@ func TestMergeIntoCanonicalIgnoresAParentSwappedDuringTheLock(t *testing.T) {
 	if err := holder.Unlock(); err != nil {
 		t.Fatal(err)
 	}
-	<-done
+	if err := <-done; err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if !strings.Contains(string(published), "rule") {
+		t.Fatalf("the merge did not return what it published: %q", published)
+	}
 	got, err := os.ReadFile(victim)
 	if err != nil {
 		t.Fatal(err)
@@ -49,4 +60,46 @@ func TestMergeIntoCanonicalIgnoresAParentSwappedDuringTheLock(t *testing.T) {
 	if string(got) != "victim\n" {
 		t.Fatalf("the merge reached another crew's file: %q", got)
 	}
+}
+
+// Both writers of one learned file must exclude each other through the pinned
+// directory, even when the parent path has moved since they pinned it.
+func TestRootedWritersShareTheLockAfterAParentSwap(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "crew-a", "topics")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	first := memory.NewRootFileLock(root, "learned.md.lock")
+	if err := first.Lock(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(dir, dir+".moved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	acquired := make(chan struct{})
+	go func() {
+		second := memory.NewRootFileLock(root, "learned.md.lock")
+		if err := second.Lock(); err == nil {
+			close(acquired)
+			_ = second.Unlock()
+		}
+	}()
+	select {
+	case <-acquired:
+		t.Fatal("a second pinned writer took the lock while the first held it")
+	case <-time.After(150 * time.Millisecond):
+	}
+	if err := first.Unlock(); err != nil {
+		t.Fatal(err)
+	}
+	<-acquired
 }

@@ -28,9 +28,10 @@ func TestUpdateFileRootedStaysInThePinnedParent(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- UpdateFileRooted(base, target, func(prior []byte, _ bool) ([]byte, error) {
+		_, err := UpdateFileRooted(base, target, func(prior []byte, _ bool) ([]byte, error) {
 			return append(prior, []byte("appended\n")...), nil
 		})
+		done <- err
 	}()
 	time.Sleep(100 * time.Millisecond)
 	moved := mine + ".moved"
@@ -64,7 +65,7 @@ func TestUpdateFileRootedRefusesSymlinkedComponents(t *testing.T) {
 	if err := os.Symlink(theirs, filepath.Join(base, "crew-a")); err != nil {
 		t.Fatal(err)
 	}
-	err := UpdateFileRooted(base, filepath.Join(base, "crew-a", "learned.md"), func([]byte, bool) ([]byte, error) {
+	_, err := UpdateFileRooted(base, filepath.Join(base, "crew-a", "learned.md"), func([]byte, bool) ([]byte, error) {
 		t.Fatal("update must not run")
 		return nil, nil
 	})
@@ -72,7 +73,7 @@ func TestUpdateFileRootedRefusesSymlinkedComponents(t *testing.T) {
 		t.Fatal("a symlinked parent must be refused")
 	}
 	outside := filepath.Join(t.TempDir(), "learned.md")
-	if err := UpdateFileRooted(base, outside, func([]byte, bool) ([]byte, error) { return nil, nil }); err == nil {
+	if _, err := UpdateFileRooted(base, outside, func([]byte, bool) ([]byte, error) { return nil, nil }); err == nil {
 		t.Fatal("a path outside the root must be refused")
 	}
 }
