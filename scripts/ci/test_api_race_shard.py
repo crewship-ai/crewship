@@ -198,5 +198,39 @@ sys.exit(int(os.environ['TEST_EXIT']))
             self.assertNotIn('::error::', output.getvalue())
 
 
+    def test_explicit_alarm_is_the_limit_and_keeps_policy_and_coverage(self):
+        # Four shards of 10 s: the measured baseline 30 s with the 1.6x rule
+        # would alarm at 48 s; an explicit alarm replaces only that limit.
+        def run(event, alarm, manifests=None):
+            with tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                for manifest in manifests or self.manifests():
+                    directory = root / str(manifest['index'])
+                    directory.mkdir()
+                    (directory / 'api-race-shard.json').write_text(json.dumps(manifest))
+                output = io.StringIO()
+                env = dict(GITHUB_EVENT_NAME=event, GITHUB_STEP_SUMMARY=os.devnull, GITHUB_SHA='a' * 40)
+                if alarm is not None:
+                    env['RACE_COMBINED_ALARM_SECONDS'] = alarm
+                with patch.dict(os.environ, env), redirect_stdout(output):
+                    if alarm is None:
+                        os.environ.pop('RACE_COMBINED_ALARM_SECONDS', None)
+                    return shard.report(root, 4, 30), output.getvalue()
+        self.assertEqual(run('push', None), (0, run('push', None)[1]))
+        code, out = run('push', '39')
+        self.assertEqual(code, 1)
+        self.assertIn('erosion alarm: 39s', out)
+        for event in ('pull_request', 'merge_group'):
+            code, out = run(event, '39')
+            self.assertEqual(code, 0)
+            self.assertIn('::warning::', out)
+        self.assertEqual(run('push', '40')[0], 0)
+        for bad in ('', '29', '-5', '4.5e3', 'x'):
+            with self.assertRaises(ValueError):
+                run('push', bad)
+        partial = self.manifests()[:-1]
+        with self.assertRaises(ValueError):
+            run('push', '5200', partial)
+
 if __name__ == '__main__':
     unittest.main()
