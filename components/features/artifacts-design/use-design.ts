@@ -12,7 +12,7 @@ import { registerDocumentDraftWriter } from "@/lib/document-queue"
 import { apiFetch, tryRefresh } from "@/lib/api-fetch"
 import { getAuthMode, resolveWsBase } from "@/lib/server-base"
 import { DesignProvider, type DesignConnection, type DesignPeer } from "./design-provider"
-import { designNodes, type DesignNode } from "./design-document"
+import { designNodes, type DesignConflict, type DesignNode } from "./design-document"
 
 interface DesignState {
  page_id: string
@@ -70,6 +70,33 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const [draftError, setDraftError] = useState(false)
  const provider = useRef<DesignProvider | null>(null)
  const [draftReady, setDraftReady] = useState(false)
+ // A text that lost a merge exists only here: a sealed draft keeps it over a
+ // reload until the person decides, and goes with the other drafts on read loss.
+ const [stored, setStored] = useState<{ key: string; conflicts: DesignConflict[] }>()
+ const conflictKey = pageId ? artifactDraftKey("design-conflict", userId, workspaceId, pageId) : null
+ const conflicts = conflictKey && stored?.key === conflictKey ? stored.conflicts : []
+ useEffect(() => {
+  if (!conflictKey) return
+  let active = true
+  void loadArtifactDraft(conflictKey).then(text => {
+   if (!active || !text) return
+   try {
+    const saved: unknown = JSON.parse(text)
+    if (Array.isArray(saved)) setStored(previous => previous?.key === conflictKey ? previous : { key: conflictKey, conflicts: saved as DesignConflict[] })
+   } catch { /* Not a conflict record: nothing to show. */ }
+  }, () => setDraftError(true))
+  return () => { active = false }
+ }, [conflictKey])
+ const storeConflicts = useCallback((change: (current: DesignConflict[]) => DesignConflict[]) => {
+  if (!conflictKey) return
+  setStored(previous => {
+   const next = change(previous?.key === conflictKey ? previous.conflicts : [])
+   void writeArtifactDraft(conflictKey, next.length ? JSON.stringify(next) : "").catch(() => setDraftError(true))
+   return { key: conflictKey, conflicts: next }
+  })
+ }, [conflictKey])
+ const storeConflictsRef = useRef(storeConflicts)
+ useEffect(() => { storeConflictsRef.current = storeConflicts }, [storeConflicts])
  const editable = Boolean(readRevokedPage !== pageId && draftReady && authorityRevision !== null && query.data?.can_edit && !query.isError && !selectedVersion && connection !== "denied" && connection !== "rejected")
  const editableRef = useRef(editable)
  useEffect(() => { editableRef.current = editable; provider.current?.setEditable(editable) }, [editable])
@@ -148,7 +175,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
     const status = (error as { status?: number }).status
     return status === 401 || status === 403 || status === 404 ? "denied" : "retry"
    }
-  })
+  }, found => { if (found.length) storeConflictsRef.current(current => [...current, ...found]) })
   provider.current = live
   const awareness = () => setPeers([...live.awareness.getStates()].flatMap(([clientId, state]) => {
    if (clientId === document.clientID || !state.user) return []
@@ -195,5 +222,5 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const connectAgent = useMutation({ mutationFn: (chat_id: string) => pinnedRequest("/agent", { chat_id }), onSuccess: invalidate })
  const comment = useMutation({ mutationFn: (body: { version: number; path: string; selector: string; quote: string; text: string; send_to_agent: boolean }) => pinnedRequest<ArtifactComment>("/comments", body), onSuccess: invalidate })
  const share = useMutation({ mutationFn: (version: number) => pinnedRequest("/share", { version }), onSuccess: invalidate })
- return { readRevoked: readRevokedPage === pageId, query, versions, comments, doc, nodes: selectedVersion || query.data?.can_edit === false ? query.data?.nodes ?? [] : nodes, peers, connection, editable, dirty, draftError, save, restore, share, comment, connectAgent, setCursor: (cursor: { x: number; y: number } | null) => provider.current?.setCursor(cursor) }
+ return { readRevoked: readRevokedPage === pageId, query, versions, comments, doc, nodes: selectedVersion || query.data?.can_edit === false ? query.data?.nodes ?? [] : nodes, peers, connection, editable, dirty, draftError, save, restore, share, comment, connectAgent, conflicts, dismissConflict: (conflict: DesignConflict) => storeConflicts(current => current.filter(item => item !== conflict && JSON.stringify(item) !== JSON.stringify(conflict))), setCursor: (cursor: { x: number; y: number } | null) => provider.current?.setCursor(cursor) }
 }

@@ -28,6 +28,38 @@ export function designNodes(doc: Y.Doc): DesignNode[] {
  })
 }
 
+/** One text two people changed from the same stale canvas. */
+export interface DesignConflict {
+ id: string
+ name: string
+ mine: string
+ theirs: string
+ /** Whose text the merge left on the canvas. */
+ kept: "mine" | "theirs"
+ /** The layer as the losing side had it: it brings the text back, also onto a deleted layer. */
+ restore: DesignNode
+}
+
+/**
+ * Yjs merges a map field by client order, not by time, so one of two concurrent
+ * texts disappears without a trace. Compares what each side made of the last
+ * synced canvas with the merged result, and names every text that lost. Only
+ * the text field counts: geometry and colours stay last-writer-wins.
+ */
+export function designConflicts(base: DesignNode[], mine: DesignNode[], theirs: DesignNode[], merged: DesignNode[]): DesignConflict[] {
+ const byId = (nodes: DesignNode[]) => new Map(nodes.map(node => [node.id, node]))
+ const [was, local, remote, now] = [byId(base), byId(mine), byId(theirs), byId(merged)]
+ return [...new Set([...was.keys(), ...local.keys(), ...remote.keys()])].flatMap(id => {
+  const before = was.get(id), my = local.get(id), their = remote.get(id)
+  const isText = (my ?? their)?.type === "text"
+  if (!before || !isText || my?.text === before.text || their?.text === before.text || my?.text === their?.text) return []
+  const kept = now.get(id)?.text === my?.text ? "mine" : "theirs"
+  const restore = kept === "mine" ? their : my
+  if (!restore) return []
+  return [{ id, name: my?.name || their?.name || "Text", mine: my?.text ?? "", theirs: their?.text ?? "", kept, restore }]
+ })
+}
+
 export function upsertDesignNode(doc: Y.Doc, patch: Partial<DesignNode> & { id: string }) {
  doc.transact(() => {
   const nodes = doc.getMap<Y.Map<unknown>>("nodes")

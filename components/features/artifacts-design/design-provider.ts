@@ -3,6 +3,7 @@ import * as sync from "y-protocols/sync"
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate, removeAwarenessStates } from "y-protocols/awareness"
 import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
+import { designConflicts, designNodes, type DesignConflict, type DesignNode } from "./design-document"
 
 export type DesignConnection = "connecting" | "connected" | "offline" | "denied" | "rejected" | "quota"
 export type DesignAdmission = "ready" | "denied" | "retry"
@@ -31,8 +32,11 @@ export class DesignProvider {
  private waiters = new Set<{ resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
  private changeListener: (update: Uint8Array, origin: unknown) => void
  private awarenessListener: (changes: { added: number[]; updated: number[]; removed: number[] }, origin: unknown) => void
+ // The canvas at the moment the socket dropped. On the way back it tells a text
+ // both sides changed from one this side simply missed.
+ private stale: { base: Uint8Array; local?: DesignNode[]; remote?: Y.Doc } | null = null
 
- constructor(readonly doc: Y.Doc, private url: string, editable: boolean, user: { name: string; color: string }, private status: (status: DesignConnection) => void, private dirty: () => void, private prepare?: () => Promise<DesignAdmission>) {
+ constructor(readonly doc: Y.Doc, private url: string, editable: boolean, user: { name: string; color: string }, private status: (status: DesignConnection) => void, private dirty: () => void, private prepare?: () => Promise<DesignAdmission>, private synced?: (conflicts: DesignConflict[]) => void) {
   this.canEdit = editable
   this.admittedEdit = editable
   this.awareness = new Awareness(doc)
@@ -139,9 +143,19 @@ export class DesignProvider {
        this.send(encoding.toUint8Array(encoder))
       }
      } else if (subtype === sync.messageYjsSyncStep2 || subtype === sync.messageYjsUpdate) {
+      const reconciling = this.stale && this.canEdit ? this.stale : null
+      if (reconciling) {
+       if (!reconciling.remote) {
+        reconciling.local = designNodes(this.doc)
+        reconciling.remote = new Y.Doc()
+        Y.applyUpdate(reconciling.remote, reconciling.base)
+       }
+       sync.readSyncStep2(decoding.clone(decoder), reconciling.remote, REMOTE)
+      }
       sync.readSyncStep2(decoder, this.doc, REMOTE)
       this.acknowledged = true
       if (subtype === sync.messageYjsSyncStep2) {
+       if (reconciling) this.reconciled(reconciling)
        for (const waiter of this.waiters) { clearTimeout(waiter.timer); waiter.resolve() }
        this.waiters.clear()
       }
@@ -158,6 +172,7 @@ export class DesignProvider {
    if (this.stopped || this.socket !== socket) return
    this.socket = null
    clearTimeout(this.renewal)
+   this.markStale()
    this.rejectWaiters(event.code===4009?"Workspace storage is full. Your private draft is retained.":"Canvas reconnected before the version was saved. Save again after reconnecting.",event.code===4009?413:undefined)
    this.connected = false
    this.acknowledged = false
@@ -180,6 +195,21 @@ export class DesignProvider {
     this.retry = setTimeout(() => this.connect(), 2000)
    }
   }
+ }
+ private markStale() {
+  if (this.stale) {
+   this.stale.remote?.destroy()
+   this.stale = { base: this.stale.base }
+  } else if (this.acknowledged && this.canEdit) this.stale = { base: Y.encodeStateAsUpdate(this.doc) }
+ }
+ private reconciled(stale: { base: Uint8Array; local?: DesignNode[]; remote?: Y.Doc }) {
+  this.stale = null
+  const base = new Y.Doc()
+  Y.applyUpdate(base, stale.base)
+  const conflicts = designConflicts(designNodes(base), stale.local ?? [], designNodes(stale.remote!), designNodes(this.doc))
+  base.destroy()
+  stale.remote?.destroy()
+  this.synced?.(conflicts)
  }
  private rejectWaiters(message: string, status?:number) {
   for (const waiter of this.waiters) { clearTimeout(waiter.timer); waiter.reject(Object.assign(new Error(message),{status})) }
@@ -205,6 +235,8 @@ export class DesignProvider {
   for (const waiter of this.waiters) { clearTimeout(waiter.timer); waiter.reject(new Error("Canvas closed before the version was saved.")) }
   this.waiters.clear()
   clearTimeout(this.retry)
+  this.stale?.remote?.destroy()
+  this.stale = null
   this.awareness.setLocalState(null)
   this.socket?.close()
   this.doc.off("update", this.changeListener)

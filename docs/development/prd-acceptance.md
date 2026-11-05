@@ -217,7 +217,8 @@ release and report, and the RC gate does not count them.
 - `role.design.stale-merge`, `role.design.conflict`: one person's Design socket
   is cut in the browser (`routeWebSocket`, HTTP stays up) and both keep working.
   The Design routes take no base version, so a stale person never gets a `409`;
-  the only way to a conflict is a stale live canvas.
+  the only way to a conflict is a stale live canvas. Yjs picks the surviving
+  text by client order, so the row checks the notice whichever side won.
 - `role.*.revoke-draft`, `role.project.revoke-read-draft`: the right goes with
   unsaved work open. The server takes nothing, the work stays visible, and it
   returns with the right; when the read right goes too, the page has to say what

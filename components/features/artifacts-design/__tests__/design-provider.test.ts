@@ -4,6 +4,7 @@ import * as encoding from "lib0/encoding"
 import * as decoding from "lib0/decoding"
 import * as sync from "y-protocols/sync"
 import { DesignProvider } from "../design-provider"
+import { designNodes, upsertDesignNode } from "../design-document"
 
 class Socket {
  static OPEN = 1
@@ -32,12 +33,12 @@ const active: DesignProvider[] = []
 afterEach(() => { active.splice(0).forEach(provider => provider.destroy()); vi.unstubAllGlobals(); vi.useRealTimers(); Socket.instances = [] })
 function setup(editable: boolean, url = "ws://localhost/design/ws") {
  vi.stubGlobal("WebSocket", Socket)
- const doc = new Y.Doc(), status = vi.fn(), dirty = vi.fn()
- const provider = new DesignProvider(doc, url, editable, { name: "Test", color: "#2563eb" }, status, dirty)
+ const doc = new Y.Doc(), status = vi.fn(), dirty = vi.fn(), synced = vi.fn()
+ const provider = new DesignProvider(doc, url, editable, { name: "Test", color: "#2563eb" }, status, dirty, undefined, synced)
  active.push(provider)
  const socket = Socket.instances.at(-1)!
  socket.onopen?.()
- return { doc, provider, socket, status, dirty }
+ return { doc, provider, socket, status, dirty, synced }
 }
 function documentFrames(socket: Socket) {
  return socket.sent.flatMap(bytes => { const decoder = decoding.createDecoder(bytes); return decoding.readVarUint(decoder) === 0 ? [decoding.readVarUint(decoder)] : [] })
@@ -189,5 +190,49 @@ describe("Design authenticated transport renewal", () => {
   active.push(provider);provider.destroy();finish("ready")
   await Promise.resolve();await Promise.resolve()
   expect(Socket.instances).toHaveLength(0)
+ })
+})
+
+describe("Design provider after a stale canvas", () => {
+ const label = { id: "label", type: "text" as const, name: "Title", text: "Base", x: 0, y: 0, width: 200, height: 40, fill: "#111111" }
+ /** Connected, synced with the server's doc, then cut off. */
+ function offline() {
+  const ctx = setup(true)
+  const server = new Y.Doc()
+  upsertDesignNode(server, label)
+  ctx.socket.receive(server, 2)
+  vi.useFakeTimers()
+  ctx.socket.close(1006)
+  return { ...ctx, server }
+ }
+ const reconnect = () => {
+  vi.advanceTimersByTime(2000)
+  const socket = Socket.instances.at(-1)!
+  socket.onopen?.()
+  return socket
+ }
+ it("reports the local text the merge dropped, with the other text beside it", () => {
+  const { doc, server, synced } = offline()
+  upsertDesignNode(doc, { id: "label", text: "Mine" })
+  upsertDesignNode(server, { id: "label", text: "Theirs" })
+  reconnect().receive(server, 2)
+  const merged = designNodes(doc)[0].text
+  expect(synced).toHaveBeenCalledTimes(1)
+  expect(synced.mock.calls[0][0]).toMatchObject([{ id: "label", mine: "Mine", theirs: "Theirs", kept: merged === "Mine" ? "mine" : "theirs" }])
+ })
+ it("reports no conflict when only the stale person changed the layer", () => {
+  const { doc, server, synced } = offline()
+  upsertDesignNode(doc, { id: "label", text: "Mine" })
+  reconnect().receive(server, 2)
+  expect(synced.mock.calls.at(-1)?.[0]).toEqual([])
+  expect(designNodes(doc)[0].text).toBe("Mine")
+ })
+ it("still compares against the last synced canvas after a second drop", () => {
+  const { doc, server, synced } = offline()
+  upsertDesignNode(doc, { id: "label", text: "Mine" })
+  upsertDesignNode(server, { id: "label", text: "Theirs" })
+  reconnect().close(1006)
+  reconnect().receive(server, 2)
+  expect(synced.mock.calls.at(-1)?.[0]).toMatchObject([{ mine: "Mine", theirs: "Theirs" }])
  })
 })

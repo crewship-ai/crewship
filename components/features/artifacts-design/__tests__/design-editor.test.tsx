@@ -13,7 +13,7 @@ vi.mock("@/lib/api-fetch",async()=>{
  const actual=await vi.importActual<typeof import("@/lib/api-fetch")>("@/lib/api-fetch")
  return {...actual,apiFetch:(...args:Parameters<typeof actual.apiFetch>)=>copying.real?actual.apiFetch(...args):copying.send(...args)}
 })
-const state = vi.hoisted(() => ({ editable: true, doc: null as Y.Doc | null, pageId: "old-private-page", user: false, peerColor: "#2563eb", saveError: null as (Error & { status?: number }) | null, restoreError: null as (Error & { status?: number }) | null }))
+const state = vi.hoisted(() => ({ editable: true, doc: null as Y.Doc | null, pageId: "old-private-page", user: false, peerColor: "#2563eb", saveError: null as (Error & { status?: number }) | null, restoreError: null as (Error & { status?: number }) | null, conflicts: [] as unknown[], dismiss: vi.fn() }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => state.user ? { data: { user: { id: "same-user" } } } : null }))
 vi.mock("@/hooks/use-artifact-agent-dispatch", () => ({ useArtifactAgentDispatch: () => ({ ready: false, dispatch: vi.fn() }) }))
 vi.mock("../use-design", () => ({ useDesign: () => {
@@ -23,10 +23,10 @@ vi.mock("../use-design", () => ({ useDesign: () => {
   comments: { data: { comments: [] }, isError: false },
   versions: { data: { versions: [{ version: 1 }], shared_version: 1 }, isError: false },
   doc: state.doc, nodes: designNodes(state.doc!), peers: [{ clientId: 2, name: "Marie", color: state.peerColor, cursor: { x: 12, y: 24 } }], connection: "connected", editable: state.editable, dirty: false, draftError: false,
-  save: { ...mutation, error: state.saveError }, restore: { ...mutation, error: state.restoreError }, share: mutation, comment: mutation, connectAgent: mutation, setCursor: vi.fn(),
+  save: { ...mutation, error: state.saveError }, restore: { ...mutation, error: state.restoreError }, share: mutation, comment: mutation, connectAgent: mutation, setCursor: vi.fn(), conflicts: state.conflicts, dismissConflict: state.dismiss,
  }
 } }))
-beforeEach(() => { copying.real=false;copying.send.mockReset(); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true"); state.editable = true; state.pageId = "old-private-page"; state.user = false; state.peerColor = "#2563eb"; state.saveError = null; state.restoreError = null; state.doc = new Y.Doc() })
+beforeEach(() => { copying.real=false;copying.send.mockReset(); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true"); state.editable = true; state.pageId = "old-private-page"; state.user = false; state.peerColor = "#2563eb"; state.conflicts = []; state.dismiss.mockReset(); state.saveError = null; state.restoreError = null; state.doc = new Y.Doc() })
 afterEach(() => { cleanup(); state.doc?.destroy(); vi.unstubAllEnvs();vi.unstubAllGlobals() })
 describe("Design editor controls", () => {
  it("clears private unsent feedback when the same slug resolves to a new Page", async () => {
@@ -197,4 +197,46 @@ it("never refreshes and replays new Design creation after 401 through the real a
  await waitFor(()=>expect(screen.queryByText("Creating…")).not.toBeInTheDocument())
  expect(creates).toBe(1);expect(refreshes).toBe(0)
  expect(screen.queryByRole("link",{name:"Open new Design"})).not.toBeInTheDocument()
+})
+
+describe("Design conflict notice",()=>{
+ const node={id:"label",type:"text" as const,name:"Nadpis",text:"Základ",x:0,y:0,width:200,height:40,fill:"#111111"}
+ const conflict=(kept:"mine"|"theirs")=>({id:"label",name:"Nadpis",mine:"Můj text",theirs:"Cizí text",kept,restore:{...node,text:kept==="mine"?"Cizí text":"Můj text"}})
+ it("shows the person who lost their text and restores it",()=>{
+  upsertDesignNode(state.doc!,{...node,text:"Cizí text"})
+  state.conflicts=[conflict("theirs")]
+  render(<DesignEditor workspaceId="workspace" slug="shop"/>)
+  const alert=screen.getByRole("alert")
+  expect(alert).toHaveTextContent("Konflikt úprav")
+  expect(alert).toHaveTextContent("Váš text se neuložil")
+  expect(alert).toHaveTextContent("Můj text")
+  fireEvent.click(screen.getByRole("button",{name:"Obnovit tento text"}))
+  expect(designNodes(state.doc!)[0].text).toBe("Můj text")
+  expect(state.dismiss).toHaveBeenCalledWith(state.conflicts[0])
+ })
+ it("says the other person's text was overwritten and may exist nowhere else",()=>{
+  state.conflicts=[conflict("mine")]
+  render(<DesignEditor workspaceId="workspace" slug="shop"/>)
+  const alert=screen.getByRole("alert")
+  expect(alert).toHaveTextContent("Text druhého člověka byl přepsán")
+  expect(alert).toHaveTextContent("v historii zůstává, jen pokud byl uložen ve verzi")
+  expect(alert).toHaveTextContent("Cizí text")
+ })
+ it("copies the text and keeps the notice when a person only dismisses it",async()=>{
+  const writeText=vi.fn(async()=>{})
+  vi.stubGlobal("navigator",{...navigator,clipboard:{writeText}})
+  state.conflicts=[conflict("theirs")]
+  render(<DesignEditor workspaceId="workspace" slug="shop"/>)
+  fireEvent.click(screen.getByRole("button",{name:"Kopírovat text"}))
+  await waitFor(()=>expect(writeText).toHaveBeenCalledWith("Můj text"))
+  expect(state.dismiss).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("button",{name:"Zavřít upozornění"}))
+  expect(state.dismiss).toHaveBeenCalledWith(state.conflicts[0])
+ })
+ it("does not offer a restore to a person who can no longer edit",()=>{
+  state.editable=false
+  state.conflicts=[conflict("theirs")]
+  render(<DesignEditor workspaceId="workspace" slug="shop"/>)
+  expect(screen.getByRole("button",{name:"Obnovit tento text"})).toBeDisabled()
+ })
 })

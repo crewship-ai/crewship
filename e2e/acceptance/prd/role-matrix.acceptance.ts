@@ -782,8 +782,15 @@ test.describe("role matrix", () => {
       const head = await getDesign(request, ws.id, d.slug)
       const history = await versionTexts(request, ws.id, d.slug, d.text.id)
       const headText = head.nodes.find((n) => n.id === d.text.id)?.text
-      const recoverable = (text: string) => headText === text || history.includes(text) || owner.includes(text) || later.includes(text)
-      const conflictShown = messages.some((m) => /conflict|overwrit|replaced|changed by|also changed|keep (yours|both)/i.test(m))
+      // The notice counts only because it survives a reload: it is a sealed draft.
+      const notice = who.page.getByRole("alert").filter({ hasText: "Konflikt úprav" })
+      const conflictShown = (await notice.count()) > 0
+      const loser = headText === LATER ? OWNER : LATER
+      await who.page.reload({ waitUntil: "domcontentloaded" })
+      await connected(who.page)
+      await expect(notice, "the notice survives a reload").toContainText(loser, { timeout: 30_000 })
+      const noticeText = await notice.innerText()
+      const recoverable = (text: string) => headText === text || history.includes(text) || owner.includes(text) || later.includes(text) || noticeText.includes(text)
       await prd.evidence(`result${test.info().repeatEachIndex || ""}.json`, {
         mode: prd.mode, appSha: prd.appSha, workspace: ws.id, design: d.slug,
         winner: headText === OWNER ? "first person" : headText === LATER ? "later person" : "neither", canvases: { owner, later }, history, messages, conflictShown,
@@ -794,6 +801,9 @@ test.describe("role matrix", () => {
       expect.soft(owner.includes(headText ?? ""), "the first canvas converged").toBe(true)
       expect.soft(later.includes(headText ?? ""), "the later canvas converged").toBe(true)
       expect(conflictShown, `the later person sees the conflict; the page said: ${messages.join(" | ")}`).toBe(true)
+      await notice.getByRole("button", { name: "Obnovit tento text" }).click()
+      await expect.poll(async () => (await getDesign(request, ws.id, d.slug)).nodes.find((n) => n.id === d.text.id)?.text, { timeout: 30_000 }).toBe(loser)
+      await expect(notice, "the restored text ends the notice").toHaveCount(0)
     },
   )
 

@@ -17,7 +17,7 @@ vi.mock("../use-design", () => ({ useDesign: () => {
   query: { data: { page_id: "page", can_edit: state.editable, can_comment: state.editable, latest_version: 1, comments: [] }, isError: false },
   comments: { data: { comments: [] }, isError: false }, versions: { data: { versions: [{ version: 1 }], shared_version: 1 }, isError: false },
   doc: state.doc, nodes: designNodes(state.doc!), peers: [], connection: "connected", editable: state.editable, dirty: false, draftError: false,
-  save: mutation, restore: mutation, share: mutation, comment: mutation, connectAgent: mutation, setCursor: vi.fn(),
+  save: mutation, restore: mutation, share: mutation, comment: mutation, connectAgent: mutation, setCursor: vi.fn(), conflicts: [], dismissConflict: vi.fn(),
  }
 } }))
 

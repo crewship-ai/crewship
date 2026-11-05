@@ -134,6 +134,21 @@ also keeps a copy of your unsaved canvas in this browser, so a crash or a lost
 connection does not discard it. If browser storage is full or blocked, the
 editor says so; keep the window open until it is connected and save a version.
 
+### When two people change one text
+
+While you are offline the canvas is stale, and someone else can change the same
+text layer. On reconnect only one text stays on the canvas. The choice follows
+the sync order, not the time. Crewship shows a **Konflikt úprav** notice to the
+person who reconnects, with the text that lost, whichever side it came from:
+**Obnovit tento text** puts it back on the canvas and **Kopírovat text** copies
+it. The notice is kept encrypted in this browser and survives a reload until
+you close it. When your text stayed on the canvas, the other person's text is in
+the history only if it was saved in a version, so the notice shows it too.
+
+Only the text of a layer is compared. Position, size, colour and layer name stay
+last-writer-wins. A canvas restored from a browser copy after the window was
+closed offline is merged without the notice.
+
 ## Play a prototype
 
 <Note>
