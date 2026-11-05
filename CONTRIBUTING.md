@@ -308,7 +308,7 @@ Use one of the templates in
 [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE):
 
 - **Bug report** — include a minimal repro, the version
-  (`crewship --version`), and the relevant `journalctl` /
+  (`crewship version`), and the relevant `journalctl` /
   `./dev.sh logs` excerpt.
 - **Feature request** — describe the user-facing problem first, then
   the proposed solution. Implementation details can come in the PR.
