@@ -82,8 +82,8 @@ func NewOllama(baseURL, model string) *Ollama {
 // process — a workspace-configured one, or the runtime-settable Keeper judge —
 // where the dial must go through a guarded transport.
 //
-// The supplied client's TRANSPORT and redirect policy are applied to the
-// streaming path as well, its timeout deliberately not: a 300s request timeout is right for Complete and
+// The supplied client's transport and redirect policy also apply to streaming,
+// but its timeout does not: a 300s request timeout is right for Complete and
 // wrong for a stream. Only the non-streaming half used to be guarded, on the
 // reasoning that "streaming isn't used for the server-side discovery/validation
 // path" — true of the callers at the time, and not a property of the object. A
@@ -97,8 +97,9 @@ func NewOllamaWithClient(baseURL, model string, client *http.Client) *Ollama {
 	if client != nil {
 		o.client = client
 		if client.Transport != nil {
-			o.stream = &http.Client{Transport: client.Transport, CheckRedirect: client.CheckRedirect}
+			o.stream = &http.Client{Transport: client.Transport}
 		}
+		o.stream.CheckRedirect = client.CheckRedirect
 	}
 	return o
 }

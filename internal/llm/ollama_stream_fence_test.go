@@ -2,10 +2,12 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // A guarded provider must be guarded on every method it exposes.
@@ -32,6 +34,82 @@ func TestNewOllamaWithClient_FencesTheStreamingPathToo(t *testing.T) {
 	}
 }
 
+// Exercise the HTTP boundary: preserving a Transport alone does not preserve a
+// client's redirect policy. Both constructor paths (nil and supplied Transport)
+// must consult the caller's policy before contacting a second server.
+func TestNewOllamaWithClient_PreservesRedirectPolicy(t *testing.T) {
+	for _, transport := range []bool{false, true} {
+		for _, method := range []string{"Complete", "Stream"} {
+			for _, policy := range []string{"deny", "allow", "default"} {
+				name := method + "/" + policy + "/default-transport"
+				if transport {
+					name = method + "/" + policy + "/supplied-transport"
+				}
+				t.Run(name, func(t *testing.T) {
+					var targetCalls, policyCalls atomic.Int64
+					target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						targetCalls.Add(1)
+						_, _ = w.Write([]byte(`{"message":{"role":"assistant","content":"ok"},"done":true}` + "\n"))
+					}))
+					defer target.Close()
+					origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						http.Redirect(w, r, target.URL+r.URL.Path, http.StatusTemporaryRedirect)
+					}))
+					defer origin.Close()
+					client := &http.Client{Timeout: 5 * time.Second}
+					if transport {
+						client.Transport = http.DefaultTransport.(*http.Transport).Clone()
+					}
+					defer client.CloseIdleConnections()
+					denied := errors.New("caller refused redirect")
+					if policy != "default" {
+						client.CheckRedirect = func(*http.Request, []*http.Request) error {
+							policyCalls.Add(1)
+							if policy == "deny" {
+								return denied
+							}
+							return nil
+						}
+					}
+					provider := NewOllamaWithClient(origin.URL, "m", client)
+					defer provider.stream.CloseIdleConnections()
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					request := Request{Messages: []Message{{Role: RoleUser, Content: "hi"}}}
+					var err error
+					if method == "Complete" {
+						_, err = provider.Complete(ctx, request)
+					} else {
+						_, err = provider.Stream(ctx, request, func(StreamEvent) error { return nil })
+					}
+					if policy == "deny" {
+						if !errors.Is(err, denied) {
+							t.Errorf("error = %v, want supplied redirect refusal", err)
+						}
+						if got := targetCalls.Load(); got != 0 {
+							t.Errorf("redirect target received %d requests, want 0", got)
+						}
+					} else {
+						if err != nil {
+							t.Errorf("allowed request: %v", err)
+						}
+						if got := targetCalls.Load(); got != 1 {
+							t.Errorf("redirect target received %d requests, want 1", got)
+						}
+					}
+					wantPolicyCalls := int64(1)
+					if policy == "default" {
+						wantPolicyCalls = 0
+					}
+					if got := policyCalls.Load(); got != wantPolicyCalls {
+						t.Errorf("redirect policy called %d times, want %d", got, wantPolicyCalls)
+					}
+				})
+			}
+		}
+	}
+}
+
 // A nil client keeps the shipped defaults, so the many callers that pass one
 // behave exactly as before.
 func TestNewOllamaWithClient_NilKeepsDefaults(t *testing.T) {
@@ -48,26 +126,4 @@ type markerTransport struct{}
 
 func (markerTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, http.ErrUseLastResponse
-}
-
-// The transport alone is half the fence: a client that refuses redirects must
-// keep refusing them on the stream, or a completion body is replayed elsewhere.
-func TestNewOllamaWithClient_StreamKeepsTheRedirectPolicy(t *testing.T) {
-	var bounced atomic.Int32
-	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { bounced.Add(1) }))
-	defer target.Close()
-	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
-	}))
-	defer endpoint.Close()
-
-	client := &http.Client{
-		Transport:     http.DefaultTransport,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}
-	o := NewOllamaWithClient(endpoint.URL, "m", client)
-	_, _ = o.Stream(context.Background(), Request{Messages: []Message{{Role: "user", Content: "ping"}}}, func(StreamEvent) error { return nil })
-	if got := bounced.Load(); got != 0 {
-		t.Fatalf("the stream followed the redirect %d time(s)", got)
-	}
 }
