@@ -35,7 +35,7 @@ export function ArtifactsRoute({ item, bySlug }: { item: string | null; bySlug?:
 
   const pinned = versionPin(params?.get("version"))
   useEffect(() => {
-    if (enabled) return
+    if (enabled || loading || linkUnavailable) return
     // The static export has no server redirect; a saved link still lands on Pages.
     // An artifact address keeps its identity and pin there: links the API
     // returns for projects open in the Pages project viewer of a build without
@@ -48,10 +48,10 @@ export function ArtifactsRoute({ item, bySlug }: { item: string | null; bySlug?:
       return
     }
     router.replace(`/pages${workspaceQuery.size ? `?${workspaceQuery}` : ""}`)
-  }, [enabled]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled, loading, linkUnavailable]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!enabled) return null
   if (linkUnavailable) return <p className="p-6" role="alert">Artifacts unavailable.</p>
+  if (!enabled) return null
   if (loading || !workspaceId) return <Skeleton className="m-6 h-12" />
 
   const filters = filtersFromParams(params)

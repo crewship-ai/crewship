@@ -90,3 +90,17 @@ it("waits for the page before deciding, showing neither view", () => {
   expect(state.replace).not.toHaveBeenCalled()
   expect(screen.queryByTestId("legacy")).toBeNull()
 })
+
+it("follows the address: a later link is resolved for its own page, never the first one", () => {
+  state.loading = true
+  state.wire = null
+  const view = render(<PageDetailClient />)
+  expect(state.read).toHaveBeenLastCalledWith("ws1", "brief")
+  state.slug = "second"
+  state.loading = false
+  state.wire = project({ id: "page-second", slug: "second" })
+  view.rerender(<PageDetailClient />)
+  expect(state.read).toHaveBeenLastCalledWith("ws1", "second")
+  expect(state.replace).toHaveBeenCalledWith("/artifacts/page-second?workspace_id=ws1")
+  expect(state.replace).not.toHaveBeenCalledWith("/artifacts/page-brief?workspace_id=ws1")
+})

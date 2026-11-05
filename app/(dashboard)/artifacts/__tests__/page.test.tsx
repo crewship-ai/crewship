@@ -1,10 +1,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
-const nav = vi.hoisted(() => ({ params: new URLSearchParams("workspace_id=ws1"), replace: vi.fn(), push: vi.fn() }))
+const nav = vi.hoisted(() => ({ linkUnavailable: false, params: new URLSearchParams("workspace_id=ws1"), replace: vi.fn(), push: vi.fn() }))
 // Like the static export: every ID is served the "_" shell and useParams() keeps returning it.
 vi.mock("next/navigation", () => ({ useSearchParams: () => nav.params, useParams: () => ({ id: "_" }), usePathname: () => window.location.pathname, useRouter: () => ({ replace: nav.replace, push: nav.push }) }))
-vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ workspaceId: "ws1", loading: false, linkUnavailable: false }) }))
+vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ workspaceId: "ws1", loading: false, linkUnavailable: nav.linkUnavailable }) }))
 vi.mock("@/components/features/artifacts-library/artifacts-library", () => ({
   ArtifactsLibrary: ({ workspaceId, item, version, bySlug, onSelect, onCanonical, filters, onFiltersChange }: {
     workspaceId: string; item: string | null; version?: number; bySlug?: boolean; onSelect: (id: string | null, slug?: string) => void
@@ -23,7 +23,7 @@ import ArtifactsPage from "../page"
 import ArtifactRoute from "../[id]/page"
 
 const at = (path: string) => window.history.replaceState(null, "", path)
-beforeEach(() => { at("/artifacts"); nav.params = new URLSearchParams("workspace_id=ws1"); nav.replace.mockReset(); nav.push.mockReset(); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true") })
+beforeEach(() => { nav.linkUnavailable = false; at("/artifacts"); nav.params = new URLSearchParams("workspace_id=ws1"); nav.replace.mockReset(); nav.push.mockReset(); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true") })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
 it("with the flag off sends saved links to Pages", () => {
@@ -118,4 +118,14 @@ it("without the library keeps a project link's identity, workspace and pin on Pa
   at("/artifacts/page-site")
   render(<ArtifactRoute />)
   expect(nav.replace).toHaveBeenCalledWith("/pages/%40page-site?workspace_id=ws1&artifact=1&version=2")
+})
+
+it("without the library refuses an unavailable workspace link instead of moving it to Pages", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "false")
+  nav.linkUnavailable = true
+  nav.params = new URLSearchParams("workspace_id=ws1&workspace_id=ws2")
+  at("/artifacts/page-site")
+  render(<ArtifactRoute />)
+  expect(nav.replace).not.toHaveBeenCalled()
+  expect(screen.getByRole("alert")).toHaveTextContent("Artifacts unavailable.")
 })
