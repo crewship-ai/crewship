@@ -100,11 +100,6 @@ it("wordcraft: an edited final capture on revoke stays a local draft", async () 
   const r = mounted("wordcraft")
   try { r.edit(6); expect(await r.controller.revokeWrite()).toBe(true); expect(r.confirmed).not.toContain(6) } finally { await r.controller.close() }
 })
-it("gridcraft: no engine revision state -> a differing export is still saved", async () => {
-  const r = mounted("gridcraft")
-  try { await r.controller.flush(); expect(r.requests.map(q => q.bytes[0])).toEqual([5]) } finally { await r.controller.close() }
-})
-
 for (const later of ["edit", "capture", "read-retirement"] as const) it(`untouched row confirmation cannot clear newer ${later}`, async () => {
   const r = mounted("wordcraft")
   let release!: () => void
@@ -125,4 +120,27 @@ for (const later of ["edit", "capture", "read-retirement"] as const) it(`untouch
     expect(r.states.at(-1)?.dirty).toBe(true)
     if (later === "read-retirement") expect(r.states.at(-1)?.phase).toBe("stopped")
   } finally { release(); await r.controller.close() }
+})
+
+it("gridcraft: no engine revision state -> a differing export is still saved", async () => {
+  const r = mounted("gridcraft")
+  try { await r.controller.flush(); expect(r.requests.map(q => q.bytes[0])).toEqual([5]) } finally { await r.controller.close() }
+})
+
+it("wordcraft: an untouched final capture retires while the loaded seed digest is still pending", async () => {
+  let releaseSeed!: () => void, delayedSeed = false
+  const seedGate = new Promise<void>(resolve => { releaseSeed = resolve })
+  const digest = webcrypto.subtle.digest.bind(webcrypto.subtle)
+  const spy = vi.spyOn(webcrypto.subtle, "digest").mockImplementation((algorithm, data) => {
+    const bytes = ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data)
+    if (bytes.length === 1 && bytes[0] === 3) { delayedSeed = true; return seedGate.then(() => digest(algorithm, data)) }
+    return digest(algorithm, data)
+  })
+  const r = mounted("wordcraft")
+  try {
+    expect(delayedSeed).toBe(true)
+    expect(await r.controller.revokeWrite()).toBe(true)
+    expect(r.requests).toHaveLength(0)
+    expect(r.confirmed).toEqual([5])
+  } finally { releaseSeed(); spy.mockRestore(); await r.controller.close() }
 })
