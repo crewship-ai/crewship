@@ -1,0 +1,1 @@
+- **An untouched Word document could reappear as a recovery draft after edit access ended.** Final capture now recognizes the unchanged loaded document even while its background checksum is pending, so it does not offer a redundant draft.
