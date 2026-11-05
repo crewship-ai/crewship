@@ -47,8 +47,8 @@ exception in the other direction: it prints YAML unless you ask for
 | `set <slug>/<panel> --data -` | Push a panel's data — the single write path |
 | `actions <slug>/<panel>` | List the actions a panel declares, and the routine each one runs |
 | `action <slug>/<panel> <action-id>` | Dispatch a declared action |
-| `grant <slug> --user\|--crew\|--agent <subject>\|--workspace --level <level>` | Grant read, comment, produce, or write on a page |
-| `share <slug> --user\|--crew <subject>\|--workspace --level read\|comment\|write` | Share inside the workspace; Comment never grants edit or execution authority |
+| `grant <slug> --user\|--crew\|--agent <subject>\|--everyone --level <level>` | Grant read, comment, produce, or write on a page |
+| `share <slug> --user\|--crew <subject>\|--everyone --level read\|comment\|write` | Share inside the workspace; Comment never grants edit or execution authority |
 | `archive <page> --dry-run --pages-version <n>` | Preview removal from default lists without deleting content |
 | `unarchive <page> --dry-run --pages-version <n>` | Preview restoration to default lists |
 | `revoke <slug> --agent <agent-slug>` | Remove a grant |
@@ -262,7 +262,7 @@ standing. It offers no guest or expiry options and cannot grant agent Produce.
 |---|---|
 | `--user <member>` | Existing member email or ID. |
 | `--crew <crew>` | Existing crew slug or ID. |
-| `--workspace` | All current human workspace members. |
+| `--everyone` | All current human workspace members. |
 | `--level <read\|comment\|write>` | Human sharing capability; Comment grants feedback only. |
 
 ## `crewship page get <slug>`
@@ -886,7 +886,7 @@ crewship page grant fleet-201 --user  ops@example.com --level write
 | `--user <email>` | Grant to a human user |
 | `--crew <slug>` | Grant to a crew |
 | `--agent <slug>` | Grant to an agent |
-| `--workspace` | Grant to everyone in the workspace — every current human member, never an agent. `read` or `write` only; `produce` names a producer, and everyone is not one. |
+| `--everyone` | Grant to everyone in the workspace — every current human member, never an agent. `read` or `write` only; `produce` names a producer, and everyone is not one. |
 | `--level <read\|comment\|produce\|write>` | The verb being granted — see [the permission model](/guides/pages#the-three-verbs) |
 | `--panels <id,id,...>` | Restricts a `produce` grant to these panel ids. Omitted = every panel the subject is otherwise eligible to write. Only meaningful for `--level produce`. |
 
@@ -913,8 +913,12 @@ crewship page revoke fleet-201 --agent devops-bot
 Removes a grant, journalled as `page.grant_removed`.
 
 `revoke` takes the same subject flags as `grant` — `--user`, `--crew`,
-`--agent`, `--workspace` — plus an optional `--level`. Omit the level and every level that
+`--agent`, `--everyone` — plus an optional `--level`. Omit the level and every level that
 subject holds is withdrawn at once.
+
+On `grant`, `share` and `revoke`, `--workspace <slug>` is the global workspace
+selector, as on every other command. The subject "everyone in the workspace"
+is `--everyone`; the old boolean `--workspace` subject is refused with exit 2.
 
 <Note>
   A grant can also stop working without being revoked. It is live only while
