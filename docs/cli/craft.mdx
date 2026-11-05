@@ -213,10 +213,13 @@ in the `connect` process, so another process can never confirm the save.
 
 ### Recover after losing the `connect` process
 
-There is no reconcile from a new process: it answers `409` (exit `5`) even when
-the save committed. A `410` from a different session says nothing about the old
-attempt either: it answers for that session's own attempts, and the old save may
-still have committed. Do not use reconcile here. Check the history instead:
+There is no reconcile from a new process. The original snapshot is refused
+before any request with `invalid native snapshot binding` (exit `1`), because
+its `sessionId` is not the new connection's. With `sessionId` rewritten, the
+server answers `409` (exit `5`) even when the save committed. A `410` from a
+different session says nothing about the old attempt either: it answers for that
+session's own attempts, and the old save may still have committed. Do not use
+reconcile here. Check the history instead:
 
 1. Keep the local draft and note the `baseVersion` of the lost save.
 2. Open a new `connect` and send `acquire`. The old lease lapses about 15 seconds

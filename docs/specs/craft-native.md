@@ -87,8 +87,8 @@ browser reports it is back online, as "Ověřit výsledek" does.
 
 The snapshot message binds the session, so `crewship craft connect` can
 reconcile only on the connection that made the save; the admission token never
-leaves that process. From a new process reconcile stays unconfirmed (409), and
-a new holder's 410 covers only its own session's attempts. Recovery after losing
+leaves that process. From a new process the original snapshot fails the local
+session check, a rewritten one stays unconfirmed (409), and a new holder's 410 covers only its own session's attempts. Recovery after losing
 the process reads base+1 from the version history and compares its hash and
 author with the local candidate.
 

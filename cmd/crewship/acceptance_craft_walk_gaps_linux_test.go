@@ -297,6 +297,16 @@ func TestAcceptance_CraftReconcileFromNewProcessIsUnconfirmed(t *testing.T) {
 	snapshot["editorRevision"] = "revision-committed"
 	snapshot["contentHash"] = fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(committed)))
 
+	// The original snapshot replayed as it stands is refused before a request:
+	// it names the session of the lost process.
+	replay, _ := f.connect()
+	if row := replay.send(map[string]any{"action": "reconcile", "snapshot": snapshot}); row != nil {
+		t.Fatalf("the replay answered: %v", row)
+	}
+	if replay.code != 1 || !strings.Contains(replay.stderr.String(), "invalid native snapshot binding") {
+		t.Fatalf("replay: exit %d, stderr %s", replay.code, replay.stderr.String())
+	}
+
 	for _, attempt := range []string{"", "attempt-from-lost-process"} {
 		other, otherSession := f.connect()
 		late := map[string]any{}
