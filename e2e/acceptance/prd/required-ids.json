@@ -441,11 +441,11 @@
     "harness.reach",
     "harness.identity",
     "harness.full-inputs",
-    "A.craft.startup.slow.wordcraft",
-    "A.craft.startup.slow.gridcraft",
-    "A.craft.startup.deadline.wordcraft",
-    "A.craft.startup.deadline.gridcraft",
-    "A.craft.startup.revoked.wordcraft",
-    "A.craft.startup.revoked.gridcraft"
+    "A.craft.startup.slow.word",
+    "A.craft.startup.slow.sheet",
+    "A.craft.startup.deadline.word",
+    "A.craft.startup.deadline.sheet",
+    "A.craft.startup.revoked.word",
+    "A.craft.startup.revoked.sheet"
   ]
 }

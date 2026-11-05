@@ -57,7 +57,7 @@ for (const { application, label } of APPLICATIONS) {
   test.describe(`${label} startup`, () => {
     test(
       `${label}: a slow start stays hidden, then opens`,
-      { annotation: prdRequirement(`A.craft.startup.slow.${application}`, "A slow engine start keeps the frame hidden until read proof and then opens") },
+      { annotation: prdRequirement(`A.craft.startup.slow.${label.toLowerCase()}`, "A slow engine start keeps the frame hidden until read proof and then opens") },
       async ({ prd, page, request }) => {
         prd.requireFull("needs the deployed native editor bundles")
         const ws = await prd.qaWorkspace()
@@ -79,7 +79,7 @@ for (const { application, label } of APPLICATIONS) {
 
     test(
       `${label}: a start past the connection deadline says so and shows nothing`,
-      { annotation: prdRequirement(`A.craft.startup.deadline.${application}`, "An engine that misses the connection deadline ends in the honest message without showing a frame") },
+      { annotation: prdRequirement(`A.craft.startup.deadline.${label.toLowerCase()}`, "An engine that misses the connection deadline ends in the honest message without showing a frame") },
       async ({ prd, page, request }) => {
         prd.requireFull("needs the deployed native editor bundles")
         const ws = await prd.qaWorkspace()
@@ -98,7 +98,7 @@ for (const { application, label } of APPLICATIONS) {
 
     test(
       `${label}: access withdrawn during a slow start shows nothing`,
-      { annotation: prdRequirement(`A.craft.startup.revoked.${application}`, "Access withdrawn while the editor loads never reveals the document") },
+      { annotation: prdRequirement(`A.craft.startup.revoked.${label.toLowerCase()}`, "Access withdrawn while the editor loads never reveals the document") },
       async ({ prd, request }) => {
         prd.requireFull("needs the deployed native editor bundles")
         const cleanup: Array<() => Promise<void>> = []
