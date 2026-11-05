@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -341,10 +342,11 @@ var pageGrantOldWorkspaceSubject = cli.WithExitCode(errors.New(
 	"--workspace selects a workspace and takes a value; to name everyone in the workspace as the subject, use --everyone"),
 	cli.ExitValidation)
 
-// pageGrantArgs refuses the old boolean spelling. Without this check the global
-// string flag would swallow the next flag as a workspace name.
+// pageGrantArgs refuses the old boolean spelling. The global string flag would
+// otherwise swallow the next flag as a workspace name, or take a former boolean
+// literal such as --workspace=false as one and send a mutation there.
 func pageGrantArgs(cmd *cobra.Command, args []string) error {
-	if strings.HasPrefix(flagWorkspace, "-") {
+	if _, literal := strconv.ParseBool(flagWorkspace); literal == nil || strings.HasPrefix(flagWorkspace, "-") {
 		return pageGrantOldWorkspaceSubject
 	}
 	return cobra.ExactArgs(1)(cmd, args)

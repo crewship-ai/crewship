@@ -918,7 +918,10 @@ subject holds is withdrawn at once.
 
 On `grant`, `share` and `revoke`, `--workspace <slug>` is the global workspace
 selector, as on every other command. The subject "everyone in the workspace"
-is `--everyone`; the old boolean `--workspace` subject is refused with exit 2.
+is `--everyone`. The old boolean `--workspace` subject is refused with exit 2,
+and so is any value the old flag accepted (`--workspace=false`, `-w 1` and the
+like), so these commands cannot select a workspace literally named `true`,
+`false`, `t`, `f`, `0` or `1`.
 
 <Note>
   A grant can also stop working without being revoked. It is live only while

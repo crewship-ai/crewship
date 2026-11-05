@@ -117,10 +117,27 @@ func TestAcceptance_PageGrantHonoursGlobalWorkspace(t *testing.T) {
 		{"page", "grant", "only-other", "--level", "read", "--workspace"},
 		{"page", "revoke", "only-other", "--workspace"},
 		{"page", "share", "only-other", "--workspace", "--level", "read"},
+		{"page", "grant", "only-other", "--workspace=false", "--user", "mate@grant.invalid", "--level", "read"},
+		{"page", "revoke", "only-other", "--workspace=false", "--user", "mate@grant.invalid"},
 	} {
 		out, code := run(old...)
 		if code != 2 || !strings.Contains(out, "--everyone") {
 			t.Fatalf("old form %v: exit %d\n%s", old, code, out)
+		}
+	}
+	// Every literal the old boolean accepted, from any spelling of the flag, is
+	// refused before a request: as a workspace name it would redirect the grant.
+	for _, literal := range []string{"1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"} {
+		for _, flag := range [][]string{{"--workspace=" + literal}, {"--workspace", literal}, {"-w", literal}, {"-w=" + literal}} {
+			for _, verb := range [][]string{
+				{"page", "grant", "only-other", "--user", "mate@grant.invalid", "--level", "read"},
+				{"page", "revoke", "only-other", "--user", "mate@grant.invalid"},
+			} {
+				args := append(append([]string{}, verb...), flag...)
+				if out, code := run(args...); code != 2 || !strings.Contains(out, "--everyone") {
+					t.Fatalf("%v: exit %d\n%s", args, code, out)
+				}
+			}
 		}
 	}
 	if out, code := run("page", "grant", "only-other", "--workspace", other, "--everyone", "--user", "mate@grant.invalid", "--level", "read"); code != 2 || !strings.Contains(out, "both given") {
