@@ -493,6 +493,7 @@ fixed status-only message:
 | 403 / 4 | No edit rights on the artifact, or the lease action is not allowed for you. |
 | 404 / 3 | `restore` names a version that does not exist. Only the lease holder gets this answer. |
 | 409 / 5 | The lease or document changed (busy, stale generation or newer version). Read the lease and document again; keep your local draft. |
+| 410 / 1 | `reconcile` with an `attemptId`, under the live lease of the session that made the attempt: that attempt did not commit and never will. |
 | 413 / 1 | The native history quota is full; existing versions are kept. |
 | 422 / 2 | The native document bytes are invalid. |
 

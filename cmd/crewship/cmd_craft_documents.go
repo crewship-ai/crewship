@@ -27,6 +27,20 @@ type craftDocumentSnapshot struct {
 	ContentHash    string `json:"contentHash,omitempty" yaml:"contentHash,omitempty"`
 	Bytes          []byte `json:"bytes,omitempty" yaml:"bytes,omitempty"`
 	TargetVersion  string `json:"targetVersion,omitempty" yaml:"targetVersion,omitempty"`
+	AttemptID      string `json:"attemptId,omitempty" yaml:"attemptId,omitempty"`
+}
+
+// craftAttemptID is the server's opaque attempt format: 8 to 64 of [A-Za-z0-9_-].
+func craftAttemptID(id string) bool {
+	if len(id) < 8 || len(id) > 64 {
+		return false
+	}
+	for _, c := range id {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func craftPositiveVersion(raw string) bool {
@@ -52,6 +66,9 @@ func craftValidateDocumentAction(a craftAction, session string) error {
 		if id == "" || len(id) > 256 || strings.ContainsRune(id, 0) {
 			return fmt.Errorf("invalid native snapshot binding")
 		}
+	}
+	if s.AttemptID != "" && (a.Action == "share" || a.Action == "restore" || !craftAttemptID(s.AttemptID)) {
+		return fmt.Errorf("attemptId belongs on save, import or reconcile: 8 to 64 of A-Z a-z 0-9 - _")
 	}
 	if a.Action == "share" {
 		if !craftPositiveVersion(s.TargetVersion) || len(s.Bytes) != 0 || s.EditorRevision != "" || s.ContentHash != "" {

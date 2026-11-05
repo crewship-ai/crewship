@@ -243,3 +243,23 @@ func TestAcceptance_CraftRestoreMissingVersionIsNotFound(t *testing.T) {
 		t.Fatalf("a refused restore wrote a version: %d", n)
 	}
 }
+
+// An attempt the server never committed answers 410 under the live lease of the
+// session that made it: a definite "never will", exit 1.
+func TestAcceptance_CraftReconcileAttemptNeverCommitted(t *testing.T) {
+	f := newCraftGapsFixture(t)
+	holder, session := f.connect()
+	_, snapshot := holder.acquire(session)
+	snapshot["editorRevision"] = "revision-never-sent"
+	snapshot["contentHash"] = "sha256:" + strings.Repeat("e", 64)
+	snapshot["attemptId"] = "attempt-never-sent"
+	if row := holder.send(map[string]any{"action": "reconcile", "snapshot": snapshot}); row != nil {
+		t.Fatalf("reconcile answered: %v", row)
+	}
+	if holder.code != 1 || !strings.Contains(holder.stderr.String(), "did not commit") {
+		t.Fatalf("exit %d, stderr %s", holder.code, holder.stderr.String())
+	}
+	if n := f.versions(); n != 2 {
+		t.Fatalf("reconcile wrote a version: %d", n)
+	}
+}

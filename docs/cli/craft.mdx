@@ -193,6 +193,24 @@ exports. The snapshot public session ID must match this connection; private
 admission tokens never belong in the snapshot. No automatic mutation retry
 occurs after a conflict or unknown ACK.
 
+### Confirm a save after a lost reply
+
+Give each `save` a fresh `attemptId` in its snapshot: 8 to 64 of
+`[A-Za-z0-9_-]`, chosen by you. `import` takes it too; `share` and `restore`
+refuse it. If the reply is lost but the `connect` process is still running, send
+`reconcile` on that same connection with the original snapshot fields, without
+`bytes`, and the same `attemptId`:
+
+| Answer | Meaning | Next step |
+|---|---|---|
+| Exit 0, receipt | The save committed at `baseVersion + 1`. | Nothing to send. |
+| `410` (exit `1`) | Under your live lease, that attempt did not commit and never will. | Open a new connection and save again with a fresh `editorRevision` and `attemptId`. |
+| `409` (exit `5`) | Unconfirmed: no `attemptId`, or this session no longer holds the live lease. Nothing was recorded. | Keep the local draft and follow the steps below. |
+
+Reconcile is bound to the original admission. The server compares the session in
+the snapshot with the session that committed, and the admission token lives only
+in the `connect` process, so another process can never confirm the save.
+
 `watch` consumes the server's live SSE stream until cancellation or stream end;
 it does not process later stdin actions. Only a valid `session_retired` event
 is a confirmed clean end; unexpected EOF reports an unconfirmed disconnect.
