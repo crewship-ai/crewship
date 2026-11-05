@@ -71,7 +71,28 @@ test.describe("Sheet data classes", () => {
         const alerts = await page.getByRole("alert").allInnerTexts()
         expect(alerts.filter(Boolean), "the editor opens the workbook without an error").toEqual([])
         await prd.evidence("editor-reopened.png", await page.screenshot({ fullPage: true }))
-        log.editor = { opened: true }
+
+        // Edit in the real editor and save through its engine: the whole workbook
+        // goes through the engine's own serializer, so every class must survive it.
+        const frame = await native.acquire(page, "gridcraft")
+        const marker = `PRDGRID${Date.now().toString(36)}`
+        await native.typeMarker(page, frame, "gridcraft", marker, 3)
+        const editorVersion = await native.waitSaved(page, 60_000)
+        await native.release(page)
+        const edited = await native.readNative(request, ws.id, doc.pageId)
+        expect(BigInt(edited.version), "the editor saved a new version").toBeGreaterThan(BigInt(receipt.version))
+        const afterEditor = readFacts(Buffer.from(edited.raw, "utf8"))
+        expect(afterEditor.sheets, "sheets after the editor saved").toEqual(EXPECTED_SHEETS)
+        expect(afterEditor.dateSystem, "date system after the editor saved").toBe(EXPECTED_DATE_SYSTEM)
+        expect(afterEditor.cells, "every data class after the editor saved").toMatchObject(EXPECTED_CELLS)
+        expect(afterEditor.cells["Sheet1!A3"], "the typed cell").toMatchObject({ valueType: "Text", value: marker })
+
+        // And it opens again from that engine-written version.
+        await page.reload()
+        await native.frameOf(page, "gridcraft")
+        expect((await page.getByRole("alert").allInnerTexts()).filter(Boolean), "the edited workbook reopens without an error").toEqual([])
+        await prd.evidence("editor-after-edit.png", await page.screenshot({ fullPage: true }))
+        log.editor = { opened: true, editedVersion: edited.version, editorVersion, marker, cells: afterEditor.cells }
       }
       await prd.evidence("result.json", log)
     } finally {
