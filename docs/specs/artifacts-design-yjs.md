@@ -166,15 +166,21 @@ permissions, keeping the local document and any unsent changes.
 | Action | Required |
 |---|---|
 | Create | A human with Page creation permission. Agents cannot create a Design. |
-| Read live canvas, open the websocket | Read access to the Page. |
+| Read canvas, open the websocket | Read access to the Page; shared-only readers are limited to the shared snapshot and presence. |
 | Edit (live sync, operations, snapshot, restore) | Edit access to the Page, or an admitted agent run for this Page. |
 | Comment | Edit access, or an explicit Comment grant. |
 | Share a version | The Page owner. |
 
-Readers see the live canvas read-only and receive live updates. The version
-list and comments they see are limited to the shared version, and they can open
-only that version by number. Tokens need `pages:read` for reads and
-`pages:write` for changes.
+Shared-only Read and Comment grantees receive the immutable shared snapshot
+and presence, not unsaved live canvas updates. Their version list and comments
+are limited to the shared version, and they can open only that version by
+number. Workspace administrators using the separately audited read path can
+still read live state; a read-only token does not gain write permission. Tokens
+need `pages:read` for reads and `pages:write` for changes.
+
+Snapshot access and presence do not establish live editing or a collaboration
+acceptance result. Live multiuser behavior must be qualified separately on the
+enabled deployment and its supported clients.
 
 ## Agents
 
