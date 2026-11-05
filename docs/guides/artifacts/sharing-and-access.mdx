@@ -13,10 +13,11 @@ access, filing artifacts in shared folders, and checking who can open what.
 <Note>
 The Artifacts library at `/artifacts` is off in a default build. Build the
 web UI with `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` to show it. Project artifacts
-also need the `artifact_projects` workspace flag, which is off by default:
+also need the `artifact_projects` workspace flag. It is on by default; if a
+workspace manager turned it off, turn it back on with:
 
 ```bash
-crewship feature-flag enable artifact_projects
+crewship feature-flag inherit artifact_projects
 ```
 
 Sharing itself has no separate flag. Leave `NEXT_PUBLIC_ARTIFACTS_SHARING_MOCK`
