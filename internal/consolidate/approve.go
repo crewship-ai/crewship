@@ -189,7 +189,7 @@ func ApproveProposal(
 	}
 	canonicalPath := filepath.Join(canonicalDir, "learned-"+now.Format("2006-01-02")+".md")
 
-	if err := appendToCanonical(canonicalPath, now, rulesBlock); err != nil {
+	if err := mergeIntoCanonical(opts.StorageRoot, canonicalPath, now, rulesBlock); err != nil {
 		return nil, fmt.Errorf("append to canonical: %w", err)
 	}
 
@@ -432,6 +432,21 @@ func markProposalDecided(ctx context.Context, db *sql.DB, proposalID, status, us
 		return ErrProposalNotPending
 	}
 	return nil
+}
+
+// mergeIntoCanonical is appendToCanonical pinned to the storage root when one
+// is configured, so the lock, the read and the write share one directory
+// handle. The crew can write this tree; only trusted callers run unrooted.
+func mergeIntoCanonical(storageRoot, canonicalPath string, now time.Time, body string) error {
+	if storageRoot == "" {
+		return appendToCanonical(canonicalPath, now, body)
+	}
+	return memory.UpdateFileRooted(storageRoot, canonicalPath, func(prior []byte, exists bool) ([]byte, error) {
+		block := BuildCanonicalAppendBlock(exists, now, body)
+		content := make([]byte, 0, len(prior)+len(block))
+		content = append(content, prior...)
+		return append(content, block...), nil
+	})
 }
 
 // appendToCanonical merges the proposal's rules block into the
