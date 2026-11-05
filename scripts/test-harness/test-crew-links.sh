@@ -136,8 +136,8 @@ crew_links_exit() {
   return "$original"
 }
 trap crew_links_exit EXIT
-trap 'exit 143' TERM
-trap 'exit 130' INT
+trap 'trap "" TERM INT; exit 143' TERM
+trap 'trap "" TERM INT; exit 130' INT
 feed_ok=1
 if (( XLINK_HAVE_JQ == 1 )); then xlink_to_morgan_ids > "$before_ids" || feed_ok=0; fi
 
