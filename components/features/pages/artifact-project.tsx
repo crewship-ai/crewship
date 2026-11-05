@@ -143,7 +143,7 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
   return () => window.removeEventListener("message", receive)
  }, [token, manifest, path, selecting, canComment, setAnchor, setSelecting])
  // A query error immediately removes cached content, including after revocation.
- if (readDenied) return <p role="alert" className="p-6">Page read access was removed. Reopen after access is granted.</p>
+ if (readDenied) return <p role="alert" className="p-6">Page read access was removed. The local draft has been deleted where this browser could reach it.</p>
  if (query.isError) return <section className="p-6"><p role="alert">{query.error.message}</p>{activeSource&&<SourceRecovery body={activeSource.body}/>}</section>
  if (!data || query.isFetchedAfterMount === false) return <p role="status" className="p-6">Loading artifact project…</p>
  const mutationError = restore.error ?? share.error ?? comment.error
