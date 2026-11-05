@@ -263,3 +263,90 @@ func TestAcceptance_CraftReconcileAttemptNeverCommitted(t *testing.T) {
 		t.Fatalf("reconcile wrote a version: %d", n)
 	}
 }
+
+// oneShot runs a CLI command that ends by itself.
+func (f *craftGapsFixture) oneShot(args ...string) (string, int) {
+	f.t.Helper()
+	home := f.t.TempDir()
+	config := filepath.Join(home, "cli.yaml")
+	if err := os.WriteFile(config, []byte("server: "+f.url+"\nworkspace: "+craftGapsWorkspace+"\ntoken: "+f.bearer+"\n"), 0600); err != nil {
+		f.t.Fatal(err)
+	}
+	cmd := exec.Command(f.binary, args...)
+	cmd.Env = append(os.Environ(), "HOME="+home, "CREWSHIP_CONFIG="+config, "CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=", "NO_COLOR=1", "DATABASE_URL=")
+	out, err := cmd.CombinedOutput()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return string(out), exit.ExitCode()
+	}
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return string(out), 0
+}
+
+// The process that made a save is gone. Reconcile from a new process cannot
+// confirm the save, because the snapshot binds the session that committed it;
+// the documented recovery compares base+1 with the local candidate.
+func TestAcceptance_CraftReconcileFromNewProcessIsUnconfirmed(t *testing.T) {
+	f := newCraftGapsFixture(t)
+	const committed = `{"v":2}`
+	original, session := f.connect()
+	generation, snapshot := original.acquire(session)
+	snapshot["baseVersion"] = "1"
+	snapshot["editorRevision"] = "revision-committed"
+	snapshot["contentHash"] = fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(committed)))
+
+	for _, attempt := range []string{"", "attempt-from-lost-process"} {
+		other, otherSession := f.connect()
+		late := map[string]any{}
+		for k, v := range snapshot {
+			late[k] = v
+		}
+		late["sessionId"] = otherSession
+		if attempt != "" {
+			late["attemptId"] = attempt
+		}
+		if row := other.send(map[string]any{"action": "reconcile", "snapshot": late}); row != nil {
+			t.Fatalf("reconcile from a new process confirmed: %v", row)
+		}
+		if other.code != 5 {
+			t.Fatalf("attempt %q: exit %d, want 5\n%s", attempt, other.code, other.stderr.String())
+		}
+	}
+
+	// The documented recovery proves the commit without any reconcile.
+	file := filepath.Join(t.TempDir(), "candidate.json")
+	if out, code := f.oneShot("craft", "version", "@"+craftGapsPage, "2", "--output", file); code != 0 {
+		t.Fatalf("craft version: exit %d\n%s", code, out)
+	}
+	got, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != committed {
+		t.Fatalf("base+1 bytes %q", got)
+	}
+
+	// A different session holding the live lease is told 410 even though the
+	// old save did commit: 410 speaks only for that session's own attempts.
+	if row := original.send(map[string]any{"action": "release", "generation": generation}); row == nil {
+		t.Fatalf("release refused: %s", original.stderr.String())
+	}
+	next, nextSession := f.connect()
+	nextGeneration, _ := next.acquire(nextSession)
+	late := map[string]any{}
+	for k, v := range snapshot {
+		late[k] = v
+	}
+	late["sessionId"], late["generation"], late["attemptId"] = nextSession, nextGeneration, "attempt-from-lost-process"
+	if row := next.send(map[string]any{"action": "reconcile", "snapshot": late}); row != nil {
+		t.Fatalf("reconcile from the new holder answered: %v", row)
+	}
+	if next.code != 1 || !strings.Contains(next.stderr.String(), "did not commit") {
+		t.Fatalf("exit %d, stderr %s", next.code, next.stderr.String())
+	}
+	if out, code := f.oneShot("craft", "version", "@"+craftGapsPage, "2", "--format", "json"); code != 0 {
+		t.Fatalf("version 2 must still exist: exit %d\n%s", code, out)
+	}
+}
