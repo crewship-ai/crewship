@@ -35,7 +35,11 @@ func TestTypedArtifactHumanRouterWorkspaceBoundary(t *testing.T) {
 		if write {
 			token = person.writer
 		}
-		return f.do(token, method, path+"?workspace_id="+person.workspace, body)
+		separator := "?"
+		if strings.Contains(path, "?") {
+			separator = "&"
+		}
+		return f.do(token, method, path+separator+"workspace_id="+person.workspace, body)
 	}
 	for _, kind := range []string{"project", "dashboard", "design", "slides"} {
 		t.Run(kind, func(t *testing.T) {
@@ -92,7 +96,7 @@ func TestTypedArtifactHumanRouterWorkspaceBoundary(t *testing.T) {
 				}
 				return receipt.PageID
 			}
-			suffix := map[string]string{"project": "/artifact", "dashboard": "/artifact/data/sales", "design": "/design", "slides": "/artifact/slides"}[kind]
+			suffix := map[string]string{"project": "/artifact", "dashboard": "/artifact/data/sales?version=1", "design": "/design", "slides": "/artifact/slides?version=1"}[kind]
 			read := func(person human, ref string) *httptest.ResponseRecorder {
 				return request(person, false, "GET", "/api/v1/pages/"+ref+suffix, "")
 			}
