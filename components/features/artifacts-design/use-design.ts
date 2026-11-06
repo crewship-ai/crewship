@@ -203,8 +203,13 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
   let stored = unconfirmed
   let localDirty = false
   let currentBaseline = baseline ? encodeDraft(baseline) : null
+  // Edits made, and how many the last store carried. Retirement stores only what
+  // no store carried: a repeat is a new revision, which a confirmed sign-out,
+  // deleting exactly the revisions it saw, would leave behind.
+  let edits = 0, carried = 0
   const storeEntry = (existing: string) => {
    canvasQueued = false
+   carried = edits
    const record = parseDesignDraft(existing)
    tabId.current ||= crypto.randomUUID()
    record[tabId.current] = { state: encodeDraft(Y.encodeStateAsUpdate(document)), baseline: currentBaseline }
@@ -218,7 +223,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
    if (canvasQueued) return
    canvasQueued = true
    stored = true
-   void mergeArtifactDraft(storageKey, storeEntry, combineDesignDrafts).catch(() => { canvasQueued = false; setDraftError(true) })
+   void mergeArtifactDraft(storageKey, storeEntry, combineDesignDrafts).then(() => { if (carried === edits) localDirty = false }, () => { canvasQueued = false; setDraftError(true) })
   }
   // Only this tab's entries, once the confirmed document holds them and the
   // notices that name their lost texts are stored.
@@ -238,6 +243,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
    setNodes(designNodes(document))
    if (origin === "editor" && initialCanEdit && userId !== "anonymous") {
     localDirty = true
+    edits += 1
     storeCanvas()
    }
   }
