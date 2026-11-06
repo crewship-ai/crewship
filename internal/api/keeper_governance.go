@@ -393,8 +393,17 @@ func checkGovernanceRefs(ctx context.Context, db *sql.DB, wsID string, body keep
 		}
 		// A row still waiting on an escalation would take its value from
 		// whoever answers that escalation, not from an OWNER or ADMIN.
+		// Re-sending the stored id binds nothing new, and a monitored credential
+		// can be RATE_LIMITED for a while.
 		if credStatus != "ACTIVE" {
-			return http.StatusBadRequest, "gov_model_credential_id must reference an active credential"
+			var previous sql.NullString
+			err := db.QueryRowContext(ctx, `SELECT gov_model_credential_id FROM keeper_governance_settings WHERE workspace_id = ?`, wsID).Scan(&previous)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return http.StatusInternalServerError, fmt.Sprintf("%s: %v", "keeper governance: stored gov model credential", err)
+			}
+			if previous.String != cur.GovModelCredentialID {
+				return http.StatusBadRequest, "gov_model_credential_id must reference an active credential"
+			}
 		}
 	}
 

@@ -151,6 +151,13 @@ func TestGovernanceBindRefusesUnsettledCredential(t *testing.T) {
 	if status != http.StatusBadRequest {
 		t.Fatalf("status = %d (%s), want 400", status, msg)
 	}
+
+	// The Judge panel re-sends the stored id on every save.
+	execOrFatal(t, db, `UPDATE credentials SET status = 'RATE_LIMITED' WHERE id = 'cred-req'`)
+	execOrFatal(t, db, `INSERT INTO keeper_governance_settings (workspace_id, gov_model_provider, gov_model_id, gov_model_credential_id) VALUES (?, 'anthropic', 'm', 'cred-req')`, wsID)
+	if status, msg := checkGovernanceRefs(context.Background(), db, wsID, body, cur); status != 0 {
+		t.Fatalf("unchanged binding: status = %d (%s), want 0", status, msg)
+	}
 }
 
 func TestStoreOAuthTokensRefusesGovernanceCredential(t *testing.T) {
@@ -186,6 +193,7 @@ func TestInternalCredentialPatchGovernance(t *testing.T) {
 		{"value", "ACTIVE", `{"status":"ACTIVE","access_token":"replacement"}`, "ACTIVE", http.StatusForbidden},
 		{"refresh token", "ACTIVE", `{"status":"ACTIVE","refresh_token":"replacement"}`, "ACTIVE", http.StatusForbidden},
 		{"reactivate revoked", "ACTIVE", `{"status":"ACTIVE"}`, "REVOKED", http.StatusForbidden},
+		{"leave revoked through error", "ERROR", `{"status":"ERROR"}`, "REVOKED", http.StatusForbidden},
 		{"health report", "RATE_LIMITED", `{"status":"RATE_LIMITED"}`, "ACTIVE", http.StatusOK},
 		{"recover after limit", "ACTIVE", `{"status":"ACTIVE"}`, "RATE_LIMITED", http.StatusOK},
 	}
