@@ -15,13 +15,17 @@ import (
 	"github.com/crewship-ai/crewship/internal/editororigin"
 )
 
-func frameSrcOf(policy string) string {
-	for _, d := range strings.Split(policy, ";") {
-		if d = strings.TrimSpace(d); strings.HasPrefix(d, "frame-src") {
-			return d
-		}
-	}
-	return ""
+func frameSrcOf(policy string) string { return directiveOf(policy, "frame-src") }
+
+// studioScriptSrc is the script policy of a Studio document with no editor
+// configured. The Studio allows WebAssembly for its own syntax highlighting, so
+// a leaked editor exception shows up as a difference from this, not as a token.
+func studioScriptSrc(t *testing.T) string {
+	t.Helper()
+	w := httptest.NewRecorder()
+	securityHeadersMiddlewareWith(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), securityHeaderOptions{}).
+		ServeHTTP(w, httptest.NewRequest("GET", "/chat", nil))
+	return directiveOf(w.Header().Get("Content-Security-Policy"), "script-src")
 }
 
 func TestEditorOriginWidensFrameSrcOfEveryUIDocumentWhenEnabled(t *testing.T) {
@@ -56,8 +60,12 @@ func TestEditorOriginWidensFrameSrcOfEveryUIDocumentWhenEnabled(t *testing.T) {
 			if !strings.Contains(policy, "frame-ancestors 'none'") || w.Header().Get("X-Frame-Options") != "DENY" {
 				t.Fatal("Studio embedding protection removed")
 			}
-			if strings.Contains(policy, "wasm-unsafe-eval") {
-				t.Fatal("editor wasm exception leaked into Studio policy")
+			want := studioScriptSrc(t)
+			if strings.HasPrefix(tc.path, "/api/") {
+				want = "" // API responses carry no script policy at all.
+			}
+			if got := directiveOf(policy, "script-src"); got != want {
+				t.Fatalf("editor exception leaked into script-src: %q", got)
 			}
 		})
 	}
@@ -167,7 +175,7 @@ func TestZeroConfigEditorServesUnderStudioPrefix(t *testing.T) {
 	if w.Code != 299 || frameSrcOf(policy) != "frame-src https://studio.example.test/_editor/b/" {
 		t.Fatalf("Studio document: %d frame-src %q", w.Code, frameSrcOf(policy))
 	}
-	if !strings.Contains(policy, "frame-ancestors 'none'") || strings.Contains(policy, "wasm-unsafe-eval") {
+	if !strings.Contains(policy, "frame-ancestors 'none'") || directiveOf(policy, "script-src") != studioScriptSrc(t) {
 		t.Fatalf("Studio policy weakened: %s", policy)
 	}
 
@@ -229,7 +237,7 @@ func TestMooringOnlyEditorPreservesSandboxAndStudioFramePolicy(t *testing.T) {
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, httptest.NewRequest("GET", "https://studio.example.test/chat", nil))
 	policy := w.Header().Get("Content-Security-Policy")
-	if w.Code != 299 || frameSrcOf(policy) != "frame-src https://studio.example.test/_editor/b/" || strings.Contains(policy, "wasm-unsafe-eval") {
+	if w.Code != 299 || frameSrcOf(policy) != "frame-src https://studio.example.test/_editor/b/" || directiveOf(policy, "script-src") != studioScriptSrc(t) {
 		t.Fatalf("Studio policy: %d %s", w.Code, policy)
 	}
 }
