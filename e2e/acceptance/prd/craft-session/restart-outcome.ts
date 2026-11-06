@@ -8,16 +8,18 @@
 export type RestartOutcome =
   /** A new process answers. `refusedBy` keeps a control complaint for the row's evidence. */
   | { kind: "restarted"; refusedBy?: string }
-  /** The control refused and the old process still runs: no restart happened. Environment, not product. */
+  /** The control refused and nothing proves a new process. Environment, not product. */
   | { kind: "refused"; reason: string }
-  /** The control accepted; wait for the new process. */
+  /** Wait: the control accepted, or the server does not answer and proves nothing yet. */
   | { kind: "waiting" }
 
 export function restartOutcome(answer: string, uptimeBefore: number | null, uptimeNow: number | null): RestartOutcome {
   const accepted = answer.trim().startsWith("ok")
-  const newProcess = uptimeNow !== null && (uptimeBefore === null || uptimeNow < uptimeBefore)
-  if (newProcess) return accepted ? { kind: "restarted" } : { kind: "restarted", refusedBy: answer.trim().slice(0, 400) }
-  return accepted ? { kind: "waiting" } : { kind: "refused", reason: answer.trim().slice(0, 400) }
+  const complaint = answer.trim().slice(0, 400)
+  if (uptimeNow === null) return { kind: "waiting" }
+  if (uptimeBefore === null) return accepted ? { kind: "restarted" } : { kind: "refused", reason: complaint }
+  if (uptimeNow < uptimeBefore) return accepted ? { kind: "restarted" } : { kind: "restarted", refusedBy: complaint }
+  return accepted ? { kind: "waiting" } : { kind: "refused", reason: complaint }
 }
 
 /** The line a row's steps carry when the control complained about a restart that did happen. */

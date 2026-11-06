@@ -96,8 +96,8 @@ export async function restartServer(origin: string, reason: string): Promise<Res
     if (outcome.kind === "restarted") {
       return { command: label, startedAt, backAt: new Date().toISOString(), tookMs: Date.now() - started, uptimeBefore, uptimeAfter: up!, ...(outcome.refusedBy ? { controlRefused: outcome.refusedBy } : {}) }
     }
-    if (outcome.kind === "refused") throw new Error(`environment: the restart was refused and the old server still runs, nothing about the product was tested: ${outcome.reason}`)
-    if (Date.now() > deadline) throw new Error("no restarted server answered /healthz within 3 minutes")
+    if (outcome.kind === "refused") throw new Error(`environment: the restart was refused and no new server process is proven, nothing about the product was tested: ${outcome.reason}`)
+    if (Date.now() > deadline) throw new Error(`no restarted server answered /healthz within 3 minutes; control answered: ${answer.slice(0, 400)}`)
     await pause(1_000)
   }
 }
