@@ -57,7 +57,10 @@ Examples:
 			if runMeta.ChatID == "" {
 				return fmt.Errorf("run %s has no chat_id; pass --new-prompt to retry", runID)
 			}
-			p := fetchFirstUserPrompt(client, runMeta.ChatID)
+			p, instruction := recoverFirstUserPrompt(client, runMeta.ChatID)
+			if instruction {
+				return fmt.Errorf("the first message of run %s's chat is a saved native Craft instruction, which runs only through `crewship craft task start`; pass --new-prompt", runID)
+			}
 			if p == "" {
 				return fmt.Errorf("could not recover original prompt for run %s; pass --new-prompt", runID)
 			}

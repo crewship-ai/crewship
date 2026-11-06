@@ -308,7 +308,8 @@ func (s *Server) handleChatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	messages, err := s.convStore.Read(r.Context(), id, 0, 0)
+	// The API proxy applies the chat audience before this IPC read.
+	messages, err := s.convStore.ReadTranscript(r.Context(), id)
 	if err != nil {
 		writeEmptyOK(w, s.logger, "read chat messages failed", err,
 			map[string]interface{}{"chat_id": id, "messages": []interface{}{}},
