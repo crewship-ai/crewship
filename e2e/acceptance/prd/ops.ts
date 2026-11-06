@@ -98,7 +98,7 @@ export async function restartServer(origin: string, reason: string): Promise<{ c
   const deadline = Date.now() + 3 * 60_000
   for (;;) {
     const up = await uptimeSeconds(origin)
-    if (restartOutcome("ok", uptimeBefore, up).kind === "restarted") return { command: label, ms: Date.now() - t0, uptimeBefore, uptimeAfter: up }
+    if (up !== null && restartOutcome("ok", uptimeBefore, up).kind === "restarted") return { command: label, ms: Date.now() - t0, uptimeBefore, uptimeAfter: up }
     if (Date.now() > deadline) throw new Error("no restarted server answered /healthz within 3 minutes")
     await pause(1_000)
   }
