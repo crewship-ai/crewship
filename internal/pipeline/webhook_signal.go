@@ -32,6 +32,7 @@ type SignalDeliveryResult struct {
 	Reason    string   // why ignored: "no_correlation_value" | "no_matching_wait"
 	RunIDs    []string // runs whose wait was satisfied by THIS call (resume these)
 	Duplicate bool     // true when this body was already fully processed
+	Retry     bool     // true when nothing was waiting yet: the receipt is non-terminal and the sender should redeliver
 }
 
 // signalDeliveryMu serialises the check-deliver-record sequence so two
@@ -158,8 +159,10 @@ func deliverSignalTx(ctx context.Context, tx *sql.Tx, wh *Webhook, deliveryID, b
 	if resuming {
 		// Finishing an earlier partial delivery: the receipt keeps every run
 		// ever claimed, the result carries only the newly claimed ones.
-		res.Outcome, res.Reason = "delivered", ""
 		stored = dedupeStrings(append(append([]string{}, prior...), res.RunIDs...))
+		if len(stored) > 0 {
+			res.Outcome, res.Reason = "delivered", ""
+		}
 	}
 	if signalBeforeReceipt != nil {
 		if err := signalBeforeReceipt(); err != nil {
@@ -170,6 +173,12 @@ func deliverSignalTx(ctx context.Context, tx *sql.Tx, wh *Webhook, deliveryID, b
 	done := 1
 	if derr != nil {
 		done = 0
+	}
+	if res.Outcome == "ignored" && res.Reason == "no_matching_wait" {
+		// Nothing was waiting yet. Keep the row for the operator but leave it
+		// non-terminal so the same body can still wake a wait armed later.
+		done = 0
+		res.Retry = true
 	}
 	if resuming {
 		_, err = tx.ExecContext(ctx, `UPDATE pipeline_signal_deliveries SET outcome = ?, reason = ?, run_ids = ?, complete = ? WHERE webhook_id = ? AND body_sha256 = ?`,

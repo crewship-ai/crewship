@@ -189,3 +189,38 @@ func TestDeliverWebhookSignal_CrashBeforeReceiptRollsBackClaims(t *testing.T) {
 		})
 	}
 }
+
+// A body that arrives before its wait is armed must not burn: the receipt is
+// non-terminal and the result tells the sender to retry, so the same bytes
+// delivered after the wait arms wake it instead of answering "duplicate".
+func TestDeliverWebhookSignal_EarlyDeliveryDoesNotBurnBody(t *testing.T) {
+	ctx := context.Background()
+	db := openSignalWaitTestDB(t)
+	s := NewSQLSignalWaitStore(db)
+	wh := signalTestWebhook()
+	body := []byte(`{"order":{"id":"A-1"}}`)
+
+	early, err := DeliverWebhookSignal(ctx, db, wh, "d1", body)
+	if err != nil || early.Outcome != "ignored" || !early.Retry || early.Duplicate {
+		t.Fatalf("early = %+v err=%v, want ignored with Retry and no duplicate", early, err)
+	}
+	// Same bytes again with nothing armed: still retryable, still not a duplicate.
+	again, err := DeliverWebhookSignal(ctx, db, wh, "d1", body)
+	if err != nil || !again.Retry || again.Duplicate {
+		t.Fatalf("second early = %+v err=%v, want Retry and no duplicate", again, err)
+	}
+
+	seedSignalRuns(t, s, "r1")
+	retry, err := DeliverWebhookSignal(ctx, db, wh, "d1", body)
+	if err != nil || retry.Duplicate || retry.Retry || retry.Outcome != "delivered" || len(retry.RunIDs) != 1 || retry.RunIDs[0] != "r1" {
+		t.Fatalf("retry after arm = %+v err=%v, want delivered to r1", retry, err)
+	}
+	if st, _ := waitStatus(t, db, "r1"); st != "delivered" {
+		t.Fatalf("wait status %q, want delivered", st)
+	}
+	// Now it is terminal: a further replay is a duplicate.
+	dup, err := DeliverWebhookSignal(ctx, db, wh, "d2", body)
+	if err != nil || !dup.Duplicate || dup.Retry {
+		t.Fatalf("replay after delivery = %+v err=%v, want terminal duplicate", dup, err)
+	}
+}

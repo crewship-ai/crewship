@@ -997,8 +997,10 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // fireWebhookSignal answers a verified delivery to a signal-mode webhook.
-// 200 {"status":"DELIVERED"} when waits were woken, 200 {"status":"IGNORED"}
-// when none matched (the sender must not retry that into an error), and the
+// 200 {"status":"DELIVERED"} when waits were woken, 503 {"status":"IGNORED",
+// "retry":true} with Retry-After when no wait was armed yet (the body is not
+// consumed, so a redelivery can still wake a later wait), 200 IGNORED when the
+// body can never match, and the
 // same body with duplicate:true when the same signed body was already processed,
 // and 409 delivery_conflict when the delivery id was used for a different body.
 func (h *PipelineHandler) fireWebhookSignal(w http.ResponseWriter, r *http.Request, wh *pipeline.Webhook, deliveryID string, body []byte) {
@@ -1048,6 +1050,14 @@ func (h *PipelineHandler) fireWebhookSignal(w http.ResponseWriter, r *http.Reque
 	resp := map[string]any{"status": status, "delivered": len(res.RunIDs), "run_ids": res.RunIDs, "duplicate": res.Duplicate}
 	if res.Reason != "" {
 		resp["reason"] = res.Reason
+	}
+	if res.Retry {
+		// Nothing was waiting yet and the body was not consumed: tell the
+		// sender to redeliver once the wait has armed.
+		resp["retry"] = true
+		w.Header().Set("Retry-After", webhook.IngressRetryAfterSeconds)
+		writeJSON(w, http.StatusServiceUnavailable, resp)
+		return
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

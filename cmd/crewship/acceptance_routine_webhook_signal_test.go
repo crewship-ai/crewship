@@ -104,8 +104,8 @@ func TestAcceptance_RoutineWebhookSignalDelivery(t *testing.T) {
 
 	// Correlates with run A but its filter rejects the payload: ignored, still pending.
 	code, out := fire("d1", `{"order":{"id":"A-1"},"status":"pending"}`, true)
-	if code != http.StatusOK || out["status"] != "IGNORED" {
-		t.Fatalf("filtered delivery = %d %v, want 200 IGNORED", code, out)
+	if code != http.StatusServiceUnavailable || out["status"] != "IGNORED" || out["retry"] != true {
+		t.Fatalf("filtered delivery = %d %v, want 503 IGNORED retry", code, out)
 	}
 	if waitStatus("sig-run-a") != "pending" {
 		t.Fatal("non-matching payload consumed the wait")
@@ -141,7 +141,7 @@ func TestAcceptance_RoutineWebhookSignalDelivery(t *testing.T) {
 
 	// Unknown correlation: accepted but ignored, and no run is started.
 	code, out = fire("d3", `{"order":{"id":"nope"}}`, true)
-	if code != http.StatusOK || out["status"] != "IGNORED" || out["reason"] != "no_matching_wait" {
+	if code != http.StatusServiceUnavailable || out["status"] != "IGNORED" || out["reason"] != "no_matching_wait" || out["retry"] != true {
 		t.Fatalf("unmatched delivery = %d %v", code, out)
 	}
 	if got := runCount(); got != runsBefore {
