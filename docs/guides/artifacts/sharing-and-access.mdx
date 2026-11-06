@@ -45,11 +45,17 @@ the workspace owners and admins described below, until publication. While it
 is private, folders, crews and direct shares do not apply, even if they are
 listed.
 
-The artifact stops being private the first time you share a version (see
-[Share a version](#share-a-version)). Until then the **Share** dialog refuses
-to add anyone and shows: *private artifact audience requires explicit
-publication; ordinary grants cannot widen it*. In the list, a private artifact
-carries a **Private** pill.
+How a private artifact opens depends on its type:
+
+| Type | What ends the private audience |
+|---|---|
+| Project, slides, dashboard | The first time you share a version (see [Share a version](#share-a-version)). |
+| Workbook | Naming its first editor with `crewship workbook share --publish`. |
+| Native Word or Sheet | Nothing yet. Sharing a version moves the shared version but the document stays private, so only its owner and workspace owners and admins can read it. |
+
+While it is private, the **Share** dialog refuses to add anyone and shows:
+*private artifact audience requires explicit publication; ordinary grants cannot
+widen it*. In the list, a private artifact carries a **Private** pill.
 
 ### Workspace owners and admins
 
@@ -147,8 +153,11 @@ Some limits always apply, whatever the level:
 
 ## Share a version
 
-Shared versions belong to project artifacts. The shared version is the one
-everyone except you and your editors sees.
+The shared version is the one everyone except you and your editors sees.
+The steps below are for project artifacts. In a native Word or Sheet document,
+the owner uses **Publikovat náhled** while holding the editor; the button is not
+offered to anyone else, and `crewship craft connect` refuses `share` for them.
+In a Design, the **Share** button in **History** appears only for its owner.
 
 <Steps>
 <Step title="Open the artifact">
@@ -250,7 +259,10 @@ shared versions of the artifacts filed there, now and later.
   library has no button for this.
 - Only a workspace admin, or a manager (or higher) of the owning crew, can
   change who a folder shares with.
-- Folder access does not open a private artifact. Share a version first.
+- Folder access does not open a private artifact. A project, slides or a
+  dashboard opens when you share a version, and a workbook when you name an
+  editor with publication. A private native Word or Sheet does not open, see
+  [Private until you share a version](#private-until-you-share-a-version).
 
 ### Change who a folder shares with
 

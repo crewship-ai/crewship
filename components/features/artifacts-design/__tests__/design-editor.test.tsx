@@ -13,20 +13,20 @@ vi.mock("@/lib/api-fetch",async()=>{
  const actual=await vi.importActual<typeof import("@/lib/api-fetch")>("@/lib/api-fetch")
  return {...actual,apiFetch:(...args:Parameters<typeof actual.apiFetch>)=>copying.real?actual.apiFetch(...args):copying.send(...args)}
 })
-const state = vi.hoisted(() => ({ editable: true, doc: null as Y.Doc | null, pageId: "old-private-page", user: false, peerColor: "#2563eb", saveError: null as (Error & { status?: number }) | null, restoreError: null as (Error & { status?: number }) | null, conflicts: [] as unknown[], dismiss: vi.fn(), dirty: false, unsynced: false }))
+const state = vi.hoisted(() => ({ canShare: true, editable: true, doc: null as Y.Doc | null, pageId: "old-private-page", user: false, peerColor: "#2563eb", saveError: null as (Error & { status?: number }) | null, restoreError: null as (Error & { status?: number }) | null, conflicts: [] as unknown[], dismiss: vi.fn(), dirty: false, unsynced: false }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => state.user ? { data: { user: { id: "same-user" } } } : null }))
 vi.mock("@/hooks/use-artifact-agent-dispatch", () => ({ useArtifactAgentDispatch: () => ({ ready: false, dispatch: vi.fn() }) }))
 vi.mock("../use-design", () => ({ useDesign: (_workspaceId: string, _slug: string, selectedVersion?: number) => {
  const mutation = { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, error: null }
  return {
-  query: { data: { page_id: state.pageId, can_edit: state.editable, can_comment: state.editable, latest_version: 1, comments: [] }, isError: false },
+  query: { data: { page_id: state.pageId, can_edit: state.editable, can_share: state.canShare, can_comment: state.editable, latest_version: 1, comments: [] }, isError: false },
   comments: { data: { comments: [] }, isError: false },
   versions: { data: { versions: [{ version: 1 }], shared_version: 1 }, isError: false },
   doc: state.doc, nodes: designNodes(state.doc!), peers: [{ clientId: 2, name: "Marie", color: state.peerColor, cursor: { x: 12, y: 24 } }], connection: "connected", editable: state.editable && !selectedVersion, dirty: state.dirty, unsynced: state.unsynced, draftError: false,
   save: { ...mutation, error: state.saveError }, restore: { ...mutation, error: state.restoreError }, share: mutation, comment: mutation, connectAgent: mutation, setCursor: vi.fn(), conflicts: state.conflicts, dismissConflict: state.dismiss,
  }
 } }))
-beforeEach(() => { copying.real=false;copying.send.mockReset(); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true"); state.editable = true; state.pageId = "old-private-page"; state.user = false; state.peerColor = "#2563eb"; state.conflicts = []; state.dismiss.mockReset(); state.dirty = false; state.unsynced = false; state.saveError = null; state.restoreError = null; state.doc = new Y.Doc() })
+beforeEach(() => { copying.real=false;copying.send.mockReset(); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true"); state.editable = true; state.canShare = true; state.pageId = "old-private-page"; state.user = false; state.peerColor = "#2563eb"; state.conflicts = []; state.dismiss.mockReset(); state.dirty = false; state.unsynced = false; state.saveError = null; state.restoreError = null; state.doc = new Y.Doc() })
 afterEach(() => { cleanup(); state.doc?.destroy(); vi.unstubAllEnvs();vi.unstubAllGlobals() })
 describe("Design editor controls", () => {
  it("clears private unsent feedback when the same slug resolves to a new Page", async () => {
@@ -57,6 +57,14 @@ describe("Design editor controls", () => {
   const history = screen.getByLabelText("Version history")
   expect(within(history).getByRole("button", { name: canEdit ? "Live canvas" : "Current view" })).toBeEnabled()
   if (!canEdit) expect(within(history).queryByRole("button", { name: "Live canvas" })).not.toBeInTheDocument()
+ })
+ it.each([[true, 1], [false, 0]])("offers Share only when the server says this person may share (%s)", (canShare, buttons) => {
+  state.canShare = canShare
+  render(<DesignEditor workspaceId="workspace" slug="shop" />)
+  fireEvent.click(screen.getByRole("button", { name: /History/ }))
+  const history = screen.getByLabelText("Version history")
+  expect(within(history).getByRole("button", { name: "Restore" })).toBeEnabled()
+  expect(within(history).queryAllByRole("button", { name: "Share" })).toHaveLength(buttons)
  })
  it("offers the live canvas to an editor while inspecting a historical snapshot", () => {
   render(<DesignEditor workspaceId="workspace" slug="shop" initialVersion={1} />)

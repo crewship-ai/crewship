@@ -7775,6 +7775,10 @@
           "can_edit": {
             "type": "boolean"
           },
+          "can_share": {
+            "description": "This caller may share a version: the Page's owner with write rights. Edit and workspace roles do not qualify.",
+            "type": "boolean"
+          },
           "latest_version": {
             "format": "int64",
             "minimum": 1,
@@ -7826,6 +7830,7 @@
           "authority_revision",
           "origin",
           "can_edit",
+          "can_share",
           "can_comment",
           "nodes",
           "order",
@@ -14713,6 +14718,9 @@
           "can_edit": {
             "type": "boolean"
           },
+          "can_share": {
+            "type": "boolean"
+          },
           "can_stop_agent": {
             "type": "boolean"
           },
@@ -14767,7 +14775,8 @@
           "can_edit",
           "acquired_at",
           "handoff_requested_kind",
-          "handoff_requested_by"
+          "handoff_requested_by",
+          "can_share"
         ],
         "type": "object"
       },
@@ -135963,7 +135972,7 @@
     },
     "/api/v1/pages/{slug}/craft/document/share": {
       "post": {
-        "description": "Submit page craft document share (POST /api/v1/pages/{slug}/craft/document/share).",
+        "description": "Pin an existing version of a native Word or Sheet document as the shared version that Read and Comment callers see, and record an audit entry in the same transaction. Page owner only: an Edit grant, a folder ACL or a workspace role answers 403, and the lease reports the same answer as `can_share`. The caller must hold the current lease.",
         "operationId": "post_api_v1_pages_slug_craft_document_share",
         "parameters": [
           {
@@ -136144,7 +136153,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Submit page craft document share",
+        "summary": "Share Craft document version",
         "tags": [
           "pages"
         ],

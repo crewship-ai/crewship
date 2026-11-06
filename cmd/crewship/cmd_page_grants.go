@@ -90,9 +90,12 @@ var pageGrantCmd = &cobra.Command{
   crewship page grant fleet-201 --user ada@example.com --level write
   crewship page grant fleet-201 --everyone --level read
 
---everyone grants to every current member of the workspace (never to an
-agent), and carries read or write only: produce names a producer, and
-everyone is not one.
+--everyone grants to every current member of the workspace, including anyone
+who joins later, and carries read, comment or write: produce names a producer,
+and everyone is not one. On an artifact, read and comment reach only the shared
+version, and write the latest version; neither lets a member share a version.
+An agent never matches it. A guest and a non-member gain nothing on a Word,
+Sheet, project or Design. A private artifact refuses the grant with exit 5.
 
 Two rules the server enforces and this command cannot talk it out of:
 

@@ -27,6 +27,7 @@ type designSnapshotResponse struct {
 	PageID            string                `json:"page_id"`
 	Origin            *designOriginResponse `json:"origin"`
 	CanEdit           bool                  `json:"can_edit"`
+	CanShare          bool                  `json:"can_share"`
 	CanComment        bool                  `json:"can_comment"`
 	Nodes             []json.RawMessage     `json:"nodes"`
 	Order             []string              `json:"order"`

@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -358,5 +359,87 @@ func TestAcceptance_CraftReconcileFromNewProcessIsUnconfirmed(t *testing.T) {
 	}
 	if out, code := f.oneShot("craft", "version", "@"+craftGapsPage, "2", "--format", "json"); code != 0 {
 		t.Fatalf("version 2 must still exist: exit %d\n%s", code, out)
+	}
+}
+
+// The real binary and Router: `page grant --everyone` opens the shared version
+// to a member and nothing newer, `page revoke --everyone` takes it away, and a
+// member with Edit who holds the lease cannot move what readers see.
+func TestAcceptance_CraftEveryoneReachesTheSharedVersionAndOnlyTheOwnerShares(t *testing.T) {
+	f := newCraftGapsFixture(t)
+	owner := f.bearer
+	const member = "crewship_cli_craft_walk_gaps_member_00000"
+	for _, q := range []string{
+		`INSERT INTO users(id,email,full_name) VALUES('craft-gaps-mate','mate@gaps.invalid','Mate')`,
+		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('craft-gaps-mate-m','` + craftGapsWorkspace + `','craft-gaps-mate','MEMBER')`,
+	} {
+		if _, err := f.db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := f.db.Exec(`INSERT INTO cli_tokens(id,user_id,name,token_hash,scopes,created_at) VALUES('craft-gaps-mate-token','craft-gaps-mate','mate',?,'["pages:*"]',datetime('now'))`, sha256HexToken(member)); err != nil {
+		t.Fatal(err)
+	}
+	as := func(token string, args ...string) (string, int) {
+		t.Helper()
+		f.bearer = token
+		return f.oneShot(args...)
+	}
+	pin := func() (n int) {
+		t.Helper()
+		if err := f.db.QueryRow(`SELECT shared_version FROM artifact_version_heads WHERE page_id=?`, craftGapsPage).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	// The owner shares version 2; version 3 then exists and is not shared.
+	f.bearer = owner
+	holder, session := f.connect()
+	generation, snapshot := holder.acquire(session)
+	snapshot["targetVersion"] = "2"
+	if row := holder.send(map[string]any{"action": "share", "snapshot": snapshot}); row == nil || pin() != 2 {
+		t.Fatalf("owner share: %v exit %d %s", row, holder.code, holder.stderr.String())
+	}
+	if row := holder.send(map[string]any{"action": "release", "generation": generation}); row == nil {
+		t.Fatalf("release: exit %d %s", holder.code, holder.stderr.String())
+	}
+	store := artifacts.NewVersionStore(f.db, artifacts.VersionOptions{Enabled: true, ContentType: "wordcraft"})
+	if _, err := store.Apply(t.Context(), artifacts.VersionKey{WorkspaceID: craftGapsWorkspace, PageID: craftGapsPage}, artifacts.VersionRequest{BaseVersion: 2, EntryPoint: "document.json", Files: map[string]artifacts.VersionFile{"document.json": {Content: []byte(`{"v":"unshared"}`), MediaType: "application/json"}}}, func(context.Context, *sql.Tx) (string, error) { return "user:craft-gaps-owner", nil }); err != nil {
+		t.Fatal(err)
+	}
+	unshared := base64.StdEncoding.EncodeToString([]byte(`{"v":"unshared"}`))
+	preview := []string{"craft", "preview", "@" + craftGapsPage}
+	if out, code := as(member, preview...); code != 4 {
+		t.Fatalf("preview before the grant: exit %d %s", code, out)
+	}
+	if out, code := as(owner, "page", "grant", "native-gaps", "--everyone", "--level", "read"); code != 0 {
+		t.Fatalf("grant: exit %d %s", code, out)
+	}
+	out, code := as(member, preview...)
+	if code != 0 || !strings.Contains(out, base64.StdEncoding.EncodeToString([]byte(`{"v":2}`))) || strings.Contains(out, unshared) {
+		t.Fatalf("preview after the grant: exit %d %s", code, out)
+	}
+	if out, code := as(member, "craft", "version", "@"+craftGapsPage, "3"); code != 4 || strings.Contains(out, unshared) {
+		t.Fatalf("unshared version after the grant: exit %d %s", code, out)
+	}
+	if out, code := as(owner, "page", "revoke", "native-gaps", "--everyone"); code != 0 {
+		t.Fatalf("revoke: exit %d %s", code, out)
+	}
+	if out, code := as(member, preview...); code != 4 {
+		t.Fatalf("preview after removal: exit %d %s", code, out)
+	}
+
+	if out, code := as(owner, "page", "grant", "native-gaps", "--everyone", "--level", "write"); code != 0 {
+		t.Fatalf("edit grant: exit %d %s", code, out)
+	}
+	f.bearer = member
+	editor, session := f.connect()
+	_, snapshot = editor.acquire(session)
+	snapshot["targetVersion"] = "3"
+	if row := editor.send(map[string]any{"action": "share", "snapshot": snapshot}); row != nil {
+		t.Fatalf("editor share answered: %v", row)
+	}
+	if editor.code != 4 || !strings.Contains(editor.stderr.String(), "only the page owner") || pin() != 2 {
+		t.Fatalf("editor share: exit %d, pin %d, stderr %s", editor.code, pin(), editor.stderr.String())
 	}
 }

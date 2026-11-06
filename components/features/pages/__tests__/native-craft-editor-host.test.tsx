@@ -14,7 +14,7 @@ vi.mock("@/lib/mooring/native-draft",async()=>({...await vi.importActual("@/lib/
 vi.mock("@/lib/document-queue",async()=>({...await vi.importActual("@/lib/document-queue"),registerDocumentDraftWriter:m.registerPrivacy,purgeDocumentDrafts:m.purge}))
 vi.mock("../workbook-editor-host",()=>({editorFrameSupported:()=>true,createEditorFrame:(doc:Document,src:string,onLoad:()=>void)=>{const f=doc.createElement('iframe');f.setAttribute('sandbox','allow-scripts');f.setAttribute('credentialless','');f.setAttribute('referrerpolicy','no-referrer');f.srcdoc='';f.src=src;queueMicrotask(onLoad);return f}}))
 const deferred=<T,>()=>{let resolve!:(v:T)=>void,reject!:(cause:unknown)=>void;const promise=new Promise<T>((r,f)=>{resolve=r;reject=f});return {promise,resolve,reject}}
-const emptyLease={can_edit:true,holder:null,mine:false,generation:null,can_write:false,acquired_at:null,expires_at:null,handoff_requested_by:[]}
+const emptyLease={can_edit:true,can_share:true,holder:null,mine:false,generation:null,can_write:false,acquired_at:null,expires_at:null,handoff_requested_by:[]}
 const ownedLease={...emptyLease,holder:{actor_id:"user:human",display_name:"Pavel",kind:"human"},mine:true,generation:"9007199254740995",can_write:true,expires_at:'2099-01-01T00:00:00Z'}
 // Another person (a holder with the viewer's own actor id is the viewer's other tab).
 const otherPerson={actor_id:"user:pavel",display_name:"Pavel",kind:"human"}
@@ -456,6 +456,15 @@ describe('native Word host authority and persistence',()=>{
   expect(client.save).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()
   await act(async()=>{await authSuspend!()})
   expect(journal.persist).toHaveBeenCalledTimes(2);expect(journal.close).toHaveBeenCalled();expect(client.save).not.toHaveBeenCalled()
+ })
+ it('offers publishing to the page owner only, even to an editor holding custody',async()=>{
+  client.lease.mockResolvedValue({...emptyLease,can_share:false})
+  const editorLease={...ownedLease,can_share:false}
+  client.leaseAction.mockImplementation(async()=>{client.lease.mockResolvedValue(editorLease);return editorLease})
+  mount();await ready();await acquire()
+  expect(screen.getByRole('button',{name:'Uvolnit úpravy'})).toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:'Publikovat náhled'})).not.toBeInTheDocument()
+  expect(client.share).not.toHaveBeenCalled()
  })
  it('publishes only the final saved and acknowledged version under current custody',async()=>{
   mount();await ready();expect(screen.queryByRole('button',{name:'Publikovat náhled'})).not.toBeInTheDocument();await acquire()

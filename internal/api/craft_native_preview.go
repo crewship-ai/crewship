@@ -146,7 +146,7 @@ func (d *craftNativeDocumentsHTTP) shareSnapshot(w http.ResponseWriter, r *http.
 	}
 	lease := mooring.EditLease{Scope: entry.scope, Holder: craftNativePrincipal(entry), Generation: generation}
 	var notify func()
-	err = store.Share(r.Context(), lease, base, target, func(ctx context.Context, tx *sql.Tx, actor string) error {
+	err = store.Share(context.WithValue(r.Context(), craftNativeShareIntentKey{}, true), lease, base, target, func(ctx context.Context, tx *sql.Tx, actor string) error {
 		if actor != craftNativePrincipal(entry).ActorID {
 			return errCraftNativeAccess
 		}
@@ -164,6 +164,8 @@ func (d *craftNativeDocumentsHTTP) shareSnapshot(w http.ResponseWriter, r *http.
 	if err != nil {
 		if errors.Is(err, errCraftNativeShareAudit) {
 			replyError(w, 500, "native preview publication audit unavailable")
+		} else if errors.Is(err, errCraftNativeShareOwner) {
+			replyError(w, 403, errCraftNativeShareOwner.Error())
 		} else {
 			craftNativeDocumentError(w, err)
 		}

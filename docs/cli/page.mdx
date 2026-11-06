@@ -886,7 +886,7 @@ crewship page grant fleet-201 --user  ops@example.com --level write
 | `--user <email>` | Grant to a human user |
 | `--crew <slug>` | Grant to a crew |
 | `--agent <slug>` | Grant to an agent |
-| `--everyone` | Grant to everyone in the workspace — every current human member, never an agent. `read` or `write` only; `produce` names a producer, and everyone is not one. |
+| `--everyone` | Grant to everyone in the workspace — every current human member, including anyone who joins later, never an agent. `read`, `comment` or `write`; `produce` names a producer, and everyone is not one. On an artifact, `read` and `comment` reach only the shared version, `write` reaches the latest version, and none of them lets a member share a version. A guest and a non-member gain nothing on a Word, Sheet, project or Design. A private artifact refuses the grant with exit `5`. |
 | `--level <read\|comment\|produce\|write>` | The verb being granted — see [the permission model](/guides/pages#the-three-verbs) |
 | `--panels <id,id,...>` | Restricts a `produce` grant to these panel ids. Omitted = every panel the subject is otherwise eligible to write. Only meaningful for `--level produce`. |
 
