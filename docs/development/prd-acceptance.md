@@ -227,6 +227,13 @@ harness must never see. A new workspace's agent therefore has no credential
 agent, its chat and the pages it works on live in `PRD_AGENT_WORKSPACE_ID`,
 which on the dev instances is the shared demo workspace.
 
+`craft-agent-ui` proves the browser control **Upravit agentem** with no harness
+socket: the person starts the agent from the page, on a free document and on one
+they hold. Its rows are diagnostic. The Read row needs no agent and leaves that
+workspace alone: it runs in a QA workspace, on a published shared preview because
+a Read person never gets the live editor, with a write grantee proving the control
+exists there.
+
 That workspace has the caps of any workspace: 100 pages (HTTP 422 on create) and
 the Project/Design history budget (HTTP 413, or the agent answering that "the
 artifact history quota is full"). When other work fills it, these rows fail on
