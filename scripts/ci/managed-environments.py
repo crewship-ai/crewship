@@ -55,6 +55,10 @@ HOST_TESTS = {
         'TestReplayDoesNotAcknowledgeIncompleteLineOrInventTerminal',
         'TestReplayRefusesRewrittenAcknowledgedPrefix',
         'TestReplayRetainsStableKeysAcrossLostProjectionAcknowledgements',
+        'TestCapturedCompletionTimeSurvivesReplay',
+        'TestLegacyCompletionTimeRemainsUnknownAndBytesStable',
+        'TestCapturedCompletionUsesExactDurableEventTime',
+        'TestMalformedCapturedCompletionIsRejected',
     },
     'internal/orchestrator': {
         'TestHostCancelledRunSettlesOnlyWithItsOwnSessionStopReceipt',
@@ -70,6 +74,7 @@ HOST_TESTS = {
         'TestRetainedAnalysisIgnoresStderrAndRequiresStructuredTerminal',
         'TestRetainedAnalysisUsesSemanticFailureInsteadOfZeroExit',
         'TestRetainedAuthoritativeStatusMirrorsOverLocalTerminalObservation',
+        'TestProtectedCompletionCallbackUsesPersistedExit',
     },
     'internal/provider/docker': {
         'TestHostCaptureAdmissionBindsConfirmedFenceStart',
@@ -104,6 +109,8 @@ HOST_TESTS = {
         'TestRetainedOutputSettlesAfterRoutineTerminalWithoutExit',
         'TestRetainedOutputTerminalReceiptSurvivesPruningAndLostACK',
         'TestRetainedOutputZeroExitInBandFailureCannotSucceed',
+        'TestRetainedRunWithUnverifiableOwnershipSettlesWithoutProjection',
+        'TestRetainedRunAgentLookupErrorDoesNotSettle',
     },
 }
 
@@ -111,10 +118,12 @@ HOST_TESTS = {
 # The subprocess helper is invoked by the controller-kill test; running it
 # without its private child environment deliberately performs no fixture work.
 HOST_FIXTURE_GROUPS = {
-    'internal/runoutput': ('host_unix_test.go', 'host_capacity_test.go', 'replay_test.go'),
+    'internal/runoutput': ('host_unix_test.go', 'host_capacity_test.go', 'replay_test.go',
+                           'completion_time_test.go'),
     'internal/orchestrator': ('run_output_analysis_test.go', 'run_output_host_test.go',
-                              'run_output_runagent_test.go'),
-    'internal/server': ('retained_output_test.go', 'retained_completion_time_test.go'),
+                              'run_output_runagent_test.go', 'run_completion_time_test.go'),
+    'internal/server': ('retained_output_test.go', 'retained_completion_time_test.go',
+                        'retained_ownership_settlement_test.go'),
     'internal/provider/docker': ('host_capture_test.go', 'host_capture_linux_test.go'),
 }
 HOST_FIXTURE_HELPERS = {('internal/runoutput', 'TestHostCaptureSubprocess')}
