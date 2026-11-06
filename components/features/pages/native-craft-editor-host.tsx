@@ -120,7 +120,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   let sessionApplication:NativeDocumentSnapshot['applicationId']|undefined
   // metadataOnly: the frame is gone after a refused private read, and the lease
   // admission stays open only so an explicit read loss can still purge the draft.
-  let closed=false,metadataOnly=false,connectionLost=false,draftOffered=false,keptRecoveries=false,offerStale=false,frameWithdrawn=false,returns=0,metadataDelay=METADATA_RETRY_MS,metadataRetry:ReturnType<typeof setTimeout>|undefined
+  let closed=false,metadataOnly=false,connectionLost=false,draftOffered=false,keptRecoveries=false,offerStale=false,frameWithdrawn=false,checkGeneration=0,metadataDelay=METADATA_RETRY_MS,metadataRetry:ReturnType<typeof setTimeout>|undefined
   // Bumped whenever private access stops being confirmed: a server comparison or
   // proposal list started before that may no longer reach the page.
   let privateEpoch=0
@@ -263,30 +263,33 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   // Keeping a draft and offering it are separate decisions. An offer stands only on
   // an answer this mount got for this content, so a return withdraws it, then asks.
   function askContent(){
-   const own=client,check=offerCheck=new AbortController(),frozen=frameWithdrawn?current:undefined
+   const own=client,check=offerCheck=new AbortController(),generation=checkGeneration,frozen=frameWithdrawn?current:undefined
+   const stale=()=>generation!==checkGeneration||authSuspended
    void own.read(AbortSignal.any([check.signal,lifetime.signal])).then(()=>{
-    if(offerCheck!==check||dead||client!==own)return
+    if(stale()||offerCheck!==check||dead||client!==own)return
     offerCheck=undefined
     if(!frozen){if(readable)withdrawOffer(false);return}
     if(current!==frozen||!live(frozen)||metadataOnly||privacyRetirement)return
     frameWithdrawn=false;frozen.frame.style.visibility='';readAccess(true)
    }).catch((cause:unknown)=>{
-    if(offerCheck!==check)return
+    if(stale()||offerCheck!==check)return
     offerCheck=undefined
     // An unclear answer leaves it sealed; the next renewal asks again.
     if(!dead&&client===own&&cause instanceof Error&&cause.message==='native_private_read_refused'){frameWithdrawn=false;void reopenReadOnly().catch(()=>stop('Přístup editoru se nepotvrdil.'))}
    })
   }
+  // Only a read started after the latest return, with no suspension since, counts.
+  function invalidateCheck(){checkGeneration++;offerCheck?.abort();offerCheck=undefined}
   function checkOnReturn(){
    if(closed||authSuspended)return
    if(keepsDraft())proveReadLoss()
    if(dead)return
    const r=current
-   if(readable&&(r||keptRecoveries)){
-    offerCheck?.abort();returns++
+   invalidateCheck()
+   if((readable||frameWithdrawn)&&(r||keptRecoveries)){
     // A frozen frame holds what was never saved: it leaves now, and only the read
     // restores it. The buffer itself stays until read loss is proven.
-    if(r?.blocked){frameWithdrawn=true;r.frame.style.visibility='hidden';readAccess(false)}
+    if(r?.blocked&&readable){frameWithdrawn=true;r.frame.style.visibility='hidden';readAccess(false)}
     if(keptRecoveries)withdrawOffer(true)
     askContent()
    }
@@ -420,9 +423,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   // With full history the unsaved draft stays in this browser; the person can
   // still take the current document out as a file. Nothing is deleted.
   downloadDraft.current=()=>{void(async()=>{
-   const r=current,own=client,started=returns;if(!readable||offerStale)return;if(!r||!live(r)||!r.ready)throw Error('native_copy_unavailable')
+   const r=current,own=client,started=checkGeneration;if(!readable||offerStale)return;if(!r||!live(r)||!r.ready)throw Error('native_copy_unavailable')
    const snapshot=await r.port.snapshot(lifetime.signal)
-   if(!readable||offerStale||returns!==started||!live(r)||client!==own)return
+   if(!readable||offerStale||checkGeneration!==started||authSuspended||!live(r)||client!==own)return
    copy({bytes:snapshot.bytes,applicationId:sessionApplication!} as NativeDraft)
   })().catch(()=>{if(!dead)setError('Místní kopii se nepodařilo stáhnout.')})}
   reconcile.current=()=>{const r=current;if(r&&live(r)&&r.writable&&r.phase?.phase==='uncertain')void r.coordinator?.reconcile()}
@@ -469,7 +472,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    return retiring
   }
   async function suspendForAuth(){
-   authSuspended=true;clearInterval(keptDraftWatch);readLossAbort.abort();setAuthEnded(true);readAccess(false);endDraftHold()
+   authSuspended=true;invalidateCheck();clearInterval(keptDraftWatch);readLossAbort.abort();setAuthEnded(true);readAccess(false);endDraftHold()
    const r=current
    if(r){freezeInput(r);r.frame.style.visibility='hidden'}
    // Another retirement may already be capturing the only native buffer.
