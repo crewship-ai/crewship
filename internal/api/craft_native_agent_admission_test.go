@@ -38,6 +38,9 @@ func nativeAgentAdmissionFixture(t *testing.T) (*artifactPrincipalFixture, *craf
 	// The workspace agent artifact policy admits the agent's crew (#4681).
 	mustExec(t, f.rig.db, `INSERT INTO workspace_artifact_creation_policy(workspace_id,enabled,version,updated_at) VALUES(?,1,1,'2026-10-17T00:00:00Z')`, f.a.WorkspaceID)
 	mustExec(t, f.rig.db, `INSERT INTO workspace_artifact_creation_crews(workspace_id,crew_id) VALUES(?,?)`, f.a.WorkspaceID, f.a.CrewID)
+	// The bridge's instruction-only send: a saved mark in the author's private chat.
+	mustExec(t, f.rig.db, `UPDATE chats SET visibility='private' WHERE id=?`, f.a.ChatID)
+	mustExec(t, f.rig.db, `UPDATE conversation_messages SET native_craft_instruction=1 WHERE id=?`, f.a.MessageID)
 	u := &AuthUser{ID: source.UserID, SessionID: source.ID, OriginalCredential: source}
 	ctx := auth.WithOriginalCredential(context.WithValue(context.WithValue(context.WithValue(t.Context(), ctxUser, u), ctxAuthKind, AuthKindSession), ctxWorkspaceID, f.rig.wsID), *source)
 	h := newCraftNativeHTTP(f.pages, true, &collaborationAdmissionTestClock{boot: "native-agent-admission", now: time.Second})
@@ -164,6 +167,29 @@ func TestCraftNativeAgentTaskRefusesMessageItsCallerDidNotAuthor(t *testing.T) {
 			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true})
 			if !errors.Is(err, errCraftNativeAgentDenied) || accepted.WorkID != "" {
 				t.Fatalf("task bound a message the caller did not author: receipt=%+v err=%v", accepted, err)
+			}
+		})
+	}
+}
+
+// #5009: an ordinary turn has already reached the agent log and the journal,
+// and a group chat shows the text to people without Page access. No start
+// path may bind either, and a refused start leaves nothing queued.
+func TestCraftNativeAgentTaskBindsOnlyAPrivateInstruction(t *testing.T) {
+	for name, sql := range map[string]string{
+		"ordinary turn": `UPDATE conversation_messages SET native_craft_instruction=0 WHERE id=?`,
+		"group chat":    `UPDATE chats SET visibility='group' WHERE id=(SELECT session_id FROM conversation_messages WHERE id=?)`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, m, ctx := nativeAgentAdmissionFixture(t)
+			mustExec(t, f.rig.db, sql, f.a.MessageID)
+			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{f.a.ChatID, f.a.MessageID, true})
+			if !errors.Is(err, errCraftNativeAgentDenied) || accepted.WorkID != "" {
+				t.Fatalf("task bound a message outside a private instruction: receipt=%+v err=%v", accepted, err)
+			}
+			var items int
+			if err = f.rig.db.QueryRow(`SELECT count(*) FROM work_items WHERE domain_kind=?`, craftNativeAgentDomain).Scan(&items); err != nil || items != 0 {
+				t.Fatal("refused task left a work item", items, err)
 			}
 		})
 	}

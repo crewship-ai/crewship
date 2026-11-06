@@ -37,6 +37,9 @@ func (c *collaborationHTTPConnection) committedOutputRecipient(ctx context.Conte
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.tearingDown.Load() {
+		return nil
+	}
 	if !c.joinedDelivered || (c.closed && !denied) || q.ParticipantRef != protocol.Identifier(c.admission.participant) || q.GateID != protocol.Identifier(originalGate.GateID) || q.PermissionVersion != protocol.Counter(originalGate.PermissionVersion) {
 		return errCollaborationHTTP
 	}
@@ -130,6 +133,9 @@ func (c *collaborationHTTPConnection) committedDocumentUpdate(ctx context.Contex
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		d := c.document
+		if c.tearingDown.Load() {
+			return nil, nil
+		}
 		if !c.joinedDelivered || (c.closed && !denied) || q.ParticipantRef != protocol.Identifier(c.admission.participant) || q.GateID != protocol.Identifier(originalGate.GateID) || q.PermissionVersion != protocol.Counter(originalGate.PermissionVersion) {
 			return nil, errCollaborationHTTP
 		}

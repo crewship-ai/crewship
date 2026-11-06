@@ -85,6 +85,7 @@ func LoadTranscript(
 		WHERE c.workspace_id = ?
 		  AND c.created_by = ?
 		  AND m.ts >= ?
+		  AND m.native_craft_instruction = 0
 		ORDER BY m.ts DESC
 		LIMIT ?
 	`, workspaceID, userID, isoMillis(since), maxTurns)

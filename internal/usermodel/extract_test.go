@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -132,6 +133,44 @@ func TestExtract_StoresOnlyWhatWasStated(t *testing.T) {
 		if !strings.HasPrefix(line, "- ") || !strings.Contains(line, ": ") {
 			t.Errorf("non-bullet line in the stored model: %q", line)
 		}
+	}
+}
+
+// #5009: a native Craft instruction belongs to its task run. It must reach
+// neither the curator's prompt nor the operator model, and it must not use up
+// the turn limit that ordinary messages share.
+func TestExtract_LeavesOutNativeCraftInstruction(t *testing.T) {
+	db := testutil.MigratedDB(t).DB
+	seedTranscript(t, db, []struct{ role, content, author string }{
+		{"user", "I run the platform team here.", "u1"},
+		{"user", "I am confidentially merging with Acme.", "u1"},
+	})
+	if _, err := db.Exec(`UPDATE conversation_messages SET native_craft_instruction=1 WHERE content LIKE '%Acme%'`); err != nil {
+		t.Fatal(err)
+	}
+	turns, err := LoadTranscript(context.Background(), db, "ws1", "u1", time.Now().Add(-2*time.Hour), 1)
+	if err != nil || len(turns) != 1 || !strings.Contains(turns[0].Content, "platform team") {
+		t.Errorf("LoadTranscript = %+v, %v", turns, err)
+	}
+	prov := &fakeProvider{reply: `{"facts":[
+  {"key":"role","value":"runs the platform team","quote":"I run the platform team here","source":"stated"},
+  {"key":"owns","value":"merging with Acme","quote":"I am confidentially merging with Acme.","source":"stated"}
+]}`}
+	ex := New(db, func() (llm.Provider, string, time.Duration) { return prov, "m", time.Second },
+		func(context.Context) Profile { return ProfileStatedTechnical }, quietLogger())
+	body, err := ex.Extract(context.Background(),
+		consolidate.UserModelCandidate{WorkspaceID: "ws1", CrewID: "cr1", UserID: "u1"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(fmt.Sprintf("%+v", prov.seenIn), "Acme") {
+		t.Error("the curator prompt received the instruction")
+	}
+	if strings.Contains(body, "Acme") {
+		t.Errorf("the operator model stored the instruction: %s", body)
+	}
+	if !strings.Contains(body, "platform team") {
+		t.Errorf("an ordinary message stopped being eligible: %s", body)
 	}
 }
 

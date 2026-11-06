@@ -76,6 +76,13 @@ type Message struct {
 	// authorship (avatar/name). Empty for agent/system turns and for legacy
 	// messages written before group chat — those fall back to Role.
 	AuthorUserID string `json:"author_user_id,omitempty"`
+
+	// NativeCraftInstruction marks a human message that was recorded for an
+	// explicit native Craft task and started no run. Only the bridge sets it.
+	// Task admission binds nothing else, and every read except ReadTranscript
+	// leaves it out, so the instruction reaches the strict task run and no
+	// ordinary one.
+	NativeCraftInstruction bool `json:"native_craft_instruction,omitempty"`
 }
 
 // NormalizedParts returns the message's structured parts for rendering. When
@@ -365,10 +372,10 @@ func (s *Store) appendMirror(ctx context.Context, sessionID string, msg Message)
 		authorUserID = msg.AuthorUserID
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO conversation_messages (id, session_id, agent_id, role, content, tool_summary, ts, author_user_id, run_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO conversation_messages (id, session_id, agent_id, role, content, tool_summary, ts, author_user_id, run_id, native_craft_instruction)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		msg.ID, sessionID, msg.AgentID, string(msg.Role), msg.Content, msg.ToolSummary,
-		msg.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"), authorUserID, msg.RunID,
+		msg.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"), authorUserID, msg.RunID, msg.NativeCraftInstruction,
 	)
 	if err != nil {
 		return fmt.Errorf("insert mirror row: %w", err)
@@ -406,7 +413,21 @@ func (s *Store) Search(ctx context.Context, agentID, query string, limit int) ([
 }
 
 // Read returns messages from a session's JSONL file with optional pagination.
+// Like every read here except ReadTranscript, it leaves out native Craft
+// instructions: those reach the strict task run and the people who may read the
+// transcript, and no prompt, memory or other reader built on this store.
 func (s *Store) Read(ctx context.Context, sessionID string, offset, limit int) ([]Message, error) {
+	return s.read(ctx, sessionID, offset, limit, false)
+}
+
+// ReadTranscript returns a session's whole transcript, native Craft
+// instructions included. Only a caller that has already applied the chat
+// audience and shows the result to that person may use it.
+func (s *Store) ReadTranscript(ctx context.Context, sessionID string) ([]Message, error) {
+	return s.read(ctx, sessionID, 0, 0, true)
+}
+
+func (s *Store) read(ctx context.Context, sessionID string, offset, limit int, instructions bool) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -429,20 +450,20 @@ func (s *Store) Read(ctx context.Context, sessionID string, offset, limit int) (
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	lineNum := 0
+	eligible := 0
 	for scanner.Scan() {
-		lineNum++
-		if offset > 0 && lineNum <= offset {
-			continue
-		}
-
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
 		}
 
 		var msg Message
-		if err := json.Unmarshal(line, &msg); err != nil {
+		if err := json.Unmarshal(line, &msg); err != nil || (msg.NativeCraftInstruction && !instructions) {
+			continue
+		}
+		// Offset counts what this reader can get, the same as limit, so
+		// consecutive pages neither repeat nor skip a message.
+		if eligible++; eligible <= offset {
 			continue
 		}
 		messages = append(messages, msg)
@@ -496,7 +517,7 @@ func (s *Store) ReadTail(ctx context.Context, sessionID string, maxMessages int)
 			continue
 		}
 		var msg Message
-		if err := json.Unmarshal(line, &msg); err != nil {
+		if err := json.Unmarshal(line, &msg); err != nil || msg.NativeCraftInstruction {
 			continue
 		}
 		if maxMessages <= 0 {
