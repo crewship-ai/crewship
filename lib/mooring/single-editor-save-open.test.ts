@@ -127,7 +127,7 @@ it("gridcraft: no engine revision state -> a differing export is still saved", a
   try { await r.controller.flush(); expect(r.requests.map(q => q.bytes[0])).toEqual([5]) } finally { await r.controller.close() }
 })
 
-it("wordcraft: an untouched final capture retires while the loaded seed digest is still pending", async () => {
+it.each([false, true])("wordcraft: loaded seed digest pending, edited=%s keeps the correct retirement state", async edited => {
   let releaseSeed!: () => void, delayedSeed = false
   const seedGate = new Promise<void>(resolve => { releaseSeed = resolve })
   const digest = webcrypto.subtle.digest.bind(webcrypto.subtle)
@@ -139,8 +139,11 @@ it("wordcraft: an untouched final capture retires while the loaded seed digest i
   const r = mounted("wordcraft")
   try {
     expect(delayedSeed).toBe(true)
+    if (edited) r.edit(6)
     expect(await r.controller.revokeWrite()).toBe(true)
     expect(r.requests).toHaveLength(0)
-    expect(r.confirmed).toEqual([5])
+    expect(r.confirmed).toEqual(edited ? [] : [5])
+    expect(r.states.at(-1)?.dirty).toBe(edited)
+    expect(r.states.at(-1)?.phase).toBe("read-only")
   } finally { releaseSeed(); spy.mockRestore(); await r.controller.close() }
 })
