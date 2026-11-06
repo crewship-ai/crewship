@@ -136,14 +136,14 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
         })
       } finally { clearTimeout(timer) }
     },
-    async put(draft, options) {
+    async put(draft, how) {
       // Bound each journal row before structured cloning large editor state.
       const serialized = JSON.stringify(draft)
       if (serialized.length > maxDraftBytes || (options?.maxDraftBytes !== undefined && new TextEncoder().encode(serialized).byteLength > maxDraftBytes)) throw new DocumentStorageError(message)
       const key: [string,string] = [owner,JSON.stringify([draft.schema,draft.epoch,draft.id])]
       const revision = crypto.randomUUID(), row = JSON.stringify(key), own = ownRevisions.get(row)
       ownRevisions.set(row, revision)
-      if (!options?.final) await transaction("readwrite", store => store.put({ key, draft, revision }))
+      if (!how?.final) await transaction("readwrite", store => store.put({ key, draft, revision }))
       else await transaction("readwrite", store => {
         const previous = store.get(key)
         previous.onsuccess = () => {
