@@ -287,14 +287,25 @@ def validate_manifests(manifests, count, expected_sha=None, bootstrap_digest=Non
     return seconds, len(combined)
 
 
+def combined_alarm(baseline):
+    """The erosion alarm: RACE_COMBINED_ALARM_SECONDS when the workflow names one
+    explicitly (a measured, owner-approved limit), else the historical 1.6x baseline."""
+    explicit = os.environ.get('RACE_COMBINED_ALARM_SECONDS')
+    if explicit is None:
+        return baseline * 1.6
+    if not explicit.isdigit() or int(explicit) < baseline:
+        raise ValueError('RACE_COMBINED_ALARM_SECONDS must be whole seconds not below the measured baseline')
+    return int(explicit)
+
+
 def report(directory, count, baseline, bootstrap_directory=None):
     if baseline <= 0 or count <= 0:
         raise ValueError('invalid API report budget or shard count')
+    alarm = combined_alarm(baseline)
     manifests = [json.loads(path.read_text()) for path in Path(directory).rglob('api-race-shard.json')]
     bootstrap_elapsed, bootstrap_digest = (0, None) if bootstrap_directory is None else validate_bootstrap(bootstrap_directory)
     seconds, total = validate_manifests(manifests, count, os.environ.get('GITHUB_SHA'), bootstrap_digest)
     seconds += bootstrap_elapsed
-    alarm = baseline * 1.6
     summary = (f'### Go Race ({PACKAGE_DIR[2:]}) — combined budget\n\n'
                f'{total} top-level tests covered exactly once across {count} shards.\n\n'
                f'Summed package seconds: {seconds:.3f}; baseline (same summed metric): {baseline}s; '
@@ -307,7 +318,7 @@ def report(directory, count, baseline, bootstrap_directory=None):
         output.write(summary)
     if seconds > alarm:
         main_push = os.environ.get('GITHUB_EVENT_NAME') == 'push'
-        print(f'::{"error" if main_push else "warning"}::API race combined duration exceeds '
+        print(f'::{"error" if main_push else "warning"}::{PACKAGE_DIR[2:]} race combined duration exceeds '
               'the erosion alarm; re-measure from green main runs before changing the budget.')
         return int(main_push)
     return 0

@@ -2356,8 +2356,8 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3, 4, 5]
     # Preserve the existing 2x full-package hang bound while measuring the
-    # new partitions. The aggregate below retains the full-package erosion
-    # alarm over SUMMED durations, including each process's setup/cleanup.
+    # new partitions. The hang bound keeps its own basis; the combined budget
+    # is a separate measured limit over SUMMED durations in the go-race-api job.
     timeout-minutes: 85
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -2377,12 +2377,14 @@ jobs:
         env:
           SHARD_INDEX: ${{ matrix.shard }}
           SHARD_COUNT: "6"
-          RACE_API_BASELINE_SECONDS: "2300"
+          # Per-partition hang bound only (2 x the unsplit 2026-09-14 package
+          # runtime). It is not the combined budget; see the go-race-api report.
+          RACE_API_TIMEOUT_BASIS_SECONDS: "2300"
           JOB_CAP_MINUTES: "85"
           JOB_OVERHEAD_MINUTES: "6"
         run: |
           set -euo pipefail
-          timeout_s=$(( RACE_API_BASELINE_SECONDS * 2 ))
+          timeout_s=$(( RACE_API_TIMEOUT_BASIS_SECONDS * 2 ))
           if [ $(( timeout_s + JOB_OVERHEAD_MINUTES * 60 )) -ge $(( JOB_CAP_MINUTES * 60 )) ]; then
             echo "::error::API race timeout plus overhead exceeds the job cap."
             exit 1
@@ -2425,12 +2427,19 @@ jobs:
           name: api-race-template-${{ github.sha }}
           path: .ci-api-template/
       - name: Verify complete API coverage and combined budget
-        # Full-package baseline measured 2026-09-14: 2291–2358 seconds in
-        # main runs 34828855474,34833070262,34835848487,34840188893.
-        # Keep the 1.6x alarm and PR-warning/main-failure policy from #2031.
-        # All six package durations plus the genuine migration bootstrap
-        # package duration exactly once. All setup/cleanup remains measured.
-        run: python3 scripts/ci/api-race-shard.py report .ci-api-shards 6 2300 .ci-api-template
+        # The combined metric (six partition package durations, each with its
+        # own setup/cleanup, plus the genuine migration bootstrap exactly once)
+        # is not the unsplit 2026-09-14 package runtime (2291–2358 s) that the
+        # partition timeout still uses. Measured baseline of this metric: median
+        # 4166 s over 46 main push runs 41633012332..41979975587 (2026-11-03
+        # 12:07 to 2026-11-05 06:22 UTC, 6 shards + bootstrap in every run);
+        # mean 4183 s, sd 280 s, p95 4581 s, max 4876 s.
+        # Alarm 5200 s: 6.6% over that max, 3.6 sd over the mean. It is not a
+        # timeout: partition timeouts, the bootstrap deadline and job caps are
+        # unchanged. PR/merge-group warning, main-push failure as in #2031.
+        env:
+          RACE_COMBINED_ALARM_SECONDS: "5200"
+        run: python3 scripts/ci/api-race-shard.py report .ci-api-shards 6 4166 .ci-api-template
 
 
   # ── Go: cross-platform test matrix ──
