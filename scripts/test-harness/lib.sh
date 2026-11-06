@@ -111,22 +111,35 @@ nonce() {
 
 # ask_agent <agent-slug> <prompt> — run a ONE-SHOT prompt (fresh session, no
 # carried history) and echo the agent's plain-text reply on stdout. Empty
-# string on transport failure with no saved reply (callers assert on content).
+# string on transport failure with no saved reply (callers assert on content),
+# and the reason (a 429 capacity refusal is named as such) is written to stderr.
 # Exit status is the captured `cs ask` status: a failed ask returns non-zero
 # EVEN when a partial reply was saved, so callers that care about the run's
 # outcome must check $?, not just whether stdout is nonempty.
 ask_agent() {
-  local agent="$1" prompt="$2" out rc
+  local agent="$1" prompt="$2" out err rc detail
   track_agent "$agent"
   out="$(mktemp -t cs-reply.XXXXXX)"
+  err="$(mktemp -t cs-reply-err.XXXXXX)"
   cs ask --agent "$agent" --quiet --no-stream --timeout "$ASK_TIMEOUT" \
-        -p "$prompt" --save "$out" >/dev/null 2>&1
+        -p "$prompt" --save "$out" >/dev/null 2>"$err"
   rc=$?
+  if [[ $rc -ne 0 ]]; then
+    # A refused ask (for example 429, the agent is at capacity) must not read
+    # as an agent that answered with nothing. The reason goes to stderr, which
+    # a `$(ask_agent …)` caller still shows, while stdout stays the reply only.
+    detail="$(head -c 300 "$err" | tr '\n' ' ')"
+    if grep -qiE '429|too many requests|capacity' "$err"; then
+      printf 'ask_agent: ASK REFUSED for %s (exit %d): the agent is at capacity (429), not an empty reply: %s\n' "$agent" "$rc" "$detail" >&2
+    else
+      printf 'ask_agent: ask to %s failed (exit %d): %s\n' "$agent" "$rc" "$detail" >&2
+    fi
+  fi
   if [[ $rc -ne 0 && ! -s "$out" ]]; then
-    rm -f "$out"; return 1
+    rm -f "$out" "$err"; return 1
   fi
   cat "$out"
-  rm -f "$out"
+  rm -f "$out" "$err"
   return "$rc"
 }
 

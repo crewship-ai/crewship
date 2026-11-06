@@ -21,24 +21,57 @@ preflight
 section "1. Lead → peer delegation (alex delegates to sam)"
 # ─────────────────────────────────────────────────────────────────────────────
 TAG="$(nonce DELEG)"
-# Count sam's chats before, so we can detect the assignment opening a new one.
+# Count sam's chats before, so we can report the assignment opening a new one.
 sam_before=0
 if have jq; then
   sam_before="$(cs chat list sam --format json 2>/dev/null | jq 'length' 2>/dev/null || echo 0)"
 fi
 
+# The tag is in the prompt, so a reply (or a quoted refusal) that contains it
+# proves nothing (#4855). Only the assignment /assign wrote counts: an
+# assignment.created entry addressed to sam whose task carries the tag, and an
+# assignment.completed entry for that same assignment id with a success
+# outcome. Non-zero when the feed cannot be read, never an empty "no entry".
+deleg_assignment_ids() { # <created|completed> -> assignment ids for $TAG
+  local feed
+  feed="$(cs activity --since 30m --lines 200 --export ndjson 2>/dev/null)" || return 1
+  printf '%s\n' "$feed" | jq -rs --arg tag "$TAG" --arg kind "$1" '
+    [ .[] | select(.to_slug == "sam" and .entry_type == "assignment.created")
+      | select((.payload.task // "") | contains($tag))
+      | .payload.assignment_id | select(type == "string" and length > 0) ] as $created
+    | if $kind == "created" then $created[]
+      else .[] | select(.entry_type == "assignment.completed")
+        | select(.payload.outcome | . == "SUCCEEDED" or . == "NO_CHANGE" or . == "WORK_CREATED")
+        | .payload.assignment_id | select(. as $id | $created | index($id)) end' 2>/dev/null | sort -u
+}
+
 info "Asking alex to delegate a concrete subtask to sam (tag $TAG)…"
 # Behavioral LLM delegation is non-deterministic: the lead may phrase the
-# report differently or answer inline. So success = EITHER the lead echoes the
-# tag back OR a new peer chat for sam appears (the /assign side-effect). Retry
-# once, then SKIP (not FAIL) if neither — a flaky phrasing must not red the run.
+# report differently or answer inline. Retry once. An ask the server refused
+# (429, the lead still holds other work) is not an inline answer and is
+# reported as such.
 delegated=0
+asks_answered=0
+ask_refused=0
+feed_ok=1
 for attempt in 1 2; do
+  # A lead that still holds earlier work answers the next ask with 429.
+  wait_agent_free alex || finish
   reply="$(ask_agent alex "Delegate this to your peer Sam, do NOT do it yourself: \
 ask Sam to reply with exactly the string '${TAG}-OK' and nothing else. Then \
 report back to me Sam's exact answer.")"
-  if printf '%s' "$reply" | grep -qiF -- "$TAG"; then delegated=1; break; fi
-  info "attempt $attempt: tag not echoed back; retrying…"
+  ask_rc=$?
+  if (( ask_rc != 0 )) && [[ -z "$reply" ]]; then
+    ask_refused=$((ask_refused+1))
+    info "attempt $attempt: the ask itself failed (see ask_agent message above)"
+    continue
+  fi
+  asks_answered=$((asks_answered+1))
+  if have jq; then
+    created="$(deleg_assignment_ids created)" || { feed_ok=0; break; }
+    if [[ -n "$created" ]]; then delegated=1; break; fi
+  fi
+  info "attempt $attempt: no assignment to sam carries the tag; retrying…"
 done
 
 sam_after=0
@@ -46,12 +79,25 @@ have jq && sam_after="$(cs chat list sam --format json 2>/dev/null | jq 'length'
 peer_chat=0
 (( sam_after > sam_before )) && peer_chat=1
 
-if (( delegated == 1 )); then
-  _pass "alex reports back the delegated result from sam"
-elif (( peer_chat == 1 )); then
-  _pass "delegation reached sam (new peer chat $sam_before → $sam_after; tag not echoed in text)"
+if (( asks_answered == 0 )); then
+  _fail "alex accepts the delegation ask" "both asks were refused or failed ($ask_refused of 2); the delegation was never attempted, so this is a capacity or transport failure, not a skipped feature"
+elif ! have jq; then
+  skip "lead→peer delegation" "jq is not installed, so the activity feed could not be read — install jq to make this assertion"
+elif (( feed_ok == 0 )); then
+  _fail "lead→peer delegation" "\`crewship activity\` could not be read, so there is no evidence either way"
+elif (( delegated == 1 )); then
+  _pass "alex's delegation reached sam (assignment.created addressed to sam carries $TAG)"
+  waited=0
+  until [[ -n "$(deleg_assignment_ids completed)" ]] || (( waited >= ASK_TIMEOUT )); do
+    sleep "$POLL_INTERVAL"; waited=$((waited+POLL_INTERVAL))
+  done
+  if [[ -n "$(deleg_assignment_ids completed)" ]]; then
+    _pass "the delegated assignment to sam completed"
+  else
+    _fail "the delegated assignment to sam completed" "no assignment.completed with a success outcome joined to the tagged assignment within ${ASK_TIMEOUT}s"
+  fi
 else
-  skip "lead→peer delegation" "non-deterministic: alex neither echoed the tag nor opened a peer chat for sam over 2 attempts"
+  skip "lead→peer delegation" "non-deterministic: no assignment addressed to sam carried $TAG over 2 attempts (a tag in alex's reply is not evidence)"
 fi
 
 if have jq; then

@@ -460,6 +460,11 @@ case "$args" in
   *" work list "*)
     # Busy with background (issue) work only: a chat-only query sees nothing.
     if [ "${EV_WORK:-free}" = busy ] && [[ "$args" != *" --class chat "* ]]; then echo '{"items":[{"id":"w1","class":"background","state":"running"}]}'; else echo '{"items":[]}'; fi; exit 0 ;;
+  *" ask "*)
+    if [ "${EV_ASK:-ok}" = 429 ]; then echo "Error: server returned 429: agent is at capacity" >&2; exit 1; fi
+    save=""; prev=""
+    for a in "$@"; do [ "$prev" = --save ] && save="$a"; prev="$a"; done
+    [ -n "$save" ] && echo "pong" >"$save"; exit 0 ;;
   *" chat list "*) printf '[{"id":"chat_new","created_at":"2999-01-01T00:00:00.000Z"},{"id":"chat_old","created_at":"2000-01-01T00:00:00.000Z"}]\n'; exit 0 ;;
   *" chat chat_new "*) echo "assistant: I used keeper-gated-secret-value"; exit 0 ;;
   *" chat chat_old "*) echo "old"; exit 0 ;;
@@ -487,6 +492,11 @@ expect_contains "no escalation and no end -> TIMEOUT, rc 2" "$out" "OPS-7 TIMEOU
 out="$(ev_run env EV_WORK=busy bash -c '. "$1/test-harness/lib.sh"; wait_agent_free morgan 2; echo "rc=$?"' _ "$SCRIPT_DIR")"
 expect_contains "an agent holding background work is not free" "$out" "rc=1"
 expect_contains "the open work is named in the failure" "$out" "background"
+out="$(ev_run env EV_ASK=429 bash -c '. "$1/test-harness/lib.sh"; r="$(ask_agent alex hi 2>"$TMPDIR/ask.err")"; echo "rc=$? reply=[$r]"; cat "$TMPDIR/ask.err"' _ "$SCRIPT_DIR")"
+expect_contains "an injected 429 ask returns non-zero, not an empty success" "$out" "rc=1 reply=[]"
+expect_contains "an injected 429 ask names the capacity refusal" "$out" "ASK REFUSED for alex"
+out="$(ev_run bash -c '. "$1/test-harness/lib.sh"; r="$(ask_agent alex hi 2>&1)"; echo "rc=$? reply=[$r]"' _ "$SCRIPT_DIR")"
+expect_contains "a successful ask still returns only the reply" "$out" "rc=0 reply=[pong]"
 out="$(ev_run bash -c '. "$1/test-harness/lib.sh"; wait_agent_free morgan 2; echo "rc=$?"' _ "$SCRIPT_DIR")"
 expect_contains "an agent with no open work is free" "$out" "rc=0"
 out="$(ev_run env EV_START=fail bash -c '. "$1/test-harness/lib.sh"; issue_work ops morgan t d 5; echo "rc=$?"' _ "$SCRIPT_DIR")"

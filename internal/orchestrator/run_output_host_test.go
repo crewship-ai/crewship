@@ -227,3 +227,48 @@ func TestHostStopReceiptSettlesProviderStoppedForcedEnds(t *testing.T) {
 		})
 	}
 }
+
+type removedContainerStatus struct {
+	provider.ContainerProvider
+	err error
+}
+
+func (c *removedContainerStatus) ContainerStatus(context.Context, string) (*provider.ContainerStatus, error) {
+	return nil, c.err
+}
+
+// A protected run whose container was removed (agent deletion) has no
+// restorable execution: the provider's ExecInspect fails, which used to be
+// reported as an identity error and left the run pending forever. Removal of
+// the whole container is authoritative proof that the run is gone, exactly as
+// it already is on the tmux path; any other inspect failure is still no proof.
+func TestStopRunAtHostRunRemovedContainerIsStopped(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		status   error
+		wantStop bool
+		wantErr  bool
+	}{
+		{"removed container", provider.ErrContainerNotFound, true, false},
+		{"inspect unavailable", errors.New("daemon unreachable"), false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o, run := retainedAnalysisFixture(t, "CLAUDE_CODE", "", "", 0)
+			// No terminal result is retained, so the run is still live as far
+			// as its own spool can tell, and the provider cannot restore it.
+			if err := os.RemoveAll(run.Output.Directory); err != nil {
+				t.Fatal(err)
+			}
+			run.AgentSlug = "agent"
+			raw, _ := json.Marshal(run)
+			if err := o.state.Set(t.Context(), "agent_runs", run.ID, raw); err != nil {
+				t.Fatal(err)
+			}
+			o.container = &removedContainerStatus{err: tc.status}
+			stopped, err := o.StopRunAt(t.Context(), RunLocation{ContainerID: run.ContainerID, AgentSlug: "agent", RunID: run.ID})
+			if stopped != tc.wantStop || (err != nil) != tc.wantErr {
+				t.Fatalf("stopped=%v err=%v, want stopped=%v err=%v", stopped, err, tc.wantStop, tc.wantErr)
+			}
+		})
+	}
+}
