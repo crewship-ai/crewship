@@ -33,7 +33,9 @@ import (
 
 const allowedHostsLimitNote = "Allowed hosts decide whether this credential is delivered: it is withheld unless the crew " +
 	"is restricted and its egress allowlist permits every listed host. This does not stop an agent that holds the " +
-	"token from sending it to any other host the crew allowlist permits."
+	"token from sending it to any other host the crew allowlist permits. A change applies to the next run or config " +
+	"read; a running sidecar drops its copy within about 60 seconds and /secrets files are removed from running crews " +
+	"that no longer qualify, but environment variables already set in a running process are not recalled."
 
 type allowedHostsResponse struct {
 	CredentialID string   `json:"credential_id"`
