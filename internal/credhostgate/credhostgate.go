@@ -227,3 +227,14 @@ func HostsPermit(hosts []string, target string) bool {
 	}
 	return egressallow.NewDomainAllowlist(hosts).IsAllowed(target)
 }
+
+// PermitsHost is the single-destination form for a stored allowed_hosts column:
+// true when the credential is unbound, or bound with a readable list that
+// covers host. An unreadable list permits nothing.
+func PermitsHost(rawAllowed, host string) bool {
+	hosts, bound, readable := Bound(rawAllowed)
+	if !bound {
+		return true
+	}
+	return readable && HostsPermit(hosts, host)
+}

@@ -35,6 +35,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/gitlink"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -565,7 +566,7 @@ func resolveCodeLinkCredential(
 	host string,
 ) (codeLinkCredential, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT id, name, COALESCE(account_label, ''), encrypted_value
+		SELECT id, name, COALESCE(account_label, ''), encrypted_value, COALESCE(allowed_hosts, '[]')
 		FROM credentials
 		WHERE workspace_id = ?
 		  AND provider = ?
@@ -590,9 +591,15 @@ func resolveCodeLinkCredential(
 	// every attach where a labelled credential wins, which is the common case.
 	var fallback *codeLinkCandidate
 	for rows.Next() {
-		var id, name, label, enc string
-		if err := rows.Scan(&id, &name, &label, &enc); err != nil {
+		var id, name, label, enc, allowed string
+		if err := rows.Scan(&id, &name, &label, &enc, &allowed); err != nil {
 			return codeLinkCredential{}, err
+		}
+		// #5045: the token is sent to `host`, a destination the pasted URL
+		// influenced. A host-bound credential is a candidate only when its
+		// approved hosts cover that host (unreadable lists permit nothing).
+		if !credhostgate.PermitsHost(allowed, host) {
+			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(label), host) {
 			token, derr := encryption.Decrypt(enc)
