@@ -79,8 +79,9 @@ type Message struct {
 
 	// NativeCraftInstruction marks a human message that was recorded for an
 	// explicit native Craft task and started no run. Only the bridge sets it.
-	// Task admission binds nothing else, and agent history leaves it out, so
-	// the instruction reaches the strict task run and no ordinary one.
+	// Task admission binds nothing else, and every read except ReadTranscript
+	// leaves it out, so the instruction reaches the strict task run and no
+	// ordinary one.
 	NativeCraftInstruction bool `json:"native_craft_instruction,omitempty"`
 }
 
@@ -412,7 +413,21 @@ func (s *Store) Search(ctx context.Context, agentID, query string, limit int) ([
 }
 
 // Read returns messages from a session's JSONL file with optional pagination.
+// Like every read here except ReadTranscript, it leaves out native Craft
+// instructions: those reach the strict task run and the people who may read the
+// transcript, and no prompt, memory or other reader built on this store.
 func (s *Store) Read(ctx context.Context, sessionID string, offset, limit int) ([]Message, error) {
+	return s.read(ctx, sessionID, offset, limit, false)
+}
+
+// ReadTranscript returns a session's whole transcript, native Craft
+// instructions included. Only a caller that has already applied the chat
+// audience and shows the result to that person may use it.
+func (s *Store) ReadTranscript(ctx context.Context, sessionID string) ([]Message, error) {
+	return s.read(ctx, sessionID, 0, 0, true)
+}
+
+func (s *Store) read(ctx context.Context, sessionID string, offset, limit int, instructions bool) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -448,7 +463,7 @@ func (s *Store) Read(ctx context.Context, sessionID string, offset, limit int) (
 		}
 
 		var msg Message
-		if err := json.Unmarshal(line, &msg); err != nil {
+		if err := json.Unmarshal(line, &msg); err != nil || (msg.NativeCraftInstruction && !instructions) {
 			continue
 		}
 		messages = append(messages, msg)
@@ -502,7 +517,7 @@ func (s *Store) ReadTail(ctx context.Context, sessionID string, maxMessages int)
 			continue
 		}
 		var msg Message
-		if err := json.Unmarshal(line, &msg); err != nil {
+		if err := json.Unmarshal(line, &msg); err != nil || msg.NativeCraftInstruction {
 			continue
 		}
 		if maxMessages <= 0 {

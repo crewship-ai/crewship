@@ -503,8 +503,9 @@ invalidates it synchronously, so a host that retires in the same render neither
 sends nor posts. Any refusal or lost reply is reported and not repeated, because
 a message can launch only one task. The chat itself stays ordinary: a later
 message the person writes there starts a normal turn, whose history leaves the
-instruction out so the agent cannot repeat it into its logs. The person still
-sees the instruction in the transcript, and resending its text as an ordinary
+instruction out so the agent cannot repeat it into its logs. The instruction is
+also left out of the Keeper judge's prompt, the operator model, conversation
+search and shared chats. The transcript alone keeps it, for the chat's audience, and resending its text as an ordinary
 message is an ordinary turn.
 The outcome appears in the task status panel, and `craft_task_id` is added to the
 URL. A document a person holds is started the same way: admission does not

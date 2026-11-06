@@ -59,7 +59,7 @@ func TestNativeCraftInstructionPersistsForAuthorWithoutRunOrDiagnosticCopy(t *te
 	if got := container.ensured.Load(); got != 0 {
 		t.Fatalf("an instruction started a runtime %d times", got)
 	}
-	msgs, err := b.convStore.Read(context.Background(), "chat-1", 0, 0)
+	msgs, err := b.convStore.ReadTranscript(context.Background(), "chat-1")
 	if err != nil || len(msgs) != 1 {
 		t.Fatalf("persisted %d messages: %v", len(msgs), err)
 	}
@@ -200,7 +200,7 @@ func TestNativeCraftInstructionStaysOutOfLaterOrdinaryTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	msgs, err := b.convStore.Read(context.Background(), "chat-1", 0, 0)
+	msgs, err := b.convStore.ReadTranscript(context.Background(), "chat-1")
 	if err != nil || len(msgs) == 0 || msgs[0].Content != nativeInstruction {
 		t.Fatalf("the author's transcript lost the instruction: %+v %v", msgs, err)
 	}

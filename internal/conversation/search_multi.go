@@ -87,7 +87,7 @@ func (s *Store) searchAgents(ctx context.Context, agentIDs []string, userID, que
 		FROM conversation_messages cm
 		JOIN conversation_messages_fts fts ON fts.rowid = cm.rowid
 		`+audienceJoin+`
-		WHERE cm.agent_id IN (`+placeholders(len(ids))+`) AND conversation_messages_fts MATCH ?
+		WHERE cm.native_craft_instruction = 0 AND cm.agent_id IN (`+placeholders(len(ids))+`) AND conversation_messages_fts MATCH ?
 		ORDER BY bm25(conversation_messages_fts) ASC, cm.ts DESC
 		LIMIT ?`, args...)
 	if err != nil {
