@@ -425,9 +425,11 @@ version store inside the Crewship database. Every save is a new immutable
 version; files are stored once per artifact by content hash. Each artifact has
 two heads: the **latest version**, which the owner and editors work on, and
 the **shared version**. For Projects (including Dashboard and Slides),
-readers other than the owner and editors see only the shared version. Design
-REST reads without a version parameter expose the live canvas to authorized
-readers; its explicit version reads restrict non-editors to the shared version.
+readers other than the owner and editors see only the shared version.
+Shared-only Design readers also receive the shared snapshot and presence,
+without live document updates. Design live reads require Edit authority or
+the separately audited administrative read path; shared-only history reads
+remain limited to the shared version.
 How a write
 is guarded depends on the type. A project write (and a Dashboard data batch)
 must name the `base_version` it started from; a Craft save names its lease
