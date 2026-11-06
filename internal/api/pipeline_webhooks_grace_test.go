@@ -125,7 +125,6 @@ func TestWebhookGrace_TimestampedAndSecondRotation(t *testing.T) {
 // previous secret valid while the audit says there was no overlap: the
 // rotation is atomic, so it either fully applies or does not apply at all.
 func TestUpdateWebhook_RotateIsAtomicWhenPreviousSecretWriteFails(t *testing.T) {
-	const body = `{"event":"deploy"}`
 	for _, grace := range []string{`0`, `3600`} {
 		t.Run("grace "+grace, func(t *testing.T) {
 			h, db, userID, wsID := webhookHandlerRig(t)

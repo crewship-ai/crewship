@@ -56,6 +56,8 @@ import {
   PlugZap,
   RotateCcw,
   ScrollText,
+  Lock,
+  LockOpen,
   ShieldAlert,
   ShieldCheck,
   ShieldOff,
@@ -254,6 +256,9 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   // ── Skills ────────────────────────────────────────────────────────
   "skill.imported": PackageOpen,
   "skill.deleted": Trash2,
+  "skill.locked": Lock,
+  "skill.unlocked": LockOpen,
+  "skill.write_blocked": ShieldAlert,
   "skill.archived": Archive,
   "skill.restored": ArchiveRestore,
   "skill.assigned": UserPlus,
