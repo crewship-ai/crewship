@@ -375,7 +375,7 @@ func TestCovCfgResolveOAuthAccessTokens(t *testing.T) {
 
 	// creds holds only the CLIENT_ID half → access token must be appended.
 	in := []mcpCredEntry{{ID: "oc1", EnvVar: "FOO_CLIENT_ID", Type: "OAUTH2", Value: "cid"}}
-	out := h.resolveOAuthAccessTokens(req, in)
+	out := h.resolveOAuthAccessTokens(req, "agent-x", in)
 	var found bool
 	for _, c := range out {
 		if c.EnvVar == "_OAUTH_ACCESS_TOKEN:oc1" && c.Value == "access-tok-123" {
@@ -388,7 +388,7 @@ func TestCovCfgResolveOAuthAccessTokens(t *testing.T) {
 
 	// When an access token is already present, nothing is appended.
 	in2 := []mcpCredEntry{{ID: "oc1", EnvVar: "FOO_TOKEN", Type: "OAUTH2", Value: "tok"}}
-	out2 := h.resolveOAuthAccessTokens(req, in2)
+	out2 := h.resolveOAuthAccessTokens(req, "agent-x", in2)
 	if len(out2) != 1 {
 		t.Errorf("expected no append when access token present, got %+v", out2)
 	}

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"io"
 	"net/http"
 	"net/url"
@@ -24,6 +25,9 @@ const (
 	// EgressRuleCrewNetworkPolicy — the authoring crew's network policy
 	// (crews.network_mode=restricted + allowed_domains) denies the host.
 	EgressRuleCrewNetworkPolicy = "crew_network_policy"
+	// EgressRuleCredentialHosts — a redirect would carry a host-bound
+	// credential to a host its approved allowed_hosts do not cover (#5045).
+	EgressRuleCredentialHosts = "credential_allowed_hosts"
 )
 
 // EgressBlockedError is the structured error an http step (or hook)
@@ -172,11 +176,17 @@ func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender Rend
 	// authenticated write to an anonymous request if the vault is unavailable.
 	// Public requests omit credential_ref. Resolver errors can contain sensitive
 	// diagnostics, so only the declared type reaches the step's recorded error.
+	var credHosts *credentialTarget
 	if ref := step.HTTP.CredentialRef; ref != nil {
 		if e.credentialByType == nil {
 			return "", 0, 0, fmt.Errorf("http step %q: required credential %q cannot be resolved; no request was sent", step.ID, ref.Type)
 		}
-		credValue, credErr := e.credentialByType(rctx, scope, ref.Type)
+		// #5045: the real target host rides in the context so the resolver can
+		// apply the credential's approved hosts; without it a host-bound
+		// credential is never resolved.
+		credCtx, credTarget := withCredentialTarget(rctx, parsed.Hostname())
+		credValue, credErr := e.credentialByType(credCtx, scope, ref.Type)
+		credHosts = credTarget
 		if credErr != nil || credValue == "" {
 			return "", 0, 0, fmt.Errorf("http step %q: required credential %q is unavailable; no request was sent", step.ID, ref.Type)
 		}
@@ -223,6 +233,15 @@ func (e *Executor) runHTTPStep(ctx context.Context, step Step, parentRender Rend
 		AllowPrivate: e.allowPrivateHTTP,
 		MaxRedirects: 10,
 		ExtraHop: func(redirReq *http.Request) error {
+			// A host-bound credential already sits in the request headers or
+			// query; never follow it to a host its approved list does not cover.
+			if credHosts != nil && credHosts.bound && !credhostgate.HostsPermit(credHosts.hosts, redirReq.URL.Hostname()) {
+				return &EgressBlockedError{
+					StepID: step.ID, Host: redirReq.URL.Hostname(),
+					Rule:   EgressRuleCredentialHosts,
+					Detail: "redirect target is not one of the credential's approved hosts",
+				}
+			}
 			if !hostInEgressTargets(redirReq.URL.Hostname(), parentRender.EgressTargets) {
 				return &EgressBlockedError{
 					StepID: step.ID, Host: redirReq.URL.Hostname(),

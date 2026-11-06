@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/restrictedruntime"
 )
@@ -22,12 +23,16 @@ type providerBinding struct {
 type providerSnapshot struct {
 	Credential, Grant, Ciphertext, Model, Profile string
 	GrantExpiry, KeyExpiry                        sql.NullString
+	AllowedHosts                                  string
 }
 
 type providerQuery interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
+
+// providerHost is the only destination the broker ever sends the key to.
+const providerHost = "api.openai.com"
 
 var providerModel = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$`)
 var providerBearer = regexp.MustCompile(`^[a-zA-Z0-9._~+/-]+=*$`)
@@ -91,7 +96,7 @@ func loadProvider(ctx context.Context, q providerQuery, attemptID string) (provi
 }
 
 func providerCurrent(ctx context.Context, q providerQuery, attempt access.Attempt, grantID string) (providerSnapshot, error) {
-	rows, err := q.QueryContext(ctx, `SELECT c.id,ac.id,c.encrypted_value,a.llm_model,a.restricted_execution_profile,ac.expires_at,c.token_expires_at
+	rows, err := q.QueryContext(ctx, `SELECT c.id,ac.id,c.encrypted_value,a.llm_model,a.restricted_execution_profile,ac.expires_at,c.token_expires_at,COALESCE(c.allowed_hosts,'[]')
         FROM agents a JOIN agent_credentials ac ON ac.agent_id=a.id
         JOIN credentials c ON c.id=ac.credential_id AND c.workspace_id=a.workspace_id
         WHERE a.id=? AND a.workspace_id=? AND a.deleted_at IS NULL AND a.llm_provider='OPENAI'
@@ -106,7 +111,7 @@ func providerCurrent(ctx context.Context, q providerQuery, attempt access.Attemp
 	count := 0
 	for rows.Next() {
 		count++
-		if err := rows.Scan(&snapshot.Credential, &snapshot.Grant, &snapshot.Ciphertext, &snapshot.Model, &snapshot.Profile, &snapshot.GrantExpiry, &snapshot.KeyExpiry); err != nil {
+		if err := rows.Scan(&snapshot.Credential, &snapshot.Grant, &snapshot.Ciphertext, &snapshot.Model, &snapshot.Profile, &snapshot.GrantExpiry, &snapshot.KeyExpiry, &snapshot.AllowedHosts); err != nil {
 			return providerSnapshot{}, err
 		}
 	}
@@ -114,6 +119,11 @@ func providerCurrent(ctx context.Context, q providerQuery, attempt access.Attemp
 		return providerSnapshot{}, err
 	}
 	if count != 1 || !providerModel.MatchString(snapshot.Model) || snapshot.Ciphertext == "" || len(snapshot.Ciphertext) > 128<<10 {
+		return providerSnapshot{}, access.ErrDenied
+	}
+	// #5045: the broker sends this key only to providerHost. A host-bound key
+	// that does not approve that host is never pinned, planned or released.
+	if hosts, bound, readable := credhostgate.Bound(snapshot.AllowedHosts); bound && (!readable || !credhostgate.HostsPermit(hosts, providerHost)) {
 		return providerSnapshot{}, access.ErrDenied
 	}
 	if _, err := snapshot.deadline(time.Now().Add(5 * time.Minute)); err != nil {

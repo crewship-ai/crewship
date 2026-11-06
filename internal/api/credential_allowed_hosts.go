@@ -24,13 +24,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"github.com/crewship-ai/crewship/internal/credhosts"
-	"github.com/crewship-ai/crewship/internal/egresspolicy"
 )
 
 const allowedHostsLimitNote = "Allowed hosts decide whether this credential is delivered: it is withheld unless the crew " +
@@ -63,16 +61,7 @@ func humanOperatorRequest(r *http.Request) bool {
 	return InternalTokenWorkspaceFromContext(ctx) == ""
 }
 
-func parseStoredHosts(raw string) ([]string, error) {
-	if strings.TrimSpace(raw) == "" {
-		return nil, nil
-	}
-	var hosts []string
-	if err := json.Unmarshal([]byte(raw), &hosts); err != nil {
-		return nil, err
-	}
-	return credhosts.NormalizeList(hosts)
-}
+func parseStoredHosts(raw string) ([]string, error) { return credhostgate.ParseStored(raw) }
 
 // GetAllowedHosts handles GET /api/v1/credentials/{credentialId}/allowed-hosts.
 func (h *CredentialHandler) GetAllowedHosts(w http.ResponseWriter, r *http.Request) {
@@ -167,98 +156,27 @@ func (h *CredentialHandler) SetAllowedHosts(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, allowedHostsResponse{CredentialID: credID, AllowedHosts: hosts, Previous: prev, Note: allowedHostsLimitNote})
 }
 
-// hostBoundWithholds returns, for the delivered credentials that carry an
-// approved host list, the ones that must NOT be delivered and why. It is the
-// only place the precondition is evaluated, called from the delivery
-// chokepoint so every path (boot, delegation, peer query, readiness) agrees.
+// hostBoundWithholds adapts the shared credhostgate evaluation to the
+// readiness notice shape. The precondition itself lives in credhostgate so
+// every delivery path (container, Keeper, MCP, OAuth, service env, routines,
+// restricted runtime) evaluates the same rule.
 func hostBoundWithholds(ctx context.Context, db sqlQuerier, agentID string, ids []string) (map[string]deliveredSlotNotice, error) {
-	out := map[string]deliveredSlotNotice{}
-	if len(ids) == 0 {
-		return out, nil
-	}
-	ph := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
-	}
-	rows, err := db.QueryContext(ctx,
-		`SELECT id, COALESCE(allowed_hosts, '[]') FROM credentials WHERE id IN (`+ph+`)`, args...)
-	if err != nil {
-		return nil, fmt.Errorf("load credential allowed hosts: %w", err)
-	}
-	type bound struct {
-		id    string
-		hosts []string
-		bad   bool
-	}
-	var boundCreds []bound
-	for rows.Next() {
-		var id, raw string
-		if err := rows.Scan(&id, &raw); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		if strings.TrimSpace(raw) == "" || strings.TrimSpace(raw) == "[]" {
-			continue
-		}
-		hosts, perr := parseStoredHosts(raw)
-		boundCreds = append(boundCreds, bound{id: id, hosts: hosts, bad: perr != nil})
-	}
-	err = rows.Err()
-	rows.Close()
+	w, err := credhostgate.Withholds(ctx, db, agentID, ids)
 	if err != nil {
 		return nil, err
 	}
-	if len(boundCreds) == 0 {
-		return out, nil
-	}
+	return noticesFromWithholds(w), nil
+}
 
-	// Resolve the crew boundary once. Any failure to read it withholds.
-	var pol egresspolicy.Effective
-	var polErr error
-	crewRows, err := db.QueryContext(ctx, `SELECT COALESCE(crew_id, '') FROM agents WHERE id = ?`, agentID)
-	if err != nil {
-		return nil, fmt.Errorf("load agent crew: %w", err)
-	}
-	crewID := ""
-	if crewRows.Next() {
-		_ = crewRows.Scan(&crewID)
-	}
-	crewRows.Close()
-	if crewID != "" {
-		pol, polErr = egresspolicy.ResolveEffective(ctx, db, crewID)
-	}
+const hostBoundNoticeSuffix = "; it is withheld rather than delivered unbound. This is a delivery precondition, not a control on where an agent can send the token"
 
-	const suffix = "; it is withheld rather than delivered unbound. This is a delivery precondition, not a control on where an agent can send the token"
-	for _, b := range boundCreds {
-		reason := ""
-		switch {
-		case b.bad || len(b.hosts) == 0:
-			reason = "its approved host list is unreadable"
-		case crewID == "":
-			reason = "the agent is not in a crew, so no egress allowlist applies to it"
-		case polErr != nil:
-			reason = "the crew's network policy could not be read"
-		case !pol.Restricted:
-			reason = "the crew has no egress allowlist (network mode is free)"
-		default:
-			var missing []string
-			for _, h := range b.hosts {
-				if !credhosts.Covered(pol.Allow, h) {
-					missing = append(missing, h)
-				}
-			}
-			if len(missing) > 0 {
-				reason = "these approved hosts are not in the crew's effective egress allowlist: " + strings.Join(missing, ", ")
-			}
-		}
-		if reason == "" {
-			continue
-		}
-		out[b.id] = deliveredSlotNotice{
-			CredentialID: b.id, HostBound: true, Hosts: b.hosts,
-			Reason: "it is bound to approved hosts but " + reason + suffix,
+func noticesFromWithholds(w map[string]credhostgate.Withhold) map[string]deliveredSlotNotice {
+	out := map[string]deliveredSlotNotice{}
+	for id, n := range w {
+		out[id] = deliveredSlotNotice{
+			CredentialID: id, HostBound: true, Hosts: n.Hosts,
+			Reason: "it is bound to approved hosts but " + n.Reason + hostBoundNoticeSuffix,
 		}
 	}
-	return out, nil
+	return out
 }

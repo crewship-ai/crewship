@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"sort"
 	"strings"
 
@@ -100,13 +101,24 @@ func NewVaultCredentialResolver(db *sql.DB) func(ctx context.Context, scope RunS
 		if credType == "" {
 			return "", fmt.Errorf("credential_ref.type is empty")
 		}
-		var encryptedValue string
-		err := selectedVaultCredential(db, ctx, scope, credType, true).Scan(new(string), &encryptedValue)
+		var encryptedValue, allowedRaw string
+		err := selectedVaultCredential(db, ctx, scope, credType, true).Scan(new(string), &encryptedValue, &allowedRaw)
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", fmt.Errorf("no active credential of type %q in workspace vault", credType)
 		}
 		if err != nil {
 			return "", fmt.Errorf("credential lookup for type %q: %w", credType, err)
+		}
+		// #5045: a host-bound credential is released only to a step whose real
+		// target host it names. No target in the context (secret templates in
+		// code/script/notify steps, any other caller) or an unreadable list
+		// means withheld.
+		if hosts, bound, readable := credhostgate.Bound(allowedRaw); bound {
+			target, ok := credentialTargetFrom(ctx)
+			if !readable || !ok || !credhostgate.HostsPermit(hosts, target.host) {
+				return "", fmt.Errorf("credential of type %q is bound to approved hosts and is withheld", credType)
+			}
+			target.bound, target.hosts = true, hosts
 		}
 		plain, err := encryption.Decrypt(encryptedValue)
 		if err != nil {
@@ -142,7 +154,7 @@ func selectedVaultCredential(db *sql.DB, ctx context.Context, scope RunScope, cr
 	projection := "v.id"
 	join := ""
 	if includeValue {
-		projection += ", c.encrypted_value"
+		projection += ", c.encrypted_value, COALESCE(c.allowed_hosts, '[]')"
 		join = " JOIN credentials c ON c.id = v.id"
 	}
 	return db.QueryRowContext(ctx, query+`SELECT `+projection+` FROM candidates v`+join+`
@@ -213,4 +225,25 @@ WHERE c.workspace_id = ? AND UPPER(c.type) = UPPER(?)
 ` + notEndpoint + `  AND c.status = 'ACTIVE' AND c.deleted_at IS NULL
 )
 `, args
+}
+
+// credentialTarget carries, through the context, the one host a resolved
+// credential is about to be sent to, and receives the credential's approved
+// hosts back so the caller can hold redirects to them (#5045).
+type credentialTarget struct {
+	host  string
+	bound bool
+	hosts []string
+}
+
+type credentialTargetKey struct{}
+
+func withCredentialTarget(ctx context.Context, host string) (context.Context, *credentialTarget) {
+	t := &credentialTarget{host: host}
+	return context.WithValue(ctx, credentialTargetKey{}, t), t
+}
+
+func credentialTargetFrom(ctx context.Context) (*credentialTarget, bool) {
+	t, ok := ctx.Value(credentialTargetKey{}).(*credentialTarget)
+	return t, ok && t != nil && t.host != ""
 }
