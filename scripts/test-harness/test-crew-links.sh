@@ -53,10 +53,13 @@ section "2. A lead knows which crews it can reach"
 info "Asking alex (engineering lead) what its sidecar reports as linked…"
 wait_agent_free alex || finish  # a busy lead answers 429, which is not "sees no crews"
 seen="$(ask_agent alex "Run exactly: curl -s http://localhost:9119/connections — then reply with ONLY the crew slugs you found, comma separated, nothing else.")"
-if [[ -z "$seen" ]]; then
-  _fail "alex answers the connections ask" "the ask returned no reply (refused or failed; see the ask_agent message above), so alex's linked crews were never read"
+seen_rc=$?
+if (( seen_rc != 0 )); then
+  # A failed ask can leave a partial reply that happens to contain "ops".
+  _fail "alex answers the connections ask" "the ask exited $seen_rc (refused or failed; see the ask_agent message above), so a partial reply is not evidence of alex's linked crews"
+  seen=""
 fi
-assert_contains "alex sees ops among its linked crews" "$seen" "ops"
+(( seen_rc == 0 )) && assert_contains "alex sees ops among its linked crews" "$seen" "ops"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "3. Delegation ACROSS a live link reaches the other crew"

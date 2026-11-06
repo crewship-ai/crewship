@@ -61,7 +61,9 @@ for attempt in 1 2; do
 ask Sam to reply with exactly the string '${TAG}-OK' and nothing else. Then \
 report back to me Sam's exact answer.")"
   ask_rc=$?
-  if (( ask_rc != 0 )) && [[ -z "$reply" ]]; then
+  # The exit status decides, never the reply: a failed ask can still leave a
+  # partial reply behind.
+  if (( ask_rc != 0 )); then
     ask_refused=$((ask_refused+1))
     info "attempt $attempt: the ask itself failed (see ask_agent message above)"
     continue
@@ -80,7 +82,7 @@ peer_chat=0
 (( sam_after > sam_before )) && peer_chat=1
 
 if (( asks_answered == 0 )); then
-  _fail "alex accepts the delegation ask" "both asks were refused or failed ($ask_refused of 2); the delegation was never attempted, so this is a capacity or transport failure, not a skipped feature"
+  _fail "alex accepts the delegation ask" "both asks exited non-zero ($ask_refused of 2, a partial reply does not count as an answer); the delegation was never confirmed, so this is a capacity or transport failure, not a skipped feature"
 elif ! have jq; then
   skip "lead→peer delegation" "jq is not installed, so the activity feed could not be read — install jq to make this assertion"
 elif (( feed_ok == 0 )); then
@@ -97,7 +99,9 @@ elif (( delegated == 1 )); then
     _fail "the delegated assignment to sam completed" "no assignment.completed with a success outcome joined to the tagged assignment within ${ASK_TIMEOUT}s"
   fi
 else
-  skip "lead→peer delegation" "non-deterministic: no assignment addressed to sam carried $TAG over 2 attempts (a tag in alex's reply is not evidence)"
+  # Both asks succeeded and no assignment to sam carries the tag: the lead did
+  # not delegate. FAIL, as test-crew-links.sh does for the same outcome.
+  _fail "lead→peer delegation" "both asks succeeded but no assignment addressed to sam carried $TAG over 2 attempts (a tag in alex's reply is not evidence)"
 fi
 
 if have jq; then
