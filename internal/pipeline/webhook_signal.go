@@ -194,3 +194,22 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, wh.ID, deliveryID, wh.WorkspaceID, res.Outc
 	}
 	return res, derr, nil
 }
+
+// LookupSignalReceipt reports a completed signal receipt for body sha256 on
+// webhook webhookID that is still inside SignalDeliveryRetention. It is how a
+// webhook that left signal mode still recognises bodies it already processed.
+func LookupSignalReceipt(ctx context.Context, db *sql.DB, webhookID, bodySHA string) (SignalDeliveryResult, bool, error) {
+	var outcome, reason, runsJSON string
+	err := db.QueryRowContext(ctx, `SELECT outcome, reason, run_ids FROM pipeline_signal_deliveries
+		WHERE webhook_id = ? AND body_sha256 = ? AND complete = 1 AND received_at >= ?`,
+		webhookID, bodySHA, tsformat.Format(time.Now().UTC().Add(-SignalDeliveryRetention))).Scan(&outcome, &reason, &runsJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SignalDeliveryResult{}, false, nil
+	}
+	if err != nil {
+		return SignalDeliveryResult{}, false, fmt.Errorf("signal receipt lookup: %w", err)
+	}
+	res := SignalDeliveryResult{Outcome: outcome, Reason: reason, Duplicate: true}
+	_ = json.Unmarshal([]byte(runsJSON), &res.RunIDs)
+	return res, true, nil
+}

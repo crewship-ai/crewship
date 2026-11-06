@@ -871,6 +871,27 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A webhook switched back from signal delivery (--clear-signal) still holds
+	// the receipts of the bodies it processed as signals. Within their retention
+	// a replay of such a body is a duplicate, not new work: otherwise clearing
+	// the mode would reopen the replay window for every captured request.
+	if wh.SignalEventType == "" && h.db != nil {
+		if res, found, err := pipeline.LookupSignalReceipt(r.Context(), h.db, wh.ID, bodySHA); err != nil {
+			h.logger.Error("webhook fire: signal receipt lookup failed; refusing rather than guessing",
+				"error", err, "webhook_id", wh.ID)
+			w.Header().Set("Retry-After", webhook.IngressRetryAfterSeconds)
+			replyError(w, http.StatusServiceUnavailable, "acceptance unavailable")
+			return
+		} else if found {
+			status := "DELIVERED"
+			if res.Outcome == "ignored" {
+				status = "IGNORED"
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"status": status, "delivered": len(res.RunIDs), "run_ids": res.RunIDs, "duplicate": true})
+			return
+		}
+	}
+
 	if !pipeline.AllowWebhookFire(wh.Token, effectiveLimit) {
 		w.Header().Set("Retry-After", "60")
 		replyError(w, http.StatusTooManyRequests, "rate limit exceeded")

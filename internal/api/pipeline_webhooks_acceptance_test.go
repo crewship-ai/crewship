@@ -2,12 +2,15 @@ package api
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/crewship-ai/crewship/internal/tsformat"
 	"github.com/crewship-ai/crewship/internal/webhook"
 )
 
@@ -230,5 +233,35 @@ func TestPipelineWebhooks_Fire_ThrottledRedeliveryAnswersTheOriginalReceipt(t *t
 	}
 	if rr := fireRoutineWebhook(t, h, token, secret, `{"event":"deploy"}`, "evt-throttled"); rr.Code != 503 {
 		t.Errorf("throttled redelivery with the ledger unavailable status = %d, want 503; body=%s", rr.Code, rr.Body.String())
+	}
+}
+
+// After --clear-signal the webhook starts runs again, but a body it already
+// processed as a signal stays a duplicate for the receipt retention: replaying
+// the captured request must not start a run.
+func TestPipelineWebhooks_Fire_ClearedSignalReceiptStillDedupes(t *testing.T) {
+	h, token, secret, wsID := routineAcceptanceRig(t)
+	body := `{"order":{"id":"A-1"}}`
+	sum := sha256.Sum256([]byte(body))
+	var whID string
+	if err := h.db.QueryRow(`SELECT id FROM pipeline_webhooks WHERE workspace_id = ?`, wsID).Scan(&whID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.Exec(`INSERT INTO pipeline_signal_deliveries
+		(webhook_id, delivery_id, workspace_id, outcome, reason, run_ids, received_at, body_sha256, complete)
+		VALUES (?, 'old-delivery', ?, 'delivered', '', '["run-1"]', ?, ?, 1)`,
+		whID, wsID, tsformat.Format(time.Now().UTC().Add(-time.Hour)), hex.EncodeToString(sum[:])); err != nil {
+		t.Fatal(err)
+	}
+	rr := fireRoutineWebhook(t, h, token, secret, body, "replay-key")
+	if rr.Code != 200 || !strings.Contains(rr.Body.String(), `"duplicate":true`) {
+		t.Fatalf("replay of a signal-processed body = %d %s, want a 200 duplicate", rr.Code, rr.Body.String())
+	}
+	if n := countWebhookRows(t, h.db, `SELECT COUNT(*) FROM routine_webhook_receipts`); n != 0 {
+		t.Fatalf("replay started work: %d receipts", n)
+	}
+	// A different body is new work.
+	if rr := fireRoutineWebhook(t, h, token, secret, `{"order":{"id":"B-2"}}`, "fresh-key"); rr.Code != 202 {
+		t.Fatalf("fresh body = %d %s, want 202", rr.Code, rr.Body.String())
 	}
 }
