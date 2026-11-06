@@ -14775,7 +14775,8 @@
           "can_edit",
           "acquired_at",
           "handoff_requested_kind",
-          "handoff_requested_by"
+          "handoff_requested_by",
+          "can_share"
         ],
         "type": "object"
       },
