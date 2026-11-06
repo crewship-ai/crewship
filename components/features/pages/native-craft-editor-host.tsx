@@ -163,17 +163,18 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   function detach(r:Runtime){r.abort.abort();r.port.close();r.frame.remove()}
   function armAdmissionDeadline(){
    const epoch=++admissionEpoch;initializing=true;readerRefreshNeeded=false;clearTimeout(admissionDeadline)
-   admissionDeadline=setTimeout(()=>{if(epoch===admissionEpoch)stop('Dokument nelze bezpečně otevřít. Vypršel čas připojení; pro nový pokus obnovte stránku.')},60000)
+   admissionDeadline=setTimeout(()=>{if(epoch!==admissionEpoch)return;if(metadataOnly)retryMetadata();else stop('Dokument nelze bezpečně otevřít. Vypršel čas připojení; pro nový pokus obnovte stránku.')},60000)
    return epoch
   }
   function finishAdmission(epoch:number){if(epoch===admissionEpoch){initializing=false;clearTimeout(admissionDeadline);queueMicrotask(catchUpReader)}}
+  function endDraftHold(){metadataOnly=false;setDraftHeld(false);clearTimeout(metadataRetry)}
   function stop(message:string,explicitClose=false){
    if(dead)return
    if(current?.blocked&&!explicitClose){
     // No unconfirmed native buffer is discarded to recover connectivity.
     // Hide it on uncertain authority; one explicit read recheck may reveal
     // this same frozen frame, never import over it or resurrect its writer.
-    admissionEpoch++;initializing=false;readOpening=false;readOpeningAbort?.abort();clearTimeout(admissionDeadline);clearTimeout(metadataRetry)
+    admissionEpoch++;initializing=false;readOpening=false;readOpeningAbort?.abort();clearTimeout(admissionDeadline);endDraftHold()
     networkRetired=true;clearInterval(reauthorize);clearInterval(leaseWatch);clearInterval(proposalWatch)
     freezeInput(current);current.frame.style.visibility='hidden';readAccess(false);setRetainedBuffer(true)
     setConnectionRetired(true);setOwnsEditor(false);setUncertain(false);setDirty(true);setSavedVersion(undefined);setBusy(false)
@@ -183,7 +184,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    }
    if(nativeFailed&&!explicitClose)return
    readAccess(false)
-   dead=true;clearTimeout(metadataRetry);readOpening=false;readOpeningAbort?.abort();admissionEpoch++;clearTimeout(admissionDeadline);setConnectionRetired(true);lifetime.abort();clearInterval(reauthorize);clearInterval(leaseWatch);clearInterval(proposalWatch);setError(message);setSavedVersion(undefined);setLabel(current?.capture?'Editor odpojen · zachycená místní kopie zůstává':'Editor odpojen');setOwnsEditor(false);setBusy(false)
+   dead=true;endDraftHold();readOpening=false;readOpeningAbort?.abort();admissionEpoch++;clearTimeout(admissionDeadline);setConnectionRetired(true);lifetime.abort();clearInterval(reauthorize);clearInterval(leaseWatch);clearInterval(proposalWatch);setError(message);setSavedVersion(undefined);setLabel(current?.capture?'Editor odpojen · zachycená místní kopie zůstává':'Editor odpojen');setOwnsEditor(false);setBusy(false)
    if(current){detach(current);void current.coordinator?.close();if(!current.coordinator)void current.journal?.close()}
    client.close()
   }
@@ -308,7 +309,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    r={enginePin:snapshot.enginePin,sessionId:admittedSession,port,frame,abort,version:snapshot.version,generation,ready:false,writable:false,nativeReadOnly:true,edit:0,blocked:false};current=r
    return ready
   }
-  copyRecovery.current=(scope,draft)=>{if(scope===scopeKey&&(readable||metadataOnly)&&!privacyRetirement)copy(draft)}
+  copyRecovery.current=(scope,draft)=>{if(scope===scopeKey&&(readable||metadataOnly&&!authSuspended&&!dead&&!lifetime.signal.aborted)&&!privacyRetirement)copy(draft)}
   compare.current=(draft,scope=scopeKey)=>{
    if(scope!==scopeKey)return
    if(metadataOnly){setError('Porovnání se serverem není bez práva upravovat dostupné. Kopii konceptu si můžete stáhnout.');return}
@@ -398,7 +399,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    r.retiring=retiring;return retiring
   }
   async function suspendForAuth(){
-   authSuspended=true;setAuthEnded(true);readAccess(false)
+   authSuspended=true;setAuthEnded(true);readAccess(false);endDraftHold()
    const r=current
    if(r){freezeInput(r);r.frame.style.visibility='hidden'}
    // Another retirement may already be capturing the only native buffer.
@@ -475,7 +476,21 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     sessionId=opened.sessionId;watch();if(!valid())return
     if(retained){
      // The frozen frame is private content too: only a confirmed read reveals it.
-     await admission.read(operation.signal);if(!valid()||current!==r)return
+     // Only an explicit recheck reads; a reconnecting draft hold stays hidden.
+     if(metadataOnly&&!retry){
+      await currentLease(admission,operation.signal);if(!valid()||current!==r)return
+      networkRetired=false;readOpening=false;finishAdmission(startup);setBusy(false);return
+     }
+     try{await admission.read(operation.signal)}
+     catch(cause){
+      if(!(cause instanceof Error)||cause.message!=='native_private_read_refused')throw cause
+      if(!valid()||current!==r)return
+      // The refused frame stays hidden and intact; lease events still reach it.
+      metadataOnly=true;setDraftHeld(true);dropPrivateViews();setConnectionRetired(true);setRetainedBuffer(true);setError(READ_ONLY_REFUSED);setBusy(false)
+      await currentLease(admission,operation.signal);if(!valid()||current!==r)return
+      networkRetired=false;readOpening=false;finishAdmission(startup);return
+     }
+     if(!valid()||current!==r)return
      await currentLease(admission,operation.signal);if(!valid()||current!==r)return
      // Keep input inert even if native read-only could not be confirmed.
      r!.frame.style.visibility='';readAccess(true);setRetainedBuffer(true)
@@ -512,7 +527,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   }
   // A lost metadata admission must not end the watch while a draft is held.
   function retryMetadata(){
-   if(dead)return
+   if(dead||authSuspended)return
+   // Retire the failed admission first, or its stalled read would hold the slot.
+   admissionEpoch++;initializing=false;readOpening=false;readOpeningAbort?.abort();readOpeningAbort=undefined;clearTimeout(admissionDeadline)
    networkRetired=true;clearInterval(reauthorize);clearInterval(leaseWatch);client.close();clearTimeout(metadataRetry)
    metadataRetry=setTimeout(()=>{networkRetired=false;void reopenReadOnly().catch(retryMetadata)},METADATA_RETRY_MS)
   }
@@ -724,10 +741,10 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     if(event==='session_retired'&&value.draft==='purge'){
      void retirePrivacy().catch(()=>setError('Vymazání místního konceptu nebylo potvrzeno.'));return
     }
-    if(event==='session_retired'&&nativeFailed){void retireConnection('Spojení bylo ukončeno.').catch(()=>stop('Přístup editoru se nepotvrdil.'));return}
+    if(event==='session_retired'&&metadataOnly&&value.reason!=='write_revoked'){retryMetadata();return}
+    if(event==='session_retired'&&nativeFailed&&!metadataOnly){void retireConnection('Spojení bylo ukončeno.').catch(()=>stop('Přístup editoru se nepotvrdil.'));return}
     if(event==='session_retired'&&value.reason==='write_revoked'&&(initializing||current&&!current.ready)){stop('Právo upravovat bylo během otevírání odebráno. Dokument se neotevřel.');return}
     if(event==='session_retired'&&value.reason==='write_revoked'){void reopenReadOnly().catch(()=>stop('Přístup editoru se nepotvrdil.'));return}
-    if(event==='session_retired'&&metadataOnly){retryMetadata();return}
     if(event==='session_retired'){void retireConnection('Spojení bylo ukončeno.').catch(()=>stop('Přístup editoru se nepotvrdil.'));return}
     void observeLease(value,true).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Aktuální přístup nelze potvrdit.').catch(()=>stop('Přístup editoru se nepotvrdil.'))})
    }).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Spojení přerušeno. Zápis není potvrzen.').catch(()=>stop('Přístup editoru se nepotvrdil.'))})
