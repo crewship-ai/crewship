@@ -1894,8 +1894,8 @@ func absorbHandlerBody(info *handlerInfo, signature, body string) {
 		info.repliesError = true
 	}
 	// Some handlers build the RFC 7807 body in place instead of calling a helper.
-	if strings.Contains(body, "writeProblem(") || strings.Contains(body, "internalError(") ||
-		strings.Contains(body, `"about:blank"`) {
+	if strings.Contains(body, "writeProblem(") || strings.Contains(body, "composioGatewayError(") ||
+		strings.Contains(body, "internalError(") || strings.Contains(body, `"about:blank"`) {
 		info.repliesProblem = true
 	}
 	if internalErrorPattern.MatchString(body) {
