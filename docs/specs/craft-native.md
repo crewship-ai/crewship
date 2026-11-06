@@ -85,6 +85,15 @@ the head. The server's base fence then decides between a new version and a
 visible conflict with the draft kept. The host runs the same reconcile when the
 browser reports it is back online, as "Ověřit výsledek" does.
 
+Restore answers 404 to the lease holder when the target does not exist.
+
+The snapshot message binds the session, so `crewship craft connect` can
+reconcile only on the connection that made the save; the admission token never
+leaves that process. From a new process the original snapshot fails the local
+session check, a rewritten one stays unconfirmed (409), and a new holder's 410 covers only its own session's attempts. Recovery after losing
+the process reads base+1 from the version history and compares its hash and
+author with the local candidate.
+
 Renew/release require `{generation: "1"}`. Handoff requires
 `{generation: "1", request_id: "public-request-id"}`. Other lease mutations use
 `{}`. Generations are canonical positive decimal **strings**, never JavaScript

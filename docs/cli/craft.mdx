@@ -173,7 +173,8 @@ nothing is deleted:
 ```
 
 A stale generation, a moved-on `baseVersion` or a missing lease answers `409`
-(exit code `5`); without edit rights the answer is `403`.
+(exit code `5`); without edit rights the answer is `403`. For the lease holder,
+a `targetVersion` that does not exist answers `404` (exit code `3`).
 
 ### Agent proposals
 
@@ -201,6 +202,51 @@ exports. The snapshot public session ID must match this connection; private
 admission tokens never belong in the snapshot. No automatic mutation retry
 occurs after a conflict or unknown ACK.
 
+### Confirm a save after a lost reply
+
+Give each `save` a fresh `attemptId` in its snapshot: 8 to 64 of
+`[A-Za-z0-9_-]`, chosen by you. `import` takes it too; `share` and `restore`
+refuse it. If the reply is lost but the `connect` process is still running, send
+`reconcile` on that same connection with the original snapshot fields, without
+`bytes`, and the same `attemptId`:
+
+| Answer | Meaning | Next step |
+|---|---|---|
+| Exit 0, receipt | The save committed at `baseVersion + 1`. | Nothing to send. |
+| `410` (exit `1`) | Under your live lease, that attempt did not commit and never will. | Open a new connection and save again with a fresh `editorRevision` and `attemptId`. |
+| `409` (exit `5`) | Unconfirmed: no `attemptId`, or this session no longer holds the live lease. Nothing was recorded. | Keep the local draft and follow the steps below. |
+
+Reconcile is bound to the original admission. The server compares the session in
+the snapshot with the session that committed, and the admission token lives only
+in the `connect` process, so another process can never confirm the save.
+
+### Recover after losing the `connect` process
+
+There is no reconcile from a new process. The original snapshot is refused
+before any request with `invalid native snapshot binding` (exit `1`), because
+its `sessionId` is not the new connection's. With `sessionId` rewritten, the
+server answers `409` (exit `5`) even when the save committed. A `410` from a
+different session says nothing about the old attempt either: it answers for that
+session's own attempts, and the old save may still have committed. Do not use
+reconcile here. Check the history instead:
+
+1. Keep the local draft and note the `baseVersion` of the lost save.
+2. Open a new `connect` and send `acquire`. The old lease lapses about 15 seconds
+   after its process stops, and `acquire` is refused with `409` (exit `5`) until
+   then, which ends that connection, so start a new one and try again. The new
+   generation fences the old session: its save can no longer publish.
+3. Send `read` and compare `version` with the lost `baseVersion`.
+4. If `version` still equals `baseVersion`, nothing committed. Save again with a
+   fresh `editorRevision` and `attemptId`.
+5. If `version` is higher, inspect `baseVersion + 1` with
+   `crewship craft versions <page>` and
+   `crewship craft version <page> <version> --output candidate.json`. Without the
+   `craft_version_history` flag these answer `404` (exit `3`); `read` then shows
+   only the head.
+6. If the sha256 of `candidate.json` equals your `contentHash` and the author is
+   you, the save committed: do not save again. Otherwise someone else wrote that
+   version: merge your draft onto the head and save at the current version.
+
 `watch` consumes the server's live SSE stream until cancellation or stream end;
 it does not process later stdin actions. Only a valid `session_retired` event
 is a confirmed clean end; unexpected EOF reports an unconfirmed disconnect.
@@ -211,11 +257,12 @@ reacquisition. EOF does not save content or release/reacquire a lease; send an
 explicit `release` when wanted. Reauthorization uses the current CLI credential
 and cannot revive an expired admission or replace its original authority.
 
-## Initialize one owned Word Page
+## Initialize one owned Word or Sheet Page
 
-`crewship craft initialize <page> --file <native.json>` calls
-`POST /api/v1/pages/{slug}/craft/initialize` with Word native bytes (at most
-32 MiB). The Page must already exist, be empty, and be personally owned by the
+`crewship craft initialize <page> [--application word|sheet] --file <native.json>`
+calls `POST /api/v1/pages/{slug}/craft/initialize` with native bytes (at most
+32 MiB). `--application` defaults to `word`; any other value than `word` or
+`sheet` exits 2 before a request. The Page must already exist, be empty, and be personally owned by the
 current human with `pages:write`. The server chooses all qualified pins and
 atomically creates its initial native version and lease. This does not convert
 legacy content or create a Page.
