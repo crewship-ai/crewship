@@ -993,7 +993,7 @@ crewship routine webhooks create --slug checkout \
 # back to starting runs:  routine webhooks update <id> --clear-signal
 ```
 
-In this mode a delivery to the webhook's public URL **never starts a run**. After the usual signature check and rate limit, the server reads the scalar at `--signal-correlation-path` (dotted JSON path in the verified body) and wakes every parked `wait: event` whose `event_type` and `correlation_key` equal it, whose run belongs to the webhook's workspace **and its target routine**, and whose `event_filter` accepts the body. The raw body is the wait step's output. It uses the same durable store as `signal`, so it survives restarts, honours each wait's original deadline, and cannot wake a cancelled, finished or timed-out run.
+In this mode a delivery to the webhook's public URL **never starts a run**. After the usual signature check and rate limit, the server reads the scalar at `--signal-correlation-path` (dotted JSON path in the verified body) and wakes every parked `wait: event` whose `event_type` and `correlation_key` equal it, whose run belongs to the webhook's workspace **and its target routine**, and whose `event_filter` accepts the body. The raw body is the wait step's output. Any `{{ steps.<wait>.output }}` reference to a `wait: event` output inside an `agent_run` prompt is wrapped in the untrusted-ingress fence (`<untrusted source="signal" ...>`), however the run was started; the egress floor for webhook-triggered runs is unchanged. It uses the same durable store as `signal`, so it survives restarts, honours each wait's original deadline, and cannot wake a cancelled, finished or timed-out run.
 
 | Response (`200`) | Meaning |
 |---|---|

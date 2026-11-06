@@ -1740,13 +1740,39 @@ func (e *Executor) agentlessGate(ctx context.Context, in RunInput, emit *pipelin
 // a child routine, which re-renders (and re-fences, if IT is later
 // determined to be webhook-triggered) on its own terms — fencing here
 // would double-wrap and is out of scope for this fix.
-func renderAgentPrompt(step Step, ctxRender RenderContext, triggeredVia TriggeredVia) string {
-	if step.Type != StepAgentRun || triggeredVia != TriggeredViaWebhook {
+//
+// Signal payloads are fenced regardless of how the run started: the output of
+// a wait:event step is whatever an outside sender delivered, so any reference
+// to it from an agent prompt is wrapped, for manual and scheduled runs too.
+func renderAgentPrompt(step Step, ctxRender RenderContext, triggeredVia TriggeredVia, dsl *DSL) string {
+	if step.Type != StepAgentRun {
 		return Render(step.Prompt, ctxRender)
 	}
 	fenced := ctxRender
-	fenced.UntrustedInputs = WebhookUntrustedInputKeys
+	if triggeredVia == TriggeredViaWebhook {
+		fenced.UntrustedInputs = WebhookUntrustedInputKeys
+	}
+	fenced.UntrustedSteps = signalWaitStepIDs(dsl)
 	return Render(step.Prompt, fenced)
+}
+
+// signalWaitStepIDs names the wait:event steps of dsl, whose output is an
+// externally delivered payload.
+func signalWaitStepIDs(dsl *DSL) map[string]struct{} {
+	if dsl == nil {
+		return nil
+	}
+	var ids map[string]struct{}
+	for i := range dsl.Steps {
+		st := &dsl.Steps[i]
+		if st.Type == StepWait && st.Wait != nil && st.Wait.Kind == "event" {
+			if ids == nil {
+				ids = map[string]struct{}{}
+			}
+			ids[st.ID] = struct{}{}
+		}
+	}
+	return ids
 }
 
 // runLinearStep is the per-step execution body of the sequential loop
@@ -1776,7 +1802,7 @@ func (e *Executor) runLinearStep(
 ) *RunResult {
 	// Build the rendered prompt for both run + dry-run paths.
 	ctxRender := buildStepRenderContext(inputsForCtx, result.StepOutputs, renderEnv, runMeta, dsl.EgressTargets, in.stateSnapshot)
-	renderedPrompt := renderAgentPrompt(step, ctxRender, in.TriggeredVia)
+	renderedPrompt := renderAgentPrompt(step, ctxRender, in.TriggeredVia, dsl)
 
 	// Conditional execution. We evaluate the rendered If string
 	// for truthiness BEFORE tier resolution / runner dispatch so

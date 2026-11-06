@@ -791,6 +791,10 @@ type RenderContext struct {
 	// corrupt it rather than protect anything; those vectors are closed
 	// by the egress hardening in egress_gate.go instead.
 	UntrustedInputs map[string]struct{}
+	// UntrustedSteps names steps whose output is an externally delivered
+	// signal payload; {{ steps.<id>.output }} (and its path form) is fenced
+	// like an untrusted input. Nil means no fencing.
+	UntrustedSteps map[string]struct{}
 	// Secrets maps a credential TYPE (e.g. "stripe") to its decrypted
 	// value for the {{ secrets.<type> }} render namespace (#1418). It is
 	// populated per-step by the executor (resolveStepSecrets) from the
@@ -865,13 +869,13 @@ func resolveRef(ref string, ctx RenderContext) (string, bool) {
 		}
 		// parts[2] starts with "output" possibly followed by ".path".
 		if parts[2] == "output" {
-			return out, true
+			return fenceStepIfUntrusted(ctx, parts[1], out), true
 		}
 		// "output.json.path" — try to JSON-decode the output and
 		// walk the path. Best-effort: failure returns "".
 		if strings.HasPrefix(parts[2], "output.") {
 			path := strings.TrimPrefix(parts[2], "output.")
-			return jsonPath(out, path), true
+			return fenceStepIfUntrusted(ctx, parts[1], jsonPath(out, path)), true
 		}
 		return "", false
 	case "env":
@@ -960,6 +964,16 @@ func fenceIfUntrusted(ctx RenderContext, inputName, value string) string {
 		return value
 	}
 	return untrusted.Wrap("webhook", value)
+}
+
+// fenceStepIfUntrusted wraps a step output in the untrusted fence when the
+// step is listed in ctx.UntrustedSteps. The source label is fixed: signal
+// payloads come from the outside, and the label never comes from the payload.
+func fenceStepIfUntrusted(ctx RenderContext, stepID, value string) string {
+	if _, ok := ctx.UntrustedSteps[stepID]; !ok {
+		return value
+	}
+	return untrusted.Wrap("signal", value)
 }
 
 // stringify converts an arbitrary input value to a string for template
