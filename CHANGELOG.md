@@ -11,7 +11,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Security
 
-- The web app's Content-Security-Policy no longer allows `unsafe-eval`. Injected scripts can no longer use `eval` or `new Function`; `wasm-unsafe-eval` keeps WebAssembly working.
+- The web app's Content-Security-Policy no longer allows `unsafe-eval`. Injected scripts can no longer use `eval` or `new Function`; `wasm-unsafe-eval` keeps WebAssembly working. Zod runs without its eval probe, so pages report no CSP violation.
 
 - ⚠️ **Behaviour change: only OWNER or ADMIN can change the governance model credential (#5024).** PATCH, rotate, escalation answers, OAuth completion and internal token writes refuse a bound credential for narrower roles, and `credential.rotate` no longer reaches it. Binding now needs an active credential.
 - **A delayed sign-out no longer removes unsent chat proposals (#5026).** If a tab learns of a sign-out after its person signed back in, it now keeps their chat recovery. A real sign-out still removes it, even when saving drafts fails.
