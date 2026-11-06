@@ -111,7 +111,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   let sessionApplication:NativeDocumentSnapshot['applicationId']|undefined
   // metadataOnly: the frame is gone after a refused private read, and the lease
   // admission stays open only so an explicit read loss can still purge the draft.
-  let closed=false,metadataOnly=false,connectionLost=false,draftOffered=false,metadataDelay=METADATA_RETRY_MS,metadataRetry:ReturnType<typeof setTimeout>|undefined
+  let closed=false,metadataOnly=false,connectionLost=false,draftOffered=false,heldCopy=false,metadataDelay=METADATA_RETRY_MS,metadataRetry:ReturnType<typeof setTimeout>|undefined
   // Bumped whenever private access stops being confirmed: a server comparison or
   // proposal list started before that may no longer reach the page.
   let privateEpoch=0
@@ -167,7 +167,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    return epoch
   }
   function finishAdmission(epoch:number){if(epoch===admissionEpoch){initializing=false;clearTimeout(admissionDeadline);queueMicrotask(catchUpReader)}}
-  function endDraftHold(){metadataOnly=false;setDraftHeld(false);clearTimeout(metadataRetry)}
+  function offerHeldCopy(value:boolean){heldCopy=value;setDraftHeld(value)}
+  function endDraftHold(){metadataOnly=false;offerHeldCopy(false);clearTimeout(metadataRetry)}
   function stop(message:string,explicitClose=false){
    if(dead)return
    if(current?.blocked&&!explicitClose){
@@ -223,7 +224,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    const purged=r?.coordinator&&!stopped?r.coordinator.revokeRead():privacyJournal?journalPurge(privacyJournal):Promise.resolve()
    if(stopped||metadataOnly)setError(undefined)
    dropPrivateViews()
-   metadataOnly=false;setDraftHeld(false)
+   metadataOnly=false;offerHeldCopy(false)
    client.close();readAccess(false);setRetainedBuffer(false);setView(vacant);setQuota(undefined);setConnectionRetired(true);setUncertain(false);setRecoveries([]);setDirty(false);setSavedVersion(undefined);setOwnsEditor(false);setLabel('Přístup ke čtení byl odebrán')
    void purged.then(resolve,reject)
    return privacyRetirement
@@ -309,7 +310,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    r={enginePin:snapshot.enginePin,sessionId:admittedSession,port,frame,abort,version:snapshot.version,generation,ready:false,writable:false,nativeReadOnly:true,edit:0,blocked:false};current=r
    return ready
   }
-  copyRecovery.current=(scope,draft)=>{if(scope===scopeKey&&(readable||metadataOnly&&!authSuspended&&!dead&&!lifetime.signal.aborted)&&!privacyRetirement)copy(draft)}
+  copyRecovery.current=(scope,draft)=>{if(scope===scopeKey&&(readable||heldCopy&&!authSuspended&&!dead&&!lifetime.signal.aborted)&&!privacyRetirement)copy(draft)}
   compare.current=(draft,scope=scopeKey)=>{
    if(scope!==scopeKey)return
    if(metadataOnly){setError('Porovnání se serverem není bez práva upravovat dostupné. Kopii konceptu si můžete stáhnout.');return}
@@ -494,9 +495,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
       if(!(cause instanceof Error)||cause.message!=='native_private_read_refused')throw cause
       if(!valid()||current!==r)return
       // The refused frame stays hidden and intact; lease events still reach it.
-      metadataOnly=true;setDraftHeld(true);dropPrivateViews();setConnectionRetired(true);setRetainedBuffer(true);setError(READ_ONLY_REFUSED);setBusy(false)
+      metadataOnly=true;dropPrivateViews();setConnectionRetired(true);setRetainedBuffer(true);setError(READ_ONLY_REFUSED);setBusy(false)
       await currentLease(admission,operation.signal);if(!valid()||current!==r)return
-      networkRetired=false;readOpening=false;finishAdmission(startup);return
+      offerHeldCopy(true);networkRetired=false;readOpening=false;finishAdmission(startup);return
      }
      if(!valid()||current!==r)return
      await currentLease(admission,operation.signal);if(!valid()||current!==r)return
@@ -518,7 +519,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
      await currentLease(admission,operation.signal);if(!valid())return
      await mountEditor(snapshot,viewNow.generation??'1');if(!valid())return
     }
-    metadataOnly=false;setDraftHeld(false);networkRetired=false;readOpening=false;setConnectionRetired(false);finishAdmission(startup);setBusy(false)
+    metadataOnly=false;offerHeldCopy(false);networkRetired=false;readOpening=false;setConnectionRetired(false);finishAdmission(startup);setBusy(false)
     setError(retained?'Zachycení posledních změn nebylo potvrzeno. Původní editor je uzamčený; po ověření čtení můžete stáhnout místní kopii.':connectionLost?'Spojení se obnovilo. Dokument je jen pro čtení, neuložené změny najdete v konceptu.':message)
     if(connectionLost)draftOffered=true
     connectionLost=false;metadataDelay=METADATA_RETRY_MS
@@ -532,15 +533,17 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   // explicit read-loss event still reach this person, and the draft stays theirs.
   async function holdMetadata(admission:typeof client,signal:AbortSignal){
    const r=current,captured=Boolean(r?.capture)
-   metadataOnly=true;setDraftHeld(true);dropPrivateViews()
+   metadataOnly=true;dropPrivateViews()
    if(r){await r.coordinator?.close();if(!r.coordinator)await r.journal?.close();detach(r);current=undefined}
    if(dead)return
    setConnectionRetired(true);setOwnsEditor(false);setSavedVersion(undefined);setQuota(undefined);setQuotaFull(false);setSaveTrace(undefined);setUncertain(false);setLabel(captured?'Editor odpojen · koncept zachován':'Editor odpojen');setError(READ_ONLY_REFUSED);setBusy(false)
-   await currentLease(admission,signal)
+   // The copy follows the monitor: only a confirmed admission offers it.
+   await currentLease(admission,signal);if(!dead&&client===admission)offerHeldCopy(true)
   }
   // A lost metadata admission must not end the watch while a draft is held.
   function retryMetadata(){
    if(dead||authSuspended)return
+   offerHeldCopy(false)
    // Retire the failed admission first, or its stalled read would hold the slot.
    admissionEpoch++;initializing=false;readOpening=false;readOpeningAbort?.abort();readOpeningAbort=undefined;clearTimeout(admissionDeadline)
    networkRetired=true;clearInterval(reauthorize);clearInterval(leaseWatch);client.close();clearTimeout(metadataRetry)

@@ -1004,6 +1004,17 @@ describe('write access removed while read access remains (#4348)',()=>{
    expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
    expect(journal.revokeRead).not.toHaveBeenCalled()
   },10000)
+  it('withdraws the held copy when its monitor is refused and restores it only after a confirmed admission',async()=>{
+   const second=await demoted()
+   await waitFor(()=>expect(second.events).toHaveBeenCalledOnce())
+   await waitFor(()=>expect(screen.getByRole('button',{name:'Kopie konceptu'})).toBeInTheDocument())
+   const third=clientRig();third.open.mockRejectedValue(Error('native_session_forbidden'));m.createClient.mockReturnValueOnce(third)
+   act(()=>stream?.('session_retired',{delivery:'stopped',draft:'retain',reason:'authority_changed'}))
+   expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
+   await waitFor(()=>expect(third.open).toHaveBeenCalledOnce(),{timeout:7000})
+   expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
+   expect(journal.revokeRead).not.toHaveBeenCalled()
+  },10000)
   it('sign-out still purges after a generic failure ended content delivery',async()=>{
    mount();await ready();await acquire()
    const second=clientRig();second.open.mockRejectedValue(Error('native_session_unavailable'));m.createClient.mockReturnValueOnce(second)
