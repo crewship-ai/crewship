@@ -589,16 +589,17 @@ func resolveCodeLinkCredential(
 	// correctly labelled credential that should have won is still two rows
 	// down, unread. Deferring the decrypt also skips an AES-GCM operation on
 	// every attach where a labelled credential wins, which is the common case.
+	destination := gitlink.APIHost(provider, host)
 	var fallback *codeLinkCandidate
 	for rows.Next() {
 		var id, name, label, enc, allowed string
 		if err := rows.Scan(&id, &name, &label, &enc, &allowed); err != nil {
 			return codeLinkCredential{}, err
 		}
-		// #5045: the token is sent to `host`, a destination the pasted URL
-		// influenced. A host-bound credential is a candidate only when its
-		// approved hosts cover that host (unreadable lists permit nothing).
-		if !credhostgate.PermitsHost(allowed, host) {
+		// #5045: a host-bound credential is a candidate only when its approved
+		// hosts cover the host the token is really sent to, which is not the
+		// pasted host on GitHub SaaS (unreadable lists permit nothing).
+		if !credhostgate.PermitsHost(allowed, destination) {
 			continue
 		}
 		if strings.EqualFold(strings.TrimSpace(label), host) {

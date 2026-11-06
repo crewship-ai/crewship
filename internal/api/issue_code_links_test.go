@@ -850,15 +850,18 @@ func TestCodeLink_AgentRead_FencesUntrustedTitle(t *testing.T) {
 	}
 }
 
-// #5045: the code-link fetch sends the token to the pasted host, so a
-// host-bound credential is used only when its approved hosts cover that host.
+// #5045: a host-bound credential is used only when its approved hosts cover
+// the host the token is really sent to. For github.com that is api.github.com,
+// never the pasted host.
 func TestResolveCodeLinkCredential_HostBound(t *testing.T) {
 	cases := []struct {
 		name, hosts string
 		want        bool
 	}{
 		{"unbound unchanged", ``, true},
-		{"approved host", `["github.com"]`, true},
+		{"real API host approved", `["api.github.com"]`, true},
+		{"wildcard covers the real API host", `["*.github.com"]`, true},
+		{"pasted host alone does not approve the API host", `["github.com"]`, false},
 		{"other host refused", `["gitlab.com"]`, false},
 		{"unreadable refused", `not-json`, false},
 	}
