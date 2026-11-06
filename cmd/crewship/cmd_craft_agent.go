@@ -102,7 +102,7 @@ func craftAgentInstruction(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	var chat struct {
-		ID string `json:"id"`
+		ID string `json:"id" yaml:"id"`
 	}
 	if err = cli.ReadJSON(response, &chat); err != nil {
 		return err
