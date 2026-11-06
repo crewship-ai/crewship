@@ -579,7 +579,7 @@ state="${DELEG_STATE:?}"
 args=" $* "
 desc="" prev=""
 for a in "$@"; do [ "$prev" = "--description" ] && desc="$a"; prev="$a"; done
-created() { printf '{"to_slug":"%s","entry_type":"assignment.created","payload":{"task":"%s","assignment_id":"%s"}}\n' "$1" "$2" "$3"; }
+created() { printf '{"from_slug":"%s","to_slug":"%s","entry_type":"assignment.created","payload":{"task":"%s","assignment_id":"%s"}}\n' "${DELEG_FROM:-alex}" "$1" "$2" "$3"; }
 done_row() { printf '{"to_slug":"sam","entry_type":"assignment.completed","payload":{"outcome":"%s","assignment_id":"%s"}}\n' "$1" "$2"; }
 case "$args" in
   *" version "*|*" whoami "*) exit 0 ;;
@@ -606,6 +606,7 @@ case "$args" in
       no-row) ;;
       other-task) created sam "do DELEG-OTHER" a1; done_row SUCCEEDED a1 ;;
       other-agent) created robin "do $tag" a1; done_row SUCCEEDED a1 ;;
+      other-sender) DELEG_FROM=morgan; created sam "do $tag" a1; done_row SUCCEEDED a1 ;;
       no-completion) created sam "do $tag" a1 ;;
       other-completion) created sam "do $tag" a1; done_row SUCCEEDED a2 ;;
       failed-completion) created sam "do $tag" a1; done_row FAILED a1 ;;
@@ -649,7 +650,7 @@ if command -v jq >/dev/null 2>&1; then
   expect_contains "delegation on the retry -> reached sam" "$out" "PASS alex's delegation reached sam"
   expect_contains "delegation on the retry -> completed" "$out" "PASS the delegated assignment to sam completed"
   expect_contains "delegation on the retry -> suite exits zero" "$out" "fixture: suite-exit:0"
-  for mode in no-row other-task other-agent feed-down no-dispatch run-failed run-timeout; do
+  for mode in no-row other-task other-agent other-sender feed-down no-dispatch run-failed run-timeout; do
     deleg_expect_fail "$mode" "lead→peer delegation"
   done
   for mode in no-completion other-completion failed-completion no-change-completion work-created-completion completion-feed-down bad-row; do

@@ -16,6 +16,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HERE/lib.sh"
 
 preflight
+keep_failure_evidence  # #4874: keep transcripts of a failing run past the reseed
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "1. Lead → peer delegation (alex delegates to sam)"
@@ -24,7 +25,7 @@ TAG="$(nonce DELEG)"
 
 # The tag is in the issue, so a reply (or a quoted refusal) that contains it
 # proves nothing (#4855). Only the assignment /assign wrote counts: an
-# assignment.created entry addressed to sam whose task carries the tag, and an
+# assignment.created entry from alex to sam whose task carries the tag, and an
 # assignment.completed entry for that same assignment id with outcome SUCCEEDED,
 # the only outcome that says the deliverable exists and was verified
 # (assignment_contract.go): WORK_CREATED says the work was passed on and
@@ -35,7 +36,7 @@ deleg_assignment_ids() { # <created|completed> -> assignment ids for $TAG
   local feed ids
   feed="$(cs activity --since 30m --lines 200 --export ndjson 2>/dev/null)" || return 1
   ids="$(printf '%s\n' "$feed" | jq -rs --arg tag "$TAG" --arg kind "$1" '
-    [ .[] | select(.to_slug == "sam" and .entry_type == "assignment.created")
+    [ .[] | select(.from_slug == "alex" and .to_slug == "sam" and .entry_type == "assignment.created")
       | select((.payload.task // "") | contains($tag))
       | .payload.assignment_id | select(type == "string" and length > 0) ] as $created
     | if $kind == "created" then $created[]
@@ -51,10 +52,12 @@ deleg_assignment_ids() { # <created|completed> -> assignment ids for $TAG
 # with delegation broken. The work is grounded (see lib.sh, #4873): a bare
 # prompt is declined as an unverified relay before /assign is called, which
 # says nothing about delegation. A lead that still does the work itself gets
-# one retry, then fails. The worst case stays under the 20-minute e2e step:
-# two attempts of DELEG_FREE_TIMEOUT + ASK_TIMEOUT, then one ASK_TIMEOUT for the
-# completion, about 13 minutes at the defaults.
-DELEG_FREE_TIMEOUT="${DELEG_FREE_TIMEOUT:-120}"
+# one retry, then fails. The task carries everything Sam needs, because /assign
+# passes only its text: without that a correct Sam reports NEEDS_HUMAN. The worst
+# case is two attempts of DELEG_FREE_TIMEOUT + ASK_TIMEOUT, then one ASK_TIMEOUT
+# for the completion, about 19 minutes at the defaults. An overrun of the suite
+# budget fails closed.
+DELEG_FREE_TIMEOUT="${DELEG_FREE_TIMEOUT:-300}"
 delegated=0
 dispatched=0
 feed_ok=1
@@ -65,7 +68,7 @@ else
     wait_agent_free alex "$DELEG_FREE_TIMEOUT" || finish
     info "Issue $attempt: alex (lead) assigns a task to sam (tag $TAG)…"
     deleg_work="$(issue_work engineering alex "Hand a check to Sam ($TAG)" \
-      "This operator-created issue tests delegation inside the crew. As engineering lead, use /assign to give your teammate Sam one task whose text contains the reference $TAG: read this issue and report its title. Do not do the work yourself. Report Sam's result here.")"
+      "This operator-created issue tests delegation inside the crew. As engineering lead, use /assign to give your teammate Sam one self-contained task whose text says: Reply with the reference $TAG unchanged; that reply is the deliverable. Sam cannot see this issue, so the task text must carry the reference. Do not do the work yourself. Report Sam's result here.")"
     deleg_rc=$?
     info "issue run: ${deleg_work:-none}"
     if (( deleg_rc == 1 )); then
