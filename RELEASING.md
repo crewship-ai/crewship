@@ -91,6 +91,20 @@ surface is off and the Artifacts nav opens `/pages`. A shared dev release
 `CREWSHIP_BUILD_PROFILE=release` and turn on the flags listed in
 `RELEASE_FLAGS` in `e2e/build-profile.ts`; the sharing mock stays off.
 
+The profile separates three things that must not be read as one:
+
+| Surface | Production default (`main`) | Shared dev release | Accepted |
+|---|---|---|---|
+| Artifacts library, Pages opening in Artifacts, chat artifact context and projects, Craft lease, Design | off | on (`RELEASE_FLAGS`) | only on the exact release SHA whose `VALIDACE` records milestones A and B |
+| Dashboard (milestone C) | off | off (`UNACCEPTED_FLAGS`) | no |
+| Slides and Design System (milestone D) | off | off (`UNACCEPTED_FLAGS`) | no |
+
+A surface moves into `RELEASE_FLAGS` after its milestone is accepted, not to make
+it reachable for a demo; the unit test fails if a flag is listed in both, or if
+either profile turns on an unaccepted flag. This table covers the build-time
+`NEXT_PUBLIC_*` flags. Server-side flags (`crewship feature-flag`, environment
+`CREWSHIP_*`) live with each environment and are verified on the deployed slot.
+
 The feature-flag unit tests and the phone browser contract read the profile and
 check either build, so CI of the exact release SHA is green without skipping
 tests. Anything bound for main (a push to main or a merge-queue ref) must carry
