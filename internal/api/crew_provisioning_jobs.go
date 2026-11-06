@@ -1364,9 +1364,7 @@ func (h *ProvisioningHandler) runProvisioningAttempt(ctx context.Context, crewID
 			"crew_id", crewID, "workspace_id", workspaceID, "base_image", baseImage)
 	}
 
-	updateCtx, updateCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer updateCancel()
-	if _, err := h.saveProvisionResult(updateCtx, crewID, workspaceID, expectedDefinition, result); err != nil {
+	if _, err := h.publishProvisionResult(crewID, workspaceID, expectedDefinition, result); err != nil {
 		if errors.Is(err, errBuildDefinitionChanged) {
 			return true
 		}
