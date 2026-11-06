@@ -83,3 +83,17 @@ it("still ignores a sign-out for a different person after re-settling", async ()
     expect(auth.session?.user.id).toBe("ana")
   } finally { replace.mockRestore() }
 })
+
+it("keeps the signed-in person's chat recovery when a delayed sign-out finds the session live", async () => {
+  const replace = vi.spyOn(window.location, "replace").mockImplementation(() => {})
+  const key = `chat-proposal:${JSON.stringify(["ws", "ana"])}`
+  try {
+    sessionStorage.setItem(key, "unsent")
+    await resettledTab(replace)
+    expect(sessionStorage.getItem(key)).toBe("unsent")
+    mockFetch.mockResolvedValueOnce(signedOut())
+    act(() => { channel().onmessage?.({ data: { type: "signout", human: "ana" } }) })
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(SIGNED_OUT_URL))
+    expect(sessionStorage.getItem(key)).toBeNull()
+  } finally { sessionStorage.removeItem(key); replace.mockRestore() }
+})

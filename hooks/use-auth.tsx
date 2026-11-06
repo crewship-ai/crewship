@@ -355,7 +355,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const gen = ++refreshGen.current
       redirectingGen = gen
       cancelUnreachableProbe()
-      purgeOtherE2Recovery(null)
       try { await preserveDraftsForIdentity(null) }
       catch { setDraftRecovery({ retry: async () => { if (redirectingGen === gen) redirectingGen = -1; await goLoginSignedOutElsewhere(human) } }); return }
       if (gen !== refreshGen.current) return
@@ -366,6 +365,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Still signed in: the tab stays and keeps listening (#4705). The settle
       // keeps this generation, so leaving is disarmed explicitly.
       if (latest.kind === "settled" && latest.session) { redirectingGen = -1; await settle(latest.session, gen); return }
+      purgeOtherE2Recovery(null)
       window.location.replace(SIGNED_OUT_URL)
     }
 
