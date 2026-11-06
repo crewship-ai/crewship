@@ -183,7 +183,7 @@ func collaborationSavedFrameNeeded(latest string, frame collaborationSavedFrame)
 // Caller holds c.mu. A newer pending rotation owns its own future Joined
 // continuation. The old metadata trigger sends nothing and moves no cursor.
 func (c *collaborationHTTPConnection) savedRecipientDeferredLocked() bool {
-	return c.closed || c.transition != nil
+	return c.closed || c.transition != nil || c.tearingDown.Load()
 }
 
 func (c *collaborationHTTPConnection) savedCatchupPlanLocked() ([]collaborationSavedFrame, error) {
