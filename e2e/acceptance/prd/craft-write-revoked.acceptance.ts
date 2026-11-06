@@ -122,8 +122,9 @@ for (const { application, label } of APPLICATIONS) {
           expect((await headText(request, doc)).version, "the refused write created no version").toBe(before.version)
 
           // The draft survives a reload; it is offered again once the person may edit.
+          // A Read grantee gets the shared preview, or its empty state, not the editor.
           await page.reload()
-          await page.getByRole("status").first().waitFor({ timeout: 90_000 })
+          await page.getByText(/Sdílený náhled/).first().waitFor({ timeout: 90_000 })
           await doc.grant(request, peer.userId, "write")
           await page.reload()
           await page.getByRole("status").filter({ hasText: /Pouze čtení|Připraveno k úpravám/ }).first().waitFor({ timeout: 90_000 })
