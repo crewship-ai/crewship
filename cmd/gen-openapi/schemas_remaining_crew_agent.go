@@ -44,8 +44,8 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 
 	// Agent read subresources.
 	add("GET", "/api/v1/agents/crews-status", "RemainingAgentCrewsStatusV1", object(map[string]any{"crews": array(anyObject()), "agents": array(anyObject())}))
-	add("GET", "/api/v1/agent-load", "RemainingAgentLoadV1", object(map[string]any{"agents": array(anyObject()), "total": integer(), "running": integer()}))
-	add("GET", "/api/v1/agents/{agentId}/credential-bindings", "RemainingAgentCredentialBindingsV1", array(anyObject()))
+	add("GET", "/api/v1/agent-load", "RemainingAgentLoadV1", array(anyObject()))
+	add("GET", "/api/v1/agents/{agentId}/credential-bindings", "RemainingAgentCredentialBindingsV1", object(map[string]any{"agent_id": str(), "slots": array(anyObject()), "warnings": array(str())}))
 	// ListCredentials writes []agentCredentialResponse (agent_credentials.go);
 	// AgentCredential's required list is graded against that struct.
 	routes["GET /api/v1/agents/{agentId}/credentials"] = DomainSchema{Response: ref("AgentCredentialList")}
@@ -75,9 +75,9 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	add("GET", "/api/v1/agents/{agentId}/integrations/resolved", "RemainingAgentResolvedIntegrationsV1", object(map[string]any{"integrations": array(anyObject())}))
 	add("GET", "/api/v1/agents/{agentId}/learning", "RemainingAgentLearningV1", object(map[string]any{"agent_id": str(), "enabled": boolean(), "mode": str(), "updated_at": str()}))
 	add("GET", "/api/v1/agents/{agentId}/logs", "RemainingAgentLogsV1", object(map[string]any{"logs": array(str()), "agent_id": str()}))
-	add("GET", "/api/v1/agents/{agentId}/notification-channels", "RemainingAgentNotificationChannelsV1", array(anyObject()))
+	add("GET", "/api/v1/agents/{agentId}/notification-channels", "RemainingAgentNotificationChannelsV1", object(map[string]any{"channels": array(anyObject())}))
 	add("GET", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaV1", object(map[string]any{"agent_id": str(), "content": str(), "version": integer(), "created_at": str(), "updated_at": str()}))
-	add("GET", "/api/v1/agents/{agentId}/persona/history", "RemainingAgentPersonaHistoryV1", array(anyObject()))
+	add("GET", "/api/v1/agents/{agentId}/persona/history", "RemainingAgentPersonaHistoryV1", object(map[string]any{"entries": array(anyObject())}))
 	components["FeedbackPreferenceV1"] = object(map[string]any{"id": str(), "revision": integer(), "feedback_id": str(), "source_revision": integer(), "chat_id": str(), "message_id": str(), "reason": str(), "value": str(), "status": str(), "source_type": str()})
 	add("GET", "/api/v1/agents/{agentId}/peers", "RemainingAgentPeersV1", object(map[string]any{"agent_id": str(), "peers": array(anyObject()), "preferences": array(ref("FeedbackPreferenceV1"))}))
 	addNoContent("PATCH", "/api/v1/agents/{agentId}/peers/{userId}")

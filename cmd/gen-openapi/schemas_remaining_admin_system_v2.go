@@ -193,7 +193,7 @@ func remainingAdminSystemSchemaCatalogV2() map[string]DomainSchema {
 		"DELETE /api/v1/admin/backups/status":                    {Response: noContent()},
 		"DELETE /api/v1/admin/rate-limits/{key}":                 {Response: obj(map[string]any{"key": str(), "value": integer(), "source": str(), "default": integer()})},
 		"DELETE /api/v1/admin/keeper/requests":                   {Response: obj(map[string]any{"deleted": integer()})},
-		"GET /api/v1/admin/keeper/requests":                      {Response: obj(map[string]any{"requests": array(free()), "count": integer()})},
+		"GET /api/v1/admin/keeper/requests":                      {Response: array(free())},
 		"GET /api/v1/admin/keeper/requests/{requestId}/events":   {Response: array(free())},
 		"POST /api/v1/admin/keeper/requests/{requestId}/resolve": {Request: json(map[string]any{"decision": str(), "reason": str()}), Response: obj(map[string]any{"request_id": str(), "decision": str(), "reason": str(), "resolved": boolean(), "error": str()})},
 	}
