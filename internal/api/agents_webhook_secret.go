@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // encryptionNotConfiguredMsg is the actionable error surfaced when a secret
@@ -108,14 +109,14 @@ func (h *AgentHandler) RotateWebhookSecret(w http.ResponseWriter, r *http.Reques
 			"agent_id", agentID, "workspace_id", workspaceID)
 	}
 	nowT := time.Now().UTC()
-	now := nowT.Format(time.RFC3339Nano)
+	now := tsformat.Format(nowT)
 	// The replaced secret becomes the previous one only when an overlap was
 	// asked for and a secret existed. The UPDATE reads the OLD column values on
 	// its right-hand side, so the swap is atomic, and a rotation during an open
 	// overlap overwrites the previous slot: at most two secrets are ever live.
 	var prevExpires any
 	if ttl > 0 {
-		prevExpires = nowT.Add(time.Duration(ttl) * time.Second).Format(time.RFC3339Nano)
+		prevExpires = tsformat.Format(nowT.Add(time.Duration(ttl) * time.Second))
 	}
 	res, err := h.db.ExecContext(r.Context(), `
 		UPDATE agents SET
@@ -181,7 +182,7 @@ func (h *AgentHandler) RevokePreviousWebhookSecret(w http.ResponseWriter, r *htt
 	res, err := h.db.ExecContext(r.Context(), `
 		UPDATE agents SET previous_webhook_secret = NULL, previous_webhook_secret_expires_at = NULL, updated_at = ?
 		WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		time.Now().UTC().Format(time.RFC3339Nano), agentID, workspaceID)
+		tsformat.Format(time.Now()), agentID, workspaceID)
 	if err != nil {
 		h.logger.Error("webhook previous secret revoke", "agent_id", agentID, "error", err)
 		replyError(w, http.StatusInternalServerError, "Internal server error")

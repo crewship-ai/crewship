@@ -436,7 +436,7 @@ func upsertTriggerSchedule(ctx context.Context, x sqlExecQuerier, in SaveSchedul
 	// otherwise a re-save inside [T, T+offset) would skip occurrence T.
 	nextRunToStore := prepared.nextRun
 	if existingCron == prepared.in.CronExpr && existingTZ == prepared.in.Timezone && existingNext.Valid {
-		if prev, perr := time.Parse(time.RFC3339Nano, existingNext.String); perr == nil && !prev.After(now) {
+		if prev, perr := time.Parse(time.RFC3339Nano, existingNext.String); perr == nil && !prev.After(now) { // tsformat:allow: read-only parse, not a SQL comparison
 			nextRunToStore = prev
 		}
 	}
