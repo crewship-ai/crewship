@@ -1,6 +1,5 @@
 "use client"
 
-import "@/lib/zod-config"
 import { useState } from "react"
 import { MotionConfig } from "motion/react"
 import { ThemeProvider } from "next-themes"

@@ -15,9 +15,8 @@ describe("zod configuration", () => {
     expect(schema.safeParse({ id: 1 }).success).toBe(false)
   })
 
-  it("is the first import of the root providers", () => {
-    const source = readFileSync(resolve(process.cwd(), "components/providers.tsx"), "utf8")
-    const firstImport = source.match(/^import .*$/m)?.[0]
-    expect(firstImport).toBe('import "@/lib/zod-config"')
+  it("loads from the client instrumentation entry, before application modules", () => {
+    const source = readFileSync(resolve(process.cwd(), "instrumentation-client.ts"), "utf8")
+    expect(source.match(/^import .*$/m)?.[0]).toBe('import "@/lib/zod-config"')
   })
 })
