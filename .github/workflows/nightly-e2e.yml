@@ -468,16 +468,18 @@ jobs:
                 export E2E_CREWSHIP_DATA_DIR=$(jq -er .data_dir "$CREWSHIP_THROWAWAY_MANIFEST")
                 export PLAYWRIGHT_BASE_URL="$CREWSHIP_SERVER"
                 for attempt in 1 2 3; do
-                  if ./crewship seed --offline-demo; then break; fi
+                  if ./crewship seed --offline-demo --server "$CREWSHIP_SERVER"; then break; fi
                   test "$attempt" -lt 3
                   sleep 5
                 done
                 ws=$(./crewship whoami --format json | jq -er .workspace.id)
                 CREWSHIP_WORKSPACE="$ws" ./crewship admin ratelimits set http.api_per_min 1000
                 status=0
+                # The previous spec left its report here; it must not count for this one.
+                rm -f playwright-nightly-report.json
                 pnpm exec playwright test --config=playwright.nightly.config.ts "$1" \
                   --workers=1 --retries=0 --output="test-results/throwaway-$2" || status=$?
-                jq -e " .stats.expected > 0 and .stats.skipped == 0 and .stats.unexpected == 0 and .stats.flaky == 0 " \
+                jq -e --arg spec "$(basename "$1")" " any(.suites[]; .file == \$spec) and .stats.expected > 0 and .stats.skipped == 0 and .stats.unexpected == 0 and .stats.flaky == 0 " \
                   playwright-nightly-report.json >/dev/null || status=1
                 mkdir -p "test-results/throwaway-$2"
                 cp playwright-nightly-report.json "test-results/throwaway-$2/report.json"
