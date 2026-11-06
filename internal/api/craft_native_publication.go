@@ -51,6 +51,11 @@ func (m *craftNativeHTTP) authorizeNative(ctx context.Context, tx *sql.Tx, scope
 	if intent == "read" && !proof.privateRead {
 		return mooring.EditLeasePrincipal{}, errCraftNativeAccess
 	}
+	// PRD §5: only the owner shares a version. This runs on every authorization of
+	// the pin's transaction, so the verdict and the write cannot come apart.
+	if ctx.Value(craftNativeShareIntentKey{}) != nil && !craftNativeMayShare(proof, entry) {
+		return mooring.EditLeasePrincipal{}, errCraftNativeShareOwner
+	}
 	if capture != nil && intent == "read" {
 		capture.record = proof.record
 	}

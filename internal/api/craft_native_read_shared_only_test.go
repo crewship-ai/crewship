@@ -224,7 +224,7 @@ func TestCraftNativeReaderLeaseStatusRevealsNoContent(t *testing.T) {
 	s := craftNativeSharedOnlyFixture(t)
 	reader := craftNativeVersionsUser(t, s.f, "shared-only-lease-read", "Reader", true, "read")
 	token, _ := craftNativeIssued(t, s.h, reader)
-	allowed := []string{"acquired_at", "can_edit", "can_stop_agent", "can_write", "expires_at", "generation", "handoff_requested_by", "handoff_requested_kind", "holder", "mine"}
+	allowed := []string{"acquired_at", "can_edit", "can_share", "can_stop_agent", "can_write", "expires_at", "generation", "handoff_requested_by", "handoff_requested_kind", "holder", "mine"}
 	check := func(where string, view map[string]any) {
 		t.Helper()
 		keys := make([]string, 0, len(view))
@@ -237,7 +237,7 @@ func TestCraftNativeReaderLeaseStatusRevealsNoContent(t *testing.T) {
 		}
 		raw, _ := json.Marshal(view)
 		assertCraftNativeNoPrivateContent(t, where, string(raw))
-		if view["can_edit"] != false || view["can_write"] != false || view["mine"] != false {
+		if view["can_edit"] != false || view["can_write"] != false || view["can_share"] != false || view["mine"] != false {
 			t.Fatalf("%s offered edit to a reader: %s", where, raw)
 		}
 	}

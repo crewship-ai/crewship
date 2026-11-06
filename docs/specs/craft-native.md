@@ -270,6 +270,11 @@ within about 5 s.
 `targetVersion` (canonical positive decimal strings for generations/versions).
 It publishes an existing committed version with current write authority, the
 current lease generation and latest-version CAS inside the same transaction.
+Only the Page's owner may publish (PRD §5): the transaction also checks that the
+caller's original credential is `pages.owner_user_id`, and anyone else gets 403
+`only the page owner may share a version`, whatever their Edit grant, folder ACL
+or workspace role. A crew-owned Page names no person, so nobody can publish it
+until a person owns it again. The lease response reports this as `can_share`.
 The same transaction records the original human actor, selected version and
 Page in the authorization audit and journal. Unsupported or failed audit writes
 roll back publication. It cannot create content or grant access. Rejected publication preserves both

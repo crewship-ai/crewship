@@ -43,6 +43,7 @@ type craftNativeLeaseResponse struct {
 	ExpiresAt            *string                      `json:"expires_at"`
 	CanEdit              bool                         `json:"can_edit"`
 	CanWrite             bool                         `json:"can_write"`
+	CanShare             bool                         `json:"can_share"`
 	AcquiredAt           *string                      `json:"acquired_at"`
 	HandoffRequestedKind *string                      `json:"handoff_requested_kind"`
 	HandoffRequestedBy   []craftNativeRequestResponse `json:"handoff_requested_by"`
@@ -159,14 +160,15 @@ func (m *craftNativeHTTP) leaseView(r *http.Request, entry *craftNativeSession, 
 	// falsely describe custody age, so the dormant API reports unknown explicitly.
 	// Edit permission is distinct from current custody. Observers must not be
 	// offered takeover/handoff controls even when the lease happens to be free.
-	canEdit := false
+	canEdit, canShare := false, false
 	if tx, err := m.pages.db.BeginTx(r.Context(), nil); err == nil {
-		_, err = m.checkEntry(r.Context(), tx, entry, true)
+		proof, err := m.checkEntry(r.Context(), tx, entry, true)
 		canEdit = err == nil
+		canShare = canEdit && craftNativeMayShare(proof, entry)
 		_ = tx.Rollback()
 	}
 	canStop := canEdit && m.agents != nil && m.agents.canStop(r.Context(), entry, l)
-	return craftNativeLeaseResponse{Holder: holder, Mine: mine, Generation: generation, ExpiresAt: expiry, CanEdit: canEdit, CanWrite: mine && canEdit, HandoffRequestedKind: requestedKind, HandoffRequestedBy: requests, CanStopAgent: canStop}
+	return craftNativeLeaseResponse{Holder: holder, Mine: mine, Generation: generation, ExpiresAt: expiry, CanEdit: canEdit, CanWrite: mine && canEdit, CanShare: canShare, HandoffRequestedKind: requestedKind, HandoffRequestedBy: requests, CanStopAgent: canStop}
 }
 func (m *craftNativeHTTP) lease(w http.ResponseWriter, r *http.Request) {
 	entry, err := m.bound(r)

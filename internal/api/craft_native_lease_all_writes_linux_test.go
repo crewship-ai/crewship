@@ -162,6 +162,11 @@ func TestCraftNativeFencedWriteRoutesRefuseStaleOrMissingLease(t *testing.T) {
 			// Handoff binds its request_id to one generation; a request that no
 			// longer matches is 403 by spec (craft-lease-generation.md, status codes).
 			want := status == 409 || (strings.HasSuffix(name, "/lease/handoff") && status == 403)
+			// The second session belongs to an editor, who may not share at all:
+			// ownership is decided before the generation, and nothing changes.
+			if strings.HasSuffix(name, "/document/share") && who != owner {
+				want = status == 403 && strings.Contains(string(raw), "only the page owner")
+			}
 			if !want {
 				t.Errorf("%s: %s with generation %q: got %d %s, want 409", phase, name, gen, status, raw)
 			}

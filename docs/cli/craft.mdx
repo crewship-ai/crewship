@@ -74,6 +74,11 @@ answer: they report who holds the lease, never content. `read`, `versions`,
 `proposals` and `proposal` need edit rights or the workspace owner or admin read
 rule and otherwise answer `403` (exit code `4`). Comment alone cannot open
 `connect`. Read the shared version with `crewship craft preview <page>`.
+
+`share` needs the Page's owner. Edit rights and the workspace owner or admin role
+are not enough: they answer `403` (exit code `4`) with
+`only the page owner may share a version`, even while holding the lease. The
+lease row's `can_share` says whether this connection may share.
 | `accept-proposal` | `POST /api/v1/pages/{slug}/craft/proposals/{proposal_id}/accept` |
 | `reject-proposal` | `POST /api/v1/pages/{slug}/craft/proposals/{proposal_id}/reject` |
 
