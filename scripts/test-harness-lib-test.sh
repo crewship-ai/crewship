@@ -593,7 +593,10 @@ case "$args" in
     printf '%s' "$desc" | grep -oE 'DELEG-[A-Z0-9]+' | head -1 >"$state/tag"
     printf '{"id":"iss_%s","identifier":"ENG-%s"}\n' "$n" "$n"; exit 0 ;;
   *" issue start "*) exit 0 ;;
-  *" issue runs "*) echo '[{"agent_slug":"alex","source":"delegation","status":"COMPLETED","result_summary":"tag quoted"}]'; exit 0 ;;
+  *" issue runs "*)
+    [ "$DELEG_MODE" = run-timeout ] && { echo '[]'; exit 0; }
+    status=COMPLETED; [ "$DELEG_MODE" = run-failed ] && status=FAILED
+    echo '[{"agent_slug":"alex","source":"delegation","status":"'"$status"'","result_summary":"tag quoted"}]'; exit 0 ;;
   *" activity "*)
     tag="$(cat "$state/tag" 2>/dev/null)"; n="$(cat "$state/n" 2>/dev/null || echo 0)"
     reads=$(( $(cat "$state/reads" 2>/dev/null || echo 0) + 1 )); echo "$reads" >"$state/reads"
@@ -606,6 +609,8 @@ case "$args" in
       no-completion) created sam "do $tag" a1 ;;
       other-completion) created sam "do $tag" a1; done_row SUCCEEDED a2 ;;
       failed-completion) created sam "do $tag" a1; done_row FAILED a1 ;;
+      no-change-completion) created sam "do $tag" a1; done_row NO_CHANGE a1 ;;
+      work-created-completion) created sam "do $tag" a1; done_row WORK_CREATED a1 ;;
       feed-down) exit 1 ;;
       completion-feed-down) [ "$reads" -ge 2 ] && exit 1; created sam "do $tag" a1 ;;
       bad-row) created sam "do $tag" a1; done_row SUCCEEDED a1
@@ -621,7 +626,7 @@ EOF
 run_delegation() { # <mode> [PATH override] — suite output, then its exit status
   local dir; dir="$(mktemp -d -t cs-deleg.XXXXXX)"
   deleg_cli "$dir/crewship"
-  env -u CREWSHIP_SERVER -u SERVER CREWSHIP="$dir/crewship" DELEG_STATE="$dir" DELEG_MODE="$1" ASK_TIMEOUT=2 POLL_INTERVAL=1 \
+  env -u CREWSHIP_SERVER -u SERVER CREWSHIP="$dir/crewship" DELEG_STATE="$dir" DELEG_MODE="$1" ASK_TIMEOUT=2 POLL_INTERVAL=1 DELEG_FREE_TIMEOUT=1 \
     ${2:+PATH="$2"} bash "$SCRIPT_DIR/test-harness/test-delegation.sh" 2>&1
   echo "fixture: suite-exit:$?"
   rm -rf "$dir"
@@ -639,15 +644,18 @@ if command -v jq >/dev/null 2>&1; then
   expect_contains "delegation proven -> reached sam" "$out" "PASS alex's delegation reached sam"
   expect_contains "delegation proven -> completed" "$out" "PASS the delegated assignment to sam completed"
   expect_not_contains "delegation proven -> no peer-chat check" "$out" "peer chat"
+  expect_contains "delegation proven -> suite exits zero" "$out" "fixture: suite-exit:0"
   out="$(run_delegation second-try)"
   expect_contains "delegation on the retry -> reached sam" "$out" "PASS alex's delegation reached sam"
   expect_contains "delegation on the retry -> completed" "$out" "PASS the delegated assignment to sam completed"
-  for mode in no-row other-task other-agent feed-down no-dispatch; do
+  expect_contains "delegation on the retry -> suite exits zero" "$out" "fixture: suite-exit:0"
+  for mode in no-row other-task other-agent feed-down no-dispatch run-failed run-timeout; do
     deleg_expect_fail "$mode" "lead→peer delegation"
   done
-  for mode in no-completion other-completion failed-completion completion-feed-down bad-row; do
+  for mode in no-completion other-completion failed-completion no-change-completion work-created-completion completion-feed-down bad-row; do
     deleg_expect_fail "$mode" "the delegated assignment to sam completed"
   done
+  deleg_expect_fail busy "alex frees its previous work"
   out="$(run_delegation completion-feed-down)"
   expect_contains "feed outage while polling -> named, not a timeout" "$out" "could not be read while waiting"
   out="$(run_delegation other-task)"

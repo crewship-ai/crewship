@@ -25,8 +25,10 @@ TAG="$(nonce DELEG)"
 # The tag is in the issue, so a reply (or a quoted refusal) that contains it
 # proves nothing (#4855). Only the assignment /assign wrote counts: an
 # assignment.created entry addressed to sam whose task carries the tag, and an
-# assignment.completed entry for that same assignment id with a success
-# outcome. Non-zero when the feed cannot be read or parsed, never an empty "no
+# assignment.completed entry for that same assignment id with outcome SUCCEEDED,
+# the only outcome that says the deliverable exists and was verified
+# (assignment_contract.go): WORK_CREATED says the work was passed on and
+# NO_CHANGE that nothing was delivered. Non-zero when the feed cannot be read or parsed, never an empty "no
 # entry", and no output then: a parser that fails partway must not leave a
 # matching id behind.
 deleg_assignment_ids() { # <created|completed> -> assignment ids for $TAG
@@ -38,7 +40,7 @@ deleg_assignment_ids() { # <created|completed> -> assignment ids for $TAG
       | .payload.assignment_id | select(type == "string" and length > 0) ] as $created
     | if $kind == "created" then $created[]
       else .[] | select(.entry_type == "assignment.completed")
-        | select(.payload.outcome | . == "SUCCEEDED" or . == "NO_CHANGE" or . == "WORK_CREATED")
+        | select(.payload.outcome == "SUCCEEDED")
         | .payload.assignment_id | select(. as $id | $created | index($id)) end' 2>/dev/null)" || return 1
   [[ -n "$ids" ]] && printf '%s\n' "$ids" | sort -u
   return 0
@@ -49,7 +51,10 @@ deleg_assignment_ids() { # <created|completed> -> assignment ids for $TAG
 # with delegation broken. The work is grounded (see lib.sh, #4873): a bare
 # prompt is declined as an unverified relay before /assign is called, which
 # says nothing about delegation. A lead that still does the work itself gets
-# one retry, then fails.
+# one retry, then fails. The worst case stays under the 20-minute e2e step:
+# two attempts of DELEG_FREE_TIMEOUT + ASK_TIMEOUT, then one ASK_TIMEOUT for the
+# completion, about 13 minutes at the defaults.
+DELEG_FREE_TIMEOUT="${DELEG_FREE_TIMEOUT:-120}"
 delegated=0
 dispatched=0
 feed_ok=1
@@ -57,7 +62,7 @@ if ! have jq; then
   _fail "lead→peer delegation" "jq is not installed, so the activity feed cannot be read and delegation cannot be proven"
 else
   for attempt in 1 2; do
-    wait_agent_free alex || finish
+    wait_agent_free alex "$DELEG_FREE_TIMEOUT" || finish
     info "Issue $attempt: alex (lead) assigns a task to sam (tag $TAG)…"
     deleg_work="$(issue_work engineering alex "Hand a check to Sam ($TAG)" \
       "This operator-created issue tests delegation inside the crew. As engineering lead, use /assign to give your teammate Sam one task whose text contains the reference $TAG: read this issue and report its title. Do not do the work yourself. Report Sam's result here.")"
@@ -90,7 +95,7 @@ else
     elif [[ -n "$completed" ]]; then
       _pass "the delegated assignment to sam completed"
     else
-      _fail "the delegated assignment to sam completed" "no assignment.completed with a success outcome joined to the tagged assignment within ${ASK_TIMEOUT}s"
+      _fail "the delegated assignment to sam completed" "no assignment.completed with outcome SUCCEEDED joined to the tagged assignment within ${ASK_TIMEOUT}s"
     fi
   elif (( dispatched == 0 )); then
     _fail "lead→peer delegation" "neither issue could be created or started"
