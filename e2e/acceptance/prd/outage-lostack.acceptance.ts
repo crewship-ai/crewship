@@ -451,8 +451,14 @@ test.afterEach(disposeActors)
 function repeatedSaves(ops: N.Op[]): { n: number; baseVersion?: string; version?: string }[] {
   let prev: string | undefined
   const out: { n: number; baseVersion?: string; version?: string }[] = []
+  // A reconciliation reports a version that already exists: it is no new commit.
+  const seen = new Set<string>()
   for (const o of ops) {
     if (o.status !== 200 || !o.contentHash) continue
+    if (o.version) {
+      if (seen.has(o.version)) continue
+      seen.add(o.version)
+    }
     if (o.contentHash === prev) out.push({ n: o.n, baseVersion: o.baseVersion, version: o.version })
     prev = o.contentHash
   }
