@@ -458,7 +458,11 @@ admission before accepting work.
 An authenticated human with current Page write access may send
 `POST /api/v1/pages/{slug}/craft/tasks?workspace_id=…` with exactly
 `{chat_id, message_id, whole_document: true}`. The message must be that human's
-persisted original user message in the actual registered agent's chat. The host
+persisted original user message in the actual registered agent's chat, saved
+as a native Craft instruction in a private chat that human created: such a
+message started no turn. An ordinary turn or a group chat message is refused,
+because the first has already reached agent logs and the journal and the second
+is shown to people without Page access. The host
 captures original credential/authority epochs, the whole-document consent and
 immutable work input. A confirmed original provider exec and matching current
 work attempt are required before the actual run credential can access the
@@ -466,9 +470,11 @@ native document. An ordinary run, a database row, an old grant, or a claimed
 actor/mandate is insufficient. Repeating the same message/Page/agent cannot
 launch another task; a new task needs a new original message and consent.
 
-The normal human CLI uses the same explicit consent and Page authority:
+The normal human CLI uses the same explicit consent, Page authority and
+instruction send:
 
 ```sh
+crewship craft task instruction AGENT "TEXT" --workspace WORKSPACE
 crewship craft task start @PAGE --chat-id CHAT --message-id MESSAGE --whole-document --workspace WORKSPACE
 crewship craft task status @PAGE WORK_ID --workspace WORKSPACE
 crewship craft task stop @PAGE --workspace WORKSPACE
@@ -496,7 +502,10 @@ editor sends the task request above exactly once. An end of the attempt
 invalidates it synchronously, so a host that retires in the same render neither
 sends nor posts. Any refusal or lost reply is reported and not repeated, because
 a message can launch only one task. The chat itself stays ordinary: a later
-message the person writes there starts a normal turn.
+message the person writes there starts a normal turn, whose history leaves the
+instruction out so the agent cannot repeat it into its logs. The person still
+sees the instruction in the transcript, and resending its text as an ordinary
+message is an ordinary turn.
 The outcome appears in the task status panel, and `craft_task_id` is added to the
 URL. A document a person holds is started the same way: admission does not
 consult the lease, the run's `craft_acquire` gets 409 and it records a proposal,

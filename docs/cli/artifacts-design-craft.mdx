@@ -483,12 +483,15 @@ file fails before any request.
 ### Start, check and stop an agent task
 
 ```sh
+crewship craft task instruction <agent> "<instruction>"
 crewship craft task start <artifact-slug> --chat-id <chat-id> --message-id <message-id> --whole-document
 crewship craft task status <artifact-slug> <work-id>
 crewship craft task stop <artifact-slug>
 ```
 
-`start` needs your own stored message in that chat and explicit
+`instruction` saves your text in a new private chat without an agent turn and
+prints the `chat_id` and `message_id` for `start`. `start` refuses an ordinary
+chat message or a group chat message with `403`, and needs explicit
 `--whole-document` consent; without it the command stops with
 `native agent start requires explicit --whole-document=true consent`. Success
 returns `{"work_id":"<work-id>","status":"queued"}`: queued, not saved.

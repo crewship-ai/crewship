@@ -76,6 +76,12 @@ type Message struct {
 	// authorship (avatar/name). Empty for agent/system turns and for legacy
 	// messages written before group chat — those fall back to Role.
 	AuthorUserID string `json:"author_user_id,omitempty"`
+
+	// NativeCraftInstruction marks a human message that was recorded for an
+	// explicit native Craft task and started no run. Only the bridge sets it.
+	// Task admission binds nothing else, and agent history leaves it out, so
+	// the instruction reaches the strict task run and no ordinary one.
+	NativeCraftInstruction bool `json:"native_craft_instruction,omitempty"`
 }
 
 // NormalizedParts returns the message's structured parts for rendering. When
@@ -365,10 +371,10 @@ func (s *Store) appendMirror(ctx context.Context, sessionID string, msg Message)
 		authorUserID = msg.AuthorUserID
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO conversation_messages (id, session_id, agent_id, role, content, tool_summary, ts, author_user_id, run_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO conversation_messages (id, session_id, agent_id, role, content, tool_summary, ts, author_user_id, run_id, native_craft_instruction)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		msg.ID, sessionID, msg.AgentID, string(msg.Role), msg.Content, msg.ToolSummary,
-		msg.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"), authorUserID, msg.RunID,
+		msg.Timestamp.UTC().Format("2006-01-02T15:04:05.000Z"), authorUserID, msg.RunID, msg.NativeCraftInstruction,
 	)
 	if err != nil {
 		return fmt.Errorf("insert mirror row: %w", err)

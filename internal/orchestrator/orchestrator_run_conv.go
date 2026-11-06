@@ -6,6 +6,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -127,6 +128,9 @@ func (o *Orchestrator) buildConversationContextWithStats(ctx context.Context, se
 	if len(messages) > 0 && messages[len(messages)-1].Role == conversation.RoleUser {
 		messages = messages[:len(messages)-1]
 	}
+	// A native Craft instruction belongs to the strict task run alone. A later
+	// ordinary turn in that chat must not be able to quote it into agent logs.
+	messages = slices.DeleteFunc(messages, func(m conversation.Message) bool { return m.NativeCraftInstruction })
 	if len(messages) == 0 {
 		return "", stats
 	}

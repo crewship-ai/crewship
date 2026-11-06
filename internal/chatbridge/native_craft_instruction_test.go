@@ -2,6 +2,10 @@ package chatbridge
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -116,5 +120,88 @@ func TestNativeCraftInstructionRefusesAmbiguousSend(t *testing.T) {
 				t.Fatalf("ambiguous send acted: err=%v read=%v messages=%d ensured=%d", err, read, len(msgs), container.ensured.Load())
 			}
 		})
+	}
+}
+
+// repeatingAgent stands in for a model that quotes what it was given: it says
+// the instruction back only when the instruction reached its prompt.
+type repeatingAgent struct {
+	scriptedContainer
+	seen strings.Builder
+}
+
+func (a *repeatingAgent) Exec(ctx context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
+	a.seen.WriteString(strings.Join(cfg.Cmd, " "))
+	a.seen.WriteString(strings.Join(cfg.Env, " "))
+	if cfg.Stdin != nil {
+		raw, _ := io.ReadAll(cfg.Stdin)
+		a.seen.Write(raw)
+	}
+	reply := "I have nothing to repeat."
+	for _, encoded := range strings.Fields(a.seen.String()) {
+		if raw, err := base64.StdEncoding.DecodeString(strings.Trim(encoded, "'")); err == nil {
+			a.seen.Write(raw)
+		}
+	}
+	if strings.Contains(a.seen.String(), nativeInstruction) {
+		reply = "You asked: " + nativeInstruction
+	}
+	line, _ := json.Marshal(map[string]any{"type": "stream_event", "event": map[string]any{"type": "content_block_delta", "delta": map[string]any{"type": "text_delta", "text": reply}}})
+	a.agentOutput = claudeProvenanceOutput + string(line) + "\n" + `{"type":"result","subtype":"success","result":"ok"}` + "\n"
+	return a.scriptedContainer.Exec(ctx, cfg)
+}
+
+type recordingEntries struct{ entries []orchestrator.JournalEntry }
+
+func (r *recordingEntries) Emit(_ context.Context, entry orchestrator.JournalEntry) (string, error) {
+	r.entries = append(r.entries, entry)
+	return "j_test", nil
+}
+
+// #5009: "the instruction reaches no ordinary run, agent log or other member's
+// diagnostics" also has to hold for the ordinary turn after the instruction.
+// Without it, a quoted instruction lands in the agent log and the journal,
+// which any workspace member reads.
+func TestNativeCraftInstructionStaysOutOfLaterOrdinaryTurn(t *testing.T) {
+	logs := t.TempDir()
+	logger := slog.Default()
+	agent := &repeatingAgent{}
+	orch := orchestrator.New(agent, &memState{data: make(map[string]map[string][]byte)}, logger)
+	journal := &recordingEntries{}
+	orch.SetJournal(journal)
+	store := conversation.NewStore(t.TempDir(), logger)
+	orch.SetConversationStore(store)
+	b := New(orch, agent, store, logcollector.NewWriter(logs, logger), &capResolver{info: baseInfo()}, BridgeConfig{}, logger)
+
+	if err := b.HandleChatMessage(context.Background(), "user-1", "chat-1", nativeInstruction, func(ws.ChatEvent) {}, nativeInstructionOption()); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.HandleChatMessage(context.Background(), "user-1", "chat-1", "What did I ask you?", func(ws.ChatEvent) {}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(agent.seen.String(), nativeInstruction) {
+		t.Error("a later ordinary turn received the instruction in its prompt")
+	}
+	for _, entry := range journal.entries {
+		if entry.Type == "chat.agent_response" && strings.Contains(fmt.Sprint(entry.Summary, entry.Payload), nativeInstruction) {
+			t.Errorf("journal %s repeats the instruction: %s", entry.Type, entry.Summary)
+		}
+	}
+	err := filepath.WalkDir(logs, func(path string, entry fs.DirEntry, walk error) error {
+		if walk != nil || entry.IsDir() {
+			return walk
+		}
+		raw, read := os.ReadFile(path)
+		if read == nil && strings.Contains(string(raw), "merger") {
+			t.Errorf("agent log %s repeats the instruction", path)
+		}
+		return read
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := b.convStore.Read(context.Background(), "chat-1", 0, 0)
+	if err != nil || len(msgs) == 0 || msgs[0].Content != nativeInstruction {
+		t.Fatalf("the author's transcript lost the instruction: %+v %v", msgs, err)
 	}
 }
