@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -261,6 +262,9 @@ func TestCraftNativeReaderLeaseStatusRevealsNoContent(t *testing.T) {
 // token reaches none of it over the real router, and no other page route serves
 // the native bytes to them.
 func TestCraftNativeRoutesServeReadersOnlyTheSharedVersion(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the native Craft router needs Linux CLOCK_BOOTTIME")
+	}
 	t.Setenv("CREWSHIP_ARTIFACT_PROJECTS_ENABLED", "true")
 	t.Setenv("CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED", "true")
 	t.Setenv("CREWSHIP_ARTIFACT_SLIDES_ENABLED", "true")
