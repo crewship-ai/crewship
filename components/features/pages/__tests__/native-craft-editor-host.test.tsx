@@ -535,6 +535,64 @@ describe('write access removed while read access remains (#4348)',()=>{
    await waitFor(()=>expect(journal.revokeRead).toHaveBeenCalled())
    await waitFor(()=>expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument())
   })
+  const recovered=()=>({draft:{applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'1',editorRevision:'old',bytes:new TextEncoder().encode('{"body":["draft"]}')},actions:['compare','copy']})
+  const proposal={id:'ncp_private',author:{actor_id:'agent:a',display_name:'Agent',kind:'agent'},authorName:'Agent',baseVersion:'1',summary:'private summary',state:'open',createdAt:'2026-11-01T00:00:00Z'}
+  const privateBytes=new TextEncoder().encode('{"body":["private-latest"]}')
+  function revoke(){
+   const second=clientRig();second.lease.mockResolvedValue(readerLease);second.read.mockRejectedValue(refused);m.createClient.mockReturnValueOnce(second)
+   act(()=>stream?.('session_retired',writeRevoked))
+   return second
+  }
+  async function settled(second:ReturnType<typeof clientRig>){
+   await waitFor(()=>expect(second.events).toHaveBeenCalledOnce())
+   await waitFor(()=>expect(document.querySelectorAll('iframe')).toHaveLength(0))
+  }
+  it('an open comparison leaves the page and its state when private read is refused',async()=>{
+   journal.recovery.mockResolvedValueOnce([recovered()])
+   mount();await ready();await acquire()
+   client.read.mockResolvedValueOnce({version:'1',bytes:privateBytes})
+   fireEvent.click(await screen.findByRole('button',{name:'Porovnat'}))
+   await screen.findByLabelText('Serverová verze')
+   await settled(revoke())
+   expect(screen.queryByLabelText('Serverová verze')).not.toBeInTheDocument()
+   expect(screen.queryByLabelText('Místní koncept')).not.toBeInTheDocument()
+   expect(document.body.textContent).not.toContain('private-latest')
+  })
+  it('a comparison still pending at the refusal is never shown, and reports nothing',async()=>{
+   journal.recovery.mockResolvedValueOnce([recovered()])
+   mount();await ready();await acquire()
+   const pending=deferred<unknown>();client.read.mockReturnValueOnce(pending.promise)
+   fireEvent.click(await screen.findByRole('button',{name:'Porovnat'}))
+   await settled(revoke())
+   await act(async()=>{pending.resolve({version:'1',bytes:privateBytes});await new Promise(r=>setTimeout(r,20))})
+   expect(screen.queryByLabelText('Serverová verze')).not.toBeInTheDocument()
+   expect(document.body.textContent).not.toContain('private-latest')
+   expect(screen.getByRole('alert')).toHaveTextContent('Sdílenou verzi zobrazíte obnovením stránky')
+  })
+  it('a pending proposal comparison is never shown and proposals do not survive a regained editor',async()=>{
+   client.proposals.mockResolvedValue([proposal])
+   mount();await ready();await acquire()
+   const pending=deferred<Uint8Array>();client.proposalBytes.mockReturnValueOnce(pending.promise)
+   fireEvent.click(await screen.findByRole('button',{name:'Porovnat'}))
+   const second=revoke();await settled(second)
+   await act(async()=>{pending.resolve(privateBytes);await new Promise(r=>setTimeout(r,20))})
+   expect(screen.queryByLabelText('Serverová verze')).not.toBeInTheDocument()
+   // Edit returns: only what the fresh admission loads may appear.
+   const third=clientRig();third.lease.mockResolvedValue(emptyLease);m.createClient.mockReturnValueOnce(third)
+   act(()=>stream?.('session_retired',{delivery:'stopped',draft:'retain',reason:'authority_changed'}))
+   await waitFor(()=>expect(third.read).toHaveBeenCalledOnce(),{timeout:7000})
+   await waitFor(()=>expect(document.querySelectorAll('iframe')).toHaveLength(1))
+   expect(screen.queryByText(/private summary/)).not.toBeInTheDocument()
+  },10000)
+  it('comparing a retained draft asks the server for nothing without private read',async()=>{
+   journal.recovery.mockResolvedValueOnce([recovered()])
+   mount();await ready();await acquire()
+   const second=revoke();await settled(second)
+   const reads=second.read.mock.calls.length
+   fireEvent.click((await screen.findAllByRole('button',{name:'Porovnat'}))[0])
+   await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Porovnání se serverem'))
+   expect(second.read).toHaveBeenCalledTimes(reads)
+  })
   it('a metadata stream ending without a read loss is reopened, so the watch continues',async()=>{
    const second=await demoted()
    await waitFor(()=>expect(second.events).toHaveBeenCalledOnce())

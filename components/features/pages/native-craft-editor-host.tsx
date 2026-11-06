@@ -105,6 +105,10 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   // metadataOnly: the frame is gone after a refused private read, and the lease
   // admission stays open only so an explicit read loss can still purge the draft.
   let closed=false,metadataOnly=false,metadataRetry:ReturnType<typeof setTimeout>|undefined
+  // Bumped whenever private access stops being confirmed: a server comparison or
+  // proposal list started before that may no longer reach the page.
+  let privateEpoch=0
+  const dropPrivateViews=()=>{privateEpoch++;setComparison(undefined);setProposals([])}
   let dead=false,networkRetired=false,nativeFailed=false,sessionId='',current:Runtime|undefined,transition=false,viewNow=vacant,readerRefresh:{client:typeof client,done:Promise<void>}|undefined
   let privacyJournal:NativeDraftJournal|undefined,privacyRetirement:Promise<void>|undefined
   let reauthorize:ReturnType<typeof setInterval>|undefined,leaseWatch:ReturnType<typeof setInterval>|undefined,proposalWatch:ReturnType<typeof setInterval>|undefined
@@ -182,7 +186,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    const journalPurge=(j:NativeDraftJournal)=>j.revokeRead().catch((cause:unknown)=>j.eraseOwnRow?j.eraseOwnRow():Promise.reject(cause))
    const purged=r?.coordinator&&!stopped?r.coordinator.revokeRead():privacyJournal?journalPurge(privacyJournal):Promise.resolve()
    if(stopped||metadataOnly)setError(undefined)
-   client.close();setView(vacant);setQuota(undefined);setConnectionRetired(true);setUncertain(false);setRecoveries([]);setComparison(undefined);setDirty(false);setSavedVersion(undefined);setOwnsEditor(false);setLabel('Přístup ke čtení byl odebrán')
+   dropPrivateViews()
+   client.close();setView(vacant);setQuota(undefined);setConnectionRetired(true);setUncertain(false);setRecoveries([]);setDirty(false);setSavedVersion(undefined);setOwnsEditor(false);setLabel('Přístup ke čtení byl odebrán')
    void purged.then(resolve,reject)
    return privacyRetirement
   }
@@ -233,23 +238,28 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    r={enginePin:snapshot.enginePin,port,frame,abort,version:snapshot.version,generation,ready:false,writable:false,nativeReadOnly:true,edit:0,blocked:false};current=r
    return ready
   }
-  compare.current=draft=>{void(async()=>{
+  compare.current=draft=>{
+   if(metadataOnly){setError('Porovnání se serverem není bez práva upravovat dostupné. Kopii konceptu si můžete stáhnout.');return}
+   const epoch=privateEpoch
+   void(async()=>{
    const snapshot=await client.read(lifetime.signal)
    const digest=async(bytes:Uint8Array)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new Uint8Array(bytes))),v=>v.toString(16).padStart(2,'0')).join('')
    const [serverHash,draftHash]=await Promise.all([digest(snapshot.bytes),digest(draft.bytes)])
    const decoder=new TextDecoder('utf-8',{fatal:true})
-   if(!dead&&!lifetime.signal.aborted)setComparison({version:snapshot.version,server:decoder.decode(snapshot.bytes),draft:decoder.decode(draft.bytes),serverHash,draftHash,equal:serverHash===draftHash})
-  })().catch(()=>{if(!dead)setError('Porovnání se nepodařilo načíst. Koncept se nepřepsal.')})}
+   if(!dead&&!lifetime.signal.aborted&&epoch===privateEpoch)setComparison({version:snapshot.version,server:decoder.decode(snapshot.bytes),draft:decoder.decode(draft.bytes),serverHash,draftHash,equal:serverHash===draftHash})
+  })().catch(()=>{if(!dead&&epoch===privateEpoch)setError('Porovnání se nepodařilo načíst. Koncept se nepřepsal.')})}
   // An agent proposal is a separate candidate; the open document is never
   // replaced until this holder accepts it as its own fenced save (#4480).
-  const loadProposals=()=>client.proposals(lifetime.signal).then(list=>{if(!dead)setProposals(list.filter(p=>p.state==='open'||p.state==='stale'))}).catch(()=>{})
-  compareProposal.current=proposal=>{void(async()=>{
+  const loadProposals=()=>{const epoch=privateEpoch;return client.proposals(lifetime.signal).then(list=>{if(!dead&&epoch===privateEpoch)setProposals(list.filter(p=>p.state==='open'||p.state==='stale'))}).catch(()=>{})}
+  compareProposal.current=proposal=>{
+   const epoch=privateEpoch
+   void(async()=>{
    const [snapshot,candidate]=await Promise.all([client.read(lifetime.signal),client.proposalBytes(proposal.id,lifetime.signal)])
    const digest=async(bytes:Uint8Array)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new Uint8Array(bytes))),v=>v.toString(16).padStart(2,'0')).join('')
    const [serverHash,draftHash]=await Promise.all([digest(snapshot.bytes),digest(candidate)])
    const decoder=new TextDecoder('utf-8',{fatal:true})
-   if(!dead&&!lifetime.signal.aborted)setComparison({version:snapshot.version,server:decoder.decode(snapshot.bytes),draft:decoder.decode(candidate),serverHash,draftHash,equal:serverHash===draftHash,draftLabel:`Návrh ${proposal.authorName} nad verzí ${proposal.baseVersion}`})
-  })().catch(()=>{if(!dead)setError('Návrh se nepodařilo načíst k porovnání.')})}
+   if(!dead&&!lifetime.signal.aborted&&epoch===privateEpoch)setComparison({version:snapshot.version,server:decoder.decode(snapshot.bytes),draft:decoder.decode(candidate),serverHash,draftHash,equal:serverHash===draftHash,draftLabel:`Návrh ${proposal.authorName} nad verzí ${proposal.baseVersion}`})
+  })().catch(()=>{if(!dead&&epoch===privateEpoch)setError('Návrh se nepodařilo načíst k porovnání.')})}
   decide.current=(id,decision)=>{
    if(dead||networkRetired||transition||viewNow.can_edit!==true)return
    transition=true;setBusy(true);setError(undefined)
@@ -353,7 +363,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   async function reopenReadOnly(){
    if(dead||networkRetired)return
    const message='Právo upravovat bylo odebráno. Dokument je jen pro čtení; neuložené změny zůstaly jako místní koncept.'
-   networkRetired=true;clearInterval(reauthorize);clearInterval(leaseWatch);viewNow=vacant;setView(vacant);setHandoffRequest(undefined);setOwnsEditor(false)
+   networkRetired=true;clearInterval(reauthorize);clearInterval(leaseWatch);viewNow=vacant;setView(vacant);setHandoffRequest(undefined);setOwnsEditor(false);dropPrivateViews()
    if(!metadataOnly)setError(message)
    const r=current
    if(r&&(r.writable||r.retiring&&!r.retirementFinished)&&!await retireWrite(r)){client.close();return}
@@ -372,16 +382,16 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     await mountEditor(snapshot,viewNow.generation??'1')
    }catch{if(metadataOnly)retryMetadata();else stop(READ_ONLY_REFUSED);return}
    if(dead)return
-   metadataOnly=false;networkRetired=false;setConnectionRetired(false);setBusy(false);setError(message);watch()
+   metadataOnly=false;networkRetired=false;setConnectionRetired(false);setBusy(false);setError(message);void loadProposals();watch()
   }
   // No frame or private request survives this; only lease status and the
   // explicit read-loss event still reach this person, and the draft stays theirs.
   async function holdMetadata(){
    const r=current
-   metadataOnly=true
+   metadataOnly=true;dropPrivateViews()
    if(r){await r.coordinator?.close();if(!r.coordinator)await r.journal?.close();detach(r);current=undefined}
    if(dead)return
-   setConnectionRetired(true);setOwnsEditor(false);setSavedVersion(undefined);setQuota(undefined);setUncertain(false);setLabel('Editor odpojen · koncept zachován');setError(READ_ONLY_REFUSED);setBusy(false)
+   setConnectionRetired(true);setOwnsEditor(false);setSavedVersion(undefined);setQuota(undefined);setQuotaFull(false);setSaveTrace(undefined);setUncertain(false);setLabel('Editor odpojen · koncept zachován');setError(READ_ONLY_REFUSED);setBusy(false)
    viewNow=leaseView(await client.lease(lifetime.signal));setView(viewNow)
    if(dead)return
    networkRetired=false;watch()
