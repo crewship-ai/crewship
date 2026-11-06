@@ -2420,8 +2420,15 @@ crewship page design create checkout --name "Checkout"
 
 ### `crewship page design get <slug>`
 
-Read the live nodes and order. Optional `--version` selects a positive retained
-snapshot; zero reads the live canvas. A reader can select only its shared pin.
+Read nodes and order authorized for the caller. Without `--version` (or with
+zero), callers with current Edit permission and both CLI `pages:read` and
+`pages:write` scopes (or `pages:*`), and separately authorized workspace OWNER/ADMIN
+readers see the latest canvas; ordinary Read grantees see only the shared pin.
+Positive `--version` selects a retained snapshot; shared-only readers can select only
+the shared pin and receive 404 until one is shared. Foreign administrator
+access is audited. Non-admin Page owners and Edit grantees using `pages:read`
+credentials are also shared-only. A read-scoped credential never grants write
+authority.
 
 ```bash
 crewship page design get checkout --version 1
@@ -2429,8 +2436,12 @@ crewship page design get checkout --version 1
 
 ### `crewship page design versions <slug>`
 
-List authorized retained snapshots. Editors see history; readers see their
-shared version. This command has no additional flags.
+List authorized retained snapshots. Callers with current Edit authority
+(Edit permission plus both `pages:read` and `pages:write`, or `pages:*`) and
+separately authorized workspace OWNER/ADMIN readers see history. Shared-only
+callers, including non-admin Page owners and Edit grantees using `pages:read`,
+see only the shared version and receive 404 before a pin exists. Foreign
+administrator access is audited. This command has no additional flags.
 
 ### `crewship page design apply <slug>`
 

@@ -392,8 +392,12 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   // receipt since, no edit before the capture and the engine's own state
   // unchanged since bootstrap.
   function untouched(attempt: Prepared): boolean {
-    return confirmed?.seeded === true && confirmed.mountedState !== undefined && attempt.epoch === 0 && edits === 0
-      && attempt.nativeState === confirmed.mountedState && attempt.draft.baseVersion === confirmed.version
+    // The trusted mount identity is available before its background hash.
+    // Write retirement must not leave an untouched recovery row merely because
+    // that hash has not settled. A receipt or proven-absent baseline excludes it.
+    return options.loaded?.mountedState !== undefined && !baselineStale && baseVersion === seedVersion
+      && attempt.epoch === 0 && edits === 0 && attempt.nativeState === options.loaded.mountedState
+      && attempt.draft.baseVersion === seedVersion
   }
   function revokeWrite(): Promise<boolean> {
     if (!active) return Promise.resolve(false)
@@ -450,7 +454,15 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   async function retireUntouched() {
     const capture = latest
     if (!active || !capture || unconfirmed || !untouched(capture)) return
-    try { await confirmRow(capture.draft) } catch { /* It remains a draft to compare. */ }
+    try {
+      await confirmRow(capture.draft)
+      // Confirmation may race another capture, an edit or privacy retirement.
+      // Only this exact, still untouched final capture can release the guard.
+      if (active && latest === capture && !unconfirmed && !newerThan(capture) && untouched(capture)) {
+        dirty = false
+        emit("read-only", "write_revoked")
+      }
+    } catch { /* It remains a draft to compare. */ }
   }
   // A final capture with exactly the bytes of a committed save whose row could
   // not be retired is that server version; retire it instead of offering it.

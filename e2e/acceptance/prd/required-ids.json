@@ -449,6 +449,12 @@
   "diagnostic": [
     "harness.reach",
     "harness.identity",
-    "harness.full-inputs"
+    "harness.full-inputs",
+    "A.craft.startup.slow.word",
+    "A.craft.startup.slow.sheet",
+    "A.craft.startup.deadline.word",
+    "A.craft.startup.deadline.sheet",
+    "A.craft.startup.revoked.word",
+    "A.craft.startup.revoked.sheet"
   ]
 }

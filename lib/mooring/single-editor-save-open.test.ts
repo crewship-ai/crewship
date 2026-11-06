@@ -54,17 +54,19 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
 function mounted(applicationId: "wordcraft" | "gridcraft") {
   let value = 5
   let during: (() => void) | undefined
-  const requests: NativeSaveRequest[] = [], confirmed: number[] = []
+  const requests: NativeSaveRequest[] = [], confirmed: number[] = [], states: NativeSaveState[] = []
+  const confirm = vi.fn(async () => {})
+  const persist = vi.fn(async () => {})
   const state = () => (applicationId === "wordcraft" ? { nativeState: `revision:${value}` } : {})
   const mountedState = applicationId === "wordcraft" ? "revision:5" : undefined
   const controller = createSingleEditorSave({ workspaceId: "w", pageId: "p", applicationId, enginePin: "engine", baseVersion: "3", generation: "1", sessionId: "s", idleMs: 5,
     loaded: { bytes: new Uint8Array([3]), ...(mountedState ? { mountedState } : {}) },
-    journal: { async persist() {}, async confirm(d) { confirmed.push(d.bytes[0]) }, async recovery() { return [] }, onRetire() { return () => {} }, async close() {}, async revokeRead() {}, async discardRecovered() {} },
+    journal: { persist, async confirm(d) { await confirm(); confirmed.push(d.bytes[0]) }, async recovery() { return [] }, onRetire() { return () => {} }, async close() {}, async revokeRead() {}, async discardRecovered() {} },
     engine: { async snapshot(_s, id) { const hook = during; during = undefined; hook?.(); return { bytes: new Uint8Array([value]), editorRevision: id ?? `rpc:${value}`, ...state() } }, async validate() {} },
     transport: { async save(r) { requests.push(r); return receipt(r) }, async reconcile(r) { return receipt(r) } },
-    onState() {}, timeoutMs: 1000,
+    onState(state) { states.push(state) }, timeoutMs: 1000,
   })
-  return { controller, requests, confirmed, edit(v: number) { value = v; controller.edited() }, typeDuringSnapshot(v: number) { during = () => { value = v } } }
+  return { controller, requests, confirmed, states, confirm, persist, edit(v: number) { value = v; controller.edited() }, typeDuringSnapshot(v: number) { during = () => { value = v } } }
 }
 
 it("wordcraft: mounted from the loaded bytes, normalized export, no edit -> no save (#4699)", async () => {
@@ -98,7 +100,47 @@ it("wordcraft: an edited final capture on revoke stays a local draft", async () 
   const r = mounted("wordcraft")
   try { r.edit(6); expect(await r.controller.revokeWrite()).toBe(true); expect(r.confirmed).not.toContain(6) } finally { await r.controller.close() }
 })
+for (const later of ["edit", "capture", "read-retirement"] as const) it(`untouched row confirmation cannot clear newer ${later}`, async () => {
+  const r = mounted("wordcraft")
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  try {
+    await r.controller.flush() // completes the seed and first untouched capture
+    r.confirm.mockImplementationOnce(() => gate)
+    const retirement = r.controller.revokeWrite()
+    await vi.waitFor(() => expect(r.confirm).toHaveBeenCalledTimes(2))
+    if (later === "edit") r.edit(6)
+    else if (later === "capture") {
+      const captures = r.persist.mock.calls.length
+      await r.controller.save()
+      expect(r.persist.mock.calls.length).toBe(captures + 1)
+    } else await r.controller.revokeRead()
+    release()
+    await retirement
+    expect(r.states.at(-1)?.dirty).toBe(true)
+    if (later === "read-retirement") expect(r.states.at(-1)?.phase).toBe("stopped")
+  } finally { release(); await r.controller.close() }
+})
+
 it("gridcraft: no engine revision state -> a differing export is still saved", async () => {
   const r = mounted("gridcraft")
   try { await r.controller.flush(); expect(r.requests.map(q => q.bytes[0])).toEqual([5]) } finally { await r.controller.close() }
+})
+
+it("wordcraft: an untouched final capture retires while the loaded seed digest is still pending", async () => {
+  let releaseSeed!: () => void, delayedSeed = false
+  const seedGate = new Promise<void>(resolve => { releaseSeed = resolve })
+  const digest = webcrypto.subtle.digest.bind(webcrypto.subtle)
+  const spy = vi.spyOn(webcrypto.subtle, "digest").mockImplementation((algorithm, data) => {
+    const bytes = ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data)
+    if (bytes.length === 1 && bytes[0] === 3) { delayedSeed = true; return seedGate.then(() => digest(algorithm, data)) }
+    return digest(algorithm, data)
+  })
+  const r = mounted("wordcraft")
+  try {
+    expect(delayedSeed).toBe(true)
+    expect(await r.controller.revokeWrite()).toBe(true)
+    expect(r.requests).toHaveLength(0)
+    expect(r.confirmed).toEqual([5])
+  } finally { releaseSeed(); spy.mockRestore(); await r.controller.close() }
 })
