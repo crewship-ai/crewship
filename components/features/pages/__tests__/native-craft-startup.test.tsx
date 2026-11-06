@@ -8,6 +8,7 @@ import {NativeCraftEditorHost} from '../native-craft-editor-host'
 const mock=vi.hoisted(()=>({client:vi.fn(),port:vi.fn(),journal:vi.fn()}))
 vi.mock('@/lib/mooring/native-document-client',()=>({createNativeDocumentClient:mock.client}))
 vi.mock('@/lib/mooring/native-editor-port',()=>({createNativeEditorPort:mock.port}))
+vi.mock('../native-craft-agent-start',()=>({NativeCraftAgentStart:()=>null}))
 vi.mock('@/lib/mooring/native-draft',async()=>({...await vi.importActual('@/lib/mooring/native-draft'),openNativeDraftJournal:mock.journal}))
 vi.mock('../workbook-editor-host',()=>({editorFrameSupported:()=>true,createEditorFrame:(doc:Document,src:string,onLoad:()=>void)=>{
  const frame=doc.createElement('iframe');frame.srcdoc='';frame.src=src;frame.setAttribute('sandbox','allow-scripts');frame.setAttribute('credentialless','');queueMicrotask(onLoad);return frame
