@@ -411,12 +411,14 @@ func upsertTriggerSchedule(ctx context.Context, x sqlExecQuerier, in SaveSchedul
 	}
 	var existingID string
 	var existingSpread int
+	var existingCron, existingTZ string
+	var existingNext sql.NullString
 	err = x.QueryRowContext(ctx,
-		`SELECT id, spread_seconds FROM pipeline_schedules
+		`SELECT id, spread_seconds, cron_expr, timezone, next_run_at FROM pipeline_schedules
 		 WHERE workspace_id = ? AND target_pipeline_id = ? AND deleted_at IS NULL
 		 ORDER BY created_at ASC LIMIT 1`,
 		in.WorkspaceID, in.TargetPipelineID,
-	).Scan(&existingID, &existingSpread)
+	).Scan(&existingID, &existingSpread, &existingCron, &existingTZ, &existingNext)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return insertScheduleRow(ctx, x, generateScheduleID(), prepared)
@@ -429,6 +431,15 @@ func upsertTriggerSchedule(ctx context.Context, x sqlExecQuerier, in SaveSchedul
 	if validateSpread(prepared.in.CronExpr, prepared.in.Timezone, existingSpread) != nil {
 		existingSpread = 0
 	}
+	// Keep a due-but-unfired occurrence (held by the spread offset or waiting
+	// for the next tick) when the cadence is unchanged, as updateSchedule does;
+	// otherwise a re-save inside [T, T+offset) would skip occurrence T.
+	nextRunToStore := prepared.nextRun
+	if existingCron == prepared.in.CronExpr && existingTZ == prepared.in.Timezone && existingNext.Valid {
+		if prev, perr := time.Parse(time.RFC3339Nano, existingNext.String); perr == nil && !prev.After(now) {
+			nextRunToStore = prev
+		}
+	}
 	if _, err := x.ExecContext(ctx, `
 UPDATE pipeline_schedules
 SET name = ?, cron_expr = ?, timezone = ?, inputs_json = ?, enabled = ?,
@@ -439,7 +450,7 @@ SET name = ?, cron_expr = ?, timezone = ?, inputs_json = ?, enabled = ?,
 WHERE id = ?`,
 		prepared.in.Name, prepared.in.CronExpr, prepared.in.Timezone, string(prepared.inputsJSON),
 		boolToInt(prepared.enabled), existingSpread, ScheduleSpreadOffset(existingID, existingSpread),
-		tsformat.Format(prepared.nextRun), prepared.in.CatchupPolicy,
+		tsformat.Format(nextRunToStore), prepared.in.CatchupPolicy,
 		nullIntIfPositive(prepared.in.MaxConsecutiveFailures),
 		nullStr(prepared.in.Activation), tsformat.Format(now), nullableStr(in.ChatOriginID),
 		existingID,
@@ -731,21 +742,26 @@ func activateSchedule(ctx context.Context, x sqlExecQuerier, id string) (*Schedu
 // UpdateAfterRun/Save rewrites it fixed-width.
 func (s *ScheduleStore) listDueSchedules(ctx context.Context) ([]*Schedule, error) {
 	now := time.Now()
+	// The spread offset is applied in Go, not SQL: a legacy row's stored offset
+	// may exceed what its cron interval admits and is clamped per row
+	// (EffectiveSpreadOffset). SQL only narrows to nominally due rows.
 	rows, err := s.db.QueryContext(ctx, scheduleSelect+`
 WHERE enabled = 1 AND deleted_at IS NULL AND next_run_at <= ?
-  AND (spread_offset_seconds = 0
-       OR CAST(strftime('%s', next_run_at) AS INTEGER) + spread_offset_seconds <= CAST(strftime('%s', ?) AS INTEGER))
-ORDER BY next_run_at ASC LIMIT 100`,
-		tsformat.Format(now), tsformat.Format(now))
+ORDER BY next_run_at ASC`,
+		tsformat.Format(now))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []*Schedule
-	for rows.Next() {
+	for rows.Next() && len(out) < 100 {
 		s, err := scanSchedule(rows)
 		if err != nil {
 			return nil, err
+		}
+		if s.SpreadOffsetSeconds > 0 && s.NextRunAt != nil &&
+			s.NextRunAt.Add(time.Duration(EffectiveSpreadOffset(s))*time.Second).After(now) {
+			continue
 		}
 		out = append(out, s)
 	}

@@ -116,7 +116,7 @@ requires `cron_expr`:
 
 `catchup_policy` is `once`, `all`, or `skip`. Optional `spread_seconds` (default
 `0`, off) offsets each fire by a stable per-schedule value in
-`[0, spread_seconds)`; it must be less than the cron interval, otherwise `400`.
+`[0, spread_seconds)`; spread plus the 30 second scheduler poll must not exceed the shortest cron interval, otherwise `400`.
 `next_run_at` in the response includes the offset and `next_occurrence_at` is
 the unshifted cron time (both only differ when a spread is set). A wake pipeline must be a
 different routine whose DSL declares `agentless: true`. Invalid cron, timezone,

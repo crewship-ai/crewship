@@ -54,14 +54,14 @@ func TestValidateSpread(t *testing.T) {
 	}{
 		{"off", "* * * * *", 0, false},
 		{"negative", "0 * * * *", -1, true},
-		{"just under a minute", "* * * * *", 59, false},
+		{"just under a minute", "* * * * *", 30, false},
 		{"equal to a minute", "* * * * *", 60, true},
 		{"over a minute", "* * * * *", 61, true},
-		{"just under an hour", "0 * * * *", 3599, false},
+		{"just under an hour", "0 * * * *", 3570, false},
 		{"equal to an hour", "0 * * * *", 3600, true},
 		{"daily", "0 9 * * *", 3600, false},
 		{"irregular cron uses the shortest gap", "0 9,10 * * *", 3600, true},
-		{"irregular cron under the shortest gap", "0 9,10 * * *", 3599, false},
+		{"irregular cron under the shortest gap", "0 9,10 * * *", 3570, false},
 		{"rare cron", "0 0 1 1 *", 86400, false},
 		{"bad cron", "not a cron", 5, true},
 	}

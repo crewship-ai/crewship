@@ -1797,8 +1797,8 @@ Each schedule is picked up at its cron time plus a **stable offset** in
 `[0, spread)` derived from the schedule id, so the same schedule always lands at
 the same point of the window and different schedules land at different points.
 The default is no spread, which fires exactly at the cron time as before. The
-spread must be shorter than the cron interval (the shortest gap between two
-occurrences); it is validated on create and on update, including when an update
+spread plus the 30 second scheduler poll must not exceed the cron interval (the
+shortest gap between two occurrences), so `*/5` accepts at most 270 seconds; it is validated on create and on update, including when an update
 changes the cron under an existing spread. `routine schedules list` and the API
 show the next run **including** the offset; `next_occurrence_at` in the API is
 the unshifted cron time.
