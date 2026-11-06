@@ -585,7 +585,13 @@ type WaitStep struct {
 	Until string `json:"until,omitempty"` // RFC3339 or template
 	// event fields
 	EventType   string `json:"event_type,omitempty"`
-	EventFilter string `json:"event_filter,omitempty"` // simple equality match on payload
+	// EventFilter is a conjunction of `path == value` terms over a JSON signal
+	// payload (syntax: see event_filter.go). A signal that does not match is
+	// not delivered to this wait. Empty accepts any signal.
+	EventFilter string `json:"event_filter,omitempty"`
+	// CorrelationKey (templated) lets a signed webhook configured for signal
+	// delivery find this parked wait by value instead of by run id.
+	CorrelationKey string `json:"correlation_key,omitempty"`
 	// TimeoutSec is the documented wait-body alias for timeout_seconds.
 	// A positive timeout_seconds on the step takes precedence. Zero uses
 	// the kind's default (24h for approval, 1h for event).

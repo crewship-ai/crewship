@@ -553,7 +553,8 @@
         },
         "until": { "type": "string", "description": "RFC3339 timestamp or template (datetime kind)." },
         "event_type": { "type": "string" },
-        "event_filter": { "type": "string", "description": "Simple equality match on payload." },
+        "event_filter": { "type": "string", "description": "Match on a JSON signal payload: terms `path == value` joined by `&&` (dotted path; value is bare text or a double-quoted string). A non-matching signal is not delivered to this wait. Empty accepts any signal." },
+        "correlation_key": { "type": "string", "description": "Templated key under which a signed webhook configured for signal delivery finds this parked wait (event kind)." },
         "timeout_sec": { "type": "integer", "minimum": 0, "description": "Wait timeout in seconds; a positive step timeout_seconds takes precedence. Zero/omitted uses the kind default: approval 24h, event 1h." }
       }
     },
