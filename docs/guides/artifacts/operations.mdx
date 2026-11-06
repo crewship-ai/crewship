@@ -14,8 +14,12 @@ an upgrade changes. Everything an artifact holds lives in the instance database:
 there is no separate file store to size, mount or back up.
 
 <Warning>
-Artifacts are off by default. An upgrade adds the tables and the workspace
-feature flags, but switches nothing on. See [Turning Artifacts on](#turning-artifacts-on).
+Projects are on by default on the server; every other artifact kind is off,
+and the web screens need build-time variables. An upgrade adds the tables and
+the workspace feature flags and turns on only the `artifact_projects` default,
+unless an administrator had already changed it. See
+[Turning Artifacts on](#turning-artifacts-on) and
+[Turning Projects off](/configuration/artifacts#turning-projects-off).
 </Warning>
 
 ## Turning Artifacts on
@@ -38,13 +42,15 @@ The library variable is needed for the library across kinds. Dashboard and
 Slides additionally need their own preview variable, and the chat viewer needs
 `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`.
 
-Every workspace flag is seeded with its instance default off. Enable one for the
-current workspace, or check what a workspace resolves to:
+`artifact_projects` is on by default. Every other workspace flag in the table
+is seeded with its instance default off. Enable or disable one for the current
+workspace, or check what a workspace resolves to:
 
 ```bash
-crewship feature-flag list                       # DEFAULT, WORKSPACE override, EFFECTIVE
-crewship feature-flag enable artifact_projects   # this workspace only
-crewship feature-flag inherit artifact_projects  # drop the override again
+crewship feature-flag list                             # DEFAULT, WORKSPACE override, EFFECTIVE
+crewship feature-flag enable artifact_slides           # this workspace only
+crewship feature-flag disable artifact_projects        # turn Projects off here
+crewship feature-flag inherit artifact_projects        # drop the override again
 ```
 
 `crewship feature-flag update <key> --enabled` changes the instance default for

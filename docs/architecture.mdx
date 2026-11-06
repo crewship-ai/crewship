@@ -498,9 +498,10 @@ for the agent.
 
 ### Switches
 
-Every artifact family is off by default. Workspace flags (`artifact_projects`,
-`artifact_dashboard_data`, `artifact_slides`, `artifacts_design`) are turned on
-with `crewship feature-flag enable <key>`. Craft needs the server switch
+Projects (`artifact_projects`) are on by default and can be turned off per
+workspace or instance-wide. Every other artifact family is off by default: the
+workspace flags `artifact_dashboard_data`, `artifact_slides` and
+`artifacts_design` are turned on with `crewship feature-flag enable <key>`. Craft needs the server switch
 `CREWSHIP_CRAFT_NATIVE_ENABLED`, and Craft agent tasks also need
 `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED`. The web UI additionally needs
 build-time `NEXT_PUBLIC_*` variables, such as `NEXT_PUBLIC_ARTIFACTS_LIBRARY`
