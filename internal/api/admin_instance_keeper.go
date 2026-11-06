@@ -467,7 +467,7 @@ func (h *InstanceKeeperHandler) PutDefaults(w http.ResponseWriter, r *http.Reque
 	resp := instanceDefaultsResponse{Configured: found, Defaults: governanceForResponse(after), Changes: diffGovernance(cur, after)}
 	resp.PreviewID = governancePreviewID(nil, &governanceFingerprintRow{ID: "defaults", Before: cur, After: after})
 	if body.DryRun {
-		resp.Defaults = cur
+		resp.Defaults = governanceForResponse(cur)
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}

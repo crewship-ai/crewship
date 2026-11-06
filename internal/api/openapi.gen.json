@@ -869,12 +869,7 @@
             "type": "string"
           },
           "crew": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/AgentCrew"
-              }
-            ],
-            "nullable": true
+            "$ref": "#/components/schemas/AgentCrew"
           },
           "crew_id": {
             "nullable": true,
@@ -1151,6 +1146,7 @@
         "type": "array"
       },
       "AgentCrew": {
+        "nullable": true,
         "properties": {
           "avatar_style": {
             "nullable": true,

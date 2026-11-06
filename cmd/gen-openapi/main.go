@@ -989,10 +989,11 @@ func nullable(typ string) map[string]any {
 	return map[string]any{"type": typ, "nullable": true}
 }
 
-// nullableAgentCrew is the crew block of an agent: null for an agent outside any
-// crew. OpenAPI 3.0 ignores siblings of a bare $ref, so the reference is wrapped.
-func nullableAgentCrew() map[string]any {
-	return map[string]any{"allOf": []any{ref("AgentCrew")}, "nullable": true}
+// nullableObject marks a component that may be null wherever it is referenced.
+// OpenAPI 3.0 ignores nullable beside a $ref and needs a type next to it.
+func nullableObject(schema map[string]any) map[string]any {
+	schema["nullable"] = true
+	return schema
 }
 
 func array(items map[string]any) map[string]any {
@@ -1055,7 +1056,7 @@ func responseComponents() map[string]any {
 		"tool_profile": scalar("string"), "memory_enabled": scalar("boolean"), "cli_tools": nullable("string"), "schedule_cron": nullable("string"),
 		"schedule_prompt": nullable("string"), "schedule_enabled": scalar("boolean"), "schedule_last_run": nullable("string"), "schedule_next_run": nullable("string"),
 		"webhook_require_timestamp": scalar("boolean"), "webhook_secret_set": nullable("boolean"), "mcp_config_json": nullable("string"),
-		"created_at": scalar("string"), "updated_at": scalar("string"), "crew": nullableAgentCrew(), "_count": ref("AgentCounts"),
+		"created_at": scalar("string"), "updated_at": scalar("string"), "crew": ref("AgentCrew"), "_count": ref("AgentCounts"),
 		"created_by_user_id": scalar("string"), "ephemeral": scalar("boolean"), "expires_at": nullable("string"), "expired_at": nullable("string"),
 		"parent_lead_id": nullable("string"), "hire_reason": nullable("string"),
 	})
@@ -1125,7 +1126,7 @@ func responseComponents() map[string]any {
 	schemas := map[string]any{
 		"Workspace": workspace, "WorkspaceList": array(ref("Workspace")), "WorkspaceCounts": object(map[string]any{"crews": scalar("integer"), "agents": scalar("integer"), "members": scalar("integer")}),
 		"Crew": crew, "CrewList": array(ref("Crew")), "CrewCounts": object(map[string]any{"agents": scalar("integer"), "members": scalar("integer")}),
-		"Agent": agent, "AgentList": array(ref("Agent")), "AgentCrew": object(map[string]any{"name": scalar("string"), "slug": scalar("string"), "color": nullable("string"), "avatar_style": nullable("string")}), "AgentCounts": object(map[string]any{"skills": scalar("integer"), "credentials": scalar("integer"), "chats": scalar("integer")}),
+		"Agent": agent, "AgentList": array(ref("Agent")), "AgentCrew": nullableObject(object(map[string]any{"name": scalar("string"), "slug": scalar("string"), "color": nullable("string"), "avatar_style": nullable("string")})), "AgentCounts": object(map[string]any{"skills": scalar("integer"), "credentials": scalar("integer"), "chats": scalar("integer")}),
 		"ProjectListItem": project, "ProjectList": array(ref("ProjectListItem")), "Issue": issue, "IssueList": array(ref("Issue")),
 		"Label":        object(map[string]any{"id": scalar("string"), "name": scalar("string"), "color": scalar("string"), "label_group": nullable("string")}),
 		"IssueCreator": object(map[string]any{"type": scalar("string"), "id": scalar("string"), "name": scalar("string")}),

@@ -49,6 +49,10 @@ func TestInstanceKeeperGovernance_EmptyPresetsAreArrays(t *testing.T) {
 	wantCode(t, rr, http.StatusOK, "defaults")
 	assertEmptyArray(t, rr.Body.Bytes(), "defaults", "watch_presets")
 
+	rr = f.do(f.boss, "PUT", "/api/v1/admin/instance/keeper/governance/defaults", `{"dry_run":true,"set":{"enabled":true}}`)
+	wantCode(t, rr, http.StatusOK, "defaults preview")
+	assertEmptyArray(t, rr.Body.Bytes(), "defaults", "watch_presets")
+
 	rr = f.do(f.boss, "GET", "/api/v1/admin/instance/keeper/governance", "")
 	wantCode(t, rr, http.StatusOK, "list")
 	assertEmptyArray(t, rr.Body.Bytes(), "defaults", "watch_presets")

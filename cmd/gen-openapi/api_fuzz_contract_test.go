@@ -83,14 +83,10 @@ func TestFuzzFindings_NullableFieldsAreDeclared(t *testing.T) {
 		}
 	}
 
-	components, _ := doc["components"].(map[string]any)
-	schemas, _ := components["schemas"].(map[string]any)
-	agent, _ := schemas["Agent"].(map[string]any)
-	agentProperties, _ := agent["properties"].(map[string]any)
-	crew, _ := agentProperties["crew"].(map[string]any)
-	if crew["nullable"] != true {
-		t.Errorf("Agent.crew is not nullable: %v", crew)
-	}
+	crew := loadNullableOAS30(t).Components.Schemas["Agent"].Value.Properties["crew"].Value
+	checkNullableData(t, crew, `null`, true)
+	checkNullableData(t, crew, `{"name":"Core","slug":"core","color":null,"avatar_style":null}`, true)
+	checkNullableData(t, crew, `{"name":"Core"}`, false)
 }
 
 // Middleware answers {"error"} ahead of a handler that replies with RFC 7807,
