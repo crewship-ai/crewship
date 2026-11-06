@@ -126,6 +126,19 @@ func TestAcceptance_RoutineWebhookSignalDelivery(t *testing.T) {
 		t.Fatalf("redelivery = %d %v, want duplicate DELIVERED", code, out)
 	}
 
+	// A new Idempotency-Key does not make the same signed body new work.
+	code, out = fire("d2-fresh-key", `{"order":{"id":"A-1"},"status":"paid"}`, true)
+	if code != http.StatusOK || out["duplicate"] != true {
+		t.Fatalf("replay under a new key = %d %v, want duplicate", code, out)
+	}
+	// The same key with a different body is a conflict, not a duplicate.
+	if code, _ := fire("d2", `{"order":{"id":"B-2"},"status":"paid"}`, true); code != http.StatusConflict {
+		t.Fatalf("reused key with another body = %d, want 409", code)
+	}
+	if waitStatus("sig-run-b") != "pending" {
+		t.Fatal("conflicting delivery woke a wait")
+	}
+
 	// Unknown correlation: accepted but ignored, and no run is started.
 	code, out = fire("d3", `{"order":{"id":"nope"}}`, true)
 	if code != http.StatusOK || out["status"] != "IGNORED" || out["reason"] != "no_matching_wait" {

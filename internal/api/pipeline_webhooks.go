@@ -999,14 +999,28 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 // fireWebhookSignal answers a verified delivery to a signal-mode webhook.
 // 200 {"status":"DELIVERED"} when waits were woken, 200 {"status":"IGNORED"}
 // when none matched (the sender must not retry that into an error), and the
-// same body with duplicate:true for a redelivered delivery id.
+// same body with duplicate:true when the same signed body was already processed,
+// and 409 delivery_conflict when the delivery id was used for a different body.
 func (h *PipelineHandler) fireWebhookSignal(w http.ResponseWriter, r *http.Request, wh *pipeline.Webhook, deliveryID string, body []byte) {
 	if h.db == nil {
 		replyError(w, http.StatusServiceUnavailable, "signal wait store not wired")
 		return
 	}
 	res, err := pipeline.DeliverWebhookSignal(r.Context(), h.db, wh, deliveryID, body)
+	if errors.Is(err, pipeline.ErrSignalDeliveryConflict) {
+		h.logger.Warn("webhook signal: delivery conflict", "webhook_id", wh.ID)
+		replyError(w, http.StatusConflict, "delivery_conflict")
+		return
+	}
 	if err != nil {
+		// Waits claimed before the failure are already durable: wake them now
+		// and let the sender's retry of the same body finish the remainder.
+		for _, runID := range res.RunIDs {
+			if h.signals != nil {
+				h.signals.Signal(runID, wh.SignalEventType, string(body))
+			}
+			h.resumeAfterSignal(runID)
+		}
 		h.logger.Error("webhook signal: durable deliver", "error", err, "webhook_id", wh.ID)
 		w.Header().Set("Retry-After", webhook.IngressRetryAfterSeconds)
 		replyError(w, http.StatusServiceUnavailable, "signal delivery unavailable")

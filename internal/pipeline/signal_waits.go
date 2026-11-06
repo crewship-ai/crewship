@@ -167,7 +167,13 @@ const claimableWait = `status = 'pending'
 // Each claim is its own guarded UPDATE, so concurrent deliveries partition the
 // rows and never claim one twice.
 func (s *SQLSignalWaitStore) claimMatching(ctx context.Context, where string, args []any, payload string, limit int) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, run_id, COALESCE(event_filter,'') FROM pipeline_signal_waits
+	return claimMatchingOn(ctx, s.db, where, args, payload, limit)
+}
+
+// claimMatchingOn is claimMatching against a db or an open transaction, so a
+// caller can commit the claims together with a receipt.
+func claimMatchingOn(ctx context.Context, x sqlExecQuerier, where string, args []any, payload string, limit int) ([]string, error) {
+	rows, err := x.QueryContext(ctx, `SELECT id, run_id, COALESCE(event_filter,'') FROM pipeline_signal_waits
  WHERE `+where+` AND `+claimableWait+` ORDER BY created_at ASC, id ASC LIMIT ?`, append(args, maxTopicFanout)...)
 	if err != nil {
 		return nil, err
@@ -196,7 +202,7 @@ func (s *SQLSignalWaitStore) claimMatching(ctx context.Context, where string, ar
 		if c.filter != "" && !EventFilterMatches(c.filter, payload) {
 			continue
 		}
-		res, err := s.db.ExecContext(ctx, `
+		res, err := x.ExecContext(ctx, `
 UPDATE pipeline_signal_waits
 SET status = 'delivered', payload = ?, delivered_at = strftime('%Y-%m-%dT%H:%M:%f000000Z','now')
 WHERE id = ? AND `+claimableWait, payload, c.id)
@@ -221,10 +227,14 @@ func (s *SQLSignalWaitStore) Deliver(ctx context.Context, runID, eventType, payl
 }
 
 func (s *SQLSignalWaitStore) DeliverCorrelated(ctx context.Context, workspaceID, pipelineID, eventType, correlationKey, payload string) ([]string, error) {
+	return deliverCorrelatedOn(ctx, s.db, workspaceID, pipelineID, eventType, correlationKey, payload)
+}
+
+func deliverCorrelatedOn(ctx context.Context, x sqlExecQuerier, workspaceID, pipelineID, eventType, correlationKey, payload string) ([]string, error) {
 	if workspaceID == "" || pipelineID == "" || eventType == "" || correlationKey == "" {
 		return nil, nil
 	}
-	claimed, err := s.claimMatching(ctx,
+	claimed, err := claimMatchingOn(ctx, x,
 		`workspace_id = ? AND event_type = ? AND correlation_key = ?
  AND run_id IN (SELECT id FROM pipeline_runs WHERE workspace_id = ? AND pipeline_id = ?)`,
 		[]any{workspaceID, eventType, correlationKey, workspaceID, pipelineID}, payload, maxTopicFanout)
