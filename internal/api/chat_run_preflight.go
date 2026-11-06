@@ -1,6 +1,7 @@
 package api
 
 import (
+	"database/sql"
 	"errors"
 	"math"
 	"net/http"
@@ -55,41 +56,54 @@ type chatRunPreflightResponse struct {
 func (r *Router) chatRunPreflight(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	chat := req.PathValue("chatId")
+	unavailable := func(step string, err error) {
+		r.logger.Error("chat run preflight unavailable", "step", step, "chat_id", chat, "error", err)
+		replyError(w, 503, "run_preflight_unavailable")
+	}
 	audience, err := r.entityRefAudience(req, chat)
 	if err != nil {
 		if errors.Is(err, errEntityAudienceDenied) {
 			replyError(w, 404, "Chat not found")
 		} else {
-			replyError(w, 503, "run_preflight_unavailable")
+			unavailable("audience", err)
 		}
 		return
 	}
 	payer, err := resolveAgentCredentialReadiness(req, r.db, audience.WorkspaceID, audience.AgentID)
 	if err != nil {
-		replyError(w, 503, "run_preflight_unavailable")
+		unavailable("credentials", err)
 		return
 	}
 	var crew, slug, role, model, configured string
-	err = r.db.QueryRowContext(req.Context(), `SELECT a.crew_id,a.slug,a.agent_role,COALESCE(a.llm_model,'') FROM agents a JOIN crews c ON c.id=a.crew_id AND c.workspace_id=a.workspace_id WHERE a.id=? AND a.workspace_id=? AND a.deleted_at IS NULL AND c.deleted_at IS NULL`, audience.AgentID, audience.WorkspaceID).Scan(&crew, &slug, &role, &model)
-	if err != nil {
-		replyError(w, 503, "run_preflight_unavailable")
+	// A solo agent has no crew row, so an inner join would turn it into a failure.
+	err = r.db.QueryRowContext(req.Context(), `SELECT COALESCE(a.crew_id,''),a.slug,a.agent_role,COALESCE(a.llm_model,'') FROM agents a LEFT JOIN crews c ON c.id=a.crew_id AND c.workspace_id=a.workspace_id WHERE a.id=? AND a.workspace_id=? AND a.deleted_at IS NULL AND (a.crew_id IS NULL OR (c.id IS NOT NULL AND c.deleted_at IS NULL))`, audience.AgentID, audience.WorkspaceID).Scan(&crew, &slug, &role, &model)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, 404, "Chat not found")
 		return
 	}
-	pol, err := r.PolicyResolver().Resolve(req.Context(), crew)
 	if err != nil {
-		replyError(w, 503, "run_preflight_unavailable")
+		unavailable("agent", err)
 		return
 	}
-	configured = policy.ApprovalModeForLevel(pol.AutonomyLevel)
+	// Runs read their approval mode from the crew policy; a solo agent has none.
+	configured = policy.ApprovalModeNone
+	if crew != "" {
+		pol, err := r.PolicyResolver().Resolve(req.Context(), crew)
+		if err != nil {
+			unavailable("policy", err)
+			return
+		}
+		configured = policy.ApprovalModeForLevel(pol.AutonomyLevel)
+	}
 	tx, err := r.db.BeginTx(req.Context(), nil)
 	if err != nil {
-		replyError(w, 503, "run_preflight_unavailable")
+		unavailable("transaction", err)
 		return
 	}
 	defer tx.Rollback()
 	statuses, err := paymaster.CheckTx(req.Context(), tx, paymaster.Scope{WorkspaceID: audience.WorkspaceID, CrewID: crew, AgentID: audience.AgentID})
 	if err != nil {
-		replyError(w, 503, "run_preflight_unavailable")
+		unavailable("budgets", err)
 		return
 	}
 	tx.Rollback()
@@ -101,16 +115,19 @@ func (r *Router) chatRunPreflight(w http.ResponseWriter, req *http.Request) {
 		mode = harbormaster.ModeAsync
 	}
 	args := map[string]any{"agent_slug": slug, "agent_role": role}
-	evaluator, err := harbormaster.EvaluatorForCrew(req.Context(), r.db, audience.WorkspaceID, crew, nil)
-	if err != nil {
-		replyError(w, 503, "run_preflight_unavailable")
-		return
+	evaluator := harbormaster.NewEvaluatorWithDefaults()
+	if crew != "" {
+		evaluator, err = harbormaster.EvaluatorForCrew(req.Context(), r.db, audience.WorkspaceID, crew, nil)
+		if err != nil {
+			unavailable("evaluator", err)
+			return
+		}
 	}
 	matches, reason, _ := evaluator.Evaluate(req.Context(), "agent_run", args)
 	if mode != harbormaster.ModeNone && matches {
 		mode, _, err = harbormaster.AdjustMode(req.Context(), r.db, audience.WorkspaceID, "agent_run", args, mode)
 		if err != nil {
-			replyError(w, 503, "run_preflight_unavailable")
+			unavailable("gate", err)
 			return
 		}
 	}
@@ -121,7 +138,7 @@ func (r *Router) chatRunPreflight(w http.ResponseWriter, req *http.Request) {
 	var hard int
 	err = r.db.QueryRowContext(req.Context(), `SELECT COUNT(*) FROM budget_limits WHERE workspace_id=? AND enabled=1 AND mode IN ('hard','tiered') AND (scope_kind='workspace' OR (scope_kind='crew' AND scope_id=?) OR (scope_kind='agent' AND scope_id=?) OR scope_kind='mission')`, audience.WorkspaceID, crew, audience.AgentID).Scan(&hard)
 	if err != nil {
-		replyError(w, 503, "run_preflight_unavailable")
+		unavailable("hard budgets", err)
 		return
 	}
 	if hard > 0 {
