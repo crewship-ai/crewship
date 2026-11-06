@@ -322,6 +322,16 @@ class GuardTests(unittest.TestCase):
             m.execute(self.event, self.env, failing, self.root)
         self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending', 'failure'])
 
+    def test_interrupted_run_also_ends_terminally(self):
+        real = self.api
+        def failing(endpoint, payload=None):
+            if '/git/trees/' in endpoint:
+                raise KeyboardInterrupt
+            return real(endpoint, payload)
+        with self.assertRaises(KeyboardInterrupt):
+            m.execute(self.event, self.env, failing, self.root)
+        self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending', 'failure'])
+
     def test_failure_status_error_never_masks_the_original_rejection(self):
         real = self.api
         def failing(endpoint, payload=None):

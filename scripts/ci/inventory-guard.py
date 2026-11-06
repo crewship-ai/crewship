@@ -434,7 +434,7 @@ def execute(event, env, api, root=ROOT):
             'description': report['decision'][:140],
             'target_url': 'https://github.com/' + report['repository'] + '/actions/runs/' + env['GITHUB_RUN_ID']})
         return report
-    except Exception:
+    except BaseException:  # Includes the runner's interrupt when a run is cancelled.
         output.unlink(missing_ok=True)
         # A pending status nobody replaces holds a merge group until the queue
         # times out (#5035). The head is not rechecked first: that needs the API
@@ -444,7 +444,7 @@ def execute(event, env, api, root=ROOT):
             try:
                 api('repos/' + target[0] + '/statuses/' + target[1], {
                     'state': 'failure', 'context': CONTEXT,
-                    'description': 'Trusted control inspection failed; rerun the CI Inventory run',
+                    'description': 'Trusted control inspection failed; rerun it or enqueue the PR again',
                     'target_url': 'https://github.com/' + target[0] + '/actions/runs/' + env['GITHUB_RUN_ID']})
             except Exception:
                 print('CI inventory guard could not post its failure status', file=sys.stderr)
