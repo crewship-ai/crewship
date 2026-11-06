@@ -670,6 +670,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- API responses now match the published contract on 23 operations: empty lists answer `[]` instead of `null`, a new agent reports its restricted profile, and the OpenAPI document describes the real shapes, nullable fields and both error envelopes.
 - **An identical Mooring create retry no longer returns a private document after its author loses access.** The existing transaction-local author check now runs before looking up the saved result as well as before committing a new document.
 
 - **Workbook creation now rechecks the original author’s current rights in its transaction.** Lost membership, restricted access or removed Page-create rights refuse both creation and identical retries; a rights change during insertion rolls back the staged Page.
