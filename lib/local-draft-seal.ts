@@ -29,7 +29,8 @@ export function forgetLocalDraftPage(scope: LocalDraftScope) {
 }
 /** Whether the server proves this person lost native read. Comment visibility
  * passes the wrap and unwrap check but not native read, so a native draft asks
- * here. Anything short of `draft_read_revoked` answers false and keeps the draft. */
+ * here. Anything short of `draft_read_revoked` answers false and keeps the draft.
+ * This has no side effects: the caller decides whether the answer is still current. */
 export async function nativeDraftReadRevoked(scope: LocalDraftScope): Promise<boolean> {
   const generation = identityGeneration
   const response = await apiFetch(`/api/v1/pages/@${encodeURIComponent(scope.page)}/draft-key?workspace_id=${encodeURIComponent(scope.workspace)}`, {
@@ -38,9 +39,7 @@ export async function nativeDraftReadRevoked(scope: LocalDraftScope): Promise<bo
     body: JSON.stringify({ human: scope.human, operation: "check-native" }),
   })
   const body = await response.json().catch(() => null)
-  if (generation !== identityGeneration || response.status !== 403 || body?.code !== "draft_read_revoked") return false
-  forgetLocalDraftPage(scope)
-  return true
+  return generation === identityGeneration && response.status === 403 && body?.code === "draft_read_revoked"
 }
 function base64(bytes: Uint8Array): string {
   let raw = ""

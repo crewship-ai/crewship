@@ -56,15 +56,17 @@ function scriptedServer(){
  m.server=async(input,init)=>{
   const name=route(String(input));s.calls.push(name)
   if(!s.reachable)throw TypeError('Failed to fetch')
+  // The server decides when the request arrives; a delay only holds the answer.
+  const state=s.state
   if(s.stall.has(name))return new Promise<Response>((_,reject)=>init.signal?.addEventListener('abort',()=>reject(init.signal!.reason),{once:true}))
   if(name==='draft-key'){
    if(s.proofDelay)await new Promise(resolve=>setTimeout(resolve,s.proofDelay))
    // The real route: wrap asks canonical Page read, which Comment passes; check-native asks native read.
    const operation=JSON.parse(String(init.body)).operation
-   if(s.state==='comment-only'&&operation==='check-native')return json({error:'current Page read access is required',code:'draft_read_revoked'},403)
-   if(s.state==='comment-only')return json({envelope:'v1:unit'})
-   if(s.state==='signed-out')return json({error:'fresh human authentication required'},401)
-   if(s.state==='read-lost')return json({error:'current Page read access is required',code:'draft_read_revoked'},403)
+   if(state==='comment-only'&&operation==='check-native')return json({error:'current Page read access is required',code:'draft_read_revoked'},403)
+   if(state==='comment-only')return json({envelope:'v1:unit'})
+   if(state==='signed-out')return json({error:'fresh human authentication required'},401)
+   if(state==='read-lost')return json({error:'current Page read access is required',code:'draft_read_revoked'},403)
    return json({envelope:'v1:unit'})
   }
   if(s.state==='signed-out')return json({error:'authentication required'},401)
@@ -241,6 +243,25 @@ describe('proof',()=>{
   expect(contentVisible()).toBe(false)
   await advance(NATIVE_REAUTHORIZE_DEADLINE_MS+2_000)
   expect(m.purge).toHaveBeenCalledWith({human:'human',workspace:'w',page:'p'},expect.anything())
+ })
+})
+describe('a stale proof',()=>{
+ it('is superseded by a later verified read and never reaches the successor journal',async()=>{
+  await opened()
+  await editWhileOffline()
+  server.state='read-lost';server.proofDelay=5*60_000
+  server.reachable=true
+  // Proof A is decided now and its answer stays on the wire.
+  await settle(()=>server.count('draft-key')>0)
+  server.state='readable';server.proofDelay=0
+  await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
+  expect(contentVisible()).toBe(true);expect(offered()).toBe(true)
+  // Read fails again before A lands, so a boolean "readable" guard would pass.
+  server.reachable=false;server.dropStream()
+  await advance(30_000)
+  expect(contentVisible()).toBe(false)
+  await advance(5*60_000)
+  expect(journal.revokeRead).not.toHaveBeenCalled();expect(journal.eraseOwnRow).not.toHaveBeenCalled();expect(m.purge).not.toHaveBeenCalled()
  })
 })
 describe('lease handoff',()=>{

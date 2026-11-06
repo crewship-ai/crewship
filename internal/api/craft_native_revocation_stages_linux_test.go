@@ -98,3 +98,38 @@ func TestCraftNativeReadLossDeliveryWithinOneEventInterval(t *testing.T) {
 		return
 	}
 }
+
+// A person who reads through a folder ACL and holds a Comment grant passes
+// canSeePage through the grant, so the ACL is first read by the native read
+// check. A fault there says nothing about the person: the draft stays.
+func TestCraftNativeRetirementKeepsTheDraftOnAnACLLookupFault(t *testing.T) {
+	f, m, _ := craftNativeHTTPFixture(t)
+	clock, err := mooring.NewBootOwnerClock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m = newCraftNativeHTTP(m.pages, true, clock)
+	ctx := craftNativeGrantedWriter(t, f)
+	mustExec(t, f.db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('native-crew',?,'Crew','native-crew')`, f.wsID)
+	mustExec(t, f.db, `INSERT INTO page_folders(id,workspace_id,slug,name,owner_crew_id,created_at,updated_at) VALUES('native-folder',?,'native-folder','Folder','native-crew',datetime('now'),datetime('now'))`, f.wsID)
+	mustExec(t, f.db, `INSERT INTO page_folder_acl(folder_id,subject_type,subject_id,can_read,can_write,set_at) VALUES('native-folder','user','native-scope-writer',1,0,datetime('now'))`)
+	mustExec(t, f.db, `UPDATE pages SET folder_id='native-folder' WHERE id='native-page'`)
+	mustExec(t, f.db, `UPDATE page_grants SET level='comment' WHERE page_id='native-page' AND subject_id='native-scope-writer'`)
+	ctx = craftNativeFreshContext(t, f, ctx, time.Hour)
+	token, _ := craftNativeIssued(t, m, ctx)
+	next := craftNativeOpenStream(t, f, m, ctx, token)
+	if event, first := next(); event != "lease" {
+		t.Fatalf("calibration stream: %s %v", event, first)
+	}
+	mustExec(t, f.db, `ALTER TABLE page_folder_acl RENAME TO page_folder_acl_unavailable`)
+	for {
+		event, value := next()
+		if event == "lease" {
+			continue
+		}
+		if event != "session_retired" || value["draft"] != "retain" {
+			t.Fatalf("retirement %s %v, want draft retain", event, value)
+		}
+		return
+	}
+}

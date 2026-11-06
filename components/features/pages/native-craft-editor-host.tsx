@@ -11,7 +11,7 @@ import {createNativeDocumentClient,type NativeDocumentSnapshot,type NativePropos
 import {createNativeEditorPort,type NativeEditorPort} from "@/lib/mooring/native-editor-port"
 import {openNativeDraftJournal,validNativeVersion,type NativeDraft,type NativeDraftJournal,type NativeRecovery} from "@/lib/mooring/native-draft"
 import {createSingleEditorSave,type NativeSaveState} from "@/lib/mooring/single-editor-save"
-import {verifyNativeReadLoss} from "@/lib/mooring/native-read-loss"
+import {confirmNativeRead,verifyNativeReadLoss} from "@/lib/mooring/native-read-loss"
 import {NATIVE_ADMISSION_DEADLINE_MS,NATIVE_REAUTHORIZE_DEADLINE_MS,NATIVE_REAUTHORIZE_INTERVAL_MS} from "@/lib/mooring/native-revocation-bounds"
 import {createEditorFrame,editorFrameSupported} from "./workbook-editor-host"
 import {downloadNativeExport} from "@/lib/mooring/native-export-download"
@@ -135,7 +135,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   let dead=false,networkRetired=false,nativeFailed=false,sessionId='',current:Runtime|undefined,transition=false,viewNow=vacant,readerRefresh:{client:typeof client,done:Promise<void>}|undefined
   let privacyJournal:NativeDraftJournal|undefined,privacyRetirement:Promise<void>|undefined,readLossCheck:Promise<boolean>|undefined
   let reauthorize:ReturnType<typeof setInterval>|undefined,leaseWatch:ReturnType<typeof setInterval>|undefined,proposalWatch:ReturnType<typeof setInterval>|undefined
-  function readAccess(value:boolean){readable=value;setReadVerified(value)}
+  // Every server confirmation of read, however it arrives, supersedes earlier proofs.
+  const draftScope={human:humanId,workspace:workspaceId,page:pageId},readConfirmed=()=>confirmNativeRead(draftScope)
+  function readAccess(value:boolean){if(value)readConfirmed();readable=value;setReadVerified(value)}
   const live=(r:Runtime)=>!dead&&!lifetime.signal.aborted&&current===r&&!r.abort.signal.aborted
   const display=(r:Runtime)=>{
    if(!live(r))return
@@ -243,7 +245,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   // This asks for the one proof that does; anything short of it keeps the draft.
   function proveReadLoss(){
    if(readLossCheck||privacyRetirement||authSuspended)return
-   const check=verifyNativeReadLoss({human:humanId,workspace:workspaceId,page:pageId},async()=>{if(readable)return false;await retirePrivacy()}).catch(()=>false)
+   const check=verifyNativeReadLoss(draftScope,retirePrivacy).catch(()=>false)
    // A stalled request only stops holding the next one up; it may still prove loss.
    const release=()=>{if(readLossCheck===check)readLossCheck=undefined}
    readLossCheck=check;void check.finally(release);setTimeout(release,NATIVE_REAUTHORIZE_DEADLINE_MS)
@@ -505,6 +507,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    const valid=()=>!dead&&!authSuspended&&client===admission&&admissionEpoch===startup&&!operation.signal.aborted
    try{
     const opened=await admission.open(operation.signal);if(!valid())return
+    readConfirmed()
     if(opened.applicationId!==sessionApplication){readMismatch=true;throw Error('native_application_changed')}
     sessionId=opened.sessionId;watch();if(!valid())return
     if(retained){
@@ -785,7 +788,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     const since=Date.now();recheckSince=since
     void currentLease(own,lifetime.signal).then(raw=>{if(dead||client!==own||!r.writable)return;const next=leaseView(raw);if(!owns(next,r.generation)){retire();return}}).catch(()=>{if(!dead&&client===own&&r.writable)retire()}).finally(()=>{if(recheckSince===since)recheckSince=0})
    },1000)
-   reauthorize=setInterval(()=>{void own.reauthorize(lifetime.signal).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Spojení bylo ukončeno.').catch(()=>stop('Přístup editoru se nepotvrdil.'))})},NATIVE_REAUTHORIZE_INTERVAL_MS)
+   reauthorize=setInterval(()=>{void own.reauthorize(lifetime.signal).then(readConfirmed).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Spojení bylo ukončeno.').catch(()=>stop('Přístup editoru se nepotvrdil.'))})},NATIVE_REAUTHORIZE_INTERVAL_MS)
    void own.events(lifetime.signal,(event,value)=>{
     if(dead||client!==own)return
     if(event==='session_retired'&&value.draft==='purge'){
@@ -796,7 +799,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     if(event==='session_retired'&&value.reason==='write_revoked'&&(initializing||current&&!current.ready)){stop('Právo upravovat bylo během otevírání odebráno. Dokument se neotevřel.');return}
     if(event==='session_retired'&&value.reason==='write_revoked'){void reopenReadOnly().catch(()=>stop('Přístup editoru se nepotvrdil.'));return}
     if(event==='session_retired'){void retireConnection('Spojení bylo ukončeno.').catch(()=>stop('Přístup editoru se nepotvrdil.'));return}
-    void observeLease(value,true).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Aktuální přístup nelze potvrdit.').catch(()=>stop('Přístup editoru se nepotvrdil.'))})
+    readConfirmed();void observeLease(value,true).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Aktuální přístup nelze potvrdit.').catch(()=>stop('Přístup editoru se nepotvrdil.'))})
    }).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Spojení přerušeno. Zápis není potvrzen.').catch(()=>stop('Přístup editoru se nepotvrdil.'))})
   }
   return()=>{closed=true;clearTimeout(metadataRetry);unregisterPrivacy();window.removeEventListener('message',windowMessage);window.removeEventListener('online',backOnline);control.current=()=>{};retryRead.current=()=>{};copyRecovery.current=()=>{};publishPreview.current=()=>{};history.current={load:async()=>null,loadVersion:async()=>{throw Error('native_editor_closed')},restore:()=>{}};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};stop('Editor uzavřen',true)}

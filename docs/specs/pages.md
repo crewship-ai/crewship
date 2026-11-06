@@ -1459,8 +1459,10 @@ Comment-only access, as native admission does; Project asks `wrap`, which accept
 it. A native draft is asked about after a refused or unavailable admission and on
 any entry short of the editor (preview, read-only, refused or failed availability,
 or a workspace gone from the directory). A proof that arrives late still erases
-the revisions captured when it was asked, unless the editor has verified read
-again by then.
+the revisions captured when it was asked, unless read was confirmed after it was
+asked. A later confirmation (fresh read, admission, reauthorization or stream
+event, in this tab) supersedes it for good: it closes no key and revokes no
+journal.
 
 | Event | Native (Word, Sheet) | Project |
 |---|---|---|

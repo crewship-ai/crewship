@@ -83,8 +83,15 @@ func (m *craftNativeHTTP) pageAuthorityForView(ctx context.Context, tx *sql.Tx, 
 	if err != nil {
 		return result, err
 	}
-	if !write && !sharedPreview && !m.pages.mayReadNativeWithoutComment(ctx, scope.WorkspaceID, rec, viewer) {
-		return result, errCraftNativeAccess
+	if !write && !sharedPreview {
+		// A lookup fault must stay a fault: retirementFinding erases a draft on refusal.
+		readable, err := m.pages.nativeReadWithoutComment(ctx, scope.WorkspaceID, rec, viewer)
+		if err != nil {
+			return result, err
+		}
+		if !readable {
+			return result, errCraftNativeAccess
+		}
 	}
 	if !visible || write && !m.pages.mayEditSpec(ctx, scope.WorkspaceID, source.UserID, role, rec) {
 		return result, errCraftNativeAccess
