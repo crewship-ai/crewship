@@ -9,6 +9,13 @@
 -- changes, and its generations move here. Anything restricted, and any change of the
 -- row's identity, stays global: restriction anywhere is a ceiling everywhere.
 
+-- A deleted member id is remembered, without any other data. access_revision restarts
+-- at 1 on a new row, so a row restored under the same id could reach the revision of a
+-- receipt taken before its removal, and id, revision and role would all match again.
+-- The API always mints a new id, but a backup restore inserts the dumped row with its
+-- id and revision, so reusing a retired id keeps the global bump.
+CREATE TABLE workspace_member_retired_ids (id TEXT PRIMARY KEY) WITHOUT ROWID;
+
 DROP TRIGGER mooring_epoch_workspace_members_insert;
 DROP TRIGGER mooring_epoch_workspace_members_delete;
 DROP TRIGGER mooring_epoch_workspace_members_update_old;
@@ -20,12 +27,13 @@ DROP TRIGGER mooring_relevant_workspace_member_new;
 
 CREATE TRIGGER mooring_epoch_workspace_members_insert AFTER INSERT ON workspace_members
 BEGIN
- UPDATE users SET authority_revision=authority_revision+1 WHERE id=NEW.user_id AND NEW.access_mode IS NOT 'trusted';
+ UPDATE users SET authority_revision=authority_revision+1 WHERE id=NEW.user_id AND (NEW.access_mode IS NOT 'trusted' OR NEW.id IN (SELECT id FROM workspace_member_retired_ids));
  UPDATE workspaces SET authority_revision=authority_revision+1 WHERE id=NEW.workspace_id OR id IN (SELECT workspace_id FROM workspace_members WHERE user_id=NEW.user_id);
 END;
 
 CREATE TRIGGER mooring_epoch_workspace_members_delete BEFORE DELETE ON workspace_members
 BEGIN
+ INSERT OR IGNORE INTO workspace_member_retired_ids(id) VALUES(OLD.id);
  UPDATE users SET authority_revision=authority_revision+1 WHERE id=OLD.user_id AND OLD.access_mode IS NOT 'trusted';
  UPDATE workspaces SET authority_revision=authority_revision+1 WHERE id=OLD.workspace_id OR id IN (SELECT workspace_id FROM workspace_members WHERE user_id=OLD.user_id);
 END;
