@@ -272,51 +272,6 @@
       "alwaysRerun": true
     },
     {
-      "id": "A.craft.draft.read-loss-open",
-      "origin": "craft",
-      "alwaysRerun": true
-    },
-    {
-      "id": "A.craft.draft.write-only-read",
-      "origin": "craft",
-      "alwaysRerun": true
-    },
-    {
-      "id": "A.craft.draft.write-only-comment",
-      "origin": "craft",
-      "alwaysRerun": true
-    },
-    {
-      "id": "A.craft.draft.offline-reconnect",
-      "origin": "craft",
-      "alwaysRerun": true
-    },
-    {
-      "id": "A.craft.draft.expiry-keeps",
-      "origin": "craft",
-      "alwaysRerun": true
-    },
-    {
-      "id": "A.craft.draft.sign-out-1",
-      "origin": "craft",
-      "alwaysRerun": true
-    },
-    {
-      "id": "A.craft.draft.sign-out-2",
-      "origin": "craft",
-      "alwaysRerun": true
-    },
-    {
-      "id": "A.craft.draft.multi-tab",
-      "origin": "craft",
-      "alwaysRerun": true
-    },
-    {
-      "id": "A.craft.draft.hidden-tab",
-      "origin": "craft",
-      "alwaysRerun": true
-    },
-    {
       "id": "B.project.agent-screens",
       "origin": "artifacts"
     },

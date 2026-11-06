@@ -12,14 +12,17 @@
 // whole lifetime. Never point it at a shared server. The offline case needs
 // PRD_ORIGIN behind revocation-proxy.mjs: REVOCATION_PROXY_CONTROL cuts the
 // connections, and REVOCATION_DIRECT reaches the server around the proxy.
+//
+// Targeted pre-RC proof, not a row of the PRD suite: it cannot run against a
+// deployed origin. See "Draft revocation proof" in docs/development/prd-acceptance.md.
 import { chromium, request as requests, type Browser, type BrowserContext, type Page } from "@playwright/test"
 import { execFileSync } from "node:child_process"
-import { acquire, editorURL, frameOf, recoveryRows, takeButton, typeMarker } from "./drafts-crash/native"
-import { pause } from "./drafts-crash/crash"
-import { peerApi, requireNative } from "./craft-lease/helpers"
-import { NativePage } from "./craft-lease/native"
-import { expect, prdRequirement, test } from "./fixtures"
-import type { StorageState } from "./auth"
+import { acquire, editorURL, frameOf, recoveryRows, takeButton, typeMarker } from "../prd/drafts-crash/native"
+import { pause } from "../prd/drafts-crash/crash"
+import { peerApi, requireNative } from "../prd/craft-lease/helpers"
+import { NativePage } from "../prd/craft-lease/native"
+import { expect, prdRequirement, test } from "../prd/fixtures"
+import type { StorageState } from "../prd/auth"
 
 const application = "wordcraft" as const
 const BOUND = {

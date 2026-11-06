@@ -9,7 +9,7 @@ export const PRD_DIR = path.dirname(new URL(import.meta.url).pathname)
 
 /**
  * Template placeholders the specs use inside an ID and the values they take.
- * The first three loop over the two native engines, `wordcraft` → "word" and
+ * Each loops over the two native engines, `wordcraft` → "word" and
  * `gridcraft` → "sheet". A placeholder not listed here is reported as
  * unresolved, so a new loop has to be added here deliberately.
  */
@@ -17,8 +17,6 @@ export const PLACEHOLDERS = {
   "label.toLowerCase()": ["word", "sheet"],
   key: ["word", "sheet"],
   slug: ["word", "sheet"],
-  level: ["read", "comment"],
-  tabs: ["1", "2"],
 }
 
 /** Every `.ts` file under dir except requirements.ts (it defines prdRequirement). @param {string} dir */
