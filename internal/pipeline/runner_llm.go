@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -88,6 +89,13 @@ func NewLLMRunner(db *sql.DB, journalEmitter journal.Emitter, logger *slog.Logge
 // than crashing the pipeline; the caller will see "FAILED at step X
 // because no anthropic credential" and can either provision one or
 // switch to a different tier.
+// anthropicAPIHost is the only destination the Anthropic provider sends the key to.
+const anthropicAPIHost = "api.anthropic.com"
+
+// errAnthropicCredHostBound: an Anthropic credential exists but every one is
+// host-bound without approving anthropicAPIHost (#5045).
+var errAnthropicCredHostBound = errors.New("the workspace's Anthropic credential is host-bound and does not approve api.anthropic.com")
+
 var errNoAnthropicCred = errors.New("no active Anthropic credential in workspace (LLMRunner mode requires one — set SEED_ANTHROPIC_API_KEY before seeding, or POST /api/v1/credentials with provider=ANTHROPIC type=API_KEY)")
 
 // RunStep satisfies pipeline.AgentRunner. Resolves the agent's
@@ -313,19 +321,41 @@ func (r *LLMRunner) providerForWorkspace(ctx context.Context, workspaceID string
 	// workspace so this only matters in rotated workspaces — but
 	// in those cases ASC silently picks a stale key, which we
 	// caught in CodeRabbit review of #285.
-	var encryptedValue string
 	// anthropicLLMCredentialFilter is the SHARED predicate the run-time
 	// credential gate probes against too, so the gate never blocks a run this
 	// resolver could complete (see internal/pipeline/anthropic_credential.go).
-	err := r.db.QueryRowContext(ctx,
-		`SELECT encrypted_value FROM credentials WHERE workspace_id = ? AND `+anthropicLLMCredentialFilter+`
-ORDER BY created_at DESC
-LIMIT 1`, workspaceID).Scan(&encryptedValue)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, errNoAnthropicCred
-	}
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT encrypted_value, COALESCE(allowed_hosts, '[]') FROM credentials WHERE workspace_id = ? AND `+anthropicLLMCredentialFilter+`
+ORDER BY created_at DESC`, workspaceID)
 	if err != nil {
 		return nil, fmt.Errorf("query credential: %w", err)
+	}
+	// #5045: the key goes to one fixed host. A host-bound key is used only when
+	// that host is approved; the newest permitted key wins.
+	var encryptedValue string
+	found, withheld := false, false
+	for rows.Next() {
+		var enc, allowed string
+		if err := rows.Scan(&enc, &allowed); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("query credential: %w", err)
+		}
+		if !credhostgate.PermitsHost(allowed, anthropicAPIHost) {
+			withheld = true
+			continue
+		}
+		encryptedValue, found = enc, true
+		break
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("query credential: %w", err)
+	}
+	if !found {
+		if withheld {
+			return nil, errAnthropicCredHostBound
+		}
+		return nil, errNoAnthropicCred
 	}
 	plain, err := encryption.Decrypt(encryptedValue)
 	if err != nil {

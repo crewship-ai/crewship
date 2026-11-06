@@ -67,8 +67,14 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 		"adapter":          str(),
 		"model_credential": modelCredential,
 		"notes":            array(str()),
+		"host_bound_withheld": array(object(map[string]any{
+			"credential_id":   str(),
+			"credential_name": str(),
+			"allowed_hosts":   array(str()),
+			"reason":          str(),
+		})),
 	})
-	readiness["required"] = []string{"agent_id", "agent_slug", "adapter", "model_credential", "notes"}
+	readiness["required"] = []string{"agent_id", "agent_slug", "adapter", "model_credential", "notes", "host_bound_withheld"}
 	add("GET", "/api/v1/agents/{agentId}/credential-readiness", "RemainingAgentCredentialReadinessV1", readiness)
 	add("GET", "/api/v1/agents/{agentId}/debug", "RemainingAgentDebugV1", object(map[string]any{"agent_id": str(), "status": str(), "details": anyObject()}))
 	add("GET", "/api/v1/agents/{agentId}/git-log", "RemainingAgentGitLogV1", object(map[string]any{"commits": array(anyObject()), "branch": str()}))

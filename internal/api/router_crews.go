@@ -355,6 +355,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// here would 403 capability-granted MANAGERs/MEMBERs before the handler
 	// could honour the grant.
 	r.authedMut("POST", "/api/v1/credentials/{credentialId}/rotate", roleInline, creds.Rotate)
+	// Human-approved hosts (#5045). PUT is OWNER/ADMIN and the handler also
+	// refuses anything that is not a person; see credential_allowed_hosts.go.
+	r.mux.Handle("GET /api/v1/credentials/{credentialId}/allowed-hosts", authed(wsCtx(http.HandlerFunc(creds.GetAllowedHosts))))
+	r.authedMut("PUT", "/api/v1/credentials/{credentialId}/allowed-hosts", roleManage, creds.SetAllowedHosts)
 	r.mux.Handle("GET /api/v1/credentials/{credentialId}/rotations", authed(wsCtx(http.HandlerFunc(creds.ListRotations))))
 	r.authedMut("DELETE", "/api/v1/credential-rotations/{rotationId}", roleInline, creds.CancelRotation)
 	// Per-tool granularity (Cursor parity, CONNECTIONS.md §3.1)

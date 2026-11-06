@@ -19,6 +19,7 @@ import { requireNative } from "./craft-lease/helpers"
 import { NativePage as LeasePage } from "./craft-lease/native"
 import { barSeen, findAgent, redact, sheetInstruction, waitForTask, watchBar, wordInstruction, type SeededAgent } from "./craft-proposal/agent"
 import { createNativePage, deletePage, sheetCell, wordText, type NativeApp, type NativePage } from "./craft-proposal/native"
+import { frameOf } from "./drafts-crash/native"
 import { expect, prdRequirement, test } from "./fixtures"
 
 /** Goes through the whole control and returns the task the page started. Fails with what the control said. */
@@ -48,12 +49,17 @@ async function startFromControl(page: Page, agent: SeededAgent, instruction: str
   return { workId: body.work_id!, held }
 }
 
-/** What a reload renders: the editors draw on a canvas, so the check is on the document the editor fetched. */
-async function reloadAndRead(page: Page, has: (doc: Record<string, unknown>) => boolean) {
+/** What a reload renders. The editors draw on a canvas, so the content is read from the document the editor fetched, and it counts only once that editor finished starting and is on screen. */
+async function reloadAndRead(page: Page, app: NativeApp, has: (doc: Record<string, unknown>) => boolean) {
   const read = page.waitForResponse((r) => r.request().method() === "GET" && /\/craft\/document\?/.test(r.url()), { timeout: 90_000 })
   await page.reload()
   const loaded = await read
   const body = (await loaded.json().catch(() => ({}))) as { version?: string | number; bytes?: string }
+  await page.getByRole("status").filter({ hasText: /Pouze čtení|Připraveno k úpravám/ }).first().waitFor({ timeout: 90_000 })
+  await frameOf(page, app)
+  const frame = page.locator('iframe[title$=" editor"]')
+  await expect(frame, "the reloaded editor is on screen").toBeVisible()
+  await expect(frame, "the reloaded editor is not concealed").toHaveCSS("opacity", "1")
   return { status: loaded.status(), version: String(body.version), hasChange: has(JSON.parse(Buffer.from(body.bytes ?? "", "base64").toString("utf8") || "{}") as Record<string, unknown>) }
 }
 
@@ -107,7 +113,7 @@ test.describe("craft-agent-ui", () => {
           const seen = await barSeen(page)
           const panel = await taskPanel(page, "Úloha agenta dokončena")
           await prd.evidence(`${app}-after-agent.png`, await page.screenshot({ fullPage: true }))
-          const shown = await reloadAndRead(page, carries(marker))
+          const shown = await reloadAndRead(page, app, carries(marker))
           await expect(bar).toContainText("Volné", { timeout: 90_000 })
           const alerts = await alertsOn(page)
           await prd.evidence(`${app}-reloaded.png`, await page.screenshot({ fullPage: true }))
@@ -197,7 +203,7 @@ test.describe("craft-agent-ui", () => {
           const after = await doc.head()
           const alerts = await alertsOn(page)
           await expect(group, "the decided proposal leaves the page").toHaveCount(0, { timeout: 30_000 })
-          const shown = await reloadAndRead(page, carries(marker))
+          const shown = await reloadAndRead(page, app, carries(marker))
           await prd.evidence(`${app}-accepted.png`, await page.screenshot({ fullPage: true }))
           await prd.evidence(`${app}-accepted.json`, redact({ compare, accept: { status: answer.status(), version: receipt.receipt?.version ?? null, error: receipt.error ?? null }, after: after.version, shown, panel, alerts }))
 

@@ -1422,6 +1422,11 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 					}
 					val = fixed
 				}
+				// #5045: approved hosts are a delivery precondition; see
+				// normalizeRestoredAllowedHosts.
+				if table == credentialsTable && k == allowedHostsColumn {
+					val = normalizeRestoredAllowedHosts(val)
+				}
 				cols = append(cols, quoteIdent(k))
 				placeholders = append(placeholders, "?")
 				args = append(args, val)

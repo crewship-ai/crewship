@@ -50,7 +50,7 @@ export async function openProtectedDocumentDrafts(human: string, workspace: stri
         throw error
       }
     },
-    async put(draft) { await raw.put(await protect(draft)) },
+    async put(draft, options) { await raw.put(await protect(draft), options) },
     remove: id => raw.remove(id),
     close,
     exclusive: raw.exclusive,

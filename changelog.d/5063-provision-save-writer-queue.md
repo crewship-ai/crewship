@@ -1,0 +1,1 @@
+- **A finished crew build survives a busy database (#5063).** Saving the build result now waits out the SQLite writer queue, so concurrent writes during seeding fail provisioning only when the database stays busy past its 30 s limit.

@@ -2,7 +2,8 @@
 import { describe,it,expect,vi } from "vitest"
 import {createServer,type Server} from "node:http"
 import type {AddressInfo} from "node:net"
-import {createNativeDocumentClient} from "./native-document-client"
+import {createNativeDocumentClient,NativeMetadataTransportError} from "./native-document-client"
+import {NATIVE_REAUTHORIZE_DEADLINE_MS} from "./native-revocation-bounds"
 import {NativeSaveError,type NativeSaveRequest} from "./single-editor-save"
 const signal=()=>new AbortController().signal
 const request:NativeSaveRequest={workspaceId:"ws",pageId:"page",applicationId:"wordcraft",enginePin:"e".repeat(64),baseVersion:"9007199254740993",generation:"9007199254740995",sessionId:"public-session",editorRevision:"10:47:3",contentHash:"sha256:"+"a".repeat(64),bytes:new Uint8Array([0,128,255])}
@@ -67,6 +68,18 @@ describe("native mounted lifecycle",()=>{
 
 describe("native authorized metadata stream",()=>{
  const admission=()=>new Response(JSON.stringify({session_token:"b".repeat(64),session_id:"public-session",application_id:"wordcraft",page_id:"page"}))
+ it("ends a reauthorization that never answers at its deadline, as a transport failure",async()=>{
+  vi.useFakeTimers()
+  try{
+   const send=vi.fn().mockResolvedValueOnce(admission()).mockImplementationOnce((_:unknown,init:RequestInit)=>new Promise((_,reject)=>init.signal?.addEventListener("abort",()=>reject(init.signal!.reason))))
+   const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send});await client.open(signal())
+   let settled=false
+   const attempt=client.reauthorize(signal()).catch((error:unknown)=>{settled=true;return error})
+   await vi.advanceTimersByTimeAsync(NATIVE_REAUTHORIZE_DEADLINE_MS-1);expect(settled).toBe(false)
+   await vi.advanceTimersByTimeAsync(1)
+   expect(await attempt).toBeInstanceOf(NativeMetadataTransportError)
+  }finally{vi.useRealTimers()}
+ })
  it("decodes split SSE metadata with the closure bearer and no mutation retry",async()=>{
   const text='event: lease\ndata: {"generation":"9007199254740995","holder":null}\n\nevent: session_retired\ndata: {"delivery":"stopped","reason":"authority_changed","draft":"purge"}\n\n'
   const stream=new ReadableStream<Uint8Array>({start(c){for(const part of [text.slice(0,17),text.slice(17,43),text.slice(43)])c.enqueue(new TextEncoder().encode(part));c.close()}})

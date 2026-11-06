@@ -4,6 +4,7 @@ import * as React from 'react'
 import {useRealtimeEventSafe} from '@/hooks/use-realtime'
 import {registerDocumentDraftWriter} from '@/lib/document-queue'
 import {readNativePreview,NativePreviewError,type NativePreviewSnapshot} from '@/lib/mooring/native-preview-client'
+import {confirmNativeRead} from '@/lib/mooring/native-read-loss'
 import {createNativeEditorPort,type NativeEditorPort} from '@/lib/mooring/native-editor-port'
 import {downloadNativeExport} from '@/lib/mooring/native-export-download'
 import {nativeCraftFrameURL} from './native-craft-editor-host'
@@ -83,6 +84,8 @@ function PreviewSession({humanId,workspaceId,pageId,retry,read:source,label='Sd√
    try{
     const snapshot=reader.current?await reader.current(abort.signal):await readNativePreview({workspaceId,pageId},abort.signal)
     if(dead||abort.signal.aborted)return
+    // A delivered version is a read of this Page, so older draft proofs are stale.
+    confirmNativeRead({human:humanId,workspace:workspaceId,page:pageId})
     if(!current||snapshot.version!==current.version||snapshot.enginePin!==current.enginePin||snapshot.editorBundle!==current.editorBundle||snapshot.editorURL!==current.editorURL||snapshot.applicationId!==current.applicationId){setVersion(undefined);show(snapshot)}
    }catch(cause){fail(cause)}finally{clearTimeout(readDeadline);reading=false;if(again&&!dead){again=false;void read()}}
   }

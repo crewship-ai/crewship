@@ -2,6 +2,7 @@ import { apiFetch,tryRefresh,type RefreshResult } from "../api-fetch"
 import {getAuthMode} from "../server-base"
 import {validNativeDraft,validNativeVersion} from "./native-draft"
 import {NativeSaveError,type NativeSaveRequest} from "./single-editor-save"
+import {NATIVE_REAUTHORIZE_DEADLINE_MS} from "./native-revocation-bounds"
 import {parseNativeRestoreReceipt,parseNativeVersionDocument,parseNativeVersionList,type NativeRestoreReceipt,type NativeRestoreRequest,type NativeVersionDocument,type NativeVersionList} from "./native-versions"
 
 export interface NativeDocumentClientOptions {
@@ -50,7 +51,7 @@ export interface NativeDocumentClient {
 }
 // Only network I/O and explicitly temporary HTTP failures can reconnect.
 // Invalid metadata, changed authority and callback failures remain terminal.
-class NativeMetadataTransportError extends Error {}
+export class NativeMetadataTransportError extends Error {}
 const identifier=(value:unknown):value is string=>typeof value==="string"&&value.length>0&&value.length<=256&&!value.includes("\0")
 const nativeBase64=(bytes:Uint8Array)=>{
  let binary="";for(let i=0;i<bytes.length;i+=32768)binary+=String.fromCharCode(...bytes.subarray(i,i+32768));return btoa(binary)
@@ -159,6 +160,8 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    const abort=()=>controller.abort(originalSignal.reason)
    originalSignal.addEventListener('abort',abort,{once:true});if(originalSignal.aborted)abort()
    signal=controller.signal
+   // No answer counts as a failed attempt: a stalled request must not hide a revocation.
+   const deadline=setTimeout(()=>controller.abort(new NativeMetadataTransportError('native_reauthorization_deadline')),NATIVE_REAUTHORIZE_DEADLINE_MS)
    const operation=(async()=>{
    ready();await freshCookie(signal);ready()
    let response:Response
@@ -188,6 +191,7 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    })
    reauthorizing=pending
    try{return await pending}finally{
+    clearTimeout(deadline)
     originalSignal.removeEventListener('abort',abort)
     if(reauthorizing===pending)reauthorizing=undefined
     if(reauthorizeAbort===controller)reauthorizeAbort=undefined

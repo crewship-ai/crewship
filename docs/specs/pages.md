@@ -1443,11 +1443,119 @@ a network failure, expired cookie, or loss of Edit alone does not prove that
 loss. Offline clients cannot promise immediate deletion. Deferred deletion
 compares the captured revision, preserving a later replacement.
 
+#### When a draft is erased: Native and Project
+
+A local draft is erased only on explicit sign-out and on proven loss of read of
+the Page. It survives an expired sign-in. This rule covers two scopes: native Word
+and Sheet drafts (the journal in `lib/mooring/native-draft.ts`) and Project source
+and comment drafts (`lib/artifact-drafts.ts`). Text documents and Design have their
+own paths and are not part of this table.
+
+Three things can be read, and they are lost separately:
+
+- **Latest content**: the current native document or Project source, its history
+  and proposals. It needs Edit, or the administrator read rule.
+- **The shared version**: the pinned version. Read and Comment reach only this, and
+  only when a version is pinned.
+- **The Page**: Read, Comment, Edit or a folder ACL entry reaches it, with or without
+  a pin. A private Page is reached only by its private audience. A Project is
+  private until its first share, so a grant alone reaches no unshared Project.
+
+Only losing the Page erases a draft. Losing Edit takes latest content away, at any
+level down to Comment: the person keeps the same shared version, or the same
+absence of one, and the draft stays. Native admission refuses Comment, but a refused
+admission is not proof.
+
+"Proven" means a `403 draft_read_revoked` from `draft-key` or, on an open native
+editor, a `session_retired` event with `draft: "purge"`. The event says `purge` only
+while the person's credential is still current and the same read `draft-key` asks
+refuses them, so native admission or application eligibility never erases, and a
+restricted private custodian keeps the draft. A `readable: true` answer or a
+delivered shared version supersedes every older proof still on the wire for that
+Page in that tab. From the moment an editor holding a kept draft asks for a
+replacement admission, it asks `draft-key` every 30 seconds, one request at a time,
+until it unmounts, signs out or erases. So Comment to none is found without a
+reload, even if that admission never finishes.
+Native
+asks `draft-key` with `operation: "check"`; Project asks `wrap`. Both ask the same
+read question, canonical Page visibility. A native draft is asked about after a
+refused or unavailable admission and on any entry short of the editor (preview,
+read-only, refused or failed availability, or a workspace gone from the directory).
+A proof that arrives late still erases the revisions captured when it was asked,
+unless read was confirmed after it was asked. A later confirmation (fresh read,
+admission, reauthorization or stream event, in this tab) supersedes it for good: it
+closes no key and revokes no journal.
+
+| Event | Latest content | Shared version | Native (Word, Sheet) | Project |
+|---|---|---|---|---|
+| Explicit sign-out, confirmed | Unchanged | Unchanged | Captured revisions erased | Captured revisions erased |
+| Sign-out cancelled or not acknowledged by the server | Unchanged | Unchanged | Kept | Kept |
+| Sign-in expired, or session ended elsewhere | Unchanged | Unchanged | Kept, sealed; content hidden | Kept, sealed |
+| 401 | Unchanged | Unchanged | Kept | Kept |
+| Generic 403, 404, 5xx, network failure | Unknown | Unknown | Kept; content hidden, nothing offered until a fresh admission | Kept; a 403 or 404 asks `draft-key` for proof |
+| Edit to Read | Lost | Readable if pinned | Kept, sealed; nothing offered, because read of the shared version gives no right to unpublished content | Kept |
+| Edit to Comment, or Read to Comment | Lost | Readable if pinned | Kept, sealed; admission is refused, so the editor offers nothing and points to the shared version | Kept |
+| Folder ACL loses write, keeps read | Lost | Readable if pinned | As Edit to Read | Kept |
+| Comment, Read or Edit removed, no other reach | Lost | Lost | Erased | Erased |
+| Private audience excludes the person | Lost | Lost | Erased | Erased |
+| Workspace membership removed | Lost | Lost | Erased | Erased |
+| Page deleted | Lost | Lost | Erased | Erased |
+| Another person signs in, same browser | Not theirs | Not theirs | Sealed rows kept, unreadable to them; recovery needs the original person | Same |
+| Offline | Unknown | Unknown | Kept; see below | Kept; see below |
+
+Unsealed legacy plaintext copies are the exception to surviving expiry: they do
+not qualify for retention and are removed at any identity change.
+
+Erasing happens where this browser can reach the row. A draft whose Page ID the
+browser no longer learns, because nothing opens that Page again, stays sealed:
+its key is refused, so it cannot be read, but it is not erased.
+
+Revocation has three separate stages on an open native editor, and each has its
+own bound:
+
+1. **Delivery.** The server rechecks every 5 seconds
+   (`craftNativeEventInterval`), so a healthy stream delivers within that
+   interval plus transit. With a silent stream, the 30-second reauthorization
+   delivers the refusal. Each attempt has a deadline equal to that interval, so
+   with both silent the editor concludes it is unconfirmed within 60 seconds
+   (`NATIVE_DETECTION_BOUND_MS`).
+2. **Client reaction.** On a purge event the frame is removed and the draft
+   offer withdrawn in the same turn; the draft is then erased. On a refusal or
+   a missed deadline content is hidden and the offer withdrawn at once. A refusal
+   alone erases nothing; the editor then asks `draft-key` for proof.
+3. **Reconnect.** Nothing is read or offered before a fresh admission. A refused
+   admission triggers the same proof request and offers nothing. Back online, an
+   existing offer is withdrawn first and returns only with a fresh read of the
+   latest content. A tab returning from hidden or frozen (`visibilitychange`,
+   `pageshow`) does the same at once, without waiting for a timer. A frozen editor
+   frame leaves in that same turn, with its download, and a pending download is
+   dropped; only a fresh read of the latest content restores them, and the buffer
+   stays until read loss is proven. The 60-second bound is detection, not an
+   access condition.
+
+An offline browser cannot learn of a revocation, so delivery has not happened
+and no bound applies. It keeps the draft, and on reconnect it follows stage 3.
+These bounds hold while the page's timers run; a browser may throttle a hidden
+tab. Content already delivered cannot be recalled.
+
+A Project tab has no stream. Its 15-second refresh delivers a 403 or 404, which
+removes cached content and asks `draft-key` for proof.
+
 Before an authentication transition unmounts an editor, admitted local writes
 must drain. Failed capture, unavailable storage, and an over-limit Design draft
 keep the live model mounted behind recovery UI and block navigation. Explicit
 sign-out warns before deleting persistent recovery copies and deletes only the
-revisions covered by that confirmation. Later writes remain for recovery.
+revisions covered by that confirmation, plus the exact revision this tab's own
+suspended native editor made from one of them. Later writes remain for recovery,
+including another tab's. A retiring editor's capture keeps the root revision of its
+chain, and a real edit starts a new chain, so confirming any revision confirms the
+root. After the server acknowledges sign-out and before any cleanup, the browser
+stores those roots beside the rows. A final capture reads them in its own transaction
+and stores nothing for a confirmed root, and every provider mount erases what such a
+tab left behind. Only a sign-in the server accepted clears that person's intent, and only if the intent is older than that sign-in's request; a session answer or a signed-out mount does not,
+since another tab may still be retiring. The sign-out broadcast only makes tabs look
+sooner. An unsaved edit the editor never stored before retiring is part of its
+capture, and goes with it.
 Recovery does not replay native snapshot saves, custody operations or agent
 dispatch. Design resumes standard CRDT synchronization only after fresh
 same-person Edit admission; read-only viewers do not restore a writer canvas.
@@ -1610,6 +1718,9 @@ that original human after a fresh current-read check under the SQL writer fence.
 All responses use `Cache-Control: no-store`. A stale client identity is refused
 before creating a key envelope; an account switch cannot rebind the draft.
 Slugs cannot alias an old draft.
+
+`{"human":"<expected-human-id>","operation":"check"}` returns `{"readable":true}`
+or the same refusal, judged by the same canonical Page read. It handles no key.
 
 A 403 with `code: "draft_read_revoked"` is positive evidence for deleting that
 Page's local draft. `draft_identity_mismatch`, generic 403, 400 (unavailable or

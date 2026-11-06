@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
@@ -361,6 +362,32 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 	if err := rows.Err(); err != nil {
 		replyInternalError(w, h.logger, "rows iteration (internal credentials)", err)
 		return
+	}
+	// #5045: this listing is what the crew sidecar's reaper reconciles its
+	// in-memory copy against, so a host-bound credential the crew no longer
+	// satisfies (hosts tightened, allowlist narrowed, network mode changed) is
+	// left out and the sidecar drops it on its next sweep. A check that cannot
+	// be answered fails the request: the reaper then keeps what it has rather
+	// than reaping everything.
+	if crewID != "" && !includeValues && len(result) > 0 {
+		ids := make([]string, len(result))
+		for i, c := range result {
+			ids[i] = c.ID
+		}
+		withheld, werr := credhostgate.WithholdsForCrew(r.Context(), h.db, crewID, ids)
+		if werr != nil {
+			replyInternalError(w, h.logger, "internal credentials: host-bound check", werr)
+			return
+		}
+		if len(withheld) > 0 {
+			kept := result[:0]
+			for _, c := range result {
+				if _, drop := withheld[c.ID]; !drop {
+					kept = append(kept, c)
+				}
+			}
+			result = kept
+		}
 	}
 	if result == nil {
 		result = []credResult{}

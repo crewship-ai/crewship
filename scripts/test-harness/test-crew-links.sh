@@ -51,8 +51,15 @@ section "2. A lead knows which crews it can reach"
 # ─────────────────────────────────────────────────────────────────────────────
 
 info "Asking alex (engineering lead) what its sidecar reports as linked…"
+wait_agent_free alex "${XLINK_FREE_TIMEOUT:-360}" || finish  # a busy lead answers 429, which is not "sees no crews"
 seen="$(ask_agent alex "Run exactly: curl -s http://localhost:9119/connections — then reply with ONLY the crew slugs you found, comma separated, nothing else.")"
-assert_contains "alex sees ops among its linked crews" "$seen" "ops"
+seen_rc=$?
+if (( seen_rc != 0 )); then
+  # A failed ask can leave a partial reply that happens to contain "ops".
+  _fail "alex answers the connections ask" "the ask exited $seen_rc (refused or failed; see the ask_agent message above), so a partial reply is not evidence of alex's linked crews"
+  seen=""
+fi
+(( seen_rc == 0 )) && assert_contains "alex sees ops among its linked crews" "$seen" "ops"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "3. Delegation ACROSS a live link reaches the other crew"
@@ -165,6 +172,7 @@ _state_add issues "$ops_record_ident"
 info "Opening an engineering issue that alex (lead) hands to Ops/morgan (tag $TAG)…"
 echoed=0
 landed=0
+wait_agent_free alex || finish
 xlink_work="$(issue_work engineering alex "Read the Ops verification record ($TAG)" \
   "Ops issue $ops_record_ident (id $ops_record_id) is an actual operator-created record for this test. Ops is linked to our crew. As engineering lead, assign this to morgan on ops through /assign with crew \"ops\". Include $TAG and issue id $ops_record_id in the task. Ask Morgan to read GET /mission/$ops_record_id, report the verification code in the issue description, and identify the record read. Wait for Morgan's result and report it here. This is record verification, not release certification.")" || true
 info "issue run: ${xlink_work:-none}"

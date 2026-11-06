@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/llm"
@@ -318,8 +319,11 @@ func nullableString(v interface{}) string {
 	return s
 }
 
+// anthropicAPIHost is where llm.NewAnthropic sends the key.
+const anthropicAPIHost = "api.anthropic.com"
+
 func (h *SkillGenerateHandler) resolveAnthropicProvider(ctx context.Context, wsID string) (llm.Provider, error) {
-	var encryptedValue string
+	var encryptedValue, allowedHosts string
 	// Strict API_KEY only — the AI_CLI_TOKEN type stores an OAuth
 	// bearer issued by the Claude Code auth flow, which is a
 	// different shape from the x-api-key the Messages API expects.
@@ -328,19 +332,23 @@ func (h *SkillGenerateHandler) resolveAnthropicProvider(ctx context.Context, wsI
 	// Better to fail at the credential lookup with a clear error
 	// telling the user to add a real API key.
 	err := h.db.QueryRowContext(ctx, `
-		SELECT encrypted_value FROM credentials
+		SELECT encrypted_value, COALESCE(allowed_hosts, '[]') FROM credentials
 		WHERE workspace_id = ?
 		  AND provider = 'ANTHROPIC'
 		  AND type = 'API_KEY'
 		  AND status = 'ACTIVE'
 		  AND deleted_at IS NULL
 		ORDER BY created_at ASC
-		LIMIT 1`, wsID).Scan(&encryptedValue)
+		LIMIT 1`, wsID).Scan(&encryptedValue, &allowedHosts)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errNoActiveAnthropicCredential
 		}
 		return nil, fmt.Errorf("query credential: %w", err)
+	}
+	// An agent can reach this path through the sidecar.
+	if !credhostgate.PermitsHost(allowedHosts, anthropicAPIHost) {
+		return nil, fmt.Errorf("%w: key is bound to other hosts", errNoActiveAnthropicCredential)
 	}
 	plain, err := encryption.Decrypt(encryptedValue)
 	if err != nil {

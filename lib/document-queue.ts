@@ -1,3 +1,4 @@
+import { isSignOutRow, signOutRowKey } from "./document-draft-sign-out"
 import { isSealedLocalDraft } from "./local-draft-seal"
 
 /** Private, browser-local recovery journal. It never grants replay authority. */
@@ -13,7 +14,8 @@ export interface DocumentDraft {
 }
 export interface DocumentDraftStore {
   load(): Promise<DocumentDraft[]>
-  put(draft: DocumentDraft): Promise<void>
+  /** `final`: the editor's last capture as it retires, not a new edit. */
+  put(draft: DocumentDraft, options?: { final?: boolean }): Promise<void>
   remove(id: string): Promise<void>
   close(): void
   /** True when this tab holds the Page's journal lock, so every row in it is an orphan. */
@@ -135,12 +137,26 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
         })
       } finally { clearTimeout(timer) }
     },
-    async put(draft) {
+    async put(draft, how) {
       // Bound each journal row before structured cloning large editor state.
       const serialized = JSON.stringify(draft)
       if (serialized.length > maxDraftBytes || (options?.maxDraftBytes !== undefined && new TextEncoder().encode(serialized).byteLength > maxDraftBytes)) throw new DocumentStorageError(message)
       const key: [string,string] = [owner,JSON.stringify([draft.schema,draft.epoch,draft.id])]
-      await transaction("readwrite", store => store.put({ key, draft, revision: crypto.randomUUID() }))
+      const revision = crypto.randomUUID(), row = JSON.stringify(key)
+      if (!how?.final) {
+        ownRoots.set(row, revision)
+        await transaction("readwrite", store => store.put({ key, draft, revision }))
+      } else await transaction("readwrite", store => {
+        const previous = store.get(key), intent = store.get(signOutRowKey(human))
+        intent.onsuccess = () => {
+          const root: string | undefined = previous.result?.finalRoot ?? previous.result?.revision ?? ownRoots.get(row)
+          // The person already confirmed erasing this chain: nothing to keep.
+          if (root && intent.result?.roots?.includes(root)) { store.delete(key); return }
+          ownRoots.set(row, root ?? revision)
+          store.put({ key, draft, revision, ...(root ? { finalRoot: root } : {}) })
+        }
+        return intent
+      })
       keys.set(draft.id,key)
     },
     async remove(id) {
@@ -202,7 +218,7 @@ async function purgeRows(range: () => IDBKeyRange | undefined, owns: (owner: str
               const row = cursor.result
               if (!row) return
               const key = row.key as [string, string]
-              if (owns(key[0])) row.delete()
+              if (!isSignOutRow(key[0]) && owns(key[0])) row.delete()
               row.continue()
             } catch { abort() }
           }
@@ -238,6 +254,12 @@ export function purgeOtherDocumentDrafts(userId: string | null): Promise<void> {
   return identityPurge
 }
 
+// An editor's final capture keeps the root revision of its chain: however many
+// retirement writes follow one another, confirming any of them confirms the root.
+// A real edit starts a new chain. The confirming tab may have erased the row
+// first; what this tab last wrote there still names the root.
+const ownRoots = new Map<string, string>()
+
 /** Preserve rows on expiry/account replacement. Editors capture before journals close. */
 let suspensionInFlight: Promise<void> | undefined
 export function suspendOtherDocumentDrafts(userId: string | null): Promise<void> {
@@ -270,6 +292,7 @@ export function suspendOtherDocumentDrafts(userId: string | null): Promise<void>
         cursor.onsuccess = () => {
           const row = cursor.result; if (!row) return
           const value = row.value
+          if (isSignOutRow(value.key[0])) { row.continue(); return }
           let human: unknown
           try { human = JSON.parse(value.key[0])[0] } catch { /* Unknown plaintext ownership is not retainable. */ }
           const sealed = typeof value.draft?.snapshot === "string" && isSealedLocalDraft(value.draft.snapshot) && value.draft.update === "" && !value.draft.request
@@ -286,7 +309,7 @@ export function suspendOtherDocumentDrafts(userId: string | null): Promise<void>
   void work.then(() => { if (suspensionInFlight === work) suspensionInFlight = undefined }, () => { if (suspensionInFlight === work) suspensionInFlight = undefined })
   return work
 }
-export interface CapturedDocumentDraft { key: [string, string]; revision: string | null; draft?: string }
+export interface CapturedDocumentDraft { key: [string, string]; revision: string | null; /** The chain this revision belongs to. */ root?: string; draft?: string }
 async function withDraftRows<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore, done: (value: T) => void) => void): Promise<T> {
   if (typeof indexedDB === "undefined") throw new DocumentStorageError(message)
   return new Promise<T>((resolve, reject) => {
@@ -321,7 +344,7 @@ export function captureDocumentDrafts(human: string, workspace?: string, page?: 
         if (owner[0] === human && (!workspace || owner[1] === workspace) && (!page || owner[2] === page) && value.draft) {
           const revision = typeof value.revision === "string" ? value.revision : crypto.randomUUID()
           if (!value.revision) row.update({...value, revision})
-          rows.push({key:value.key, revision})
+          rows.push({key:value.key, revision, root: value.finalRoot ?? revision})
         }
       } catch { /* Unknown legacy rows are preserved. */ }
       row.continue()

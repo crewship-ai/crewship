@@ -13076,7 +13076,7 @@
         "type": "object"
       },
       "LocalDraftKeyRequest": {
-        "description": "At most 4 KiB JSON; requires a current human credential and current read of the immutable Page.",
+        "description": "At most 4 KiB JSON; requires a current human credential and current read of the immutable Page. check handles no key and answers the same read question.",
         "oneOf": [
           {
             "additionalProperties": false,
@@ -13143,6 +13143,39 @@
               "envelope"
             ],
             "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "envelope": {
+                "enum": [
+                  ""
+                ],
+                "type": "string"
+              },
+              "human": {
+                "description": "Expected original human identity; must equal the current credential.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "key": {
+                "enum": [
+                  ""
+                ],
+                "type": "string"
+              },
+              "operation": {
+                "enum": [
+                  "check"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "human",
+              "operation"
+            ],
+            "type": "object"
           }
         ]
       },
@@ -13173,6 +13206,21 @@
             },
             "required": [
               "key"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "readable": {
+                "enum": [
+                  true
+                ],
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "readable"
             ],
             "type": "object"
           }
@@ -17241,6 +17289,29 @@
           "agent_slug": {
             "type": "string"
           },
+          "host_bound_withheld": {
+            "items": {
+              "properties": {
+                "allowed_hosts": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "credential_id": {
+                  "type": "string"
+                },
+                "credential_name": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
           "model_credential": {
             "properties": {
               "credential_id": {
@@ -17284,7 +17355,8 @@
           "agent_slug",
           "adapter",
           "model_credential",
-          "notes"
+          "notes",
+          "host_bound_withheld"
         ],
         "type": "object"
       },
@@ -78636,6 +78708,335 @@
           "credentials"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/credentials/{credentialId}/allowed-hosts": {
+      "get": {
+        "description": "List credential allowed hosts (GET /api/v1/credentials/{credentialId}/allowed-hosts).",
+        "operationId": "get_api_v1_credentials_credentialId_allowed-hosts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credentialId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "allowed_hosts": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "credential_id": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List credential allowed hosts",
+        "tags": [
+          "credentials"
+        ],
+        "x-crewship-read-only": true
+      },
+      "put": {
+        "description": "Update credential allowed hosts (PUT /api/v1/credentials/{credentialId}/allowed-hosts).",
+        "operationId": "put_api_v1_credentials_credentialId_allowed-hosts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credentialId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "allowed_hosts": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "allowed_hosts"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "allowed_hosts": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "credential_id": {
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": "string"
+                    },
+                    "previous": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Update credential allowed hosts",
+        "tags": [
+          "credentials"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/credentials/{credentialId}/audit": {

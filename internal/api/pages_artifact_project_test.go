@@ -34,6 +34,9 @@ func artifactProjectFixture(t *testing.T) (*PageHandler, string, string, func(st
 		req.SetPathValue("slug", "three-screens")
 		w := httptest.NewRecorder()
 		switch {
+		case strings.HasPrefix(path, "draft-key/"):
+			req.SetPathValue("slug", "@"+strings.TrimPrefix(path, "draft-key/"))
+			h.LocalDraftKey(w, req)
 		case path == "artifacts":
 			h.CreateArtifactProject(w, req)
 		case strings.Contains(path, "restore"):
