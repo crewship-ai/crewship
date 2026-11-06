@@ -8,8 +8,7 @@
 // the one workspace where that agent can act, as a private test page that is
 // deleted afterwards (the same setup as the proposal scenarios).
 import { randomUUID } from "node:crypto"
-import type { Page } from "@playwright/test"
-import { findAgent, openChat, redact, sendInstruction, sheetInstruction, waitForTask, wordInstruction } from "./craft-proposal/agent"
+import { barSeen, findAgent, openChat, redact, sendInstruction, sheetInstruction, waitForTask, watchBar, wordInstruction } from "./craft-proposal/agent"
 import { createNativePage, deletePage, sheetCell, wordText } from "./craft-proposal/native"
 import { expect, prdRequirement, test } from "./fixtures"
 
@@ -17,29 +16,6 @@ const REQ = {
   wordcraft: prdRequirement("A.craft.agent.free-edit-word", "Word: an agent edits a free document; the person in the browser sees \"Upravuje <agent>\", then the change and the new version"),
   gridcraft: prdRequirement("A.craft.agent.free-edit-sheet", "Sheet: an agent edits a free document; the person in the browser sees \"Upravuje <agent>\", then the change and the new version"),
 } as const
-
-interface Seen {
-  at: number
-  text: string
-}
-
-/** Records every text the lease bar shows, with timestamps, inside the page. */
-async function watchBar(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const w = window as unknown as { __bar: Array<{ at: number; text: string }> }
-    w.__bar = []
-    const bar = document.querySelector('[role="toolbar"][aria-label="Úpravy dokumentu"]')
-    if (!bar) throw new Error("lease bar not found")
-    const note = () => {
-      const text = (bar.textContent ?? "").trim()
-      if (w.__bar.at(-1)?.text !== text) w.__bar.push({ at: Date.now(), text })
-    }
-    note()
-    new MutationObserver(note).observe(bar, { subtree: true, childList: true, characterData: true })
-  })
-}
-
-const barSeen = (page: Page) => page.evaluate(() => (window as unknown as { __bar: Seen[] }).__bar)
 
 for (const app of ["wordcraft", "gridcraft"] as const) {
   const label = app === "wordcraft" ? "Word" : "Sheet"
