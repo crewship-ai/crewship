@@ -287,6 +287,8 @@ crewship skill unlock <slug-or-id>
 
 While a skill is locked:
 
+- Delete is refused too (HTTP `423`, `skill.write_blocked`), so delete plus
+  re-import cannot get around the lock.
 - No import, bulk import, generation, agent-authored proposal, proposed-skill
   approval, memory consolidation promotion or bundled re-seed changes its
   content. Each refuses with an error naming the lock (HTTP `423`) and writes
@@ -296,6 +298,8 @@ While a skill is locked:
 
 Only a signed-in person with the `OWNER` or `ADMIN` role can lock or unlock;
 run tokens, sidecar tokens and agent identities are refused with `403`.
+Bundled skills, and skills held only by another workspace's agents, cannot be
+locked or unlocked (`403`): the catalog row is shared by every workspace.
 Skills are unlocked by default. `skill list` shows a `LOCKED` column and
 `skill get` a `Locked` row; JSON output carries `locked`.
 

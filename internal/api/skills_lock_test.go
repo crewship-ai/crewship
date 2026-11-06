@@ -251,3 +251,92 @@ func lockTestJSONString(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
 }
+
+// The catalog row is shared by every workspace: a bundled skill or one held
+// only by another workspace's agents cannot be locked or unlocked here.
+func TestSkillLockUnlock_SharedCatalogOwnership(t *testing.T) {
+	tests := []struct {
+		name     string
+		source   string
+		holder   string // "", "own", "other", "both"
+		wantCode int
+	}{
+		{"unassigned custom", "CUSTOM", "", http.StatusOK},
+		{"held by own workspace", "CUSTOM", "own", http.StatusOK},
+		{"held by another workspace only", "CUSTOM", "other", http.StatusForbidden},
+		{"held by both", "CUSTOM", "both", http.StatusOK},
+		{"bundled", "BUNDLED", "own", http.StatusForbidden},
+	}
+	for _, tc := range tests {
+		for _, action := range []string{"lock", "unlock"} {
+			t.Run(tc.name+"/"+action, func(t *testing.T) {
+				db := setupTestDB(t)
+				userID := seedTestUser(t, db)
+				wsA := seedTestWorkspace(t, db, userID)
+				wsB := "ws-lock-other"
+				execOrFatal(t, db, `INSERT INTO workspaces (id, name, slug) VALUES (?, 'Other', 'other-lock')`, wsB)
+				seedCrewRow(t, db, "crew-a", wsA, "Crew A", "crew-a")
+				seedCrewRow(t, db, "crew-b", wsB, "Crew B", "crew-b")
+				agA := seedAgentRow(t, db, "agent-a", wsA, "crew-a", "Ava", "ava", "AGENT")
+				agB := seedAgentRow(t, db, "agent-b", wsB, "crew-b", "Ben", "ben", "AGENT")
+				seedSkillForTest(t, db, "sk-l", "lockme", "CODING")
+				execOrFatal(t, db, `UPDATE skills SET source = ? WHERE id = 'sk-l'`, tc.source)
+				if tc.holder == "own" || tc.holder == "both" {
+					execOrFatal(t, db, `INSERT INTO agent_skills (id, agent_id, skill_id, enabled) VALUES ('as-a', ?, 'sk-l', 1)`, agA)
+				}
+				if tc.holder == "other" || tc.holder == "both" {
+					execOrFatal(t, db, `INSERT INTO agent_skills (id, agent_id, skill_id, enabled) VALUES ('as-b', ?, 'sk-l', 1)`, agB)
+				}
+				if action == "unlock" {
+					execOrFatal(t, db, `UPDATE skills SET locked = 1 WHERE id = 'sk-l'`)
+				}
+				h := NewSkillHandler(db, newTestLogger())
+				h.SetJournal(&recordingEmitter{})
+				req := httptest.NewRequest("POST", "/x", nil)
+				req.SetPathValue("skillId", "sk-l")
+				req = humanLockCtx(req, userID, wsA, "OWNER")
+				rr := httptest.NewRecorder()
+				if action == "lock" {
+					h.Lock(rr, req)
+				} else {
+					h.Unlock(rr, req)
+				}
+				if rr.Code != tc.wantCode {
+					t.Fatalf("status = %d, want %d: %s", rr.Code, tc.wantCode, rr.Body.String())
+				}
+				var locked int
+				_ = db.QueryRow(`SELECT locked FROM skills WHERE id = 'sk-l'`).Scan(&locked)
+				wantLocked := action == "unlock"
+				if tc.wantCode == http.StatusOK {
+					wantLocked = action == "lock"
+				}
+				if (locked == 1) != wantLocked {
+					t.Fatalf("locked = %d, want %v", locked, wantLocked)
+				}
+			})
+		}
+	}
+}
+
+// Delete must honour the lock, otherwise delete plus re-import bypasses it.
+func TestSkillDelete_LockedSkillRefused(t *testing.T) {
+	db := setupTestDB(t)
+	userID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, userID)
+	seedSkillForTest(t, db, "sk-l", "lockme", "CODING")
+	execOrFatal(t, db, `UPDATE skills SET locked = 1 WHERE id = 'sk-l'`)
+	h := NewSkillHandler(db, newTestLogger())
+	rec := &recordingEmitter{}
+	h.SetJournal(rec)
+	req := httptest.NewRequest("DELETE", "/x", nil)
+	req.SetPathValue("skillId", "sk-l")
+	req = humanLockCtx(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Delete(rr, req)
+	assertLockedRefusal(t, rr, rec)
+	var n int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM skills WHERE id = 'sk-l'`).Scan(&n)
+	if n != 1 {
+		t.Fatalf("locked skill was deleted")
+	}
+}

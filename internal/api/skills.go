@@ -711,9 +711,10 @@ func (h *SkillHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var source string
+	var source, slug string
+	var locked int
 	err := h.db.QueryRowContext(r.Context(),
-		"SELECT source FROM skills WHERE id = ?", skillID).Scan(&source)
+		"SELECT source, slug, locked FROM skills WHERE id = ?", skillID).Scan(&source, &slug, &locked)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeProblem(http.StatusNotFound, "skill not found")
 		return
@@ -730,7 +731,16 @@ func (h *SkillHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := h.db.ExecContext(r.Context(), "DELETE FROM skills WHERE id = ?", skillID)
+	// A content lock also covers removal: delete followed by a re-import
+	// would otherwise rewrite a locked skill.
+	if locked == 1 {
+		actor, actorID := skillWriteActor(r)
+		emitSkillWriteBlocked(r.Context(), h.journal, WorkspaceIDFromContext(r.Context()), "", actor, actorID, slug, "delete")
+		writeProblem(http.StatusLocked, (&skills.LockedError{Slug: slug}).Error())
+		return
+	}
+
+	res, err := h.db.ExecContext(r.Context(), "DELETE FROM skills WHERE id = ? AND locked = 0", skillID)
 	if err != nil {
 		h.logger.Error("delete skill", "error", err, "skill_id", skillID)
 		writeProblem(http.StatusInternalServerError, "Internal server error")

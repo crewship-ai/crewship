@@ -55,15 +55,35 @@ func (h *SkillHandler) setLock(w http.ResponseWriter, r *http.Request, lock bool
 		return
 	}
 	skillID := r.PathValue("skillId")
-	var slug string
+	var slug, source string
 	var was int
-	err := h.db.QueryRowContext(r.Context(), "SELECT slug, locked FROM skills WHERE id = ?", skillID).Scan(&slug, &was)
+	err := h.db.QueryRowContext(r.Context(), "SELECT slug, locked, source FROM skills WHERE id = ?", skillID).Scan(&slug, &was, &source)
 	if errors.Is(err, sql.ErrNoRows) {
 		problem(http.StatusNotFound, "skill not found")
 		return
 	}
 	if err != nil {
 		replyInternalError(w, h.logger, "skill lock lookup", err)
+		return
+	}
+	// The catalog row is shared by every workspace. A bundled skill is
+	// re-seeded by the server, and a skill held only by another workspace's
+	// agents is not this workspace's to curate: neither may be locked or
+	// unlocked here.
+	if source == "BUNDLED" {
+		problem(http.StatusForbidden, "BUNDLED skills are shared by every workspace; refusing to lock or unlock")
+		return
+	}
+	var ownHeld, otherHeld int
+	if err := h.db.QueryRowContext(r.Context(), `
+		SELECT COALESCE(SUM(a.workspace_id = ?), 0), COALESCE(SUM(a.workspace_id != ?), 0)
+		FROM agent_skills as2 JOIN agents a ON a.id = as2.agent_id WHERE as2.skill_id = ?`,
+		WorkspaceIDFromContext(r.Context()), WorkspaceIDFromContext(r.Context()), skillID).Scan(&ownHeld, &otherHeld); err != nil {
+		replyInternalError(w, h.logger, "skill lock ownership", err)
+		return
+	}
+	if otherHeld > 0 && ownHeld == 0 {
+		problem(http.StatusForbidden, "this skill belongs to another workspace; refusing to lock or unlock")
 		return
 	}
 	userID := UserFromContext(r.Context()).ID
