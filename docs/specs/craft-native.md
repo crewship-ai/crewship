@@ -45,7 +45,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | POST | `/api/v1/pages/{slug}/craft/document/save` | Bound whole snapshot described below. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Same whole snapshot contract; existing explicit native Page only. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Exact original snapshot binding and hash, plus the attempt's `attemptId`; no blind retry. Current write rights and the original admission; the original lease may have expired or moved. | Original pinned commit receipt,200; never an arbitrary latest head. 410 when base+1 is not this attempt: the attempt is retired and can never commit. |
-| POST | `/api/v1/pages/{slug}/craft/document/restore` | Current binding and targetVersion. | New committed version and node durability, 200. |
+| POST | `/api/v1/pages/{slug}/craft/document/restore` | Current binding and targetVersion. | New committed version and node durability, 200; 404 to the lease holder when the target does not exist. |
 | GET | `/api/v1/pages/{slug}/craft/proposals` | Craft admission header; Page read. | `{proposals: [...]}` open and decided agent proposals, 200. |
 | GET | `/api/v1/pages/{slug}/craft/proposals/{proposalID}` | Craft admission header; `ncp_` id. | `{proposal, bytes, content_hash, engine_pin}` candidate, 200; 404 when absent. |
 | POST | `/api/v1/pages/{slug}/craft/proposals/{proposalID}/accept` | `{generation: "1"}` of this admission's lease; Page write. | `{proposal, receipt}` with the new committed version, 200; 409 `stale` when the content changed after base. |
@@ -84,6 +84,13 @@ its old baseline as already saved, because that baseline is no longer proof of
 the head. The server's base fence then decides between a new version and a
 visible conflict with the draft kept. The host runs the same reconcile when the
 browser reports it is back online, as "Ověřit výsledek" does.
+
+The snapshot message binds the session, so `crewship craft connect` can
+reconcile only on the connection that made the save; the admission token never
+leaves that process. From a new process the original snapshot fails the local
+session check, a rewritten one stays unconfirmed (409), and a new holder's 410 covers only its own session's attempts. Recovery after losing
+the process reads base+1 from the version history and compares its hash and
+author with the local candidate.
 
 Renew/release require `{generation: "1"}`. Handoff requires
 `{generation: "1", request_id: "public-request-id"}`. Other lease mutations use

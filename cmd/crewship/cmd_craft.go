@@ -33,8 +33,9 @@ func newCraftCommand() *cobra.Command {
 	version.Flags().StringP("output", "o", "", "Write the decoded native document to this file (- for stdout) and print only its metadata")
 	craft.AddCommand(version)
 	craft.AddCommand(&cobra.Command{Use: "connect <page>", Args: cobra.ExactArgs(1), Short: "Read bounded NDJSON actions; watch keeps the lease stream alive", RunE: craftConnect})
-	initialize := &cobra.Command{Use: "initialize <page>", Args: cobra.ExactArgs(1), Short: "Initialize an existing empty owned Page as Word native; keep its admission in this process", RunE: craftInitialize}
-	initialize.Flags().String("file", "", "Native Word document file (or - for stdin, without subsequent actions)")
+	initialize := &cobra.Command{Use: "initialize <page>", Args: cobra.ExactArgs(1), Short: "Initialize an existing empty owned Page as native Word or Sheet; keep its admission in this process", RunE: craftInitialize}
+	initialize.Flags().String("application", "word", `Application to create: "word" or "sheet"`)
+	initialize.Flags().String("file", "", "Native document file (or - for stdin, without subsequent actions)")
 	_ = initialize.MarkFlagRequired("file")
 	craft.AddCommand(initialize)
 	craft.AddCommand(newCraftAgentTaskCommand())
@@ -66,10 +67,12 @@ func craftConnect(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("native session HTTP %d", r.StatusCode)
 	}
-	return craftUseAdmission(cmd, args, c, r, false)
+	return craftUseAdmission(cmd, args, c, r, "")
 }
 
-func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http.Response, initialized bool) error {
+// craftUseAdmission runs the action loop on a new admission. A nonempty
+// initialized names the application that craft initialize asked for.
+func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http.Response, initialized string) error {
 	raw, e := craftReadJSON(r.Body)
 	if e != nil {
 		return e
@@ -97,8 +100,8 @@ func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http
 	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	c.HTTPClient = &httpClient
 	fields := map[string]string{"session_id": admission.ID}
-	if initialized {
-		if !craftPositiveVersion(admission.Generation) || admission.Version != "1" || admission.Application != "wordcraft" || admission.Page == "" {
+	if initialized != "" {
+		if !craftPositiveVersion(admission.Generation) || admission.Version != "1" || admission.Application != initialized || admission.Page == "" {
 			return fmt.Errorf("invalid native initialization response")
 		}
 		fields["application_id"] = admission.Application
