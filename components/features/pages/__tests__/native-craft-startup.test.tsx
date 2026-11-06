@@ -162,6 +162,9 @@ describe('authority and cancellation throughout slow initialization',()=>{
    client.lease.mockResolvedValue(next);act(()=>stream?.('lease',next))
   }
   await tick(16000)
+  // Fake time alone does not finish the dynamic imports on a loaded runner. The
+  // writer stays locked in every step, however long the refusal takes to show.
+  for(let step=0;step<30&&!screen.queryByRole('alert');step++)await tick(1000)
   expect(adapters.flatMap(port=>vi.mocked(port.setReadOnly).mock.calls).some(([readOnly])=>readOnly===false)).toBe(false)
   expect(client.lease).toHaveBeenCalled();expect(screen.getByRole('alert')).toBeInTheDocument()
   expect(client.save).not.toHaveBeenCalled();expect(screen.queryByText(/^Uloženo/)).not.toBeInTheDocument()
