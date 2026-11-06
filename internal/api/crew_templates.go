@@ -159,6 +159,14 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, j 
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	// A soft-deleted crew keeps its slug under the UNIQUE index; free it the way
+	// crew creation does.
+	if _, err = tx.ExecContext(ctx,
+		"UPDATE crews SET slug = slug || '_deleted_' || id WHERE workspace_id = ? AND slug = ? AND deleted_at IS NOT NULL",
+		wsID, crewSlug); err != nil {
+		return nil, fmt.Errorf("free deleted crew slug: %w", err)
+	}
+
 	crewID := generateCUID()
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -185,6 +193,9 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, j 
 		}
 		webhookSecret := storedSecret
 		agentSlug := a.Slug + "-" + crewSlug
+		if err = freeDeletedAgentSlugTx(ctx, tx, wsID, agentSlug); err != nil {
+			return nil, err
+		}
 
 		if _, err = tx.ExecContext(ctx, `
 			INSERT INTO agents (id, workspace_id, crew_id, name, slug, role_title, agent_role,

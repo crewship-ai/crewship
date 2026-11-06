@@ -24,6 +24,14 @@ func freeDeletedAgentSlug(ctx context.Context, db *sql.DB, workspaceID, slug str
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := freeDeletedAgentSlugTx(ctx, tx, workspaceID, slug); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// freeDeletedAgentSlugTx does the same inside the caller's transaction.
+func freeDeletedAgentSlugTx(ctx context.Context, tx *sql.Tx, workspaceID, slug string) error {
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM agents WHERE workspace_id = ? AND slug = ? AND deleted_at IS NOT NULL`, workspaceID, slug)
 	if err != nil {
 		return err
@@ -58,5 +66,5 @@ func freeDeletedAgentSlug(ctx context.Context, db *sql.DB, workspaceID, slug str
 	if _, err := tx.ExecContext(ctx, `UPDATE agents SET slug = ? WHERE id = ? AND deleted_at IS NOT NULL`, renamed, ids[0]); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
