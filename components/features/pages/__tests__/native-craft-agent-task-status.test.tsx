@@ -106,4 +106,9 @@ describe('native agent task private projection',()=>{
   const view=render(<NativeCraftAgentTaskStatus {...scope}/>);await flush();await tick();view.rerender(<NativeCraftAgentTaskStatus {...scope} enabled={false}/>);expect(screen.queryByRole('complementary')).toBeNull()
   await act(async()=>old.resolve(response(payload({last_committed_receipt:receipt}))));expect(screen.queryByText(/9007199254740995/)).toBeNull()
  })
+ it('shows the proposal outcome after a run that proposed',async()=>{
+  m.fetch.mockResolvedValue(response(payload({state:'succeeded',outcome:'proposal',events:[{operation:'acquire',status:409,holder_kind:'human'},{operation:'read',status:200},{operation:'propose',status:201}]})));render(<NativeCraftAgentTaskStatus {...scope}/>);await flush()
+  expect(screen.getByText('Agent připravil návrh ke schválení.')).toBeInTheDocument()
+  expect(screen.queryByText('Stav úlohy agenta není dostupný.')).toBeNull()
+ })
 })

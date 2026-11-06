@@ -13,7 +13,7 @@ function taskView(raw:unknown,workId:string,scope:Scope):Task {
  if(!object(raw)||raw.work_id!==workId||!id(raw.state)||!id(raw.agent_id)||typeof raw.run_id!=='string'||raw.run_id.length>256||!['wordcraft','gridcraft'].includes(String(raw.application))||typeof raw.uncertain!=='boolean'||typeof raw.operation_inflight!=='boolean'||!Array.isArray(raw.events)||raw.events.length>64||raw.outcome!==undefined&&raw.outcome!=='saved'&&raw.outcome!=='proposal')throw Error('invalid_native_task_status')
  const events:Event[]=[]
  for(const event of raw.events){
-  if(!object(event)||!['read','acquire','renew','apply','release'].includes(String(event.operation))||!Number.isInteger(event.status)||Number(event.status)<100||Number(event.status)>599||event.holder_kind!==undefined&&!['human','agent','unknown'].includes(String(event.holder_kind)))throw Error('invalid_native_task_event')
+  if(!object(event)||!['read','acquire','renew','apply','propose','release'].includes(String(event.operation))||!Number.isInteger(event.status)||Number(event.status)<100||Number(event.status)>599||event.holder_kind!==undefined&&!['human','agent','unknown'].includes(String(event.holder_kind)))throw Error('invalid_native_task_event')
   events.push({operation:String(event.operation),status:Number(event.status),holder_kind:event.holder_kind as string|undefined})
  }
  let version:string|undefined
