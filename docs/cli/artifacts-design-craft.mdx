@@ -116,7 +116,7 @@ the exit code for other commands' argument validation.
 | Command | Needs |
 |---|---|
 | `create` | A human login with `pages:write` and a workspace role that may create artifacts. Agent runs cannot create a Design. |
-| `get`, `versions`, `comments`, `watch` | A read-capable credential (`pages:read`, `pages:*`, `*`, or an unscoped full-role token) and visibility of the artifact. Shared-only callers (ordinary Read/Comment, or non-admin owners/Edit grantees with only read scope) are limited to the shared pin/comments and its initial sync snapshot when a pin exists. Live/history reads need current Edit permission plus both `pages:read` and `pages:write` (or `pages:*`, `*`, or an unscoped full-role token), or separately authorized OWNER/ADMIN read access with audit for foreign Designs. Read scope never grants writes. |
+| `get`, `versions`, `comments`, `watch` | A read-capable credential (`pages:read`, `pages:*`, `*`, or an unscoped full-role token) and visibility of the artifact. Shared-only callers (ordinary Read/Comment, or non-admin owners/Edit grantees with only read scope) are limited to the shared pin/comments and its initial sync snapshot when a pin exists. Live/history reads need current Edit permission plus both `pages:read` and `pages:write` (or `pages:*`, `*`, or an unscoped full-role token), or separately authorized OWNER/ADMIN read access with audit for foreign Designs. Read scope never grants writes. A shared-only `watch` with no shared version receives no canvas; it closes with exit `1` unless `--count` is reached on presence frames. |
 | `apply`, `snapshot`, `restore` | `pages:write` and edit rights on the artifact. |
 | `share` | Edit rights **and** ownership of the artifact. An Edit grant does not allow changing the shared version. |
 | `comment` | Edit rights, or `pages:write` with a Comment grant. `--send-to-agent` additionally needs edit rights. |
@@ -233,7 +233,9 @@ crewship page design versions launch-hero -f json
 ```
 
 `snapshot` (alias `save`) records the live canvas as a new version even when it
-is unchanged since the last one. Take `latest_version` from `versions` whenever
+is unchanged since the last one, and it has no idempotency key: a retry after a
+lost reply adds a second version with the same content, so read `versions`
+before sending it again. Take `latest_version` from `versions` whenever
 a command below needs the latest version.
 
 ### Share a version
@@ -457,17 +459,19 @@ The person who wants the lease sends `{"action":"request-handoff"}` and gets a
 The target is always the server-issued request, never a user named on the
 command line.
 
-### Initialize an empty artifact as Word
+### Initialize an empty artifact as Word or Sheet
 
 ```sh
 crewship craft initialize <artifact-slug> --file document.json
+crewship craft initialize <artifact-slug> --application sheet --file workbook.json
 ```
 
 The artifact must exist, be empty and be owned by you, and you need
-`pages:write`. `document.json` is not a `.docx` file: it is the Word editor's
-native document, a single JSON object (1 byte to 32 MiB) that the instance's
-Word profile validates; anything else is refused. Only Word
-(`wordcraft`) can be initialized. The command prints `session_id`,
+`pages:write`. The native file is not a `.docx` or `.xlsx` file: it is the
+editor's native document, a single JSON object (1 byte to 32 MiB) that the
+instance's profile for that application validates; anything else is refused.
+`--application` is `word` (the default, `wordcraft`) or `sheet` (`gridcraft`);
+any other value exits 2 before a request. The command prints `session_id`,
 `application_id`, `page_id`, `generation` and `version` (`"1"`), holds the new
 lease, and then reads actions from stdin one line at a time exactly like
 `connect`; use the printed `generation`, `page_id` and `session_id` in them.
@@ -506,7 +510,9 @@ fixed status-only message:
 | 503 / 7 | Native Craft is switched off or unavailable on this instance. |
 | 400 / 2 | The snapshot or request does not match the document, for example `workspaceId` holds a slug instead of the workspace ID, or another binding field differs from the session. |
 | 403 / 4 | No edit rights on the artifact, or the lease action is not allowed for you. |
+| 404 / 3 | `restore` names a version that does not exist. Only the lease holder gets this answer. |
 | 409 / 5 | The lease or document changed (busy, stale generation or newer version). Read the lease and document again; keep your local draft. |
+| 410 / 1 | `reconcile` with an `attemptId`, under the live lease of the session that made the attempt: that attempt did not commit and never will. |
 | 413 / 1 | The native history quota is full; existing versions are kept. |
 | 422 / 2 | The native document bytes are invalid. |
 

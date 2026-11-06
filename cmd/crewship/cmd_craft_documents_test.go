@@ -54,6 +54,58 @@ func TestCraftCLINativeDocumentActionsUseBoundSessionAndAllRoutes(t *testing.T) 
 	}
 }
 
+// attemptId travels on save and reconcile exactly as given; a malformed one, or
+// one on an action without attempts, is refused before any request.
+func TestCraftCLIAttemptIDTravelsOnSaveAndReconcile(t *testing.T) {
+	stub := pageStub(t)
+	base := "/api/v1/pages/health/craft"
+	stub.OnPost(base+"/sessions", func(*http.Request, []byte) (int, []byte, string) {
+		return 201, []byte(`{"session_token":"` + strings.Repeat("a", 64) + `","session_id":"attempt-session"}`), "application/json"
+	})
+	seen := map[string]string{}
+	for _, operation := range []string{"save", "import", "reconcile"} {
+		stub.OnPost(base+"/document/"+operation, func(_ *http.Request, raw []byte) (int, []byte, string) {
+			var got craftDocumentSnapshot
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatal(err)
+			}
+			seen[operation] = got.AttemptID
+			return 200, []byte(`{"version":"2"}`), "application/json"
+		})
+	}
+	snapshot := craftDocumentSnapshot{WorkspaceID: covWSCli3, PageID: "p", ApplicationID: "wordcraft", EnginePin: strings.Repeat("b", 64), SessionID: "attempt-session", Generation: "7", BaseVersion: "1", EditorRevision: "r", ContentHash: "sha256:" + strings.Repeat("c", 64), Bytes: []byte("{}"), AttemptID: "attempt_id-01"}
+	input := ""
+	for _, action := range []string{"save", "import", "reconcile"} {
+		raw, err := json.Marshal(craftAction{Action: action, Snapshot: &snapshot})
+		if err != nil {
+			t.Fatal(err)
+		}
+		input += string(raw) + "\n"
+	}
+	if _, err := runPageCLI(t, input, "craft", "connect", "health"); err != nil {
+		t.Fatal(err)
+	}
+	for _, operation := range []string{"save", "import", "reconcile"} {
+		if seen[operation] != snapshot.AttemptID {
+			t.Errorf("%s carried attemptId %q", operation, seen[operation])
+		}
+	}
+	for _, bad := range []string{"short", strings.Repeat("a", 65), "not valid!"} {
+		invalid := snapshot
+		invalid.AttemptID = bad
+		if err := craftValidateDocumentAction(craftAction{Action: "save", Snapshot: &invalid}, invalid.SessionID); err == nil {
+			t.Errorf("accepted attemptId %q", bad)
+		}
+	}
+	for _, action := range []string{"share", "restore"} {
+		other := snapshot
+		other.Bytes, other.EditorRevision, other.ContentHash, other.TargetVersion = nil, "", "", "1"
+		if err := craftValidateDocumentAction(craftAction{Action: action, Snapshot: &other}, other.SessionID); err == nil {
+			t.Errorf("%s accepted an attemptId", action)
+		}
+	}
+}
+
 func TestCraftCLINativeDocumentPreservesFiveMiBAndRejectsForeignSession(t *testing.T) {
 	stub := pageStub(t)
 	base := "/api/v1/pages/health/craft"
