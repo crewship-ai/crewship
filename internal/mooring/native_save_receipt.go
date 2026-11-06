@@ -64,6 +64,9 @@ type NativeSaveReceipt struct {
 	Durability     string `json:"durability"`
 	IssuedBy       string `json:"issuedBy"`
 	Phase          string `json:"phase"`
+	// Unchanged: no version was created. Version is BaseVersion, whose content
+	// already equals this snapshot (#5075). A committed save never sets it.
+	Unchanged bool `json:"unchanged,omitempty"`
 }
 
 // EnginePin identifies the immutable application/engine/editor compatibility profile.
@@ -140,11 +143,27 @@ func (s *NativeStore) SaveAttempt(ctx context.Context, l EditLease, base int64, 
 	}
 	request := nativeManifest(base, b)
 	request.Message = message
-	receipt, err := s.versions.Apply(ctx, nativeVersionKey(l.Scope), request, a)
+	receipt, unchanged, err := s.versions.ApplyChanged(ctx, nativeVersionKey(l.Scope), request, a)
+	if errors.Is(err, artifacts.ErrVersionConflict) {
+		// Attempt idempotence: the exact request already committed. The write
+		// authority above just passed; this adds the exact proof and writes nothing.
+		var repeat NativeSaveReceipt
+		repeatErr := s.readAttempt(ctx, l, base, editorRevision, contentHash, message, func(*sql.Tx) error { return ErrNativeUnconfirmed }, &repeat)
+		if repeatErr == nil {
+			return repeat, nil
+		}
+		if !errors.Is(repeatErr, ErrNativeUnconfirmed) {
+			return NativeSaveReceipt{}, repeatErr
+		}
+	}
 	if err != nil {
 		return NativeSaveReceipt{}, err
 	}
-	return s.snapshotReceipt(l, base, editorRevision, contentHash, receipt.Version), nil
+	saved := s.snapshotReceipt(l, base, editorRevision, contentHash, receipt.Version)
+	// Content equality: base already is this document, so the base stays the
+	// confirmed version. A client without this answer gets no duplicate either.
+	saved.Unchanged = unchanged
+	return saved, nil
 }
 
 // ReconcileSnapshot proves only the exact attempted successor, including when
@@ -172,29 +191,38 @@ func (s *NativeStore) ReconcileAttempt(ctx context.Context, l EditLease, base in
 	if err != nil {
 		return NativeSaveReceipt{}, err
 	}
-	var version int64
 	absent := false
-	err = s.versions.ReadVersionFenced(ctx, nativeVersionKey(l.Scope), base+1, s.holderAuthority(l, "write"), func(tx *sql.Tx, m artifacts.VersionManifest, readErr error) error {
-		if readErr == nil {
-			file, ok := m.Files["document.json"]
-			hash := sha256.Sum256(file.Content)
-			if m.Message == message && m.Actor == l.Holder.ActorID && m.EntryPoint == "document.json" && len(m.Files) == 1 && ok && file.MediaType == "application/json" && "sha256:"+hex.EncodeToString(hash[:]) == contentHash {
-				version = m.Version
-				return nil
-			}
-		}
+	var receipt NativeSaveReceipt
+	err = s.readAttempt(ctx, l, base, editorRevision, contentHash, message, func(tx *sql.Tx) error {
 		if attemptID == "" {
 			return ErrNativeUnconfirmed
 		}
 		return s.retireAttempt(ctx, tx, l, base, attemptID, &absent)
-	})
+	}, &receipt)
 	if err != nil {
 		return NativeSaveReceipt{}, err
 	}
 	if absent {
 		return NativeSaveReceipt{}, ErrNativeAttemptAbsent
 	}
-	return s.snapshotReceipt(l, base, editorRevision, contentHash, version), nil
+	return receipt, nil
+}
+
+// readAttempt fills receipt when version base+1 is exactly this attempt, under
+// current write rights and the original admission. Otherwise it runs notProven
+// in the same fenced transaction. It never writes a version.
+func (s *NativeStore) readAttempt(ctx context.Context, l EditLease, base int64, editorRevision, contentHash, message string, notProven func(*sql.Tx) error, receipt *NativeSaveReceipt) error {
+	return s.versions.ReadVersionFenced(ctx, nativeVersionKey(l.Scope), base+1, s.holderAuthority(l, "write"), func(tx *sql.Tx, m artifacts.VersionManifest, readErr error) error {
+		if readErr == nil {
+			file, ok := m.Files["document.json"]
+			hash := sha256.Sum256(file.Content)
+			if m.Message == message && m.Actor == l.Holder.ActorID && m.EntryPoint == "document.json" && len(m.Files) == 1 && ok && file.MediaType == "application/json" && "sha256:"+hex.EncodeToString(hash[:]) == contentHash {
+				*receipt = s.snapshotReceipt(l, base, editorRevision, contentHash, m.Version)
+				return nil
+			}
+		}
+		return notProven(tx)
+	})
 }
 
 // retireAttempt records attemptID as retired, inside the writer-fenced

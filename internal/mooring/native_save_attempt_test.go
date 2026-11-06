@@ -289,7 +289,8 @@ func TestNativeRetirementRecoversRepeatedOutagesWithTheSameLease(t *testing.T) {
 		if _, err := s.SaveAttempt(t.Context(), l, base, "r", nativeReceiptHash(raw), raw, attempt); !errors.Is(err, ErrNativeAttemptRetired) {
 			t.Fatalf("retired current-base attempt %d published: %v", i, err)
 		}
-		receipt, err := s.SaveAttempt(t.Context(), l, base, "r", nativeReceiptHash(raw), raw, fmt.Sprintf("fresh-attempt-%04d", i))
+		// A fresh capture is a new snapshot, so its revision differs from the retired one's.
+		receipt, err := s.SaveAttempt(t.Context(), l, base, "r-fresh", nativeReceiptHash(raw), raw, fmt.Sprintf("fresh-attempt-%04d", i))
 		if err != nil {
 			t.Fatalf("fresh capture %d: %v", i, err)
 		}
@@ -306,7 +307,7 @@ func TestNativeRetirementRecoversRepeatedOutagesWithTheSameLease(t *testing.T) {
 		t.Fatalf("pruned stale-base attempt was not fenced: %v", err)
 	}
 	// Pruning changes only runtime fences, never the exact historical receipt.
-	if receipt, err := s.ReconcileAttempt(t.Context(), l, 1, "r", nativeReceiptHash(old), "fresh-attempt-0000"); err != nil || receipt != firstReceipt {
+	if receipt, err := s.ReconcileAttempt(t.Context(), l, 1, "r-fresh", nativeReceiptHash(old), "fresh-attempt-0000"); err != nil || receipt != firstReceipt {
 		t.Fatalf("historical committed receipt changed after pruning: %+v %v", receipt, err)
 	}
 }

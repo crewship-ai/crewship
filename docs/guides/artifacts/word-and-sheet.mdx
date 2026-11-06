@@ -248,9 +248,14 @@ first, nothing is published, and the editor says so.
 
 ## Version history and restore
 
-Every confirmed save is a version. The history lists them all, newest first,
-and restoring one never deletes anything: it saves the old content again as a
-new version on top.
+Every confirmed save of changed content is a version. The history lists them
+all, newest first, and restoring one never deletes anything: it saves the old
+content again as a new version on top.
+
+Ctrl+S without a change adds no version and uses no quota: the editor confirms
+the version it already has. If the last save's result is unknown, Ctrl+S first
+asks the server about that save and sends nothing until it knows. If the server
+can't tell yet, you keep seeing *Výsledek nepotvrzen*.
 
 <Note>
 The history is off by default. An instance administrator defines the flag

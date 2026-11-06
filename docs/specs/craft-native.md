@@ -81,8 +81,8 @@ without the live lease, or at that limit nothing is recorded and reconcile answe
 editor sends nothing and may ask again later. After a 410 the editor resumes with a fresh
 capture at the same base and always sends it: it never treats bytes equal to
 its old baseline as already saved, because that baseline is no longer proof of
-the head. The server's base fence then decides between a new version and a
-visible conflict with the draft kept. The editor runs the same reconcile by
+the head. The server's base fence then decides between a new version, an
+`unchanged` answer and a visible conflict with the draft kept. The editor runs the same reconcile by
 itself after 2, 10 and 30 seconds and then every minute until the outcome is
 known, when the browser reports it is back online, and on "Ověřit výsledek",
 which also returns the keyboard to the document. A reconcile resends nothing.
@@ -456,7 +456,38 @@ base binding, gives the exact successor `version`, matching `candidateHash`,
 `issuedBy: "crewship"`, `durability: "node"` and `phase: "committed"`. Only this
 receipt acknowledges Saved. Reconcile sends the original attempt metadata; it
 may return that same pinned commit after another version exists. A lost ACK
-does not authorize replaying a save. Restore supplies the current binding and
+does not authorize replaying a save.
+
+A repeat never writes (#5075). These are two separate checks on the server:
+
+- **Attempt idempotence.** A save whose base+1 is already exactly this request
+  (same message, actor and bytes, the proof reconcile uses) gets that original
+  receipt back, even when the head has moved on.
+- **Content equality.** A fresh attempt whose base is the head and whose bytes
+  equal the head creates no version and charges no quota. The receipt has
+  `unchanged: true` and `version` equal to `baseVersion`; lease, write rights,
+  retired-attempt and hash checks all run first. Equality with an older version
+  does not count, and another attempt at an older base stays a 409.
+
+A client from before this change rejects `version` equal to `baseVersion` as an
+invalid receipt and shows the result as unconfirmed until reload; it cannot
+create a duplicate. The agent tool gets the same `unchanged` receipt for a
+change that leaves the document as it is.
+
+Ctrl+S decides in the browser first. With content and native state equal to the
+confirmed baseline at the current base it sends no save: it retires the local
+recovery row and acknowledges the engine with a locally built `unchanged`
+confirmation for that exact snapshot, at the confirmed version. The editor port
+matches it to the snapshot's own proof and hash, and accepts it only at or above
+the last acknowledged version. An untouched rendition of the opened document
+counts as that version. Equal bytes with another native state still go to the
+server, which decides. While a save is unconfirmed, Ctrl+S first runs one
+reconcile: a proven commit becomes the baseline and is judged as above, a 410
+lets it send a fresh attempt under the base fence, and anything else fails the
+press with nothing sent. A failed row retirement fails the press and keeps the
+row; the editor retries once and then delivers the owed confirmation.
+
+Restore supplies the current binding and
 `targetVersion`, producing a new version rather than replacing history.
 
 Read returns `version`, base64 `bytes`, `applicationId`, `enginePin`,

@@ -261,3 +261,35 @@ func TestVersionStoreContentFamilyIsImmutableAndDoesNotConvertPages(t *testing.T
 		t.Fatalf("native state changed: %+v %v", v, err)
 	}
 }
+
+// #5075: a request that equals the head costs nothing and works at a full quota.
+// Only the head at the same base counts, and only a full match of its manifest.
+func TestVersionStoreApplyChangedWritesOnlyAChange(t *testing.T) {
+	file := func(content, media string) map[string]VersionFile {
+		return map[string]VersionFile{"a.html": {Content: []byte(content), MediaType: media}}
+	}
+	s, k, a, _ := versionFixture(t, VersionOptions{ContentType: "wordcraft", Enabled: true, MaxHistoryBytes: 4 << 10, MaxVersionBytes: 1 << 10, MaxFiles: 4})
+	first, _, err := s.ApplyChanged(t.Context(), k, VersionRequest{BaseVersion: 0, EntryPoint: "a.html", Files: file("one", "text/html")}, a)
+	if err != nil || first.Version != 1 {
+		t.Fatalf("first: %+v %v", first, err)
+	}
+	second, unchanged, err := s.ApplyChanged(t.Context(), k, VersionRequest{BaseVersion: 1, EntryPoint: "a.html", Files: file("two", "text/html")}, a)
+	if err != nil || unchanged || second.Version != 2 {
+		t.Fatalf("second: %+v %v %v", second, unchanged, err)
+	}
+	s.opts.MaxHistoryBytes = 1
+	got, unchanged, err := s.ApplyChanged(t.Context(), k, VersionRequest{BaseVersion: 2, EntryPoint: "a.html", Files: file("two", "text/html")}, a)
+	if err != nil || !unchanged || got.Version != 2 {
+		t.Fatalf("identical at a full quota: %+v %v %v", got, unchanged, err)
+	}
+	if _, _, err = s.ApplyChanged(t.Context(), k, VersionRequest{BaseVersion: 2, EntryPoint: "a.html", Files: file("three", "text/html")}, a); !errors.Is(err, ErrVersionQuota) {
+		t.Fatalf("a change at a full quota: %v", err)
+	}
+	s.opts.MaxHistoryBytes = 4 << 10
+	if third, unchanged, err := s.ApplyChanged(t.Context(), k, VersionRequest{BaseVersion: 2, EntryPoint: "a.html", Files: file("two", "text/plain")}, a); err != nil || unchanged || third.Version != 3 {
+		t.Fatalf("another media type: %+v %v %v", third, unchanged, err)
+	}
+	if _, _, err = s.ApplyChanged(t.Context(), k, VersionRequest{BaseVersion: 1, EntryPoint: "a.html", Files: file("two", "text/html")}, a); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("an older base: %v", err)
+	}
+}

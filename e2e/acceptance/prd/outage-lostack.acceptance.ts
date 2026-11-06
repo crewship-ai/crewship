@@ -258,7 +258,7 @@ test.describe("outage and lost acknowledgement", () => {
             await N.typeMarker(page, f, app, M.M4, "A4")
             await page.keyboard.press("Control+s")
             next = await N.waitSaved(page, 30_000, saved)
-            // An autosave before this Ctrl+S gives a second save of the same bytes: let it land.
+            // An autosave may still be landing: Ctrl+S waits for it and adds no second version.
             await N.pause(2_000)
             next = (await N.waitSaved(page, 5_000, saved)) ?? next
             afterNext = await N.uiState(page)
@@ -302,8 +302,8 @@ test.describe("outage and lost acknowledgement", () => {
           const successor = String(BigInt(lost[0].serverVersion!) + 1n)
           expect.soft(resavedLost.map((o) => ({ base: o.baseVersion, status: o.status, version: o.version })), "the reconciled save is not saved again as a duplicate version").toEqual([])
           expect.soft(firstNext && { base: firstNext.baseVersion, version: firstNext.version }, "the next save builds on the reconciled version (no duplicate)").toEqual({ base: lost[0].serverVersion, version: successor })
-          // Autosave then Ctrl+S on the same bytes writes one more version. Whether that
-          // is allowed is undecided, so the row fails until the contract says otherwise.
+          // Owner's decision (#5075): Ctrl+S without a content change creates no new
+          // version. Autosave then Ctrl+S on the same bytes must leave one version.
           expect.soft(identicalRepeats, "no extra version of identical bytes").toEqual([])
           expect.soft(next, "the editor confirms the last committed save").toBe(lastCommittedSave(ops))
           expect.soft(fin.version, "the head is the last committed save").toBe(lastCommittedSave(ops))

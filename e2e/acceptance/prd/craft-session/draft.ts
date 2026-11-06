@@ -205,8 +205,8 @@ export async function savedAfter(page: Page, after: string, timeout: number): Pr
 
 /**
  * The editor saves by itself 300 ms after the last keystroke. Takes that save
- * when it comes and presses Ctrl+S only when it does not (Ctrl+S always sends,
- * so after an autosave it would store identical bytes as a second version).
+ * when it comes and presses Ctrl+S only when it does not. After an autosave
+ * Ctrl+S sends nothing: it confirms the saved version (#5075).
  */
 export async function saveByAutosaveOrKey(page: Page, after: string): Promise<string | undefined> {
   const v = await savedAfter(page, after, 4_000)

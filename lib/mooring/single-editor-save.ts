@@ -9,6 +9,8 @@ export interface NativeSaveReceipt extends Omit<NativeSaveRequest, "bytes" | "at
   issuedBy: "crewship"
   phase: "committed"
   candidateHash: string
+  /** No new version: `version` is `baseVersion`, which already holds this capture (#5075). */
+  unchanged?: true
 }
 /** `absent` (reconcile only): the server retired the attempt; it did not commit and never will. */
 export type NativeSaveFailure = "conflict" | "quota" | "write_revoked" | "read_revoked" | "absent"
@@ -128,18 +130,21 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   function scheduleIfNeeded() {
     if (active && writable && dirty && (!blocked || blocked === "storage") && !unconfirmed && !pending && preparingCount === 0 && manualCount === 0) schedule()
   }
-  function validReceipt(raw: unknown, attempt: Prepared): raw is NativeSaveReceipt {
+  // Only a save may answer `unchanged`: reconcile proves the exact successor.
+  function validReceipt(raw: unknown, attempt: Prepared, unchangedAllowed = false): raw is NativeSaveReceipt {
     if (!raw || typeof raw !== "object") return false
     const r = raw as Record<string, unknown>, d = attempt.draft
-    return validNativeVersion(r.version) && BigInt(r.version) === BigInt(d.baseVersion) + 1n
+    const unchanged = unchangedAllowed && r.unchanged === true
+    if ("unchanged" in r && !unchanged) return false
+    return validNativeVersion(r.version) && BigInt(r.version) === BigInt(d.baseVersion) + (unchanged ? 0n : 1n)
       && r.durability === "node" && r.issuedBy === "crewship" && r.phase === "committed" && r.candidateHash === d.contentHash
       && r.workspaceId === d.workspaceId && r.pageId === d.pageId && r.applicationId === d.applicationId && r.enginePin === d.enginePin && r.baseVersion === d.baseVersion
       && r.sessionId === d.sessionId && r.generation === d.generation && r.editorRevision === d.editorRevision && r.contentHash === d.contentHash
   }
-  async function settle(raw: unknown, attempt: Prepared) {
+  async function settle(raw: unknown, attempt: Prepared, unchangedAllowed: boolean) {
     if (!active || !writable) return
     const receipt: unknown = raw && typeof raw === "object" ? { ...raw } : raw
-    if (!validReceipt(receipt, attempt)) { unconfirmed = attempt; emit("uncertain", "invalid_receipt"); return }
+    if (!validReceipt(receipt, attempt, unchangedAllowed)) { unconfirmed = attempt; emit("uncertain", "invalid_receipt"); return }
     if (!active || !writable) return
     baseVersion = receipt.version
     unconfirmed = undefined
@@ -165,6 +170,8 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     dirty = newerThan(attempt) || latest?.draft.editorRevision !== attempt.draft.editorRevision
     emit(dirty ? "dirty" : "saved")
   }
+  // The request's identity without what only a transmission carries.
+  function unsent({ bytes: _bytes, attemptId: _attemptId, ...identity }: NativeSaveRequest) { return identity }
   function attemptNonce(): string {
     if (typeof crypto.randomUUID === "function") return crypto.randomUUID()
     return Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("")
@@ -228,7 +235,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     try {
       const result = await bounded(signal => reconcile ? options.transport.reconcile!(attempt.draft, signal) : options.transport.save(attempt.draft, signal), operation.abort)
       if (!active || !writable || pending !== operation) return
-      await settle(result, attempt)
+      await settle(result, attempt, !reconcile)
     } catch (error) {
       if (!active || !writable || pending !== operation) return
       if (reconcile && error instanceof NativeSaveError && error.reason === "absent" && unconfirmed === attempt) {
@@ -289,6 +296,9 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   }
   function save(requestId?: string, autosaveToken?: number, hostFlush = false): Promise<void> {
     const manual = requestId !== undefined || hostFlush
+    // A press of Ctrl+S: Word's carries a ticket, Sheet's has none. Revocation's
+    // own capture also arrives here, but it can no longer reach the transport.
+    const explicit = autosaveToken === undefined && !hostFlush
     if (requestId !== undefined && (typeof requestId !== "string" || !requestId || requestId.length > 128 || requestId.includes("\0"))) return Promise.reject(new Error("invalid_native_save_ticket"))
     if (manual && manualCount >= 4) return Promise.reject(new Error("native_save_backpressure"))
     if (manual) manualCount++
@@ -333,8 +343,19 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       // A manual ticket owns this exact prepared snapshot. Wait for the bounded
       // transport, but never replay a queued ticket after an unknown ACK.
       const unavailable = () => !active ? "native_session_retired" : !writable ? "write_revoked" : blocked ?? (unconfirmed ? "unconfirmed" : pending ? "pending" : undefined)
+      let lookedUp = false
       for (;;) {
         if (manual) while (pending && active && writable && !blocked && !unconfirmed) await pending.done
+        // Ctrl+S during an unknown outcome first asks about the original attempt,
+        // once, and resends nothing. A proven commit becomes the baseline judged
+        // below; a retired attempt makes this capture a fresh save under the base
+        // fence; anything else stays unconfirmed and fails below, unsent (#5075).
+        if (explicit && !lookedUp && active && writable && !blocked && unconfirmed && options.transport.reconcile) {
+          lookedUp = true
+          if (pending) await pending.done
+          else await transmit(unconfirmed, true)
+          continue
+        }
         if (unavailable()) {
           emit(!writable ? "read-only" : unconfirmed ? "uncertain" : "draft", blocked)
           if (manual) throw new Error(unavailable())
@@ -347,35 +368,47 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         // Another manual operation may have started while this journal write
         // awaited storage. Repeat both the transport fence and base sampling.
       }
-      // A timer, a reconnect or a host release/transfer flush can capture a
-      // second RPC for the exact bytes already committed at the current base
-      // (any application, not only Word). Never create a version from them:
-      // retire only the local recovery row; the RPC-bound receipt and native ACK
-      // remain exclusive to the original request. A native Ctrl+S ticket always
-      // transmits, as its ACK is bound to its own RPC. An untouched export of an
-      // engine mounted from the seeded bytes is that same version.
+      // A timer, a reconnect, a host release/transfer flush or Ctrl+S can capture
+      // the exact bytes already committed at the current base (any application,
+      // not only Word). Never create a version from them: retire the local
+      // recovery row. An idle capture stops there, as the receipt and native ACK
+      // belong to the original request. Ctrl+S gets its own ACK for this capture,
+      // which also needs the native state of the baseline: otherwise the server
+      // decides (#5075). An untouched export of an engine mounted from the seeded
+      // bytes is that same version.
       await seeding
-      const unchanged = confirmed && (confirmed.contentHash === attempt.draft.contentHash || untouched(attempt))
-      if ((autosaveToken !== undefined || hostFlush && requestId === undefined) && confirmed && unchanged && (confirmed.seeded || confirmed.nativeState === attempt.nativeState) && confirmed.version === baseVersion) {
-        const baseline = confirmed
+      const baseline = confirmed
+      const unchanged = baseline && (baseline.contentHash === attempt.draft.contentHash || untouched(attempt))
+      const sameState = baseline && (baseline.seeded
+        ? !explicit || baseline.mountedState === undefined || baseline.mountedState === attempt.nativeState
+        : baseline.nativeState === attempt.nativeState)
+      if (baseline && unchanged && sameState && baseline.version === baseVersion) {
+        const confirmation: NativeSaveReceipt | undefined = explicit ? { ...unsent(attempt.draft), baseVersion: baseline.version, version: baseline.version, durability: "node", issuedBy: "crewship", phase: "committed", candidateHash: attempt.draft.contentHash, unchanged: true } : undefined
         try { await confirmRow(attempt.draft) } catch {
           // The bytes are committed; only their row stayed. Retry once by
           // itself, as after a failed retirement in settle, instead of waiting
-          // for the next edit, Ctrl+S or flush (#4852).
+          // for the next edit, Ctrl+S or flush (#4852). A press is owed its ACK
+          // from that retry and fails until then.
           if (!unavailable() && confirmed === baseline && baseVersion === baseline.version) {
+            if (confirmation) owedReceipt = confirmation
             unretired(attempt)
             if (!retirementRetried) { retirementRetried = true; scheduleIfNeeded() }
           }
+          if (requestId !== undefined) throw new Error("storage")
           return
         }
         retirementRetried = false
         // Another save can finish, fail, or retire authority during storage.
-        // Its state and receipt baseline always supersede this older idle RPC.
-        if (unavailable() || confirmed !== baseline || baseVersion !== baseline.version) return
+        // Its state and receipt baseline always supersede this older capture.
+        if (unavailable() || confirmed !== baseline || baseVersion !== baseline.version) {
+          if (requestId !== undefined) throw new Error(unavailable() ?? "superseded")
+          return
+        }
         // Storage recovered after a committed save whose row could not be
         // retired: its own validated receipt now completes the native ACK.
         const owed = owedReceipt
-        if (owed && owed.version === baseline.version && owed.contentHash === baseline.contentHash) { owedReceipt = undefined; deliver(owed) }
+        if (owed && owed.version === baseline.version && (owed.unchanged || owed.contentHash === baseline.contentHash)) { owedReceipt = undefined; deliver(owed) }
+        if (confirmation) deliver(confirmation)
         dirty = newerThan(attempt) || latest?.nativeState !== attempt.nativeState
         emit(dirty ? "dirty" : "saved")
         scheduleIfNeeded()

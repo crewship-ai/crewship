@@ -64,14 +64,12 @@ it("requires a fresh receipt for a different native state even when its bytes ar
   try { await r.controller.save("manual"); r.edit(1, "state:2"); await settled(r, 2); expect(r.requests).toHaveLength(2); expect(r.onReceipt).toHaveBeenCalledTimes(2) } finally { await r.controller.close() }
 })
 
-it("keeps both explicit native tickets and an explicit transfer save on fresh exact receipts", async () => {
+it("keeps explicit native tickets on their own exact confirmation without a second save (#5075)", async () => {
   const r = fixture()
   try {
     await r.controller.save("ticket-one"); await r.controller.save("ticket-two"); await r.controller.save()
-    expect(r.requests).toHaveLength(3)
-    expect(r.requests.map(x => x.editorRevision)).toEqual(["ticket-one", "ticket-two", "rpc:3"])
-    expect(new Set(r.requests.map(x => x.contentHash)).size).toBe(1)
-    expect(r.onReceipt).toHaveBeenCalledTimes(3)
+    expect(r.requests.map(x => x.editorRevision)).toEqual(["ticket-one"])
+    expect(r.onReceipt.mock.calls.map(call => [call[0].editorRevision, call[0].version, call[0].unchanged])).toEqual([["ticket-one", "2", undefined], ["ticket-two", "2", true], ["rpc:3", "2", true]])
   } finally { await r.controller.close() }
 })
 
@@ -114,6 +112,7 @@ it.each(["unconfirmed", "conflict"] as const)("does not replace a newer manual %
     const exactConfirm = r.confirm.getMockImplementation()!
     r.confirm.mockImplementationOnce(async draft => { entered.resolve(); await release.promise; await exactConfirm(draft) })
     r.edit(1, "state:1"); await entered.promise
+    r.edit(2, "state:2")
     r.send.mockRejectedValueOnce(failure === "unconfirmed" ? new Error("lost newer acknowledgement") : new NativeSaveError("conflict"))
     await expect(r.controller.save("manual-two")).rejects.toThrow(failure)
     expect(r.stored?.editorRevision).toBe("manual-two")
