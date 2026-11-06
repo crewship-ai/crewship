@@ -14,7 +14,7 @@ import (
 // Key material travels in a bounded file or stdin, never in command arguments.
 // Recovery is a human operation; an agent bearer cannot fall back to a profile.
 func newPageDraftKeyCommand() *cobra.Command {
-	cmd := &cobra.Command{Use: "draft-key <@page-id>", Short: "Protect or recover a local draft key using current human Page read", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "draft-key <@page-id>", Short: "Protect or recover a local draft key, or check native read, using current human Page read", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		if os.Getenv("CREWSHIP_AGENT_TOKEN") != "" {
 			return fmt.Errorf("draft keys require human authentication")
 		}
@@ -63,8 +63,12 @@ func newPageDraftKeyCommand() *cobra.Command {
 			if body["key"] != "" || len(body["envelope"]) == 0 || len(body["envelope"]) > 2048 {
 				return fmt.Errorf("unwrap requires a bounded envelope")
 			}
+		case "check-native":
+			if body["key"] != "" || body["envelope"] != "" {
+				return fmt.Errorf("check-native takes neither key nor envelope")
+			}
 		default:
-			return fmt.Errorf("operation must be wrap or unwrap")
+			return fmt.Errorf("operation must be wrap, unwrap or check-native")
 		}
 		return artifactCLIRequest(cmd, "POST", "/api/v1/pages/"+pagePathEscape(args[0])+"/draft-key", body)
 	}}

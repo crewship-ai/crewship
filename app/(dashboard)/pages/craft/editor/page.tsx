@@ -20,9 +20,20 @@ function NativeWordEntry(){
  const scope=valid?JSON.stringify([humanId,workspaceId,pageId]):null
  const request=valid?`/api/v1/pages/${encodeURIComponent('@'+pageId)}/craft/availability?${new URLSearchParams({workspace_id:workspaceId!})}`:null
  const [availability,setAvailability]=useState<Availability>()
+ // A workspace gone from this account's directory opens nothing, and may be why.
+ // The link still names the immutable scope; only the server's proof erases.
+ const linkScope=session.status==='authenticated'&&humanId&&workspace.linkUnavailable&&workspaces.length===1&&workspaces[0]&&pages.length===1&&Boolean(pageId)&&pageId.length<=256&&!pageId.includes('\0')?JSON.stringify([humanId,workspaces[0],pageId]):null
+ useEffect(()=>{
+  if(!linkScope)return
+  const [human,linked,page]=JSON.parse(linkScope) as [string,string,string]
+  void verifyNativeReadLoss({human,workspace:linked,page}).catch(()=>{})
+ },[linkScope])
  useEffect(()=>{
   if(!scope||!request)return
   const abort=new AbortController()
+  // Anything short of the editor may mean this person lost native read, but
+  // says neither way: a draft left here is erased only on proof.
+  const proveReadLoss=()=>void verifyNativeReadLoss({human:humanId!,workspace:workspaceId!,page:pageId}).catch(()=>{})
   setAvailability({scope,state:'loading'})
   void apiFetch(request,{signal:abort.signal,cache:'no-store',redirect:'error'}).then(async response=>{
    if(!response.ok)throw Error('native_availability_unconfirmed')
@@ -31,9 +42,8 @@ function NativeWordEntry(){
    const preview=Boolean(value)&&typeof value==='object'&&!Array.isArray(value)&&(value as {preview_enabled?:unknown}).preview_enabled===true
    if(abort.signal.aborted)return
    setAvailability({scope,state:enabled?'enabled':preview?'preview':'disabled'})
-   // Availability does not say why: a draft left here is erased only on proof.
-   if(!enabled&&!preview)void verifyNativeReadLoss({human:humanId!,workspace:workspaceId!,page:pageId}).catch(()=>{})
-  }).catch(()=>{if(!abort.signal.aborted)setAvailability({scope,state:'error'})})
+   if(!enabled)proveReadLoss()
+  }).catch(()=>{if(!abort.signal.aborted){setAvailability({scope,state:'error'});proveReadLoss()}})
   return()=>abort.abort()
  },[scope,request,humanId,workspaceId,pageId])
  if(loading)return <p className="p-6">Připojuji…</p>

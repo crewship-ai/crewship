@@ -28,6 +28,9 @@ export function ArtifactNativeEditor({ workspaceId, pageId, fallback }: { worksp
   useEffect(() => {
     if (!scope) return
     const abort = new AbortController()
+    // Anything short of the editor may mean this person lost native read, but
+    // says neither way: a draft left here is erased only on proof.
+    const proveReadLoss = () => { if (humanId) void verifyNativeReadLoss({ human: humanId, workspace: workspaceId, page: pageId }).catch(() => {}) }
     setAvailability({ scope, state: "loading" })
     const request = `/api/v1/pages/${encodeURIComponent("@" + pageId)}/craft/availability?${new URLSearchParams({ workspace_id: workspaceId })}`
     void apiFetch(request, { signal: abort.signal, cache: "no-store", redirect: "error" }).then(async response => {
@@ -37,9 +40,8 @@ export function ArtifactNativeEditor({ workspaceId, pageId, fallback }: { worksp
       const state: State = fields.enabled === true && fields.can_edit === true ? "enabled" : fields.preview_enabled === true ? "preview" : fields.enabled === true ? "readonly" : "disabled"
       if (abort.signal.aborted) return
       setAvailability({ scope, state })
-      // Availability does not say why: a draft left here is erased only on proof.
-      if (state === "disabled" && humanId) void verifyNativeReadLoss({ human: humanId, workspace: workspaceId, page: pageId }).catch(() => {})
-    }).catch(() => { if (!abort.signal.aborted) setAvailability({ scope, state: "error" }) })
+      if (state !== "enabled") proveReadLoss()
+    }).catch(() => { if (!abort.signal.aborted) { setAvailability({ scope, state: "error" }); proveReadLoss() } })
     return () => abort.abort()
   }, [scope, humanId, workspaceId, pageId, attempt])
 

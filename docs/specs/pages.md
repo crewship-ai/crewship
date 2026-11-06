@@ -1454,6 +1454,13 @@ have their own paths and are not part of this table.
 "Proven" means a `403 draft_read_revoked` from `draft-key` or, on an open native
 editor, a `session_retired` event with `draft: "purge"`. The event says `purge`
 only while the person's credential is still current and the Page refuses them.
+Native asks `draft-key` with `operation: "check-native"`, which also refuses
+Comment-only access, as native admission does; Project asks `wrap`, which accepts
+it. A native draft is asked about after a refused or unavailable admission and on
+any entry short of the editor (preview, read-only, refused or failed availability,
+or a workspace gone from the directory). A proof that arrives late still erases
+the revisions captured when it was asked, unless the editor has verified read
+again by then.
 
 | Event | Native (Word, Sheet) | Project |
 |---|---|---|
@@ -1464,6 +1471,7 @@ only while the person's credential is still current and the Page refuses them.
 | Generic 403, 404, 5xx, network failure | Kept; content hidden, nothing offered until a fresh admission | Kept; a 403 or 404 asks `draft-key` for proof |
 | Read removed (`draft_read_revoked`) | Erased | Erased |
 | Write removed, read kept | Kept and offered for compare or copy | Kept |
+| Edit reduced to Comment | Erased: Comment is not native read | Kept: Comment still reads the Project |
 | Workspace membership removed | Erased, as read removed | Erased, as read removed |
 | Page deleted | Erased, as read removed | Erased, as read removed |
 | Another person signs in, same browser | Sealed rows kept, unreadable to them; recovery needs the original person | Same |
@@ -1667,6 +1675,10 @@ that original human after a fresh current-read check under the SQL writer fence.
 All responses use `Cache-Control: no-store`. A stale client identity is refused
 before creating a key envelope; an account switch cannot rebind the draft.
 Slugs cannot alias an old draft.
+
+`{"human":"<expected-human-id>","operation":"check-native"}` returns
+`{"readable":true}` or the same refusal, judged by native read when the Page has
+a native document and by canonical Page read otherwise. It handles no key.
 
 A 403 with `code: "draft_read_revoked"` is positive evidence for deleting that
 Page's local draft. `draft_identity_mismatch`, generic 403, 400 (unavailable or

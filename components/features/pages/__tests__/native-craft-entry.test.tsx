@@ -20,6 +20,19 @@ it('asks for proof of read loss only when neither editor nor preview is availabl
  await waitFor(()=>expect(m.readLoss).toHaveBeenCalledOnce());expect(m.readLoss.mock.calls[0][0]).toMatchObject({workspace:'w',page:'p'});unmount()
  m.readLoss.mockClear();m.fetch.mockResolvedValue(availability(true));render(<CraftPage/>);await screen.findByText('Full native Word');expect(m.readLoss).not.toHaveBeenCalled()
 })
+it.each([
+ ['a preview-only answer',()=>Promise.resolve(new Response(JSON.stringify({enabled:false,can_edit:false,preview_enabled:true}),{status:200}))],
+ ['a refused availability',()=>Promise.resolve(new Response(null,{status:403}))],
+ ['a failed availability',()=>Promise.reject(new TypeError('Failed to fetch'))],
+])('asks for proof after %s',async(_,answer)=>{
+ m.fetch.mockImplementation(answer);render(<CraftPage/>)
+ await waitFor(()=>expect(m.readLoss).toHaveBeenCalledOnce());expect(m.readLoss.mock.calls[0][0]).toMatchObject({human:expect.any(String),workspace:'w',page:'p'})
+})
+it('asks for proof when the workspace left the directory, from the link\'s own scope',async()=>{
+ m.workspace={workspaceId:'',loading:false,linkUnavailable:true}
+ try{render(<CraftPage/>);await waitFor(()=>expect(m.readLoss).toHaveBeenCalledOnce());expect(m.readLoss.mock.calls[0][0]).toMatchObject({workspace:'w',page:'p'});expect(m.fetch).not.toHaveBeenCalled()}
+ finally{m.workspace={workspaceId:'w',loading:false,linkUnavailable:false}}
+})
 it('mounts one full host only after authenticated page-scoped server availability even with no build flag',async()=>{render(<CraftPage/>);expect(m.host).not.toHaveBeenCalled();await screen.findByText('Full native Word');expect(m.fetch).toHaveBeenCalledWith('/api/v1/pages/%40p/craft/availability?workspace_id=w',expect.objectContaining({signal:expect.any(AbortSignal),cache:'no-store'}));expect(m.host).toHaveBeenCalledWith(expect.objectContaining({workspaceId:'w',pageId:'p',humanId:'human',enabled:true}))})
 it('keeps the server default false off even if an old frontend build flag is true',async()=>{vi.stubEnv('NEXT_PUBLIC_CRAFT_NATIVE_ENABLED','true');m.fetch.mockResolvedValue(availability(false));render(<CraftPage/>);await screen.findByText('Nativní editor není zapnutý.');expect(m.fetch).toHaveBeenCalledOnce();expect(m.host).not.toHaveBeenCalled()})
 it('never mounts or admits a host after an unavailable or forbidden availability response',async()=>{m.fetch.mockResolvedValue(new Response(null,{status:403}));render(<CraftPage/>);await screen.findByRole('alert');expect(m.host).not.toHaveBeenCalled()})

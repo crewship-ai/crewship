@@ -40,26 +40,33 @@ func (h *PageHandler) mayCommentPage(ctx context.Context, wsID, userID, role str
 // lease status only, and the collaborative checkpoint read, which serves latest
 // rather than a shared snapshot. The comment level never qualifies.
 func (h *PageHandler) mayReadNativeWithoutComment(ctx context.Context, wsID string, rec *pageRecord, viewer *pageViewer) bool {
+	readable, err := h.nativeReadWithoutComment(ctx, wsID, rec, viewer)
+	return err == nil && readable
+}
+
+// nativeReadWithoutComment keeps a lookup fault apart from a refusal, which
+// mayReadNativeWithoutComment does not need but erasing a draft does.
+func (h *PageHandler) nativeReadWithoutComment(ctx context.Context, wsID string, rec *pageRecord, viewer *pageViewer) (bool, error) {
 	if rec == nil || viewer == nil {
-		return false
+		return false, nil
 	}
 	if rec.PrivateAudience {
-		return privatePageViewer(rec, viewer)
+		return privatePageViewer(rec, viewer), nil
 	}
 	if h.pageReachedWithoutGrant(rec, nil, viewer) {
-		return true
+		return true, nil
 	}
 	grants, err := h.grantsFor(ctx, wsID, rec, viewer)
 	if err != nil {
-		return false
+		return false, err
 	}
 	for _, grant := range grants {
 		if grant.Level == pageGrantRead || grant.Level == pageGrantProduce || grant.Level == pageGrantWrite {
-			return true
+			return true, nil
 		}
 	}
 	folder, err := h.folderACLVerdictFor(ctx, rec, viewer)
-	return err == nil && folder.read
+	return err == nil && folder.read, err
 }
 
 // mayReadNativePrivate answers who may reach a native document beyond its shared

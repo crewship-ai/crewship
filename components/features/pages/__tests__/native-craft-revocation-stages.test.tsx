@@ -43,7 +43,8 @@ function route(url:string):Route{
 function scriptedServer(){
  const s={
   reachable:true,
-  state:'readable' as 'readable'|'read-lost'|'signed-out',
+  state:'readable' as 'readable'|'read-lost'|'comment-only'|'signed-out',
+  proofDelay:0,
   stall:new Set<Route>(),
   calls:[] as Route[],
   stream:undefined as ReadableStreamDefaultController<Uint8Array>|undefined,
@@ -57,12 +58,17 @@ function scriptedServer(){
   if(!s.reachable)throw TypeError('Failed to fetch')
   if(s.stall.has(name))return new Promise<Response>((_,reject)=>init.signal?.addEventListener('abort',()=>reject(init.signal!.reason),{once:true}))
   if(name==='draft-key'){
+   if(s.proofDelay)await new Promise(resolve=>setTimeout(resolve,s.proofDelay))
+   // The real route: wrap asks canonical Page read, which Comment passes; check-native asks native read.
+   const operation=JSON.parse(String(init.body)).operation
+   if(s.state==='comment-only'&&operation==='check-native')return json({error:'current Page read access is required',code:'draft_read_revoked'},403)
+   if(s.state==='comment-only')return json({envelope:'v1:unit'})
    if(s.state==='signed-out')return json({error:'fresh human authentication required'},401)
    if(s.state==='read-lost')return json({error:'current Page read access is required',code:'draft_read_revoked'},403)
    return json({envelope:'v1:unit'})
   }
   if(s.state==='signed-out')return json({error:'authentication required'},401)
-  if(s.state==='read-lost')return json({error:'native Craft access denied'},403)
+  if(s.state==='read-lost'||s.state==='comment-only')return json({error:'native Craft access denied'},403)
   switch(name){
    case 'sessions':return json({session_token:'a'.repeat(64),session_id:'private-session',application_id:'wordcraft',page_id:'p'},201)
    case 'reauthorize':return json({renewed:false})
@@ -202,6 +208,26 @@ describe('offline',()=>{
   server.reachable=true
   await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
   expect(offered()).toBe(false);expect(m.purge).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()
+ })
+})
+describe('proof',()=>{
+ it('an Edit to Comment downgrade missed while offline is proven on reconnect although canonical Page read still passes',async()=>{
+  await opened()
+  await editWhileOffline()
+  server.state='comment-only'
+  await advance(60_000)
+  server.reachable=true
+  await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
+  expect(server.count('document')).toBe(0);expect(offered()).toBe(false)
+  expect(m.purge).toHaveBeenCalledOnce()
+ })
+ it('a positive proof arriving after the reauthorization deadline still erases the captured revisions',async()=>{
+  await opened()
+  server.state='read-lost';server.proofDelay=NATIVE_REAUTHORIZE_DEADLINE_MS+1_000
+  await advance(NATIVE_REAUTHORIZE_INTERVAL_MS+300)
+  expect(contentVisible()).toBe(false)
+  await advance(NATIVE_REAUTHORIZE_DEADLINE_MS+2_000)
+  expect(m.purge).toHaveBeenCalledWith({human:'human',workspace:'w',page:'p'},expect.anything())
  })
 })
 describe('lease handoff',()=>{

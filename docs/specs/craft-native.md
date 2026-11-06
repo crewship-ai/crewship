@@ -189,8 +189,9 @@ A timeout advises explicit reload for a fresh attempt, without replaying an
 import, mutation or save. Existing captured drafts are not erased on a generic
 timeout or disconnection; only proven read loss authorizes their purge. Proof is
 a `session_retired` event with `draft: "purge"`, sent only while the credential
-is current, or `403 draft_read_revoked` from `draft-key`, which the host requests
-after a refused successor admission. An ended credential retires the stream with
+is current, or `403 draft_read_revoked` from `draft-key` with
+`operation: "check-native"`, which the host requests after a refused admission and
+each entry requests whenever it does not open the editor. An ended credential retires the stream with
 `draft: "retain"`. Stages and bounds: [Private browser draft
 recovery](pages.md#when-a-draft-is-erased-native-and-project).
 

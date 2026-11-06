@@ -12,7 +12,7 @@ import {createNativeEditorPort,type NativeEditorPort} from "@/lib/mooring/native
 import {openNativeDraftJournal,validNativeVersion,type NativeDraft,type NativeDraftJournal,type NativeRecovery} from "@/lib/mooring/native-draft"
 import {createSingleEditorSave,type NativeSaveState} from "@/lib/mooring/single-editor-save"
 import {verifyNativeReadLoss} from "@/lib/mooring/native-read-loss"
-import {NATIVE_ADMISSION_DEADLINE_MS,NATIVE_REAUTHORIZE_INTERVAL_MS} from "@/lib/mooring/native-revocation-bounds"
+import {NATIVE_ADMISSION_DEADLINE_MS,NATIVE_REAUTHORIZE_DEADLINE_MS,NATIVE_REAUTHORIZE_INTERVAL_MS} from "@/lib/mooring/native-revocation-bounds"
 import {createEditorFrame,editorFrameSupported} from "./workbook-editor-host"
 import {downloadNativeExport} from "@/lib/mooring/native-export-download"
 import {NativeCraftLeaseBar,type NativeCraftLeaseAction,type NativeCraftLeaseView} from "./native-craft-lease-bar"
@@ -243,7 +243,10 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   // This asks for the one proof that does; anything short of it keeps the draft.
   function proveReadLoss(){
    if(readLossCheck||privacyRetirement||authSuspended)return
-   readLossCheck=verifyNativeReadLoss({human:humanId,workspace:workspaceId,page:pageId},retirePrivacy).catch(()=>false).finally(()=>{readLossCheck=undefined})
+   const check=verifyNativeReadLoss({human:humanId,workspace:workspaceId,page:pageId},async()=>{if(readable)return false;await retirePrivacy()}).catch(()=>false)
+   // A stalled request only stops holding the next one up; it may still prove loss.
+   const release=()=>{if(readLossCheck===check)readLossCheck=undefined}
+   readLossCheck=check;void check.finally(release);setTimeout(release,NATIVE_REAUTHORIZE_DEADLINE_MS)
   }
   async function currentLease(admission:typeof client,signal:AbortSignal){
    const observed=leaseObservation

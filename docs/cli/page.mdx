@@ -2564,7 +2564,10 @@ crewship page draft-key @PAGE_ID --file - --format json
 
 `--file` is required. The bounded JSON input is
 `{"human":"EXPECTED_USER_ID","operation":"wrap","key":"BASE64_32_BYTE_KEY"}`
-or `{"human":"EXPECTED_USER_ID","operation":"unwrap","envelope":"VERSIONED_ENVELOPE"}`.
+or `{"human":"EXPECTED_USER_ID","operation":"unwrap","envelope":"VERSIONED_ENVELOPE"}`,
+or `{"human":"EXPECTED_USER_ID","operation":"check-native"}`, which handles no key
+and answers `{"readable":true}` or the refusal below using native read on a native
+document, so Comment-only access is refused there.
 Keep input files private. Output contains the protected envelope or recovered key;
 only direct it to a trusted destination. Agent runs cannot substitute a saved
 human profile. An unavailable service does not mean that a local draft may be
