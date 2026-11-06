@@ -14,7 +14,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { Input } from "@/components/ui/input"
 import { useDesign } from "./use-design"
 import { readablePeerFill } from "./peer-colors"
-import { designLinkTarget, designScreenOf, removeDesignNode, safeImageSource, setDesignNodeLink, upsertDesignNode, type DesignNode, type DesignNodeType } from "./design-document"
+import { designLinkTarget, designScreenOf, removeDesignNode, restoreDesignConflict, safeImageSource, setDesignNodeLink, upsertDesignNode, type DesignConflict, type DesignNode, type DesignNodeType } from "./design-document"
 import { DesignNodeShape } from "./design-node-shape"
 import { DesignPrototypePlayer } from "./design-prototype-player"
 
@@ -201,7 +201,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
   <header className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
    <Frame className="size-5" aria-hidden="true" />
    <h1 className="mr-auto truncate font-semibold">{slug} <span className="ml-2 text-xs font-normal text-muted-foreground">Design</span></h1>
-   <span role="status" className="text-xs text-muted-foreground">{version ? `Version ${version}` : historyFull ? "History full · changes kept in this browser" : design.connection === "connected" ? !design.editable ? "Connected · read only" : design.dirty ? "Live · changes saved as you work" : "Live · up to date" : design.connection === "denied" ? "Access changed · reopen to continue" : design.connection === "rejected" ? "The server refused changes made in this browser (too large or invalid) · they will not sync" : design.connection === "connecting" ? "Connecting…" : "Offline · changes kept in this browser"}</span>
+   <span role="status" className="text-xs text-muted-foreground">{version ? `Version ${version}` : historyFull ? "History full · changes kept in this browser" : design.unsynced && data.can_edit === false ? "Jen pro čtení · neodeslané změny zůstaly v tomto prohlížeči a vrátí se, až budete moci znovu upravovat" : design.connection === "connected" ? design.unsynced ? "Live · sending changes…" : !design.editable ? "Connected · read only" : design.dirty ? "Live · changes saved as you work" : "Live · up to date" : design.connection === "denied" ? "Access changed · reopen to continue" : design.connection === "rejected" ? "The server refused changes made in this browser (too large or invalid) · they will not sync" : design.connection === "connecting" ? "Connecting…" : "Offline · changes kept in this browser"}</span>
    {!design.editable && <span className="rounded bg-muted px-2 py-1 text-xs">{version ? "History" : "Read only"}</span>}
    <div className="flex -space-x-1" aria-label="People on this canvas">{design.peers.map(peer => <span key={peer.clientId} title={peer.name} className="flex size-7 items-center justify-center rounded-full border-2 border-background text-xs font-medium text-white" style={{ backgroundColor: readablePeerFill(peer.color) }}>{peer.name.slice(0, 2).toUpperCase()}</span>)}</div>
    {prototype && frames.length > 0 && <Button ref={playButton} variant="outline" onClick={play}><Play className="size-4" />Play</Button>}
@@ -213,6 +213,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
   {continued?.scope===continueScope&&<div role="status" className="border-b px-4 py-3 text-sm"><p>A new Design contains the copied canvas. This original canvas, its history and your unsent feedback remain here.</p><a className="underline" href={`/artifacts/${encodeURIComponent(continued.page)}?workspace_id=${encodeURIComponent(workspaceId)}`} target="_blank" rel="noopener noreferrer">Open new Design</a></div>}
   {failure && !historyFull && <p role="alert" className="border-b px-4 py-2 text-sm text-destructive">{failure.message}</p>}
   {design.connection==="quota"&&!historyFull&&<p role="alert" className="border-b px-4 py-2 text-sm">Storage capacity is full. Your changes are kept in this browser and nothing was deleted. Save a version to open the recovery choices.</p>}
+  {design.conflicts.map((conflict, index) => <DesignConflictNotice key={`${conflict.id}-${index}`} conflict={conflict} canRestore={design.editable && Boolean(design.doc)} onRestore={() => { if (design.doc) restoreDesignConflict(design.doc, conflict); design.dismissConflict(conflict) }} onDismiss={() => design.dismissConflict(conflict)} />)}
   {design.draftError && <p role="alert" className="border-b px-4 py-2 text-sm">Browser draft storage is unavailable or full. Keep this window open until connected and save a version.</p>}
   <div className="flex min-h-0 flex-1 flex-col md:flex-row">
    <aside className="flex max-h-40 shrink-0 flex-col overflow-auto border-b md:max-h-none md:w-48 md:border-b-0 md:border-r" aria-label="Layers">
@@ -300,4 +301,22 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
  return <label className="block text-xs text-muted-foreground"><span className="mb-1.5 block">{label}</span>{children}</label>
+}
+
+/** Two people changed one text from a stale canvas and only one text stayed on it. */
+function DesignConflictNotice({ conflict, canRestore, onRestore, onDismiss }: { conflict: DesignConflict; canRestore: boolean; onRestore: () => void; onDismiss: () => void }) {
+ const [copy, setCopy] = useState<"" | "copied" | "failed">("")
+ const lost = conflict.kept === "mine" ? conflict.theirs : conflict.mine
+ const copyText = () => { void navigator.clipboard.writeText(lost).then(() => setCopy("copied"), () => setCopy("failed")) }
+ return <div role="alert" className="space-y-2 border-b px-4 py-3 text-sm">
+  <p><b>Konflikt úprav: text vrstvy „{conflict.name}“ změnili dva lidé.</b></p>
+  <p>{conflict.left === undefined ? "Vrstva je mezitím smazaná. Její text je jen tady v tomto prohlížeči:" : conflict.kept === "mine" ? "Na plátně zůstal váš text. Text druhého člověka byl přepsán a v historii zůstává, jen pokud byl uložen ve verzi. Tady je:" : "Na plátně zůstal text druhého člověka. Váš text se neuložil a je jen tady v tomto prohlížeči:"}</p>
+  <blockquote className="max-h-32 overflow-auto whitespace-pre-wrap rounded border bg-muted p-2">{lost}</blockquote>
+  <div className="flex flex-wrap items-center gap-2">
+   <Button variant="outline" size="sm" disabled={!canRestore} onClick={onRestore}>Obnovit tento text</Button>
+   <Button variant="outline" size="sm" onClick={copyText}>Kopírovat text</Button>
+   <Button variant="ghost" size="sm" onClick={onDismiss}>Zavřít upozornění</Button>
+   {copy && <span className="text-xs text-muted-foreground">{copy === "copied" ? "Text je zkopírovaný." : "Kopírování se nepovedlo, označte text ručně."}</span>}
+  </div>
+ </div>
 }

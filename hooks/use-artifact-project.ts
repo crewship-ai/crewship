@@ -88,7 +88,7 @@ export function useArtifactProject(workspace: string, slug: string, version?: nu
    const data = await response.json().catch(() => null)
    if(!valid()||controller.signal.aborted)throw new Error("Project request retired.")
    if (!response.ok) {
-    const error=Object.assign(new Error(response.status === 409 ? "This project changed. Your draft is preserved. Load the latest version before saving again." : data?.error ?? "Could not load the artifact project."), { status: response.status })
+    const error=Object.assign(new Error(response.status === 409 ? "This project changed. Your draft is preserved. Load the latest version before saving again." : response.status === 403 && writing ? "Nemáte oprávnění tuto změnu uložit. Váš koncept zůstává v tomto prohlížeči." : data?.error ?? "Could not load the artifact project."), { status: response.status })
     throw error
    }
    if(!writing&&typeof data?.page_id==="string"){

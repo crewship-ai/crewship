@@ -20,7 +20,7 @@ it.skipIf(!existsSync(chromium.executablePath()))("plays three linked screens A 
    setDesignNodeLink(doc,"to-b","b"); setDesignNodeLink(doc,"to-c","c");
    window.designUpdates = 0; doc.on("update",()=>{window.designUpdates++});
    const mutation={mutate(){},mutateAsync:async()=>({version:1}),isPending:false,error:null};
-   window.designFixture={query:{data:{page_id:"page",can_edit:false,can_comment:false,latest_version:1},isError:false},comments:{data:{comments:[]}},versions:{data:{versions:[{version:1}]}},doc,nodes:designNodes(doc),peers:[],connection:"connected",editable:false,dirty:false,draftError:false,save:mutation,restore:mutation,share:mutation,comment:mutation,connectAgent:mutation,setCursor(){}};
+   window.designFixture={conflicts:[],dismissConflict(){},query:{data:{page_id:"page",can_edit:false,can_comment:false,latest_version:1},isError:false},comments:{data:{comments:[]}},versions:{data:{versions:[{version:1}]}},doc,nodes:designNodes(doc),peers:[],connection:"connected",editable:false,dirty:false,draftError:false,save:mutation,restore:mutation,share:mutation,comment:mutation,connectAgent:mutation,setCursor(){}};
    createRoot(document.getElementById("root")).render(<DesignEditor workspaceId="ws" slug="flow"/>);
   ` },
   bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic",

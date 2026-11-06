@@ -28,6 +28,70 @@ export function designNodes(doc: Y.Doc): DesignNode[] {
  })
 }
 
+/** One text two people changed from the same stale canvas. */
+export interface DesignConflict {
+ id: string
+ name: string
+ mine: string
+ theirs: string
+ /** Whose text the merge left on the canvas. */
+ kept: "mine" | "theirs"
+ /** The text the merge left on the canvas; undefined when the layer was deleted. */
+ left?: string
+ /** The layer as the losing side had it. Only recreating a deleted layer uses all of it. */
+ restore: DesignNode
+}
+
+/** Stable across tabs and reloads: the same two texts on one layer are one conflict. */
+export function designConflictIdentity(conflict: DesignConflict): string {
+ return JSON.stringify([conflict.id, conflict.mine, conflict.theirs])
+}
+
+function readConflictRecord(text: string): DesignConflict[] {
+ if (!text) return []
+ const saved: unknown = JSON.parse(text)
+ if (!Array.isArray(saved)) throw new Error("Not a Design conflict record.")
+ return saved as DesignConflict[]
+}
+export const parseDesignConflictRecord = readConflictRecord
+
+/**
+ * One step of the durable conflict list: the additions and removals of one
+ * tab applied to what is stored now, not to what that tab last saw. Throws on
+ * an unreadable record, so the caller's merge stores nothing over it.
+ */
+export function mergeDesignConflictRecord(existing: string, add: DesignConflict[], remove: string[]): string {
+ const gone = new Set(remove), merged = new Map<string, DesignConflict>()
+ for (const conflict of [...readConflictRecord(existing), ...add]) {
+  const identity = designConflictIdentity(conflict)
+  if (!gone.has(identity) && !merged.has(identity)) merged.set(identity, conflict)
+ }
+ return merged.size ? JSON.stringify([...merged.values()]) : ""
+}
+
+/**
+ * Yjs merges a map field by client order, not by time, so one of two concurrent
+ * texts disappears without a trace. Compares what each side made of the last
+ * confirmed canvas with the merged result, and names every text that lost. Only
+ * the text field counts: geometry and colours stay last-writer-wins.
+ */
+export function designConflicts(base: DesignNode[], mine: DesignNode[], theirs: DesignNode[], merged: DesignNode[]): DesignConflict[] {
+ const byId = (nodes: DesignNode[]) => new Map(nodes.map(node => [node.id, node]))
+ const [was, local, remote, now] = [byId(base), byId(mine), byId(theirs), byId(merged)]
+ return [...new Set([...was.keys(), ...local.keys(), ...remote.keys()])].flatMap(id => {
+  const before = was.get(id), my = local.get(id), their = remote.get(id)
+  const isText = (my ?? their)?.type === "text"
+  // A live layer without a text says nothing: a frame carries the server's whole
+  // delete set, so the confirmed side loses a text to a local edit it lacks. Only
+  // a missing layer is a change.
+  if (!before || !isText || my?.text === before.text || their?.text === before.text || my?.text === their?.text || (their && their.text === undefined)) return []
+  const kept = now.get(id)?.text === my?.text ? "mine" : "theirs"
+  const restore = kept === "mine" ? their : my
+  if (!restore) return []
+  return [{ id, name: my?.name || their?.name || "Text", mine: my?.text ?? "", theirs: their?.text ?? "", kept, left: now.get(id)?.text, restore }]
+ })
+}
+
 export function upsertDesignNode(doc: Y.Doc, patch: Partial<DesignNode> & { id: string }) {
  doc.transact(() => {
   const nodes = doc.getMap<Y.Map<unknown>>("nodes")
@@ -40,6 +104,50 @@ export function upsertDesignNode(doc: Y.Doc, patch: Partial<DesignNode> & { id: 
   }
   for (const [key, value] of Object.entries(patch)) if (value !== undefined) node.set(key, value)
  }, "editor")
+}
+
+/**
+ * Brings a lost text back without taking anything else from the stale side.
+ * The layer's current geometry, style, name and links stay. Text changed after
+ * the conflict stays too: the lost text then lands in a separate layer beside
+ * it. Only a deleted layer is rebuilt from the snapshot.
+ */
+export function restoreDesignConflict(doc: Y.Doc, conflict: DesignConflict): "text" | "layer" | "recreated" | "none" {
+ const lost = conflict.kept === "mine" ? conflict.theirs : conflict.mine
+ const nodes = doc.getMap<Y.Map<unknown>>("nodes")
+ const current = nodes.get(conflict.id)
+ if (!(current instanceof Y.Map)) {
+  const { parentId, ...layer } = conflict.restore
+  upsertDesignNode(doc, { ...layer, text: lost, ...(parentId && nodes.has(parentId) ? { parentId } : {}) })
+  return "recreated"
+ }
+ const text = current.get("text")
+ if (text === lost) return "none"
+ if (text === conflict.left) {
+  upsertDesignNode(doc, { id: conflict.id, text: lost })
+  return "text"
+ }
+ const { linkTo: _linkTo, ...layer } = { ...current.toJSON(), id: conflict.id } as DesignNode
+ upsertDesignNode(doc, { ...layer, id: crypto.randomUUID(), name: `${layer.name || conflict.name} (obnovený text)`, y: (Number(layer.y) || 0) + (Number(layer.height) || 0) + 8, text: lost })
+ return "layer"
+}
+
+/**
+ * Whether a document holds a stored work generation (an encoded Y.Snapshot).
+ * Compares the delete set too: work that is only a deletion leaves the state
+ * vector alone. An unreadable generation is not covered.
+ */
+export function designWorkCovered(document: Y.Snapshot, work: Uint8Array): boolean {
+ try {
+  const stored = Y.decodeSnapshot(work)
+  for (const [client, clock] of stored.sv) if (clock > (document.sv.get(client) ?? 0)) return false
+  for (const [client, ranges] of stored.ds.clients) {
+   for (const range of ranges) {
+    for (let clock = range.clock; clock < range.clock + range.len; clock++) if (!Y.isDeleted(document.ds, Y.createID(client, clock))) return false
+   }
+  }
+  return true
+ } catch { return false }
 }
 
 export function removeDesignNode(doc: Y.Doc, id: string) {

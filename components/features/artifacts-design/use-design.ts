@@ -6,13 +6,13 @@ import * as Y from "yjs"
 import type { ArtifactOrigin } from "@/hooks/use-artifact-agent-dispatch"
 import type { ArtifactComment } from "@/hooks/use-artifact-project"
 import { useSessionSafe } from "@/hooks/use-auth"
-import { artifactDraftKey, loadArtifactDraft, writeArtifactDraft, admittedArtifactDraftCapture, purgeLocalDraftPage, captureLocalDraftPage } from "@/lib/artifact-drafts"
+import { artifactDraftKey, loadArtifactDraft, mergeArtifactDraft, writeArtifactDraft, admittedArtifactDraftCapture, purgeLocalDraftPage, captureLocalDraftPage } from "@/lib/artifact-drafts"
 import { createLocalDraftCipher, LocalDraftReadRevoked } from "@/lib/local-draft-seal"
 import { registerDocumentDraftWriter } from "@/lib/document-queue"
 import { apiFetch, tryRefresh } from "@/lib/api-fetch"
 import { getAuthMode, resolveWsBase } from "@/lib/server-base"
 import { DesignProvider, type DesignConnection, type DesignPeer } from "./design-provider"
-import { designNodes, type DesignNode } from "./design-document"
+import { designConflictIdentity, designNodes, designWorkCovered, mergeDesignConflictRecord, parseDesignConflictRecord, type DesignConflict, type DesignNode } from "./design-document"
 
 interface DesignState {
  page_id: string
@@ -31,6 +31,35 @@ interface DesignState {
 export interface DesignVersion { version: number; message?: string; actor?: string; created_at?: string }
 interface DesignVersions { versions: DesignVersion[]; latest_version: number; shared_version: number }
 const COLORS = ["#2563eb", "#c026d3", "#059669", "#ea580c", "#9333ea"]
+const DRAFT_LIMIT = 2 * 1024 * 1024
+function encodeDraft(bytes: Uint8Array) {
+ if (bytes.length > DRAFT_LIMIT) throw new Error("Canvas exceeds the local draft limit. Keep this tab open.")
+ let value = ""
+ for (let index = 0; index < bytes.length; index += 8192) value += String.fromCharCode(...bytes.subarray(index, index + 8192))
+ return btoa(value)
+}
+const decodeDraft = (value: string) => Uint8Array.from(atob(value), char => char.charCodeAt(0))
+/** Unconfirmed work per tab: only a marker and a comparison base, never the work itself (that is the canvas draft). */
+interface PendingMark { baseline: string; work: string }
+function readPendingRecord(text: string): Record<string, PendingMark> {
+ try {
+  const saved: unknown = JSON.parse(text || "{}")
+  if (!saved || typeof saved !== "object" || Array.isArray(saved)) return {}
+  return Object.fromEntries(Object.entries(saved as Record<string, PendingMark>).filter(([, mark]) => typeof mark?.baseline === "string" && typeof mark.work === "string"))
+ } catch { return {} }
+}
+/** Conflicts on screen: the durable list, plus changes this tab could not store yet. */
+function designConflictView(ledger: ConflictLedger | undefined): DesignConflict[] {
+ if (!ledger) return []
+ const seen = new Set(ledger.remove)
+ return [...ledger.durable, ...ledger.add].filter(conflict => {
+  const identity = designConflictIdentity(conflict)
+  if (seen.has(identity)) return false
+  seen.add(identity)
+  return true
+ })
+}
+interface ConflictLedger { key: string; durable: DesignConflict[]; add: DesignConflict[]; remove: string[]; merged?: boolean }
 
 export function useDesign(workspaceId: string, slug: string, selectedVersion?: number) {
  const session = useSessionSafe()
@@ -66,10 +95,57 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const [peers, setPeers] = useState<DesignPeer[]>([])
  const [connection, setConnection] = useState<DesignConnection>("connecting")
  const [dirty, setDirty] = useState(false)
+ // The Page with local work the server has not confirmed. Outlives a provider:
+ // it ends with a confirmation, never with a replacement or a new connection.
+ const [unsyncedPage, setUnsyncedPage] = useState<string>()
  const [readRevokedPage, setReadRevokedPage] = useState<string>()
  const [draftError, setDraftError] = useState(false)
  const provider = useRef<DesignProvider | null>(null)
  const [draftReady, setDraftReady] = useState(false)
+ // A text that lost a merge exists only here: a sealed draft keeps it over a
+ // reload until the person decides, and goes with the other drafts on read loss.
+ const conflictKey = pageId ? artifactDraftKey("design-conflict", userId, workspaceId, pageId) : null
+ const [ledger, setLedger] = useState<ConflictLedger>()
+ const ledgerRef = useRef(ledger)
+ const changeLedger = useCallback((target: string, change: (current: ConflictLedger) => ConflictLedger) => {
+  const previous = ledgerRef.current
+  ledgerRef.current = change(previous?.key === target ? previous : { key: target, durable: [], add: [], remove: [] })
+  setLedger(ledgerRef.current)
+ }, [])
+ useEffect(() => {
+  if (!conflictKey) return
+  let active = true
+  void loadArtifactDraft(conflictKey).then(text => {
+   // A merge that landed meanwhile holds the newer list.
+   if (active && text) changeLedger(conflictKey, current => current.merged ? current : { ...current, durable: parseDesignConflictRecord(text) })
+  }).catch(() => { if (active) setDraftError(true) })
+  return () => { active = false }
+ }, [conflictKey, changeLedger])
+ // Runs under the draft's cross-tab lock against what is stored at that moment.
+ // Each change stays in the ledger until a merge carried it, so a failed one
+ // stays on screen and goes out with the next.
+ const storeConflicts = useCallback((change: { add?: DesignConflict[]; remove?: string[] }) => {
+  if (!conflictKey) return
+  changeLedger(conflictKey, current => ({ ...current, add: [...current.add, ...(change.add ?? [])], remove: [...current.remove, ...(change.remove ?? [])] }))
+  const { add, remove } = ledgerRef.current!
+  void mergeArtifactDraft(conflictKey, existing => mergeDesignConflictRecord(existing, add, remove)).then(text => {
+   changeLedger(conflictKey, current => ({ key: conflictKey, durable: parseDesignConflictRecord(text), add: current.add.filter(item => !add.includes(item)), remove: current.remove.filter(item => !remove.includes(item)), merged: true }))
+  }, () => setDraftError(true))
+ }, [conflictKey, changeLedger])
+ const storeConflictsRef = useRef(storeConflicts)
+ useEffect(() => { storeConflictsRef.current = storeConflicts }, [storeConflicts])
+ const pendingWriter = useRef("")
+ // Marks this tab's work generation, or clears every generation the confirmed
+ // document holds. Decided against the record as stored at that moment: a mark
+ // for work this document never contained stays with its own tab's draft.
+ const storePending = useCallback((target: string, change: PendingMark | Y.Snapshot) => mergeArtifactDraft(target, existing => {
+  pendingWriter.current ||= crypto.randomUUID()
+  const record = readPendingRecord(existing)
+  if ("work" in change) record[pendingWriter.current] = change
+  else for (const [writer, mark] of Object.entries(record)) if (designWorkCovered(change, decodeDraft(mark.work))) delete record[writer]
+  return Object.keys(record).length ? JSON.stringify(record) : ""
+ }), [])
+ const conflicts = designConflictView(conflictKey && ledger?.key === conflictKey && readRevokedPage !== pageId ? ledger : undefined)
  const editable = Boolean(readRevokedPage !== pageId && draftReady && authorityRevision !== null && query.data?.can_edit && !query.isError && !selectedVersion && connection !== "denied" && connection !== "rejected")
  const editableRef = useRef(editable)
  useEffect(() => { editableRef.current = editable; provider.current?.setEditable(editable) }, [editable])
@@ -95,24 +171,33 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
   const document = new Y.Doc()
   setDraftReady(false)
   const storageKey = artifactDraftKey("design-canvas", userId, workspaceId, pageId)!
+  const markerKey = artifactDraftKey("design-pending", userId, workspaceId, pageId)!
   let cleanup = () => { document.destroy() }
   const initialize = async () => {
-  if (initialCanEdit) {
-   const draft = await loadArtifactDraft(storageKey)
-   if (!active) return
-   if (draft) Y.applyUpdate(document, Uint8Array.from(atob(draft), char => char.charCodeAt(0)))
-  }
+  let draft = ""
+  if (initialCanEdit) draft = await loadArtifactDraft(storageKey)
   if (!active) return
+  // A reader only needs to know the mark exists; failing to read it must not cost them the live canvas.
+  const marked = readPendingRecord(await loadArtifactDraft(markerKey).catch(error => {
+   if (initialCanEdit || error instanceof LocalDraftReadRevoked) throw error
+   setDraftError(true)
+   return ""
+  }))
+  if (!active) return
+  if (draft) Y.applyUpdate(document, decodeDraft(draft))
   setDraftReady(true)
+  let adopted = Object.keys(marked)
+  // Compare only from a baseline whose work this document holds.
+  const loaded = Y.snapshot(document)
+  const stored = [marked[pendingWriter.current], ...Object.values(marked)].find(mark => mark && designWorkCovered(loaded, decodeDraft(mark.work)))
+  const unconfirmed = initialCanEdit && Boolean(draft || adopted.length)
+  // A stored draft is unconfirmed until this socket's barrier says otherwise.
+  if (draft || adopted.length) setUnsyncedPage(pageId)
+  else if (initialCanEdit) setUnsyncedPage(current => current === pageId ? undefined : current)
+  let wroteMark = false
   const capture = initialCanEdit ? admittedArtifactDraftCapture(storageKey) : undefined
   let localDirty = false
-  const snapshot = () => {
-   const bytes = Y.encodeStateAsUpdate(document)
-   if (bytes.length > 2 * 1024 * 1024) throw new Error("Canvas exceeds the local draft limit. Keep this tab open.")
-   let value = ""
-   for (let index = 0; index < bytes.length; index += 8192) value += String.fromCharCode(...bytes.subarray(index, index + 8192))
-   return btoa(value)
-  }
+  const snapshot = () => encodeDraft(Y.encodeStateAsUpdate(document))
   setDoc(document)
   setNodes(designNodes(document))
   const update = (_update: Uint8Array, origin: unknown) => {
@@ -148,6 +233,20 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
     const status = (error as { status?: number }).status
     return status === 401 || status === 403 || status === 404 ? "denied" : "retry"
    }
+  }, {
+   unconfirmed,
+   baseline: unconfirmed && stored ? decodeDraft(stored.baseline) : undefined,
+   pending: baseline => {
+    if (baseline) setUnsyncedPage(pageId)
+    else setUnsyncedPage(current => current === pageId ? undefined : current)
+    if (!baseline && !wroteMark && !adopted.length) return
+    wroteMark = baseline !== null
+    // Taken now: the document may move on before the merge runs.
+    try { void storePending(markerKey, baseline ? { baseline: encodeDraft(baseline), work: encodeDraft(Y.encodeSnapshot(Y.snapshot(document))) } : Y.snapshot(document)).catch(() => setDraftError(true)) }
+    catch { setDraftError(true) }
+    if (!baseline) adopted = []
+   },
+   conflicts: found => storeConflictsRef.current({ add: found }),
   })
   provider.current = live
   const awareness = () => setPeers([...live.awareness.getStates()].flatMap(([clientId, state]) => {
@@ -176,7 +275,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
    cleanup()
    setDoc(null); setNodes([]); setPeers([]); setDraftReady(false)
   }
- }, [canConnect, endpoint, workspaceId, slug, userId, pageId, authorityRevision, actorName, admittedActor, initialCanEdit, client, request])
+ }, [canConnect, endpoint, workspaceId, slug, userId, pageId, authorityRevision, actorName, admittedActor, initialCanEdit, client, request, storePending])
  const invalidate = () => { void client.invalidateQueries({ queryKey: key }) }
  const save = useMutation({ mutationFn: async (message: string) => {
   if(provider.current?.storageFull)throw Object.assign(new Error("Workspace storage is full. Your private draft is retained."),{status:413})
@@ -195,5 +294,5 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const connectAgent = useMutation({ mutationFn: (chat_id: string) => pinnedRequest("/agent", { chat_id }), onSuccess: invalidate })
  const comment = useMutation({ mutationFn: (body: { version: number; path: string; selector: string; quote: string; text: string; send_to_agent: boolean }) => pinnedRequest<ArtifactComment>("/comments", body), onSuccess: invalidate })
  const share = useMutation({ mutationFn: (version: number) => pinnedRequest("/share", { version }), onSuccess: invalidate })
- return { readRevoked: readRevokedPage === pageId, query, versions, comments, doc, nodes: selectedVersion || query.data?.can_edit === false ? query.data?.nodes ?? [] : nodes, peers, connection, editable, dirty, draftError, save, restore, share, comment, connectAgent, setCursor: (cursor: { x: number; y: number } | null) => provider.current?.setCursor(cursor) }
+ return { readRevoked: readRevokedPage === pageId, query, versions, comments, doc, nodes: selectedVersion || query.data?.can_edit === false ? query.data?.nodes ?? [] : nodes, peers, connection, editable, dirty, unsynced: Boolean(pageId) && unsyncedPage === pageId && readRevokedPage !== pageId, draftError, save, restore, share, comment, connectAgent, conflicts, dismissConflict: (conflict: DesignConflict) => storeConflicts({ remove: [designConflictIdentity(conflict)] }), setCursor: (cursor: { x: number; y: number } | null) => provider.current?.setCursor(cursor) }
 }

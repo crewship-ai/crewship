@@ -25,6 +25,8 @@ it('preserves complete local source for copy after a real save403 while retiring
  fireEvent.change(screen.getByLabelText('Source file'),{target:{value:'Private human source'}})
  fireEvent.click(screen.getByRole('button',{name:'Save project'}))
  const recovery=await screen.findByLabelText('Source recovery draft')
+ expect(screen.getByRole('alert')).toHaveTextContent('Nemáte oprávnění tuto změnu uložit. Váš koncept zůstává v tomto prohlížeči.')
+ expect(screen.queryByText('write revoked')).toBeNull()
  expect(recovery).toHaveAttribute('readonly')
  expect((recovery as HTMLTextAreaElement).value).toContain('Private human source')
  expect((recovery as HTMLTextAreaElement).value).toContain('Keep this file')

@@ -104,9 +104,11 @@ The status in the header tells you where your changes are:
 |---|---|
 | **Connecting…** | The editor is opening the live connection. |
 | **Connected · read only** | Connected without edit authority. Shared-only readers see the shared snapshot and presence; separately authorized administrators can read the latest canvas with audit. |
-| **Live · up to date** | Connected, and you have no unsaved changes. |
+| **Live · sending changes…** | Connected, and the server has not confirmed your latest changes yet. They stay in this browser until it does. |
+| **Live · up to date** | Connected, the server holds your changes, and you have no unsaved version changes. |
 | **Live · changes saved as you work** | Connected. You have changes since the last version you saved; they are sent as you work. |
 | **Offline · changes kept in this browser** | The connection dropped. Keep the window open; the editor reconnects and sends your changes. |
+| **Jen pro čtení · neodeslané změny zůstaly v tomto prohlížeči…** | You lost the write right with changes that never reached the server. They stay in this browser, and they return and sync when you can edit again and reopen the Design. |
 | **Access changed · reopen to continue** | Your access or session changed. Reopen the Design. |
 
 People with read access see a **Read only** badge next to the status.
@@ -136,6 +138,32 @@ Live updates reach the people authorized to view the live canvas. Shared-only
 readers keep seeing the shared version. The editor also keeps a copy of your unsaved canvas in this browser, so a crash or a lost
 connection does not discard it. If browser storage is full or blocked, the
 editor says so; keep the window open until it is connected and save a version.
+
+### When two people change one text
+
+Your changes count as sent only once the server has confirmed them. Until then
+someone else can change the same text layer: while you are offline, or in the
+moment between your edit and the confirmation. Only one text stays on the
+canvas, and the choice follows the sync order, not the time. Crewship shows a
+**Konflikt úprav** notice to the person whose browser sees both, with the text
+that lost, whichever side it came from. **Kopírovat text** copies it.
+**Obnovit tento text** brings it back:
+
+- If the layer still shows the text the merge left, only the text changes. Its
+  position, size, colour, name and link stay as they are now.
+- If someone changed the text after the conflict, nothing is replaced. The lost
+  text lands in a new layer below, named **(obnovený text)**.
+- If the layer was deleted, it comes back as it was.
+
+The notice is kept encrypted in this browser and survives a reload until you
+close it, in every tab of the same person. When your text stayed on the canvas,
+the other person's text is in the history only if it was saved in a version, so
+the notice shows it too.
+
+Only the text of a layer is compared. Position, size, colour and layer name stay
+last-writer-wins. Unconfirmed work and the canvas it was made from are kept in
+this browser, so the comparison also works after a reload, a lost write right or
+a new connection.
 
 ## Play a prototype
 

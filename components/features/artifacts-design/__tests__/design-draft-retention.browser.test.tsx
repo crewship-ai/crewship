@@ -48,7 +48,7 @@ it.skipIf(!existsSync(chromium.executablePath())).each([false,true,"settled"])("
   }
   await page.waitForURL("**/login?**",{timeout:3000})
   const rows=await page.evaluate(()=>new Promise<{text:string}[]>((resolve,reject)=>{const r=indexedDB.open("crewship-artifact-drafts",1);r.onerror=()=>reject(r.error);r.onsuccess=()=>{const db=r.result,tx=db.transaction("drafts","readonly"),get=tx.objectStore("drafts").getAll();tx.oncomplete=()=>{db.close();resolve(get.result)}}}))
-  expect(rows).toHaveLength(1);expect(JSON.parse(rows[0].text).format).toBe("crewship-local-draft-v1")
+  expect(rows).toHaveLength(2);for(const row of rows)expect(JSON.parse(row.text).format).toBe("crewship-local-draft-v1")
   expect(JSON.stringify(rows)).not.toContain("PRIVATE_CANVAS_CHANGE")
  }finally{await browser.close()}
 },30_000)
