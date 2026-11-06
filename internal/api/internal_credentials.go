@@ -432,8 +432,9 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 	defer tx.Rollback()
 
 	// This route serves the health and OAuth workers. Neither has a reason to
-	// put a new value into the governance model credential or to move it away
-	// from REVOKED; both decide where the workspace judge connects (#5024).
+	// put a new value into the governance model credential or to move it out of
+	// REVOKED or an unapproved state; both decide where the workspace judge
+	// connects (#5024).
 	bound, err := credentialGovernanceBound(r.Context(), tx, credID)
 	if err != nil {
 		replyInternalError(w, h.logger, "check governance credential binding", err)
@@ -445,7 +446,7 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 			replyInternalError(w, h.logger, "load credential status", err)
 			return
 		}
-		if body.AccessToken != nil || body.RefreshToken != nil || (current == "REVOKED" && body.Status != "REVOKED") {
+		if body.AccessToken != nil || body.RefreshToken != nil || (body.Status != current && (current == "REVOKED" || current == "PENDING_APPROVAL" || current == credentialStatusRequested)) {
 			replyError(w, http.StatusForbidden, msgGovernanceCredential)
 			return
 		}

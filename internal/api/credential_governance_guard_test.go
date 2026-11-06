@@ -194,6 +194,9 @@ func TestInternalCredentialPatchGovernance(t *testing.T) {
 		{"refresh token", "ACTIVE", `{"status":"ACTIVE","refresh_token":"replacement"}`, "ACTIVE", http.StatusForbidden},
 		{"reactivate revoked", "ACTIVE", `{"status":"ACTIVE"}`, "REVOKED", http.StatusForbidden},
 		{"leave revoked through error", "ERROR", `{"status":"ERROR"}`, "REVOKED", http.StatusForbidden},
+		{"activate pending approval", "ACTIVE", `{"status":"ACTIVE"}`, "PENDING_APPROVAL", http.StatusForbidden},
+		{"leave pending through error", "ERROR", `{"status":"ERROR"}`, "PENDING_APPROVAL", http.StatusForbidden},
+		{"leave requested", "ACTIVE", `{"status":"ACTIVE"}`, "REQUESTED", http.StatusForbidden},
 		{"health report", "RATE_LIMITED", `{"status":"RATE_LIMITED"}`, "ACTIVE", http.StatusOK},
 		{"recover after limit", "ACTIVE", `{"status":"ACTIVE"}`, "RATE_LIMITED", http.StatusOK},
 	}

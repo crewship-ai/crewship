@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- ⚠️ **Behaviour change: only OWNER or ADMIN can change the governance model credential (#5024).** PATCH, rotate, escalation answers, OAuth completion and internal token writes refuse a bound credential for narrower roles, and `credential.rotate` no longer reaches it. Binding now needs an active credential.
+
 - ⚠️ **Behaviour change: invalid native version reads now return exit code 2 instead of 1 (#4930).** `crewship craft version` classifies non-positive, non-canonical and overflowing version numbers as validation errors before authentication or any HTTP request. Scripts must now expect process exit 2 and `error.exit_code: 2` in machine-readable errors. Negative positional versions are passed after `--` so they reach version validation.
 
 - **A Design comment sent to an agent no longer produces a duplicate version (#4527).** The task prompts from the Design editor, `crewship page design comment --send-to-agent --wait` and the chat bridge told the agent to call `design_snapshot` after `design_apply`. A successful `design_apply` already saves the version and answers the comment, so the agent saved the same canvas twice. The prompts now say not to snapshot afterwards, matching the `crewship-design` skill, and the PRD acceptance test requires exactly one agent version and no `design_snapshot` call.
