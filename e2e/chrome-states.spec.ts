@@ -62,7 +62,9 @@ test.describe("phone", () => {
       await page.clock.fastForward(31_000)
       // Real time for the ticket request between attempts.
       await page.waitForTimeout(250)
-      if (await banner.getAttribute("data-state").catch(() => null) === "unreachable") break
+      // Bounded: the banner does not exist yet, and an unbounded read would wait
+      // for it on real time while this loop stops advancing the page clock.
+      if (await banner.getAttribute("data-state", { timeout: 250 }).catch(() => null) === "unreachable") break
     }
     await expect(banner).toHaveAttribute("data-state", "unreachable", { timeout: 15_000 })
     await expect(banner).toHaveCount(1)

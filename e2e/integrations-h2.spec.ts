@@ -137,7 +137,9 @@ test.describe("desktop", () => {
       try {
         await signIn(member, email!, process.env.E2E_MEMBER_PASSWORD ?? "")
         await member.goto(`/integrations?space=webhooks&id=${id}&pane=settings`)
-        await expect(member.locator("h1:visible").first()).toHaveText(name)
+        // A member may know a webhook exists, not where it points (#4595).
+        await expect(member.locator("h1:visible").first()).toHaveText("Webhook")
+        await expect(member.getByText(name)).toHaveCount(0)
         await expect(member.getByRole("switch", { name: "Paused" })).toBeDisabled()
         await expect(member.getByRole("button", { name: "Remove…" })).toHaveCount(0)
         await expect(primary(member)).toHaveAccessibleName("Add webhook")
