@@ -400,7 +400,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   window.addEventListener('message',windowMessage)
   const unregisterPrivacy=registerDocumentDraftWriter(humanId,retirePrivacy,{suspend:suspendForAuth,hasDraft:()=>Boolean(metadataOnly||current?.phase?.dirty||current?.capture)})
   function wrapJournal(journal:NativeDraftJournal,r:Runtime):NativeDraftJournal{return {...journal,
-   async persist(draft){await journal.persist(draft);if(live(r))r.capture={...draft,bytes:draft.bytes.slice()}},
+   async persist(draft,final=Boolean(r.retiring)){await journal.persist(draft,final);if(live(r))r.capture={...draft,bytes:draft.bytes.slice()}},
    confirm:async(draft)=>{await journal.confirm(draft);if(r.capture?.editorRevision===draft.editorRevision)r.capture=undefined},
   }}
   function retireWrite(r:Runtime,closeJournal=true):Promise<boolean>{
@@ -447,7 +447,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     const snapshot=await r.port.snapshot(r.abort.signal)
     const draft:NativeDraft={applicationId:sessionApplication!,enginePin:r.enginePin,sessionId:r.sessionId,generation:r.generation,baseVersion:r.receiptVersion??r.version,editorRevision:snapshot.editorRevision,bytes:snapshot.bytes.slice()}
     await r.port.validate(draft,r.abort.signal)
-    await r.journal.persist(draft)
+    await r.journal.persist(draft,true)
     if(!live(r))return
     r.capture=draft;r.blocked=false
     if(!r.nativeReadOnly&&await r.port.setReadOnly(true,r.abort.signal)!==true)throw Error('native_read_only_unconfirmed')

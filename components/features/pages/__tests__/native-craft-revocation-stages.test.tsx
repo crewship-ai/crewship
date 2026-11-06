@@ -314,6 +314,16 @@ describe('a draft kept after write loss',()=>{
   // The journal identity is per module: the next test signs in again.
   await suspendOtherDocumentDrafts('human')
  })
+ it('marks the capture of a retiring editor as final, and an edit as not',async()=>{
+  await opened()
+  act(()=>options.at(-1)!.onChanged('typed','doc'))
+  await advance(3_000)
+  expect(journal.persist.mock.calls.at(-1)?.[1]).toBe(false)
+  server.state='comment-only'
+  server.push('session_retired',{delivery:'stopped',reason:'write_revoked',draft:'retain'})
+  await advance(1_000)
+  expect(journal.persist.mock.calls.at(-1)?.[1]).toBe(true)
+ })
  it('the watch ends with the editor',async()=>{
   await opened()
   act(()=>options.at(-1)!.onChanged('typed','doc'))

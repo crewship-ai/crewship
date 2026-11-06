@@ -54,9 +54,9 @@ function confirmedNativeDrafts(human: string | undefined, documents: unknown): C
 }
 /** A native editor suspended by a confirmed sign-out stores its last snapshot:
  * nothing new arrived, and the confirmation covers it. Any other revision stays. */
-function removeSuspendedNativeDrafts(confirmed: CapturedDocumentDraft[]) {
-  const successors = confirmed.length ? suspendedDocumentDraftRevisions(confirmed).filter(row => row.key[1].includes('"native:')) : []
-  return successors.length ? removeCapturedDocumentDrafts(successors) : Promise.resolve()
+async function removeSuspendedNativeDrafts(confirmed: CapturedDocumentDraft[]) {
+  const successors = confirmed.length ? (await suspendedDocumentDraftRevisions(confirmed)).filter(row => row.key[1].includes('"native:')) : []
+  if (successors.length) await removeCapturedDocumentDrafts(successors)
 }
 
 const sessionSchema = z.object({

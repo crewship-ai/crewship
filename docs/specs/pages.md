@@ -1540,9 +1540,10 @@ keep the live model mounted behind recovery UI and block navigation. Explicit
 sign-out warns before deleting persistent recovery copies and deletes only the
 revisions covered by that confirmation, plus the exact revision this tab's own
 suspended native editor made from one of them. Later writes remain for recovery,
-including another tab's. The sign-out message names the confirmed revisions, so a
-tab holding one of them erases the same successor once the session is gone; an
-unsaved edit it never stored before suspending is part of that snapshot.
+including another tab's. A retiring editor's last capture records on its row which
+revision it replaced, and the sign-out message names the confirmed revisions, so
+whichever tab finishes last erases that one capture once the session is gone. An
+unsaved edit the editor never stored before retiring is part of that capture.
 Recovery does not replay native snapshot saves, custody operations or agent
 dispatch. Design resumes standard CRDT synchronization only after fresh
 same-person Edit admission; read-only viewers do not restore a writer canvas.
