@@ -34,6 +34,7 @@ func TestAcceptance_SkillLockBlocksRewrites(t *testing.T) {
 	sink := &lockJournalSink{}
 	rig, db := startFidelityServer(t, "fid-ws", "fid-owner", append(append([]string{}, fidelityBaseSeed...),
 		`INSERT INTO skills(id,name,slug,display_name,source,lifecycle_state,content) VALUES('sk-lk','lk-skill','lk-skill','LK','CUSTOM','active','# original')`,
+		`INSERT INTO agent_skills(id,agent_id,skill_id,enabled) VALUES('as-lk','fid-agent-id','sk-lk',1)`,
 	), api.WithJournal(sink))
 
 	if out := rig.must("skill", "lock", "lk-skill"); !strings.Contains(out, "locked") {

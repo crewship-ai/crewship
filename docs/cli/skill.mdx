@@ -295,8 +295,14 @@ While a skill is locked:
   a `skill.write_blocked` journal entry. Unlock the skill first to change it.
 - The lifecycle sweep never moves it to `stale` or `archived`, the same way an
   assigned skill is held. A person who can manage skills can still
-  archive or restore it by hand, on purpose: the lock guards against autonomous
-  rewrites, not against an owner's own housekeeping.
+  archive or restore it by hand: the lock guards against autonomous rewrites,
+  not manual housekeeping. Archive and restore are not limited to the workspace
+  that placed the lock.
+
+A lock belongs to the workspace that placed it. A workspace can lock a skill
+only when its own agents alone hold it, so bundled, unassigned and shared skills
+are refused with `403`. Only the placing workspace can unlock, even if another
+workspace assigns the skill later.
 
 Only a signed-in person with the `OWNER` or `ADMIN` role can lock or unlock;
 run tokens, sidecar tokens and agent identities are refused with `403`.

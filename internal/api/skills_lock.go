@@ -4,7 +4,8 @@ package api
 // agent, sidecar tool, consolidation or promotion path rewrites it, and the
 // lifecycle sweep does not age it out. Only an interactive human credential
 // with the manage role may lock or unlock; run tokens, internal (sidecar)
-// tokens and agent identities are refused.
+// tokens and agent identities are refused. A lock belongs to the workspace that
+// placed it.
 
 import (
 	"context"
@@ -55,9 +56,15 @@ func (h *SkillHandler) setLock(w http.ResponseWriter, r *http.Request, lock bool
 		return
 	}
 	skillID := r.PathValue("skillId")
-	var slug, source string
+	wsID := WorkspaceIDFromContext(r.Context())
+	var slug, source, holder string
 	var was int
-	err := h.db.QueryRowContext(r.Context(), "SELECT slug, locked, source FROM skills WHERE id = ?", skillID).Scan(&slug, &was, &source)
+	// The join drops a holder workspace that no longer exists, so its lock
+	// falls to the sole remaining assignee instead of being stranded.
+	err := h.db.QueryRowContext(r.Context(), `
+		SELECT s.slug, s.locked, s.source, COALESCE(w.id, '')
+		FROM skills s LEFT JOIN workspaces w ON w.id = s.locked_workspace_id
+		WHERE s.id = ?`, skillID).Scan(&slug, &was, &source, &holder)
 	if errors.Is(err, sql.ErrNoRows) {
 		problem(http.StatusNotFound, "skill not found")
 		return
@@ -66,10 +73,10 @@ func (h *SkillHandler) setLock(w http.ResponseWriter, r *http.Request, lock bool
 		replyInternalError(w, h.logger, "skill lock lookup", err)
 		return
 	}
-	// The catalog row is shared by every workspace. A bundled skill is
-	// re-seeded by the server, and a skill held only by another workspace's
-	// agents is not this workspace's to curate: neither may be locked or
-	// unlocked here.
+	// The catalog row is shared by every workspace and has no owner column. A
+	// lock therefore belongs to the workspace that placed it, and only a
+	// workspace that alone holds the skill may place one: a bundled, unassigned
+	// or shared skill has no single owner to curate it.
 	if source == "BUNDLED" {
 		problem(http.StatusForbidden, "BUNDLED skills are shared by every workspace; refusing to lock or unlock")
 		return
@@ -78,12 +85,16 @@ func (h *SkillHandler) setLock(w http.ResponseWriter, r *http.Request, lock bool
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT COALESCE(SUM(a.workspace_id = ?), 0), COALESCE(SUM(a.workspace_id != ?), 0)
 		FROM agent_skills as2 JOIN agents a ON a.id = as2.agent_id WHERE as2.skill_id = ?`,
-		WorkspaceIDFromContext(r.Context()), WorkspaceIDFromContext(r.Context()), skillID).Scan(&ownHeld, &otherHeld); err != nil {
+		wsID, wsID, skillID).Scan(&ownHeld, &otherHeld); err != nil {
 		replyInternalError(w, h.logger, "skill lock ownership", err)
 		return
 	}
-	if otherHeld > 0 && ownHeld == 0 {
-		problem(http.StatusForbidden, "this skill belongs to another workspace; refusing to lock or unlock")
+	switch {
+	case holder != "" && holder != wsID:
+		problem(http.StatusForbidden, "another workspace placed this lock; refusing to change it")
+		return
+	case holder == "" && (ownHeld == 0 || otherHeld > 0):
+		problem(http.StatusForbidden, "only a workspace that alone holds a skill can lock it; assign it to one of your agents first, and unassign it elsewhere")
 		return
 	}
 	userID := UserFromContext(r.Context()).ID
@@ -96,11 +107,11 @@ func (h *SkillHandler) setLock(w http.ResponseWriter, r *http.Request, lock bool
 		now := time.Now().UTC().Format(time.RFC3339)
 		if lock {
 			_, err = h.db.ExecContext(r.Context(),
-				`UPDATE skills SET locked = 1, locked_by = ?, locked_at = ?, updated_at = ? WHERE id = ?`,
-				userID, now, now, skillID)
+				`UPDATE skills SET locked = 1, locked_by = ?, locked_workspace_id = ?, locked_at = ?, updated_at = ? WHERE id = ?`,
+				userID, wsID, now, now, skillID)
 		} else {
 			_, err = h.db.ExecContext(r.Context(),
-				`UPDATE skills SET locked = 0, locked_by = NULL, locked_at = NULL, updated_at = ? WHERE id = ?`,
+				`UPDATE skills SET locked = 0, locked_by = NULL, locked_workspace_id = NULL, locked_at = NULL, updated_at = ? WHERE id = ?`,
 				now, skillID)
 		}
 		if err != nil {
@@ -112,7 +123,7 @@ func (h *SkillHandler) setLock(w http.ResponseWriter, r *http.Request, lock bool
 			entryType, verb = journal.EntrySkillUnlocked, "unlocked"
 		}
 		if _, jerr := h.journal.Emit(r.Context(), journal.Entry{
-			WorkspaceID: WorkspaceIDFromContext(r.Context()),
+			WorkspaceID: wsID,
 			Type:        entryType,
 			Severity:    journal.SeverityNotice,
 			ActorType:   journal.ActorUser,

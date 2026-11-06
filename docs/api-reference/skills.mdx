@@ -429,6 +429,12 @@ Locking and unlocking are idempotent and emit `skill.locked` / `skill.unlocked`.
 Needs the `OWNER` or `ADMIN` role **and** a person's credential (session or CLI
 token). Run tokens, sidecar tokens and agent identities get `403`.
 
+Skills are one catalog shared by every workspace, with no owner column, so a
+lock belongs to the workspace that placed it. A workspace can place a lock only
+on a skill that its own agents alone hold. Only that workspace can lift the
+lock, even if another workspace assigns the skill later. If the placing
+workspace is deleted, the lock passes to the workspace that alone holds the skill.
+
 **Response:** `200 OK`
 
 ```json
@@ -437,7 +443,7 @@ token). Run tokens, sidecar tokens and agent identities get `403`.
 
 | Status | Condition |
 |---|---|
-| `403` | Insufficient role, or a non-human credential |
+| `403` | Insufficient role, a non-human credential, a bundled, unassigned or shared skill, or a lock placed by another workspace |
 | `404` | Skill not found |
 
 ---

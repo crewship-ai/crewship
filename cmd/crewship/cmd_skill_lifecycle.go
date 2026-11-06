@@ -88,7 +88,8 @@ memory consolidation, generation or proposed-skill approval can change its
 content, bundled re-seeds leave it alone, and the lifecycle sweep never moves
 it to stale or archived. A blocked write fails with an error naming the lock
 and is recorded in the journal. Needs a signed-in person with the OWNER or
-ADMIN role; run tokens and agent identities are refused.
+ADMIN role; run tokens and agent identities are refused. Only a workspace whose
+agents alone hold the skill can lock it, and only that workspace can unlock it.
 
 Examples:
   crewship skill lock my-skill`,
