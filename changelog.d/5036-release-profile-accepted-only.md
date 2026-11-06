@@ -1,0 +1,1 @@
+- **Shared dev releases turn on accepted surfaces only (#5036).** Dashboard and Slides stay off in the release profile until their milestones pass acceptance, and `RELEASING.md` now lists the production default, the shared dev setting and the acceptance state separately.
