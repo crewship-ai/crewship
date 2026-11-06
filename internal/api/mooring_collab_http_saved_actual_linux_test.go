@@ -58,6 +58,13 @@ func TestMooringHTTPActualRotationKeepsQueuedPendingAndItsReceipt(t *testing.T) 
 	runMooringHTTPActualSDK(t, false, "late-renewal-queued-pending")
 }
 
+// #5019. A recipient can disconnect after its reopen was sent and before Joined
+// was captured. Only that recipient goes away: the Open cannot be taken back, but
+// the other collaborator keeps the session and receives everything.
+func TestMooringHTTPActualDisconnectDuringReopenKeepsOtherRecipients(t *testing.T) {
+	runMooringHTTPActualSDK(t, false, "late-renewal-disconnect")
+}
+
 // mooringActualNativeLease is session_control::DELIVERY_LEASE_MS.
 const mooringActualNativeLease = 5 * time.Second
 
@@ -112,6 +119,7 @@ func (l *mooringLateRenewal) arm(t *testing.T, db *sql.DB) func() {
 func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...string) {
 	lateRenewal := len(grantChange) != 0 && strings.HasPrefix(grantChange[0], "late-renewal")
 	queuedPending := lateRenewal && grantChange[0] == "late-renewal-queued-pending"
+	disconnectDuringReopen := lateRenewal && grantChange[0] == "late-renewal-disconnect"
 	if lateRenewal {
 		grantChange = nil
 	}
@@ -277,6 +285,7 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...strin
 		t.Fatal("actual human capability not activated")
 	}
 	late := &mooringLateRenewal{release: make(chan struct{})}
+	var disconnectPeer atomic.Pointer[func()]
 	if lateRenewal {
 		// Same barrier as the late-ticket fixture below: installed before any Open.
 		document.mu.Lock()
@@ -287,6 +296,9 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...strin
 		}
 		document.pump.handlers.Submit = func(ctx context.Context, q protocol.SessionSubmitBatch) (protocol.SessionCommitResult, error) {
 			late.wait(ctx)
+			if disconnectDuringReopen {
+				defer late.commits.Add(1)
+			}
 			if !queuedPending {
 				return originalSubmit(ctx, q)
 			}
@@ -299,6 +311,39 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...strin
 				close(late.committed)
 			}
 			return result, err
+		}
+		if disconnectDuringReopen {
+			originalTicket := document.pump.handlers.TicketControl
+			document.pump.handlers.TicketControl = func(ctx context.Context, token mooring.SessionControl, q protocol.TicketValidationRequest) error {
+				document.mu.Lock()
+				peer := document.connections[second.Ref]
+				document.mu.Unlock()
+				if peer != nil {
+					peer.mu.Lock()
+					reopening := peer.transition != nil && peer.ticket == q.Ticket
+					peer.mu.Unlock()
+					if disconnect := disconnectPeer.Load(); reopening && disconnect != nil && disconnectPeer.CompareAndSwap(disconnect, nil) {
+						// The physical Open is out and no ticket has been answered. Both
+						// groups finish first: a sealed group whose author has left ends
+						// the session on its own path, which is not what this test proves.
+						for start := time.Now(); late.commits.Load() < 2 && time.Since(start) < mooringActualNativeLease; {
+							time.Sleep(10 * time.Millisecond)
+						}
+						(*disconnect)()
+						phase("peer-disconnected")
+						for start := time.Now(); time.Since(start) < 5*time.Second; time.Sleep(10 * time.Millisecond) {
+							peer.mu.Lock()
+							closed := peer.closed
+							peer.mu.Unlock()
+							if closed || peer.tearingDown.Load() || ctx.Err() != nil {
+								break
+							}
+						}
+						time.Sleep(100 * time.Millisecond) // Let teardown reach its decision.
+					}
+				}
+				return originalTicket(ctx, token, q)
+			}
 		}
 		if queuedPending {
 			late.rotated, late.committed = make(chan struct{}), make(chan struct{})
@@ -627,18 +672,26 @@ process.stdout.write(JSON.stringify(changes));`
 		leasesLapsed := late.arm(t, rig.db)
 		send(a, first, "original-own-request", own)
 		send(b, second, "original-peer-request", peer)
+		if disconnectDuringReopen {
+			disconnect := func() { _ = b.Close() }
+			disconnectPeer.Store(&disconnect)
+		}
 		leasesLapsed()
 	} else {
 		send(a, first, "original-own-request", own)
 		send(b, second, "original-peer-request", peer)
 	}
 	phase("original-groups-sent")
-	for _, recipient := range []struct {
+	recipients := []struct {
 		ws    *websocket.Conn
 		id    string
 		count int
 		ref   string
-	}{{a, "original-own-request", 2, first.Ref}, {b, "original-peer-request", 1, second.Ref}} {
+	}{{a, "original-own-request", 2, first.Ref}, {b, "original-peer-request", 1, second.Ref}}
+	if disconnectDuringReopen {
+		recipients = recipients[:1]
+	}
+	for _, recipient := range recipients {
 		receivedReceipt, updates := recipient.ref == second.Ref && peerAlreadySaved, len(framesByRef[recipient.ref])
 		for !receivedReceipt || updates < 3 {
 			_ = recipient.ws.SetReadDeadline(time.Now().Add(mooringActualFrameDeadline))
@@ -711,7 +764,22 @@ process.stdout.write(JSON.stringify(changes));`
 	currentOpening := first
 	currentOpening.Revision = "3"
 	actualCurrent := read(a, currentOpening)
-	for _, o := range []opening{first, second} {
+	openings := []opening{first, second}
+	if disconnectDuringReopen {
+		openings = openings[:1]
+		// The other recipient can finish first; the peer's reopen is on its own clock.
+		for start := time.Now(); disconnectPeer.Load() != nil && time.Since(start) < mooringActualFrameDeadline; {
+			time.Sleep(50 * time.Millisecond)
+		}
+		if disconnectPeer.Load() != nil {
+			t.Fatal("the peer's reopen never reached its ticket, so nothing was disconnected")
+		}
+		time.Sleep(time.Second) // Long enough for the leaving socket's reopen to land.
+		if err := document.cell.runtime.Err(); err != nil || document.ctx.Err() != nil {
+			t.Fatal("one recipient's disconnect ended the session", err, document.ctx.Err())
+		}
+	}
+	for _, o := range openings {
 		dir := sdkDirs[o.Ref]
 		input, _ := json.Marshal(map[string]any{"frames": framesByRef[o.Ref], "expected": actualCurrent.State, "peer_delete": peerDelete})
 		if err := os.WriteFile(filepath.Join(dir, "replay.json"), input, 0600); err != nil {

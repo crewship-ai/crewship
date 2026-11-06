@@ -63,7 +63,8 @@
         "TestMooringHTTPActualSDKWholeGroupSavedAndPeer",
         "TestMooringHTTPActualSDKUnobservedPeerDeletePreservesOriginal",
         "TestMooringHTTPActualLateRenewalReopensQuietRecipients",
-        "TestMooringHTTPActualRotationKeepsQueuedPendingAndItsReceipt"
+        "TestMooringHTTPActualRotationKeepsQueuedPendingAndItsReceipt",
+        "TestMooringHTTPActualDisconnectDuringReopenKeepsOtherRecipients"
       ]
     },
     {

@@ -16,6 +16,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
@@ -105,6 +106,8 @@ type collaborationHTTPConnection struct {
 	participantBinding       *mooring.SessionParticipantBinding
 	transition               *collaborationGateTransition
 	retirements              map[string]*collaborationRetiredGate
+	// The socket is going away: start no reopen and send it nothing further.
+	tearingDown atomic.Bool
 }
 
 func newCollaborationHTTPManager(pages *PageHandler, c MooringHTTPConfig) (*collaborationHTTPManager, error) {

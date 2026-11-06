@@ -196,7 +196,9 @@ to send anything. Saved edits are not lost either way. The expiry is proved agai
 in the writer transaction, and the reopen requires the original admission. A
 rotation can overtake a Pending still queued for the old gate; its receipt on the
 new gate shares that one output's ID only along a rotation chain the runtime
-recorded, and only the gate may differ.
+recorded, and only the gate may differ. A recipient that disconnects while its
+reopen is in flight leaves once that reopen lands; a sent Open cannot be withdrawn,
+and other recipients are unaffected.
 
 
 ## Recorded edit metadata

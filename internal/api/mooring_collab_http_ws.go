@@ -206,7 +206,11 @@ func (m *collaborationHTTPManager) websocket(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		stopLiveness = collaborationSocketLiveness(operationContext, ws, time.Minute, 30*time.Second)
-		defer c.startGateWatch(operationContext, collaborationGateWatchInterval)()
+		stopGateWatch := c.startGateWatch(operationContext, collaborationGateWatchInterval)
+		defer func() {
+			c.tearingDown.Store(true)
+			stopGateWatch()
+		}()
 		for {
 			_ = ws.SetReadDeadline(time.Now().Add(time.Minute))
 			_, raw, err = ws.ReadMessage()
@@ -297,7 +301,8 @@ func (c *collaborationHTTPConnection) close() {
 	if c == nil {
 		return
 	}
-	c.deliveryMu.Lock()
+	c.tearingDown.Store(true)
+	c.lockAfterSentReopen()
 	defer c.deliveryMu.Unlock()
 	c.mu.Lock()
 	if c.closed {

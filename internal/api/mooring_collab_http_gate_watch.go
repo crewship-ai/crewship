@@ -22,7 +22,7 @@ const collaborationGateWatchInterval = time.Second
 func (c *collaborationHTTPConnection) gateLapsed(ctx context.Context) (bool, error) {
 	c.mu.Lock()
 	gate := c.joined.gate
-	live := !c.closed && c.joinedDelivered && c.participantBinding != nil && c.joined.delivery != nil && c.transition == nil
+	live := !c.closed && !c.tearingDown.Load() && c.joinedDelivered && c.participantBinding != nil && c.joined.delivery != nil && c.transition == nil
 	c.mu.Unlock()
 	if !live {
 		return false, nil
@@ -48,6 +48,10 @@ func (c *collaborationHTTPConnection) gateLapsed(ctx context.Context) (bool, err
 // rotation from any other trigger does, unless this socket closed meanwhile.
 func (c *collaborationHTTPConnection) reopenLapsedGate(ctx context.Context) {
 	c.deliveryMu.Lock()
+	if c.tearingDown.Load() {
+		c.deliveryMu.Unlock()
+		return
+	}
 	_, err := c.startGateTransition(ctx)
 	c.deliveryMu.Unlock()
 	if err == nil {
@@ -61,9 +65,34 @@ func (c *collaborationHTTPConnection) reopenLapsedGate(ctx context.Context) {
 	}
 }
 
-// startGateWatch runs for one socket. Stop it before closing the connection and
-// before cancelling ctx: a rotation cut off by its own socket's teardown must not
-// read as a failure and end the document for everyone else.
+// lockAfterSentReopen returns holding deliveryMu, once no sent reopen is waiting
+// for its Joined. A sent Open cannot be discarded, and the child's ticket and
+// Joined for it are still owed answers; answering them on a closed connection ends
+// the document for everyone. So teardown lets the reopen land and then leaves the
+// normal way, holding no lock meanwhile because Joined needs them. A running
+// session always answers an Open, so the wait ends with it at the latest. The
+// frames that arrive meanwhile are dropped, not sent: tearingDown is already set.
+func (c *collaborationHTTPConnection) lockAfterSentReopen() {
+	for {
+		c.deliveryMu.Lock()
+		c.mu.Lock()
+		t := c.transition
+		waiting := t != nil && c.participantPending != nil && !c.closed
+		c.mu.Unlock()
+		if !waiting || c.document.ctx.Err() != nil {
+			return
+		}
+		c.deliveryMu.Unlock()
+		select {
+		case <-t.ready:
+		case <-c.document.ctx.Done():
+		}
+	}
+}
+
+// startGateWatch runs for one socket. Publish tearingDown and stop it before
+// closing the connection and before cancelling ctx: a rotation cut off by its own
+// socket's teardown must not read as a failure and end the document for everyone.
 func (c *collaborationHTTPConnection) startGateWatch(ctx context.Context, interval time.Duration) func() {
 	stop := make(chan struct{})
 	done := make(chan struct{})

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/mooring"
+	protocol "github.com/crewship-ai/crewship/mooring/protocol/generated/go"
 	_ "modernc.org/sqlite"
 )
 
@@ -59,6 +60,7 @@ func TestCollaborationGateLapsedOnlyOnPlainExpiry(t *testing.T) {
 			c.transition = &collaborationGateTransition{ready: make(chan struct{})}
 		}},
 		{name: "socket closed", expires: 1, mutate: func(c *collaborationHTTPConnection, _ *gateWatchClock) { c.closed = true }},
+		{name: "socket tearing down", expires: 1, mutate: func(c *collaborationHTTPConnection, _ *gateWatchClock) { c.tearingDown.Store(true) }},
 		{name: "joined not delivered yet", expires: 1, mutate: func(c *collaborationHTTPConnection, _ *gateWatchClock) { c.joinedDelivered = false }},
 		{name: "no native binding", expires: 1, mutate: func(c *collaborationHTTPConnection, _ *gateWatchClock) { c.participantBinding = nil }},
 	} {
@@ -125,4 +127,110 @@ func TestCollaborationGateWatchStopsWithoutAnotherTick(t *testing.T) {
 	stopped := c.startGateWatch(ctx, time.Hour)
 	cancel()
 	stopped()
+}
+
+// Teardown publishes first, so a tick that already passed gateLapsed starts no
+// reopen. Without a binding a started one would fail and end the document.
+func TestCollaborationGateReopenStartsNothingDuringTeardown(t *testing.T) {
+	c, _, _ := gateWatchFixture(t, 1, false)
+	var cancellations atomic.Int32
+	c.document.cancel = func() { cancellations.Add(1) }
+	c.participantBinding = nil
+	c.tearingDown.Store(true)
+	c.reopenLapsedGate(t.Context())
+	if cancellations.Load() != 0 {
+		t.Fatal("teardown still attempted a reopen")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.savedRecipientDeferredLocked() {
+		t.Fatal("saved frames would still be sent to a leaving socket")
+	}
+}
+
+func TestCollaborationCloseWaitsOnlyForSentReopenWithoutHoldingLocks(t *testing.T) {
+	sent := func(t *testing.T) (*collaborationHTTPConnection, *collaborationGateTransition, context.CancelFunc) {
+		c, _, _ := gateWatchFixture(t, 1, false)
+		ctx, cancel := context.WithCancel(t.Context())
+		c.document.ctx = ctx
+		transition := &collaborationGateTransition{ready: make(chan struct{})}
+		c.transition, c.participantPending = transition, &mooring.SessionParticipantPending{}
+		return c, transition, cancel
+	}
+	wait := func(c *collaborationHTTPConnection) chan struct{} {
+		locked := make(chan struct{})
+		go func() {
+			c.lockAfterSentReopen()
+			c.deliveryMu.Unlock()
+			close(locked)
+		}()
+		return locked
+	}
+	t.Run("no reopen does not wait", func(t *testing.T) {
+		c, _, _ := gateWatchFixture(t, 1, false)
+		select {
+		case <-wait(c):
+		case <-time.After(5 * time.Second):
+			t.Fatal("waited with no reopen in flight")
+		}
+	})
+	t.Run("released by Joined", func(t *testing.T) {
+		c, transition, cancel := sent(t)
+		defer cancel()
+		locked := wait(c)
+		select {
+		case <-locked:
+			t.Fatal("did not wait for the sent reopen")
+		case <-time.After(100 * time.Millisecond):
+		}
+		// Joined needs both locks: holding either here would hang this capture.
+		c.deliveryMu.Lock()
+		c.mu.Lock()
+		c.participantPending, c.transition = nil, nil
+		close(transition.ready)
+		c.mu.Unlock()
+		c.deliveryMu.Unlock()
+		select {
+		case <-locked:
+		case <-time.After(5 * time.Second):
+			t.Fatal("Joined did not release teardown")
+		}
+	})
+	t.Run("released by the session ending", func(t *testing.T) {
+		c, _, cancel := sent(t)
+		locked := wait(c)
+		cancel()
+		select {
+		case <-locked:
+		case <-time.After(5 * time.Second):
+			t.Fatal("a dead session held teardown")
+		}
+	})
+}
+
+// close can win the race after outputControl sampled the connection, and one
+// error here ends the session for every collaborator. A closed socket that is
+// not leaving is a different case and still fails.
+func TestCollaborationFrameOwedToLeavingSocketIsDropped(t *testing.T) {
+	for _, kind := range []string{"changes_received", "commit_result", "document_update"} {
+		for _, tc := range []struct {
+			name    string
+			leaving bool
+			wantErr bool
+		}{
+			{name: "leaving", leaving: true},
+			{name: "closed without teardown", wantErr: true},
+		} {
+			t.Run(kind+"/"+tc.name, func(t *testing.T) {
+				c, _, _ := gateWatchFixture(t, 1, false)
+				c.document.originals = &collaborationLiveOriginals{}
+				c.closed = true
+				c.tearingDown.Store(tc.leaving)
+				err := c.committedOutputRecipient(context.Background(), protocol.SessionParticipantOutput{}, []byte(`{}`), kind, c.joined.gate, false)
+				if (err != nil) != tc.wantErr {
+					t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+				}
+			})
+		}
+	}
 }
