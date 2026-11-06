@@ -37,6 +37,12 @@ func craftInstructionServer(t *testing.T, busy bool) (*httptest.Server, func() [
 	mux.HandleFunc("GET /api/v1/chats/chat-new/execution-profile", func(w http.ResponseWriter, _ *http.Request) {
 		reply(w, 200, `{"mode":"trusted"}`)
 	})
+	mux.HandleFunc("GET /api/v1/chats/chat-new/messages", func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, 200, `{"messages":[{"id":"saved-instruction","role":"user","content":"Rewrite the summary","author_user_id":"user-1","agent_id":"agent-src","native_craft_instruction":true}]}`)
+	})
+	mux.HandleFunc("/api/v1/auth/cli-token/validate", func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, 200, `{"user_id":"user-1"}`)
+	})
 	mux.HandleFunc("/api/v1/ws-token", func(w http.ResponseWriter, _ *http.Request) {
 		reply(w, 200, `{"token":"ws-tok"}`)
 	})
@@ -122,5 +128,20 @@ func TestAcceptance_CraftTaskInstructionRefusedWithoutSavedEcho(t *testing.T) {
 	out, code := runArtifactBinary(t, srv, "craft", "task", "instruction", "viktor", "Rewrite the summary")
 	if code == 0 || !strings.Contains(out, "not confirmed as saved") {
 		t.Fatalf("unconfirmed instruction exit %d: %s", code, out)
+	}
+}
+
+// #5009: neither a one-click retry nor a recap turns the saved instruction into
+// an ordinary agent turn.
+func TestAcceptance_SavedInstructionIsNotResentOrRecapped(t *testing.T) {
+	srv, sent := craftInstructionServer(t, false)
+	if out, code := runArtifactBinary(t, srv, "chat", "retry", "chat-new", "--no-stream"); code == 0 || !strings.Contains(out, "native Craft instruction") {
+		t.Fatalf("retry exit %d: %s", code, out)
+	}
+	if out, code := runArtifactBinary(t, srv, "recap", "chat-new", "--agent", "viktor"); code == 0 || !strings.Contains(out, "has no messages") {
+		t.Fatalf("recap exit %d: %s", code, out)
+	}
+	if sends := sent(); len(sends) != 0 {
+		t.Fatalf("the instruction was sent again: %q", sends)
 	}
 }

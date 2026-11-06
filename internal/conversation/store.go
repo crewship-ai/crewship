@@ -450,13 +450,8 @@ func (s *Store) read(ctx context.Context, sessionID string, offset, limit int, i
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
-	lineNum := 0
+	eligible := 0
 	for scanner.Scan() {
-		lineNum++
-		if offset > 0 && lineNum <= offset {
-			continue
-		}
-
 		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
@@ -464,6 +459,11 @@ func (s *Store) read(ctx context.Context, sessionID string, offset, limit int, i
 
 		var msg Message
 		if err := json.Unmarshal(line, &msg); err != nil || (msg.NativeCraftInstruction && !instructions) {
+			continue
+		}
+		// Offset counts what this reader can get, the same as limit, so
+		// consecutive pages neither repeat nor skip a message.
+		if eligible++; eligible <= offset {
 			continue
 		}
 		messages = append(messages, msg)

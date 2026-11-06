@@ -724,6 +724,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	broadcastUserMsg := func() {
 		metadata := map[string]any{"author_user_id": userID, "message_id": triggerMessageID}
+		if instructionOnly {
+			metadata[NativeCraftInstructionMetadataKey] = true
+		}
 		if askEnvelope != nil {
 			metadata["ask_submission_id"] = askEnvelope.SubmissionID
 		}

@@ -155,6 +155,66 @@ describe("ChatPanel — every delegated command does its advertised thing", () =
   })
 })
 
+describe("ChatPanel — a saved native Craft instruction (#5009)", () => {
+  const instruction = {
+    ...turn("t3", "user", "Confidential merger instruction"),
+    metadata: { native_craft_instruction: true },
+  }
+
+  it("keeps the classification through the history mapping", async () => {
+    global.fetch = vi.fn((url: string) => {
+      const u = String(url)
+      if (u.includes("/execution-profile")) return { ok: true, status: 200, json: async () => ({ mode: "trusted" }) } as unknown as Response
+      const messages = u.includes("/messages")
+        ? [{ id: "m1", role: "user", content: "Confidential merger instruction", ts: "2026-11-06T00:00:00Z", native_craft_instruction: true }]
+        : []
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ messages, participants: [] }) }) as unknown as Promise<Response>
+    }) as unknown as typeof fetch
+    render(<ChatPanel {...panelProps} />)
+
+    await waitFor(() => expect(chatStub.loadHistory).toHaveBeenCalledWith(
+      [expect.objectContaining({ id: "m1", metadata: expect.objectContaining({ native_craft_instruction: true }) })],
+    ))
+  })
+
+  it("disables regenerate when the last message is the instruction", async () => {
+    chatStub.turns = [...chatStub.turns, instruction]
+    render(<ChatPanel {...panelProps} />)
+    await waitFor(() => expect(palette.props).not.toBeNull())
+
+    const disabled = palette.props!.disabledCommands as Record<string, string>
+    expect(disabled.regenerate).toBeTruthy()
+  })
+
+  it("keeps regenerate for an ordinary turn after the instruction", async () => {
+    chatStub.turns = [instruction, turn("t4", "user", "ordinary"), turn("t5", "assistant", "answer")]
+    render(<ChatPanel {...panelProps} />)
+    await waitFor(() => expect(palette.props).not.toBeNull())
+
+    const disabled = palette.props!.disabledCommands as Record<string, string>
+    expect(disabled.regenerate).toBeUndefined()
+  })
+
+  it("leaves the instruction out of what an action form pre-fills", async () => {
+    chatStub.turns = [...chatStub.turns, instruction]
+    render(<ChatPanel {...panelProps} />)
+    await waitFor(() => expect(palette.props).not.toBeNull())
+
+    act(() => {
+      (palette.props!.onAction as (c: unknown) => void)({
+        id: "skill",
+        label: "Create skill from this conversation",
+        capability: "skill.create",
+        form_schema: [{ name: "prompt", type: "textarea", required: true }],
+      })
+    })
+
+    const prompt = await screen.findByLabelText(/prompt/i) as HTMLTextAreaElement
+    expect(prompt.value).toContain("How do I close the month?")
+    expect(prompt.value).not.toContain("Confidential merger instruction")
+  })
+})
+
 describe("ChatPanel — the action modal's lifecycle", () => {
   const skill = {
     id: "skill",

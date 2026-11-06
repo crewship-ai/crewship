@@ -75,6 +75,11 @@ func TestNativeCraftInstructionPersistsForAuthorWithoutRunOrDiagnosticCopy(t *te
 	if echo["message_id"] != msg.ID || echo["author_user_id"] != "user-1" {
 		t.Fatalf("echo does not name the persisted message: %+v", echo)
 	}
+	// A live turn needs the same classification as a reloaded one, or its
+	// one-click resend guards see an ordinary message.
+	if echo[NativeCraftInstructionMetadataKey] != true {
+		t.Fatalf("echo lost the instruction mark: %+v", echo)
+	}
 	if done, _ := events[1].Metadata.(map[string]any); done["no_reply"] != true {
 		t.Fatalf("done = %+v, want no_reply", events[1])
 	}
