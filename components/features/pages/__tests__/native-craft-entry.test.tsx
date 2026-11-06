@@ -2,7 +2,8 @@ import {render,screen,waitFor,act} from '@testing-library/react'
 import {beforeEach,afterEach,it,expect,vi} from 'vitest'
 import {APP_ROUTE_PATTERNS,isKnownAppPath} from '@/lib/app-routes'
 import CraftPage from '@/app/(dashboard)/pages/craft/editor/page'
-const m=vi.hoisted(()=>({host:vi.fn(),preview:vi.fn(),fetch:vi.fn(),params:new URLSearchParams('workspace_id=w&page_id=p'),workspace:{workspaceId:'w',loading:false,linkUnavailable:false},session:{status:'authenticated',data:{user:{id:'human'}}}}))
+const m=vi.hoisted(()=>({readLoss:vi.fn(),host:vi.fn(),preview:vi.fn(),fetch:vi.fn(),params:new URLSearchParams('workspace_id=w&page_id=p'),workspace:{workspaceId:'w',loading:false,linkUnavailable:false},session:{status:'authenticated',data:{user:{id:'human'}}}}))
+vi.mock('@/lib/mooring/native-read-loss',()=>({verifyNativeReadLoss:m.readLoss}))
 vi.mock('next/navigation',()=>({useSearchParams:()=>m.params}))
 vi.mock('@/hooks/use-auth',()=>({useSession:()=>m.session}))
 vi.mock('@/hooks/use-page-workspace',()=>({usePageWorkspace:()=>m.workspace}))
@@ -11,8 +12,14 @@ vi.mock('../native-craft-editor-host',()=>({NativeCraftEditorHost:(props:unknown
 vi.mock('../native-craft-preview',()=>({NativeCraftPreview:(props:unknown)=>{m.preview(props);return <div>Shared native preview</div>}}))
 const deferred=<T,>()=>{let resolve!:(v:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve}}
 const availability=(enabled:boolean)=>new Response(JSON.stringify({enabled,can_edit:enabled}),{status:200,headers:{'content-type':'application/json'}})
-beforeEach(()=>{vi.stubEnv('NEXT_PUBLIC_CRAFT_NATIVE_ENABLED','false');m.host.mockClear();m.preview.mockClear();m.fetch.mockReset();m.fetch.mockResolvedValue(availability(true));m.params=new URLSearchParams('workspace_id=w&page_id=p');m.workspace={workspaceId:'w',loading:false,linkUnavailable:false};m.session={status:'authenticated',data:{user:{id:'human'}}}})
+beforeEach(()=>{m.readLoss.mockReset();m.readLoss.mockResolvedValue(false);vi.stubEnv('NEXT_PUBLIC_CRAFT_NATIVE_ENABLED','false');m.host.mockClear();m.preview.mockClear();m.fetch.mockReset();m.fetch.mockResolvedValue(availability(true));m.params=new URLSearchParams('workspace_id=w&page_id=p');m.workspace={workspaceId:'w',loading:false,linkUnavailable:false};m.session={status:'authenticated',data:{user:{id:'human'}}}})
 afterEach(()=>vi.unstubAllEnvs())
+// Availability cannot say why a Page is closed: the draft leaves only on proof, and an open Page never asks.
+it('asks for proof of read loss only when neither editor nor preview is available',async()=>{
+ m.fetch.mockResolvedValue(availability(false));const {unmount}=render(<CraftPage/>)
+ await waitFor(()=>expect(m.readLoss).toHaveBeenCalledOnce());expect(m.readLoss.mock.calls[0][0]).toMatchObject({workspace:'w',page:'p'});unmount()
+ m.readLoss.mockClear();m.fetch.mockResolvedValue(availability(true));render(<CraftPage/>);await screen.findByText('Full native Word');expect(m.readLoss).not.toHaveBeenCalled()
+})
 it('mounts one full host only after authenticated page-scoped server availability even with no build flag',async()=>{render(<CraftPage/>);expect(m.host).not.toHaveBeenCalled();await screen.findByText('Full native Word');expect(m.fetch).toHaveBeenCalledWith('/api/v1/pages/%40p/craft/availability?workspace_id=w',expect.objectContaining({signal:expect.any(AbortSignal),cache:'no-store'}));expect(m.host).toHaveBeenCalledWith(expect.objectContaining({workspaceId:'w',pageId:'p',humanId:'human',enabled:true}))})
 it('keeps the server default false off even if an old frontend build flag is true',async()=>{vi.stubEnv('NEXT_PUBLIC_CRAFT_NATIVE_ENABLED','true');m.fetch.mockResolvedValue(availability(false));render(<CraftPage/>);await screen.findByText('Nativní editor není zapnutý.');expect(m.fetch).toHaveBeenCalledOnce();expect(m.host).not.toHaveBeenCalled()})
 it('never mounts or admits a host after an unavailable or forbidden availability response',async()=>{m.fetch.mockResolvedValue(new Response(null,{status:403}));render(<CraftPage/>);await screen.findByRole('alert');expect(m.host).not.toHaveBeenCalled()})

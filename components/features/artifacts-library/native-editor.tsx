@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { apiFetch } from "@/lib/api-fetch"
+import { verifyNativeReadLoss } from "@/lib/mooring/native-read-loss"
 import { NativeCraftEditorHost } from "@/components/features/pages/native-craft-editor-host"
 import { NativeCraftPreview } from "@/components/features/pages/native-craft-preview"
 import { NativeCraftReaderHistory } from "@/components/features/pages/native-craft-reader-history"
@@ -34,10 +35,13 @@ export function ArtifactNativeEditor({ workspaceId, pageId, fallback }: { worksp
       const value: unknown = await response.json()
       const fields = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
       const state: State = fields.enabled === true && fields.can_edit === true ? "enabled" : fields.preview_enabled === true ? "preview" : fields.enabled === true ? "readonly" : "disabled"
-      if (!abort.signal.aborted) setAvailability({ scope, state })
+      if (abort.signal.aborted) return
+      setAvailability({ scope, state })
+      // Availability does not say why: a draft left here is erased only on proof.
+      if (state === "disabled" && humanId) void verifyNativeReadLoss({ human: humanId, workspace: workspaceId, page: pageId }).catch(() => {})
     }).catch(() => { if (!abort.signal.aborted) setAvailability({ scope, state: "error" }) })
     return () => abort.abort()
-  }, [scope, workspaceId, pageId, attempt])
+  }, [scope, humanId, workspaceId, pageId, attempt])
 
   if (!scope || !humanId) return <>{fallback}</>
   // A previous person's or document's answer never authorizes this render.

@@ -7,6 +7,7 @@ import {usePageWorkspace} from "@/hooks/use-page-workspace"
 import {apiFetch} from "@/lib/api-fetch"
 import {NativeCraftPreview} from "@/components/features/pages/native-craft-preview"
 import {NativeCraftEditorHost} from "@/components/features/pages/native-craft-editor-host"
+import {verifyNativeReadLoss} from "@/lib/mooring/native-read-loss"
 
 interface Availability {scope:string;state:"loading"|"enabled"|"preview"|"disabled"|"error"}
 export default function CraftPage(){return <Suspense fallback={<p className="p-6">Připojuji…</p>}><NativeWordEntry/></Suspense>}
@@ -28,10 +29,13 @@ function NativeWordEntry(){
    const value:unknown=await response.json()
    const enabled=Boolean(value)&&typeof value==='object'&&!Array.isArray(value)&&(value as {enabled?:unknown}).enabled===true&&(value as {can_edit?:unknown}).can_edit===true
    const preview=Boolean(value)&&typeof value==='object'&&!Array.isArray(value)&&(value as {preview_enabled?:unknown}).preview_enabled===true
-   if(!abort.signal.aborted)setAvailability({scope,state:enabled?'enabled':preview?'preview':'disabled'})
+   if(abort.signal.aborted)return
+   setAvailability({scope,state:enabled?'enabled':preview?'preview':'disabled'})
+   // Availability does not say why: a draft left here is erased only on proof.
+   if(!enabled&&!preview)void verifyNativeReadLoss({human:humanId!,workspace:workspaceId!,page:pageId}).catch(()=>{})
   }).catch(()=>{if(!abort.signal.aborted)setAvailability({scope,state:'error'})})
   return()=>abort.abort()
- },[scope,request])
+ },[scope,request,humanId,workspaceId,pageId])
  if(loading)return <p className="p-6">Připojuji…</p>
  if(!valid)return <p role="alert" className="p-6">Dokument není dostupný.</p>
  // A previous page or human's result can never authorize this render, even
