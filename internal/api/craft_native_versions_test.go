@@ -123,7 +123,7 @@ func TestCraftNativeVersionsListAuthorityMatchesDocumentRead(t *testing.T) {
 	}{
 		{"owner", owner, ownerToken, 200},
 		{"editor", editor, issued(editor), 200},
-		{"reader", reader, issued(reader), 200},
+		{"reader", reader, issued(reader), 403},
 		{"comment only", commenter, issued(commenter), 403},
 		{"non-member", outsider, issued(outsider), 403},
 		{"non-member replaying the owner's admission", outsider, ownerToken, 403},
@@ -150,12 +150,15 @@ func TestCraftNativeVersionsListAuthorityMatchesDocumentRead(t *testing.T) {
 			}
 		})
 	}
-	// A reader whose grant is revoked loses the listing on the same admission.
-	readerToken := issued(reader)
-	mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='native-page' AND subject_id='native-history-reader'`)
-	read := craftNativeDocumentCall(t, d, reader, readerToken, "read", nil)
-	if list := craftNativeVersionsCall(d, reader, readerToken); list.Code == 200 || list.Code != read.Code {
-		t.Fatalf("revoked reader listed history: list %d read %d", list.Code, read.Code)
+	// An editor whose grant is revoked loses the listing on the same admission.
+	editorToken := issued(editor)
+	if list := craftNativeVersionsCall(d, editor, editorToken); list.Code != 200 {
+		t.Fatalf("editor before revoke %d %s", list.Code, list.Body)
+	}
+	mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='native-page' AND subject_id='native-history-editor'`)
+	read := craftNativeDocumentCall(t, d, editor, editorToken, "read", nil)
+	if list := craftNativeVersionsCall(d, editor, editorToken); list.Code == 200 || list.Code != read.Code {
+		t.Fatalf("revoked editor listed history: list %d read %d", list.Code, read.Code)
 	}
 }
 
@@ -233,7 +236,7 @@ func TestCraftNativeVersionsRestoreIsFencedAndAppends(t *testing.T) {
 	if restored.Code != 200 || !strings.Contains(restored.Body.String(), `"version":"4"`) {
 		t.Fatalf("holder restore %d %s", restored.Code, restored.Body)
 	}
-	read := craftNativeDocumentCall(t, d, reader, readerToken, "read", nil)
+	read := craftNativeDocumentCall(t, d, editor, editorToken, "read", nil)
 	var state struct {
 		Version string `json:"version"`
 		Bytes   []byte `json:"bytes"`
@@ -245,7 +248,7 @@ func TestCraftNativeVersionsRestoreIsFencedAndAppends(t *testing.T) {
 		name  string
 		ctx   context.Context
 		token string
-	}{{"owner", owner, ownerToken}, {"reader", reader, readerToken}} {
+	}{{"owner", owner, ownerToken}, {"editor", editor, editorToken}} {
 		list := craftNativeVersionsCall(d, viewer.ctx, viewer.token)
 		if list.Code != 200 {
 			t.Fatalf("%s list %d %s", viewer.name, list.Code, list.Body)

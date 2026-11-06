@@ -139,10 +139,13 @@ func TestAcceptance_CraftVersionsList(t *testing.T) {
 	if out, stderr, code := run(ownerBearer, "", "craft", "version", "@craft-hist-page", "1", "-f", "json"); code != 3 || strings.Contains(out, "bytes") {
 		t.Fatalf("version read with the flag off: exit %d %s %s", code, out, stderr)
 	}
+	if out, stderr, code := run(readerBearer, ""); code != 4 || strings.Contains(out, "createdAt") {
+		t.Fatalf("reader with the flag off: exit %d %s %s", code, out, stderr)
+	}
 	if _, err = db.Exec(`INSERT INTO feature_flags(id,key,description,enabled,percentage) VALUES('ff-craft-history-accept',?,'',1,100)`, api.CraftVersionHistoryFlag); err != nil {
 		t.Fatal(err)
 	}
-	for _, who := range []struct{ name, bearer string }{{"owner", ownerBearer}, {"reader", readerBearer}} {
+	for _, who := range []struct{ name, bearer string }{{"owner", ownerBearer}} {
 		// The listing answers exactly as the whole document read does.
 		if _, stderr, code := run(who.bearer, `{"action":"read"}`+"\n", "craft", "connect", "@craft-hist-page"); code != 0 {
 			t.Fatalf("%s document read calibration exit %d: %s", who.name, code, stderr)
@@ -184,7 +187,7 @@ func TestAcceptance_CraftVersionsList(t *testing.T) {
 			DisplayName string `json:"displayName"`
 		} `json:"author"`
 	}
-	for _, who := range []struct{ name, bearer string }{{"owner", ownerBearer}, {"reader", readerBearer}} {
+	for _, who := range []struct{ name, bearer string }{{"owner", ownerBearer}} {
 		out, stderr, code := run(who.bearer, "", "craft", "version", "@craft-hist-page", "2", "-f", "json")
 		if code != 0 {
 			t.Fatalf("%s version exit %d: %s", who.name, code, stderr)
@@ -227,6 +230,35 @@ func TestAcceptance_CraftVersionsList(t *testing.T) {
 			t.Fatalf("%s non-canonical version accepted", who.name)
 		}
 	}
+	// A Read grantee reaches only the shared version: every other command is
+	// refused as access denied, the shared version in history included.
+	if _, err = db.Exec(`UPDATE artifact_version_heads SET shared_version=2 WHERE page_id='craft-hist-page'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"craft", "versions", "@craft-hist-page", "-f", "json"},
+		{"craft", "version", "@craft-hist-page", "1", "-f", "json"},
+		{"craft", "version", "@craft-hist-page", "2", "-f", "json"},
+		{"craft", "version", "@craft-hist-page", "3", "-f", "json"},
+		{"craft", "version", "@craft-hist-page", "99", "-f", "json"},
+	} {
+		if out, stderr, code := run(readerBearer, "", args...); code != 4 || strings.Contains(out, "bytes") || strings.Contains(out, "createdAt") {
+			t.Fatalf("reader %v: exit %d %s %s", args, code, out, stderr)
+		}
+	}
+	for _, action := range []string{"read", "versions", "proposals"} {
+		if out, stderr, code := run(readerBearer, `{"action":"`+action+`"}`+"\n", "craft", "connect", "@craft-hist-page"); code != 4 || strings.Contains(out, "bytes") {
+			t.Fatalf("reader connect %s: exit %d %s %s", action, code, out, stderr)
+		}
+	}
+	if out, stderr, code := run(readerBearer, `{"action":"status"}`+"\n", "craft", "connect", "@craft-hist-page"); code != 0 || !strings.Contains(out, "can_edit") || strings.Contains(out, "bytes") {
+		t.Fatalf("reader lease status: exit %d %s %s", code, out, stderr)
+	}
+	out, stderr, code := run(readerBearer, "", "craft", "preview", "@craft-hist-page", "-f", "json")
+	var shared versionDocument
+	if code != 0 || json.Unmarshal([]byte(out), &shared) != nil || shared.Version != "2" || string(shared.Bytes) != `{"v":2}` {
+		t.Fatalf("reader preview: exit %d %s %s", code, out, stderr)
+	}
 	versionsAfter := 0
 	if err = db.QueryRow(`SELECT count(*) FROM artifact_versions WHERE page_id='craft-hist-page'`).Scan(&versionsAfter); err != nil || versionsAfter != versionsBefore {
 		t.Fatalf("version reads wrote history: %d -> %d %v", versionsBefore, versionsAfter, err)
@@ -235,7 +267,7 @@ func TestAcceptance_CraftVersionsList(t *testing.T) {
 		t.Fatalf("outsider version read: exit %d %s %s", code, out, stderr)
 	}
 	_, _, readCode := run(outsiderBearer, `{"action":"read"}`+"\n", "craft", "connect", "@craft-hist-page")
-	out, stderr, code := run(outsiderBearer, "")
+	out, stderr, code = run(outsiderBearer, "")
 	if code != readCode {
 		t.Fatalf("outsider listing exit %d differs from document read exit %d", code, readCode)
 	}

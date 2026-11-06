@@ -3,7 +3,8 @@
 // server must refuse any further write from that person, and the unsaved
 // work must not be lost: it stays in the person's browser and is offered back
 // (compare / copy), never saved automatically and never deleted. Losing only
-// the write right is not losing access: the person still reads the document.
+// the write right is not losing access: the person still reads the shared
+// version, and nothing newer than it.
 //
 // Full mode only: it drives the real editor of a deployed origin.
 import { captureAdmission, peerApi, requireNative, traceCraft, type CraftCall } from "./craft-lease/helpers"
@@ -165,8 +166,9 @@ for (const { application, label } of APPLICATIONS) {
 
     test(
       // #4348 (API): the writer admission is retired with reason write_revoked and
-      // draft retain; only a FRESH admission reads, and it cannot write or reuse
-      // the old lease generation.
+      // draft retain; the person reads the shared version, and a FRESH admission
+      // carries lease status only: no private read, no write, no reuse of the old
+      // lease generation.
       `${label}: revoking only write retires the writer and leaves a fresh read-only admission (API)`,
       { annotation: REQ[application] },
       async ({ prd, request }) => {
@@ -177,6 +179,7 @@ for (const { application, label } of APPLICATIONS) {
           await requireNative(prd, request, doc)
           const { peer, api: editorApi } = await peerApi(prd, cleanup)
           await doc.grant(request, peer.userId, "write")
+          const sharedVersion = await doc.publishPreview(request)
 
           // The editor holds the lease and its stream is live.
           const admission = await doc.session(editorApi)
@@ -204,10 +207,15 @@ for (const { application, label } of APPLICATIONS) {
           expect([403, 409], "old admission save after the write revoke").toContain(save.status())
           expect((await doc.leaseOp(editorApi, admission, "renew", { generation })).status(), "old admission renew").toBeGreaterThanOrEqual(400)
 
-          // A fresh admission reads the current document, read-only.
+          // The person still reads the document, as the shared version; a fresh
+          // admission reports lease status and reaches no private bytes.
+          const shared = await doc.previewRaw(editorApi)
+          expect(shared.status(), "the shared version stays readable").toBe(200)
+          const reread = (await shared.json()) as { version: string; bytes: string }
+          expect(reread.version, "the person reads the shared version").toBe(sharedVersion)
+          expect(reread.bytes, "the shared version is the published content").toBe(head.bytes)
           const fresh = await doc.session(editorApi)
-          const reread = await doc.document(editorApi, fresh)
-          expect(reread.version, "the fresh admission reads the current version").toBe(head.version)
+          expect((await doc.documentRaw(editorApi, fresh)).status(), "the fresh admission reads no private document").toBe(403)
           const view = await doc.lease(editorApi, fresh)
           expect(view.can_edit, "the fresh admission cannot edit").toBe(false)
           expect(view.can_write).toBe(false)

@@ -21,6 +21,14 @@ describe("native document client",()=>{
   client.close();await expect(client.save(request,signal())).rejects.toThrow()
   expect(calls).toHaveLength(2)
  })
+ it("reports a refused private read apart from an unavailable document",async()=>{
+  const opened=()=>new Response(JSON.stringify({session_token:"a".repeat(64),session_id:"session",application_id:"wordcraft",page_id:"page"}),{status:201})
+  for(const [status,message] of [[403,"native_private_read_refused"],[503,"native_document_unavailable"]] as const){
+   const send=vi.fn(async(url:RequestInfo|URL)=>String(url).includes("sessions")?opened():new Response("{}",{status}))
+   const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send as unknown as typeof fetch});await client.open(signal())
+   await expect(client.read(signal())).rejects.toThrow(message)
+  }
+ })
  it("does not retry unknown save outcomes or turn a generic403 into read revocation",async()=>{
   const send=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({session_token:"b".repeat(64),session_id:"public-session",application_id:"wordcraft",page_id:"page"}))).mockRejectedValueOnce(new Error("connection lost")).mockResolvedValueOnce(new Response('{}',{status:403}))
   const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send});await client.open(signal())

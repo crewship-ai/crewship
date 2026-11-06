@@ -72,10 +72,11 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
 
       // What the open editor does on its own after the server is back.
       const timeline: Awaited<ReturnType<typeof N.uiState>>[] = []
+      // A disconnected editor checks read again by itself, then offers the draft.
       for (let i = 0; i < 30; i++) {
         await N.pause(2_000)
         timeline.push(await N.uiState(page))
-        if (timeline.at(-1)!.recoveries.length || timeline.at(-1)!.alerts.length || /odpojen|Uloženo/.test(timeline.at(-1)!.status)) break
+        if (timeline.at(-1)!.recoveries.length || /Uloženo/.test(timeline.at(-1)!.status)) break
       }
       const savesWithoutPerson = ops.slice(savesBefore).filter((o) => o.kind === "save")
       const headAfter = await N.readHead(request, ref)

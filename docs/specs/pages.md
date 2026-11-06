@@ -445,9 +445,9 @@ Artifact comments retain their actual human author and immutable shared-version
 anchor. Creating feedback does not dispatch an owner run or borrow the owner's
 credentials. Processing another member's feedback requires a fresh explicit
 owner message in the owner's private chat and the existing live run admission.
-Native Craft comment-only observer access remains denied until its independent
-shared snapshot and feedback contract is implemented; ordinary native read and
-write paths retain their existing semantics.
+Native Craft comment-only observer access stays denied. Read and Comment
+grantees reach only the shared native version; latest bytes, history and proposals
+need Edit or the workspace OWNER/ADMIN read rule (`docs/specs/craft-native.md`).
 
 Catalog state is independent of content and access. `created_by_test` is an
 explicit server-stored, creation-only boolean with no name-based backfill;
