@@ -76,6 +76,7 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	r.authedMut("POST", "/api/v1/chats/{chatId}/restricted-cli-run", roleSelf, r.restrictedCLIRun)
 	r.mux.Handle("GET /api/v1/chats/{chatId}/execution-profile", authed(wsCtx(http.HandlerFunc(r.executionProfile))))
 
+	// openapi: responses 202,400,401,403,404,409,503
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/issues/{issueId}/private-preflight", roleSelf, r.restrictedIssuePreflight)
 	r.mux.Handle("GET /api/v1/chats/{chatId}/project-input-options", authed(wsCtx(http.HandlerFunc(r.projectInputOptions))))
 	r.mux.Handle("GET /api/v1/workspaces/{workspaceId}/projects/{projectId}/files", authed(wsCtx(http.HandlerFunc(r.projectFiles))))
@@ -664,11 +665,17 @@ func (r *Router) registerOrchestrationRoutes() orchestrationHandlers {
 	// The feature is paused (internal/hooks/paused.go): every route still
 	// authenticates and authorizes as before, then answers 503 instead of
 	// acting, so a client learns why rather than meeting a 404.
+	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/hooks", authed(wsCtx(hooksPausedGate(hh.List))))
+	// openapi: responses 200,201,400,401,403,503
 	r.authedMut("POST", "/api/v1/hooks", roleInline, hooksPausedGate(hh.Create))
+	// openapi: responses 200,400,401,403,404,500,503
 	r.authedMut("PATCH", "/api/v1/hooks/{id}", roleInline, hooksPausedGate(hh.Update))
+	// openapi: responses 200,400,401,403,404,500,503
 	r.authedMut("DELETE", "/api/v1/hooks/{id}", roleManage, hooksPausedGate(hh.Delete))
+	// openapi: responses 200,401,403,503
 	r.authedMut("POST", "/api/v1/hooks/{id}/enable", roleInline, hooksPausedGate(hh.Enable))
+	// openapi: responses 200,401,403,503
 	r.authedMut("POST", "/api/v1/hooks/{id}/disable", roleInline, hooksPausedGate(hh.Disable))
 
 	// Watch Roster: per-workspace presence snapshot. Read-only — agent
