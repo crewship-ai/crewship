@@ -78,7 +78,7 @@ async function retireCommitted(journal:NativeDraftJournal,rows:NativeRecovery[],
  }
  return kept
 }
-interface Runtime {enginePin:string;sessionId:string;port:NativeEditorPort;frame:HTMLIFrameElement;abort:AbortController;version:string;generation:string;ready:boolean;writable:boolean;nativeReadOnly:boolean;coordinator?:Coordinator;journal?:NativeDraftJournal;phase?:NativeSaveState;ackedVersion?:string;receiptAck?:Promise<boolean>;receiptVersion?:string;lastAck?:Promise<boolean>;lastAckVersion?:string;edit:number;blocked:boolean;capture?:NativeDraft;retiring?:Promise<boolean>;retirementFinished?:boolean;mountedState?:string}
+interface Runtime {transferSaved?:boolean;enginePin:string;sessionId:string;port:NativeEditorPort;frame:HTMLIFrameElement;abort:AbortController;version:string;generation:string;ready:boolean;writable:boolean;nativeReadOnly:boolean;coordinator?:Coordinator;journal?:NativeDraftJournal;phase?:NativeSaveState;ackedVersion?:string;receiptAck?:Promise<boolean>;receiptVersion?:string;lastAck?:Promise<boolean>;lastAckVersion?:string;edit:number;blocked:boolean;capture?:NativeDraft;retiring?:Promise<boolean>;retirementFinished?:boolean;mountedState?:string}
 
 /** One authenticated client/session owns both lease controls and the isolated full Craft editor. */
 const READ_ONLY_REFUSED='Právo upravovat bylo odebráno. Neuložené změny zůstaly jako místní koncept. Sdílenou verzi zobrazíte obnovením stránky.'
@@ -646,7 +646,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     if(await r.port.setReadOnly(true,r.abort.signal)!==true)throw Error('native_read_only_unconfirmed')
     r.nativeReadOnly=true;r.blocked=!captured;setHostBlocked(r.blocked);resumeViewing(r);throw Error('lease_not_current')
    }
-   r.writable=true;setOwnsEditor(true);resumeViewing(r);display(r)
+   r.transferSaved=false;r.writable=true;setOwnsEditor(true);resumeViewing(r);display(r)
    }finally{finishAdmission(startup)}
   }
   async function flushBeforeTransfer(r:Runtime):Promise<boolean>{
@@ -705,8 +705,13 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     if(action==='acquire'){await acquire();return}
     if(action==='handoff'||action==='release'){
      const r=current;if(!r||body.generation!==r.generation||!owns(viewNow,r.generation))throw Error('lease_not_current')
-     if(!await flushBeforeTransfer(r))throw Error('final_save_unconfirmed')
-     if(!await retireWrite(r,false))return
+     // After a failed POST the final save is still proven and write stays retired;
+     // the coordinator refuses a second flush, so a retry only sends the POST again.
+     if(!r.transferSaved){
+      if(!await flushBeforeTransfer(r))throw Error('final_save_unconfirmed')
+      if(!await retireWrite(r,false))return
+      r.transferSaved=true
+     }
      await client.leaseAction(action,body,lifetime.signal)
      const proof=await currentLease(client,lifetime.signal)
      if(proof.mine&&proof.generation===r.generation)throw Error('custody_transfer_unconfirmed')

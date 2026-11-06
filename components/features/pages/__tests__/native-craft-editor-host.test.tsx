@@ -749,6 +749,27 @@ describe('native Word host authority and persistence',()=>{
   expect(client.save).not.toHaveBeenCalled()
   expect(screen.queryByText('Výsledek akce nebyl potvrzen. Koncept zůstává zachován.')).not.toBeInTheDocument()
  })
+ // The final save is already proven and write is retired, so a failed POST can
+ // only be sent again. The other person must not wait for this tab to close.
+ for(const action of ['handoff','release'] as const)it(`retries a failed ${action} without saving again`,async()=>{
+  mount();await ready();await acquire()
+  const p=ports.at(-1)!
+  p.snapshot.mockResolvedValue({bytes:new TextEncoder().encode('{"body":[]}'),editorRevision:'initial',documentId:'doc'})
+  client.leaseAction.mockRejectedValueOnce(new Error('network'))
+  const press=async()=>{
+   if(action==='handoff'){
+    act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}))
+    fireEvent.click(await screen.findByRole('button',{name:'Předat uživateli Jana'}))
+   }else fireEvent.click(await screen.findByRole('button',{name:'Uvolnit úpravy'}))
+  }
+  await press()
+  await waitFor(()=>expect(client.leaseAction.mock.calls.filter(c=>c[0]===action)).toHaveLength(1))
+  await screen.findByText('Výsledek akce nebyl potvrzen. Koncept zůstává zachován.')
+  client.leaseAction.mockImplementationOnce(async()=>{client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:action==='handoff'?{actor_id:'user:other',display_name:'Jana',kind:'human'}:null,generation:'9007199254740996'});return {}})
+  await press()
+  await waitFor(()=>expect(client.leaseAction.mock.calls.filter(c=>c[0]===action)).toHaveLength(2))
+  expect(client.save).not.toHaveBeenCalled()
+ })
  // The final capture equals a version an idle save just committed: custody waits
  // for the editor's ACK of that receipt and never moves when the ACK fails.
  for(const acknowledged of [true,false])it(`${acknowledged?'releases':'keeps'} an unchanged editor ${acknowledged?'after':'when'} the last save's editor ACK ${acknowledged?'arrives':'fails'}`,async()=>{
