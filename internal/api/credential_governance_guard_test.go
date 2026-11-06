@@ -241,6 +241,7 @@ func TestEscalationRefusesManagerOnBoundCredential(t *testing.T) {
 	if got := as("POST", f.h.SupplyEscalationCredential, map[string]any{"value": "replacement"}); got != http.StatusForbidden {
 		t.Fatalf("supply: status = %d, want 403", got)
 	}
+	execOrFatal(t, f.h.db, `UPDATE credentials SET status = 'PENDING_APPROVAL' WHERE id = ?`, credID)
 	if got := as("PATCH", f.h.ResolveEscalation, map[string]any{"action": "approve"}); got != http.StatusForbidden {
 		t.Fatalf("resolve: status = %d, want 403", got)
 	}
@@ -248,7 +249,7 @@ func TestEscalationRefusesManagerOnBoundCredential(t *testing.T) {
 	if err := f.h.db.QueryRow(`SELECT status FROM credentials WHERE id = ?`, credID).Scan(&status); err != nil {
 		t.Fatal(err)
 	}
-	if status != credentialStatusRequested {
+	if status != "PENDING_APPROVAL" {
 		t.Fatalf("credential status = %q", status)
 	}
 }
