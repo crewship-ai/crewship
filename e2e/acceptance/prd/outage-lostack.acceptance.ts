@@ -14,6 +14,7 @@
 // browser's offline switch; the native outage uses a local CONNECT proxy that
 // severs every tunnel, including the editor's lease event stream.
 import type { TestInfo } from "@playwright/test"
+import { lastCommittedSave } from "./craft-session/confirm"
 import { expect, prdRequirement, test } from "./fixtures"
 import { disposeActors, isolatedActor } from "./outage-lostack/actor"
 import * as N from "./outage-lostack/native"
@@ -257,6 +258,9 @@ test.describe("outage and lost acknowledgement", () => {
             await N.typeMarker(page, f, app, M.M4, "A4")
             await page.keyboard.press("Control+s")
             next = await N.waitSaved(page, 30_000, saved)
+            // An autosave before this Ctrl+S gives a second save of the same bytes: let it land.
+            await N.pause(2_000)
+            next = (await N.waitSaved(page, 5_000, saved)) ?? next
             afterNext = await N.uiState(page)
             await N.release(page).catch(() => {})
           }
@@ -297,7 +301,8 @@ test.describe("outage and lost acknowledgement", () => {
           const successor = String(BigInt(lost[0].serverVersion!) + 1n)
           expect.soft(resavedLost.map((o) => ({ base: o.baseVersion, status: o.status, version: o.version })), "the reconciled save is not saved again as a duplicate version").toEqual([])
           expect.soft(firstNext && { base: firstNext.baseVersion, version: firstNext.version }, "the next save builds on the reconciled version (no duplicate)").toEqual({ base: lost[0].serverVersion, version: successor })
-          expect.soft(next, "the editor confirms the next save").toBe(successor)
+          expect.soft(next, "the editor confirms the last committed save").toBe(lastCommittedSave(ops))
+          expect.soft(fin.version, "the head is the last committed save").toBe(lastCommittedSave(ops))
           expect(fin.text.includes(M.M1) && fin.text.includes(M.M2) && fin.text.includes(M.M4), "no data loss").toBe(true)
         } finally {
           await ctx.close()

@@ -194,3 +194,57 @@ export function sentSince<T extends SentOp>(ops: T[], from: number): T[] {
 export function pendingReplies(ops: SentOp[]): number[] {
   return ops.filter((o) => o.status === undefined && o.failed === undefined).map((o) => o.n)
 }
+
+// ---------------------------------------------------------------------------
+// "Výsledek nepotvrzen" in the hour rows and the lost-reply rows (RC f3035b06c).
+//
+// A renderer stalled past the editor's 10 s save deadline turns a committed save into
+// "Výsledek nepotvrzen", and the editor sends nothing until somebody asks. A person
+// presses "Ověřit výsledek"; the hour session does too, a little after that deadline,
+// and records it. The press proves nothing about the typing: confirmCycle stays the judge.
+
+/** Past the editor's own 10 s save deadline, so a reply that is merely late can still land. */
+export const VERIFY_AFTER_MS = 15_000
+
+export const isUnconfirmedStatus = (status: string): boolean => /^Výsledek nepotvrzen/.test(status)
+
+/** Has the status said "Výsledek nepotvrzen" for longer than the deadline, counted from `since`? */
+export function verifyDue(status: string, since: number, now: number, after = VERIFY_AFTER_MS): boolean {
+  return isUnconfirmedStatus(status) && now - since >= after
+}
+
+/** One press of "Ověřit výsledek", for the row's evidence. */
+export interface VerifyPress {
+  cycle: number
+  firstSeenAt: string
+  pressedAt: string
+  unconfirmedForMs: number
+  statusAfter: string
+  reconcile: { status?: number; version?: string; failed?: string } | null
+}
+
+/** A gap in the page's own proposal polling: the renderer did not run its timers. */
+export interface PageStall {
+  from: string
+  to: string
+  gapMs: number
+}
+
+export function pageStalls(trail: ReadonlyArray<{ at: string; who: string; path: string }>, minGapMs = 10_000): PageStall[] {
+  const polls = trail.filter((c) => c.who === "person" && c.path === "craft/proposals")
+  const stalls: PageStall[] = []
+  for (let i = 1; i < polls.length; i++) {
+    const gapMs = Date.parse(polls[i].at) - Date.parse(polls[i - 1].at)
+    if (gapMs >= minGapMs) stalls.push({ from: polls[i - 1].at, to: polls[i].at, gapMs })
+  }
+  return stalls
+}
+
+/**
+ * The version of the last save the server committed. An autosave before Ctrl+S gives two
+ * saves of the same bytes (a Ctrl+S ticket always transmits), so the next version is not
+ * always what the editor ends on. The contiguity of the first one is a separate assertion.
+ */
+export function lastCommittedSave(ops: ReadonlyArray<{ kind: string; status?: number; version?: string }>): string | undefined {
+  return ops.filter((o) => o.kind === "save" && o.status === 200 && o.version !== undefined).at(-1)?.version
+}

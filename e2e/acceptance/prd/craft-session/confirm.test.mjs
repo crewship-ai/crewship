@@ -2,7 +2,7 @@
 // (also run by e2e/acceptance/prd/report.test.mjs, the PRD runner step in CI)
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, labelVersion, markerReport, pendingReplies, sentSince, splitBy, tableRunsLeft } from "./confirm.ts"
+import { isUnconfirmedStatus, lastCommittedSave, pageStalls, verifyDue, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, labelVersion, markerReport, pendingReplies, sentSince, splitBy, tableRunsLeft } from "./confirm.ts"
 
 const word = (paras) => JSON.stringify({ body: paras.map((text) => ({ kind: "para", text, runs: [{ len: text.length }] })) })
 const C = "HOURf9vyrC010"
@@ -147,4 +147,38 @@ test("the chain keeps the requests themselves, so a reply after the cycle end st
   assert.equal(sent[0].version, "15", "the late reply is in the chain")
   assert.deepEqual(pendingReplies(sent), [])
   assert.deepEqual(JSON.parse(JSON.stringify(sent)), [{ n: 2, status: 200, version: "15" }, { n: 3, failed: "net::ERR_CONNECTION_RESET" }])
+})
+
+// RC f3035b06c, Word lost reply: an autosave and a Ctrl+S ticket stored the same bytes as
+// v5 and v6. The test wanted the label to be v5, the next version after the reconciled v4.
+test("the editor is compared with the last committed save, not the next version", () => {
+  const ops = [
+    { kind: "save", status: 200, version: "2" },
+    { kind: "save", status: 200, version: "3" },
+    { kind: "save" },
+    { kind: "reconcile", status: 200, version: "4" },
+    { kind: "save", status: 200, version: "5" },
+    { kind: "save", status: 200, version: "6" },
+  ]
+  assert.equal(lastCommittedSave(ops), "6")
+  assert.equal(lastCommittedSave([{ kind: "save" }, { kind: "reconcile", status: 200, version: "4" }]), undefined)
+})
+
+test("Ověřit výsledek is due only for that status and only past the deadline", () => {
+  const s = "Výsledek nepotvrzenHistorie 26300 / 17179869184 B"
+  assert.equal(isUnconfirmedStatus(s), true)
+  assert.equal(verifyDue(s, 1_000, 15_999), false)
+  assert.equal(verifyDue(s, 1_000, 16_000), true)
+  assert.equal(verifyDue("Uloženo · verze 3", 1_000, 99_000), false)
+})
+
+test("a press does not make a cycle confirmed: the server's head decides", () => {
+  const c = confirmCycle({ typed, baseline: "3", label: "4", head: { version: "4", text: word(["other"]) } })
+  assert.equal(c.confirmed, false)
+})
+
+test("gaps in the page's polling are reported as stalls", () => {
+  const poll = (s) => ({ at: `2026-11-06T09:47:${s}.000Z`, who: "person", path: "craft/proposals" })
+  const trail = [poll("00"), { at: "2026-11-06T09:47:01.000Z", who: "lease-poll", path: "x" }, poll("05"), poll("45")]
+  assert.deepEqual(pageStalls(trail), [{ from: "2026-11-06T09:47:05.000Z", to: "2026-11-06T09:47:45.000Z", gapMs: 40_000 }])
 })

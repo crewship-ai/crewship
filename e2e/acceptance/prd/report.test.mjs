@@ -9,6 +9,7 @@ import { idCoverageProblems, scanEmittedIds } from "./emitted-ids.mjs"
 // The Craft rows' lost-line checker, the hour rows' cycle confirmation and the API session renewal have their
 // own tests; loading them here runs them in the CI step of this file ("PRD acceptance runner tests").
 import "./craft-session/confirm.test.mjs"
+import "./craft-session/restart-outcome.test.mjs"
 import "./craft-session/lines.test.mjs"
 import "./session-refresh.test.mjs"
 
