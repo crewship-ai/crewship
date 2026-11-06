@@ -259,3 +259,34 @@ VALUES ('psched_sp_all', 'ws_test', 'all', 'pipe_1', '* * * * *', 'UTC', '{}', 1
 		t.Errorf("last_missed_count = %d, want 0", sc.LastMissedCount)
 	}
 }
+
+// A stored spread that no longer fits the scan window (for example a DST gap
+// entering the 128-occurrence horizon) must not block unrelated edits; only a
+// change to the spread, cron or timezone is revalidated.
+func TestScheduleStore_Spread_UnrelatedEditSkipsRevalidation(t *testing.T) {
+	db := openScheduleTestDB(t)
+	defer db.Close()
+	seedPipeline(t, db, "pipe_1", "digest")
+	store := NewScheduleStore(db)
+	ctx := context.Background()
+
+	sp, err := store.Save(ctx, SaveScheduleInput{WorkspaceID: "ws_test", Name: "spread", TargetPipelineID: "pipe_1",
+		CronExpr: "0 * * * *", Timezone: "UTC", Enabled: false, SpreadSeconds: 600})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Simulate the window now holding a shorter gap than the stored spread.
+	if _, err := db.Exec(`UPDATE pipeline_schedules SET cron_expr = '* * * * *' WHERE id = ?`, sp.ID); err != nil {
+		t.Fatal(err)
+	}
+	upd := SaveScheduleInput{ID: sp.ID, WorkspaceID: "ws_test", Name: "spread", TargetPipelineID: "pipe_1",
+		CronExpr: "* * * * *", Timezone: "UTC", Enabled: true, SpreadSeconds: 600}
+	if _, err := store.Save(ctx, upd); err != nil {
+		t.Fatalf("enabling with cron, timezone and spread unchanged must not revalidate: %v", err)
+	}
+	// Changing the spread is still validated.
+	upd.SpreadSeconds = 900
+	if _, err := store.Save(ctx, upd); !errors.Is(err, ErrInvalidTrigger) {
+		t.Fatalf("a changed spread must be revalidated, got %v", err)
+	}
+}

@@ -515,8 +515,14 @@ func updateSchedule(ctx context.Context, x sqlExecQuerier, in SaveScheduleInput)
 		return nil, fmt.Errorf("pipeline_schedules: invalid catchup_policy %q (must be %q, %q, or %q)",
 			in.CatchupPolicy, CatchupSkip, CatchupOnce, CatchupAll)
 	}
-	if err := validateSpread(in.CronExpr, in.Timezone, in.SpreadSeconds); err != nil {
-		return nil, err
+	// Revalidate the spread only when it, the cron or the timezone changes: the
+	// scan window moves with the calendar (a DST gap can enter it), and an
+	// unrelated edit such as enable must not start failing for that. The runtime
+	// clamp still bounds the offset at fire time.
+	if existingRow.SpreadSeconds != in.SpreadSeconds || existingRow.CronExpr != in.CronExpr || existingRow.Timezone != in.Timezone {
+		if err := validateSpread(in.CronExpr, in.Timezone, in.SpreadSeconds); err != nil {
+			return nil, err
+		}
 	}
 	inputsJSON, err := json.Marshal(in.Inputs)
 	if err != nil {
