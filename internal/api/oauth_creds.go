@@ -7,6 +7,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -95,17 +96,27 @@ func (h *OAuthHandler) storeOAuthTokens(ctx context.Context, credID string, resp
 		expiresAt = time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
 	}
 
-	_, err = h.db.ExecContext(ctx, `
+	// An OAuth grant can finish after the credential was bound as the governance
+	// model. The condition sits in the UPDATE so the check and the write are one
+	// step; a person's OAuth flow never replaces that value (#5024).
+	res, err := h.db.ExecContext(ctx, `
 		UPDATE credentials SET
 			encrypted_value = ?,
 			oauth_refresh_token_enc = CASE WHEN ? != '' THEN ? ELSE oauth_refresh_token_enc END,
 			oauth_token_expires_at = ?,
 			status = 'ACTIVE',
 			updated_at = datetime('now')
-		WHERE id = ?`,
+		WHERE id = ?
+		  AND NOT EXISTS (SELECT 1 FROM keeper_governance_settings g
+		                   WHERE g.gov_model_credential_id = credentials.id)`,
 		encAccessToken, encRefreshToken, encRefreshToken, expiresAt, credID)
 	if err != nil {
 		return fmt.Errorf("update credentials: %w", err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		if bound, err := credentialGovernanceBound(ctx, h.db, credID); err != nil || bound {
+			return errors.New("the governance model credential cannot be replaced through OAuth")
+		}
 	}
 	return nil
 }

@@ -30,6 +30,8 @@ package api
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
@@ -97,7 +99,17 @@ func (h *CredentialInternalAdapter) Rotate(w http.ResponseWriter, r *http.Reques
 		CapabilityCredentialRotate, "credential.rotate", "credential:"+credID) {
 		return
 	}
+	// injectContext stamps ADMIN, so Rotate needs the caller's real role to
+	// decide about a credential bound to the governance model.
+	var actual string
+	err := h.creds.db.QueryRowContext(r.Context(),
+		`SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, wsID, callerID).Scan(&actual)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		replyInternalError(w, h.creds.logger, "load caller role for rotate", err)
+		return
+	}
 	r = h.injectContext(r, wsID, callerID)
+	r = r.WithContext(context.WithValue(r.Context(), ctxCredentialWriteRole{}, actual))
 	h.creds.Rotate(w, r)
 }
 

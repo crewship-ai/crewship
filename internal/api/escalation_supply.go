@@ -116,6 +116,9 @@ func (h *QueryHandler) SupplyEscalationCredential(w http.ResponseWriter, r *http
 		replyError(w, http.StatusBadRequest, "only a CREDENTIAL escalation takes a credential value")
 		return
 	}
+	if !h.allowEscalationCredentialWrite(w, r, credentialID) {
+		return
+	}
 	if h.refuseCredentialSelfApproval(w, r, secondApproverInput{
 		workspaceID: workspaceID, crewID: crewID, chatID: chatID, escalationID: escalationID,
 		escalationType: escalationType, fromSlug: fromSlug, action: "supply",

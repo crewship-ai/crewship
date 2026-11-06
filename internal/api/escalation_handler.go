@@ -655,6 +655,9 @@ func (h *QueryHandler) ResolveEscalation(w http.ResponseWriter, r *http.Request)
 				return
 			}
 		}
+		if !h.allowEscalationCredentialWrite(w, r, credentialID) {
+			return
+		}
 	} else if body.Resolution == "" {
 		replyError(w, http.StatusBadRequest, "resolution required")
 		return
