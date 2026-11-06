@@ -174,9 +174,12 @@ save. A disconnected status claims a retained draft only after a confirmed
 local capture, not merely because bootstrap once completed.
 
 Fresh admission/document loading and acquisition have a 60-second overall
-deadline. Handoff applies that deadline only after the previous writer
-confirmed its final save/capture and retired; it never times out a live
-writer's uncaptured buffer. Each new
+deadline. Handoff applies that deadline from the moment the previous writer
+confirmed its final save/capture and retired, so it covers the transfer request,
+its proof and the reader mount; it never times out a live writer's uncaptured
+buffer. How long a holder may leave a request unanswered has no deadline: custody
+moves only by the holder's choice, loss of connection, revocation or closing.
+Each new
 frame has a 50-second overall deadline, including its final authority read;
 inside it, the frame has 20 seconds for verified read-only ready and each of the
 at most three import RPCs keeps its 10-second deadline, including snapshot
@@ -184,7 +187,15 @@ hashing. The connection deadline ends at ready instead of overlapping the
 finite import sequence. Neither metadata events nor progress reset these caps.
 A timeout advises explicit reload for a fresh attempt, without replaying an
 import, mutation or save. Existing captured drafts are not erased on a generic
-timeout or disconnection; only explicit read retirement authorizes their purge.
+timeout or disconnection; only proven read loss authorizes their purge. Proof is
+a `session_retired` event with `draft: "purge"`, sent only while the credential
+is current, or `403 draft_read_revoked` from `draft-key` with
+`operation: "check"`, which the host requests after a refused admission and each
+entry requests whenever it does not open the editor. Losing Edit is not read loss,
+down to Comment: Comment keeps the shared version, so a refused admission alone
+erases nothing. An ended credential retires the stream with
+`draft: "retain"`. Stages and bounds: [Private browser draft
+recovery](pages.md#when-a-draft-is-erased-native-and-project).
 
 ## Shared previews and edit capability
 
@@ -324,8 +335,9 @@ confirmed capture, a person who keeps private read (an administrator on a
 private Page) reads the current version, sees the same read-only editor a
 non-holder sees and is offered the captured draft for compare or copy. A Read
 grantee is refused the private read (403 on an otherwise valid admission): the
-frame is removed and the draft stays offered for copy, while that admission
-keeps the event stream open for lease status only. Server comparisons and
+frame is removed and the draft stays sealed and offered to nobody, because a
+shared version gives no right to unpublished content; that admission keeps the
+event stream open for lease status only. It returns only if private read does. Server comparisons and
 proposals leave the page and its state as soon as write is retired, a request
 still pending then is discarded, and a comparison needs private read again
 before it asks the server. If the admission retires or the stream drops without
@@ -346,7 +358,8 @@ mount's draft), so it deletes exactly its own row by its full key
 (`eraseOwnRow`). Work still in flight from the replaced admission, such as a
 pending document read, is ignored when it completes and never stops the
 fresh read-only view. Comment-only access is not native read
-access, so an Edit to Comment downgrade follows the read-loss path.
+access, so an Edit to Comment downgrade gets no fresh admission, but it is not
+read loss: the draft stays and the editor keeps asking `draft-key` about the Page.
 
 Original expired or revoked credentials never regain an old admission. Explicit
 reauthorization accepts only a separately authenticated newer expiry for the same
@@ -370,7 +383,9 @@ several seconds for cleanup. Planned credential rotation keeps its separate
 short handoff grace. A valid lease on a stream shorter than five seconds does
 not reset the recovery budget. Invalid metadata, authorization
 refusal and explicit session retirement are terminal. Exhaustion uses the
-existing draft-retaining disconnection path. Closing the client cancels both
+existing draft-retaining disconnection path. A periodic or recovery
+reauthorization has a 30-second deadline, the interval between attempts; missing
+it counts as a failed attempt. Closing the client cancels both
 the stream and a coalesced periodic/recovery authorization. No save, custody
 mutation or new admission is replayed by this recovery.
 

@@ -23,6 +23,8 @@ type DocumentWriterFixture = {
   staleRefresh: Promise<void>
   edit(): void
   rows(): Promise<string[]>
+  intents(): Promise<string[]>
+  otherTabSignsOut(): Promise<void>
 }
 declare global { interface Window { documentErasureFixture: DocumentWriterFixture } }
 
@@ -33,6 +35,8 @@ import {QueryClient,QueryClientProvider} from '@tanstack/react-query';
 import {AuthProvider,useAuth} from '@/hooks/use-auth';
 import {usePageDocument} from '@/hooks/use-page-document';
 import {documentSchema} from '@/lib/documents/schema';
+import {captureDocumentDrafts,removeCapturedDocumentDrafts} from '@/lib/document-queue';
+import {recordSignOut} from '@/lib/document-draft-sign-out';
 const source=documentSchema.create({type:'doc',content:[{type:'paragraph',attrs:{id:'paragraph'},content:[{type:'text',text:'base'}]}]},3);
 const state={page_id:'p',schema:3,rev:1,epoch:'epoch',generation:1,incarnation:'generation',snapshot:documentSchema.snapshot(source),snapshotRev:1,updates:[],blocks:[],content:{type:'doc'},outline:[],can_write:true,can_comment:false,can_resolve:false};
 // Keep this single-tab fixture mounted so its post-sign-out IDB rows can be observed.
@@ -69,14 +73,20 @@ function Editor(){const d=usePageDocument('w','slug','p',false);f.editor=d;retur
 function App(){const auth=useAuth();f.auth=auth;return auth.session?<Editor key={auth.session.user.id}/>:null;}
 createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0}}})}><AuthProvider><App/></AuthProvider></QueryClientProvider>);
 f.edit=()=>documentSchema.textNode(f.editor.doc,'paragraph').insert(0,'private draft ');
+f.otherTabSignsOut=async()=>{const rows=await captureDocumentDrafts('alice');await recordSignOut('alice',rows.map(row=>row.root));await removeCapturedDocumentDrafts(rows)};
+f.intents=()=>new Promise((resolve,reject)=>{
+ const request=indexedDB.open('crewship-document-drafts',1);
+ request.onerror=()=>reject(new Error('fixture read'));
+ request.onsuccess=()=>{const db=request.result;const tx=db.transaction('drafts','readonly');const rows=tx.objectStore('drafts').getAll();tx.oncomplete=()=>{db.close();resolve(rows.result.filter(row=>!row.draft).map(row=>row.key[1]));};};
+});
 f.rows=()=>new Promise((resolve,reject)=>{
  const request=indexedDB.open('crewship-document-drafts',1);
  request.onerror=()=>reject(new Error('fixture read'));
- request.onsuccess=()=>{const db=request.result;const tx=db.transaction('drafts','readonly');const rows=tx.objectStore('drafts').getAll();tx.oncomplete=()=>{db.close();resolve(rows.result.map(row=>JSON.parse(row.key[0])[0]));};};
+ request.onsuccess=()=>{const db=request.result;const tx=db.transaction('drafts','readonly');const rows=tx.objectStore('drafts').getAll();tx.oncomplete=()=>{db.close();resolve(rows.result.filter(row=>row.draft).map(row=>JSON.parse(row.key[0])[0]));};};
 });
 `
 
-it.skipIf(!existsSync(chromium.executablePath())).each(["coalesced sign-out", "in-flight sign-out", "identity replacement", "stale session refresh", "stuck sign-out"])(
+it.skipIf(!existsSync(chromium.executablePath())).each(["coalesced sign-out", "in-flight sign-out", "identity replacement", "stale session refresh", "stuck sign-out", "delayed authenticated response"])(
   "drains the real document writer and retains revisions not confirmed for deletion: %s", async scenario => {
     const { outputFiles } = buildSync({ stdin: { contents: fixture, loader: "tsx", resolveDir: process.cwd() }, bundle: true, write: false, platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"test"' } })
     const browser = await chromium.launch({ headless: true })
@@ -87,6 +97,19 @@ it.skipIf(!existsSync(chromium.executablePath())).each(["coalesced sign-out", "i
       await page.goto("https://document-writer.test")
       await page.addScriptTag({ content: outputFiles[0].text })
       await page.waitForFunction(() => window.documentErasureFixture.editor?.state?.rev === 1 && window.documentErasureFixture.editor?.durability === "confirmed")
+      if (scenario === "delayed authenticated response") {
+        // Another tab signs out while this one waits on an older session answer.
+        // This fixture has no BroadcastChannel, so nothing tells it.
+        await page.evaluate(() => window.documentErasureFixture.edit())
+        await expect.poll(() => page.evaluate(() => window.documentErasureFixture.rows()), { timeout: 15_000 }).toContain("alice")
+        await page.evaluate(() => { const f = window.documentErasureFixture; f.holdSession = true; f.staleRefresh = f.auth.refresh() })
+        await page.waitForFunction(() => window.documentErasureFixture.sessionStarted)
+        await page.evaluate(() => window.documentErasureFixture.otherTabSignsOut())
+        await page.evaluate(async () => { const f = window.documentErasureFixture; f.releaseSession(); await f.staleRefresh })
+        await page.waitForFunction(() => window.documentErasureFixture.auth.session?.user.id === "alice")
+        expect(await page.evaluate(() => window.documentErasureFixture.intents())).toEqual(["alice"])
+        return
+      }
       if (scenario === "stale session refresh") {
         await page.evaluate(() => { const f = window.documentErasureFixture; f.holdSession = true; f.staleRefresh = f.auth.refresh() })
         await page.waitForFunction(() => window.documentErasureFixture.sessionStarted)

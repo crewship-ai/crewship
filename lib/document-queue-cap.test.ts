@@ -32,6 +32,14 @@ it("keeps the legacy 4 MiB journal cap and opts a native document into a bounded
   native.close()
 })
 
+it("a chosen cap counts bytes, not characters", async () => {
+  const put = storage()
+  const store = await openDocumentDrafts("h", "w", "p", { maxDraftBytes: 1024 })
+  await expect(store.put({ id: "wide", schema: 1, epoch: "native", attempted: false, update: "", snapshot: "\u{1F600}".repeat(300) })).rejects.toBeInstanceOf(DocumentStorageError)
+  expect(put).not.toHaveBeenCalled()
+  store.close()
+})
+
 it("rejects a cap above 64 MiB before opening private storage", async () => {
   storage()
   const open = vi.spyOn(indexedDB, "open")
