@@ -341,6 +341,14 @@ type SaveWebhookInput struct {
 	SignalCorrelationPath string
 	Enabled               bool
 	RateLimitPerMin       int
+
+	// RotatePrevious applies PreviousSecret/PreviousExpires to the previous
+	// secret slot in the SAME transaction as the update, so a rotation either
+	// records its overlap (or clears an older one when PreviousSecret is
+	// empty) or does not happen. Update only.
+	RotatePrevious  bool
+	PreviousSecret  string
+	PreviousExpires *time.Time
 }
 
 // WebhookStore is the persistence + lookup layer for pipeline_webhooks.
@@ -504,6 +512,11 @@ WHERE id = ? AND deleted_at IS NULL`,
 	if err != nil {
 		return nil, fmt.Errorf("update webhook: %w", err)
 	}
+	if in.RotatePrevious {
+		if err := setPreviousSecretExec(ctx, tx, in.ID, in.PreviousSecret, in.PreviousExpires); err != nil {
+			return nil, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -515,6 +528,12 @@ WHERE id = ? AND deleted_at IS NULL`,
 // rotation with no grace window does. The secret is encrypted at rest like the
 // current one.
 func (s *WebhookStore) SetPreviousSecret(ctx context.Context, id, secret string, expires *time.Time) error {
+	return setPreviousSecretExec(ctx, s.db, id, secret, expires)
+}
+
+func setPreviousSecretExec(ctx context.Context, x interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}, id, secret string, expires *time.Time) error {
 	var stored string
 	var exp any
 	if secret != "" && expires != nil {
@@ -524,7 +543,7 @@ func (s *WebhookStore) SetPreviousSecret(ctx context.Context, id, secret string,
 		}
 		exp = expires.UTC().Format(time.RFC3339Nano) // tsformat:allow: grace expiry is parsed and compared as time.Time in Go; SQL only stores and reads it by ID
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err := x.ExecContext(ctx,
 		`UPDATE pipeline_webhooks SET previous_signing_secret = ?, previous_secret_expires_at = ? WHERE id = ? AND deleted_at IS NULL`,
 		nullStr(stored), exp, id)
 	if err != nil {

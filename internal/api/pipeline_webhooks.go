@@ -406,6 +406,8 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 	// re-encrypt is a no-op change in content.
 	signingSecret := existing.SigningSecret
 	rotated := false
+	var previousUntil *time.Time
+	previousSecret := ""
 	if body.RotateGraceSeconds != nil {
 		if !body.RotateSecret {
 			replyError(w, http.StatusBadRequest, "rotate_grace_seconds only applies together with rotate_secret")
@@ -429,6 +431,13 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 		}
 		signingSecret = gen
 		rotated = true
+		// The replaced secret keeps working for the requested window; no
+		// window (or none asked for) clears whatever an earlier rotation left.
+		// Recorded in the same transaction as the new secret (RotatePrevious).
+		if body.RotateGraceSeconds != nil && *body.RotateGraceSeconds > 0 && existing.SigningSecret != "" {
+			t := time.Now().UTC().Add(time.Duration(*body.RotateGraceSeconds) * time.Second)
+			previousUntil, previousSecret = &t, existing.SigningSecret
+		}
 	}
 
 	if body.IngressProfile != "" && body.IngressProfile != existing.IngressProfile {
@@ -448,6 +457,9 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 		SignalCorrelationPath: signalPath,
 		Enabled:               enabled,
 		RateLimitPerMin:       rateLimit,
+		RotatePrevious:        rotated,
+		PreviousSecret:        previousSecret,
+		PreviousExpires:       previousUntil,
 	}
 	saved, err := h.webhooks.Save(r.Context(), in)
 	if err != nil {
@@ -468,19 +480,7 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if rotated {
-		// The replaced secret keeps working for the requested window; no
-		// window (or none asked for) clears whatever an earlier rotation left.
-		var until *time.Time
-		prev := ""
-		if body.RotateGraceSeconds != nil && *body.RotateGraceSeconds > 0 && existing.SigningSecret != "" {
-			t := time.Now().UTC().Add(time.Duration(*body.RotateGraceSeconds) * time.Second)
-			until, prev = &t, existing.SigningSecret
-		}
-		if err := h.webhooks.SetPreviousSecret(r.Context(), webhookID, prev, until); err != nil {
-			// The new secret is already live; failing now would hide a
-			// rotation that happened. The old one simply stops now.
-			h.logger.Error("update pipeline webhook: record previous secret", "error", err, "webhook_id", webhookID)
-		}
+		until := previousUntil
 		meta := map[string]interface{}{"overlap": until != nil}
 		if until != nil {
 			meta["previous_secret_expires_at"] = until.Format(time.RFC3339)
