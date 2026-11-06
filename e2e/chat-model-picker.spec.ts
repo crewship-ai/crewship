@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test"
+import { test, expect, type Frame, type Page } from "@playwright/test"
 import { readFileSync } from "node:fs"
 import { throwawayRefusal } from "./throwaway-guard"
 
@@ -73,9 +73,18 @@ async function openWithPreflight(page: Page, slug: string) {
   await page.getByPlaceholder(/^Message /).fill("model picker check")
   await page.locator('button[type="submit"]').last().click()
   expect((await created).status()).toBe(201)
-  const preflight = page.waitForResponse((r) => r.url().includes("/run-preflight"), { timeout: COLD_ROUTE })
+  // The old page may still be fetching its own preflight. The reload destroys
+  // that response's body, so only the reloaded document's response counts.
+  let navigated = false
+  const onNavigated = (frame: Frame) => {
+    if (frame === page.mainFrame()) navigated = true
+  }
+  page.on("framenavigated", onNavigated)
+  const preflight = page.waitForResponse((r) => navigated && r.url().includes("/run-preflight"), { timeout: COLD_ROUTE })
   await page.reload({ timeout: COLD_ROUTE })
-  return preflight
+  const response = await preflight
+  page.off("framenavigated", onNavigated)
+  return response
 }
 
 async function checkFlow(page: Page, nth: number) {
