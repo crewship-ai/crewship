@@ -343,7 +343,7 @@ class GuardTests(unittest.TestCase):
         with self.assertRaisesRegex(m.Rejected, 'original'):
             m.execute(self.event, self.env, failing, self.root)
 
-    def test_failed_final_status_removes_the_success_report(self):
+    def test_failed_final_status_keeps_the_report_with_an_unknown_outcome(self):
         import os
         real = self.api
         def failing(endpoint, payload=None):
@@ -355,8 +355,30 @@ class GuardTests(unittest.TestCase):
             os.chdir(self.root)
             with self.assertRaises(m.Rejected):
                 m.execute(self.event, self.env, failing, self.root)
-            self.assertFalse((self.root / '.ci-results/ci-inventory-report.json').exists())
+            report = json.loads((self.root / '.ci-results/ci-inventory-report.json').read_text())
+            self.assertEqual(report['status_publication'], 'unknown')
             self.assertEqual(self.calls[-1][1]['state'], 'failure')
+        finally: os.chdir(previous)
+
+    def test_published_status_is_confirmed_in_the_report(self):
+        import os
+        previous = os.getcwd()
+        try:
+            os.chdir(self.root)
+            m.execute(self.event, self.env, self.api, self.root)
+            report = json.loads((self.root / '.ci-results/ci-inventory-report.json').read_text())
+            self.assertEqual(report['status_publication'], 'confirmed')
+        finally: os.chdir(previous)
+
+    def test_failure_before_publication_leaves_no_report(self):
+        import os
+        previous = os.getcwd()
+        try:
+            os.chdir(self.root)
+            self.advance = True
+            with self.assertRaises(m.Rejected):
+                m.execute(self.event, self.env, self.api, self.root)
+            self.assertFalse((self.root / '.ci-results/ci-inventory-report.json').exists())
         finally: os.chdir(previous)
 
     def test_failure_before_pending_posts_nothing(self):
@@ -599,6 +621,17 @@ class ApiRetryTests(unittest.TestCase):
         with self.assertRaises(m.Rejected): api('repos/x')
         with self.assertRaises(m.Rejected): api('repos/y')
         self.assertEqual(len(self.requests), m.API.RETRIES + 2)
+
+    def test_elapsed_time_is_bounded_but_a_status_can_still_be_written(self):
+        now = [0.0]
+        api = self.client(b'{}', b'{}')
+        api.clock = lambda: now[0]
+        api.deadline = m.API.TIME_BUDGET
+        self.assertEqual(api('repos/x'), {})
+        now[0] = m.API.TIME_BUDGET + 1
+        with self.assertRaises(m.Rejected): api('repos/x')
+        self.assertEqual(len(self.requests), 1)
+        self.assertEqual(api('repos/x/statuses/abc', {'state': 'failure'}), {})
 
     def test_terminal_status_survives_a_spent_read_budget(self):
         api = self.client(*[b'{}'] * 40)

@@ -120,18 +120,23 @@ class API:
     # Shared by the whole run: the job has a five-minute limit.
     RETRIES = 3
     TRANSIENT = (429, 500, 502, 503, 504)
+    # Leaves room in the job limit for the status that ends the run.
+    TIME_BUDGET = 240
 
-    def __init__(self, token, sleep=time.sleep):
+    def __init__(self, token, sleep=time.sleep, clock=time.monotonic):
         self.token = token
         self.calls = 0
         self.retries = 0
         self.sleep = sleep
+        self.clock = clock
+        self.deadline = clock() + self.TIME_BUDGET
 
     def __call__(self, endpoint, payload=None):
         self.calls += 1
-        # Reads spend the budget; statuses are bounded by execute() and must
-        # still be able to end a run that used the budget up.
-        if not endpoint.startswith('repos/') or (self.calls > 32 and '/statuses/' not in endpoint):
+        # Reads spend the budgets; statuses are bounded by execute() and must
+        # still be able to end a run that used a budget up.
+        status = '/statuses/' in endpoint
+        if not endpoint.startswith('repos/') or (not status and (self.calls > 32 or self.clock() > self.deadline)):
             raise Rejected('API request budget or endpoint rejected')
         while True:
             try:
@@ -139,15 +144,18 @@ class API:
             except Rejected:
                 raise
             except urllib.error.HTTPError as error:
-                if error.code not in self.TRANSIENT or self.retries >= self.RETRIES:
+                if error.code not in self.TRANSIENT or self.spent():
                     raise Rejected('GitHub API request failed or returned invalid data') from None
             except (urllib.error.URLError, OSError, http.client.HTTPException):
-                if self.retries >= self.RETRIES:
+                if self.spent():
                     raise Rejected('GitHub API request failed or returned invalid data') from None
             except ValueError:
                 raise Rejected('GitHub API request failed or returned invalid data') from None
             self.retries += 1
             self.sleep(self.retries * 2)
+
+    def spent(self):
+        return self.retries >= self.RETRIES or self.clock() > self.deadline
 
     def request(self, endpoint, payload):
         body = json.dumps(payload).encode() if payload is not None else None
@@ -427,15 +435,19 @@ def execute(event, env, api, root=ROOT):
         else:
             latest = api('repos/' + report['repository'] + '/pulls/' + str(report['pr_number']))
             verify_pr(latest, report['repository'], report['pr_number'], report['head_sha'])
+        # The finished inspection is evidence whatever happens to the status:
+        # GitHub can accept a write whose response never arrives.
+        report['status_publication'] = 'unknown'
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(json.dumps(report, indent=2) + '\n')
         api('repos/' + report['repository'] + '/statuses/' + report['head_sha'], {
             'state': report['state'], 'context': CONTEXT,
             'description': report['decision'][:140],
             'target_url': 'https://github.com/' + report['repository'] + '/actions/runs/' + env['GITHUB_RUN_ID']})
+        report['status_publication'] = 'confirmed'
+        output.write_text(json.dumps(report, indent=2) + '\n')
         return report
     except BaseException:  # Includes the runner's interrupt when a run is cancelled.
-        output.unlink(missing_ok=True)
         # A pending status nobody replaces holds a merge group until the queue
         # times out (#5035). The head is not rechecked first: that needs the API
         # that may have just failed, and failure on a stale head is harmless.

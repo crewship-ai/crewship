@@ -51,7 +51,10 @@ pending with a fixed `failure` on that exact head, so a merge group fails at onc
 instead of waiting for the queue timeout. Rerun the failed run or enqueue the PR
 again to evaluate again; this bypasses nothing. A refused dispatch stays pending, so it cannot eject a
 group. GitHub API errors that look transient are retried three times per run and
-can never produce success. If GitHub is unavailable before target validation or rejects the
+can never produce success; reads stop after 240 seconds so the job limit leaves
+room for the final status. A finished inspection keeps its report:
+`status_publication` is `confirmed`, or `unknown` when GitHub never confirmed the
+status write, so check the head's status before relying on that report. If GitHub is unavailable before target validation or rejects the
 pending write, the job cannot revoke an older successful status. That residual
 is explicit: the base-SHA Actions job failure alone does not invalidate a
 head-SHA commit status. A job killed by its timeout cannot write the failure
