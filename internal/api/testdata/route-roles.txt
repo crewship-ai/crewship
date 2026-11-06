@@ -25,6 +25,7 @@ DELETE /api/v1/agents/{agentId}/integrations/{integrationId} roleCreate
 DELETE /api/v1/agents/{agentId}/peers/{userId} roleSelf
 DELETE /api/v1/agents/{agentId}/persona roleCreate
 DELETE /api/v1/agents/{agentId}/skills/{skillId} roleCreate
+DELETE /api/v1/agents/{agentId}/webhook-secret/previous roleInline
 DELETE /api/v1/auth/cli-tokens/{tokenId} roleSelf
 DELETE /api/v1/automations/{id} roleManage
 DELETE /api/v1/cache/images/{tag} roleManage

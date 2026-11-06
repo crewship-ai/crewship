@@ -171,13 +171,23 @@ type webhookRequestBody struct {
 	// all; that still requires delete + recreate.
 	RotateSecret bool `json:"rotate_secret,omitempty"`
 	// RotateGraceSeconds keeps the secret a rotation replaces valid for this
-	// long (ODCH-INT-11): 0 (the default), 3600, 86400 or 604800, and only with
+	// long (ODCH-INT-11): 0 (the default) or 60..604800 (7 days), and only with
 	// rotate_secret. The response says when it stops, never what it was.
 	RotateGraceSeconds *int `json:"rotate_grace_seconds,omitempty"`
+	// RevokePreviousSecret ends an open overlap window now. It cannot be
+	// combined with rotate_secret (a rotation already decides the window).
+	RevokePreviousSecret bool `json:"revoke_previous_secret,omitempty"`
 }
 
-// webhookRotateGraceSeconds are the windows the rotate dialog offers.
-var webhookRotateGraceSeconds = map[int]bool{0: true, 3600: true, 86400: true, 604800: true}
+// Overlap window bounds for a rotated secret, in seconds. 0 means no overlap.
+const (
+	webhookOverlapMinSeconds = 60
+	webhookOverlapMaxSeconds = 7 * 24 * 3600
+)
+
+func validWebhookOverlapSeconds(n int) bool {
+	return n == 0 || (n >= webhookOverlapMinSeconds && n <= webhookOverlapMaxSeconds)
+}
 
 // CreateWebhook POST /workspaces/{wsId}/pipeline-webhooks
 func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) {
@@ -401,10 +411,14 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 			replyError(w, http.StatusBadRequest, "rotate_grace_seconds only applies together with rotate_secret")
 			return
 		}
-		if !webhookRotateGraceSeconds[*body.RotateGraceSeconds] {
-			replyError(w, http.StatusBadRequest, "rotate_grace_seconds must be 0, 3600, 86400 or 604800")
+		if !validWebhookOverlapSeconds(*body.RotateGraceSeconds) {
+			replyError(w, http.StatusBadRequest, "rotate_grace_seconds must be 0 or between 60 and 604800 (7 days)")
 			return
 		}
+	}
+	if body.RevokePreviousSecret && body.RotateSecret {
+		replyError(w, http.StatusBadRequest, "revoke_previous_secret cannot be combined with rotate_secret")
+		return
 	}
 	if body.RotateSecret {
 		gen, gerr := generateWebhookSigningSecret()
@@ -467,6 +481,23 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 			// rotation that happened. The old one simply stops now.
 			h.logger.Error("update pipeline webhook: record previous secret", "error", err, "webhook_id", webhookID)
 		}
+		meta := map[string]interface{}{"overlap": until != nil}
+		if until != nil {
+			meta["previous_secret_expires_at"] = until.Format(time.RFC3339)
+		}
+		auditFromRequest(r, h.db, "webhook.secret.rotated", "PIPELINE_WEBHOOK", webhookID, meta)
+		if reloaded, rerr := h.webhooks.GetByID(r.Context(), webhookID); rerr == nil {
+			reloaded.Token = saved.Token
+			saved = reloaded
+		}
+	}
+	if body.RevokePreviousSecret {
+		if err := h.webhooks.SetPreviousSecret(r.Context(), webhookID, "", nil); err != nil {
+			h.logger.Error("update pipeline webhook: revoke previous secret", "error", err, "webhook_id", webhookID)
+			replyError(w, http.StatusInternalServerError, "failed to revoke the previous secret")
+			return
+		}
+		auditFromRequest(r, h.db, "webhook.previous_secret.revoked", "PIPELINE_WEBHOOK", webhookID, nil)
 		if reloaded, rerr := h.webhooks.GetByID(r.Context(), webhookID); rerr == nil {
 			reloaded.Token = saved.Token
 			saved = reloaded
@@ -742,6 +773,9 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusUnauthorized, "invalid GitHub webhook")
 			return
 		}
+		if strings.HasSuffix(verdict.KeyID, ":previous") {
+			h.auditPreviousSecretUse(r, wh, "github")
+		}
 		// This endpoint has one fixed action: invoke this routine for PR changes.
 		// Unsigned event headers cannot select a different target or action.
 		if verdict.EventType == profiles.EventPing {
@@ -768,14 +802,20 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		sig := r.Header.Get("X-Crewship-Signature")
+		var sigOK, usedPrev bool
+		scheme := "hmac"
 		if ts := r.Header.Get("X-Crewship-Timestamp"); ts != "" {
-			if !wh.ValidateTimestampedSignature(body, ts, sig, time.Now(), 0) {
-				replyError(w, http.StatusUnauthorized, "signature mismatch")
-				return
-			}
-		} else if !wh.ValidateSignature(body, sig) {
+			scheme = "hmac-timestamped"
+			sigOK, usedPrev = wh.MatchTimestampedSignature(body, ts, sig, time.Now(), 0)
+		} else {
+			sigOK, usedPrev = wh.MatchSignature(body, sig, time.Now())
+		}
+		if !sigOK {
 			replyError(w, http.StatusUnauthorized, "signature mismatch")
 			return
+		}
+		if usedPrev {
+			h.auditPreviousSecretUse(r, wh, scheme)
 		}
 
 	}
@@ -1375,4 +1415,15 @@ func githubVerifyKeys(wh *pipeline.Webhook, now time.Time) []profiles.Key {
 		keys = append(keys, profiles.Key{ID: id, Secret: []byte(s)})
 	}
 	return keys
+}
+
+// auditPreviousSecretUse records that a delivery verified with the previous
+// secret of an open rotation overlap, so operators can see when every sender
+// has moved to the new one. Metadata carries no secret material.
+func (h *PipelineHandler) auditPreviousSecretUse(r *http.Request, wh *pipeline.Webhook, scheme string) {
+	meta := map[string]interface{}{"scheme": scheme}
+	if wh.PreviousSecretExpiresAt != nil {
+		meta["previous_secret_expires_at"] = wh.PreviousSecretExpiresAt.UTC().Format(time.RFC3339)
+	}
+	WriteAuditLog(r.Context(), h.db, nil, "webhook.previous_secret.used", "PIPELINE_WEBHOOK", wh.ID, "", wh.WorkspaceID, meta)
 }

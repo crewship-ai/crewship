@@ -2072,6 +2072,26 @@ opt-in flag rather than the only way to change anything:
 crewship routine webhooks update wh_abc123 --rotate-secret
 ```
 
+To let senders migrate without a window of 401s, keep the replaced secret valid
+for a bounded overlap, and end it early once every sender has switched:
+
+```bash
+crewship routine webhooks update wh_abc123 --rotate-secret --previous-secret-ttl 24h
+crewship routine webhooks update wh_abc123 --revoke-previous-secret
+```
+
+The overlap is 60 seconds to 7 days (`24h`, `3d`, `7d`, ...); the default is none,
+which keeps the old behaviour of invalidating the replaced secret at once. While
+it is open, both the current and the previous secret verify (body-only,
+timestamped and GitHub profiles), compared in constant time. The previous secret
+is encrypted at rest, never returned by any API, and expires strictly at the
+reported `previous_secret_expires_at`. Rotating again during an overlap replaces
+the remembered secret, so at most two secrets are ever valid. Each delivery
+verified with the previous secret is recorded in the audit log as
+`webhook.previous_secret.used` (revocations as `webhook.previous_secret.revoked`),
+so an empty trail tells you every sender has moved. `--grace` (`none`, `1h`,
+`24h`, `7d`) is the older spelling of the same option.
+
 <Warning>
 The signing secret is still shown **once** per reveal — on create, or on an
 update that passes `--rotate-secret`. `--rotate-secret` invalidates the

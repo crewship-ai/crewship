@@ -127,7 +127,8 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"signal_event_type": str(), "signal_correlation_path": str(),
 		"enabled": nullable(boolean()), "rate_limit_per_min": integer(), "rotate_secret": boolean(),
 		// How long the secret a rotation replaces stays valid; only with rotate_secret.
-		"rotate_grace_seconds": map[string]any{"type": "integer", "enum": []int{0, 3600, 86400, 604800}},
+		"rotate_grace_seconds":   map[string]any{"type": "integer", "minimum": 0, "maximum": 604800, "description": "0 (no overlap) or 60..604800 seconds"},
+		"revoke_previous_secret": boolean(),
 	})
 
 	chatDomain := map[string]DomainSchema{

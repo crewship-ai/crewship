@@ -23,6 +23,7 @@ crewship agent <subcommand> [flags]
 | `create` | Create a new agent |
 | `update` | Update an agent |
 | `rotate-webhook-secret` | Mint a new webhook signing secret (shown once) |
+| `revoke-previous-webhook-secret` | End a webhook secret rotation overlap now |
 | `delete` | Delete an agent |
 | `runs` | List runs for an agent |
 | `status` | Fleet-wide agent status counts (total / running / error / idle / queued) |
@@ -323,6 +324,20 @@ crewship agent rotate-webhook-secret viktor
 Backed by `POST /api/v1/agents/{id}/webhook-secret/rotate`. Table output shows
 the secret once; `--format json` or `--format yaml` returns `webhook_secret`
 and `rotated_at`.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--previous-secret-ttl <dur>` | none | Keep the replaced secret valid for this long (60s to 7d, e.g. `24h`) so the sender can migrate. Each use is audited. |
+
+## `crewship agent revoke-previous-webhook-secret`
+
+End a rotation overlap now, so only the current secret validates. Idempotent.
+
+```bash
+crewship agent revoke-previous-webhook-secret viktor
+```
+
+Backed by `DELETE /api/v1/agents/{id}/webhook-secret/previous`.
 
 ---
 

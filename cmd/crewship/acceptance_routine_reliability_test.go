@@ -400,6 +400,78 @@ func TestAcceptance_RoutineWebhooksUpdate_RotateSecretWithGrace(t *testing.T) {
 	}
 }
 
+// TestAcceptance_RoutineWebhooksUpdate_PreviousSecretTTLAndRevoke drives the
+// overlap window with a free-form duration and the early revoke through the
+// binary: during the window both secrets verify, after the revoke only the new
+// one does.
+func TestAcceptance_RoutineWebhooksUpdate_PreviousSecretTTLAndRevoke(t *testing.T) {
+	cfgPath, serverURL := startReliabilityAcceptanceServer(t)
+	createOut, err := runReliabilityCLI(t, cfgPath, "-f", "json", "routine", "webhooks", "create",
+		"--slug", "rel-routine", "--name", "ttl-revoke", "--base-url", serverURL)
+	if err != nil {
+		t.Fatalf("create: %v\n%s", err, createOut)
+	}
+	var created struct {
+		ID            string `json:"id"`
+		PublicURL     string `json:"public_url"`
+		SigningSecret string `json:"signing_secret"`
+	}
+	if err := json.Unmarshal([]byte(createOut), &created); err != nil {
+		t.Fatalf("decode: %v\n%s", err, createOut)
+	}
+	for _, args := range [][]string{
+		{"--previous-secret-ttl", "24h"},                                    // no rotation
+		{"--rotate-secret", "--previous-secret-ttl", "30s"},                 // below the minimum
+		{"--rotate-secret", "--previous-secret-ttl", "8d"},                  // above the maximum
+		{"--rotate-secret", "--revoke-previous-secret"},                     // contradictory
+		{"--rotate-secret", "--previous-secret-ttl", "1h", "--grace", "1h"}, // two spellings
+	} {
+		argv := append([]string{"routine", "webhooks", "update", created.ID}, args...)
+		if out, err := runReliabilityCLI(t, cfgPath, argv...); err == nil {
+			t.Fatalf("%v must be refused, got:\n%s", args, out)
+		}
+	}
+	rotateOut, err := runReliabilityCLI(t, cfgPath, "-f", "json", "routine", "webhooks", "update", created.ID,
+		"--rotate-secret", "--previous-secret-ttl", "36h")
+	if err != nil {
+		t.Fatalf("rotate: %v\n%s", err, rotateOut)
+	}
+	var rotated struct {
+		SigningSecret string `json:"signing_secret"`
+		Expires       string `json:"previous_secret_expires_at"`
+	}
+	if err := json.Unmarshal([]byte(rotateOut), &rotated); err != nil || rotated.Expires == "" {
+		t.Fatalf("rotate output must report the expiry: %v\n%s", err, rotateOut)
+	}
+	if strings.Contains(rotateOut, created.SigningSecret) {
+		t.Fatal("the previous secret must never be printed")
+	}
+	fire := func(secret, delivery string) int {
+		body := []byte(`{"hello":"world"}`)
+		req, _ := http.NewRequest(http.MethodPost, created.PublicURL, bytes.NewReader(body))
+		req.Header.Set("X-Crewship-Signature", "sha256="+hmacSHA256Hex(secret, body))
+		req.Header.Set("Idempotency-Key", delivery)
+		resp, derr := http.DefaultClient.Do(req)
+		if derr != nil {
+			t.Fatalf("fire: %v", derr)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+	if got := fire(created.SigningSecret, "ttl-old"); got != http.StatusAccepted {
+		t.Errorf("old secret inside the window = %d, want 202", got)
+	}
+	if out, err := runReliabilityCLI(t, cfgPath, "-f", "json", "routine", "webhooks", "update", created.ID, "--revoke-previous-secret"); err != nil {
+		t.Fatalf("revoke: %v\n%s", err, out)
+	}
+	if got := fire(created.SigningSecret, "ttl-old-2"); got != http.StatusUnauthorized {
+		t.Errorf("old secret after the revoke = %d, want 401", got)
+	}
+	if got := fire(rotated.SigningSecret, "ttl-new"); got != http.StatusAccepted {
+		t.Errorf("new secret after the revoke = %d, want 202", got)
+	}
+}
+
 // TestAcceptance_RoutineWebhooksUpdate_SlugAndVersionPin drives the CLI
 // parity fields `update` shares with `schedules update` — code review on
 // this PR found them missing from the CLI even though the server, the

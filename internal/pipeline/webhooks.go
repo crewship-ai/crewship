@@ -752,15 +752,19 @@ RETURNING consecutive_fire_failures`,
 // dispatch URL. Audit chain finding (A13.2 + A17.2): MEMBER creates
 // webhook → public URL fires pipeline → no auth.
 func (w *Webhook) ValidateSignature(body []byte, providedHex string) bool {
-	for _, secret := range w.acceptedSecrets(time.Now()) {
-		if validateBodySignature(secret, body, providedHex) {
-			return true
-		}
-	}
-	// No secret on the row (or none that matched): no signature is verifiable.
-	// The dispatch is unauthenticated rather than silently passing; the webhook
-	// needs its secret rotated before it can fire again.
-	return false
+	ok, _ := w.MatchSignature(body, providedHex, time.Now())
+	return ok
+}
+
+// MatchSignature is ValidateSignature that also reports whether the delivery
+// was signed with the previous secret of an open rotation overlap, so the
+// caller can record that a sender has not migrated yet. Both secrets are
+// always compared (no early exit) so timing does not reveal which one matched.
+func (w *Webhook) MatchSignature(body []byte, providedHex string, now time.Time) (ok, usedPrevious bool) {
+	cur, prev := w.currentAndPrevious(now)
+	curOK := cur != "" && validateBodySignature(cur, body, providedHex)
+	prevOK := prev != "" && validateBodySignature(prev, body, providedHex)
+	return curOK || prevOK, !curOK && prevOK
 }
 
 // AcceptedSecrets lists the signing secrets a delivery may be signed with at
@@ -770,13 +774,25 @@ func (w *Webhook) AcceptedSecrets(now time.Time) []string { return w.acceptedSec
 
 func (w *Webhook) acceptedSecrets(now time.Time) []string {
 	var out []string
-	if w.SigningSecret != "" {
-		out = append(out, w.SigningSecret)
+	cur, prev := w.currentAndPrevious(now)
+	if cur != "" {
+		out = append(out, cur)
 	}
-	if w.PreviousSigningSecret != "" && w.PreviousSecretExpiresAt != nil && now.Before(*w.PreviousSecretExpiresAt) {
-		out = append(out, w.PreviousSigningSecret)
+	if prev != "" {
+		out = append(out, prev)
 	}
 	return out
+}
+
+// currentAndPrevious returns the current secret and, only while the overlap
+// window is open at now, the previous one. The window ends strictly at its
+// expiry instant: at or after it the previous secret is not accepted.
+func (w *Webhook) currentAndPrevious(now time.Time) (cur, prev string) {
+	cur = w.SigningSecret
+	if w.PreviousSigningSecret != "" && w.PreviousSecretExpiresAt != nil && now.Before(*w.PreviousSecretExpiresAt) {
+		prev = w.PreviousSigningSecret
+	}
+	return cur, prev
 }
 
 func validateBodySignature(secret string, body []byte, providedHex string) bool {
@@ -813,15 +829,22 @@ func validateBodySignature(secret string, body []byte, providedHex string) bool 
 // (rather than reading time.Now internally) so callers/tests can pin a
 // deterministic clock; production callers pass time.Now().
 func (w *Webhook) ValidateTimestampedSignature(body []byte, ts, providedHex string, now time.Time, tolerance time.Duration) bool {
-	secrets := w.acceptedSecrets(now)
-	if len(secrets) == 0 {
+	ok, _ := w.MatchTimestampedSignature(body, ts, providedHex, now, tolerance)
+	return ok
+}
+
+// MatchTimestampedSignature is ValidateTimestampedSignature that also reports
+// whether the previous secret of an open rotation overlap verified it.
+func (w *Webhook) MatchTimestampedSignature(body []byte, ts, providedHex string, now time.Time, tolerance time.Duration) (ok, usedPrevious bool) {
+	cur, prev := w.currentAndPrevious(now)
+	if cur == "" && prev == "" {
 		// Mirrors ValidateSignature: no secret on this row means no
 		// signature is verifiable, timestamped or not.
-		return false
+		return false, false
 	}
 	secs, err := strconv.ParseInt(ts, 10, 64)
 	if err != nil {
-		return false
+		return false, false
 	}
 	if tolerance <= 0 {
 		tolerance = DefaultWebhookTimestampTolerance
@@ -833,22 +856,24 @@ func (w *Webhook) ValidateTimestampedSignature(body []byte, ts, providedHex stri
 	tolSec := int64(tolerance / time.Second)
 	nowSec := now.Unix()
 	if secs < nowSec-tolSec || secs > nowSec+tolSec {
-		return false
+		return false, false
 	}
 	providedHex = strings.TrimPrefix(providedHex, "sha256=")
 	if providedHex == "" {
-		return false
+		return false, false
 	}
-	for _, secret := range secrets {
+	check := func(secret string) bool {
+		if secret == "" {
+			return false
+		}
 		mac := hmac.New(sha256.New, []byte(secret))
 		_, _ = mac.Write([]byte(ts + "."))
 		_, _ = mac.Write(body)
 		expected := hex.EncodeToString(mac.Sum(nil))
-		if hmac.Equal([]byte(expected), []byte(providedHex)) {
-			return true
-		}
+		return hmac.Equal([]byte(expected), []byte(providedHex))
 	}
-	return false
+	curOK, prevOK := check(cur), check(prev)
+	return curOK || prevOK, !curOK && prevOK
 }
 
 // rateLimiter is the in-memory throttle for webhooks. Per-token

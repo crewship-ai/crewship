@@ -534,6 +534,7 @@ func fenceKinds() []fenceKind {
 				{method: "PUT", path: "/api/v1/agents/{agentId}/persona", body: `{"persona":"pwned"}`, mode: probeDeny},
 				{method: "POST", path: "/api/v1/agents/{agentId}/stop", mode: probeDeny},
 				{method: "POST", path: "/api/v1/agents/{agentId}/webhook-secret/rotate", mode: probeDeny},
+				{method: "DELETE", path: "/api/v1/agents/{agentId}/webhook-secret/previous", mode: probeDeny},
 				{method: "GET", path: "/api/v1/agents/{agentId}/skills", mode: probeDeny},
 				{method: "GET", path: "/api/v1/agents/{agentId}/credentials", mode: probeDeny},
 				{method: "GET", path: "/api/v1/agents/{agentId}/chats", mode: probeNoLeak, markerKind: "chats"},

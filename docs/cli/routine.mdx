@@ -2036,6 +2036,8 @@ crewship routine webhooks update wh_abc123 \
 | `--unpin` | Remove the version pin (fires track head again). Mutually exclusive with `--pin-version`; mentioning neither keeps the existing pin. |
 | `--signal-event-type` / `--signal-correlation-path` | Switch the webhook to signal delivery (both required together). |
 | `--clear-signal` | Return to starting a run on each delivery. |
+| `--previous-secret-ttl` | With `--rotate-secret`: keep the replaced secret valid for any duration from `60s` to `7d` (e.g. `36h`). Mutually exclusive with `--grace`. Each use of the old secret is audited. |
+| `--revoke-previous-secret` | End an open overlap now; only the current secret verifies. Cannot be combined with `--rotate-secret`. |
 | `--rotate-secret` | Mint a new HMAC signing secret, shown once in the response — same show-once contract as `create`. **The URL/token is never rotated by this command, with or without this flag.** |
 
 At least one flag is required. `--format json` on an ordinary edit (no

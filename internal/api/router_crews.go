@@ -439,6 +439,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// rotate mints + returns the new value exactly once. Gate is inline
 	// (canEditAgent) — same as Update.
 	r.authedMut("POST", "/api/v1/agents/{agentId}/webhook-secret/rotate", roleInline, agents.RotateWebhookSecret)
+	r.authedMut("DELETE", "/api/v1/agents/{agentId}/webhook-secret/previous", roleInline, agents.RevokePreviousWebhookSecret)
 
 	// Persisted avatar (#1297). GET is readable by any workspace member —
 	// rosters render each other — while PUT/DELETE take the same inline
