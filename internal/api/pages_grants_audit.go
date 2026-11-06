@@ -25,6 +25,7 @@ type pageGrantSnapshot struct {
 	PanelIDs    sql.NullString `json:"-"`
 	GrantedBy   string         `json:"granted_by_user_id"`
 	GrantedAt   string         `json:"granted_at"`
+	RetiredAt   sql.NullString `json:"-"`
 }
 
 func (g pageGrantSnapshot) MarshalJSON() ([]byte, error) {
@@ -33,14 +34,19 @@ func (g pageGrantSnapshot) MarshalJSON() ([]byte, error) {
 	if g.PanelIDs.Valid {
 		panels = g.PanelIDs.String
 	}
+	var retired any
+	if g.RetiredAt.Valid {
+		retired = g.RetiredAt.String
+	}
 	return json.Marshal(struct {
 		fields
-		Panels any `json:"panel_ids"`
-	}{fields(g), panels})
+		Panels  any `json:"panel_ids"`
+		Retired any `json:"retired_at,omitempty"`
+	}{fields(g), panels, retired})
 }
 
 func readPageGrantSubject(ctx context.Context, tx *sql.Tx, page, kind, subject string) ([]pageGrantSnapshot, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT page_id,subject_type,subject_id,level,panel_ids,granted_by_user_id,granted_at FROM page_grants WHERE page_id=? AND (?='' OR (subject_type=? AND subject_id=?)) ORDER BY subject_type,subject_id,level`, page, kind, kind, subject)
+	rows, err := tx.QueryContext(ctx, `SELECT page_id,subject_type,subject_id,level,panel_ids,granted_by_user_id,granted_at,retired_at FROM page_grants WHERE page_id=? AND (?='' OR (subject_type=? AND subject_id=?)) ORDER BY subject_type,subject_id,level`, page, kind, kind, subject)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +54,7 @@ func readPageGrantSubject(ctx context.Context, tx *sql.Tx, page, kind, subject s
 	out := []pageGrantSnapshot{}
 	for rows.Next() {
 		var g pageGrantSnapshot
-		if err := rows.Scan(&g.PageID, &g.SubjectType, &g.SubjectID, &g.Level, &g.PanelIDs, &g.GrantedBy, &g.GrantedAt); err != nil {
+		if err := rows.Scan(&g.PageID, &g.SubjectType, &g.SubjectID, &g.Level, &g.PanelIDs, &g.GrantedBy, &g.GrantedAt, &g.RetiredAt); err != nil {
 			return nil, err
 		}
 		out = append(out, g)
@@ -164,6 +170,21 @@ func (h *PageHandler) commitPageGrantMutation(ctx context.Context, tx *sql.Tx, r
 		}
 	}
 
+	// Authority first: losing it inside this transaction retires the actor's
+	// grants, which would otherwise read as a corrupted final state.
+	current, err := h.loadPage(ctx, changes[0].entry.WorkspaceID, rec.Slug)
+	if err != nil {
+		return err
+	}
+	if current.ID != rec.ID || current.PrivateAudience {
+		return errors.New("page identity or audience changed during grant mutation")
+	}
+	if err := h.pageGrantIssuerCurrent(ctx, changes[0].entry.WorkspaceID, actor, current); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errPageGrantIssuerNotCurrent
+		}
+		return err
+	}
 	actual, err := readPageGrantSubject(ctx, tx, rec.ID, kind, subject)
 	if err != nil {
 		return err
@@ -182,19 +203,6 @@ func (h *PageHandler) commitPageGrantMutation(ctx context.Context, tx *sql.Tx, r
 	})
 	if !reflect.DeepEqual(actual, expected) {
 		return errors.New("page grant final state differs from audited mutation")
-	}
-	current, err := h.loadPage(ctx, changes[0].entry.WorkspaceID, rec.Slug)
-	if err != nil {
-		return err
-	}
-	if current.ID != rec.ID || current.PrivateAudience {
-		return errors.New("page identity or audience changed during grant mutation")
-	}
-	if err := h.pageGrantIssuerCurrent(ctx, changes[0].entry.WorkspaceID, actor, current); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return errPageGrantIssuerNotCurrent
-		}
-		return err
 	}
 	var recheck []string
 	if rec.NativeCraftApplication != "" {

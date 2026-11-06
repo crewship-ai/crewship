@@ -1110,7 +1110,8 @@ Two consequences worth knowing:
 An agent's authority is always a **subset** of the authorising human's, never
 a superset, and it is evaluated at use time — if that human later loses
 access to a crew, every grant they issued to an agent narrows with them
-automatically.
+automatically. A grant that ended this way stays ended: if the human regains
+the access, the grant has to be issued again.
 
 ### Ownership
 
@@ -1185,7 +1186,10 @@ what a page owner needs to be told. Revoking asks first.
 "Inert" now means exactly one thing: the human who issued the grant no longer
 has the standing to issue it. It is not a comment on the level — `read`,
 `produce` and `write` all decide something for as long as their issuer stands
-behind them. `comment` behaves the same way.
+behind them. `comment` behaves the same way. Losing that standing ends the
+grant for good: promoting or restoring the person does not bring it back, and
+the list says it must be issued again. Issuing it again is a new grant, with
+its own journal entry.
 </Note>
 
 ### What a page is, and what changed it

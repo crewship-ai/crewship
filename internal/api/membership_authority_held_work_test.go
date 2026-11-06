@@ -472,10 +472,9 @@ func TestStoredAuthorityDoesNotReviveAcrossMembershipChange(t *testing.T) {
 	}
 }
 
-// A Page grant is judged live against its issuer's standing, so it stops and
-// starts with the issuer (pages_grants_authz.go, livePageGrants). That is the
-// grant's own rule and no revision decides it. What must hold is the session a
-// grantee opened on it: it does not come back with the grant.
+// A Page grant ends when its issuer loses standing and does not come back with
+// it (pages_grants_authz.go, #5069). The session a grantee opened on it stays
+// dead, and a fresh session cannot be opened on the old grant either.
 func TestGranteeSessionAcrossIssuerMembershipChange(t *testing.T) {
 	const user = "native-scope-writer"
 	for _, test := range []struct {
@@ -512,6 +511,9 @@ func TestGranteeSessionAcrossIssuerMembershipChange(t *testing.T) {
 			next := craftNativeFreshRequestContext(t, f, user, "native-scope-session")
 			if err := craftNativeStreamBound(m, next, token, id); (err == nil) != test.keep {
 				t.Fatalf("grantee session after the issuer's change: %v, keep=%v", err, test.keep)
+			}
+			if w := craftNativeSessionCall(m, next); (w.Code == 201) != test.keep {
+				t.Fatalf("fresh session on the grant after the issuer's change: %d %s, keep=%v", w.Code, w.Body, test.keep)
 			}
 		})
 	}

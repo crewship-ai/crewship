@@ -255,8 +255,8 @@ review. The artifact spelling is an alias of the same Page API.
 
 Share with an existing workspace member, crew or the entire workspace using
 `PUT /api/v1/pages/{slug}/grants`. This human command uses the existing live
-issuer authorization. A grant is immediately inert after its issuer loses
-standing. It offers no guest or expiry options and cannot grant agent Produce.
+issuer authorization. A grant ends immediately when its issuer loses standing
+and does not return with it; share again to issue a new one. It offers no guest or expiry options and cannot grant agent Produce.
 
 | Flag | Description |
 |---|---|
@@ -928,9 +928,11 @@ like), so these commands cannot select a workspace literally named `true`,
   the human who issued it still has the reach they granted from: leave the
   workspace, lose ADMIN, or be removed from the page's owning crew, and every
   grant you issued narrows with you. The row stays — `page grants` shows it as
-  inert, with the reason — so you can see what would come back if that person's
-  access were restored. Revoking is how you remove a grant; this is how one
-  stops being borrowed authority nobody is accountable for any more.
+  inert, with the reason — but it does not come back if that person's access is
+  restored. Grant it again and it is a new grant with its own journal entry. A
+  change that keeps standing, such as ADMIN to OWNER, ends nothing. Revoking is
+  how you remove a grant; this is how one stops being borrowed authority nobody
+  is accountable for any more.
 </Note>
 
 ---
