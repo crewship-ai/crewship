@@ -471,6 +471,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   async function reopenReadOnly(retry=false){
    if(dead||authSuspended||readOpening||networkRetired&&!(retry&&current?.blocked))return
    const message='Právo upravovat bylo odebráno. Dokument je jen pro čtení.'
+   offerHeldCopy(false)
    networkRetired=true;clearInterval(reauthorize);clearInterval(leaseWatch);viewNow=vacant;setView(vacant);setHandoffRequest(undefined);setOwnsEditor(false);dropPrivateViews()
    if(!metadataOnly)setError(message)
    const r=current
