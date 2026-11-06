@@ -1,0 +1,1 @@
+- **The web app no longer needs `unsafe-eval` in its Content Security Policy (#5053).** Zod runs in `jitless` mode, set before any route chunk builds a schema, so its `new Function` probe stops reporting a violation on every page. WebAssembly keeps `wasm-unsafe-eval`.
