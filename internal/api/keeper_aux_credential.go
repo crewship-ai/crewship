@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
+	"time"
 
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/keepercfg"
 	"github.com/crewship-ai/crewship/internal/llm"
 )
@@ -94,6 +97,9 @@ func NewAuxCredentialLookup(db *sql.DB) keepercfg.AuxCredentialLookup {
 	}
 }
 
+// auxOllamaTimeout matches the request timeout of the plain Ollama client.
+const auxOllamaTimeout = 300 * time.Second
+
 // buildAuxWithCredential builds one aux-slot provider, sourcing its key from the
 // named vault credential when there is one.
 //
@@ -114,6 +120,11 @@ func buildAuxWithCredential(
 	lookup keepercfg.AuxCredentialLookup,
 	logger *slog.Logger,
 ) (llm.Provider, error) {
+	// The base handed in here is the runtime-settable judge endpoint, so it dials
+	// through the same trusted client as every other reader of that value.
+	if ollamaBase != "" && strings.EqualFold(strings.TrimSpace(m.Provider), keepercfg.ProviderOllama) {
+		return llm.NewOllamaWithClient(ollamaBase, m.Model, httpsafe.TrustedEndpointClient(auxOllamaTimeout)), nil
+	}
 	var apiKey string
 	if lookup != nil && credentialID != "" && m.Provider != keepercfg.ProviderOllama {
 		key, err := lookup(ctx, credentialID)

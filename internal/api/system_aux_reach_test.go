@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -202,5 +203,27 @@ func TestAuxReach_WithoutAJudgeEndpointFallsBackToTheEnv(t *testing.T) {
 	row := reachRow(t, h, "curator")
 	if row.Reachable == nil || !*row.Reachable {
 		t.Errorf("reachable = %v, want true — no accessor means the env value, as before", row.Reachable)
+	}
+}
+
+// A status probe is a request made on the caller's behalf, so it gets the same
+// fence as the judge it reports on: no redirects, no hard-blocked addresses.
+func TestAuxReach_ProbeDoesNotLeaveTheConfiguredEndpoint(t *testing.T) {
+	var bounced atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { bounced.Add(1) }))
+	defer target.Close()
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusFound)
+	}))
+	defer endpoint.Close()
+
+	if ok, _ := reachOllama(context.Background(), endpoint.URL); !ok {
+		t.Error("an endpoint answering with a redirect is still reachable")
+	}
+	if got := bounced.Load(); got != 0 {
+		t.Fatalf("the probe followed the redirect %d time(s)", got)
+	}
+	if ok, _ := reachOllama(context.Background(), "http://169.254.169.254"); ok {
+		t.Error("a hard-blocked address must not read as reachable")
 	}
 }
