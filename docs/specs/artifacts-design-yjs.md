@@ -169,6 +169,21 @@ permissions, keeping the local document and any unsent changes.
 
 ## Who can do what
 
+Live-read/Edit authority means the effective authority of this request, not
+only the Page ownership or grant label. Human CLI reads need a read-capable
+credential: `pages:read`, `pages:*`, `*`, or an unscoped full-role token;
+write scope alone does not imply read scope. Live/history reads need both
+`pages:read` and `pages:write` (or `pages:*`, `*`, or an unscoped full-role token) plus current Edit permission, or
+current Edit permission through a browser session. Ordinary Read/Comment
+callers and non-admin Page owners/Edit grantees using only `pages:read` are
+shared-only. Separately authorized workspace OWNER/ADMIN readers can read
+latest/history even with read scope, with audit for foreign Designs; that
+credential still cannot write. Agent tools retain their separate exact-run
+mandate, original human credential and live authority checks; these human CLI
+scope examples do not replace agent credential validation. Every credential
+form still requires live membership and current Page permission; a wildcard
+or unscoped full-role token does not confer Edit by itself.
+
 | Action | Required |
 |---|---|
 | Create | A human with Page creation permission. Agents cannot create a Design. |
@@ -181,8 +196,9 @@ Shared-only Read and Comment grantees receive the immutable shared snapshot
 and presence, not unsaved live canvas updates. Their version list and comments
 are limited to the shared version, and they can open only that version by
 number. Workspace administrators using the separately audited read path can
-still read live state; a read-only token does not gain write permission. Tokens
-need `pages:read` for reads and `pages:write` for changes.
+still read live state; a read-only token does not gain write permission. Narrowed
+tokens are checked for `pages:read` on reads and `pages:write` on changes;
+matching wildcards and unscoped full-role alternatives apply as described above.
 
 Snapshot access and presence do not establish live editing or a collaboration
 acceptance result. Live multiuser behavior must be qualified separately on the
