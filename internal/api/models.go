@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/llm"
@@ -231,21 +232,32 @@ func curatedOrEmpty(provider string) []llm.ModelInfo {
 	return []llm.ModelInfo{}
 }
 
+// modelListHosts is where defaultModelLister sends each provider's key.
+var modelListHosts = map[string]string{
+	"ANTHROPIC": anthropicAPIHost,
+	"OPENAI":    "api.openai.com",
+}
+
 // activeCredential returns the decrypted value of the workspace's first active
 // API_KEY credential for the given provider, or sql.ErrNoRows when none exists.
 func (h *ModelsHandler) activeCredential(ctx context.Context, wsID, provider string) (string, error) {
-	var encryptedValue string
+	var encryptedValue, allowedHosts string
 	err := h.db.QueryRowContext(ctx, `
-		SELECT encrypted_value FROM credentials
+		SELECT encrypted_value, COALESCE(allowed_hosts, '[]') FROM credentials
 		WHERE workspace_id = ?
 		  AND provider = ?
 		  AND type = 'API_KEY'
 		  AND status = 'ACTIVE'
 		  AND deleted_at IS NULL
 		ORDER BY created_at ASC
-		LIMIT 1`, wsID, provider).Scan(&encryptedValue)
+		LIMIT 1`, wsID, provider).Scan(&encryptedValue, &allowedHosts)
 	if err != nil {
 		return "", err
+	}
+	// The caller may be any authenticated token, so a host-bound key is used
+	// only when it approves the host listing really contacts (#5045).
+	if !credhostgate.PermitsHost(allowedHosts, modelListHosts[provider]) {
+		return "", sql.ErrNoRows
 	}
 	return encryption.Decrypt(encryptedValue)
 }

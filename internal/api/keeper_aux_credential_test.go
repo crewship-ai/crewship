@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/keepercfg"
@@ -312,5 +313,46 @@ func TestAuxCredential_HostBoundRefused(t *testing.T) {
 		if err := check(ctx, wsID, id); err == nil {
 			t.Errorf("%s: write accepted a host-bound credential", id)
 		}
+	}
+}
+
+// #5045: the verdict slots cache a built provider. Binding a pinned key must
+// stop that key on the next call rather than at the next restart.
+func TestAuxProvider_BindingAPinnedKeyDropsTheCachedClient(t *testing.T) {
+	ensureEncryptionKey(t)
+	db := setupTestDB(t)
+	store := keepercfg.NewAuxStore(db, llm.AuxiliaryModels{
+		RunSummary: llm.AuxModel{Provider: "ollama", Model: "boot-model", Timeout: 15 * time.Second},
+		Fallback:   llm.AuxModel{Provider: "ollama", Model: "boot-fallback", Timeout: 10 * time.Second},
+	})
+	if err := store.Load(context.Background()); err != nil {
+		t.Fatalf("load aux store: %v", err)
+	}
+	r := &Router{keeperAuxSettings: store, logger: newTestLogger(), db: db}
+	ownerID := seedTestUser(t, r.db)
+	wsID := seedTestWorkspace(t, r.db, ownerID)
+	e, err := encryption.Encrypt("sk-live-123")
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	execOrFatal(t, r.db, `INSERT INTO credentials
+		(id, workspace_id, name, encrypted_value, type, status, created_by)
+		VALUES ('key_pin', ?, 'pin', ?, ?, 'ACTIVE', ?)`, wsID, e, CredTypeAPIKey, ownerID)
+	id := "key_pin"
+	if _, err := r.KeeperAuxSettings().Apply(context.Background(), string(llm.SlotRunSummary),
+		keepercfg.AuxPatch{CredentialID: &id}, ""); err != nil {
+		t.Fatalf("pin key: %v", err)
+	}
+	pinned := &stubVerdictProvider{}
+	r.runVerdictCache.fpr = "ollama|boot-model||key_pin"
+	r.runVerdictCache.provider = pinned
+	r.runVerdictCache.model = "boot-model"
+
+	if got, _, _ := r.RunVerdict(); got != llm.Provider(pinned) {
+		t.Fatal("an unbound pinned key must keep its cached client")
+	}
+	execOrFatal(t, r.db, `UPDATE credentials SET allowed_hosts = '["api.anthropic.com"]' WHERE id = 'key_pin'`)
+	if got, _, _ := r.RunVerdict(); got == llm.Provider(pinned) {
+		t.Fatal("a cached client kept spending a key after it was bound")
 	}
 }

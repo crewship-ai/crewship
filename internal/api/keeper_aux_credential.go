@@ -184,3 +184,23 @@ func newAuxCredentialCheck(db *sql.DB) func(ctx context.Context, workspaceID, cr
 		return nil
 	}
 }
+
+// auxCredentialUsable reports whether a pinned evaluator key may still be spent:
+// no key is pinned, or the key carries no approved hosts. A slot that caches its
+// client checks this on every call, so binding a key takes effect without a
+// restart (#5045). A failed read withholds.
+func auxCredentialUsable(ctx context.Context, db *sql.DB, credentialID string) bool {
+	if credentialID == "" {
+		return true
+	}
+	if db == nil {
+		return false
+	}
+	var allowedHosts string
+	if err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(allowed_hosts, '[]') FROM credentials WHERE id = ?`, credentialID).Scan(&allowedHosts); err != nil {
+		return false
+	}
+	_, bound, _ := credhostgate.Bound(allowedHosts)
+	return !bound
+}
