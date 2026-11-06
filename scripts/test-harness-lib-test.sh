@@ -220,7 +220,9 @@ case "$args" in
         | if $mode == "landed-no-refusal-receipt-id" then map(del(.id)) else . end'
     else echo '[]'; fi; exit 0 ;;
   *" chat list "*) echo "[]"; exit 0 ;;
-  *" work list "*) echo '{"items":[]}'; exit 0 ;;
+  *" work list "*)
+    [ "${XLINK_BUSY:-}" = 1 ] && { echo '{"items":[{"id":"busy"}]}'; exit 0; }
+    echo '{"items":[]}'; exit 0 ;;
   *" activity "*)
     printf '%s\n' activity >>"$state/request-categories"
     [ "$XLINK_MODE" = feed-down ] && exit 1
@@ -279,7 +281,9 @@ case "$args" in
     exit 0 ;;
   *" issue comments "*|*" issue get "*) exit 0 ;;
   *" ask "*)
-    printf 'ops\n' >"$save"; exit 0 ;;
+    printf 'ops\n' >"$save"
+    [ "${XLINK_ASK:-}" = partial ] && exit 1
+    exit 0 ;;
 esac
 exit 0
 EOF
@@ -563,6 +567,108 @@ if bash "$SCRIPT_DIR/test-harness/crew-links-evidence-test.sh"; then
   pass "cross-crew completion and refusal evidence rejects false positives"
 else
   fail "cross-crew completion and refusal evidence rejects false positives"
+fi
+
+# ── Delegation evidence: the real suite against a stub CLI ───────────────────
+# No path without a tagged assignment may pass or skip: run-all.sh and the
+# nightly job read only the exit status, so a skip here is a false green.
+deleg_cli() {
+  cat >"$1" <<'EOF'
+#!/usr/bin/env bash
+state="${DELEG_STATE:?}"
+args=" $* "
+desc="" prev=""
+for a in "$@"; do [ "$prev" = "--description" ] && desc="$a"; prev="$a"; done
+created() { printf '{"to_slug":"%s","entry_type":"assignment.created","payload":{"task":"%s","assignment_id":"%s"}}\n' "$1" "$2" "$3"; }
+done_row() { printf '{"to_slug":"sam","entry_type":"assignment.completed","payload":{"outcome":"%s","assignment_id":"%s"}}\n' "$1" "$2"; }
+case "$args" in
+  *" version "*|*" whoami "*) exit 0 ;;
+  *" agent list "*|*" routine list "*) echo row; exit 0 ;;
+  *" work list "*)
+    [ "$DELEG_MODE" = busy ] && { echo '{"items":[{"id":"busy"}]}'; exit 0; }
+    echo '{"items":[]}'; exit 0 ;;
+  *" issue create "*)
+    [ "$DELEG_MODE" = no-dispatch ] && exit 1
+    n=$(( $(cat "$state/n" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$state/n"
+    printf '%s' "$desc" | grep -oE 'DELEG-[A-Z0-9]+' | head -1 >"$state/tag"
+    printf '{"id":"iss_%s","identifier":"ENG-%s"}\n' "$n" "$n"; exit 0 ;;
+  *" issue start "*) exit 0 ;;
+  *" issue runs "*) echo '[{"agent_slug":"alex","source":"delegation","status":"COMPLETED","result_summary":"tag quoted"}]'; exit 0 ;;
+  *" activity "*)
+    tag="$(cat "$state/tag" 2>/dev/null)"; n="$(cat "$state/n" 2>/dev/null || echo 0)"
+    reads=$(( $(cat "$state/reads" 2>/dev/null || echo 0) + 1 )); echo "$reads" >"$state/reads"
+    case "$DELEG_MODE" in
+      proven) created sam "do $tag" a1; done_row SUCCEEDED a1 ;;
+      second-try) if [ "$n" -ge 2 ]; then created sam "do $tag" a1; done_row SUCCEEDED a1; fi ;;
+      no-row) ;;
+      other-task) created sam "do DELEG-OTHER" a1; done_row SUCCEEDED a1 ;;
+      other-agent) created robin "do $tag" a1; done_row SUCCEEDED a1 ;;
+      no-completion) created sam "do $tag" a1 ;;
+      other-completion) created sam "do $tag" a1; done_row SUCCEEDED a2 ;;
+      failed-completion) created sam "do $tag" a1; done_row FAILED a1 ;;
+      feed-down) exit 1 ;;
+      completion-feed-down) [ "$reads" -ge 2 ] && exit 1; created sam "do $tag" a1 ;;
+      bad-row) created sam "do $tag" a1; done_row SUCCEEDED a1
+        printf '{"to_slug":"sam","entry_type":"assignment.completed","payload":"oops"}\n' ;;
+    esac
+    exit 0 ;;
+esac
+exit 0
+EOF
+  chmod +x "$1"
+}
+
+run_delegation() { # <mode> [PATH override] — suite output, then its exit status
+  local dir; dir="$(mktemp -d -t cs-deleg.XXXXXX)"
+  deleg_cli "$dir/crewship"
+  env -u CREWSHIP_SERVER -u SERVER CREWSHIP="$dir/crewship" DELEG_STATE="$dir" DELEG_MODE="$1" ASK_TIMEOUT=2 POLL_INTERVAL=1 \
+    ${2:+PATH="$2"} bash "$SCRIPT_DIR/test-harness/test-delegation.sh" 2>&1
+  echo "fixture: suite-exit:$?"
+  rm -rf "$dir"
+}
+
+deleg_expect_fail() { # <mode> <check name> [PATH override]
+  local out; out="$(run_delegation "$1" "${3:-}")"
+  expect_contains "delegation $1 -> FAIL $2" "$out" "FAIL $2"
+  expect_not_contains "delegation $1 -> no skip stands in for proof" "$out" "SKIP lead→peer"
+  expect_contains "delegation $1 -> suite exits non-zero" "$out" "fixture: suite-exit:1"
+}
+
+if command -v jq >/dev/null 2>&1; then
+  out="$(run_delegation proven)"
+  expect_contains "delegation proven -> reached sam" "$out" "PASS alex's delegation reached sam"
+  expect_contains "delegation proven -> completed" "$out" "PASS the delegated assignment to sam completed"
+  expect_not_contains "delegation proven -> no peer-chat check" "$out" "peer chat"
+  out="$(run_delegation second-try)"
+  expect_contains "delegation on the retry -> reached sam" "$out" "PASS alex's delegation reached sam"
+  expect_contains "delegation on the retry -> completed" "$out" "PASS the delegated assignment to sam completed"
+  for mode in no-row other-task other-agent feed-down no-dispatch; do
+    deleg_expect_fail "$mode" "lead→peer delegation"
+  done
+  for mode in no-completion other-completion failed-completion completion-feed-down bad-row; do
+    deleg_expect_fail "$mode" "the delegated assignment to sam completed"
+  done
+  out="$(run_delegation completion-feed-down)"
+  expect_contains "feed outage while polling -> named, not a timeout" "$out" "could not be read while waiting"
+  out="$(run_delegation other-task)"
+  expect_not_contains "another task's row is not proof" "$out" "PASS alex's delegation"
+  out="$(run_delegation bad-row)"
+  expect_not_contains "a parser failure leaves no matching id" "$out" "PASS the delegated assignment"
+
+  # jq is the only tool removed, so the outcome is the suite's, not the shell's.
+  nojq="$(mktemp -d -t cs-nojq.XXXXXX)"
+  for tool in bash cat cut date dirname basename env grep head mktemp rm sed sleep sort tail tr wc; do
+    ln -s "$(command -v "$tool")" "$nojq/$tool"
+  done
+  deleg_expect_fail proven "lead→peer delegation" "$nojq"
+  rm -rf "$nojq"
+
+  out="$(XLINK_ASK=partial run_crew_links landed)"
+  expect_contains "partial failed ask -> FAIL" "$out" "FAIL alex answers the connections ask"
+  expect_not_contains "partial failed ask -> ops is not read" "$out" "PASS alex sees ops"
+  out="$(XLINK_BUSY=1 XLINK_FREE_TIMEOUT=1 run_crew_links landed)"
+  expect_contains "busy lead -> FAIL before the ask" "$out" "FAIL alex frees its previous work"
+  expect_not_contains "busy lead -> the ask is not sent" "$out" "alex sees ops"
 fi
 
 echo

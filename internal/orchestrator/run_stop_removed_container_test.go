@@ -14,11 +14,15 @@ import (
 
 type removedContainerStatus struct {
 	provider.ContainerProvider
-	err error
+	state string
+	err   error
 }
 
 func (c *removedContainerStatus) ContainerStatus(context.Context, string) (*provider.ContainerStatus, error) {
-	return nil, c.err
+	if c.err != nil {
+		return nil, c.err
+	}
+	return &provider.ContainerStatus{State: c.state}, nil
 }
 
 // A protected run whose container was removed (agent deletion) has no
@@ -29,12 +33,16 @@ func (c *removedContainerStatus) ContainerStatus(context.Context, string) (*prov
 func TestStopRunAtHostRunRemovedContainerIsStopped(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
+		state    string
 		status   error
 		wantStop bool
 		wantErr  bool
 	}{
-		{"removed container", provider.ErrContainerNotFound, true, false},
-		{"inspect unavailable", errors.New("daemon unreachable"), false, true},
+		{"removed container", "", provider.ErrContainerNotFound, true, false},
+		{"stopped container", "stopped", nil, true, false},
+		{"dead container", "error", nil, true, false},
+		{"unknown state is no proof", "paused", nil, false, true},
+		{"inspect unavailable", "", errors.New("daemon unreachable"), false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			o, run := retainedAnalysisFixture(t, "CLAUDE_CODE", "", "", 0)
@@ -48,7 +56,7 @@ func TestStopRunAtHostRunRemovedContainerIsStopped(t *testing.T) {
 			if err := o.state.Set(t.Context(), "agent_runs", run.ID, raw); err != nil {
 				t.Fatal(err)
 			}
-			o.container = &removedContainerStatus{err: tc.status}
+			o.container = &removedContainerStatus{state: tc.state, err: tc.status}
 			stopped, err := o.StopRunAt(t.Context(), RunLocation{ContainerID: run.ContainerID, AgentSlug: "agent", RunID: run.ID})
 			if stopped != tc.wantStop || (err != nil) != tc.wantErr {
 				t.Fatalf("stopped=%v err=%v, want stopped=%v err=%v", stopped, err, tc.wantStop, tc.wantErr)

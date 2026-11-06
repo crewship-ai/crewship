@@ -51,7 +51,7 @@ section "2. A lead knows which crews it can reach"
 # ─────────────────────────────────────────────────────────────────────────────
 
 info "Asking alex (engineering lead) what its sidecar reports as linked…"
-wait_agent_free alex || finish  # a busy lead answers 429, which is not "sees no crews"
+wait_agent_free alex "${XLINK_FREE_TIMEOUT:-360}" || finish  # a busy lead answers 429, which is not "sees no crews"
 seen="$(ask_agent alex "Run exactly: curl -s http://localhost:9119/connections — then reply with ONLY the crew slugs you found, comma separated, nothing else.")"
 seen_rc=$?
 if (( seen_rc != 0 )); then
