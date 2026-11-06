@@ -93,14 +93,18 @@ type webhookResponse struct {
 	// the secret before the current one is still accepted until then.
 	PreviousSecretExpiresAt *time.Time     `json:"previous_secret_expires_at,omitempty"`
 	InputsTemplate          map[string]any `json:"inputs_template"`
-	Enabled                 bool           `json:"enabled"`
-	RateLimitPerMin         int            `json:"rate_limit_per_min"`
-	LastFiredAt             *time.Time     `json:"last_fired_at,omitempty"`
-	LastStatus              string         `json:"last_status,omitempty"`
-	LastRunID               string         `json:"last_run_id,omitempty"`
-	FireCount               int64          `json:"fire_count"`
-	CreatedAt               time.Time      `json:"created_at"`
-	UpdatedAt               time.Time      `json:"updated_at"`
+	// Signal delivery mode: a verified delivery wakes parked wait:event steps
+	// (matched by correlation key) instead of starting a run.
+	SignalEventType       string     `json:"signal_event_type,omitempty"`
+	SignalCorrelationPath string     `json:"signal_correlation_path,omitempty"`
+	Enabled               bool       `json:"enabled"`
+	RateLimitPerMin       int        `json:"rate_limit_per_min"`
+	LastFiredAt           *time.Time `json:"last_fired_at,omitempty"`
+	LastStatus            string     `json:"last_status,omitempty"`
+	LastRunID             string     `json:"last_run_id,omitempty"`
+	FireCount             int64      `json:"fire_count"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
 }
 
 func (h *PipelineHandler) toWebhookResponse(w *pipeline.Webhook, slug string, includeSecret bool) webhookResponse {
@@ -122,6 +126,8 @@ func (h *PipelineHandler) toWebhookResponse(w *pipeline.Webhook, slug string, in
 		Token:                 w.Token,
 		SigningSecretSet:      w.SigningSecret != "",
 		InputsTemplate:        tmpl,
+		SignalEventType:       w.SignalEventType,
+		SignalCorrelationPath: w.SignalCorrelationPath,
 		Enabled:               w.Enabled,
 		RateLimitPerMin:       w.RateLimitPerMin,
 		LastFiredAt:           w.LastFiredAt,
@@ -150,6 +156,11 @@ type webhookRequestBody struct {
 	InputsTemplate        map[string]any `json:"inputs_template"`
 	Enabled               *bool          `json:"enabled,omitempty"`
 	RateLimitPerMin       int            `json:"rate_limit_per_min"`
+	// SignalEventType + SignalCorrelationPath switch the webhook to signal
+	// delivery. On PATCH, absent keeps the current value; empty strings for
+	// both return the webhook to starting runs.
+	SignalEventType       string `json:"signal_event_type"`
+	SignalCorrelationPath string `json:"signal_correlation_path"`
 	// RotateSecret is PATCH-only (F21, B9 #2362): the explicit, opt-in
 	// signal to mint a new HMAC signing secret. Absent/false means "leave
 	// the existing secret alone" — the whole point of this endpoint over
@@ -236,11 +247,17 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 		TargetPipelineVersion: body.TargetPipelineVersion,
 		SigningSecret:         signingSecret,
 		InputsTemplate:        body.InputsTemplate,
+		SignalEventType:       body.SignalEventType,
+		SignalCorrelationPath: body.SignalCorrelationPath,
 		Enabled:               enabled,
 		RateLimitPerMin:       body.RateLimitPerMin,
 	}
 	saved, err := h.webhooks.Save(r.Context(), in)
 	if err != nil {
+		if errors.Is(err, pipeline.ErrInvalidSignalDelivery) {
+			replyError(w, http.StatusBadRequest, signalDeliveryConfigMsg(err))
+			return
+		}
 		if errors.Is(err, pipeline.ErrInvalidTrigger) {
 			replyError(w, http.StatusBadRequest, "target does not support automatic triggers")
 			return
@@ -260,6 +277,11 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 	// once, the user copies it into the sender, and we never expose
 	// it again. Stripe / GitHub use the same one-shot pattern.
 	writeJSON(w, http.StatusCreated, h.toWebhookResponse(saved, slug, true))
+}
+
+func signalDeliveryConfigMsg(err error) string {
+	return "invalid signal delivery configuration: signal_event_type and signal_correlation_path (a dotted JSON path) " +
+		"must be set together, on a crewship-profile webhook (" + err.Error() + ")"
 }
 
 // UpdateWebhook PATCH /workspaces/{wsId}/pipeline-webhooks/{webhookId}
@@ -361,6 +383,14 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 		rateLimit = body.RateLimitPerMin
 	}
 
+	signalEventType, signalPath := existing.SignalEventType, existing.SignalCorrelationPath
+	if _, mentioned := rawKeys["signal_event_type"]; mentioned {
+		signalEventType = body.SignalEventType
+	}
+	if _, mentioned := rawKeys["signal_correlation_path"]; mentioned {
+		signalPath = body.SignalCorrelationPath
+	}
+
 	// Secret rotation is explicit and opt-in (F21). Every other path keeps
 	// the existing plaintext (GetByID already decrypted it) so Save's
 	// re-encrypt is a no-op change in content.
@@ -400,11 +430,17 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 		TargetPipelineVersion: body.TargetPipelineVersion,
 		SigningSecret:         signingSecret,
 		InputsTemplate:        inputsTemplate,
+		SignalEventType:       signalEventType,
+		SignalCorrelationPath: signalPath,
 		Enabled:               enabled,
 		RateLimitPerMin:       rateLimit,
 	}
 	saved, err := h.webhooks.Save(r.Context(), in)
 	if err != nil {
+		if errors.Is(err, pipeline.ErrInvalidSignalDelivery) {
+			replyError(w, http.StatusBadRequest, signalDeliveryConfigMsg(err))
+			return
+		}
 		if errors.Is(err, pipeline.ErrInvalidTrigger) {
 			replyError(w, http.StatusBadRequest, "target does not support automatic triggers")
 			return
@@ -801,6 +837,14 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Signal-delivery mode: the verified delivery wakes parked wait:event
+	// steps by correlation key. It never starts a run, so none of the run
+	// pre-checks below apply. Reached only after signature verification.
+	if wh.SignalEventType != "" {
+		h.fireWebhookSignal(w, r, wh, idemKey, body)
+		return
+	}
+
 	// Build pipeline inputs. Default: pass body under "event" so the
 	// pipeline can reference {{ inputs.event }}. The inputs_template
 	// (if non-empty) is merged on top so a webhook can hand-shape
@@ -910,6 +954,48 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"run_id": runID, "status": "PENDING", "deduped": false, "delivery_id": receipt.DeliveryID, "pending_id": receipt.PendingID, "duplicate": false,
 	})
+}
+
+// fireWebhookSignal answers a verified delivery to a signal-mode webhook.
+// 200 {"status":"DELIVERED"} when waits were woken, 200 {"status":"IGNORED"}
+// when none matched (the sender must not retry that into an error), and the
+// same body with duplicate:true for a redelivered delivery id.
+func (h *PipelineHandler) fireWebhookSignal(w http.ResponseWriter, r *http.Request, wh *pipeline.Webhook, deliveryID string, body []byte) {
+	if h.db == nil {
+		replyError(w, http.StatusServiceUnavailable, "signal wait store not wired")
+		return
+	}
+	res, err := pipeline.DeliverWebhookSignal(r.Context(), h.db, wh, deliveryID, body)
+	if err != nil {
+		h.logger.Error("webhook signal: durable deliver", "error", err, "webhook_id", wh.ID)
+		w.Header().Set("Retry-After", webhook.IngressRetryAfterSeconds)
+		replyError(w, http.StatusServiceUnavailable, "signal delivery unavailable")
+		return
+	}
+	if !res.Duplicate {
+		for _, runID := range res.RunIDs {
+			if h.signals != nil {
+				h.signals.Signal(runID, wh.SignalEventType, string(body))
+			}
+			h.resumeAfterSignal(runID)
+		}
+		status := "SIGNALED"
+		if res.Outcome == "ignored" {
+			status = "IGNORED"
+			h.logger.Info("webhook signal: no matching wait", "webhook_id", wh.ID, "reason", res.Reason, "delivery_id", deliveryID)
+		}
+		// Operator-visible: last_status on `routine webhooks list`.
+		_, _ = h.webhooks.RecordFire(r.Context(), wh.ID, "", status)
+	}
+	status := "DELIVERED"
+	if res.Outcome == "ignored" {
+		status = "IGNORED"
+	}
+	resp := map[string]any{"status": status, "delivered": len(res.RunIDs), "run_ids": res.RunIDs, "duplicate": res.Duplicate}
+	if res.Reason != "" {
+		resp["reason"] = res.Reason
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // routineReceipt identifies accepted work whose pending start committed with it.

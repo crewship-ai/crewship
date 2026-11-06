@@ -181275,6 +181275,12 @@
                     "rate_limit_per_min": {
                       "type": "integer"
                     },
+                    "signal_correlation_path": {
+                      "type": "string"
+                    },
+                    "signal_event_type": {
+                      "type": "string"
+                    },
                     "signing_secret": {
                       "type": "string"
                     },
@@ -181353,6 +181359,12 @@
                     },
                     "rate_limit_per_min": {
                       "type": "integer"
+                    },
+                    "signal_correlation_path": {
+                      "type": "string"
+                    },
+                    "signal_event_type": {
+                      "type": "string"
                     },
                     "signing_secret": {
                       "type": "string"
@@ -181711,6 +181723,12 @@
                   "rotate_secret": {
                     "type": "boolean"
                   },
+                  "signal_correlation_path": {
+                    "type": "string"
+                  },
+                  "signal_event_type": {
+                    "type": "string"
+                  },
                   "target_pipeline_id": {
                     "type": "string"
                   },
@@ -181774,6 +181792,12 @@
                     },
                     "rate_limit_per_min": {
                       "type": "integer"
+                    },
+                    "signal_correlation_path": {
+                      "type": "string"
+                    },
+                    "signal_event_type": {
+                      "type": "string"
                     },
                     "signing_secret": {
                       "type": "string"

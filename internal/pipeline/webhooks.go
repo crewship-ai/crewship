@@ -310,15 +310,21 @@ type Webhook struct {
 	PreviousSigningSecret   string
 	PreviousSecretExpiresAt *time.Time
 	InputsTemplateJSON      string
-	Enabled                 bool
-	RateLimitPerMin         int
-	LastFiredAt             *time.Time
-	LastStatus              string
-	LastRunID               string
-	FireCount               int64
-	CreatedAt               time.Time
-	UpdatedAt               time.Time
-	DeletedAt               *time.Time
+	// SignalEventType, when set, puts the webhook in signal-delivery mode: a
+	// verified delivery wakes parked wait:event steps instead of starting a run.
+	// SignalCorrelationPath is the dotted path in the verified JSON body whose
+	// value is the correlation key. Both set, or both empty.
+	SignalEventType       string
+	SignalCorrelationPath string
+	Enabled               bool
+	RateLimitPerMin       int
+	LastFiredAt           *time.Time
+	LastStatus            string
+	LastRunID             string
+	FireCount             int64
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	DeletedAt             *time.Time
 }
 
 // SaveWebhookInput is the payload for WebhookStore.Save.
@@ -331,6 +337,8 @@ type SaveWebhookInput struct {
 	TargetPipelineVersion *int
 	SigningSecret         string
 	InputsTemplate        map[string]any
+	SignalEventType       string
+	SignalCorrelationPath string
 	Enabled               bool
 	RateLimitPerMin       int
 }
@@ -395,6 +403,17 @@ func (s *WebhookStore) Save(ctx context.Context, in SaveWebhookInput) (*Webhook,
 	if in.WorkspaceID == "" || in.TargetPipelineID == "" {
 		return nil, errors.New("pipeline_webhooks: workspace_id + target_pipeline_id required")
 	}
+	if (in.SignalEventType == "") != (in.SignalCorrelationPath == "") {
+		return nil, ErrInvalidSignalDelivery
+	}
+	if in.SignalEventType != "" {
+		if in.IngressProfile != "crewship" {
+			return nil, ErrInvalidSignalDelivery
+		}
+		if err := ValidateJSONPath(in.SignalCorrelationPath); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidSignalDelivery, err)
+		}
+	}
 	tmplJSON, err := json.Marshal(in.InputsTemplate)
 	if err != nil {
 		return nil, fmt.Errorf("marshal inputs_template: %w", err)
@@ -440,8 +459,9 @@ INSERT INTO pipeline_webhooks (
     id, workspace_id, name, target_pipeline_id, target_pipeline_version,
     token, token_hash, signing_secret, inputs_template,
     enabled, rate_limit_per_min,
-    created_at, updated_at, ingress_profile
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    created_at, updated_at, ingress_profile,
+    signal_event_type, signal_correlation_path
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, in.WorkspaceID, in.Name, in.TargetPipelineID,
 			nullInt(in.TargetPipelineVersion),
 			// The cleartext never reaches the table (#1888): only its
@@ -451,6 +471,7 @@ INSERT INTO pipeline_webhooks (
 			nullStr(storedSigning), string(tmplJSON),
 			boolToInt(in.Enabled), in.RateLimitPerMin,
 			now, now, in.IngressProfile,
+			nullStr(in.SignalEventType), nullStr(in.SignalCorrelationPath),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("insert webhook: %w", err)
@@ -472,11 +493,13 @@ INSERT INTO pipeline_webhooks (
 UPDATE pipeline_webhooks
 SET name = ?, target_pipeline_id = ?, target_pipeline_version = ?,
     signing_secret = ?, inputs_template = ?, enabled = ?, rate_limit_per_min = ?,
-    updated_at = ?, ingress_profile = ?
+    updated_at = ?, ingress_profile = ?,
+    signal_event_type = ?, signal_correlation_path = ?
 WHERE id = ? AND deleted_at IS NULL`,
 		in.Name, in.TargetPipelineID, nullInt(in.TargetPipelineVersion),
 		nullStr(storedSigning), string(tmplJSON),
-		boolToInt(in.Enabled), in.RateLimitPerMin, now, in.IngressProfile, in.ID,
+		boolToInt(in.Enabled), in.RateLimitPerMin, now, in.IngressProfile,
+		nullStr(in.SignalEventType), nullStr(in.SignalCorrelationPath), in.ID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update webhook: %w", err)
@@ -913,7 +936,8 @@ SELECT id, workspace_id, name, target_pipeline_id, target_pipeline_version,
        enabled, rate_limit_per_min,
        last_fired_at, COALESCE(last_status, ''), COALESCE(last_run_id, ''),
        fire_count, created_at, updated_at, deleted_at, ingress_profile,
-       COALESCE(previous_signing_secret, ''), previous_secret_expires_at
+       COALESCE(previous_signing_secret, ''), previous_secret_expires_at,
+       COALESCE(signal_event_type, ''), COALESCE(signal_correlation_path, '')
 FROM pipeline_webhooks`
 
 func scanWebhook(rs rowScanner) (*Webhook, error) {
@@ -934,6 +958,7 @@ func scanWebhook(rs rowScanner) (*Webhook, error) {
 		&lastFired, &w.LastStatus, &w.LastRunID,
 		&w.FireCount, &createdAt, &updatedAt, &deletedAt, &w.IngressProfile,
 		&w.PreviousSigningSecret, &prevExpires,
+		&w.SignalEventType, &w.SignalCorrelationPath,
 	)
 	if err != nil {
 		return nil, err

@@ -19,6 +19,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
@@ -40,6 +41,12 @@ const reliabilityAcceptanceWorkspaceID = "creliabilityws00000001"
 
 func startReliabilityAcceptanceServer(t *testing.T) (cfgPath, serverURL string) {
 	t.Helper()
+	cfgPath, serverURL, _ = startReliabilityAcceptanceServerDB(t)
+	return cfgPath, serverURL
+}
+
+func startReliabilityAcceptanceServerDB(t *testing.T) (cfgPath, serverURL string, db *sql.DB) {
+	t.Helper()
 
 	// CreateWebhook/UpdateWebhook encrypt the HMAC signing secret at rest
 	// and fail CLOSED with no usable key (#1254 item C) — the server runs
@@ -48,7 +55,7 @@ func startReliabilityAcceptanceServer(t *testing.T) (cfgPath, serverURL string) 
 	t.Setenv("ENCRYPTION_KEY", strings.Repeat("ab", 32))
 
 	dbh := testutil.MigratedDB(t)
-	db := dbh.DB
+	db = dbh.DB
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 	mustExec := func(q string, args ...any) {
@@ -115,7 +122,7 @@ func startReliabilityAcceptanceServer(t *testing.T) (cfgPath, serverURL string) 
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	return cfgPath, srv.URL
+	return cfgPath, srv.URL, db
 }
 
 func runReliabilityCLI(t *testing.T, cfgPath string, args ...string) (string, error) {

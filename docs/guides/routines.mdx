@@ -954,6 +954,56 @@ crewship signal send --event-type deploy.finished --payload "v1.4.2"
 
 The topic form is what makes `wait: event` usable as a subscription rather than a callback: several routines can park on `mission.status_change` and one delivery resumes all of them, each with the payload as its wait step's output. The `event_type` is a free-form string — there is no registry to add to, so a producer and a consumer only have to agree on a name.
 
+**Filtering what a wait accepts: `event_filter`.** A `wait: event` step may set `event_filter` to accept only some signals. The filter is a conjunction of terms joined by `&&`; each term is `path == value`.
+
+- `path` is a dotted path into the signal payload, which must be a JSON document (segments are letters, digits, `_` or `-`; a numeric segment indexes an array).
+- `value` is bare text (trimmed) or a double-quoted string for values containing `&&`, `"` or leading/trailing spaces; `""` is the empty string. Strings compare as written; numbers by their written form (`42`, `1.5`); booleans as `true`/`false`; JSON `null` as `null`.
+- A missing path, an object/array at the path, or a non-JSON payload does not match. There is no OR and no negation.
+- The field is templated (`{{ inputs.env }}`) and rendered when the wait arms. A templated value that renders with a quote or `&&` changes the terms, so quote templated values you do not control.
+
+```yaml
+- id: gate
+  type: wait
+  wait:
+    kind: event
+    event_type: deploy.finished
+    event_filter: 'env.name == prod && status == ok'
+```
+
+A signal that does not match is **not** delivered to that wait: the wait stays pending (same deadline), and the signal remains available to other waits that do match. A per-run signal that matches nothing answers `404`, a topic signal that matches nothing answers `delivered: 0`. A malformed filter is rejected when the routine is saved. An empty filter accepts any signal, as before.
+
+> **Behaviour change.** Previously `event_filter` was accepted and ignored, so any signal completed the wait. Routines that set a filter now only complete on matching payloads; a filter that never matches ends in the normal wait timeout. Review any saved routine that sets `event_filter`.
+
+**Waking a wait from a signed webhook: correlation.** A sender that cannot know a run id can still wake the right wait. The wait declares a templated `correlation_key`, and a routine webhook is switched to signal delivery:
+
+```yaml
+- id: await_payment
+  type: wait
+  wait:
+    kind: event
+    event_type: payment.settled
+    correlation_key: "{{ inputs.order_id }}"
+    event_filter: 'status == paid'
+```
+
+```bash
+crewship routine webhooks create --slug checkout \
+  --signal-event-type payment.settled --signal-correlation-path order.id
+# change later:  routine webhooks update <id> --signal-event-type ... --signal-correlation-path ...
+# back to starting runs:  routine webhooks update <id> --clear-signal
+```
+
+In this mode a delivery to the webhook's public URL **never starts a run**. After the usual signature check and rate limit, the server reads the scalar at `--signal-correlation-path` (dotted JSON path in the verified body) and wakes every parked `wait: event` whose `event_type` and `correlation_key` equal it, whose run belongs to the webhook's workspace **and its target routine**, and whose `event_filter` accepts the body. The raw body is the wait step's output. It uses the same durable store as `signal`, so it survives restarts, honours each wait's original deadline, and cannot wake a cancelled, finished or timed-out run.
+
+| Response (`200`) | Meaning |
+|---|---|
+| `{"status":"DELIVERED","delivered":N,"run_ids":[...]}` | N waits were woken. |
+| `{"status":"IGNORED","reason":"no_matching_wait"}` | Nothing was parked for that key (or its filter rejected the body). Accepted, not an error: do not retry. |
+| `{"status":"IGNORED","reason":"no_correlation_value"}` | The body had no scalar at the path (or it was empty). |
+| same body plus `"duplicate":true` | A redelivery of an already processed delivery id (`Idempotency-Key`, `X-Crewship-Event-ID`, or the identical signed bytes); nothing is signalled again. |
+
+Ignored deliveries are recorded for the operator: the webhook's `last_status` becomes `IGNORED` (`SIGNALED` after a delivery that woke waits) in `crewship routine webhooks list`, and the delivery id is kept for 30 days so redeliveries stay idempotent. A wait with no `correlation_key` (or an empty rendered one) can only be woken by run or topic. Signal delivery is available on `crewship`-profile webhooks only; `inputs_template` and the pinned version are unused in this mode. An invalid signature gets `401` and signals nothing.
+
 Both forms are workspace-fenced: a topic delivery never reaches a run in another workspace, and each parked wait is claimed exactly once, so two producers announcing the same event at the same instant cannot resume one run twice. Delivering a topic nobody is waiting on is a success with `delivered: 0`, not a `404` — an event source emits whether or not anything is listening. (The per-run form still answers `404` when that specific run is not at the wait step, because there the caller named a run and was wrong about it.)
 
 ### `code`

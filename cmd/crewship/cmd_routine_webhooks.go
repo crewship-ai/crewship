@@ -37,6 +37,8 @@ type WebhookRow struct {
 	SigningSecretSet      bool                   `json:"signing_secret_set" yaml:"signing_secret_set"`
 	SigningSecret         string                 `json:"signing_secret,omitempty" yaml:"signing_secret,omitempty"`
 	InputsTemplate        map[string]interface{} `json:"inputs_template" yaml:"inputs_template"`
+	SignalEventType       string                 `json:"signal_event_type,omitempty" yaml:"signal_event_type,omitempty"`
+	SignalCorrelationPath string                 `json:"signal_correlation_path,omitempty" yaml:"signal_correlation_path,omitempty"`
 	Enabled               bool                   `json:"enabled" yaml:"enabled"`
 	RateLimitPerMin       int                    `json:"rate_limit_per_min" yaml:"rate_limit_per_min"`
 	LastFiredAt           *string                `json:"last_fired_at,omitempty" yaml:"last_fired_at,omitempty"`
@@ -246,6 +248,15 @@ var routineWebhooksCreateCmd = &cobra.Command{
 			}
 			body["inputs_template"] = tpl
 		}
+		sigType, _ := cmd.Flags().GetString("signal-event-type")
+		sigPath, _ := cmd.Flags().GetString("signal-correlation-path")
+		if (sigType == "") != (sigPath == "") {
+			return cli.WithExitCode(fmt.Errorf("--signal-event-type and --signal-correlation-path must be set together"), cli.ExitValidation)
+		}
+		if sigType != "" {
+			body["signal_event_type"] = sigType
+			body["signal_correlation_path"] = sigPath
+		}
 		if err := requireAuth(); err != nil {
 			return err
 		}
@@ -383,6 +394,22 @@ all — rotating the URL still requires delete + recreate.`,
 		if unpin {
 			body["target_pipeline_version"] = nil
 		}
+		sigType, _ := cmd.Flags().GetString("signal-event-type")
+		sigPath, _ := cmd.Flags().GetString("signal-correlation-path")
+		clearSignal, _ := cmd.Flags().GetBool("clear-signal")
+		if clearSignal {
+			if sigType != "" || sigPath != "" {
+				return cli.WithExitCode(fmt.Errorf("--clear-signal cannot be combined with --signal-event-type / --signal-correlation-path"), cli.ExitValidation)
+			}
+			body["signal_event_type"] = ""
+			body["signal_correlation_path"] = ""
+		} else if sigType != "" || sigPath != "" {
+			if sigType == "" || sigPath == "" {
+				return cli.WithExitCode(fmt.Errorf("--signal-event-type and --signal-correlation-path must be set together"), cli.ExitValidation)
+			}
+			body["signal_event_type"] = sigType
+			body["signal_correlation_path"] = sigPath
+		}
 		rotate, _ := cmd.Flags().GetBool("rotate-secret")
 		if rotate {
 			body["rotate_secret"] = true
@@ -399,7 +426,7 @@ all — rotating the URL still requires delete + recreate.`,
 			body["rotate_grace_seconds"] = seconds
 		}
 		if len(body) == 0 {
-			return fmt.Errorf("at least one of --name / --slug / --rate-limit / --inputs-template / --enabled / --pin-version / --unpin / --rotate-secret required")
+			return fmt.Errorf("at least one of --name / --slug / --rate-limit / --inputs-template / --enabled / --pin-version / --unpin / --signal-event-type / --clear-signal / --rotate-secret required")
 		}
 		if err := requireAuth(); err != nil {
 			return err
@@ -596,6 +623,11 @@ func init() {
 	routineWebhooksCreateCmd.Flags().Int("pin-version", 0, "pin the webhook to a specific routine version — every fire executes that immutable version instead of head; if the version is later deleted the fire FAILS (409) rather than silently running head")
 	routineWebhooksCreateCmd.Flags().String("ingress-profile", "", "signature profile: crewship (default; X-Crewship-Signature over the body) or github (X-Hub-Signature-256, pull_request events only, public URL ends in /github-pull-request); fixed for the webhook's lifetime")
 
+	routineWebhooksCreateCmd.Flags().String("signal-event-type", "", "deliver a signal instead of starting a run: the wait:event event_type to wake (crewship profile only; requires --signal-correlation-path)")
+	routineWebhooksCreateCmd.Flags().String("signal-correlation-path", "", "dotted JSON path in the verified body whose value must equal the wait step's correlation_key, e.g. order.id")
+	routineWebhooksUpdateCmd.Flags().String("signal-event-type", "", "switch to signal delivery for this wait:event event_type (requires --signal-correlation-path)")
+	routineWebhooksUpdateCmd.Flags().String("signal-correlation-path", "", "dotted JSON path in the verified body carrying the correlation value")
+	routineWebhooksUpdateCmd.Flags().Bool("clear-signal", false, "return to starting a run on each delivery")
 	routineWebhooksUpdateCmd.Flags().String("name", "", "new webhook name")
 	routineWebhooksUpdateCmd.Flags().String("slug", "", "retarget to a different routine slug")
 	routineWebhooksUpdateCmd.Flags().Int("rate-limit", 0, "new max fires per minute")

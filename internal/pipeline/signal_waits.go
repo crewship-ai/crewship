@@ -113,7 +113,7 @@ INSERT INTO pipeline_signal_waits (id, workspace_id, run_id, step_id, event_type
 VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
 ON CONFLICT (run_id, step_id) DO NOTHING`,
 		"sigwait_"+runID+"_"+stepID, workspaceID, runID, stepID, eventType, tsformat.Format(now), tsformat.Format(now.Add(timeout)),
-		nilIfBlank(filter), nilIfBlank(correlationKey))
+		nullStr(filter), nullStr(correlationKey))
 	if err != nil {
 		return time.Time{}, fmt.Errorf("signal_waits: arm: %w", err)
 	}
@@ -152,13 +152,6 @@ func (s *SQLSignalWaitStore) Status(ctx context.Context, runID, stepID string) (
 	var status string
 	err := s.db.QueryRowContext(ctx, `SELECT status FROM pipeline_signal_waits WHERE run_id=? AND step_id=?`, runID, stepID).Scan(&status)
 	return status, err
-}
-
-func nilIfBlank(v string) any {
-	if v == "" {
-		return nil
-	}
-	return v
 }
 
 // claimableWait is the shared predicate for a wait a delivery may claim: still

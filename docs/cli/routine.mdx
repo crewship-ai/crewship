@@ -2007,6 +2007,8 @@ crewship routine webhooks create --slug pr-review-structured --ingress-profile g
 | `--inputs-template` | | JSON template merged with the request body |
 | `--base-url` | | Override the public base URL printed |
 | `--pin-version` | | Pin every fire to this immutable routine version instead of head. A fire whose pinned version no longer exists answers `409` — never a silent head run. |
+| `--signal-event-type` | | Deliver a signal instead of starting a run: the `wait: event` `event_type` to wake. Requires `--signal-correlation-path`. `crewship` profile only. See [Routines](/guides/routines). |
+| `--signal-correlation-path` | | Dotted JSON path in the verified body whose value must equal the wait step's `correlation_key` (e.g. `order.id`). |
 
 ### `webhooks update <id>`
 
@@ -2032,6 +2034,8 @@ crewship routine webhooks update wh_abc123 \
 | `--pin-version` | Pin (or re-pin) the webhook to a specific routine version; fires execute that immutable version instead of head. |
 | `--grace` | With `--rotate-secret`: keep the replaced secret valid for `none` (default), `1h`, `24h` or `7d`, so a sender can be switched over without a window of 401s. Refused without `--rotate-secret`. |
 | `--unpin` | Remove the version pin (fires track head again). Mutually exclusive with `--pin-version`; mentioning neither keeps the existing pin. |
+| `--signal-event-type` / `--signal-correlation-path` | Switch the webhook to signal delivery (both required together). |
+| `--clear-signal` | Return to starting a run on each delivery. |
 | `--rotate-secret` | Mint a new HMAC signing secret, shown once in the response — same show-once contract as `create`. **The URL/token is never rotated by this command, with or without this flag.** |
 
 At least one flag is required. `--format json` on an ordinary edit (no

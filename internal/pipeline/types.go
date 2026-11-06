@@ -584,7 +584,7 @@ type WaitStep struct {
 	// datetime fields
 	Until string `json:"until,omitempty"` // RFC3339 or template
 	// event fields
-	EventType   string `json:"event_type,omitempty"`
+	EventType string `json:"event_type,omitempty"`
 	// EventFilter is a conjunction of `path == value` terms over a JSON signal
 	// payload (syntax: see event_filter.go). A signal that does not match is
 	// not delivered to this wait. Empty accepts any signal.

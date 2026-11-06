@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS pipeline_webhooks (
     signing_secret           TEXT,
     previous_signing_secret  TEXT,
     previous_secret_expires_at TEXT,
+    signal_event_type TEXT,
+    signal_correlation_path TEXT,
     inputs_template          TEXT NOT NULL DEFAULT '{}',
     enabled                  INTEGER NOT NULL DEFAULT 1,
     rate_limit_per_min       INTEGER NOT NULL DEFAULT 0,
