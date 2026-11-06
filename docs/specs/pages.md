@@ -1458,7 +1458,8 @@ Three things can be read, and they are lost separately:
 - **The shared version**: the pinned version. Read and Comment reach only this, and
   only when a version is pinned.
 - **The Page**: Read, Comment, Edit or a folder ACL entry reaches it, with or without
-  a pin. A private Page is reached only by its private audience.
+  a pin. A private Page is reached only by its private audience. A Project is
+  private until its first share, so a grant alone reaches no unshared Project.
 
 Only losing the Page erases a draft. Losing Edit takes latest content away, at any
 level down to Comment: the person keeps the same shared version, or the same

@@ -197,6 +197,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // supersedes any retry loop still backing off, so a stale loop can't
   // clobber fresh session state.
   const refreshGen = useRef(0)
+  const signingOut = useRef(false)
 
   const settle = useCallback(async (next: AuthSession | null, gen: number) => {
     if (gen !== refreshGen.current) return
@@ -312,7 +313,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // the leaving handler's generation and keep both listeners disarmed.
     const cancelUnreachableProbe = () => { clearTimeout(unreachableTimer.current); unreachableTimer.current = undefined }
     const goLoginExpired = async (reason?: string) => {
-      if (redirectingGen === refreshGen.current) return
+      if (signingOut.current || redirectingGen === refreshGen.current) return
       // A path the app has no page for shows the not-found state, signed in
       // or not (app/(dashboard)/layout.tsx). The static-export backend serves
       // the dashboard there, whose first requests answer 401 for a visitor
@@ -349,7 +350,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       window.location.replace(`/login?${params.toString()}`)
     }
     const goLoginSignedOutElsewhere = async (human?: string) => {
-      if (redirectingGen === refreshGen.current) return
+      if (signingOut.current || redirectingGen === refreshGen.current) return
       const currentHuman = sessionRef.current?.user.id
       if (human && currentHuman && human !== currentHuman) return
       const gen = ++refreshGen.current
@@ -470,6 +471,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const discardDrafts = capturedDocuments.length + capturedArtifacts.length + capturedLegacy.length > 0
     if (discardDrafts && !(await confirmDraftDiscard())) return false
     if (sessionRef.current?.user.id !== signingOutHuman || refreshGen.current !== startingGeneration) return false
+    // Revoking the session makes other tabs and in-flight requests report it
+    // ended. That report is this sign-out, and must not cancel its erase.
+    signingOut.current = true
     let serverAcknowledged = false
     try {
        
@@ -485,20 +489,28 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } catch {
       // Network error — leave local state intact so a transient outage
       // doesn't desync this tab from the still-active server session.
+      signingOut.current = false
       return false
     }
     if (!serverAcknowledged) {
+      signingOut.current = false
       return false
     }
-    if (sessionRef.current?.user.id !== signingOutHuman || refreshGen.current !== startingGeneration) return false
+    if (sessionRef.current?.user.id !== signingOutHuman || refreshGen.current !== startingGeneration) { signingOut.current = false; return false }
     const gen = ++refreshGen.current // An older session read must not revive a signed-out writer.
     purgeOtherE2Recovery(null)
     const finalize = async (): Promise<boolean> => {
+      signingOut.current = true
       try {
         const admission = await preserveDraftsForIdentity(null)
         if (gen !== refreshGen.current) return false
         if (discardDrafts) {
-          await Promise.all([removeCapturedDocumentDrafts(capturedDocuments), removeCapturedArtifactDrafts(capturedArtifacts)])
+          // Suspending a native editor freezes it and stores its last snapshot as a
+          // new revision of a row the person agreed to discard: nothing new arrived.
+          // Any other changed or new row is a change arriving during sign-out and stays.
+          const confirmed = new Set(capturedDocuments.map(row => JSON.stringify(row.key)))
+          const suspended = (await captureDocumentDrafts(signingOutHuman!)).filter(row => row.key[1].includes('"native:') && confirmed.has(JSON.stringify(row.key)))
+          await Promise.all([removeCapturedDocumentDrafts([...capturedDocuments, ...suspended]), removeCapturedArtifactDrafts(capturedArtifacts)])
           removeCapturedLegacyLocalDrafts(capturedLegacy)
         }
         if (gen !== refreshGen.current) return false
@@ -510,6 +522,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       } catch {
         setDraftRecovery({ retry: async () => { if (await finalize()) window.location.replace(SIGNED_OUT_URL) } })
         return false
+      } finally {
+        signingOut.current = false
       }
     }
     return finalize()
