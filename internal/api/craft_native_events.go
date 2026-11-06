@@ -9,6 +9,48 @@ import (
 	"time"
 )
 
+// craftNativeEventInterval is the server's authority recheck cadence on an open
+// metadata stream: on a healthy connection read loss reaches the client within
+// one interval plus delivery.
+const craftNativeEventInterval = 5 * time.Second
+
+// retirementFinding says why a stream ends and whether the browser may erase its
+// draft. Erasing needs proof that this still signed-in person lost Page read: an
+// ended, revoked or missing credential says nothing about the Page, and the
+// browser keeps its draft through it (docs/specs/pages.md, Private browser draft
+// recovery). A moved user revision alone is no proof either, it also moves for
+// other workspaces, so the Page is judged on the person's current revision.
+func (m *craftNativeHTTP) retirementFinding(ctx context.Context, entry *craftNativeSession) (draft, reason string) {
+	draft, reason = "retain", "authority_changed"
+	tx, err := m.pages.db.BeginTx(ctx, nil)
+	if err != nil {
+		return draft, reason
+	}
+	defer tx.Rollback()
+	source := entry.source
+	current, err := loadOriginalCredential(ctx, tx, source.UserID, source.Kind, source.ID)
+	if err != nil || current.reference.Binding != source.Binding {
+		return draft, reason
+	}
+	if expiry, _ := source.Expiry(); !expiry.IsZero() && !time.Now().Before(expiry) {
+		return draft, reason
+	}
+	source.UserAuthorityRevision = current.reference.UserAuthorityRevision
+	_, err = m.pageAuthority(ctx, tx, source, entry.scope, false)
+	if errors.Is(err, errCraftNativeAccess) || errors.Is(err, sql.ErrNoRows) {
+		return "purge", reason
+	}
+	if err == nil {
+		// Read still holds but Page write is explicitly denied (#4348). The
+		// reason only lets the client explain itself and ask for a FRESH read
+		// admission; this admission and its lease generation stay retired.
+		if _, denied := m.pageAuthority(ctx, tx, source, entry.scope, true); errors.Is(denied, errCraftNativeAccess) {
+			reason = "write_revoked"
+		}
+	}
+	return draft, reason
+}
+
 // events is an authenticated server heartbeat. It never depends on browser
 // visibility, never acquires custody, and renews only this exact live holder.
 func (m *craftNativeHTTP) events(w http.ResponseWriter, r *http.Request) {
@@ -50,25 +92,10 @@ func (m *craftNativeHTTP) events(w http.ResponseWriter, r *http.Request) {
 		return controller.Flush() == nil
 	}
 	retire := func() {
-		draft, reason := "retain", "authority_changed"
-		tx, e := m.pages.db.BeginTx(r.Context(), nil)
-		if e == nil {
-			_, e = m.pageAuthority(r.Context(), tx, entry.source, entry.scope, false)
-			if errors.Is(e, errCraftNativeAccess) || errors.Is(e, errContentCredentialNotCurrent) || errors.Is(e, errContentCredentialScope) || errors.Is(e, sql.ErrNoRows) {
-				draft = "purge"
-			} else if e == nil {
-				// Read still holds but Page write is explicitly denied (#4348). The
-				// reason only lets the client explain itself and ask for a FRESH read
-				// admission; this admission and its lease generation stay retired.
-				if _, denied := m.pageAuthority(r.Context(), tx, entry.source, entry.scope, true); errors.Is(denied, errCraftNativeAccess) {
-					reason = "write_revoked"
-				}
-			}
-			_ = tx.Rollback()
-		}
+		draft, reason := m.retirementFinding(r.Context(), entry)
 		send("session_retired", map[string]any{"delivery": "stopped", "reason": reason, "draft": draft})
 	}
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(craftNativeEventInterval)
 	defer ticker.Stop()
 	for {
 		// Repeat original-source, scope and current Page read authority immediately
