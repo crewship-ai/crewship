@@ -355,9 +355,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const gen = ++refreshGen.current
       redirectingGen = gen
       cancelUnreachableProbe()
-      purgeOtherE2Recovery(null)
+      // A failed draft step still has to learn who is signed in: chat recovery
+      // must leave with the person, whatever happens to the drafts.
+      let preserved = true
       try { await preserveDraftsForIdentity(null) }
-      catch { setDraftRecovery({ retry: async () => { if (redirectingGen === gen) redirectingGen = -1; await goLoginSignedOutElsewhere(human) } }); return }
+      catch { preserved = false }
       if (gen !== refreshGen.current) return
       // The sender deletes only its captured revisions with CAS. A delayed
       // message never authorizes deleting this tab's newer recovery rows.
@@ -366,6 +368,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Still signed in: the tab stays and keeps listening (#4705). The settle
       // keeps this generation, so leaving is disarmed explicitly.
       if (latest.kind === "settled" && latest.session) { redirectingGen = -1; await settle(latest.session, gen); return }
+      purgeOtherE2Recovery(null)
+      if (!preserved) { setDraftRecovery({ retry: async () => { if (redirectingGen === gen) redirectingGen = -1; await goLoginSignedOutElsewhere(human) } }); return }
       window.location.replace(SIGNED_OUT_URL)
     }
 
