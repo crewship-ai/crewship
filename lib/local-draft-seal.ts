@@ -27,6 +27,23 @@ export function forgetLocalDraftPage(scope: LocalDraftScope) {
     if (handle.human === scope.human && handle.workspace === scope.workspace && handle.page === scope.page) handle.close()
   }
 }
+/** What the server says about this person's read of the Page. Native admission
+ * refuses Comment, but Comment keeps the shared version, so a refusal alone proves
+ * nothing. Only `draft_read_revoked` is "revoked" and only `readable: true` is
+ * "readable"; anything else is "unknown" and keeps the draft. This has no side
+ * effects: the caller decides whether the answer is still current. */
+export async function nativeDraftRead(scope: LocalDraftScope, signal?: AbortSignal): Promise<"revoked" | "readable" | "unknown"> {
+  const generation = identityGeneration
+  const response = await apiFetch(`/api/v1/pages/@${encodeURIComponent(scope.page)}/draft-key?workspace_id=${encodeURIComponent(scope.workspace)}`, {
+    method: "POST", cache: "no-store", redirect: "error", skipRefresh: true, signal,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ human: scope.human, operation: "check" }),
+  })
+  const body = await response.json().catch(() => null)
+  if (generation !== identityGeneration) return "unknown"
+  if (response.status === 403 && body?.code === "draft_read_revoked") return "revoked"
+  return response.status === 200 && body?.readable === true ? "readable" : "unknown"
+}
 function base64(bytes: Uint8Array): string {
   let raw = ""
   for (let i = 0; i < bytes.length; i += 32768) raw += String.fromCharCode(...bytes.subarray(i, i + 32768))

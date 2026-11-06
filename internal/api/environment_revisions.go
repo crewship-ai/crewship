@@ -45,6 +45,17 @@ type EnvironmentRevision struct {
 	CreatedAt      string                           `json:"created_at" yaml:"created_at"`
 }
 
+// provisionSaveBudget outlasts SQLite's 30 s busy_timeout. The save queues for
+// the writer lock, so a shorter budget discards a finished build whenever other
+// writers are busy, as they are during a seed.
+const provisionSaveBudget = 45 * time.Second
+
+func (h *ProvisioningHandler) publishProvisionResult(crewID, workspaceID string, expected provisionDefinition, result *devcontainer.ProvisionResult) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), provisionSaveBudget)
+	defer cancel()
+	return h.saveProvisionResult(ctx, crewID, workspaceID, expected, result)
+}
+
 // saveProvisionResult atomically verifies the definition, records immutable
 // build evidence and publishes the cached result. It never changes a running
 // container. Raw configuration/env values are deliberately absent from history.

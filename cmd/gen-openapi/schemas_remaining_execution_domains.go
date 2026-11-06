@@ -61,6 +61,13 @@ func remainingExecutionDomainSchemaCatalog() map[string]DomainSchema {
 	})
 	memoryDoc := obj(map[string]any{"path": str(), "tier": str(), "scope": str(), "title": str(), "tags": arr(str()), "sources": arr(str()), "body": str()})
 	memoryEntry := anyObject()
+	// setLifecycle writes RFC 7807 itself, one call below the routed handler,
+	// while the workspace gate ahead of it answers {"error"}.
+	skillLifecycleSchema := DomainSchema{
+		NoRequest:     true,
+		ErrorMedia:    []string{"application/json"},
+		ErrorResponse: map[string]any{"oneOf": []any{errorSchema(), problemSchema()}},
+	}
 
 	return map[string]DomainSchema{
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/calendar.ics": {Response: str(), ResponseMedia: []string{"text/calendar"}, SuccessStatuses: []string{"200"}, SuccessHeaders: map[string]any{
@@ -69,8 +76,8 @@ func remainingExecutionDomainSchemaCatalog() map[string]DomainSchema {
 		}},
 		// Release and skill lifecycle actions read only authenticated/path context.
 		"POST /api/v1/agents/{agentId}/release":                          {NoRequest: true},
-		"POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/archive": {NoRequest: true},
-		"POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/restore": {NoRequest: true},
+		"POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/archive": skillLifecycleSchema,
+		"POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/restore": skillLifecycleSchema,
 
 		"GET /api/v1/recipes":                                              {Response: arr(recipe)},
 		"GET /api/v1/recipes/{slug}":                                       {Response: recipe},

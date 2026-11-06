@@ -96,6 +96,11 @@ func (h *PageHandler) LocalDraftKey(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 400, "local draft scope mismatch")
 			return
 		}
+	case "check":
+		if input.Key != "" || input.Envelope != "" {
+			replyError(w, 400, "invalid local draft key request")
+			return
+		}
 	default:
 		replyError(w, 400, "invalid local draft key operation")
 		return
@@ -115,7 +120,7 @@ func (h *PageHandler) LocalDraftKey(w http.ResponseWriter, r *http.Request) {
 		if err := validateContentHumanCredential(r.WithContext(ctx), tx, "pages:read"); err != nil {
 			return err
 		}
-		return h.localDraftRead(ctx, r, key, tx)
+		return h.localDraftRead(ctx, key, tx)
 	}
 	fail := func(err error) {
 		switch {
@@ -138,7 +143,9 @@ func (h *PageHandler) LocalDraftKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var response any
-	if input.Operation == "wrap" {
+	if input.Operation == "check" {
+		response = map[string]bool{"readable": true}
+	} else if input.Operation == "wrap" {
 		raw, _ := json.Marshal(payload)
 		envelope, wrapErr := encryption.Encrypt(string(raw))
 		if wrapErr != nil {
@@ -160,7 +167,7 @@ func (h *PageHandler) LocalDraftKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, response)
 }
 
-func (h *PageHandler) localDraftRead(ctx context.Context, r *http.Request, key artifacts.VersionKey, tx *sql.Tx) error {
+func (h *PageHandler) localDraftRead(ctx context.Context, key artifacts.VersionKey, tx *sql.Tx) error {
 	var family string
 	err := tx.QueryRowContext(ctx, `SELECT content_type FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, key.WorkspaceID, key.PageID).Scan(&family)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {

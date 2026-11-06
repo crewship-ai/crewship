@@ -111,7 +111,7 @@ describe('authority and cancellation throughout slow initialization',()=>{
   await mount('wordcraft');await tick(8000)
   expect(client.events).toHaveBeenCalledOnce()
   const frame=document.querySelector('iframe')!
-  expect(frame).toHaveStyle({visibility:'hidden'});expect(frame).toHaveAttribute('inert')
+  expect(frame).toHaveStyle({opacity:'0'});expect(frame).toHaveAttribute('inert')
   act(()=>stream?.('session_retired',right==='read'?{draft:'purge',reason:'authority_changed'}:{draft:'retain',reason:'write_revoked'}))
   await tick(16000)
   expect(document.querySelector('iframe')).toBeNull();expect(client.open).toHaveBeenCalledOnce()
@@ -148,9 +148,9 @@ describe('authority and cancellation throughout slow initialization',()=>{
   expect(newFrame).not.toBe(oldFrame)
   act(()=>{oldOptions.onReady?.('late');oldOptions.onChanged('late','old-document')})
   await tick(16000)
-  expect(document.querySelector('iframe')).toBe(newFrame);expect(newFrame).toHaveStyle({visibility:'hidden'})
+  expect(document.querySelector('iframe')).toBe(newFrame);expect(newFrame).toHaveStyle({opacity:'0'})
   await tick(8000)
-  expect(document.querySelector('iframe')).toBe(newFrame);expect(newFrame).not.toHaveStyle({visibility:'hidden'})
+  expect(document.querySelector('iframe')).toBe(newFrame);expect(newFrame).not.toHaveStyle({opacity:'0'})
   expect(old.close).toHaveBeenCalledOnce();expect(old.save).not.toHaveBeenCalled();expect(fresh.save).not.toHaveBeenCalled()
  })
  it.each(['expired','handoff'] as const)('never unlocks a writer whose lease %s during slow import',async loss=>{
@@ -181,7 +181,7 @@ describe('authority and cancellation throughout slow initialization',()=>{
 describe('startup limits and fail-closed admission',()=>{
  it('accepts a verified ready at 19.9s and three 9.9s replies within the 50s frame cap',async()=>{
   readyDelay=19900;delay=9900;await mount('wordcraft');await tick(49600)
-  expect(screen.queryByRole('alert')).not.toBeInTheDocument();expect(document.querySelector('iframe')).not.toHaveStyle({visibility:'hidden'})
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();expect(document.querySelector('iframe')).not.toHaveStyle({opacity:'0'})
   expect(client.lease).toHaveBeenCalledTimes(2);expect(client.events).toHaveBeenCalledOnce();expect(client.save).not.toHaveBeenCalled()
  })
  it('keeps a hung snapshot hash inside the existing 10s RPC deadline',async()=>{
@@ -233,7 +233,7 @@ it('ignores a delayed final authority reply after the page admission is replaced
  ui.rerender(<NativeCraftEditorHost workspaceId="diagnostic-workspace" pageId="next-page" humanId="diagnostic-human" enabled />)
  await tick(0);const frame=document.querySelector('iframe')
  await act(async()=>resolve(vacant));await tick(24000)
- expect(document.querySelector('iframe')).toBe(frame);expect(frame).not.toHaveStyle({visibility:'hidden'})
+ expect(document.querySelector('iframe')).toBe(frame);expect(frame).not.toHaveStyle({opacity:'0'})
  expect(next.close).not.toHaveBeenCalled();expect(previous.save).not.toHaveBeenCalled();expect(next.save).not.toHaveBeenCalled()
  await tick(30000);expect(document.querySelector('iframe')).toBe(frame);expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })

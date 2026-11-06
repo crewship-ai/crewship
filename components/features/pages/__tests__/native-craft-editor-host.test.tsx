@@ -197,6 +197,15 @@ describe('native Word host authority and persistence',()=>{
   finally{client.lease.mockResolvedValue(ownedLease);await act(async()=>action.resolve(ownedLease))}
   await screen.findByText('Připraveno k úpravám');expect(journal.revokeRead).not.toHaveBeenCalled()
  })
+ it('keeps a starting editor rendering but unseen, and shows it once admitted',async()=>{
+  const inserted:{visibility:string,opacity:string,inert:boolean}[]=[]
+  const watch=new MutationObserver(()=>{const f=document.querySelector('iframe');if(f&&!inserted.length)inserted.push({visibility:f.style.visibility,opacity:f.style.opacity,inert:f.hasAttribute('inert')})})
+  watch.observe(document.body,{childList:true,subtree:true})
+  mount();await ready();await acquire();await screen.findByText('Připraveno k úpravám');watch.disconnect()
+  expect(inserted).toEqual([{visibility:'',opacity:'0',inert:true}])
+  const frame=document.querySelector('iframe')!
+  expect(frame).not.toHaveAttribute('inert');expect(frame.style.opacity).toBe('');expect(frame.style.visibility).toBe('')
+ })
  it.each([['captured','stream'],['failed-capture','stream'],['captured','invalid-lease'],['failed-capture','invalid-lease']] as const)('monitor terminal failure hides immediately and preserves %s custody while capture settles (%s)',async(outcome,failure)=>{
   const monitor=deferred<void>();client.events.mockImplementation((_signal,callback)=>{stream=callback;return monitor.promise})
   mount();await ready();await acquire();await screen.findByText('Připraveno k úpravám')
@@ -312,6 +321,72 @@ describe('native Word host authority and persistence',()=>{
   act(()=>stream?.('session_retired',{draft:'purge',reason:'authority_changed'}))
   await act(async()=>snapshot.resolve({bytes:new Uint8Array([1]),editorRevision:'late',documentId:'doc'}))
   expect(copy).not.toHaveBeenCalled();expect(document.querySelector('iframe')).toBeNull();expect(journal.revokeRead).toHaveBeenCalled()
+ })
+
+ describe('a return with a frozen frame and no recovery row',()=>{
+  const refused=Error('native_private_read_refused'),download=()=>screen.queryByRole('button',{name:'Stáhnout místní kopii'})
+  const back=()=>window.dispatchEvent(new Event('pageshow'))
+  async function frozen(){
+   mount();await ready();await acquire();const frame=document.querySelector('iframe')!,port=ports.at(-1)!
+   journal.persist.mockRejectedValue(Error('storage unavailable'))
+   const second=clientRig();m.createClient.mockReturnValueOnce(second)
+   act(()=>{portOptions.at(-1)!.onChanged('uncaptured','doc');stream?.('session_retired',{draft:'retain',reason:'write_revoked'})})
+   await screen.findByRole('button',{name:'Stáhnout místní kopii'})
+   expect(frame).not.toHaveStyle({visibility:'hidden'});expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
+   second.read.mockClear()
+   return {frame,port,second}
+  }
+  it('hides the frame and removes the download in the same turn, and only the read brings them back',async()=>{
+   const {frame,second}=await frozen(),answer=deferred<{version:string;bytes:Uint8Array}>();second.read.mockReturnValueOnce(answer.promise)
+   act(back)
+   expect(frame).toHaveStyle({visibility:'hidden'});expect(download()).not.toBeInTheDocument();expect(second.read).toHaveBeenCalledOnce()
+   await act(async()=>{second.reauthorize.mockResolvedValue(true);await new Promise(resolve=>setTimeout(resolve,20))})
+   expect(frame).toHaveStyle({visibility:'hidden'});expect(download()).not.toBeInTheDocument()
+   await act(async()=>answer.resolve({version:'1',bytes:new Uint8Array()}))
+   expect(frame).not.toHaveStyle({visibility:'hidden'});expect(download()).toBeInTheDocument()
+  })
+  it('a refused read keeps it hidden and the buffer intact',async()=>{
+   const {frame,port,second}=await frozen();second.read.mockRejectedValue(refused)
+   // The refusal re-admits; that admission is refused too, as the server would.
+   const third=clientRig();third.lease.mockResolvedValue({...emptyLease,can_edit:false});third.read.mockRejectedValue(refused);m.createClient.mockReturnValueOnce(third)
+   await act(async()=>{back();await new Promise(resolve=>setTimeout(resolve,20))})
+   expect(frame).toHaveStyle({visibility:'hidden'});expect(download()).not.toBeInTheDocument()
+   expect(document.querySelector('iframe')).toBe(frame);expect(port.close).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()
+  })
+  it('an unclear answer keeps it hidden and the buffer intact',async()=>{
+   const {frame,port,second}=await frozen();second.read.mockRejectedValue(Error('native_read_unavailable'))
+   await act(async()=>{back();await new Promise(resolve=>setTimeout(resolve,20))})
+   expect(frame).toHaveStyle({visibility:'hidden'});expect(download()).not.toBeInTheDocument();expect(port.close).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()
+  })
+  it('a second return leaves the first read unable to restore anything',async()=>{
+   const {frame,second}=await frozen(),first=deferred<{version:string;bytes:Uint8Array}>(),latest=deferred<{version:string;bytes:Uint8Array}>()
+   second.read.mockReturnValueOnce(first.promise).mockReturnValueOnce(latest.promise)
+   act(back);act(back)
+   await act(async()=>first.resolve({version:'1',bytes:new Uint8Array()}))
+   expect(frame).toHaveStyle({visibility:'hidden'});expect(download()).not.toBeInTheDocument()
+   expect(second.read).toHaveBeenCalledTimes(2);expect(second.read.mock.calls[0][0].aborted).toBe(true)
+   await act(async()=>latest.resolve({version:'1',bytes:new Uint8Array()}))
+   expect(frame).not.toHaveStyle({visibility:'hidden'});expect(download()).toBeInTheDocument()
+  })
+  it('auth suspension leaves a pending read unable to restore anything',async()=>{
+   const {frame,port,second}=await frozen(),answer=deferred<{version:string;bytes:Uint8Array}>();second.read.mockReturnValueOnce(answer.promise)
+   port.snapshot.mockReturnValue(new Promise(()=>{}))
+   act(back)
+   act(()=>{void authSuspend!().catch(()=>{})})
+   await act(async()=>answer.resolve({version:'1',bytes:new Uint8Array()}))
+   expect(frame).toHaveStyle({visibility:'hidden'});expect(download()).not.toBeInTheDocument()
+   expect(second.read.mock.calls[0][0].aborted).toBe(true)
+  })
+  it('a download started before the return is dropped even after read comes back',async()=>{
+   const {port,second}=await frozen(),snapshot=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>();port.snapshot.mockReturnValueOnce(snapshot.promise)
+   const copy=vi.fn();vi.stubGlobal('URL',Object.assign(class extends URL {},{createObjectURL:copy,revokeObjectURL:vi.fn()}))
+   fireEvent.click(download()!)
+   second.read.mockResolvedValue({version:'1',bytes:new Uint8Array()})
+   await act(async()=>{back();await new Promise(resolve=>setTimeout(resolve,20))})
+   expect(download()).toBeInTheDocument()
+   await act(async()=>snapshot.resolve({bytes:new Uint8Array([1]),editorRevision:'late',documentId:'doc'}))
+   expect(copy).not.toHaveBeenCalled()
+  })
  })
 
  it.each(['stream','retirement','reauthorization','auth-suspend'] as const)('retires a fresh read bootstrap on %s failure and ignores its late completion',async failure=>{
@@ -688,6 +763,18 @@ describe('native Word host authority and persistence',()=>{
  it('never unlocks or saves without exclusive durable draft storage',async()=>{m.openJournal.mockRejectedValueOnce(Error('storage unavailable'));mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await screen.findByRole('alert');expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);expect(client.save).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()})
  it('retires a recovered draft whose bytes the server already holds instead of offering it',async()=>{const same={applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'0',editorRevision:'lost-ack',bytes:new TextEncoder().encode('{"body":[]}')},other={...same,editorRevision:'later',bytes:new Uint8Array([99])};journal.recovery.mockResolvedValueOnce([{draft:same,actions:['compare','copy']},{draft:other,actions:['compare','copy']}]);mount();await ready();await acquire();await waitFor(()=>expect(journal.discardRecovered).toHaveBeenCalledWith(expect.objectContaining({draft:same})));expect(journal.discardRecovered).not.toHaveBeenCalledWith(expect.objectContaining({draft:other}));expect(screen.getAllByRole('button',{name:'Porovnat'})).toHaveLength(1);expect(client.save).not.toHaveBeenCalled()})
  it('reconciles the lost save before closing the client when the connection retires',async()=>{mount();await ready();await acquire();client.save.mockImplementationOnce(()=>new Promise(()=>{}));client.reconcile.mockImplementation(async(r:NativeSaveRequest)=>receipt(r));act(()=>portOptions.at(-1)!.onChanged('pending','doc'));await waitFor(()=>expect(client.save).toHaveBeenCalledOnce());act(()=>stream?.('session_retired',{delivery:'stopped',reason:'session_closed'}));await waitFor(()=>expect(client.close).toHaveBeenCalled());expect(client.reconcile).toHaveBeenCalled();expect(client.reconcile.mock.invocationCallOrder[0]).toBeLessThan(client.close.mock.invocationCallOrder[0])})
+ // The button sits outside the frame; a person who pressed it keeps typing into the document.
+ it('returns the keyboard to the document after the check button',async()=>{
+  mount();await ready();await acquire()
+  client.save.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+  client.reconcile.mockImplementation(async(r:NativeSaveRequest)=>({...r,bytes:undefined,version:'2',durability:'node',issuedBy:'crewship',phase:'committed',candidateHash:r.contentHash}))
+  act(()=>portOptions.at(-1)!.onChanged('during-outage','doc'))
+  const check=await screen.findByRole('button',{name:'Ověřit výsledek'})
+  const frame=document.querySelector('iframe') as HTMLIFrameElement,focus=vi.spyOn(frame,'focus')
+  fireEvent.click(check)
+  await waitFor(()=>expect(client.reconcile).toHaveBeenCalled())
+  expect(focus).toHaveBeenCalled()
+ })
  // UX walkthrough RC-4 R05: offline before the save left the browser. The
  // server retires the attempt that never landed (reconcile 410); the editor must resume
  // saving instead of staying unsaved forever, and coming back online asks
@@ -884,19 +971,18 @@ describe('write access removed while read access remains (#4348)',()=>{
    await waitFor(()=>expect(document.querySelectorAll('iframe')).toHaveLength(0))
    return second
   }
-  it('removes the frame, keeps the draft offered and stays on the metadata admission',async()=>{
+  it('removes the frame, seals the draft unoffered and stays on the metadata admission',async()=>{
    const second=await demoted()
    await waitFor(()=>expect(second.events).toHaveBeenCalledOnce())
    expect(second.close).not.toHaveBeenCalled()
    expect(screen.getByRole('alert')).toHaveTextContent('Sdílenou verzi zobrazíte obnovením stránky')
    expect(screen.getByRole('status')).toHaveTextContent('Editor odpojen')
-   expect(screen.getByRole('button',{name:'Kopie konceptu'})).toBeInTheDocument()
+   expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
    expect(journal.revokeRead).not.toHaveBeenCalled()
    expect(second.save).not.toHaveBeenCalled();expect(second.leaseAction).not.toHaveBeenCalled()
   })
   it('then losing Read purges the draft and clears recovery and comparison material',async()=>{
    await demoted()
-   await waitFor(()=>expect(screen.getByRole('button',{name:'Kopie konceptu'})).toBeInTheDocument())
    await waitFor(()=>expect(stream).toBeDefined())
    act(()=>stream?.('session_retired',{delivery:'stopped',draft:'purge',reason:'authority_changed'}))
    await waitFor(()=>expect(journal.revokeRead).toHaveBeenCalled())
@@ -966,13 +1052,12 @@ describe('write access removed while read access remains (#4348)',()=>{
    await waitFor(()=>expect(document.querySelectorAll('iframe')).toHaveLength(1))
    expect(screen.queryByText(/private summary/)).not.toBeInTheDocument()
   },10000)
-  it('comparing a retained draft asks the server for nothing without private read',async()=>{
+  it('a retained draft offers no comparison and asks the server for nothing without private read',async()=>{
    journal.recovery.mockResolvedValueOnce([recovered()])
    mount();await ready();await acquire()
    const second=revoke();await settled(second)
    const reads=second.read.mock.calls.length
-   fireEvent.click((await screen.findAllByRole('button',{name:'Porovnat'}))[0])
-   await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Porovnání se serverem'))
+   expect(screen.queryByRole('button',{name:'Porovnat'})).not.toBeInTheDocument()
    expect(second.read).toHaveBeenCalledTimes(reads)
   })
   it('a metadata stream ending without a read loss is reopened, so the watch continues',async()=>{
@@ -981,7 +1066,7 @@ describe('write access removed while read access remains (#4348)',()=>{
    const third=clientRig();third.lease.mockResolvedValue(readerLease);third.read.mockRejectedValue(refused);m.createClient.mockReturnValueOnce(third)
    act(()=>stream?.('session_retired',{delivery:'stopped',draft:'retain',reason:'authority_changed'}))
    await waitFor(()=>expect(third.events).toHaveBeenCalledOnce(),{timeout:7000})
-   expect(screen.getByRole('button',{name:'Kopie konceptu'})).toBeInTheDocument()
+   expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
    act(()=>stream?.('session_retired',{delivery:'stopped',draft:'purge',reason:'authority_changed'}))
    await waitFor(()=>expect(journal.revokeRead).toHaveBeenCalled())
   },10000)
@@ -1010,7 +1095,7 @@ describe('write access removed while read access remains (#4348)',()=>{
    const third=clientRig();third.lease.mockResolvedValue(readerLease);third.read.mockRejectedValue(refused);m.createClient.mockReturnValueOnce(third)
    act(()=>stream?.('session_retired',{delivery:'stopped',draft:'retain',reason:'authority_changed'}))
    await waitFor(()=>expect(third.read).toHaveBeenCalledOnce(),{timeout:12000})
-   await waitFor(()=>expect(screen.getByRole('button',{name:'Kopie konceptu'})).toBeInTheDocument())
+   expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
   },22000)
   it('checks read again after a lost stream and offers the confirmed draft without a reload',async()=>{
    const monitor=deferred<void>();client.events.mockImplementation((_signal,callback)=>{stream=callback;return monitor.promise})
@@ -1035,10 +1120,9 @@ describe('write access removed while read access remains (#4348)',()=>{
    expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
    expect(journal.revokeRead).not.toHaveBeenCalled()
   },10000)
-  it('withdraws the held copy when its monitor is refused and restores it only after a confirmed admission',async()=>{
+  it('a refused monitor offers nothing before or after',async()=>{
    const second=await demoted()
    await waitFor(()=>expect(second.events).toHaveBeenCalledOnce())
-   await waitFor(()=>expect(screen.getByRole('button',{name:'Kopie konceptu'})).toBeInTheDocument())
    const third=clientRig();third.open.mockRejectedValue(Error('native_session_forbidden'));m.createClient.mockReturnValueOnce(third)
    act(()=>stream?.('session_retired',{delivery:'stopped',draft:'retain',reason:'authority_changed'}))
    expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
@@ -1046,10 +1130,9 @@ describe('write access removed while read access remains (#4348)',()=>{
    expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
    expect(journal.revokeRead).not.toHaveBeenCalled()
   },10000)
-  it('withdraws the held copy while a repeated write revocation replaces the admission',async()=>{
+  it('offers nothing while a repeated write revocation replaces the admission',async()=>{
    const second=await demoted()
    await waitFor(()=>expect(second.events).toHaveBeenCalledOnce())
-   await waitFor(()=>expect(screen.getByRole('button',{name:'Kopie konceptu'})).toBeInTheDocument())
    const third=clientRig(),opening=deferred<{sessionId:string;applicationId:string}>();third.open.mockReturnValue(opening.promise);m.createClient.mockReturnValueOnce(third)
    act(()=>stream?.('session_retired',writeRevoked))
    expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()

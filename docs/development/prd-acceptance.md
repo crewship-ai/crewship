@@ -157,7 +157,7 @@ draft is kept and offered (also after a reload once the right returns).
 
 `craft-agent-free-edit.acceptance.ts` (`A.craft.agent.free-edit-word`, `-sheet`)
 lets the seeded agent edit a free document while a person watches it in the
-browser: the person sees "Upravuje <agent>", then the new version.
+browser: the person sees `Upravuje <agent>`, then the new version.
 
 ### Manual walkthrough: `A.craft.session.hour-word`
 
@@ -398,6 +398,51 @@ rows, which the RC gate does not count); every required ID must be emitted by ex
 `${...}` placeholder in an ID must be one of the known Word/Sheet loop
 variables in `PLACEHOLDERS`. A renamed or forgotten row therefore fails in CI,
 not as `missing` on the RC.
+
+## Draft revocation proof
+
+`e2e/acceptance/draft-revocation/` measures what happens to an unsaved native
+draft when access changes: delivery of the revocation, the client's reaction
+and reconnect, each timed apart. It is targeted pre-RC proof, not a row of this
+suite. It rewrites a server's database and needs a proxy in front of it, so it
+cannot run against a deployed origin. `pnpm acceptance:prd` does not pick it up,
+its `A.craft.draft.*` IDs are not in `required-ids.json`, and `--gate` does not
+count them. Never point it at a shared server.
+
+Start a server from `scripts/throwaway-server.sh` with native Craft enabled and
+`CREWSHIP_NEXTJS_URL` set to the proxy's origin, because the editor refuses any
+other host. Seed it, start the proxy, then run the spec with its own config:
+
+```bash
+node e2e/acceptance/draft-revocation/revocation-proxy.mjs 8111 8112 8113 &
+crewship-heavy env \
+  REVOCATION_DB="$STATE/data/crewship.db" \
+  REVOCATION_PROXY_CONTROL=http://127.0.0.1:8113 \
+  REVOCATION_DIRECT=http://127.0.0.1:8112 \
+  PRD_MODE=quick PRD_ORIGIN=http://127.0.0.1:8111 PRD_CRAFT_NATIVE=on \
+  PRD_OUTPUT_DIR="$OUT" E2E_EMAIL=... E2E_PASSWORD=... CI=1 \
+  pnpm exec playwright test --config=playwright.draft-revocation.config.ts
+```
+
+The arguments to `revocation-proxy.mjs` are the port it listens on, the server's
+port and its control port. `crewship-heavy` does not forward the environment,
+which is why the variables go through `env`.
+
+| Variable | Meaning |
+| --- | --- |
+| `REVOCATION_DB` | Database file of the throwaway server. The expiry case sets `expires_at` here, because a real expiry takes the session's whole lifetime. Without it that case is skipped |
+| `REVOCATION_PROXY_CONTROL` | Control URL of `revocation-proxy.mjs`: `POST /cut` closes every connection and refuses new ones, `POST /restore` accepts them again. Chromium's offline emulation leaves an established stream running, so it cannot prove this case. Without it the offline case is skipped |
+| `REVOCATION_DIRECT` | Server URL around the proxy, so the owner can revoke while the browser is cut off. Without it the offline case is skipped |
+| `REVOCATION_CHROME` | Path of a full Chromium for the hidden-tab case. Without it, or without `DISPLAY`, that case is skipped |
+| `REVOCATION_HIDDEN_MS` | How long the hidden-tab case keeps the tab hidden, in milliseconds. Default 330000 |
+
+**Hidden-tab timing is not measured.** The headless shell always reports
+`visibilityState` as `visible`, so it cannot hide a tab. Full Chromium 1243 and
+1248, headless and under Xvfb with software rendering, never finish starting
+the editor: they stop at "Dokument nelze bezpečně otevřít", and on 1243 the
+snapshot request went unanswered. The cause is not established. The case stays
+in the spec and fails or is skipped until that is resolved, so a passing run of
+the other cases says nothing about a hidden tab.
 
 ## RC gate: required IDs
 

@@ -17,6 +17,7 @@ import { purgeOtherE2Recovery } from "@/lib/chat-e2-recovery"
 import { isKnownAppPath } from "@/lib/app-routes"
 import { SIGNED_OUT_URL, rememberSignedOut, signedOutKind } from "@/lib/signed-out"
 import { suspendOtherDocumentDrafts, captureDocumentDrafts, removeCapturedDocumentDrafts } from "@/lib/document-queue"
+import { clearSignOut, recordSignOut, sweepSignOuts } from "@/lib/document-draft-sign-out"
 import { suspendOtherArtifactDrafts, finishArtifactDraftIdentity, captureArtifactDrafts, removeCapturedArtifactDrafts, captureLegacyLocalDrafts, removeCapturedLegacyLocalDrafts } from "@/lib/artifact-drafts"
 
 import { beginLocalDraftIdentity, finishLocalDraftIdentity } from "@/lib/local-draft-seal"
@@ -191,12 +192,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const statusRef = useRef<AuthStatus>("loading")
   const unreachableTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => { sessionRef.current = session }, [session])
+  // Runs without a server: a tab that died mid sign-out is answered here.
+  useEffect(() => { void sweepSignOuts().catch(() => {}) }, [])
   useEffect(() => { statusRef.current = status }, [status])
 
   // Monotonic generation guard: a newer refresh() (e.g. one fired by signIn)
   // supersedes any retry loop still backing off, so a stale loop can't
   // clobber fresh session state.
   const refreshGen = useRef(0)
+  const signingOut = useRef(false)
 
   const settle = useCallback(async (next: AuthSession | null, gen: number) => {
     if (gen !== refreshGen.current) return
@@ -206,6 +210,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     let admission: number
     try { admission = await preserveDraftsForIdentity(next?.user.id ?? null) }
     catch { if (gen === refreshGen.current) setDraftRecovery({ retry: () => retryDraftTransition.current() }); return }
+    await sweepSignOuts().catch(() => {})
     if (gen !== refreshGen.current) return
     // The cold load and signed-out pages hold nothing of a person, so admitting
     // one there keeps the tree (and anything typed meanwhile) mounted.
@@ -312,7 +317,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // the leaving handler's generation and keep both listeners disarmed.
     const cancelUnreachableProbe = () => { clearTimeout(unreachableTimer.current); unreachableTimer.current = undefined }
     const goLoginExpired = async (reason?: string) => {
-      if (redirectingGen === refreshGen.current) return
+      if (signingOut.current || redirectingGen === refreshGen.current) return
       // A path the app has no page for shows the not-found state, signed in
       // or not (app/(dashboard)/layout.tsx). The static-export backend serves
       // the dashboard there, whose first requests answer 401 for a visitor
@@ -328,6 +333,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Superseded by a newer refresh: this tab stays and, the generation
       // having moved, still follows a later sign-out or expiry (#4705).
       if (gen !== refreshGen.current) return
+      // The ended session may be another tab's confirmed sign-out.
+      await sweepSignOuts().catch(() => {})
       const { pathname, search } = window.location
       const currentPath = pathname + search
       // no_credentials: the browser never had a session (or its cookies
@@ -349,7 +356,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       window.location.replace(`/login?${params.toString()}`)
     }
     const goLoginSignedOutElsewhere = async (human?: string) => {
-      if (redirectingGen === refreshGen.current) return
+      if (signingOut.current || redirectingGen === refreshGen.current) return
       const currentHuman = sessionRef.current?.user.id
       if (human && currentHuman && human !== currentHuman) return
       const gen = ++refreshGen.current
@@ -362,7 +369,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       catch { preserved = false }
       if (gen !== refreshGen.current) return
       // The sender deletes only its captured revisions with CAS. A delayed
-      // message never authorizes deleting this tab's newer recovery rows.
+      // message never authorizes deleting this tab's newer recovery rows; only the
+      // sign-out intent stored with them does.
       const latest = await fetchSession()
       if (gen !== refreshGen.current) return
       // Still signed in: the tab stays and keeps listening (#4705). The settle
@@ -370,6 +378,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (latest.kind === "settled" && latest.session) { redirectingGen = -1; await settle(latest.session, gen); return }
       purgeOtherE2Recovery(null)
       if (!preserved) { setDraftRecovery({ retry: async () => { if (redirectingGen === gen) redirectingGen = -1; await goLoginSignedOutElsewhere(human) } }); return }
+      await sweepSignOuts().catch(() => {})
       window.location.replace(SIGNED_OUT_URL)
     }
 
@@ -402,7 +411,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     try {
-       
+      const started = Date.now()
       const res = await serverFetch("/api/auth/callback/credentials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -424,6 +433,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       await refresh()
+      // Only this answer proves a session newer than a sign-out; a session read
+      // may have left before it and arrive after.
+      const human = sessionRef.current?.user.id
+      if (human) await clearSignOut(human, started).catch(() => {})
       return { ok: true }
     } catch {
       return { ok: false, error: "Network error" }
@@ -470,6 +483,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const discardDrafts = capturedDocuments.length + capturedArtifacts.length + capturedLegacy.length > 0
     if (discardDrafts && !(await confirmDraftDiscard())) return false
     if (sessionRef.current?.user.id !== signingOutHuman || refreshGen.current !== startingGeneration) return false
+    // Revoking the session makes other tabs and in-flight requests report it
+    // ended. That report is this sign-out, and must not cancel its erase.
+    signingOut.current = true
     let serverAcknowledged = false
     try {
        
@@ -485,20 +501,29 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } catch {
       // Network error — leave local state intact so a transient outage
       // doesn't desync this tab from the still-active server session.
+      signingOut.current = false
       return false
     }
     if (!serverAcknowledged) {
+      signingOut.current = false
       return false
     }
-    if (sessionRef.current?.user.id !== signingOutHuman || refreshGen.current !== startingGeneration) return false
+    if (sessionRef.current?.user.id !== signingOutHuman || refreshGen.current !== startingGeneration) { signingOut.current = false; return false }
     const gen = ++refreshGen.current // An older session read must not revive a signed-out writer.
     purgeOtherE2Recovery(null)
     const finalize = async (): Promise<boolean> => {
+      signingOut.current = true
       try {
-        const admission = await preserveDraftsForIdentity(null)
+        // Before anything is cleaned up: a tab still retiring reads this, however
+        // this tab ends. The broadcast below only makes others look sooner.
+        // A capture landing first is swept below; IndexedDB may hold this behind
+        // a write in flight, which suspension itself has to finish.
+        // The server already ended the session, so storage must not undo that here.
+        const intent = discardDrafts && capturedDocuments.length ? recordSignOut(signingOutHuman!, capturedDocuments.map(row => row.root ?? row.revision).filter((root): root is string => Boolean(root))).catch(() => {}) : Promise.resolve()
+        const [admission] = await Promise.all([preserveDraftsForIdentity(null), intent])
         if (gen !== refreshGen.current) return false
         if (discardDrafts) {
-          await Promise.all([removeCapturedDocumentDrafts(capturedDocuments), removeCapturedArtifactDrafts(capturedArtifacts)])
+          await Promise.all([removeCapturedDocumentDrafts(capturedDocuments), sweepSignOuts().catch(() => {}), removeCapturedArtifactDrafts(capturedArtifacts)])
           removeCapturedLegacyLocalDrafts(capturedLegacy)
         }
         if (gen !== refreshGen.current) return false
@@ -510,6 +535,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       } catch {
         setDraftRecovery({ retry: async () => { if (await finalize()) window.location.replace(SIGNED_OUT_URL) } })
         return false
+      } finally {
+        signingOut.current = false
       }
     }
     return finalize()

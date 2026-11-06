@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Deleting an agent stops its runs whose container is already gone (#5050).** A protected host run in a removed container stayed pending and held on to its work; it now counts as stopped. Any other inspect failure still reports an error.
 - ⚠️ **Behaviour change: only OWNER or ADMIN can change the governance model credential (#5024).** PATCH, rotate, escalation answers, OAuth completion and internal token writes refuse a bound credential for narrower roles, and `credential.rotate` no longer reaches it. Binding now needs an active credential.
 - **A delayed sign-out no longer removes unsent chat proposals (#5026).** If a tab learns of a sign-out after its person signed back in, it now keeps their chat recovery. A real sign-out still removes it, even when saving drafts fails.
 
@@ -670,6 +671,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ### Fixed
 
+- API responses now match the published contract on 23 operations: empty lists answer `[]` instead of `null`, a new agent reports its restricted profile, and the OpenAPI document describes the real shapes, nullable fields and both error envelopes.
 - **An identical Mooring create retry no longer returns a private document after its author loses access.** The existing transaction-local author check now runs before looking up the saved result as well as before committing a new document.
 
 - **Workbook creation now rechecks the original author’s current rights in its transaction.** Lost membership, restricted access or removed Page-create rights refuse both creation and identical retries; a rights change during insertion rolls back the staged Page.

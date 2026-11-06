@@ -5,7 +5,7 @@ import {QueryClient,QueryClientProvider} from '@tanstack/react-query'
 import {cleanup,fireEvent,render,screen} from '@testing-library/react'
 import {afterEach,expect,it,vi} from 'vitest'
 import {ArtifactProject} from '../artifact-project'
-const m=vi.hoisted(()=>({revoked:false,fetch:vi.fn()}))
+const m=vi.hoisted(()=>({revoked:false,fetch:vi.fn(),purge:vi.fn()}))
 vi.mock('@/lib/local-draft-seal',()=>{
  class LocalDraftReadRevoked extends Error {}
  return {LocalDraftReadRevoked,forgetLocalDraftPage(){},isSealedLocalDraft:()=>true,createLocalDraftCipher:async()=>{
@@ -13,13 +13,14 @@ vi.mock('@/lib/local-draft-seal',()=>{
   return {seal:async(text:string)=>text,open:async(text:string)=>text,close(){}}
  }}
 })
+vi.mock('@/lib/artifact-drafts',async()=>{const actual=await vi.importActual<typeof import('@/lib/artifact-drafts')>('@/lib/artifact-drafts');return {...actual,purgeLocalDraftPage:(...args:Parameters<typeof actual.purgeLocalDraftPage>)=>{m.purge(...args);return actual.purgeLocalDraftPage(...args)}}})
 vi.mock('@/hooks/use-auth',()=>({useSessionSafe:()=>({data:{user:{id:'owner'}}})}))
 vi.mock('@/lib/api-fetch',()=>({tryRefresh:async()=>'ok',apiFetch:(url:string,init:RequestInit)=>m.fetch(url,init)}))
 vi.mock('@/hooks/use-artifact-agent-dispatch',()=>({useArtifactAgentDispatch:()=>({dispatch:vi.fn(),ready:false})}))
 vi.mock('@/components/features/chat/artifact-context/viewer/artifact-slides-preview',()=>({ArtifactSlidesPreview:()=>null}))
 vi.mock('@/components/features/chat/artifact-context/viewer/artifact-dashboard-preview',()=>({ArtifactDashboardPreview:()=>null}))
 const snapshot={page_id:'p',can_write:true,can_comment:true,can_share:false,can_restore:false,can_send_to_agent:false,latest_version:1,shared_version:1,manifest:{version:1,entrypoint:'index.html',files:[{path:'index.html',content:'<h1>Shared</h1>',media_type:'text/html'}]},versions:[{version:1}],quota:{used_bytes:1,limit_bytes:100,warning:false},comments:[]}
-afterEach(()=>{cleanup();m.fetch.mockReset();m.revoked=false})
+afterEach(()=>{cleanup();m.fetch.mockReset();m.purge.mockReset();m.revoked=false})
 it('says plainly that the local draft was deleted when read access goes',async()=>{
  let allowed=true
  m.fetch.mockImplementation(()=>Promise.resolve(allowed?new Response(JSON.stringify(snapshot)):new Response(JSON.stringify({error:'not found'}),{status:404})))
@@ -32,4 +33,26 @@ it('says plainly that the local draft was deleted when read access goes',async()
  await client.invalidateQueries({queryKey:['artifact-project','w','demo']})
  expect(await screen.findByText(/^Page read access was removed\..*local draft has been deleted/)).toHaveAttribute('role','alert')
  expect(document.body.textContent).not.toContain('Private human source')
+})
+// Project scope of the draft rule (docs/specs/pages.md): proof erases, an ended
+// sign-in or a dropped connection does not, and offline has no proof to obtain.
+it.each([
+ {name:'401: an ended sign-in is not asked for proof',fail:()=>new Response('{}',{status:401}),proof:true,erased:false},
+ {name:'network failure (offline)',fail:()=>{throw new TypeError('Failed to fetch')},proof:true,erased:false},
+ {name:'403 without proof',fail:()=>new Response('{}',{status:403}),proof:false,erased:false},
+ {name:'403 with proof (read removed, membership removed)',fail:()=>new Response('{}',{status:403}),proof:true,erased:true},
+ {name:'404 with proof (Page deleted)',fail:()=>new Response('{}',{status:404}),proof:true,erased:true},
+])('Project draft on $name',async({fail,proof,erased})=>{
+ let allowed=true
+ m.fetch.mockImplementation(async()=>{if(allowed)return new Response(JSON.stringify(snapshot));return fail()})
+ const client=new QueryClient({defaultOptions:{queries:{retry:false}}})
+ render(<QueryClientProvider client={client}><ArtifactProject workspaceId="w" slug="demo" /></QueryClientProvider>)
+ fireEvent.click(await screen.findByRole('button',{name:'Edit source'}))
+ fireEvent.change(screen.getByLabelText('Source file'),{target:{value:'Private human source'}})
+ allowed=false;m.revoked=proof
+ await client.invalidateQueries({queryKey:['artifact-project','w','demo']})
+ await screen.findByRole('alert')
+ await new Promise(resolve=>setTimeout(resolve,50))
+ expect(m.purge).toHaveBeenCalledTimes(erased?1:0)
+ expect(Boolean(screen.queryByText(/^Page read access was removed/))).toBe(erased)
 })

@@ -12,7 +12,8 @@ export interface NativeDraft {
 }
 export interface NativeRecovery { draft: NativeDraft; actions: readonly ["compare", "copy"]; /** Journal row this recovery was read from; only `discardRecovered` uses it. */ source?: { id: string; snapshot: string } }
 export interface NativeDraftJournal {
-  persist(draft: NativeDraft): Promise<void>
+  /** `final`: the capture of a retiring editor. It may repeat what is stored. */
+  persist(draft: NativeDraft, final?: boolean): Promise<void>
   confirm: (draft: NativeDraft) => Promise<void>
   recovery(): Promise<NativeRecovery[]>
   /** Removes the exact stored row a recovery was read from (an earlier mount's
@@ -101,11 +102,11 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
     return work.then(value => { if (!active) throw fail(); return value })
   }
   return {
-    persist(draft) {
+    persist(draft, final) {
       if (!active || draft.applicationId !== scope.applicationId) return Promise.reject(fail())
       const snapshot = encode(draft)
       return enqueue(async () => {
-        await journal.put({ id, schema: 1, epoch: "native-v1", update: "", attempted: true, snapshot })
+        await journal.put({ id, schema: 1, epoch: "native-v1", update: "", attempted: true, snapshot }, { final })
         current = snapshot
       })
     },
