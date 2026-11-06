@@ -468,6 +468,12 @@
     "A.craft.startup.deadline.word",
     "A.craft.startup.deadline.sheet",
     "A.craft.startup.revoked.word",
-    "A.craft.startup.revoked.sheet"
+    "A.craft.startup.revoked.sheet",
+    "A.craft.agent-ui.word.free",
+    "A.craft.agent-ui.word.proposal",
+    "A.craft.agent-ui.word.read-absent",
+    "A.craft.agent-ui.sheet.free",
+    "A.craft.agent-ui.sheet.proposal",
+    "A.craft.agent-ui.sheet.read-absent"
   ]
 }
