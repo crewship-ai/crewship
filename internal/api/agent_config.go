@@ -466,7 +466,7 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 	// case the orchestrator applies the deprecated env fallback. api_key/headers
 	// carry optional auth for an authenticated endpoint and travel only on this
 	// internal resolve channel (never on a user-facing read path).
-	localEndpoint := resolveLocalModelEndpoint(r.Context(), h.db, h.logger, data.wsID, creds)
+	localEndpoint := resolveLocalModelEndpoint(r.Context(), h.db, h.logger, agentID, data.wsID, creds)
 	resp["local_model_base_url"] = localEndpoint.BaseURL
 	if localEndpoint.APIKey != "" {
 		resp["local_model_api_key"] = localEndpoint.APIKey
@@ -1581,7 +1581,7 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 			}
 		}
 		if !hasComposioBinding {
-			if entry, ok := h.buildDefaultComposioEntry(r, data.wsID, defaultSrvID, defaultUserID); ok {
+			if entry, ok := h.buildDefaultComposioEntry(r, agentID, data.wsID, defaultSrvID, defaultUserID); ok {
 				mcpServers = append(mcpServers, entry)
 			}
 		}
@@ -1654,21 +1654,26 @@ func (h *InternalHandler) attachToolBindings(r *http.Request, servers []mcpServe
 // agent-config hot path. Any failure (missing key, decrypt error) logs and
 // returns ok=false so the agent still resolves without the default rather than
 // failing the whole config.
-func (h *InternalHandler) buildDefaultComposioEntry(r *http.Request, wsID, serverID, userID string) (mcpServerEntry, bool) {
+func (h *InternalHandler) buildDefaultComposioEntry(r *http.Request, agentID, wsID, serverID, userID string) (mcpServerEntry, bool) {
 	if serverID == "" || userID == "" {
 		return mcpServerEntry{}, false
 	}
-	var encVal string
+	var credID, encVal string
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT encrypted_value FROM credentials
+		`SELECT id, encrypted_value FROM credentials
 		 WHERE workspace_id = ? AND name = ? AND deleted_at IS NULL AND status = 'ACTIVE'`,
-		wsID, composioManagedKeyName).Scan(&encVal)
+		wsID, composioManagedKeyName).Scan(&credID, &encVal)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			h.logger.Warn("default composio: read managed key", "workspace_id", wsID, "error", err)
 		} else {
 			h.logger.Warn("default composio: managed key missing", "workspace_id", wsID)
 		}
+		return mcpServerEntry{}, false
+	}
+	// #5045: the managed key is delivered to the sidecar as CredToken.
+	if ok, why := credhostgate.Deliverable(r.Context(), h.db, agentID, credID); !ok {
+		h.logger.Warn("default composio: managed key withheld (host-bound)", "credential_id", credID, "reason", why)
 		return mcpServerEntry{}, false
 	}
 	token, derr := decryptCredential(encVal)

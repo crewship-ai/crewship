@@ -187,7 +187,7 @@ func (h *ModelsHandler) resolveModels(ctx context.Context, wsID, provider string
 	// cap is on). Fail-open: a blocked or unreachable workspace endpoint falls
 	// through to the server-global path / curated, never rejecting an edit.
 	if provider == "OLLAMA" && h.workspaceOllamaLister != nil {
-		if ep := resolveLocalModelEndpoint(ctx, h.db, h.logger, wsID, nil); ep.BaseURL != "" {
+		if ep := resolveLocalModelEndpoint(ctx, h.db, h.logger, "", wsID, nil); ep.BaseURL != "" {
 			if wl, ok := h.workspaceOllamaLister(ep.BaseURL); ok {
 				if live, err := wl.ListModels(ctx); err == nil {
 					return live, "live"
