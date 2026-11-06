@@ -32,10 +32,10 @@ export function forgetLocalDraftPage(scope: LocalDraftScope) {
  * nothing. Only `draft_read_revoked` is "revoked" and only `readable: true` is
  * "readable"; anything else is "unknown" and keeps the draft. This has no side
  * effects: the caller decides whether the answer is still current. */
-export async function nativeDraftRead(scope: LocalDraftScope): Promise<"revoked" | "readable" | "unknown"> {
+export async function nativeDraftRead(scope: LocalDraftScope, signal?: AbortSignal): Promise<"revoked" | "readable" | "unknown"> {
   const generation = identityGeneration
   const response = await apiFetch(`/api/v1/pages/@${encodeURIComponent(scope.page)}/draft-key?workspace_id=${encodeURIComponent(scope.workspace)}`, {
-    method: "POST", cache: "no-store", redirect: "error", skipRefresh: true,
+    method: "POST", cache: "no-store", redirect: "error", skipRefresh: true, signal,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ human: scope.human, operation: "check" }),
   })

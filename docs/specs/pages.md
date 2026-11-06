@@ -1472,9 +1472,10 @@ while the person's credential is still current and the same read `draft-key` ask
 refuses them, so native admission or application eligibility never erases, and a
 restricted private custodian keeps the draft. A `readable: true` answer or a
 delivered shared version supersedes every older proof still on the wire for that
-Page in that tab. Once native admission refuses a person holding a kept draft, the
-editor asks `draft-key` every 30 seconds until it unmounts, signs out or erases, so
-Comment to none is found without a reload.
+Page in that tab. From the moment an editor holding a kept draft asks for a
+replacement admission, it asks `draft-key` every 30 seconds, one request at a time,
+until it unmounts, signs out or erases. So Comment to none is found without a
+reload, even if that admission never finishes.
 Native
 asks `draft-key` with `operation: "check"`; Project asks `wrap`. Both ask the same
 read question, canonical Page visibility. A native draft is asked about after a
@@ -1539,7 +1540,9 @@ keep the live model mounted behind recovery UI and block navigation. Explicit
 sign-out warns before deleting persistent recovery copies and deletes only the
 revisions covered by that confirmation, plus the exact revision this tab's own
 suspended native editor made from one of them. Later writes remain for recovery,
-including another tab's.
+including another tab's. The sign-out message names the confirmed revisions, so a
+tab holding one of them erases the same successor once the session is gone; an
+unsaved edit it never stored before suspending is part of that snapshot.
 Recovery does not replay native snapshot saves, custody operations or agent
 dispatch. Design resumes standard CRDT synchronization only after fresh
 same-person Edit admission; read-only viewers do not restore a writer canvas.

@@ -7,6 +7,7 @@ import {act,cleanup,fireEvent,render,screen} from '@testing-library/react'
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest'
 import type {NativeEditorPortOptions} from '@/lib/mooring/native-editor-port'
 import {NATIVE_ADMISSION_DEADLINE_MS,NATIVE_DETECTION_BOUND_MS,NATIVE_REAUTHORIZE_DEADLINE_MS,NATIVE_REAUTHORIZE_INTERVAL_MS} from '@/lib/mooring/native-revocation-bounds'
+import {suspendOtherDocumentDrafts} from '@/lib/document-queue'
 import {NativeCraftEditorHost} from '../native-craft-editor-host'
 
 type Route='sessions'|'reauthorize'|'lease'|'document'|'save'|'events'|'action'|'draft-key'|'proposals'|'other'
@@ -48,6 +49,7 @@ function scriptedServer(){
   stall:new Set<Route>(),
   calls:[] as Route[],
   stream:undefined as ReadableStreamDefaultController<Uint8Array>|undefined,
+  probes:[] as AbortSignal[],
   retiredPush:0,
   push(event:string,value:unknown){s.stream!.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`))},
   dropStream(){s.stream?.error(TypeError('network down'));s.stream=undefined},
@@ -55,6 +57,7 @@ function scriptedServer(){
  }
  m.server=async(input,init)=>{
   const name=route(String(input));s.calls.push(name)
+  if(name==='draft-key'&&init.signal)s.probes.push(init.signal)
   if(!s.reachable)throw TypeError('Failed to fetch')
   // The server decides when the request arrives; a delay only holds the answer.
   const state=s.state
@@ -198,8 +201,9 @@ describe('offline',()=>{
   expect(journal.revokeRead).not.toHaveBeenCalled();expect(m.purge).not.toHaveBeenCalled()
   server.calls.length=0;server.reachable=true
   await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
-  // T3: refused admission, then the positive proof, and only then the erase.
-  expect(server.count('sessions')).toBeGreaterThan(0);expect(server.count('document')).toBe(0);expect(offered()).toBe(false)
+  // T3: nothing is read, and only the positive proof erases. Whichever of the kept
+  // draft's watch and the admission retry reaches the server first may ask for it.
+  expect(server.count('draft-key')).toBeGreaterThan(0);expect(server.count('document')).toBe(0);expect(offered()).toBe(false)
   expect(m.purge).toHaveBeenCalledOnce()
  })
  it('reconnecting with read intact offers the draft only after a fresh admission and read',async()=>{
@@ -260,6 +264,55 @@ describe('a draft kept after write loss',()=>{
   server.calls.length=0
   await advance(5*60_000)
   expect(server.count('draft-key')).toBe(0)
+ })
+ it('a replacement admission that stalls past its deadline does not end the watch',async()=>{
+  await opened()
+  act(()=>options.at(-1)!.onChanged('typed','doc'))
+  await advance(3_000)
+  server.state='comment-only';server.stall.add('sessions')
+  server.push('session_retired',{delivery:'stopped',reason:'write_revoked',draft:'retain'})
+  await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
+  expect(m.purge).not.toHaveBeenCalled()
+  // Comment goes while nothing else is left to notice; recovery brings the proof.
+  server.state='read-lost';server.reachable=false
+  await advance(NATIVE_DETECTION_BOUND_MS)
+  server.reachable=true
+  await advance(NATIVE_DETECTION_BOUND_MS)
+  expect(m.purge).toHaveBeenCalledWith({human:'human',workspace:'w',page:'p'},expect.anything())
+ })
+ it('asks one question at a time, and a late proof still erases',async()=>{
+  await opened()
+  act(()=>options.at(-1)!.onChanged('typed','doc'))
+  await advance(3_000)
+  server.state='comment-only'
+  server.push('session_retired',{delivery:'stopped',reason:'write_revoked',draft:'retain'})
+  await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
+  server.state='read-lost';server.proofDelay=5*60_000
+  await settle(()=>server.count('draft-key')>0&&server.probes.some(signal=>!signal.aborted))
+  await advance(NATIVE_REAUTHORIZE_INTERVAL_MS)
+  server.calls.length=0
+  await advance(4*60_000)
+  expect(server.count('draft-key')).toBe(0);expect(m.purge).not.toHaveBeenCalled()
+  await advance(60_000+NATIVE_REAUTHORIZE_INTERVAL_MS)
+  expect(m.purge).toHaveBeenCalled()
+ })
+ it.each([['unmounting',()=>cleanup()],['the end of the sign-in',()=>{void suspendOtherDocumentDrafts(null).catch(()=>{})}]])('%s cancels the question on the wire',async(_,end)=>{
+  await opened()
+  act(()=>options.at(-1)!.onChanged('typed','doc'))
+  await advance(3_000)
+  server.state='comment-only'
+  server.push('session_retired',{delivery:'stopped',reason:'write_revoked',draft:'retain'})
+  await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
+  server.stall.add('draft-key');server.probes.length=0
+  await advance(NATIVE_REAUTHORIZE_INTERVAL_MS+1_000)
+  expect(server.probes).toHaveLength(1);expect(server.probes[0].aborted).toBe(false)
+  end();await advance(50)
+  expect(server.probes[0].aborted).toBe(true)
+  server.calls.length=0
+  await advance(5*60_000)
+  expect(server.count('draft-key')).toBe(0)
+  // The journal identity is per module: the next test signs in again.
+  await suspendOtherDocumentDrafts('human')
  })
  it('the watch ends with the editor',async()=>{
   await opened()

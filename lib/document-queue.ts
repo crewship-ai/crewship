@@ -142,7 +142,9 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
       const key: [string,string] = [owner,JSON.stringify([draft.schema,draft.epoch,draft.id])]
       await transaction("readwrite", store => {
         const revision = crypto.randomUUID()
-        if (suspensions) { const previous = store.get(key); previous.onsuccess = () => noteSuspendedRevision(key, previous.result?.revision ?? null, revision) }
+        const row = JSON.stringify(key), own = ownRevisions.get(row) ?? null
+        if (suspensions) { const previous = store.get(key); previous.onsuccess = () => noteSuspendedRevision(key, previous.result?.revision ?? own, revision) }
+        ownRevisions.set(row, revision)
         return store.put({ key, draft, revision })
       })
       keys.set(draft.id,key)
@@ -245,8 +247,10 @@ export function purgeOtherDocumentDrafts(userId: string | null): Promise<void> {
 // What this tab's own editors stored while suspended, row by row. A revision
 // written by another tab never passes through here. Suspension only saves what
 // the editor already held, so a row confirmed for deletion stays confirmed through
-// these exact revisions, and through nothing else.
+// these exact revisions, and through nothing else. The tab that confirmed may have
+// erased the row first, so what this tab last wrote there still names the origin.
 let suspensions = 0
+const ownRevisions = new Map<string, string>()
 const suspendedRevisions = new Map<string, { from: string | null; to: string }>()
 function noteSuspendedRevision(key: [string, string], from: string | null, to: string) {
   const row = JSON.stringify(key), last = suspendedRevisions.get(row)
@@ -259,6 +263,9 @@ export function suspendedDocumentDraftRevisions(rows: CapturedDocumentDraft[]): 
     return written && written.from === row.revision ? [{ key: row.key, revision: written.to }] : []
   })
 }
+
+/** Settles with the suspension under way, if any. It never rejects. */
+export function documentSuspensionSettled(): Promise<void> { return (suspensionInFlight ?? Promise.resolve()).catch(() => {}) }
 
 /** Preserve rows on expiry/account replacement. Editors capture before journals close. */
 let suspensionInFlight: Promise<void> | undefined

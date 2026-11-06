@@ -270,6 +270,32 @@ test.describe("native draft on access change", () => {
     })
   }
 
+  for (const holder of ["open", "closed"] as const) {
+    test(`sign-out from the other tab erases with the holder tab ${holder}`, { annotation: prdRequirement(`A.craft.draft.sign-out-holder-${holder}`, `Word: sign-out confirmed in a tab without the draft erases it, holder tab ${holder}`) }, async ({ prd, request }) => {
+      const f = await holding(prd, request, cleanup, ["write"], browser)
+      const other = await open(f.context, f.doc, f.workspace)
+      await pause(2_000)
+      const rows = await draftRows(other, f.doc.pageId)
+      if (holder === "closed") await f.page.close({ runBeforeUnload: false })
+      await other.bringToFront()
+      await other.getByRole("button", { name: "User menu" }).first().click()
+      await other.getByRole("menuitem", { name: /Log out/ }).or(other.getByRole("button", { name: /Log out/ })).first().click()
+      const confirm = other.getByRole("button", { name: "Sign out", exact: true })
+      await confirm.waitFor({ timeout: 5_000 })
+      await confirm.click()
+      const t0 = Date.now()
+      await expect.poll(() => other.url(), { timeout: 30_000 }).toMatch(/\/login/)
+      if (holder === "open") await expect.poll(() => f.page.url(), { timeout: 30_000 }).toMatch(/\/login/)
+      const erasedAt = await until("draft erased", async () => (await draftRows(other, f.doc.pageId)) === 0, 20_000).catch(() => 0)
+      // Long enough for a holder still suspending to have written.
+      await pause(5_000)
+      const left = await draftRows(other, f.doc.pageId)
+      await prd.evidence(`timing-${test.info().repeatEachIndex}.json`, { holder, rows, erasedMs: erasedAt ? erasedAt - t0 : null, left })
+      expect(rows, "there was a draft").toBeGreaterThan(0)
+      expect(left, "no row survives a confirmed sign-out").toBe(0)
+    })
+  }
+
   test("read lost with two tabs open erases once and stops both", { annotation: prdRequirement("A.craft.draft.multi-tab", "Word: read removed with two tabs open erases the draft and stops both tabs") }, async ({ prd, request }) => {
     const f = await holding(prd, request, cleanup, ["write"], browser)
     const other = await open(f.context, f.doc, f.workspace)

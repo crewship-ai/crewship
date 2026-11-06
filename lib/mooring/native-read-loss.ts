@@ -14,11 +14,12 @@ export function confirmNativeRead(scope:LocalDraftScope){confirmations.set(key(s
  * still proof, unless read was confirmed after it was asked. Then it does nothing
  * at all: no cipher closes and no journal is revoked. Captured revisions keep a
  * later draft safe. Returns whether read loss was proven and acted on. */
-export async function verifyNativeReadLoss(scope:LocalDraftScope,retire?:()=>Promise<void>):Promise<boolean>{
+export async function verifyNativeReadLoss(scope:LocalDraftScope,retire?:()=>Promise<void>,signal?:AbortSignal):Promise<boolean>{
  const asked=confirmations.get(key(scope))??0
  const captured=await captureLocalDraftPage(scope)
  if(!captured.local.length&&!captured.artifacts.length&&!captured.documents.length&&!retire)return false
- const answer=await nativeDraftRead(scope).catch(()=>"unknown" as const)
+ const answer=await nativeDraftRead(scope,signal).catch(()=>"unknown" as const)
+ if(signal?.aborted)return false
  if(answer==="readable")confirmNativeRead(scope)
  if(answer!=="revoked")return false
  if((confirmations.get(key(scope))??0)!==asked)return false
