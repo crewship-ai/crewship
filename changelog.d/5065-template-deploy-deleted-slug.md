@@ -1,0 +1,1 @@
+- **Crew templates deploy onto a slug left by a deleted crew (#5065).** The deploy no longer fails with HTTP 500; it frees the slug the same way crew creation does.
