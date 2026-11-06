@@ -83,3 +83,33 @@ it("still ignores a sign-out for a different person after re-settling", async ()
     expect(auth.session?.user.id).toBe("ana")
   } finally { replace.mockRestore() }
 })
+
+it("keeps the signed-in person's chat recovery when a delayed sign-out finds the session live", async () => {
+  const replace = vi.spyOn(window.location, "replace").mockImplementation(() => {})
+  const key = `chat-proposal:${JSON.stringify(["ws", "ana"])}`
+  try {
+    sessionStorage.setItem(key, "unsent")
+    await resettledTab(replace)
+    expect(sessionStorage.getItem(key)).toBe("unsent")
+    mockFetch.mockResolvedValueOnce(signedOut())
+    act(() => { channel().onmessage?.({ data: { type: "signout", human: "ana" } }) })
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(SIGNED_OUT_URL))
+    expect(sessionStorage.getItem(key)).toBeNull()
+  } finally { sessionStorage.removeItem(key); replace.mockRestore() }
+})
+
+it("removes chat recovery after a real sign-out even when the drafts step fails", async () => {
+  const replace = vi.spyOn(window.location, "replace").mockImplementation(() => {})
+  const key = `chat-decision:${JSON.stringify(["ws", "ana"])}`
+  try {
+    sessionStorage.setItem(key, "unsent")
+    mockFetch.mockResolvedValueOnce(user("ana"))
+    render(<AuthProvider><Probe /></AuthProvider>)
+    await waitFor(() => expect(auth.session?.user.id).toBe("ana"))
+    suspendDocuments.mockRejectedValueOnce(new Error("idb"))
+    mockFetch.mockResolvedValueOnce(signedOut())
+    act(() => { channel().onmessage?.({ data: { type: "signout", human: "ana" } }) })
+    await waitFor(() => expect(sessionStorage.getItem(key)).toBeNull())
+    expect(replace).not.toHaveBeenCalled()
+  } finally { sessionStorage.removeItem(key); replace.mockRestore() }
+})
