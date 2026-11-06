@@ -1471,7 +1471,7 @@ func isMuxRoutedPath(path string) bool {
 // isOpenAPIDocsPath reports whether path belongs to the browsable OpenAPI
 // rendering (#1846). It is HTML, but it is NOT the SPA: it is served by the
 // mux from Go templates, and it runs under the strict CSP below rather than
-// the Next.js runtime's 'unsafe-inline'/'unsafe-eval' policy. Missing it here
+// the Next.js runtime's 'unsafe-inline' policy. Missing it here
 // would hand every one of its pages to the SPA catch-all, which answers 200
 // text/html for any path — the exact failure /openapi.json had before #1325.
 func isOpenAPIDocsPath(path string) bool {
