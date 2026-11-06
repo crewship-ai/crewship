@@ -57,9 +57,9 @@ feed_ok=1
 for attempt in 1 2; do
   # A lead that still holds earlier work answers the next ask with 429.
   wait_agent_free alex || finish
-  reply="$(ask_agent alex "Delegate this to your peer Sam, do NOT do it yourself: \
+  ask_agent alex "Delegate this to your peer Sam, do NOT do it yourself: \
 ask Sam to reply with exactly the string '${TAG}-OK' and nothing else. Then \
-report back to me Sam's exact answer.")"
+report back to me Sam's exact answer." >/dev/null
   ask_rc=$?
   # The exit status decides, never the reply: a failed ask can still leave a
   # partial reply behind.
@@ -98,9 +98,14 @@ elif (( delegated == 1 )); then
   else
     _fail "the delegated assignment to sam completed" "no assignment.completed with a success outcome joined to the tagged assignment within ${ASK_TIMEOUT}s"
   fi
+elif (( ask_refused > 0 )); then
+  # One refused ask plus one inline answer is not the two chances the skip
+  # below stands for, so the refusal decides.
+  _fail "lead→peer delegation" "$ask_refused of 2 asks exited non-zero and the answered one carried no tagged assignment to sam, so delegation was never confirmed"
 else
   # Both asks succeeded and no assignment to sam carries the tag: the lead did
-  # not delegate. That is the model's choice, so it stays a skip.
+  # not delegate. That is the model's choice, so it stays a skip. The stage e2e
+  # leg does not count a run with skips as release evidence.
   skip "lead→peer delegation" "non-deterministic: both asks succeeded but no assignment addressed to sam carried $TAG over 2 attempts, so the lead may have answered inline; a tag in the reply is not evidence"
 fi
 
