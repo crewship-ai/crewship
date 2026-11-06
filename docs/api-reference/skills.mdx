@@ -24,6 +24,8 @@ Most read endpoints accept a session or CLI token with workspace membership. Wri
 | `DELETE` | [`/api/v1/workspaces/{workspaceId}/skills/{skillId}`](#delete-skill) | Delete a non-bundled skill |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/skills/{skillId}/archive`](#archive-and-restore-a-skill) | Move a skill to the Archived view |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/skills/{skillId}/restore`](#archive-and-restore-a-skill) | Bring an archived skill back |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/skills/{skillId}/lock`](#lock-and-unlock-a-skill) | Lock a skill against autonomous rewrites |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/skills/{skillId}/unlock`](#lock-and-unlock-a-skill) | Lift the lock |
 | `GET` | [`/api/v1/skills/proposed`](#list-proposed-skills) | List memory-proposed skills |
 | `POST` | [`/api/v1/skills/proposed/approve`](#approve-proposed-skill) | Approve a proposed skill |
 | `POST` | [`/api/v1/skills/proposed/reject`](#reject-proposed-skill) | Reject a proposed skill |
@@ -160,6 +162,8 @@ filters) only sees the caller's workspace.
 | `scan_status` | string | Security scan status |
 | `description_quality` | string? | Description quality rating |
 | `lifecycle_state` | string | Curator sweep verdict: `active`, `stale`, `archived` or `deprecated` |
+| `locked` | boolean | `true` while a curator holds the skill against autonomous rewrites |
+| `locked_at` | string? | When the skill was locked; null when unlocked |
 | `needs_credentials` | string[] | Env-var names the skill expects an agent to hold (decoded `credential_requirements`); `[]` when none |
 | `usage` | object | This workspace's invocations: `uses_7d`, `uses_30d`, `errors_7d`, `errors_30d` (non-zero exit), `uses_total`, `last_used_at` (null when never used) |
 | `installed_on` | array? | Agents of the caller's workspace holding the skill, with crew info and `missing_credentials` (the `needs_credentials` the agent is not delivered at run start). Omitted when no agent of the workspace holds it |
@@ -405,6 +409,36 @@ A restored skill is still judged by the sweep: when no agent holds it and nobody
 | `403` | Insufficient role |
 | `404` | Skill not found |
 | `409` | The skill is `deprecated` (terminal) |
+
+---
+
+### Lock and Unlock a Skill
+
+```
+POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/lock
+POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/unlock
+```
+
+While locked, import, bulk import, generation, agent-authored proposals,
+proposed-skill approval, memory consolidation promotion and bundled re-seeds
+refuse to change the skill's content and answer `423 Locked` with a detail
+naming the lock; each blocked attempt is journaled as `skill.write_blocked`.
+The lifecycle sweep never moves a locked skill to `stale` or `archived`.
+Locking and unlocking are idempotent and emit `skill.locked` / `skill.unlocked`.
+
+Needs the `OWNER` or `ADMIN` role **and** a person's credential (session or CLI
+token). Run tokens, sidecar tokens and agent identities get `403`.
+
+**Response:** `200 OK`
+
+```json
+{ "skill_id": "skill_abc", "slug": "deploy-checks", "locked": true }
+```
+
+| Status | Condition |
+|---|---|
+| `403` | Insufficient role, or a non-human credential |
+| `404` | Skill not found |
 
 ---
 

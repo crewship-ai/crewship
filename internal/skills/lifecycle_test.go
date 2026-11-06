@@ -115,3 +115,30 @@ func TestEvaluateTransition(t *testing.T) {
 		})
 	}
 }
+
+// A locked skill is held where it is: the sweep never ages it to stale or
+// archived (#5045), the same way an assignment does.
+func TestEvaluateTransition_LockedHoldsState(t *testing.T) {
+	now := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
+	day := 24 * time.Hour
+	tests := []struct {
+		name string
+		snap LifecycleSnapshot
+		want LifecycleState
+	}{
+		{"active unused 60d stays active", LifecycleSnapshot{Current: LifecycleActive, LastUsedAt: now.Add(-60 * day), Locked: true, Now: now}, LifecycleActive},
+		{"active never used stays active", LifecycleSnapshot{Current: LifecycleActive, Locked: true, Now: now}, LifecycleActive},
+		{"stale unused 120d stays stale", LifecycleSnapshot{Current: LifecycleStale, LastUsedAt: now.Add(-120 * day), Locked: true, Now: now}, LifecycleStale},
+		{"archived stays archived", LifecycleSnapshot{Current: LifecycleArchived, LastUsedAt: now.Add(-120 * day), Locked: true, Now: now}, LifecycleArchived},
+		{"deprecated stays terminal", LifecycleSnapshot{Current: LifecycleDeprecated, Locked: true, Now: now}, LifecycleDeprecated},
+		{"unlocked control ages out", LifecycleSnapshot{Current: LifecycleActive, LastUsedAt: now.Add(-60 * day), Now: now}, LifecycleStale},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := EvaluateTransition(tc.snap)
+			if got.Next != tc.want {
+				t.Fatalf("Next = %q, want %q", got.Next, tc.want)
+			}
+		})
+	}
+}

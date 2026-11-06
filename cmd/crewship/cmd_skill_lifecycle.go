@@ -80,7 +80,45 @@ Examples:
 	},
 }
 
+var skillLockCmd = &cobra.Command{
+	Use:   "lock <skill-slug-or-id>",
+	Short: "Lock a skill against autonomous rewrites",
+	Long: `Lock a skill you curated. While it is locked no agent, sidecar tool,
+memory consolidation, generation or proposed-skill approval can change its
+content, bundled re-seeds leave it alone, and the lifecycle sweep never moves
+it to stale or archived. A blocked write fails with an error naming the lock
+and is recorded in the journal. Needs a signed-in person with the OWNER or
+ADMIN role; run tokens and agent identities are refused.
+
+Examples:
+  crewship skill lock my-skill`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSkillLifecycle(cmd, args, "locked", func(c *cli.Client, ws, id string) (*http.Response, error) {
+			return c.Post("/api/v1/workspaces/"+ws+"/skills/"+id+"/lock", nil)
+		})
+	},
+}
+
+var skillUnlockCmd = &cobra.Command{
+	Use:   "unlock <skill-slug-or-id>",
+	Short: "Lift a skill's lock",
+	Long: `Unlock a skill so imports, proposals and the lifecycle sweep may change it
+again. Needs a signed-in person with the OWNER or ADMIN role.
+
+Examples:
+  crewship skill unlock my-skill`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runSkillLifecycle(cmd, args, "unlocked", func(c *cli.Client, ws, id string) (*http.Response, error) {
+			return c.Post("/api/v1/workspaces/"+ws+"/skills/"+id+"/unlock", nil)
+		})
+	},
+}
+
 func init() {
+	skillCmd.AddCommand(skillLockCmd)
+	skillCmd.AddCommand(skillUnlockCmd)
 	skillCmd.AddCommand(skillArchiveCmd)
 	skillCmd.AddCommand(skillRestoreCmd)
 }

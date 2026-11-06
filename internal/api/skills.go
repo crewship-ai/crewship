@@ -77,6 +77,10 @@ type skillResponse struct {
 	// LifecycleState is the curator sweep's verdict (active, stale,
 	// archived, deprecated — internal/skills/lifecycle.go).
 	LifecycleState string `json:"lifecycle_state"`
+	// Locked is true while a curator holds the skill against autonomous
+	// rewrites (#5045); LockedAt is when it was locked.
+	Locked   bool    `json:"locked"`
+	LockedAt *string `json:"locked_at"`
 	// NeedsCredentials is credential_requirements decoded: the env-var
 	// names the skill expects an agent to hold. Never null.
 	NeedsCredentials []string `json:"needs_credentials"`
@@ -163,7 +167,7 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 		category, source, icon, verification, downloads, rating_avg, rating_count,
 		tags, featured, pricing_tier, tool_count, vendor, homepage, spdx_license,
 		runtime, maturity, scan_status, description_quality, created_at, updated_at,
-		lifecycle_state, COALESCE(credential_requirements, '[]')
+		lifecycle_state, COALESCE(credential_requirements, '[]'), locked, locked_at
 		FROM skills WHERE 1=1`
 	var args []interface{}
 
@@ -223,17 +227,19 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 		var s skillResponse
 		var featured int
 		var credReqs string
+		var lockedFlag int
 		if err := rows.Scan(&s.ID, &s.Name, &s.Slug, &s.DisplayName, &s.Description,
 			&s.Version, &s.Author, &s.Category, &s.Source, &s.Icon,
 			&s.Verification, &s.Downloads, &s.RatingAvg, &s.RatingCount,
 			&s.Tags, &featured, &s.PricingTier, &s.ToolCount,
 			&s.Vendor, &s.Homepage, &s.SPDXLicense,
 			&s.Runtime, &s.Maturity, &s.ScanStatus, &s.DescriptionQuality,
-			&s.CreatedAt, &s.UpdatedAt, &s.LifecycleState, &credReqs); err != nil {
+			&s.CreatedAt, &s.UpdatedAt, &s.LifecycleState, &credReqs, &lockedFlag, &s.LockedAt); err != nil {
 			replyInternalError(w, h.logger, "scan skill", err)
 			return
 		}
 		s.Featured = featured == 1
+		s.Locked = lockedFlag == 1
 		s.NeedsCredentials = decodeCredentialRequirements(credReqs)
 		// Normalize tags from JSON string
 		if s.Tags != nil && strings.TrimSpace(*s.Tags) == "" {
@@ -424,14 +430,14 @@ func (h *SkillHandler) Get(w http.ResponseWriter, r *http.Request) {
 	skillID := r.PathValue("skillId")
 
 	var s skillDetailResponse
-	var featured int
+	var featured, lockedFlag int
 	err := h.db.QueryRowContext(r.Context(), `
 		SELECT s.id, s.name, s.slug, s.display_name, s.description, s.version, s.author,
 		       s.category, s.source, s.icon, s.verification, s.downloads, s.rating_avg, s.rating_count,
 		       s.tags, s.featured, s.pricing_tier, s.tool_count,
 		       s.vendor, s.homepage, s.spdx_license,
 		       s.runtime, s.maturity, s.scan_status, s.description_quality,
-		       s.created_at, s.updated_at, s.lifecycle_state,
+		       s.created_at, s.updated_at, s.lifecycle_state, s.locked, s.locked_at,
 		       s.content, s.credential_requirements, s.mcp_server_command, s.mcp_server_image,
 		       s.mcp_transport, s.dependencies, s.license,
 		       (SELECT COUNT(*) FROM agent_skills as2 JOIN agents a ON a.id = as2.agent_id
@@ -443,7 +449,7 @@ func (h *SkillHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&s.Tags, &featured, &s.PricingTier, &s.ToolCount,
 		&s.Vendor, &s.Homepage, &s.SPDXLicense,
 		&s.Runtime, &s.Maturity, &s.ScanStatus, &s.DescriptionQuality,
-		&s.CreatedAt, &s.UpdatedAt, &s.LifecycleState,
+		&s.CreatedAt, &s.UpdatedAt, &s.LifecycleState, &lockedFlag, &s.LockedAt,
 		&s.Content, &s.CredentialRequirements, &s.McpServerCommand, &s.McpServerImage,
 		&s.McpTransport, &s.Dependencies, &s.License, &s.AgentCount,
 		&s.SecurityScore, &s.AllowedDomains, &s.Changelog,
@@ -462,6 +468,7 @@ func (h *SkillHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Featured = featured == 1
+	s.Locked = lockedFlag == 1
 	creds := "[]"
 	if s.CredentialRequirements != nil {
 		creds = *s.CredentialRequirements
@@ -557,6 +564,9 @@ func (h *SkillHandler) Import(w http.ResponseWriter, r *http.Request) {
 		AllowUnsafeLicense: req.AllowUnsafeLicense,
 	})
 	if err != nil {
+		if refuseLockedSkill(w, r, h.journal, wsID, "", journal.ActorUser, user.ID, "import", err) {
+			return
+		}
 		// Full error captured for ops; sanitised reason returned to the
 		// caller so the response can't double as an internal-network
 		// mapper. Anything net/http reports — resolved IPs, TLS cert SAN

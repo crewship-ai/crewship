@@ -67,6 +67,8 @@ type SkippedSkill struct {
 	Path   string
 	Slug   string
 	Reason string
+	// Locked marks a skip caused by a curator's content lock (#5045).
+	Locked bool
 }
 
 // BulkImport walks a git repo or local directory tree for SKILL.md
@@ -230,6 +232,7 @@ func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*Bu
 			out.Skipped = append(out.Skipped, SkippedSkill{
 				Path: p, Slug: parsed.Meta.Name,
 				Reason: "upsert: " + importErr.Error(),
+				Locked: IsLocked(importErr),
 			})
 			return nil
 		}

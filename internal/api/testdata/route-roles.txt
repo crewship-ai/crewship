@@ -470,6 +470,8 @@ POST /api/v1/workspaces/{workspaceId}/skills/generate roleInline
 POST /api/v1/workspaces/{workspaceId}/skills/import roleInline
 POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/archive roleManage
 POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/restore roleManage
+POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/lock roleManage
+POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/unlock roleManage
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/cancel roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/replay roleCreate
 POST /api/v1/workspaces/{workspaceId}/work-items/{workItemId}/resolve roleCreate

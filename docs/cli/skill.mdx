@@ -32,6 +32,7 @@ crewship skill <subcommand> [flags]
 | `delete` | Remove a skill from the workspace registry. |
 | `archive` | Move a skill to the Archived view (hidden from the library and pickers). |
 | `restore` | Bring an archived skill back to active. |
+| `lock` / `unlock` | Hold a skill against autonomous rewrites, or lift the hold. |
 | `assign` | Attach a skill to one agent, several agents, or a whole crew. |
 | `unassign` | Detach the same way. |
 | `proposed list` | List skills auto-promoted from memory awaiting operator approval. |
@@ -274,6 +275,29 @@ With `--format json|yaml|ndjson` both print the server's answer,
 for an already-archived skill is not a change this call made.
 
 ---
+
+## `crewship skill lock` / `unlock`
+
+Lock a skill you curated so nothing autonomous rewrites it.
+
+```bash
+crewship skill lock <slug-or-id>
+crewship skill unlock <slug-or-id>
+```
+
+While a skill is locked:
+
+- No import, bulk import, generation, agent-authored proposal, proposed-skill
+  approval, memory consolidation promotion or bundled re-seed changes its
+  content. Each refuses with an error naming the lock (HTTP `423`) and writes
+  a `skill.write_blocked` journal entry. Unlock the skill first to change it.
+- The lifecycle sweep never moves it to `stale` or `archived`, the same way an
+  assigned skill is held. A person can still archive it by hand.
+
+Only a signed-in person with the `OWNER` or `ADMIN` role can lock or unlock;
+run tokens, sidecar tokens and agent identities are refused with `403`.
+Skills are unlocked by default. `skill list` shows a `LOCKED` column and
+`skill get` a `Locked` row; JSON output carries `locked`.
 
 ## `crewship skill assign`
 

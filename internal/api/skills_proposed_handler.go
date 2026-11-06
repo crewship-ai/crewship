@@ -255,6 +255,9 @@ func (h *SkillProposedHandler) Approve(w http.ResponseWriter, r *http.Request) {
 		SourceType: "GENERATED",
 	})
 	if err != nil {
+		if refuseLockedSkill(w, r, h.journal, wsID, body.CrewID, journal.ActorUser, actorID, "proposed_approve", err) {
+			return
+		}
 		// Surface the importer's own error — typically a parser
 		// validation failure (frontmatter malformed) or a license
 		// rejection. 422 because the request was well-formed but the

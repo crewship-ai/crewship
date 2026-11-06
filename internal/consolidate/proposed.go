@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
+	"github.com/crewship-ai/crewship/internal/skills"
 )
 
 // writeProposal is the HITL-mode write path. Instead of appending the
@@ -169,7 +170,7 @@ func (c *Consolidator) writeProposal(
 	// first proposal for a pattern, recall is by definition 0 and no
 	// skill is written; only repeated, recalled-against rules cross
 	// the gate on later runs. See skill_promote.go for the thresholds.
-	if skillPaths := c.promoteProposalSkills(rules, scores, cfg.OutputRoot, cfg.OutputDir, now); len(skillPaths) > 0 {
+	if skillPaths := c.promoteProposalSkills(ctx, cfg, rules, scores, cfg.OutputRoot, cfg.OutputDir, now); len(skillPaths) > 0 {
 		logger.Info("memory→skills promotion staged",
 			"proposal_id", proposalID,
 			"skill_count", len(skillPaths),
@@ -389,6 +390,8 @@ func loadRecallMetrics(ctx context.Context, db *sql.DB, workspaceID string, evid
 // Returns the absolute paths of any Skills that landed on disk so the
 // caller can include them in observability logs.
 func (c *Consolidator) promoteProposalSkills(
+	ctx context.Context,
+	cfg Config,
 	rules []LearnedRule,
 	scores map[string]ScoreResult,
 	outputRoot string,
@@ -403,6 +406,7 @@ func (c *Consolidator) promoteProposalSkills(
 		OutputDir:  outputDir,
 		OutputRoot: outputRoot,
 		Now:        now,
+		IsLocked:   c.skillLockedFn(ctx, cfg),
 	})
 	if err != nil {
 		logger.Warn("memory→skills promotion partial failure",
@@ -427,4 +431,31 @@ func newProposalID(now time.Time) string {
 		return now.UTC().Format("20060102150405") + "-" + fmt.Sprintf("%016x", now.UTC().UnixNano())
 	}
 	return now.UTC().Format("20060102150405") + "-" + hex.EncodeToString(r[:])
+}
+
+// skillLockedFn reports whether a slug names a skill locked by its curator, so
+// the memory-to-skill bridge never stages a rewrite of it (#5045). A blocked
+// promotion is journaled. Without a database it reports nothing locked; a
+// lookup error fails closed.
+func (c *Consolidator) skillLockedFn(ctx context.Context, cfg Config) func(string) bool {
+	if c.DB == nil {
+		return nil
+	}
+	return func(slug string) bool {
+		if skills.CheckUnlocked(ctx, c.DB, slug) == nil {
+			return false
+		}
+		if c.Journal != nil {
+			_, _ = c.Journal.Emit(ctx, journal.Entry{
+				WorkspaceID: cfg.WorkspaceID,
+				CrewID:      cfg.CrewID,
+				Type:        journal.EntrySkillWriteBlocked,
+				ActorType:   journal.ActorSystem,
+				Severity:    journal.SeverityNotice,
+				Summary:     "skill write blocked, skill is locked: " + slug,
+				Payload:     map[string]any{"slug": slug, "path": "consolidation_promote"},
+			})
+		}
+		return true
+	}
 }
