@@ -1527,8 +1527,11 @@ own bound:
    admission triggers the same proof request and offers nothing. Back online, an
    existing offer is withdrawn first and returns only with a fresh read of the
    latest content. A tab returning from hidden or frozen (`visibilitychange`,
-   `pageshow`) does the same at once, without waiting for a timer. The 60-second
-   bound is detection, not an access condition.
+   `pageshow`) does the same at once, without waiting for a timer. A frozen editor
+   frame leaves in that same turn, with its download, and a pending download is
+   dropped; only a fresh read of the latest content restores them, and the buffer
+   stays until read loss is proven. The 60-second bound is detection, not an
+   access condition.
 
 An offline browser cannot learn of a revocation, so delivery has not happened
 and no bound applies. It keeps the draft, and on reconnect it follows stage 3.
@@ -1549,7 +1552,7 @@ chain, and a real edit starts a new chain, so confirming any revision confirms t
 root. After the server acknowledges sign-out and before any cleanup, the browser
 stores those roots beside the rows. A final capture reads them in its own transaction
 and stores nothing for a confirmed root, and every provider mount erases what such a
-tab left behind. Signing in clears that person's intent; a signed-out mount does not,
+tab left behind. Only a sign-in the server accepted clears that person's intent, and only if the intent is older than that sign-in's request; a session answer or a signed-out mount does not,
 since another tab may still be retiring. The sign-out broadcast only makes tabs look
 sooner. An unsaved edit the editor never stored before retiring is part of its
 capture, and goes with it.

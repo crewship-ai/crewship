@@ -120,7 +120,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   let sessionApplication:NativeDocumentSnapshot['applicationId']|undefined
   // metadataOnly: the frame is gone after a refused private read, and the lease
   // admission stays open only so an explicit read loss can still purge the draft.
-  let closed=false,metadataOnly=false,connectionLost=false,draftOffered=false,keptRecoveries=false,offerStale=false,metadataDelay=METADATA_RETRY_MS,metadataRetry:ReturnType<typeof setTimeout>|undefined
+  let closed=false,metadataOnly=false,connectionLost=false,draftOffered=false,keptRecoveries=false,offerStale=false,frameWithdrawn=false,returns=0,metadataDelay=METADATA_RETRY_MS,metadataRetry:ReturnType<typeof setTimeout>|undefined
   // Bumped whenever private access stops being confirmed: a server comparison or
   // proposal list started before that may no longer reach the page.
   let privateEpoch=0
@@ -139,7 +139,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   // Every server confirmation of read, however it arrives, supersedes earlier proofs.
   const readLossAbort=new AbortController()
   const draftScope={human:humanId,workspace:workspaceId,page:pageId},readConfirmed=()=>confirmNativeRead(draftScope)
-  function readAccess(value:boolean){if(value){readConfirmed();offerCheck?.abort();offerCheck=undefined;withdrawOffer(false)}readable=value;setReadVerified(value)}
+  function readAccess(value:boolean){if(value){frameWithdrawn=false;readConfirmed();offerCheck?.abort();offerCheck=undefined;withdrawOffer(false)}readable=value;setReadVerified(value)}
   function withdrawOffer(value:boolean){offerStale=value;setOfferWithdrawn(value)}
   function offerRecoveries(rows:NativeRecovery[]){keptRecoveries=rows.length>0;setRecoveries(rows)}
   const live=(r:Runtime)=>!dead&&!lifetime.signal.aborted&&current===r&&!r.abort.signal.aborted
@@ -263,19 +263,33 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   // Keeping a draft and offering it are separate decisions. An offer stands only on
   // an answer this mount got for this content, so a return withdraws it, then asks.
   function askContent(){
-   const own=client,check=offerCheck=new AbortController()
-   void own.read(AbortSignal.any([check.signal,lifetime.signal])).then(()=>{if(offerCheck===check&&!dead&&client===own&&readable){offerCheck=undefined;withdrawOffer(false)}}).catch((cause:unknown)=>{
+   const own=client,check=offerCheck=new AbortController(),frozen=frameWithdrawn?current:undefined
+   void own.read(AbortSignal.any([check.signal,lifetime.signal])).then(()=>{
+    if(offerCheck!==check||dead||client!==own)return
+    offerCheck=undefined
+    if(!frozen){if(readable)withdrawOffer(false);return}
+    if(current!==frozen||!live(frozen)||metadataOnly||privacyRetirement)return
+    frameWithdrawn=false;frozen.frame.style.visibility='';readAccess(true)
+   }).catch((cause:unknown)=>{
     if(offerCheck!==check)return
     offerCheck=undefined
     // An unclear answer leaves it sealed; the next renewal asks again.
-    if(!dead&&client===own&&cause instanceof Error&&cause.message==='native_private_read_refused')void reopenReadOnly().catch(()=>stop('Přístup editoru se nepotvrdil.'))
+    if(!dead&&client===own&&cause instanceof Error&&cause.message==='native_private_read_refused'){frameWithdrawn=false;void reopenReadOnly().catch(()=>stop('Přístup editoru se nepotvrdil.'))}
    })
   }
   function checkOnReturn(){
    if(closed||authSuspended)return
    if(keepsDraft())proveReadLoss()
    if(dead)return
-   if(readable&&keptRecoveries){offerCheck?.abort();withdrawOffer(true);askContent()}
+   const r=current
+   if(readable&&(r||keptRecoveries)){
+    offerCheck?.abort();returns++
+    // A frozen frame holds what was never saved: it leaves now, and only the read
+    // restores it. The buffer itself stays until read loss is proven.
+    if(r?.blocked){frameWithdrawn=true;r.frame.style.visibility='hidden';readAccess(false)}
+    if(keptRecoveries)withdrawOffer(true)
+    askContent()
+   }
    if(!networkRetired)renewNow()
   }
   async function currentLease(admission:typeof client,signal:AbortSignal){
@@ -406,9 +420,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   // With full history the unsaved draft stays in this browser; the person can
   // still take the current document out as a file. Nothing is deleted.
   downloadDraft.current=()=>{void(async()=>{
-   const r=current,own=client;if(!readable)return;if(!r||!live(r)||!r.ready)throw Error('native_copy_unavailable')
+   const r=current,own=client,started=returns;if(!readable||offerStale)return;if(!r||!live(r)||!r.ready)throw Error('native_copy_unavailable')
    const snapshot=await r.port.snapshot(lifetime.signal)
-   if(!readable||!live(r)||client!==own)return
+   if(!readable||offerStale||returns!==started||!live(r)||client!==own)return
    copy({bytes:snapshot.bytes,applicationId:sessionApplication!} as NativeDraft)
   })().catch(()=>{if(!dead)setError('Místní kopii se nepodařilo stáhnout.')})}
   reconcile.current=()=>{const r=current;if(r&&live(r)&&r.writable&&r.phase?.phase==='uncertain')void r.coordinator?.reconcile()}
@@ -832,7 +846,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     const since=Date.now();recheckSince=since
     void currentLease(own,lifetime.signal).then(raw=>{if(dead||client!==own||!r.writable)return;const next=leaseView(raw);if(!owns(next,r.generation)){retire();return}}).catch(()=>{if(!dead&&client===own&&r.writable)retire()}).finally(()=>{if(recheckSince===since)recheckSince=0})
    },1000)
-   renewNow=()=>{void own.reauthorize(lifetime.signal).then(()=>{readConfirmed();if(offerStale&&!offerCheck&&client===own&&readable)askContent()}).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Spojení bylo ukončeno.').catch(()=>stop('Přístup editoru se nepotvrdil.'))})}
+   renewNow=()=>{void own.reauthorize(lifetime.signal).then(()=>{readConfirmed();if((offerStale&&readable||frameWithdrawn)&&!offerCheck&&client===own)askContent()}).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Spojení bylo ukončeno.').catch(()=>stop('Přístup editoru se nepotvrdil.'))})}
    reauthorize=setInterval(renewNow,NATIVE_REAUTHORIZE_INTERVAL_MS)
    void own.events(lifetime.signal,(event,value)=>{
     if(dead||client!==own)return
@@ -862,7 +876,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   <div role="status" className="px-3 py-2" data-save-phase={saveTrace?.phase} data-save-reason={saveTrace?.reason}><span>{label}</span>{savedVersion&&<span> · verze {savedVersion}</span>}{quota&&<span className="ml-3 text-muted-foreground">Historie {quota.usedBytes} / {quota.limitBytes} B{quota.warning?' · blíží se limit':''}</span>}</div>
   {readVerified&&historyKey>0&&!connectionRetired&&<NativeCraftVersionHistory load={signal=>history.current.load(signal)} loadVersion={(version,signal)=>history.current.loadVersion(version,signal)} scope={{humanId,workspaceId,pageId}} refreshKey={`${historyKey}:${savedVersion??''}`} canRestore={view.can_edit===true&&ownsEditor} restoreHint={view.can_edit===true?'Pro obnovení verze převezměte úpravy.':'Obnovit verzi může jen ten, kdo dokument právě upravuje.'} pending={busy} onRestore={version=>history.current.restore(version)}/>}
   {quotaFull&&<div role="alert" className="space-y-2 border-y px-3 py-2"><p><b>Kapacita úložiště neumožňuje další uložení.</b> Další verze se neuloží. Všechny dosavadní verze zůstávají a vaše neuložené změny jsou v tomto prohlížeči.</p><p className="text-sm text-muted-foreground">Navýšení ani mazání historie aplikace zatím nenabízí. Práci si stáhněte jako soubor koncept nebo exportem z editoru; koncept se nabídne i po znovuotevření.</p><Button variant="outline" onClick={()=>downloadDraft.current()}>Stáhnout koncept</Button></div>}
-  {retainedBuffer&&<div role="group" aria-label="Obnova místní kopie" className="space-y-2 border-y px-3 py-2"><p>Poslední změny nebyly potvrzeně zachyceny. Původní editor zůstává uzamčený; jeho obsah se nepřepisuje novým dokumentem.</p>{readVerified?<Button disabled={busy} variant="outline" onClick={()=>downloadDraft.current()}>Stáhnout místní kopii</Button>:<Button disabled={busy||authEnded} variant="outline" onClick={()=>retryRead.current()}>Znovu ověřit přístup</Button>}</div>}
+  {retainedBuffer&&<div role="group" aria-label="Obnova místní kopie" className="space-y-2 border-y px-3 py-2"><p>Poslední změny nebyly potvrzeně zachyceny. Původní editor zůstává uzamčený; jeho obsah se nepřepisuje novým dokumentem.</p>{readVerified&&!offerWithdrawn?<Button disabled={busy} variant="outline" onClick={()=>downloadDraft.current()}>Stáhnout místní kopii</Button>:<Button disabled={busy||authEnded} variant="outline" onClick={()=>retryRead.current()}>Znovu ověřit přístup</Button>}</div>}
   {uncertain&&<Button variant="outline" onClick={()=>reconcile.current()}>Ověřit výsledek</Button>}
   {error&&<p role="alert" className="px-3 py-2">{error}{mismatch&&error===mismatch.message&&<> <a className="underline" href={mismatch.address+window.location.pathname+window.location.search+window.location.hash} rel="noopener noreferrer">Otevřít na {mismatch.address}</a></>}</p>}
   {readVerified&&!retainedBuffer&&!connectionRetired&&proposals.map(proposal=><div key={proposal.id} role="group" aria-label={`Návrh ${proposal.authorName}`} className="flex flex-wrap items-center gap-2 border-y px-3 py-2">

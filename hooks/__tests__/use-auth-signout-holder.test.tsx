@@ -4,7 +4,7 @@ import { act, render, waitFor } from "@testing-library/react"
 
 const q = vi.hoisted(() => ({ suspend: vi.fn(), sweep: vi.fn() }))
 vi.mock("@/lib/document-queue", () => ({ suspendOtherDocumentDrafts: q.suspend, captureDocumentDrafts: vi.fn(async () => []), removeCapturedDocumentDrafts: vi.fn(async () => {}) }))
-vi.mock("@/lib/document-draft-sign-out", () => ({ recordSignOut: vi.fn(async () => {}), sweepSignOuts: q.sweep }))
+vi.mock("@/lib/document-draft-sign-out", () => ({ recordSignOut: vi.fn(async () => {}), sweepSignOuts: q.sweep, clearSignOut: vi.fn(async () => {}) }))
 import { AuthProvider, useAuth, sessionRetryPolicy } from "@/hooks/use-auth"
 import { AUTH_CHANNEL, AUTH_EVENT } from "@/lib/api-fetch"
 
@@ -38,7 +38,7 @@ beforeEach(() => {
 afterEach(() => { replace.mockRestore(); vi.unstubAllGlobals(); Object.assign(sessionRetryPolicy, realPolicy) })
 
 const expectSweptBetweenSuspensionAndLeaving = () => {
-  expect(q.sweep).toHaveBeenCalledWith(null)
+  expect(q.sweep).toHaveBeenCalled()
   expect(q.suspend.mock.invocationCallOrder[0]).toBeLessThan(q.sweep.mock.invocationCallOrder[0])
   expect(q.sweep.mock.invocationCallOrder[0]).toBeLessThan(replace.mock.invocationCallOrder[0])
 }

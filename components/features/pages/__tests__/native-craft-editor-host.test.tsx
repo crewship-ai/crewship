@@ -314,6 +314,53 @@ describe('native Word host authority and persistence',()=>{
   expect(copy).not.toHaveBeenCalled();expect(document.querySelector('iframe')).toBeNull();expect(journal.revokeRead).toHaveBeenCalled()
  })
 
+ describe('a return with a frozen frame and no recovery row',()=>{
+  const refused=Error('native_private_read_refused'),download=()=>screen.queryByRole('button',{name:'Stáhnout místní kopii'})
+  const back=()=>window.dispatchEvent(new Event('pageshow'))
+  async function frozen(){
+   mount();await ready();await acquire();const frame=document.querySelector('iframe')!,port=ports.at(-1)!
+   journal.persist.mockRejectedValue(Error('storage unavailable'))
+   const second=clientRig();m.createClient.mockReturnValueOnce(second)
+   act(()=>{portOptions.at(-1)!.onChanged('uncaptured','doc');stream?.('session_retired',{draft:'retain',reason:'write_revoked'})})
+   await screen.findByRole('button',{name:'Stáhnout místní kopii'})
+   expect(frame).not.toHaveStyle({visibility:'hidden'});expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
+   second.read.mockClear()
+   return {frame,port,second}
+  }
+  it('hides the frame and removes the download in the same turn, and only the read brings them back',async()=>{
+   const {frame,second}=await frozen(),answer=deferred<{version:string;bytes:Uint8Array}>();second.read.mockReturnValueOnce(answer.promise)
+   act(back)
+   expect(frame).toHaveStyle({visibility:'hidden'});expect(download()).not.toBeInTheDocument();expect(second.read).toHaveBeenCalledOnce()
+   await act(async()=>{second.reauthorize.mockResolvedValue(true);await new Promise(resolve=>setTimeout(resolve,20))})
+   expect(frame).toHaveStyle({visibility:'hidden'});expect(download()).not.toBeInTheDocument()
+   await act(async()=>answer.resolve({version:'1',bytes:new Uint8Array()}))
+   expect(frame).not.toHaveStyle({visibility:'hidden'});expect(download()).toBeInTheDocument()
+  })
+  it('a refused read keeps it hidden and the buffer intact',async()=>{
+   const {frame,port,second}=await frozen();second.read.mockRejectedValue(refused)
+   // The refusal re-admits; that admission is refused too, as the server would.
+   const third=clientRig();third.lease.mockResolvedValue({...emptyLease,can_edit:false});third.read.mockRejectedValue(refused);m.createClient.mockReturnValueOnce(third)
+   await act(async()=>{back();await new Promise(resolve=>setTimeout(resolve,20))})
+   expect(frame).toHaveStyle({visibility:'hidden'});expect(download()).not.toBeInTheDocument()
+   expect(document.querySelector('iframe')).toBe(frame);expect(port.close).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()
+  })
+  it('an unclear answer keeps it hidden and the buffer intact',async()=>{
+   const {frame,port,second}=await frozen();second.read.mockRejectedValue(Error('native_read_unavailable'))
+   await act(async()=>{back();await new Promise(resolve=>setTimeout(resolve,20))})
+   expect(frame).toHaveStyle({visibility:'hidden'});expect(download()).not.toBeInTheDocument();expect(port.close).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()
+  })
+  it('a download started before the return is dropped even after read comes back',async()=>{
+   const {port,second}=await frozen(),snapshot=deferred<{bytes:Uint8Array;editorRevision:string;documentId:string}>();port.snapshot.mockReturnValueOnce(snapshot.promise)
+   const copy=vi.fn();vi.stubGlobal('URL',Object.assign(class extends URL {},{createObjectURL:copy,revokeObjectURL:vi.fn()}))
+   fireEvent.click(download()!)
+   second.read.mockResolvedValue({version:'1',bytes:new Uint8Array()})
+   await act(async()=>{back();await new Promise(resolve=>setTimeout(resolve,20))})
+   expect(download()).toBeInTheDocument()
+   await act(async()=>snapshot.resolve({bytes:new Uint8Array([1]),editorRevision:'late',documentId:'doc'}))
+   expect(copy).not.toHaveBeenCalled()
+  })
+ })
+
  it.each(['stream','retirement','reauthorization','auth-suspend'] as const)('retires a fresh read bootstrap on %s failure and ignores its late completion',async failure=>{
   vi.useFakeTimers({shouldAdvanceTime:true})
   try{

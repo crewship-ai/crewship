@@ -17,7 +17,7 @@ import { purgeOtherE2Recovery } from "@/lib/chat-e2-recovery"
 import { isKnownAppPath } from "@/lib/app-routes"
 import { SIGNED_OUT_URL, rememberSignedOut, signedOutKind } from "@/lib/signed-out"
 import { suspendOtherDocumentDrafts, captureDocumentDrafts, removeCapturedDocumentDrafts } from "@/lib/document-queue"
-import { recordSignOut, sweepSignOuts } from "@/lib/document-draft-sign-out"
+import { clearSignOut, recordSignOut, sweepSignOuts } from "@/lib/document-draft-sign-out"
 import { suspendOtherArtifactDrafts, finishArtifactDraftIdentity, captureArtifactDrafts, removeCapturedArtifactDrafts, captureLegacyLocalDrafts, removeCapturedLegacyLocalDrafts } from "@/lib/artifact-drafts"
 
 import { beginLocalDraftIdentity, finishLocalDraftIdentity } from "@/lib/local-draft-seal"
@@ -193,7 +193,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const unreachableTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => { sessionRef.current = session }, [session])
   // Runs without a server: a tab that died mid sign-out is answered here.
-  useEffect(() => { void sweepSignOuts(null).catch(() => {}) }, [])
+  useEffect(() => { void sweepSignOuts().catch(() => {}) }, [])
   useEffect(() => { statusRef.current = status }, [status])
 
   // Monotonic generation guard: a newer refresh() (e.g. one fired by signIn)
@@ -210,7 +210,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     let admission: number
     try { admission = await preserveDraftsForIdentity(next?.user.id ?? null) }
     catch { if (gen === refreshGen.current) setDraftRecovery({ retry: () => retryDraftTransition.current() }); return }
-    await sweepSignOuts(next?.user.id ?? null).catch(() => {})
+    await sweepSignOuts().catch(() => {})
     if (gen !== refreshGen.current) return
     // The cold load and signed-out pages hold nothing of a person, so admitting
     // one there keeps the tree (and anything typed meanwhile) mounted.
@@ -334,7 +334,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // having moved, still follows a later sign-out or expiry (#4705).
       if (gen !== refreshGen.current) return
       // The ended session may be another tab's confirmed sign-out.
-      await sweepSignOuts(null).catch(() => {})
+      await sweepSignOuts().catch(() => {})
       const { pathname, search } = window.location
       const currentPath = pathname + search
       // no_credentials: the browser never had a session (or its cookies
@@ -378,7 +378,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (latest.kind === "settled" && latest.session) { redirectingGen = -1; await settle(latest.session, gen); return }
       purgeOtherE2Recovery(null)
       if (!preserved) { setDraftRecovery({ retry: async () => { if (redirectingGen === gen) redirectingGen = -1; await goLoginSignedOutElsewhere(human) } }); return }
-      await sweepSignOuts(null).catch(() => {})
+      await sweepSignOuts().catch(() => {})
       window.location.replace(SIGNED_OUT_URL)
     }
 
@@ -411,7 +411,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     try {
-       
+      const started = Date.now()
       const res = await serverFetch("/api/auth/callback/credentials", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -433,6 +433,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
 
       await refresh()
+      // Only this answer proves a session newer than a sign-out; a session read
+      // may have left before it and arrive after.
+      const human = sessionRef.current?.user.id
+      if (human) await clearSignOut(human, started).catch(() => {})
       return { ok: true }
     } catch {
       return { ok: false, error: "Network error" }
@@ -514,11 +518,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // this tab ends. The broadcast below only makes others look sooner.
         // A capture landing first is swept below; IndexedDB may hold this behind
         // a write in flight, which suspension itself has to finish.
-        const intent = discardDrafts && capturedDocuments.length ? recordSignOut(signingOutHuman!, capturedDocuments.map(row => row.root ?? row.revision).filter((root): root is string => Boolean(root))) : Promise.resolve()
+        // The server already ended the session, so storage must not undo that here.
+        const intent = discardDrafts && capturedDocuments.length ? recordSignOut(signingOutHuman!, capturedDocuments.map(row => row.root ?? row.revision).filter((root): root is string => Boolean(root))).catch(() => {}) : Promise.resolve()
         const [admission] = await Promise.all([preserveDraftsForIdentity(null), intent])
         if (gen !== refreshGen.current) return false
         if (discardDrafts) {
-          await Promise.all([removeCapturedDocumentDrafts(capturedDocuments), sweepSignOuts(null), removeCapturedArtifactDrafts(capturedArtifacts)])
+          await Promise.all([removeCapturedDocumentDrafts(capturedDocuments), sweepSignOuts().catch(() => {}), removeCapturedArtifactDrafts(capturedArtifacts)])
           removeCapturedLegacyLocalDrafts(capturedLegacy)
         }
         if (gen !== refreshGen.current) return false

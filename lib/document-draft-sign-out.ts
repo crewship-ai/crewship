@@ -36,29 +36,40 @@ function withDrafts(action: (store: IDBObjectStore) => void): Promise<void> {
 export function recordSignOut(human: string, roots: string[]): Promise<void> {
   return withDrafts(store => {
     const key = signOutRowKey(human), existing = store.get(key)
-    existing.onsuccess = () => { store.put({ key, roots: [...new Set([...(existing.result?.roots ?? []), ...roots])] }) }
+    existing.onsuccess = () => { store.put({ key, at: Date.now(), roots: [...new Set([...(existing.result?.roots ?? []), ...roots])] }) }
   })
 }
 
-/** Erases every row in a confirmed chain, for every recorded person. Only signing
- * in clears a person's intent: a signed-out mount cannot know that no tab of theirs
- * is still retiring, and a root names one chain, so keeping it costs nothing. */
-export function sweepSignOuts(signedIn: string | null): Promise<void> {
-  return withDrafts(store => {
-    const intents = store.getAll(IDBKeyRange.bound([OWNER, ""], [OWNER, "￿"]))
-    intents.onsuccess = () => {
-      const confirmed = new Map<string, Set<string>>(intents.result.map(row => [row.key[1], new Set(row.roots)]))
-      if (!confirmed.size) return
-      const cursor = store.openCursor()
-      cursor.onsuccess = () => {
-        const row = cursor.result
-        if (!row) { if (signedIn) store.delete(signOutRowKey(signedIn)); return }
-        const value = row.value
-        try {
-          if (value.draft && confirmed.get(JSON.parse(value.key[0])[0])?.has(value.finalRoot ?? value.revision)) row.delete()
-        } catch { /* Unknown legacy rows are preserved. */ }
-        row.continue()
-      }
+function sweep(store: IDBObjectStore, done: () => void) {
+  const intents = store.getAll(IDBKeyRange.bound([OWNER, ""], [OWNER, "\uffff"]))
+  intents.onsuccess = () => {
+    const confirmed = new Map<string, Set<string>>(intents.result.map(row => [row.key[1], new Set(row.roots)]))
+    if (!confirmed.size) return
+    const cursor = store.openCursor()
+    cursor.onsuccess = () => {
+      const row = cursor.result
+      if (!row) { done(); return }
+      const value = row.value
+      try {
+        if (value.draft && confirmed.get(JSON.parse(value.key[0])[0])?.has(value.finalRoot ?? value.revision)) row.delete()
+      } catch { /* Unknown legacy rows are preserved. */ }
+      row.continue()
     }
-  })
+  }
+}
+
+/** Erases every row in a confirmed chain, for every recorded person. It never
+ * clears an intent: no mount or session answer can know that no tab of theirs is
+ * still retiring, and a root names one chain, so keeping it costs nothing. */
+export function sweepSignOuts(): Promise<void> {
+  return withDrafts(store => sweep(store, () => {}))
+}
+
+/** After a sign-in the server accepted: sweeps, then ends this person's intent if
+ * it is older than that request. A later sign-out's intent outlives this answer. */
+export function clearSignOut(human: string, signInStarted: number): Promise<void> {
+  return withDrafts(store => sweep(store, () => {
+    const key = signOutRowKey(human), intent = store.get(key)
+    intent.onsuccess = () => { if (intent.result && intent.result.at < signInStarted) store.delete(key) }
+  }))
 }
