@@ -2,10 +2,11 @@ package api
 
 // Skill content lock (#5045). A person who curated a skill can lock it so no
 // agent, sidecar tool, consolidation or promotion path rewrites it, and the
-// lifecycle sweep does not age it out. Only an interactive human credential
-// with the manage role may lock or unlock; run tokens, internal (sidecar)
-// tokens and agent identities are refused. A lock belongs to the workspace that
-// placed it.
+// lifecycle sweep does not age it out. Skills are one catalog for the whole
+// instance with no recorded owner, and a lock binds every workspace that uses
+// the skill, so only an interactive instance administrator may lock or unlock.
+// Assigning a skill to agents grants nothing here. Run tokens, internal
+// (sidecar) tokens and agent identities are refused.
 
 import (
 	"context"
@@ -55,12 +56,18 @@ func (h *SkillHandler) setLock(w http.ResponseWriter, r *http.Request, lock bool
 		problem(http.StatusForbidden, "Forbidden")
 		return
 	}
+	// Workspace roles and assignments are things a workspace grants itself, so
+	// neither can authorise a change to a row every workspace shares.
+	if !isInstanceAdmin(r, h.db) {
+		problem(http.StatusForbidden, "skills are shared across the instance; locking or unlocking one needs an instance administrator")
+		return
+	}
 	skillID := r.PathValue("skillId")
 	wsID := WorkspaceIDFromContext(r.Context())
-	var slug, source, stored string
+	var slug, source string
 	var was int
 	err := h.db.QueryRowContext(r.Context(),
-		"SELECT slug, locked, source, COALESCE(locked_workspace_id, '') FROM skills WHERE id = ?", skillID).Scan(&slug, &was, &source, &stored)
+		"SELECT slug, locked, source FROM skills WHERE id = ?", skillID).Scan(&slug, &was, &source)
 	if errors.Is(err, sql.ErrNoRows) {
 		problem(http.StatusNotFound, "skill not found")
 		return
@@ -69,39 +76,8 @@ func (h *SkillHandler) setLock(w http.ResponseWriter, r *http.Request, lock bool
 		replyInternalError(w, h.logger, "skill lock lookup", err)
 		return
 	}
-	// The catalog row is shared by every workspace and has no owner column. A
-	// lock therefore belongs to the workspace that placed it, and only a
-	// workspace that alone holds the skill may place one: a bundled, unassigned
-	// or shared skill has no single owner to curate it.
 	if source == "BUNDLED" {
-		problem(http.StatusForbidden, "BUNDLED skills are shared by every workspace; refusing to lock or unlock")
-		return
-	}
-	var ownHeld, otherHeld, holderHeld int
-	if err := h.db.QueryRowContext(r.Context(), `
-		SELECT COALESCE(SUM(a.workspace_id = ?), 0), COALESCE(SUM(a.workspace_id != ?), 0),
-			COALESCE(SUM(a.workspace_id = ?), 0)
-		FROM agent_skills as2
-		JOIN agents a ON a.id = as2.agent_id AND a.deleted_at IS NULL
-		JOIN workspaces w ON w.id = a.workspace_id AND w.deleted_at IS NULL
-		WHERE as2.skill_id = ?`,
-		wsID, wsID, stored, skillID).Scan(&ownHeld, &otherHeld, &holderHeld); err != nil {
-		replyInternalError(w, h.logger, "skill lock ownership", err)
-		return
-	}
-	// A workspace that was deleted or gave the skill up has no claim left,
-	// otherwise assign, lock and unassign would strand the skill for whoever
-	// holds it next. Deletion is soft, so only live rows count as holding.
-	holder := stored
-	if holder != wsID && holderHeld == 0 {
-		holder = ""
-	}
-	switch {
-	case holder != "" && holder != wsID:
-		problem(http.StatusForbidden, "another workspace placed this lock; refusing to change it")
-		return
-	case holder == "" && (ownHeld == 0 || otherHeld > 0):
-		problem(http.StatusForbidden, "only a workspace that alone holds a skill can lock or unlock it; assign it to one of your agents first, and unassign it elsewhere")
+		problem(http.StatusForbidden, "BUNDLED skills ship with the product and are re-seeded; refusing to lock or unlock")
 		return
 	}
 	userID := UserFromContext(r.Context()).ID
@@ -109,17 +85,16 @@ func (h *SkillHandler) setLock(w http.ResponseWriter, r *http.Request, lock bool
 	if lock {
 		want = 1
 	}
-	// Relocking after a holder lapsed moves the lock to this workspace.
-	if was != want || (lock && stored != wsID) {
+	if was != want {
 		var err error
 		now := time.Now().UTC().Format(time.RFC3339)
 		if lock {
 			_, err = h.db.ExecContext(r.Context(),
-				`UPDATE skills SET locked = 1, locked_by = ?, locked_workspace_id = ?, locked_at = ?, updated_at = ? WHERE id = ?`,
-				userID, wsID, now, now, skillID)
+				`UPDATE skills SET locked = 1, locked_by = ?, locked_at = ?, updated_at = ? WHERE id = ?`,
+				userID, now, now, skillID)
 		} else {
 			_, err = h.db.ExecContext(r.Context(),
-				`UPDATE skills SET locked = 0, locked_by = NULL, locked_workspace_id = NULL, locked_at = NULL, updated_at = ? WHERE id = ?`,
+				`UPDATE skills SET locked = 0, locked_by = NULL, locked_at = NULL, updated_at = ? WHERE id = ?`,
 				now, skillID)
 		}
 		if err != nil {

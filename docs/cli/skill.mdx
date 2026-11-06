@@ -296,19 +296,15 @@ While a skill is locked:
 - The lifecycle sweep never moves it to `stale` or `archived`, the same way an
   assigned skill is held. A person who can manage skills can still
   archive or restore it by hand: the lock guards against autonomous rewrites,
-  not manual housekeeping. Archive and restore are not limited to the workspace
-  that placed the lock.
+  not manual housekeeping.
 
-A lock belongs to the workspace that placed it. A workspace can lock a skill
-only when its own agents alone hold it, so bundled, unassigned and shared skills
-are refused with `403`. Only the placing workspace can unlock, even if another
-workspace assigns the skill later. If it is deleted or no longer holds the
-skill, the lock passes to the workspace that alone holds it.
-
-Only a signed-in person with the `OWNER` or `ADMIN` role can lock or unlock;
-run tokens, sidecar tokens and agent identities are refused with `403`.
-Bundled skills, and skills held only by another workspace's agents, cannot be
-locked or unlocked (`403`): the catalog row is shared by every workspace.
+Skills are one catalog shared by the whole instance, and a lock applies to every
+workspace that uses the skill. Only an instance administrator can lock or unlock,
+and the request must name a workspace where they hold the `OWNER` or `ADMIN`
+role. Assigning a skill to your agents gives no right to lock it, even when no
+other workspace uses it. Scoped CLI tokens (even with `instance:admin`), run
+tokens, sidecar tokens and agent identities are refused with `403`, and so are
+bundled skills.
 Skills are unlocked by default. `skill list` shows a `LOCKED` column and
 `skill get` a `Locked` row; JSON output carries `locked`.
 

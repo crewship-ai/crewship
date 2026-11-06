@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -27,7 +28,21 @@ func lockEntries(rec *recordingEmitter, typ journal.EntryType) int {
 	return n
 }
 
-// Only an interactive human with the manage role can lock or unlock.
+// seedInstanceAdmin makes the test user an administrator of the instance.
+func seedInstanceAdmin(t *testing.T, db *sql.DB, userID string) {
+	t.Helper()
+	execOrFatal(t, db, `UPDATE users SET instance_role = 'ADMIN' WHERE id = ?`, userID)
+}
+
+// seedOtherInstanceAdmin gives the instance a different administrator. Without
+// one the bootstrap rule promotes the only user, and the test user would pass.
+func seedOtherInstanceAdmin(t *testing.T, db *sql.DB) {
+	t.Helper()
+	execOrFatal(t, db, `INSERT INTO users (id, email, full_name, instance_role) VALUES ('inst-admin', 'boss@example.com', 'Boss', 'ADMIN')`)
+}
+
+// Only an interactive human who administers the instance, and manages the
+// workspace the request names, can lock or unlock.
 func TestSkillLockUnlock_Authority(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -40,6 +55,14 @@ func TestSkillLockUnlock_Authority(t *testing.T) {
 		{"admin cli token locks", "ADMIN", func(r *http.Request) *http.Request {
 			return r.WithContext(context.WithValue(r.Context(), ctxAuthKind, AuthKindCLIToken))
 		}, http.StatusOK, true},
+		{"full access cli token locks", "ADMIN", func(r *http.Request) *http.Request {
+			ctx := context.WithValue(r.Context(), ctxAuthKind, AuthKindCLIToken)
+			return r.WithContext(context.WithValue(ctx, ctxTokenScopes, stringSet{"*": {}}))
+		}, http.StatusOK, true},
+		{"scoped cli token refused", "OWNER", func(r *http.Request) *http.Request {
+			ctx := context.WithValue(r.Context(), ctxAuthKind, AuthKindCLIToken)
+			return r.WithContext(context.WithValue(ctx, ctxTokenScopes, stringSet{scopeInstanceAdmin: {}}))
+		}, http.StatusForbidden, false},
 		{"member refused", "MEMBER", nil, http.StatusForbidden, false},
 		{"run token refused", "OWNER", func(r *http.Request) *http.Request {
 			return r.WithContext(context.WithValue(r.Context(), artifactRunKey{}, "run"))
@@ -61,9 +84,7 @@ func TestSkillLockUnlock_Authority(t *testing.T) {
 				userID := seedTestUser(t, db)
 				wsID := seedTestWorkspace(t, db, userID)
 				seedSkillForTest(t, db, "sk-l", "lockme", "CODING")
-				seedCrewRow(t, db, "crew-a", wsID, "Crew A", "crew-a")
-				agent := seedAgentRow(t, db, "agent-a", wsID, "crew-a", "Ava", "ava", "AGENT")
-				execOrFatal(t, db, `INSERT INTO agent_skills (id, agent_id, skill_id, enabled) VALUES ('as-a', ?, 'sk-l', 1)`, agent)
+				seedInstanceAdmin(t, db, userID)
 				if action == "unlock" {
 					execOrFatal(t, db, `UPDATE skills SET locked = 1 WHERE id = 'sk-l'`)
 				}
@@ -260,18 +281,28 @@ func lockTestJSONString(s string) string {
 
 // The catalog row is shared by every workspace: a bundled skill or one held
 // only by another workspace's agents cannot be locked or unlocked here.
-func TestSkillLockUnlock_SharedCatalogOwnership(t *testing.T) {
+// The catalog is shared by the whole instance and records no owner, so nothing
+// a workspace can do to itself earns the right to lock: assigning a skill to
+// its own agents, even as the only holder, gives a workspace owner no authority
+// over a row other workspaces rely on. An instance administrator holds that
+// authority whoever has the skill assigned.
+func TestSkillLockUnlock_CatalogBoundary(t *testing.T) {
 	tests := []struct {
-		name     string
-		source   string
-		holder   string // "", "own", "other", "both"
-		wantCode int
+		name          string
+		instanceAdmin bool
+		source        string
+		holder        string // "", "own", "other", "both"
+		wantCode      int
 	}{
-		{"unassigned custom has no owner", "CUSTOM", "", http.StatusForbidden},
-		{"held by own workspace", "CUSTOM", "own", http.StatusOK},
-		{"held by another workspace only", "CUSTOM", "other", http.StatusForbidden},
-		{"held by both has no single owner", "CUSTOM", "both", http.StatusForbidden},
-		{"bundled", "BUNDLED", "own", http.StatusForbidden},
+		{"owner who assigned it as sole holder", false, "CUSTOM", "own", http.StatusForbidden},
+		{"owner of an unassigned skill", false, "CUSTOM", "", http.StatusForbidden},
+		{"owner of another workspace's skill", false, "CUSTOM", "other", http.StatusForbidden},
+		{"owner of a shared skill", false, "CUSTOM", "both", http.StatusForbidden},
+		{"instance admin, own workspace holds it", true, "CUSTOM", "own", http.StatusOK},
+		{"instance admin, unassigned", true, "CUSTOM", "", http.StatusOK},
+		{"instance admin, another workspace holds it", true, "CUSTOM", "other", http.StatusOK},
+		{"instance admin, shared", true, "CUSTOM", "both", http.StatusOK},
+		{"instance admin, bundled", true, "BUNDLED", "own", http.StatusForbidden},
 	}
 	for _, tc := range tests {
 		for _, action := range []string{"lock", "unlock"} {
@@ -287,6 +318,11 @@ func TestSkillLockUnlock_SharedCatalogOwnership(t *testing.T) {
 				agB := seedAgentRow(t, db, "agent-b", wsB, "crew-b", "Ben", "ben", "AGENT")
 				seedSkillForTest(t, db, "sk-l", "lockme", "CODING")
 				execOrFatal(t, db, `UPDATE skills SET source = ? WHERE id = 'sk-l'`, tc.source)
+				if tc.instanceAdmin {
+					seedInstanceAdmin(t, db, userID)
+				} else {
+					seedOtherInstanceAdmin(t, db)
+				}
 				if tc.holder == "own" || tc.holder == "both" {
 					execOrFatal(t, db, `INSERT INTO agent_skills (id, agent_id, skill_id, enabled) VALUES ('as-a', ?, 'sk-l', 1)`, agA)
 				}
@@ -324,129 +360,26 @@ func TestSkillLockUnlock_SharedCatalogOwnership(t *testing.T) {
 	}
 }
 
-// The workspace that placed a lock is the only one that can lift it, even if
-// another workspace later assigns the skill. A holder that no longer exists or
-// no longer holds the skill leaves the lock to the sole remaining assignee, so
-// assigning, locking and unassigning cannot strand it.
-func TestSkillLock_HolderWorkspaceOwnsTheLock(t *testing.T) {
-	tests := []struct {
-		name     string
-		holder   string // locked_workspace_id: "a", "b", "gone" or "soft"
-		agents   string // assigned to: "a", "b", "both", or "a-b-deleted" (b's agent soft-deleted)
-		action   string
-		wantCode int
-		wantHeld bool
-	}{
-		{"holder unlocks", "a", "a", "unlock", http.StatusOK, false},
-		{"holder unlocks a skill now shared", "a", "both", "unlock", http.StatusOK, false},
-		{"holder unlocks after unassigning", "a", "b", "unlock", http.StatusOK, false},
-		{"foreign workspace cannot unlock a holder's lock", "b", "both", "unlock", http.StatusForbidden, true},
-		{"foreign workspace cannot relock a holder's lock", "b", "both", "lock", http.StatusForbidden, true},
-		{"holder relock is idempotent", "a", "both", "lock", http.StatusOK, true},
-		{"holder gave the skill up, sole assignee unlocks", "b", "a", "unlock", http.StatusOK, false},
-		{"holder gave the skill up, sole assignee takes the lock", "b", "a", "lock", http.StatusOK, true},
-		{"missing holder, sole assignee unlocks", "gone", "a", "unlock", http.StatusOK, false},
-		{"soft-deleted holder, sole assignee unlocks", "soft", "a", "unlock", http.StatusOK, false},
-		{"missing holder, shared skill stays locked", "gone", "both", "unlock", http.StatusForbidden, true},
-		{"deleted agent does not hold for its workspace", "b", "a-b-deleted", "unlock", http.StatusOK, false},
-		{"soft-deleted holder with a leftover agent has no claim", "soft", "a-soft", "unlock", http.StatusOK, false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			db := setupTestDB(t)
-			userID := seedTestUser(t, db)
-			wsA := seedTestWorkspace(t, db, userID)
-			wsB := "ws-lock-other"
-			execOrFatal(t, db, `INSERT INTO workspaces (id, name, slug) VALUES (?, 'Other', 'other-lock')`, wsB)
-			seedCrewRow(t, db, "crew-a", wsA, "Crew A", "crew-a")
-			seedCrewRow(t, db, "crew-b", wsB, "Crew B", "crew-b")
-			agA := seedAgentRow(t, db, "agent-a", wsA, "crew-a", "Ava", "ava", "AGENT")
-			agB := seedAgentRow(t, db, "agent-b", wsB, "crew-b", "Ben", "ben", "AGENT")
-			seedSkillForTest(t, db, "sk-l", "lockme", "CODING")
-			execOrFatal(t, db, `INSERT INTO workspaces (id, name, slug, deleted_at) VALUES ('ws-soft', 'Soft', 'soft-lock', '2026-11-01T00:00:00Z')`)
-			execOrFatal(t, db, `UPDATE skills SET source = 'CUSTOM', locked = 1, locked_workspace_id = ? WHERE id = 'sk-l'`,
-				map[string]string{"a": wsA, "b": wsB, "gone": "ws-missing", "soft": "ws-soft"}[tc.holder])
-			if tc.agents != "b" {
-				execOrFatal(t, db, `INSERT INTO agent_skills (id, agent_id, skill_id, enabled) VALUES ('as-a', ?, 'sk-l', 1)`, agA)
-			}
-			if tc.agents == "a-soft" {
-				seedCrewRow(t, db, "crew-s", "ws-soft", "Crew S", "crew-s")
-				agS := seedAgentRow(t, db, "agent-s", "ws-soft", "crew-s", "Sam", "sam", "AGENT")
-				execOrFatal(t, db, `INSERT INTO agent_skills (id, agent_id, skill_id, enabled) VALUES ('as-s', ?, 'sk-l', 1)`, agS)
-				execOrFatal(t, db, `DELETE FROM agent_skills WHERE id = 'as-b'`)
-			} else if tc.agents != "a" {
-				execOrFatal(t, db, `INSERT INTO agent_skills (id, agent_id, skill_id, enabled) VALUES ('as-b', ?, 'sk-l', 1)`, agB)
-			}
-			if tc.agents == "a-b-deleted" {
-				execOrFatal(t, db, `UPDATE agents SET deleted_at = '2026-11-01T00:00:00Z' WHERE id = ?`, agB)
-			}
-			h := NewSkillHandler(db, newTestLogger())
-			h.SetJournal(&recordingEmitter{})
-			req := httptest.NewRequest("POST", "/x", nil)
-			req.SetPathValue("skillId", "sk-l")
-			req = humanLockCtx(req, userID, wsA, "OWNER")
-			rr := httptest.NewRecorder()
-			if tc.action == "lock" {
-				h.Lock(rr, req)
-			} else {
-				h.Unlock(rr, req)
-			}
-			if rr.Code != tc.wantCode {
-				t.Fatalf("status = %d, want %d: %s", rr.Code, tc.wantCode, rr.Body.String())
-			}
-			var locked int
-			_ = db.QueryRow(`SELECT locked FROM skills WHERE id = 'sk-l'`).Scan(&locked)
-			if (locked == 1) != tc.wantHeld {
-				t.Fatalf("locked = %d, want %v", locked, tc.wantHeld)
-			}
-			if tc.name == "holder gave the skill up, sole assignee takes the lock" {
-				var got string
-				_ = db.QueryRow(`SELECT locked_workspace_id FROM skills WHERE id = 'sk-l'`).Scan(&got)
-				if got != wsA {
-					t.Fatalf("locked_workspace_id = %q, want the new holder %q", got, wsA)
-				}
-			}
-		})
-	}
-}
-
-// Locking records the workspace, and unlocking clears it.
-func TestSkillLock_RecordsTheHolderWorkspace(t *testing.T) {
+// A workspace owner cannot lift a lock an instance administrator placed, however
+// they hold the skill.
+func TestSkillLock_WorkspaceOwnerCannotLiftAnAdminLock(t *testing.T) {
 	db := setupTestDB(t)
-	userID := seedTestUser(t, db)
-	wsA := seedTestWorkspace(t, db, userID)
-	seedCrewRow(t, db, "crew-a", wsA, "Crew A", "crew-a")
-	agA := seedAgentRow(t, db, "agent-a", wsA, "crew-a", "Ava", "ava", "AGENT")
+	owner := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, owner)
+	seedOtherInstanceAdmin(t, db)
+	seedCrewRow(t, db, "crew-a", wsID, "Crew A", "crew-a")
+	agent := seedAgentRow(t, db, "agent-a", wsID, "crew-a", "Ava", "ava", "AGENT")
 	seedSkillForTest(t, db, "sk-l", "lockme", "CODING")
-	execOrFatal(t, db, `UPDATE skills SET source = 'CUSTOM' WHERE id = 'sk-l'`)
-	execOrFatal(t, db, `INSERT INTO agent_skills (id, agent_id, skill_id, enabled) VALUES ('as-a', ?, 'sk-l', 1)`, agA)
+	execOrFatal(t, db, `UPDATE skills SET source = 'CUSTOM', locked = 1, locked_by = 'inst-admin' WHERE id = 'sk-l'`)
+	execOrFatal(t, db, `INSERT INTO agent_skills (id, agent_id, skill_id, enabled) VALUES ('as-a', ?, 'sk-l', 1)`, agent)
 	h := NewSkillHandler(db, newTestLogger())
 	h.SetJournal(&recordingEmitter{})
-	call := func(f http.HandlerFunc) {
-		t.Helper()
-		req := httptest.NewRequest("POST", "/x", nil)
-		req.SetPathValue("skillId", "sk-l")
-		rr := httptest.NewRecorder()
-		f(rr, humanLockCtx(req, userID, wsA, "OWNER"))
-		if rr.Code != http.StatusOK {
-			t.Fatalf("status = %d: %s", rr.Code, rr.Body.String())
-		}
-	}
-	holder := func() string {
-		t.Helper()
-		var got string
-		if err := db.QueryRow(`SELECT COALESCE(locked_workspace_id, '') FROM skills WHERE id = 'sk-l'`).Scan(&got); err != nil {
-			t.Fatal(err)
-		}
-		return got
-	}
-	call(h.Lock)
-	if got := holder(); got != wsA {
-		t.Fatalf("locked_workspace_id = %q, want %q", got, wsA)
-	}
-	call(h.Unlock)
-	if got := holder(); got != "" {
-		t.Fatalf("locked_workspace_id = %q after unlock, want empty", got)
+	req := httptest.NewRequest("POST", "/x", nil)
+	req.SetPathValue("skillId", "sk-l")
+	rr := httptest.NewRecorder()
+	h.Unlock(rr, humanLockCtx(req, owner, wsID, "OWNER"))
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403: %s", rr.Code, rr.Body.String())
 	}
 }
 

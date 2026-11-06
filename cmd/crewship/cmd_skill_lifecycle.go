@@ -87,9 +87,10 @@ var skillLockCmd = &cobra.Command{
 memory consolidation, generation or proposed-skill approval can change its
 content, bundled re-seeds leave it alone, and the lifecycle sweep never moves
 it to stale or archived. A blocked write fails with an error naming the lock
-and is recorded in the journal. Needs a signed-in person with the OWNER or
-ADMIN role; run tokens and agent identities are refused. Only a workspace whose
-agents alone hold the skill can lock it, and only that workspace can unlock it.
+and is recorded in the journal. Skills are shared across the instance, so this
+needs an instance administrator who is OWNER or ADMIN of the workspace, using a
+session or a full-access CLI token. Assigning a skill grants nothing, and scoped
+tokens, run tokens and agent identities are refused.
 
 Examples:
   crewship skill lock my-skill`,

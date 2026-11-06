@@ -30,11 +30,30 @@ func (s *lockJournalSink) Flush(context.Context) error { return nil }
 // Real CLI process -> real router: a curator locks a skill, an autonomous
 // rewrite is refused with an error naming the lock, the lock shows in list and
 // get, and unlocking lets the write through again (#5045).
+func TestAcceptance_SkillLockRefusesAWorkspaceOwner(t *testing.T) {
+	rig, db := startFidelityServer(t, "fid-ws", "fid-owner", append(append([]string{}, fidelityBaseSeed...),
+		`INSERT INTO skills(id,name,slug,display_name,source,lifecycle_state,content) VALUES('sk-lk','lk-skill','lk-skill','LK','CUSTOM','active','# original')`,
+		`INSERT INTO agent_skills(id,agent_id,skill_id,enabled) VALUES('as-lk','fid-agent-id','sk-lk',1)`,
+		`INSERT INTO users(id,email,full_name,instance_role) VALUES('fid-boss','boss@fid.invalid','Boss','ADMIN')`,
+	))
+	out, err := rig.run(nil, "skill", "lock", "lk-skill")
+	if err == nil {
+		t.Fatalf("a workspace owner who only assigned the skill must not lock it, got: %s", out)
+	}
+	if !strings.Contains(out, "instance administrator") {
+		t.Errorf("error must name who can lock: %s", out)
+	}
+	var locked int
+	if err := db.QueryRow(`SELECT locked FROM skills WHERE id='sk-lk'`).Scan(&locked); err != nil || locked != 0 {
+		t.Fatalf("locked = %d err=%v, want 0", locked, err)
+	}
+}
+
 func TestAcceptance_SkillLockBlocksRewrites(t *testing.T) {
 	sink := &lockJournalSink{}
 	rig, db := startFidelityServer(t, "fid-ws", "fid-owner", append(append([]string{}, fidelityBaseSeed...),
 		`INSERT INTO skills(id,name,slug,display_name,source,lifecycle_state,content) VALUES('sk-lk','lk-skill','lk-skill','LK','CUSTOM','active','# original')`,
-		`INSERT INTO agent_skills(id,agent_id,skill_id,enabled) VALUES('as-lk','fid-agent-id','sk-lk',1)`,
+		`UPDATE users SET instance_role='ADMIN' WHERE id='fid-owner'`,
 	), api.WithJournal(sink))
 
 	if out := rig.must("skill", "lock", "lk-skill"); !strings.Contains(out, "locked") {

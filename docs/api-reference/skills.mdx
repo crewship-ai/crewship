@@ -427,15 +427,12 @@ The lifecycle sweep never moves a locked skill to `stale` or `archived`.
 Repeating a lock or unlock you are allowed to make changes nothing. A change emits
 `skill.locked` / `skill.unlocked`.
 
-Needs the `OWNER` or `ADMIN` role **and** a person's credential (session or CLI
-token). Run tokens, sidecar tokens and agent identities get `403`.
-
-Skills are one catalog shared by every workspace, with no owner column, so a
-lock belongs to the workspace that placed it. A workspace can place a lock only
-on a skill that its own agents alone hold. Only that workspace can lift the
-lock, even if another workspace assigns the skill later. If the placing
-workspace is deleted or no longer holds the skill, the lock passes to the
-workspace that alone holds it.
+Skills are one catalog shared by the whole instance, and a lock applies to every
+workspace that uses the skill. The caller must be an instance administrator, hold
+the `OWNER` or `ADMIN` role in the workspace in the path, and use a person's
+credential (a session or a full-access CLI token). Scoped CLI tokens, even with
+`instance:admin`, run tokens, sidecar tokens and agent identities get `403`.
+Assigning a skill to agents grants nothing here.
 
 **Response:** `200 OK`
 
@@ -445,7 +442,7 @@ workspace that alone holds it.
 
 | Status | Condition |
 |---|---|
-| `403` | Insufficient role, a non-human credential, a bundled, unassigned or shared skill, or a lock placed by another workspace |
+| `403` | Not an instance administrator, insufficient workspace role, a scoped or non-human credential, or a bundled skill |
 | `404` | Skill not found |
 
 ---
