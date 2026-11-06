@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -429,6 +430,26 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 		return
 	}
 	defer tx.Rollback()
+
+	// This route serves the health and OAuth workers. Neither has a reason to
+	// put a new value into the governance model credential or to bring it back
+	// from REVOKED; both decide where the workspace judge connects (#5024).
+	bound, err := credentialGovernanceBound(r.Context(), tx, credID)
+	if err != nil {
+		replyInternalError(w, h.logger, "check governance credential binding", err)
+		return
+	}
+	if bound {
+		var current string
+		if err := tx.QueryRowContext(r.Context(), "SELECT status FROM credentials WHERE "+where, whereArgs...).Scan(&current); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			replyInternalError(w, h.logger, "load credential status", err)
+			return
+		}
+		if body.AccessToken != nil || body.RefreshToken != nil || (body.Status == "ACTIVE" && current == "REVOKED") {
+			replyError(w, http.StatusForbidden, msgGovernanceCredential)
+			return
+		}
+	}
 
 	result, err := tx.ExecContext(r.Context(),
 		"UPDATE credentials SET status = ?, last_checked_at = ?, updated_at = ? WHERE "+where,

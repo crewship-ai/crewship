@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/keeper/governance"
 )
 
 // Binding a governance model credential needs OWNER/ADMIN, so changing what the
@@ -102,18 +104,151 @@ func TestGovernanceBoundCredentialInternalRotate(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO keeper_governance_settings (workspace_id, gov_model_provider, gov_model_id, gov_model_credential_id) VALUES (?, 'anthropic', 'm', 'cred-bound')`, wsID)
 
 	adapter := NewCredentialInternalAdapter(&CredentialHandler{db: db, logger: quietLogger()})
+	caller := ownerID
 	rotate := func(credID string) int {
 		r := httptest.NewRequest(http.MethodPost, "/?workspace_id="+wsID, strings.NewReader(`{"value":"sk-new"}`))
 		r.SetPathValue("credentialId", credID)
-		stampSignedCaller(r, forgedTestMaster, wsID, ownerID)
+		stampSignedCaller(r, forgedTestMaster, wsID, caller)
 		w := httptest.NewRecorder()
 		adapter.Rotate(w, r)
 		return w.Code
 	}
-	if got := rotate("cred-bound"); got != http.StatusForbidden {
-		t.Fatalf("bound credential: status = %d, want 403", got)
+	// The signed caller is the OWNER, so the bound credential rotates.
+	if got := rotate("cred-bound"); got != http.StatusOK {
+		t.Fatalf("OWNER on bound credential: status = %d, want 200", got)
 	}
 	if got := rotate("cred-plain"); got != http.StatusOK {
 		t.Fatalf("ordinary credential: status = %d, want 200", got)
+	}
+
+	const manager = "gov-internal-manager"
+	execOrFatal(t, db, `INSERT INTO users (id, email, full_name) VALUES (?, ?, 'T')`, manager, manager+"@x")
+	execOrFatal(t, db, `INSERT INTO workspace_members (id, workspace_id, user_id, role, capabilities) VALUES (?, ?, ?, 'MANAGER', ?)`,
+		"m-"+manager, wsID, manager, `["chat","credential.rotate"]`)
+	InvalidateCapabilityCache(wsID, manager)
+	caller = manager
+	if got := rotate("cred-bound"); got != http.StatusForbidden {
+		t.Fatalf("MANAGER on bound credential: status = %d, want 403", got)
+	}
+	if got := rotate("cred-plain"); got != http.StatusOK {
+		t.Fatalf("MANAGER on ordinary credential: status = %d, want 200", got)
+	}
+}
+
+// A row waiting on an escalation cannot be bound: whoever answered the
+// escalation would then choose the judge's value.
+func TestGovernanceBindRefusesUnsettledCredential(t *testing.T) {
+	t.Parallel()
+	db := setupTestDB(t)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+	execOrFatal(t, db, `INSERT INTO credentials (id, workspace_id, name, encrypted_value, type, provider, scope, status, created_by, created_at, updated_at)
+		VALUES ('cred-req', ?, 'REQ', '', 'API_KEY', 'ANTHROPIC', 'WORKSPACE', 'REQUESTED', ?, datetime('now'), datetime('now'))`, wsID, ownerID)
+	id := "cred-req"
+	body := keeperGovernancePutBody{GovModelCredentialID: &id}
+	cur := governance.Settings{GovModelCredentialID: id}
+	status, msg := checkGovernanceRefs(context.Background(), db, wsID, body, cur)
+	if status != http.StatusBadRequest {
+		t.Fatalf("status = %d (%s), want 400", status, msg)
+	}
+}
+
+func TestStoreOAuthTokensRefusesGovernanceCredential(t *testing.T) {
+	t.Parallel()
+	setTestEncryptionKeyParallelSafe(t)
+	db := setupTestDB(t)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+	seedCredentialEnc(t, db, wsID, ownerID, "cred-oauth", "OAUTH_KEY", "old-value")
+	execOrFatal(t, db, `INSERT INTO keeper_governance_settings (workspace_id, gov_model_provider, gov_model_id, gov_model_credential_id) VALUES (?, 'anthropic', 'm', 'cred-oauth')`, wsID)
+
+	h := &OAuthHandler{db: db}
+	if err := h.storeOAuthTokens(context.Background(), "cred-oauth", &tokenResponse{AccessToken: "replacement"}); err == nil {
+		t.Fatal("OAuth completion replaced the governance credential")
+	}
+	var stored string
+	if err := db.QueryRow(`SELECT encrypted_value FROM credentials WHERE id = 'cred-oauth'`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if plain, _ := encryption.DecryptIfEncrypted(stored); plain != "old-value" {
+		t.Fatalf("stored value = %q", plain)
+	}
+}
+
+func TestInternalCredentialPatchGovernance(t *testing.T) {
+	t.Parallel()
+	setTestEncryptionKeyParallelSafe(t)
+	cases := []struct {
+		name, status, payload string
+		start                 string
+		want                  int
+	}{
+		{"value", "ACTIVE", `{"status":"ACTIVE","access_token":"replacement"}`, "ACTIVE", http.StatusForbidden},
+		{"refresh token", "ACTIVE", `{"status":"ACTIVE","refresh_token":"replacement"}`, "ACTIVE", http.StatusForbidden},
+		{"reactivate revoked", "ACTIVE", `{"status":"ACTIVE"}`, "REVOKED", http.StatusForbidden},
+		{"health report", "RATE_LIMITED", `{"status":"RATE_LIMITED"}`, "ACTIVE", http.StatusOK},
+		{"recover after limit", "ACTIVE", `{"status":"ACTIVE"}`, "RATE_LIMITED", http.StatusOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupTestDB(t)
+			ownerID := seedTestUser(t, db)
+			wsID := seedTestWorkspace(t, db, ownerID)
+			seedCredentialEnc(t, db, wsID, ownerID, "cred-int", "INT_KEY", "old-value")
+			execOrFatal(t, db, `UPDATE credentials SET status = ? WHERE id = 'cred-int'`, tc.start)
+			execOrFatal(t, db, `INSERT INTO keeper_governance_settings (workspace_id, gov_model_provider, gov_model_id, gov_model_credential_id) VALUES (?, 'anthropic', 'm', 'cred-int')`, wsID)
+
+			h := &InternalHandler{db: db, logger: quietLogger()}
+			r := httptest.NewRequest(http.MethodPatch, "/?workspace_id="+wsID, strings.NewReader(tc.payload))
+			r.SetPathValue("credentialId", "cred-int")
+			w := httptest.NewRecorder()
+			h.UpdateCredentialStatus(w, r)
+			if w.Code != tc.want {
+				t.Fatalf("status = %d, want %d: %s", w.Code, tc.want, w.Body.String())
+			}
+			var stored, status string
+			if err := db.QueryRow(`SELECT encrypted_value, status FROM credentials WHERE id = 'cred-int'`).Scan(&stored, &status); err != nil {
+				t.Fatal(err)
+			}
+			if plain, _ := encryption.DecryptIfEncrypted(stored); plain != "old-value" {
+				t.Fatalf("stored value = %q", plain)
+			}
+			if tc.want == http.StatusForbidden && status != tc.start {
+				t.Fatalf("status changed to %q", status)
+			}
+		})
+	}
+}
+
+// Rows bound before binding required an ACTIVE credential can still wait on
+// their escalation. A MANAGER may not answer it.
+func TestEscalationRefusesManagerOnBoundCredential(t *testing.T) {
+	f := newSupplyFixture(t)
+	escID, credID := f.ask(t, askMetadata)
+	if credID == "" {
+		t.Fatal("ask must stage a credential")
+	}
+	execOrFatal(t, f.h.db, `INSERT INTO keeper_governance_settings (workspace_id, gov_model_provider, gov_model_id, gov_model_credential_id) VALUES (?, 'anthropic', 'm', ?)`, f.wsID, credID)
+
+	as := func(method string, call func(http.ResponseWriter, *http.Request), body map[string]any) int {
+		req := httptest.NewRequest(method, "/", jsonBody(body))
+		req.SetPathValue("escalationId", escID)
+		req = req.WithContext(withWorkspace(withUser(req.Context(), &AuthUser{ID: "someone-else"}), f.wsID, "MANAGER"))
+		rr := httptest.NewRecorder()
+		call(rr, req)
+		return rr.Code
+	}
+	if got := as("POST", f.h.SupplyEscalationCredential, map[string]any{"value": "replacement"}); got != http.StatusForbidden {
+		t.Fatalf("supply: status = %d, want 403", got)
+	}
+	if got := as("PATCH", f.h.ResolveEscalation, map[string]any{"action": "approve"}); got != http.StatusForbidden {
+		t.Fatalf("resolve: status = %d, want 403", got)
+	}
+	var status string
+	if err := f.h.db.QueryRow(`SELECT status FROM credentials WHERE id = ?`, credID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != credentialStatusRequested {
+		t.Fatalf("credential status = %q", status)
 	}
 }

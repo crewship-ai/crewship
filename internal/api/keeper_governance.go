@@ -377,11 +377,11 @@ func checkGovernanceRefs(ctx context.Context, db *sql.DB, wsID string, body keep
 	// update must not be blocked because a previously-stored credential was
 	// since revoked (the resolver's revoke-safety handles that at build time).
 	if body.GovModelCredentialID != nil && cur.GovModelCredentialID != "" {
-		var credType string
+		var credType, credStatus string
 		err := db.QueryRowContext(ctx, `
-			SELECT type FROM credentials
+			SELECT type, status FROM credentials
 			WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-			cur.GovModelCredentialID, wsID).Scan(&credType)
+			cur.GovModelCredentialID, wsID).Scan(&credType, &credStatus)
 		if errors.Is(err, sql.ErrNoRows) {
 			return http.StatusBadRequest, "gov_model_credential_id is not a credential in this workspace"
 		}
@@ -390,6 +390,11 @@ func checkGovernanceRefs(ctx context.Context, db *sql.DB, wsID string, body keep
 		}
 		if credType != governance.CredTypeEndpointURL && credType != governance.CredTypeAPIKey {
 			return http.StatusBadRequest, "gov_model_credential_id must reference an ENDPOINT_URL or API_KEY credential"
+		}
+		// A row still waiting on an escalation would take its value from
+		// whoever answers that escalation, not from an OWNER or ADMIN.
+		if credStatus != "ACTIVE" {
+			return http.StatusBadRequest, "gov_model_credential_id must reference an active credential"
 		}
 	}
 

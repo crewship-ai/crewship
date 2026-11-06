@@ -880,9 +880,6 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusForbidden, "Provider accounts require OWNER or ADMIN")
 		return
 	}
-	if !canRole(role, "manage") && !h.allowGovernanceCredentialWrite(w, r, workspaceID, credID) {
-		return
-	}
 	if msg := validateCredentialUpdate(body, currentType, currentUsername, currentProvider); msg != "" {
 		replyError(w, http.StatusBadRequest, msg)
 		return
@@ -1172,6 +1169,10 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		replyInternalError(w, h.logger, "begin tx (update credential)", err)
+		return
+	}
+	if !canRole(role, "manage") && !h.allowGovernanceCredentialWrite(w, r, tx, credID) {
+		tx.Rollback()
 		return
 	}
 
