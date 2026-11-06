@@ -2739,8 +2739,9 @@ persistence failure, 503 unavailable engine.
 
 **Auth:** current Page read access and CLI `pages:read` scope. **Request:** no
 body; optional positive `version` selects a retained snapshot. Editors may read
-history; readers may select only the shared pin. Without `version`, authorized
-readers see the live canvas. **Response:** `{page_id,nodes,order,can_edit,
+history; shared-only readers may select only the shared pin. Without `version`,
+Edit authority or the separately audited administrative read path exposes the
+live canvas; shared-only readers still receive the shared snapshot. **Response:** `{page_id,nodes,order,can_edit,
 can_comment,version,latest_version,shared_version,authority_revision,actor,origin}`.
 `authority_revision` is an opaque string; a fresh authorized read establishes
 a new connection after rights change. `origin` is null unless available to

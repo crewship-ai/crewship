@@ -1,0 +1,1 @@
+- **Edit source reaches the project editor again (#5015).** With the Artifacts library on, the link now keeps its own address instead of following the legacy redirect.

@@ -251,7 +251,7 @@ it("stops a waiting batch when send capability leaves and returns during the fir
 it("keeps source editing available to an Edit user without owner queue, sharing or restore controls",async()=>{
  state.snapshot.data=snap({can_share:false,can_restore:false,can_send_to_agent:false})
  renderLibrary()
- expect(screen.getByRole("link",{name:"Edit source"})).toHaveAttribute("href","/pages/launch?artifact=1&workspace_id=ws1")
+ expect(screen.getByRole("link",{name:"Edit source"})).toHaveAttribute("href","/pages/launch?artifact=1&edit=1&workspace_id=ws1")
  selectHero();await typeComment("Local feedback")
  expect(screen.queryByRole("button",{name:"Add to queue"})).toBeNull()
  expect(screen.queryByRole("button",{name:"Send to agent"})).toBeNull()
