@@ -861,6 +861,9 @@ update with the same fields and bounds as the per-workspace
   fields it changed from and to.
 - `security_contact_user_id` and `gov_model_credential_id` name something that
   belongs to one workspace, and are refused for more than one.
+- Once bound, the credential named by `gov_model_credential_id` can be changed or
+  rotated only by a workspace OWNER or ADMIN. `credential.rotate` and the MANAGER
+  update right do not reach it; those calls answer `403`.
 
 **Auth:** instance administrator. **Request:**
 

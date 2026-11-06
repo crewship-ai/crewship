@@ -119,6 +119,11 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
+	// The credential.rotate grant does not reach the workspace judge's own
+	// credential: binding it takes OWNER/ADMIN, so replacing it does too.
+	if !canRole(role, "manage") && !h.allowGovernanceCredentialWrite(w, r, workspaceID, credID) {
+		return
+	}
 
 	var req credentialRotateRequest
 	if err := readJSON(r, &req); err != nil {

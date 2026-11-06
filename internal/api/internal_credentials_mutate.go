@@ -97,6 +97,12 @@ func (h *CredentialInternalAdapter) Rotate(w http.ResponseWriter, r *http.Reques
 		CapabilityCredentialRotate, "credential.rotate", "credential:"+credID) {
 		return
 	}
+	// injectContext below stamps ADMIN, so the role check inside Rotate cannot
+	// tell who is calling. The capability alone never reaches a credential
+	// bound to the governance model; that rotation happens in the app.
+	if !h.creds.allowGovernanceCredentialWrite(w, r, wsID, credID) {
+		return
+	}
 	r = h.injectContext(r, wsID, callerID)
 	h.creds.Rotate(w, r)
 }
