@@ -465,3 +465,27 @@ it("a verified read revocation still removes a fallback copy whose superseded re
   await drafts.purgeLocalDraftPage({ human: "alice", workspace: "w", page: "page" })
   expect(local.has("artifact-comment:alice:w:page")).toBe(false)
 })
+
+it("retires an admitted capture when the draft is loaded again: a store or clear must not load", async () => {
+ const store = durableStore()
+ const drafts = await load()
+ drafts.setArtifactDraftStore(store as never)
+ const key = drafts.artifactDraftKey("design-canvas", "alice", "w", "page")!
+ await drafts.loadArtifactDraft(key)
+ const capture = drafts.admittedArtifactDraftMerge(key, () => "captured", parts => parts.join(""))
+ await expect(capture()).resolves.toBe("captured")
+ await drafts.loadArtifactDraft(key)
+ await expect(capture()).rejects.toThrow("no longer signed in")
+})
+
+it("merges an admitted capture into what the row holds", async () => {
+ const store = durableStore()
+ const drafts = await load()
+ drafts.setArtifactDraftStore(store as never)
+ const key = drafts.artifactDraftKey("design-canvas", "alice", "w", "page")!
+ await drafts.writeArtifactDraft(key, "other tab")
+ await drafts.loadArtifactDraft(key)
+ const capture = drafts.admittedArtifactDraftMerge(key, existing => `${existing}+mine`, parts => parts.join("|"))
+ await expect(capture()).resolves.toBe("other tab+mine")
+ await expect(drafts.loadArtifactDraft(key)).resolves.toBe("other tab+mine")
+})
