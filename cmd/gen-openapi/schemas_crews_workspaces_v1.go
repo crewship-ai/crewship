@@ -110,9 +110,9 @@ func crewWorkspaceGETSchemaCatalogV1() (map[string]map[string]DomainSchema, map[
 	crewPolicy := object(map[string]any{"crew_id": str(), "autonomy_level": str(), "behavior_mode": str(), "whole_run_approval": boolean(), "set_by_user_id": str(), "set_at": str(), "reason": str()})
 	crewPolicy["required"] = []string{"crew_id", "autonomy_level", "behavior_mode", "whole_run_approval"}
 	add("/api/v1/crews/{crewId}/policy", "CrewPolicyResponseV1", crewPolicy)
-	add("/api/v1/crews/{crewId}/peer-conversations", "CrewPeerConversationsResponseV1", object(map[string]any{"conversations": array(anyObject()), "count": integer()}))
+	add("/api/v1/crews/{crewId}/peer-conversations", "CrewPeerConversationsResponseV1", array(anyObject()))
 	add("/api/v1/crews/{crewId}/standup", "CrewStandupResponseV1", object(map[string]any{"crew_id": str(), "date": str(), "summary": str(), "items": array(anyObject())}))
-	add("/api/v1/crews/{crewId}/port-expose", "CrewPortExposeResponseV1", object(map[string]any{"ports": array(object(map[string]any{"id": str(), "port": integer(), "host": str(), "status": str(), "created_at": str()}))}))
+	add("/api/v1/crews/{crewId}/port-expose", "CrewPortExposeResponseV1", array(object(map[string]any{"id": str(), "port": integer(), "host": str(), "status": str(), "created_at": str()})))
 	add("/api/v1/crews/{crewId}/git-diff", "CrewGitDiffResponseV1", object(map[string]any{"diff": str(), "base_ref": str(), "head_ref": str(), "files": array(anyObject())}))
 
 	addList("/api/v1/workspaces/{workspaceId}/members", "WorkspaceMembersResponseV1", member)

@@ -491,7 +491,7 @@ func buildDocument(routes []route) map[string]any {
 				continue
 			}
 			if status[0] != '2' && status != "304" {
-				response.(map[string]any)["content"] = errorContentForRoute(rt, info)
+				response.(map[string]any)["content"] = errorContentForRoute(rt, info, status)
 			}
 			if status[0] == '2' {
 				if headers := routeSchemaCatalog()[rt.method+" "+rt.path].SuccessHeaders; headers != nil {
@@ -989,6 +989,12 @@ func nullable(typ string) map[string]any {
 	return map[string]any{"type": typ, "nullable": true}
 }
 
+// nullableAgentCrew is the crew block of an agent: null for an agent outside any
+// crew. OpenAPI 3.0 ignores siblings of a bare $ref, so the reference is wrapped.
+func nullableAgentCrew() map[string]any {
+	return map[string]any{"allOf": []any{ref("AgentCrew")}, "nullable": true}
+}
+
 func array(items map[string]any) map[string]any {
 	return map[string]any{"type": "array", "items": items}
 }
@@ -1049,7 +1055,7 @@ func responseComponents() map[string]any {
 		"tool_profile": scalar("string"), "memory_enabled": scalar("boolean"), "cli_tools": nullable("string"), "schedule_cron": nullable("string"),
 		"schedule_prompt": nullable("string"), "schedule_enabled": scalar("boolean"), "schedule_last_run": nullable("string"), "schedule_next_run": nullable("string"),
 		"webhook_require_timestamp": scalar("boolean"), "webhook_secret_set": nullable("boolean"), "mcp_config_json": nullable("string"),
-		"created_at": scalar("string"), "updated_at": scalar("string"), "crew": ref("AgentCrew"), "_count": ref("AgentCounts"),
+		"created_at": scalar("string"), "updated_at": scalar("string"), "crew": nullableAgentCrew(), "_count": ref("AgentCounts"),
 		"created_by_user_id": scalar("string"), "ephemeral": scalar("boolean"), "expires_at": nullable("string"), "expired_at": nullable("string"),
 		"parent_lead_id": nullable("string"), "hire_reason": nullable("string"),
 	})
@@ -1140,9 +1146,14 @@ func responseComponents() map[string]any {
 // statuses: the envelope the handler's helper writes, as application/json,
 // unless the route's catalog entry says its errors are written some other
 // way (DomainSchema.ErrorMedia).
-func errorContentForRoute(rt route, info handlerInfo) map[string]any {
+func errorContentForRoute(rt route, info handlerInfo, status string) map[string]any {
 	schema := routeSchemaCatalog()[rt.method+" "+rt.path]
 	if schema.ErrorMedia == nil {
+		// The middleware ahead of a handler answers these with {"error"}, whatever
+		// envelope the handler itself uses.
+		if status == "400" || status == "401" || status == "403" {
+			info.repliesError = true
+		}
 		return map[string]any{"application/json": map[string]any{"schema": errorBodySchema(info)}}
 	}
 	body := schema.ErrorResponse
@@ -1878,7 +1889,12 @@ func absorbHandlerBody(info *handlerInfo, signature, body string) {
 	if strings.Contains(body, "replyError(") {
 		info.repliesError = true
 	}
-	if strings.Contains(body, "writeProblem(") || strings.Contains(body, "internalError(") {
+	if strings.Contains(body, "replyInternalError(") {
+		info.repliesError = true
+	}
+	// Some handlers build the RFC 7807 body in place instead of calling a helper.
+	if strings.Contains(body, "writeProblem(") || strings.Contains(body, "internalError(") ||
+		strings.Contains(body, `"about:blank"`) {
 		info.repliesProblem = true
 	}
 	if internalErrorPattern.MatchString(body) {

@@ -161,7 +161,7 @@ func (h *InstanceKeeperHandler) ListGovernance(w http.ResponseWriter, r *http.Re
 		return
 	}
 	out := instanceGovernanceList{
-		Defaults:   instanceGovernanceDefaults{Configured: dFound, Settings: d, EffectiveSecondApprover: resolveEffectiveSecondApprover(d)},
+		Defaults:   instanceGovernanceDefaults{Configured: dFound, Settings: governanceForResponse(d), EffectiveSecondApprover: resolveEffectiveSecondApprover(d)},
 		Workspaces: make([]instanceGovernanceRow, 0, len(all)),
 	}
 	for _, ws := range all {
@@ -171,7 +171,7 @@ func (h *InstanceKeeperHandler) ListGovernance(w http.ResponseWriter, r *http.Re
 			return
 		}
 		out.Workspaces = append(out.Workspaces, instanceGovernanceRow{
-			instanceWorkspaceRef: ws, Configured: found, Settings: s,
+			instanceWorkspaceRef: ws, Configured: found, Settings: governanceForResponse(s),
 			EffectiveSecondApprover: resolveEffectiveSecondApprover(s),
 		})
 	}
@@ -427,7 +427,7 @@ func (h *InstanceKeeperHandler) GetDefaults(w http.ResponseWriter, r *http.Reque
 		h.fail(w, "defaults", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, instanceDefaultsResponse{Configured: found, Defaults: d, Changes: []governanceFieldChange{}})
+	writeJSON(w, http.StatusOK, instanceDefaultsResponse{Configured: found, Defaults: governanceForResponse(d), Changes: []governanceFieldChange{}})
 }
 
 // PutDefaults is PUT /api/v1/admin/instance/keeper/governance/defaults: the
@@ -464,7 +464,7 @@ func (h *InstanceKeeperHandler) PutDefaults(w http.ResponseWriter, r *http.Reque
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	resp := instanceDefaultsResponse{Configured: found, Defaults: after, Changes: diffGovernance(cur, after)}
+	resp := instanceDefaultsResponse{Configured: found, Defaults: governanceForResponse(after), Changes: diffGovernance(cur, after)}
 	resp.PreviewID = governancePreviewID(nil, &governanceFingerprintRow{ID: "defaults", Before: cur, After: after})
 	if body.DryRun {
 		resp.Defaults = cur

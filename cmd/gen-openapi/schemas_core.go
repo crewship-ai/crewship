@@ -101,7 +101,7 @@ func coreResourceSchemas() map[string]any {
 		"tool_profile":                 stringSchema(), "memory_enabled": boolSchema(), "cli_tools": nullableString(), "schedule_cron": nullableString(),
 		"schedule_prompt": nullableString(), "schedule_enabled": boolSchema(), "schedule_last_run": nullableString(), "schedule_next_run": nullableString(),
 		"webhook_require_timestamp": boolSchema(), "webhook_secret_set": nullableBool(), "mcp_config_json": nullableString(),
-		"created_at": stringSchema(), "updated_at": stringSchema(), "crew": ref("AgentCrew"), "_count": ref("AgentCounts"),
+		"created_at": stringSchema(), "updated_at": stringSchema(), "crew": nullableAgentCrew(), "_count": ref("AgentCounts"),
 		"created_by_user_id": stringSchema(), "ephemeral": boolSchema(), "expires_at": nullableString(), "expired_at": nullableString(),
 		"parent_lead_id": nullableString(), "hire_reason": nullableString(),
 		// ask_forms / suggested_prompts are *string WITHOUT omitempty on

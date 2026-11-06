@@ -119,6 +119,16 @@ func resolveEffectiveSecondApprover(s governance.Settings) effectiveSecondApprov
 	return out
 }
 
+// governanceForResponse fills what an unset row leaves nil, so the wire contract
+// holds: watch_presets is always an array. Only answers go through it; the
+// stored settings and the preview fingerprint keep their own shape.
+func governanceForResponse(s governance.Settings) governance.Settings {
+	if s.WatchPresets == nil {
+		s.WatchPresets = []string{}
+	}
+	return s
+}
+
 // Get handles GET /api/v1/admin/keeper/governance (ADMIN+).
 func (h *KeeperGovernanceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
@@ -130,7 +140,7 @@ func (h *KeeperGovernanceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, keeperGovernanceResponse{
 		Configured:              found,
-		Settings:                s,
+		Settings:                governanceForResponse(s),
 		EffectiveSecondApprover: resolveEffectiveSecondApprover(s),
 	})
 }
@@ -254,7 +264,7 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, keeperGovernanceResponse{
 		Configured:              true,
-		Settings:                s,
+		Settings:                governanceForResponse(s),
 		EffectiveSecondApprover: resolveEffectiveSecondApprover(s),
 		Warning:                 strings.Join(warnings, " "),
 	})
