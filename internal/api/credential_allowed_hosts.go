@@ -67,9 +67,11 @@ func parseStoredHosts(raw string) ([]string, error) { return credhostgate.ParseS
 func (h *CredentialHandler) GetAllowedHosts(w http.ResponseWriter, r *http.Request) {
 	credID := r.PathValue("credentialId")
 	var raw string
+	// Same visibility as reading the credential itself.
+	visFilter, visArgs := credentialVisibilityFilter(RoleFromContext(r.Context()), UserFromContext(r.Context()))
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT COALESCE(allowed_hosts, '[]') FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-		credID, WorkspaceIDFromContext(r.Context())).Scan(&raw)
+		`SELECT COALESCE(c.allowed_hosts, '[]') FROM credentials c WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL`+visFilter,
+		append([]any{credID, WorkspaceIDFromContext(r.Context())}, visArgs...)...).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "Credential not found")
 		return

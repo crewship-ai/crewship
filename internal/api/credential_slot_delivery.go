@@ -151,11 +151,6 @@ func logDeliveredCredentialNotices(logger *slog.Logger, agentID string, delivere
 				"agent_id", agentID, "credential_id", n.CredentialID, "reason", n.Reason)
 			continue
 		}
-		if n.HostBound {
-			logger.Warn("host-bound credential withheld — its approved hosts are not satisfied by the crew's egress allowlist",
-				"agent_id", agentID, "credential_id", n.CredentialID, "reason", n.Reason)
-			continue
-		}
 		logger.Warn("credential not delivered — its name cannot be an environment variable",
 			"agent_id", agentID, "credential_id", n.CredentialID,
 			"requested", n.Requested, "reason", n.Reason)

@@ -207,3 +207,28 @@ func TestListCredentials_HostBoundDroppedForCrewScopedReap(t *testing.T) {
 		})
 	}
 }
+
+// GET answers under the same visibility as reading the credential itself: a
+// member who cannot see a crew-scoped credential must not learn its hosts.
+func TestGetAllowedHosts_FollowsCredentialVisibility(t *testing.T) {
+	db, wsID, ownerID := seedHostBoundRig(t, "restricted", `["api.github.com"]`, `["api.github.com"]`)
+	ownerTok := mintTokenFor(t, db, ownerID, "visowner0000000000000000")
+	memberTok := seedRoleMemberToken(t, db, wsID, "vis-member", "MEMBER", "vismember000000000000000")
+	r, err := NewRouter(db, "this-is-a-32-char-test-secret-pad", newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const path = "/api/v1/credentials/hb-cred/allowed-hosts"
+
+	if res := hostsReq(t, r, "GET", memberTok, path, ""); res.code != http.StatusOK {
+		t.Fatalf("workspace-scoped credential should be readable by a member: %d %s", res.code, res.body)
+	}
+	execOrFatal(t, db, `UPDATE credentials SET scope = 'CREW' WHERE id = 'hb-cred'`)
+	res := hostsReq(t, r, "GET", memberTok, path, "")
+	if res.code != http.StatusNotFound || strings.Contains(res.body, "api.github.com") {
+		t.Fatalf("member read hosts of a credential it cannot see: %d %s", res.code, res.body)
+	}
+	if res := hostsReq(t, r, "GET", ownerTok, path, ""); res.code != http.StatusOK {
+		t.Fatalf("owner must still read it: %d %s", res.code, res.body)
+	}
+}
