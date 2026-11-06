@@ -97,3 +97,19 @@ it("keeps the signed-in person's chat recovery when a delayed sign-out finds the
     expect(sessionStorage.getItem(key)).toBeNull()
   } finally { sessionStorage.removeItem(key); replace.mockRestore() }
 })
+
+it("removes chat recovery after a real sign-out even when the drafts step fails", async () => {
+  const replace = vi.spyOn(window.location, "replace").mockImplementation(() => {})
+  const key = `chat-decision:${JSON.stringify(["ws", "ana"])}`
+  try {
+    sessionStorage.setItem(key, "unsent")
+    mockFetch.mockResolvedValueOnce(user("ana"))
+    render(<AuthProvider><Probe /></AuthProvider>)
+    await waitFor(() => expect(auth.session?.user.id).toBe("ana"))
+    suspendDocuments.mockRejectedValueOnce(new Error("idb"))
+    mockFetch.mockResolvedValueOnce(signedOut())
+    act(() => { channel().onmessage?.({ data: { type: "signout", human: "ana" } }) })
+    await waitFor(() => expect(sessionStorage.getItem(key)).toBeNull())
+    expect(replace).not.toHaveBeenCalled()
+  } finally { sessionStorage.removeItem(key); replace.mockRestore() }
+})
