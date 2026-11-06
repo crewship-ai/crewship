@@ -153,16 +153,15 @@ export function designWorkCovered(document: Y.Snapshot, work: Uint8Array): boole
 /**
  * The stored canvas: one entry per tab, each a full document state with the
  * confirmed canvas it was made from. One row, so an entry and its base are one
- * write, and a tab replaces only its own entry. An old row is a bare state.
+ * write, and a tab replaces only its own entry. Older builds read another row
+ * kind, a bare state, which is only ever read here: a rollback finds no draft
+ * rather than a format it cannot open.
  */
 export interface DesignDraftEntry { state: string; baseline: string | null }
 export type DesignDraftRecord = Record<string, DesignDraftEntry>
 const DRAFT_FORMAT = "crewship-design-draft-v2"
-/** The entry of a row stored before there were entries. */
-export const DESIGN_OLD_DRAFT = "old-format"
 export function parseDesignDraft(text: string): DesignDraftRecord {
  if (!text) return {}
- if (!text.startsWith("{")) return { [DESIGN_OLD_DRAFT]: { state: text, baseline: null } }
  const saved = JSON.parse(text) as { format?: unknown; tabs?: DesignDraftRecord }
  if (saved.format !== DRAFT_FORMAT || !saved.tabs) throw new Error("Not a Design draft record.")
  return saved.tabs

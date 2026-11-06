@@ -172,14 +172,17 @@ with one entry per tab: that tab's full document state and the confirmed canvas
 it was made from. An entry and its base are one write, and a tab replaces only
 its own entry, under the cross-tab draft lock. After an identity change a tab
 that cannot open the row adds a sealed part, and the owner's next load combines
-the parts. Rows and marks written by older builds are still read: a bare state
-counts as one entry, and a mark supplies its base.
+the parts. The row has its own kind, `design-tabs`. The `design-canvas` and
+`design-pending` rows of older builds are only read, so a rollback finds no draft
+rather than a format it cannot open: a bare state counts as one more entry, and a
+mark supplies its base.
 
 Reopening merges every entry in a fixed order and turns what the merge hides into
 a conflict notice, so a notice exists only for texts that were really stored. An
-entry goes when a confirmed document holds it, whichever tab wrote it, and only
-after the notices made from it are stored. Until then a reopen repeats the same
-work.
+entry goes only from the tab that wrote or recovered it, when a confirmed document
+holds it and every notice that tab found is stored. Causal coverage cannot speak
+for an entry nobody examined, because it includes text a merge dropped, so that
+entry waits for the next reopen.
 
 A version save has five seconds from the call, on the monotonic clock, to get a
 sync request through the client's copy of the server's bucket and receive the

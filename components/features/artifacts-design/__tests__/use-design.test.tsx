@@ -91,6 +91,7 @@ afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear())
 const pendingKey = "design-pending:same-user:same-workspace:old-private-page"
 const conflictKey = "design-conflict:same-user:same-workspace:old-private-page"
 const canvasKey = "crewship-design:v2:same-user:same-workspace:old-private-page"
+const tabsKey = "design-tabs:same-user:same-workspace:old-private-page"
 const lost = (over: Record<string, unknown> = {}) => ({ id: "label", name: "Title", mine: "Mine", theirs: "Theirs", kept: "theirs", left: "Theirs", restore: { id: "label", type: "text", text: "Mine" }, ...over })
 const mark = (doc: Y.Doc) => ({ baseline: "AQ==", work: btoa(String.fromCharCode(...Y.encodeSnapshot(Y.snapshot(doc)))) })
 const encoded = (doc: Y.Doc) => btoa(String.fromCharCode(...Y.encodeStateAsUpdate(doc)))
@@ -102,7 +103,8 @@ async function mounted() {
 const layer = (id: string, text = id) => ({ id, type: "text" as const, text, x: 0, y: 0, width: 200, height: 40 })
 const ids = (doc: Y.Doc) => designNodes(doc).map(node => node.id).sort()
 const decoded = (text: string) => Uint8Array.from(atob(text), char => char.charCodeAt(0))
-const entries = () => parseDesignDraft(drafts.get(canvasKey) ?? "")
+const storedKey = () => tabsKey
+const entries = () => parseDesignDraft(drafts.get(storedKey()) ?? "")
 /** Everything the stored canvas row holds, whichever tab wrote it. */
 const storedDoc = () => { const doc = new Y.Doc(); for (const entry of Object.values(entries())) Y.applyUpdate(doc, decoded(entry.state)); return doc }
 const entryOf = (doc: Y.Doc, baseline: string | null = null) => ({ state: encoded(doc), baseline })
@@ -121,16 +123,16 @@ describe("Design unsynced work", () => {
   act(() => provider.tracking!.pending!(new Uint8Array([1])))
   expect(view.result.current.unsynced).toBe(true)
   await edit(view, layer("unsent"))
-  await waitFor(() => expect(drafts.get(canvasKey)).toBeTruthy())
+  await waitFor(() => expect(drafts.get(tabsKey)).toBeTruthy())
   await act(async () => provider.tracking!.pending!(null))
   expect(view.result.current.unsynced).toBe(false)
-  await waitFor(() => expect(drafts.has(canvasKey)).toBe(false))
+  await waitFor(() => expect(drafts.has(tabsKey)).toBe(false))
  })
  it("hands unconfirmed work and its baseline to the provider that replaces this one", async () => {
   const view = await mounted()
   await act(async () => server.providers[0].tracking!.pending!(new Uint8Array([7, 8])))
   await edit(view, layer("draft", "Unsent"))
-  await waitFor(() => expect(drafts.get(canvasKey)).toBeTruthy())
+  await waitFor(() => expect(drafts.get(tabsKey)).toBeTruthy())
   server.authorityRevision = "2"
   await act(async () => { await clients[0].invalidateQueries({ queryKey: ["artifact-design"] }) })
   await waitFor(() => expect(server.providers).toHaveLength(2))
@@ -150,7 +152,7 @@ describe("Design unsynced work", () => {
   const view = await mounted()
   await act(async () => server.providers[0].tracking!.pending!(new Uint8Array([1])))
   await edit(view, layer("unsent"))
-  await waitFor(() => expect(drafts.get(canvasKey)).toBeTruthy())
+  await waitFor(() => expect(drafts.get(tabsKey)).toBeTruthy())
   server.canEdit = false
   server.authorityRevision = "2"
   await act(async () => { await clients[0].invalidateQueries({ queryKey: ["artifact-design"] }) })
@@ -158,7 +160,7 @@ describe("Design unsynced work", () => {
   expect(server.providers[1].admittedEdit).toBe(false)
   await waitFor(() => expect(view.result.current.doc).not.toBeNull())
   expect(view.result.current.unsynced).toBe(true)
-  expect(drafts.get(canvasKey)).toBeTruthy()
+  expect(drafts.get(tabsKey)).toBeTruthy()
   view.unmount()
   const again = await mounted()
   await waitFor(() => expect(again.result.current.unsynced).toBe(true))
@@ -168,7 +170,7 @@ describe("Design unsynced work", () => {
   const view = await mounted()
   await edit(view, layer("mine"))
   const other = new Y.Doc(); upsertDesignNode(other, layer("their-work"))
-  drafts.set(canvasKey, serializeDesignDraft({ ...entries(), "other-tab": entryOf(other) }))
+  drafts.set(tabsKey, serializeDesignDraft({ ...entries(), "other-tab": entryOf(other) }))
   await act(async () => server.providers[0].tracking!.pending!(null))
   await waitFor(() => expect(Object.keys(entries())).toEqual(["other-tab"]))
   expect(view.result.current.unsynced).toBe(false)
@@ -176,11 +178,11 @@ describe("Design unsynced work", () => {
  it("clears a closed tab's entry once the confirmed document holds it", async () => {
   const stored = new Y.Doc(); upsertDesignNode(stored, layer("stored-work"))
   const base = new Y.Doc()
-  drafts.set(canvasKey, serializeDesignDraft({ "closed-tab": entryOf(stored, b64(baseOf(base))) }))
+  drafts.set(tabsKey, serializeDesignDraft({ "closed-tab": entryOf(stored, b64(baseOf(base))) }))
   await mounted()
   expect(server.providers[0].tracking?.baseline).toEqual(baseOf(base))
   await act(async () => server.providers[0].tracking!.pending!(null))
-  await waitFor(() => expect(drafts.has(canvasKey)).toBe(false))
+  await waitFor(() => expect(drafts.has(tabsKey)).toBe(false))
  })
  it("judges coverage by the confirmed document, not by an edit made after it", async () => {
   const view = await mounted()
@@ -197,7 +199,7 @@ describe("Design unsynced work", () => {
   await mounted()
   await act(async () => server.providers[0].tracking!.pending!(null))
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) })
-  expect(store.merges).not.toContain(canvasKey)
+  expect(store.merges).not.toContain(tabsKey)
  })
 })
 describe("Rows stored by older builds (#5017)", () => {
@@ -259,7 +261,7 @@ describe("One stored entry per tab (#5017)", () => {
   let open = () => {}
   store.mergeGate = new Promise<void>(resolve => { open = resolve })
   for (let keys = 0; keys < 20; keys++) act(() => upsertDesignNode(view.result.current.doc!, layer("typing", `Key ${keys}`)))
-  expect(store.merges.filter(key => key === canvasKey)).toHaveLength(1)
+  expect(store.merges.filter(key => key === tabsKey)).toHaveLength(1)
   await act(async () => { open(); await Promise.resolve() })
   await waitFor(() => expect(designNodes(storedDoc())[0].text).toBe("Key 19"))
  })
@@ -267,11 +269,11 @@ describe("One stored entry per tab (#5017)", () => {
   const view = await mounted()
   await act(async () => server.providers[0].tracking!.pending!(baseOf(new Y.Doc())))
   await edit(view, layer("kept"))
-  const before = drafts.get(canvasKey)
+  const before = drafts.get(tabsKey)
   store.failMerges = true
   await edit(view, layer("refused"))
   await waitFor(() => expect(view.result.current.draftError).toBe(true))
-  expect(drafts.get(canvasKey)).toBe(before)
+  expect(drafts.get(tabsKey)).toBe(before)
   store.failMerges = false
   await edit(view, layer("next"))
   await waitFor(() => expect(ids(storedDoc())).toEqual(["kept", "next", "refused"]))
@@ -281,7 +283,7 @@ describe("One stored entry per tab (#5017)", () => {
   await act(async () => server.providers[0].tracking!.pending!(baseOf(new Y.Doc())))
   await edit(view, layer("first"))
   await edit(view, layer("second"))
-  expect(new Set(store.merges)).toEqual(new Set([canvasKey]))
+  expect(new Set(store.merges)).toEqual(new Set([tabsKey]))
   expect(Object.values(entries())).toMatchObject([{ baseline: b64(baseOf(new Y.Doc())) }])
   expect(Y.encodeStateVector(storedDoc())).toEqual(Y.encodeStateVector(view.result.current.doc!))
  })
@@ -324,15 +326,70 @@ describe("One stored entry per tab (#5017)", () => {
   await edit(view, layer("sent"))
   store.loads = []
   await act(async () => { server.providers[0].tracking!.pending!(null); await new Promise(resolve => setTimeout(resolve, 10)) })
-  expect(store.loads).not.toContain(canvasKey)
+  expect(store.loads).not.toContain(tabsKey)
  })
  it("takes one base from every entry, all of which the server held", async () => {
   const one = new Y.Doc(); upsertDesignNode(one, layer("one"))
   const two = new Y.Doc(); upsertDesignNode(two, layer("two"))
-  drafts.set(canvasKey, serializeDesignDraft({ a: entryOf(one, b64(baseOf(one))), b: entryOf(two, b64(baseOf(two))) }))
+  drafts.set(tabsKey, serializeDesignDraft({ a: entryOf(one, b64(baseOf(one))), b: entryOf(two, b64(baseOf(two))) }))
   await mounted()
   const base = new Y.Doc(); Y.applyUpdate(base, server.providers[0].tracking!.baseline!)
   expect(ids(base)).toEqual(["one", "two"])
+ })
+})
+describe("Entries a tab may remove (#5017)", () => {
+ const titled = (text: string) => ({ ...layer("title", text), name: "Title" })
+ const wait = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
+ it("leaves an entry this tab never recovered, though its document covers it", async () => {
+  const base = new Y.Doc(); upsertDesignNode(base, titled("Base"))
+  const clean = await mounted()
+  act(() => Y.applyUpdate(clean.result.current.doc!, baseOf(base), "design-server"))
+  const crashed = new Y.Doc(); Y.applyUpdate(crashed, baseOf(base)); upsertDesignNode(crashed, titled("Mine"))
+  drafts.set(storedKey(), serializeDesignDraft({ "crashed-tab": entryOf(crashed, b64(baseOf(base))) }))
+  // The server relayed the losing update: this document covers the entry and shows no sign of it.
+  act(() => Y.applyUpdate(clean.result.current.doc!, baseOf(crashed), "design-server"))
+  await edit(clean, layer("mine"))
+  await act(async () => server.providers[0].tracking!.pending!(null))
+  await wait()
+  expect(Object.keys(entries())).toEqual(["crashed-tab"])
+ })
+ it("removes a recovered entry only as it was recovered", async () => {
+  const stored = new Y.Doc(); upsertDesignNode(stored, layer("stored"))
+  drafts.set(storedKey(), serializeDesignDraft({ "closed-tab": entryOf(stored) }))
+  await mounted()
+  const newer = new Y.Doc(); Y.applyUpdate(newer, baseOf(stored)); upsertDesignNode(newer, layer("newer"))
+  drafts.set(storedKey(), serializeDesignDraft({ "closed-tab": entryOf(newer) }))
+  await act(async () => server.providers[0].tracking!.pending!(null))
+  await wait()
+  expect(Object.keys(entries())).toEqual(["closed-tab"])
+ })
+ it("keeps the entry when a notice found by the provider cannot be stored", async () => {
+  const stored = new Y.Doc(); upsertDesignNode(stored, titled("Mine"))
+  drafts.set(storedKey(), serializeDesignDraft({ "closed-tab": entryOf(stored) }))
+  const view = await mounted()
+  store.failConflictMerge = true
+  await act(async () => { server.providers[0].tracking!.conflicts!([lost()]); server.providers[0].tracking!.pending!(null) })
+  await waitFor(() => expect(view.result.current.draftError).toBe(true))
+  await wait()
+  expect(Object.keys(entries())).toEqual(["closed-tab"])
+ })
+ it("removes the entry once the provider's notice is stored", async () => {
+  const stored = new Y.Doc(); upsertDesignNode(stored, titled("Mine"))
+  drafts.set(storedKey(), serializeDesignDraft({ "closed-tab": entryOf(stored) }))
+  await mounted()
+  await act(async () => { server.providers[0].tracking!.conflicts!([lost()]); server.providers[0].tracking!.pending!(null) })
+  await waitFor(() => expect(drafts.has(storedKey())).toBe(false))
+  expect(JSON.parse(drafts.get(conflictKey)!)).toHaveLength(1)
+ })
+})
+describe("Rollback to a build that reads only the old row (#5017)", () => {
+ it("writes nothing to the rows an older build reads", async () => {
+  const view = await mounted()
+  await act(async () => server.providers[0].tracking!.pending!(baseOf(new Y.Doc())))
+  await edit(view, layer("unsent"))
+  expect(drafts.has(canvasKey)).toBe(false)
+  expect(drafts.has(pendingKey)).toBe(false)
+  expect(ids(storedDoc())).toEqual(["unsent"])
  })
 })
 describe("Competing offline work in two tabs (#5017)", () => {
@@ -372,9 +429,9 @@ describe("Competing offline work in two tabs (#5017)", () => {
   store.failConflictMerge = true
   const reopened = await reopen(first, second)
   await waitFor(() => expect(reopened.result.current.draftError).toBe(true))
-  const before = drafts.get(canvasKey)
+  const before = drafts.get(tabsKey)
   await act(async () => { lastProvider().tracking!.pending!(null); await new Promise(resolve => setTimeout(resolve, 10)) })
-  expect(drafts.get(canvasKey)).toBe(before)
+  expect(drafts.get(tabsKey)).toBe(before)
  })
  it("removes the entries after the server covers them, with the notice stored", async () => {
   const { first, second } = await twoTabs()
@@ -382,7 +439,7 @@ describe("Competing offline work in two tabs (#5017)", () => {
   await edit(second, titled("Second"))
   await reopen(first, second)
   await act(async () => lastProvider().tracking!.pending!(null))
-  await waitFor(() => expect(drafts.has(canvasKey)).toBe(false))
+  await waitFor(() => expect(drafts.has(tabsKey)).toBe(false))
   expect(JSON.parse(drafts.get(conflictKey)!)).toHaveLength(1)
  })
  it("names only the last text of a tab that kept typing", async () => {
@@ -719,7 +776,7 @@ describe("Design local drafts after access loss", () => {
   await waitFor(() => expect(view.result.current.doc).not.toBeNull())
   act(() => upsertDesignNode(view.result.current.doc!, { id: "confidential", type: "text", text: "Private canvas", x: 0, y: 0, width: 200, height: 40, fill: "#111111" }))
   drafts.set("design-comment:v2:same-user:same-workspace:old-private-page", "Unsent comment")
-  await waitFor(() => expect(drafts.has("crewship-design:v2:same-user:same-workspace:old-private-page")).toBe(true))
+  await waitFor(() => expect(drafts.has(tabsKey)).toBe(true))
   server.status = 404
   await act(async () => { await clients[0].invalidateQueries({ queryKey: ["artifact-design"] }) })
   await waitFor(() => expect(view.result.current.query.isError).toBe(true))

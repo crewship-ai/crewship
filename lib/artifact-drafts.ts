@@ -18,8 +18,8 @@ import { captureDocumentDrafts, removeCapturedDocumentDrafts, type CapturedDocum
  * persistent revisions; newer writes survive an older sign-out acknowledgement.
  */
 
-export type ArtifactDraftKind = "artifact-source" | "artifact-comment" | "artifact-viewer-comment" | "design-canvas" | "design-comment" | "design-conflict" | "design-pending" | "wordcraft-pending"
-const KINDS: readonly ArtifactDraftKind[] = ["artifact-source", "artifact-comment", "artifact-viewer-comment", "design-canvas", "design-comment", "design-conflict", "design-pending", "wordcraft-pending"]
+export type ArtifactDraftKind = "artifact-source" | "artifact-comment" | "artifact-viewer-comment" | "design-canvas" | "design-tabs" | "design-comment" | "design-conflict" | "design-pending" | "wordcraft-pending"
+const KINDS: readonly ArtifactDraftKind[] = ["artifact-source", "artifact-comment", "artifact-viewer-comment", "design-canvas", "design-tabs", "design-comment", "design-conflict", "design-pending", "wordcraft-pending"]
 export type ArtifactDraftRow = [human: string, kind: ArtifactDraftKind, workspace: string, target: string]
 type Row = ArtifactDraftRow
 export interface CapturedArtifactDraft { row: Row; revision: string | null; text?: string }

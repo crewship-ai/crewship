@@ -51,7 +51,7 @@ const queries=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0}}})
 f.refresh=()=>queries.invalidateQueries();
 createRoot(document.getElementById('root')).render(<QueryClientProvider client={queries}><AuthProvider><App/></AuthProvider></QueryClientProvider>);
 f.edit=id=>upsertDesignNode(f.design.doc,{id,type:'text',text:id,x:0,y:0,width:100,height:40});
-f.stored=()=>artifactDraftStorageState(artifactDraftKey('design-canvas','alice','w','page'))==='durable';
+f.stored=()=>artifactDraftStorageState(artifactDraftKey('design-tabs','alice','w','page'))==='durable';
 f.ids=()=>f.design.nodes.map(node=>node.id).sort();
 f.text=(id,text)=>upsertDesignNode(f.design.doc,{id,type:'text',text,x:0,y:0,width:100,height:40});
 f.lost=()=>f.design.conflicts.map(conflict=>({left:conflict.left,restored:conflict.restore.text}));
@@ -152,13 +152,14 @@ it_("names the unsent text a server text hides after a killed tab, with a remote
  const [notice] = await reopened.evaluate(() => (window as unknown as { designTabs: Tabs }).designTabs.lost())
  expect([notice.left, notice.restored].sort()).toEqual(["Mine", "Theirs"])
 }), 30_000)
-it_("erases the entries of every tab when read access goes", () => withTabs(async (open, edit, access) => {
+it_("erases the entries of every tab and the old row when read access goes", () => withTabs(async (open, edit, access) => {
  const first = await open(), second = await open()
  await edit(first, () => (window as unknown as { designTabs: Tabs }).designTabs.edit("from-first"))
  await edit(second, () => (window as unknown as { designTabs: Tabs }).designTabs.edit("from-second"))
+ await second.evaluate(() => (window as unknown as { designTabs: Tabs }).designTabs.writeOldFormat("old-format"))
  await kill(second)
  const rows = () => first.evaluate(() => new Promise<number>((resolve, reject) => { const r = indexedDB.open("crewship-artifact-drafts", 1); r.onerror = () => reject(r.error); r.onsuccess = () => { const db = r.result, tx = db.transaction("drafts", "readonly"), count = tx.objectStore("drafts").count(); tx.oncomplete = () => { db.close(); resolve(count.result) } } }))
- expect(await rows()).toBe(1)
+ await expect.poll(rows, { timeout: 5000 }).toBe(2)
  access.readable = false
  await first.evaluate(() => { const tabs = (window as unknown as { designTabs: Tabs }).designTabs; tabs.deny = true; return tabs.refresh() })
  await expect.poll(rows, { timeout: 5000 }).toBe(0)
