@@ -763,6 +763,18 @@ describe('native Word host authority and persistence',()=>{
  it('never unlocks or saves without exclusive durable draft storage',async()=>{m.openJournal.mockRejectedValueOnce(Error('storage unavailable'));mount();await ready();fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await screen.findByRole('alert');expect(ports.some(p=>p.setReadOnly.mock.calls.some(c=>c[0]===false))).toBe(false);expect(client.save).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()})
  it('retires a recovered draft whose bytes the server already holds instead of offering it',async()=>{const same={applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'0',editorRevision:'lost-ack',bytes:new TextEncoder().encode('{"body":[]}')},other={...same,editorRevision:'later',bytes:new Uint8Array([99])};journal.recovery.mockResolvedValueOnce([{draft:same,actions:['compare','copy']},{draft:other,actions:['compare','copy']}]);mount();await ready();await acquire();await waitFor(()=>expect(journal.discardRecovered).toHaveBeenCalledWith(expect.objectContaining({draft:same})));expect(journal.discardRecovered).not.toHaveBeenCalledWith(expect.objectContaining({draft:other}));expect(screen.getAllByRole('button',{name:'Porovnat'})).toHaveLength(1);expect(client.save).not.toHaveBeenCalled()})
  it('reconciles the lost save before closing the client when the connection retires',async()=>{mount();await ready();await acquire();client.save.mockImplementationOnce(()=>new Promise(()=>{}));client.reconcile.mockImplementation(async(r:NativeSaveRequest)=>receipt(r));act(()=>portOptions.at(-1)!.onChanged('pending','doc'));await waitFor(()=>expect(client.save).toHaveBeenCalledOnce());act(()=>stream?.('session_retired',{delivery:'stopped',reason:'session_closed'}));await waitFor(()=>expect(client.close).toHaveBeenCalled());expect(client.reconcile).toHaveBeenCalled();expect(client.reconcile.mock.invocationCallOrder[0]).toBeLessThan(client.close.mock.invocationCallOrder[0])})
+ // The button sits outside the frame; a person who pressed it keeps typing into the document.
+ it('returns the keyboard to the document after the check button',async()=>{
+  mount();await ready();await acquire()
+  client.save.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+  client.reconcile.mockImplementation(async(r:NativeSaveRequest)=>({...r,bytes:undefined,version:'2',durability:'node',issuedBy:'crewship',phase:'committed',candidateHash:r.contentHash}))
+  act(()=>portOptions.at(-1)!.onChanged('during-outage','doc'))
+  const check=await screen.findByRole('button',{name:'Ověřit výsledek'})
+  const frame=document.querySelector('iframe') as HTMLIFrameElement,focus=vi.spyOn(frame,'focus')
+  fireEvent.click(check)
+  await waitFor(()=>expect(client.reconcile).toHaveBeenCalled())
+  expect(focus).toHaveBeenCalled()
+ })
  // UX walkthrough RC-4 R05: offline before the save left the browser. The
  // server retires the attempt that never landed (reconcile 410); the editor must resume
  // saving instead of staying unsaved forever, and coming back online asks
