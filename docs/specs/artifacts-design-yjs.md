@@ -169,16 +169,18 @@ permissions, keeping the local document and any unsent changes.
 
 Each tab holds its own document, so the local canvas draft is one row every tab
 merges into under the cross-tab draft lock. It is never overwritten by one tab's
-view. A pending mark records a tab's unconfirmed work and its comparison base,
-and lags the draft by up to one barrier interval. A tab that confirms its work
-removes another tab's mark only when the confirmed document holds both that mark
-and the whole stored draft. On reopening, a mark ahead of the draft still gives
-the comparison base if the draft holds that base.
+view. Before each store, still under that lock, a tab records any text the merge
+would hide, as a durable conflict notice, and refreshes its pending mark. If the
+notice cannot be stored the canvas row stays as it was. A mark therefore never
+lags what its tab stored, and a confirmed document that covers a mark covers
+that tab's stored work. A mark ahead of the draft still gives the comparison
+base on reopening if the draft holds that base.
 
-A version save has five seconds on the monotonic clock to get a sync request
-through the client's copy of the server's bucket and receive the reply. Closing
-the socket, closing the editor or the caller's `AbortSignal` ends it at once, and
-the work stays unconfirmed in the browser.
+A version save has five seconds from the call, on the monotonic clock, to get a
+sync request through the client's copy of the server's bucket and receive the
+reply, including any wait behind earlier saves. Closing the socket, closing the
+editor or the caller's `AbortSignal` ends it at once, and the work stays
+unconfirmed in the browser.
 
 ## Who can do what
 

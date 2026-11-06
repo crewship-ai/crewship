@@ -30,32 +30,51 @@ createRoot(document.getElementById('root')).render(<QueryClientProvider client={
 f.edit=id=>upsertDesignNode(f.design.doc,{id,type:'text',text:id,x:0,y:0,width:100,height:40});
 f.stored=()=>artifactDraftStorageState(artifactDraftKey('design-canvas','alice','w','page'))==='durable';
 f.ids=()=>f.design.nodes.map(node=>node.id).sort();
+f.text=(id,text)=>upsertDesignNode(f.design.doc,{id,type:'text',text,x:0,y:0,width:100,height:40});
+f.lost=()=>f.design.conflicts.map(conflict=>({left:conflict.left,restored:conflict.restore.text}));
+f.shown=id=>f.design.nodes.find(node=>node.id===id)?.text;
 `
-type Tabs = { design: { editable: boolean } | null; edit(id: string): void; stored(): boolean; ids(): string[] }
-it.skipIf(!existsSync(chromium.executablePath()))("keeps the offline work of a killed tab when another tab stores the canvas", async () => {
+type Tabs = { design: { editable: boolean } | null; edit(id: string): void; text(id: string, text: string): void; stored(): boolean; ids(): string[]; lost(): { left?: string; restored?: string }[]; shown(id: string): string | undefined }
+const it_ = it.skipIf(!existsSync(chromium.executablePath()))
+async function withTabs(run: (open: () => Promise<Page>, edit: (page: Page, change: () => void) => Promise<void>) => Promise<void>) {
  const built = buildSync({ stdin: { contents: fixture, loader: "tsx", resolveDir: process.cwd() }, bundle: true, write: false, platform: "browser", format: "iife", define: { "process.env.NODE_ENV": '"test"' } })
  const browser = await chromium.launch({ headless: true })
  try {
   const context = await browser.newContext()
   await context.route("https://design-tabs.test/**", route => route.fulfill({ body: '<div id="root"></div>', contentType: "text/html" }))
-  const open = async () => {
+  await run(async () => {
    const page = await context.newPage()
    await installLocalDraftKeyFixture(page, { human: () => "alice" })
    await page.goto("https://design-tabs.test/pages/design")
    await page.addScriptTag({ content: built.outputFiles[0].text })
    await page.waitForFunction(() => (window as unknown as { designTabs: Tabs }).designTabs.design?.editable)
    return page
-  }
-  const edit = async (page: Page, id: string) => {
-   await page.evaluate(value => (window as unknown as { designTabs: Tabs }).designTabs.edit(value), id)
+  }, async (page, change) => {
+   await page.evaluate(change)
    await page.waitForFunction(() => (window as unknown as { designTabs: Tabs }).designTabs.stored())
-  }
-  const first = await open(), second = await open()
-  await edit(first, "from-first")
-  await edit(second, "from-second")
-  await first.close({ runBeforeUnload: false })
-  await second.close({ runBeforeUnload: false })
-  const reopened = await open()
-  expect(await reopened.evaluate(() => (window as unknown as { designTabs: Tabs }).designTabs.ids())).toEqual(["from-first", "from-second"])
+  })
  } finally { await browser.close() }
-}, 30_000)
+}
+it_("keeps the offline work of a killed tab when another tab stores the canvas", () => withTabs(async (open, edit) => {
+ const first = await open(), second = await open()
+ await edit(first, () => (window as unknown as { designTabs: Tabs }).designTabs.edit("from-first"))
+ await edit(second, () => (window as unknown as { designTabs: Tabs }).designTabs.edit("from-second"))
+ await first.close({ runBeforeUnload: false })
+ await second.close({ runBeforeUnload: false })
+ const reopened = await open()
+ expect(await reopened.evaluate(() => (window as unknown as { designTabs: Tabs }).designTabs.ids())).toEqual(["from-first", "from-second"])
+}), 30_000)
+it_("shows the text that lost when two killed tabs changed one layer", () => withTabs(async (open, edit) => {
+ const seed = await open()
+ await edit(seed, () => (window as unknown as { designTabs: Tabs }).designTabs.text("title", "Base"))
+ await seed.close({ runBeforeUnload: false })
+ const first = await open(), second = await open()
+ await edit(first, () => (window as unknown as { designTabs: Tabs }).designTabs.text("title", "First"))
+ await edit(second, () => (window as unknown as { designTabs: Tabs }).designTabs.text("title", "Second"))
+ await first.close({ runBeforeUnload: false })
+ await second.close({ runBeforeUnload: false })
+ const reopened = await open()
+ const shown = await reopened.evaluate(() => (window as unknown as { designTabs: Tabs }).designTabs.shown("title"))
+ await reopened.waitForFunction(() => (window as unknown as { designTabs: Tabs }).designTabs.lost().length > 0, undefined, { timeout: 3000 })
+ expect(await reopened.evaluate(() => (window as unknown as { designTabs: Tabs }).designTabs.lost())).toEqual([{ left: shown, restored: shown === "First" ? "Second" : "First" }])
+}), 30_000)

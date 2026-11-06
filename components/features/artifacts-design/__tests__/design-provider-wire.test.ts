@@ -187,8 +187,10 @@ describe("Design providers against the room's frame order", () => {
   settle()
   const saves: Promise<void>[] = []
   for (let save = 0; save < 12; save++) { upsertDesignNode(anna.doc, { id: "label", text: `Overlap ${save}` }); saves.push(anna.provider.synchronize()) }
+  // Saves queued past their own deadline refuse; none costs the socket.
+  const settled = Promise.allSettled(saves)
   await vi.advanceTimersByTimeAsync(20_000)
-  await Promise.all(saves)
+  expect((await settled)[0].status).toBe("fulfilled")
   expect(room.current.clients.size).toBe(1)
  })
  it("does not exhaust the room's sync budget during long typing", () => {
@@ -257,6 +259,45 @@ describe("A save waiting on the sync budget (#5017)", () => {
   expect(state).toEqual({ error: "Save cancelled.", done: true })
   await vi.advanceTimersByTimeAsync(200_000)
   expect(frames).not.toHaveBeenCalled()
+ })
+ it("stops a queued save at once when its caller aborts, behind one that gets no reply", async () => {
+  const anna = person("anna")
+  settle()
+  ;[...room.current.clients][0].send = () => {}
+  const first = outcome(anna.provider.synchronize())
+  const stop = new AbortController()
+  const queued = outcome(anna.provider.synchronize(stop.signal))
+  await vi.advanceTimersByTimeAsync(10)
+  stop.abort(new Error("Save cancelled."))
+  await vi.advanceTimersByTimeAsync(0)
+  expect(queued).toEqual({ error: "Save cancelled.", done: true })
+  expect(first.done).toBe(false)
+ })
+ it("counts the deadline from the call, not from the save's turn in the queue", async () => {
+  const anna = person("anna")
+  settle()
+  ;[...room.current.clients][0].send = () => {}
+  const first = outcome(anna.provider.synchronize())
+  const queued = outcome(anna.provider.synchronize())
+  await vi.advanceTimersByTimeAsync(5100)
+  expect(first.done).toBe(true)
+  expect(queued).toEqual({ error: "The canvas is still reconnecting. Your changes remain in this browser.", done: true })
+ })
+ it("sends nothing for a queued save aborted before its turn", async () => {
+  const anna = person("anna")
+  settle()
+  const wire = [...room.current.clients][0]
+  const real = wire.send.bind(wire)
+  let frames = 0
+  wire.send = () => {}
+  void anna.provider.synchronize().catch(() => {})
+  const stop = new AbortController()
+  void anna.provider.synchronize(stop.signal).catch(() => {})
+  await vi.advanceTimersByTimeAsync(10)
+  stop.abort(new Error("Save cancelled."))
+  wire.send = bytes => { frames++; real(bytes) }
+  await vi.advanceTimersByTimeAsync(6000)
+  expect(frames).toBe(0)
  })
  it("does not start when its caller already aborted", async () => {
   const anna = person("anna")

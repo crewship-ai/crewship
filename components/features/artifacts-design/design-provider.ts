@@ -29,7 +29,7 @@ export interface DesignTracking {
  /** Texts a merge dropped. */
  conflicts?: (found: DesignConflict[]) => void
 }
-type Waiter = { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+type Waiter = { resolve: () => void; reject: (error: Error) => void }
 
 /** Carries the standard y-websocket sync and awareness envelopes through Crewship auth. */
 export class DesignProvider {
@@ -203,27 +203,31 @@ export class DesignProvider {
   if (found.length) this.tracking.conflicts?.(found)
   this.reportPending()
  }
- /** Confirms everything local. Ends at the deadline, the socket's close, `destroy` or `cancel`, with the work kept. */
+ /** Confirms everything local. Ends at the deadline, counted from this call, or at the socket's close, `destroy` or `cancel`, with the work kept. */
  synchronize(cancel?: AbortSignal): Promise<void> {
-  const next = this.syncQueue.then(() => this.synchronizeNow(cancel))
-  this.syncQueue = next.catch(() => {})
-  return next
+  const deadline = new AbortController()
+  const timer = setTimeout(() => deadline.abort(new Error("The canvas is still reconnecting. Your changes remain in this browser.")), SAVE_DEADLINE_MS)
+  const stop = () => deadline.abort(cancel?.reason)
+  if (cancel?.aborted) stop()
+  else cancel?.addEventListener("abort", stop, { once: true })
+  const turn = this.syncQueue.then(() => this.synchronizeNow(deadline.signal))
+  this.syncQueue = turn.catch(() => {})
+  // A save behind others ends without waiting for its turn.
+  const ended = new Promise<never>((_, reject) => {
+   if (deadline.signal.aborted) reject(deadline.signal.reason)
+   else deadline.signal.addEventListener("abort", () => reject(deadline.signal.reason), { once: true })
+  })
+  return Promise.race([turn, ended]).finally(() => { clearTimeout(timer); cancel?.removeEventListener("abort", stop) })
  }
- private synchronizeNow(cancel?: AbortSignal): Promise<void> {
-  if (cancel?.aborted) return Promise.reject(cancel.reason)
+ private synchronizeNow(deadline: AbortSignal): Promise<void> {
+  if (deadline.aborted) return Promise.reject(deadline.reason)
   if (!this.ready) return Promise.reject(new Error("Reconnect before saving a version."))
   return new Promise<void>((resolve, reject) => {
-   const deadline = new AbortController()
-   const stop = () => deadline.abort(cancel?.reason)
-   cancel?.addEventListener("abort", stop, { once: true })
-   const settled = () => { clearTimeout(waiter.timer); clearTimeout(turn); cancel?.removeEventListener("abort", stop) }
+   const abort = () => { this.waiters.delete(waiter); waiter.reject(deadline.reason) }
+   const settled = () => { clearTimeout(turn); deadline.removeEventListener("abort", abort) }
    let turn: ReturnType<typeof setTimeout> | undefined
-   const waiter: Waiter = {
-    resolve: () => { settled(); resolve() },
-    reject: error => { settled(); reject(error) },
-    timer: setTimeout(() => deadline.abort(new Error("The canvas is still reconnecting. Your changes remain in this browser.")), SAVE_DEADLINE_MS),
-   }
-   deadline.signal.addEventListener("abort", () => { this.waiters.delete(waiter); waiter.reject(deadline.signal.reason) }, { once: true })
+   const waiter: Waiter = { resolve: () => { settled(); resolve() }, reject: error => { settled(); reject(error) } }
+   deadline.addEventListener("abort", abort, { once: true })
    // In the set from the start: a closing socket or `destroy` ends the wait too.
    this.waiters.add(waiter)
    // A save shares the bucket with background barriers and waits its turn.

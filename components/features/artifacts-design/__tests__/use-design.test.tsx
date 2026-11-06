@@ -4,15 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as Y from "yjs"
 import { tryRefresh } from "@/lib/api-fetch"
 import { useDesign } from "../use-design"
-import { designNodes, removeDesignNode, upsertDesignNode } from "../design-document"
+import { designNodes, designWorkCovered, removeDesignNode, upsertDesignNode } from "../design-document"
 vi.mock("@/lib/artifact-drafts", () => ({
  artifactDraftKey: (kind: string, human: string, workspace: string, page: string) => page ? `${kind === "design-canvas" ? "crewship-design:v2" : kind}:${human}:${workspace}:${page}` : null,
- loadArtifactDraft: async (key: string) => { await store.reads.get(key); if (store.failRead === key) throw new Error("storage"); return drafts.get(key) ?? "" },
- mergeArtifactDraft: async (key: string, merge: (existing: string) => string) => {
+ loadArtifactDraft: async (key: string) => { store.loads.push(key); await store.reads.get(key); if (store.failRead === key) throw new Error("storage"); return drafts.get(key) ?? "" },
+ mergeArtifactDraft: async (key: string, merge: (existing: string) => string | Promise<string>) => {
   store.merges.push(key)
   await store.mergeGate
-  if (store.failMerges) throw new Error("storage")
-  const text = merge(drafts.get(key) ?? "")
+  if (store.failMerges || (store.failConflictMerge && key.startsWith("design-conflict"))) throw new Error("storage")
+  const text = await merge(drafts.get(key) ?? "")
   if (text) drafts.set(key, text); else drafts.delete(key)
   return text
  },
@@ -28,7 +28,7 @@ vi.mock("@/lib/local-draft-seal", () => {
   return { close() {} }
  } }
 })
-const store = vi.hoisted(() => ({ mergeGate: Promise.resolve() as Promise<unknown>, reads: new Map<string, Promise<unknown>>(), failRead: "", failMerges: false, merges: [] as string[] }))
+const store = vi.hoisted(() => ({ mergeGate: Promise.resolve() as Promise<unknown>, reads: new Map<string, Promise<unknown>>(), failRead: "", failMerges: false, failConflictMerge: false, merges: [] as string[], loads: [] as string[] }))
 const server = vi.hoisted(() => ({ status: 200, post401: false, actorId: "same-user", bearer: false, pageId: "old-private-page", authorityRevision: "1", canEdit: true, nodes: [] as Record<string, unknown>[], providers: [] as { admittedEdit: boolean; editable: boolean; destroyed: boolean; deny: () => void; connect: () => void; prepare?: () => Promise<string>; dirty: () => void; tracking?: { baseline?: Uint8Array; unconfirmed?: boolean; pending?: (base: Uint8Array | null) => void; conflicts?: (found: unknown[]) => void } }[], urls: [] as string[], calls: [] as { url: string; method: string; skipRefresh?: boolean }[] }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "same-user", name: "Owner" } } }) }))
 vi.mock("@/lib/server-base", () => ({ resolveWsBase: () => "ws://localhost", getAuthMode: () => server.bearer ? "bearer" : "cookie" }))
@@ -70,7 +70,7 @@ beforeEach(() => {
  server.status = 200
  server.actorId = "same-user"
  server.bearer = false
- store.mergeGate = Promise.resolve(); store.reads.clear(); store.failRead = ""; store.failMerges = false; store.merges = []
+ store.mergeGate = Promise.resolve(); store.reads.clear(); store.failRead = ""; store.failMerges = false; store.failConflictMerge = false; store.merges = []; store.loads = []
  vi.mocked(tryRefresh).mockClear().mockResolvedValue("ok")
  server.authorityRevision = "1"
  server.canEdit = true
@@ -278,15 +278,49 @@ describe("Design canvas draft and pending marks stay on one generation (#5017)",
   await mounted()
   expect(server.providers[2].tracking?.baseline).toEqual(baseOf(base))
  })
- it("keeps every other mark when the stored canvas cannot be read for the coverage check", async () => {
-  const stored = new Y.Doc(); upsertDesignNode(stored, layer("stored"))
-  drafts.set(canvasKey, encoded(stored))
-  drafts.set(pendingKey, JSON.stringify({ "other-tab": mark(stored) }))
+ it("keeps the mark of newer work stored while another tab is clearing", async () => {
+  const base = new Y.Doc(); upsertDesignNode(base, layer("confirmed"))
+  drafts.set(canvasKey, encoded(base))
+  const writer = await mounted(), other = await mounted()
+  await edit(writer, layer("reached-the-server"))
+  await act(async () => server.providers[0].tracking!.pending!(baseOf(base)))
+  await waitFor(() => expect(drafts.get(pendingKey)).toBeTruthy())
+  act(() => Y.applyUpdate(other.result.current.doc!, Y.encodeStateAsUpdate(writer.result.current.doc!), "design-server"))
+  await act(async () => server.providers[1].tracking!.pending!(baseOf(base)))
+  await waitFor(() => expect(Object.keys(JSON.parse(drafts.get(pendingKey)!))).toHaveLength(2))
+  // The clear is admitted first; the newer canvas lands between its decision and its write.
+  let open = () => {}
+  store.mergeGate = new Promise<void>(resolve => { open = resolve })
+  await act(async () => { server.providers[1].tracking!.pending!(null); await new Promise(resolve => setTimeout(resolve, 10)) })
+  act(() => upsertDesignNode(writer.result.current.doc!, layer("unsent")))
+  store.mergeGate = Promise.resolve()
+  await act(async () => { open(); await new Promise(resolve => setTimeout(resolve, 20)) })
+  await waitFor(() => expect(ids(stateOf(drafts.get(canvasKey)!))).toContain("unsent"))
+  writer.unmount(); other.unmount()
+  await mounted()
+  expect(server.providers[2].tracking?.baseline).toEqual(baseOf(base))
+  expect(designWorkCovered(Y.snapshot(base), Uint8Array.from(atob(Object.values(JSON.parse(drafts.get(pendingKey)!) as Record<string, { work: string }>)[0].work), char => char.charCodeAt(0)))).toBe(false)
+ })
+ it("reads no canvas to clear a mark, so the admitted capture keeps its cipher", async () => {
   const view = await mounted()
-  store.failRead = canvasKey
-  await act(async () => server.providers[0].tracking!.pending!(null))
-  await waitFor(() => expect(view.result.current.draftError).toBe(true))
-  expect(Object.keys(JSON.parse(drafts.get(pendingKey)!))).toEqual(["other-tab"])
+  await edit(view, layer("sent"))
+  await act(async () => server.providers[0].tracking!.pending!(new Uint8Array([1])))
+  store.loads = []
+  await act(async () => { server.providers[0].tracking!.pending!(null); await new Promise(resolve => setTimeout(resolve, 10)) })
+  expect(store.loads).not.toContain(canvasKey)
+ })
+ it("refreshes a tab's mark with every canvas it stores", async () => {
+  const base = new Y.Doc()
+  const view = await mounted()
+  await edit(view, layer("first"))
+  await act(async () => server.providers[0].tracking!.pending!(baseOf(base)))
+  await edit(view, layer("second"))
+  await waitFor(() => expect(ids(stateOf(drafts.get(canvasKey)!))).toEqual(["first", "second"]))
+  const marks = Object.values(JSON.parse(drafts.get(pendingKey)!) as Record<string, { work: string }>)
+  expect(designWorkCovered(Y.snapshot(view.result.current.doc!), Uint8Array.from(atob(marks[0].work), char => char.charCodeAt(0)))).toBe(true)
+  const held = new Y.Doc(); Y.applyUpdate(held, Uint8Array.from(atob(drafts.get(canvasKey)!), char => char.charCodeAt(0)))
+  expect(designWorkCovered(Y.snapshot(held), Uint8Array.from(atob(marks[0].work), char => char.charCodeAt(0)))).toBe(true)
+  expect(Y.encodeStateVector(held)).toEqual(Y.encodeStateVector(view.result.current.doc!))
  })
  it("clears the last mark once the confirmed document holds the stored canvas too", async () => {
   const stored = new Y.Doc(); upsertDesignNode(stored, layer("stored"))
@@ -312,6 +346,86 @@ describe("Design canvas draft and pending marks stay on one generation (#5017)",
   drafts.set(pendingKey, JSON.stringify({ "other-tab": { ...mark(foreign), baseline: btoa(String.fromCharCode(...baseOf(foreign))) } }))
   await mounted()
   expect(server.providers[0].tracking?.baseline).toBeUndefined()
+ })
+})
+describe("Competing offline work in two tabs (#5017)", () => {
+ const titled = (text: string) => ({ ...layer("title", text), name: "Title" })
+ async function twoTabs() {
+  const base = new Y.Doc(); upsertDesignNode(base, titled("Base"))
+  drafts.set(canvasKey, encoded(base))
+  return { first: await mounted(), second: await mounted() }
+ }
+ const stored = () => JSON.parse(drafts.get(conflictKey) ?? "[]") as { mine: string; theirs: string; left?: string; restore: { text?: string } }[]
+ it("keeps the text that loses when two tabs change one layer and both die", async () => {
+  const { first, second } = await twoTabs()
+  await edit(first, titled("First"))
+  await edit(second, titled("Second"))
+  await waitFor(() => expect(drafts.get(conflictKey)).toBeTruthy())
+  first.unmount(); second.unmount()
+  const reopened = await mounted()
+  const shown = designNodes(reopened.result.current.doc!)[0].text
+  const lost = shown === "First" ? "Second" : "First"
+  await waitFor(() => expect(reopened.result.current.conflicts).toMatchObject([{ id: "title", left: shown, restore: { text: lost } }]))
+ })
+ it("stores the losing text before the canvas that hides it", async () => {
+  const { first, second } = await twoTabs()
+  await edit(first, titled("First"))
+  await waitFor(() => expect(designNodes(stateOf(drafts.get(canvasKey)!))[0].text).toBe("First"))
+  await edit(second, titled("Second"))
+  await waitFor(() => expect(store.merges.indexOf(conflictKey)).toBeGreaterThan(-1))
+  await waitFor(() => expect(stored()).toHaveLength(1))
+  expect(store.merges.indexOf(conflictKey)).toBeGreaterThan(store.merges.lastIndexOf(canvasKey))
+ })
+ it("keeps the stored canvas when the losing text cannot be stored", async () => {
+  const { first, second } = await twoTabs()
+  await edit(first, titled("First"))
+  await waitFor(() => expect(designNodes(stateOf(drafts.get(canvasKey)!))[0].text).toBe("First"))
+  const before = drafts.get(canvasKey)
+  store.failConflictMerge = true
+  await edit(second, titled("Second"))
+  await waitFor(() => expect(second.result.current.draftError).toBe(true))
+  expect(drafts.get(canvasKey)).toBe(before)
+ })
+ it("keeps one record per layer while the loser goes on typing", async () => {
+  const { first, second } = await twoTabs()
+  await edit(first, titled("First"))
+  await waitFor(() => expect(designNodes(stateOf(drafts.get(canvasKey)!))[0].text).toBe("First"))
+  for (const text of ["S", "Se", "Sec"]) {
+   await edit(second, titled(text))
+   await waitFor(() => expect(designNodes(stateOf(drafts.get(canvasKey)!))[0].text).toBeDefined())
+   await waitFor(() => expect(stored().length).toBeGreaterThan(0))
+   await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
+  }
+  // Clients order at random: either "First" lost once, or the newest typed text is the one on record.
+  expect(stored()).toHaveLength(1)
+  expect(["First", "Sec"]).toContain(stored()[0].restore.text)
+ })
+ it("keeps a text whose layer another tab deleted", async () => {
+  const { first, second } = await twoTabs()
+  act(() => removeDesignNode(first.result.current.doc!, "title"))
+  await edit(first, layer("elsewhere"))
+  await waitFor(() => expect(ids(stateOf(drafts.get(canvasKey)!))).toEqual(["elsewhere"]))
+  await edit(second, titled("Edited"))
+  await waitFor(() => expect(stored()).toMatchObject([{ id: "title", restore: { text: "Edited" }, kept: "theirs" }]))
+ })
+ it("reports nothing for a text one tab replaced knowing the other", async () => {
+  const { first, second } = await twoTabs()
+  await edit(first, titled("First"))
+  await waitFor(() => expect(designNodes(stateOf(drafts.get(canvasKey)!))[0].text).toBe("First"))
+  act(() => Y.applyUpdate(second.result.current.doc!, Y.encodeStateAsUpdate(first.result.current.doc!), "design-server"))
+  await edit(second, titled("On top"))
+  await waitFor(() => expect(designNodes(stateOf(drafts.get(canvasKey)!))[0].text).toBe("On top"))
+  expect(drafts.has(conflictKey)).toBe(false)
+ })
+ it("reports nothing for a tab retyping its own text beside the other tab's layer", async () => {
+  const { first, second } = await twoTabs()
+  await edit(first, layer("other-layer"))
+  await waitFor(() => expect(ids(stateOf(drafts.get(canvasKey)!))).toContain("other-layer"))
+  await edit(second, titled("One"))
+  await waitFor(() => expect(designNodes(stateOf(drafts.get(canvasKey)!)).find(node => node.id === "title")?.text).toBe("One"))
+  await edit(second, titled("Two"))
+  await waitFor(() => expect(designNodes(stateOf(drafts.get(canvasKey)!)).find(node => node.id === "title")?.text).toBe("Two"))
+  expect(drafts.has(conflictKey)).toBe(false)
  })
 })
 describe("Design conflict record", () => {

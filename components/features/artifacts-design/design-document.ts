@@ -159,6 +159,32 @@ export function designStateCovered(document: Y.Snapshot, state: Uint8Array): boo
  } catch { return false } finally { stored.destroy() }
 }
 
+/**
+ * What a merge of this tab's canvas into the stored one would drop. Tabs share
+ * no history until the server relays it, so a merge keeps one of two concurrent
+ * texts by client order, or none when the layer was deleted. A text the other
+ * side has already seen was replaced knowingly and does not count.
+ */
+export function designDraftConflicts(mine: Y.Doc, stored: Uint8Array): DesignConflict[] {
+ const other = new Y.Doc(), merged = new Y.Doc()
+ try {
+  Y.applyUpdate(other, stored)
+  Y.applyUpdate(merged, stored)
+  Y.applyUpdate(merged, Y.encodeStateAsUpdate(mine))
+  const [local, theirs, now] = [mine, other, merged].map(doc => new Map(designNodes(doc).map(node => [node.id, node])))
+  const unseen = (from: Y.Doc, by: Y.Doc, id: string) => {
+   // The map entry behind the value: only it says who wrote that text.
+   const item = from.getMap<Y.Map<unknown>>("nodes").get(id)?._map.get("text")
+   return Boolean(item && item.id.clock >= Y.getState(by.store, item.id.client))
+  }
+  return [...new Set([...local.keys(), ...theirs.keys()])].flatMap(id => {
+   const my = local.get(id), their = theirs.get(id), left = now.get(id)?.text
+   const lost = (node: DesignNode | undefined, from: Y.Doc, by: Y.Doc) => node?.type === "text" && node.text !== undefined && node.text !== left && unseen(from, by, id)
+   return ([[their, other, mine, "mine"], [my, mine, other, "theirs"]] as const).flatMap(([node, from, by, kept]) => lost(node, from, by) ? [{ id, name: my?.name || their?.name || "Text", mine: my?.text ?? "", theirs: their?.text ?? "", kept, left, restore: node! }] : [])
+  })
+ } finally { other.destroy(); merged.destroy() }
+}
+
 export function removeDesignNode(doc: Y.Doc, id: string) {
  doc.transact(() => {
   const nodes = doc.getMap<Y.Map<unknown>>("nodes")
