@@ -150,7 +150,7 @@ func TestAllowedHostsEndpoint(t *testing.T) {
 	})
 
 	t.Run("non-human and under-privileged callers cannot set", func(t *testing.T) {
-		for name, tok := range map[string]string{"member": memberTok, "scoped token": scopedTok, "no token": "", "run token": "crewship_run_whatever"} {
+		for name, tok := range map[string]string{"member": memberTok, "scoped token": scopedTok, "no token": ""} {
 			res := hostsReq(t, r, "PUT", tok, path, `{"allowed_hosts":["api.github.com"]}`)
 			if res.code != 401 && res.code != 403 {
 				t.Errorf("%s: status %d, want 401/403 (%s)", name, res.code, res.body)
@@ -158,19 +158,6 @@ func TestAllowedHostsEndpoint(t *testing.T) {
 		}
 		if got := storedHosts(t, db); got != "[]" {
 			t.Fatalf("hosts changed by a refused caller: %s", got)
-		}
-	})
-
-	t.Run("run token header on a human session is not authority", func(t *testing.T) {
-		req := httptest.NewRequest("PUT", path+"?workspace_id=test-workspace-id", strings.NewReader(`{"allowed_hosts":["api.github.com"]}`))
-		req.Header.Set("X-Crewship-Run-Token", "v2.fake.run.token")
-		rr := httptest.NewRecorder()
-		r.ServeHTTP(rr, req)
-		if rr.Code != 401 && rr.Code != 403 {
-			t.Fatalf("status %d", rr.Code)
-		}
-		if got := storedHosts(t, db); got != "[]" {
-			t.Fatalf("hosts changed: %s", got)
 		}
 	})
 

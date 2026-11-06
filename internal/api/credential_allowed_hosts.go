@@ -142,14 +142,56 @@ func (h *CredentialHandler) SetAllowedHosts(w http.ResponseWriter, r *http.Reque
 	prev, _ := parseStoredHosts(prevRaw)
 
 	enc, _ := json.Marshal(hosts)
-	if _, err := h.db.ExecContext(ctx,
+	changed := !equalHostLists(prev, hosts)
+	// The write and its audit row commit together: a change a person made is
+	// never missing from the timeline, and an unrecordable change is refused.
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "allowed hosts: begin", err)
+		return
+	}
+	if _, err := tx.ExecContext(ctx,
 		`UPDATE credentials SET allowed_hosts = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`,
 		string(enc), time.Now().UTC().Format(time.RFC3339), credID, workspaceID); err != nil {
+		_ = tx.Rollback()
 		replyInternalError(w, h.logger, "allowed hosts: write", err)
 		return
 	}
-	h.logger.Info("credential allowed_hosts changed", "credential_id", credID, "user_id", callerID,
-		"from", len(prev), "to", len(hosts))
+	if changed {
+		action := "changed"
+		switch {
+		case len(prev) == 0:
+			action = "set"
+		case len(hosts) == 0:
+			action = "cleared"
+		}
+		if recErr := RecordCredentialEventTx(ctx, tx, credID, AuditEventAllowedHosts, "", clientIP(r), map[string]any{
+			"action":        action,
+			"previous":      nonNilHosts(prev),
+			"allowed_hosts": nonNilHosts(hosts),
+			"changed_by":    callerID,
+			"auth_kind":     AuthKindFromContext(ctx),
+		}); recErr != nil {
+			_ = tx.Rollback()
+			replyInternalError(w, h.logger, "allowed hosts: audit", recErr)
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "allowed hosts: commit", err)
+		return
+	}
+	if changed {
+		// audit_logs is the long-lived trail (credential_audit is pruned by the
+		// retention sweep); both carry the old and the new list.
+		auditFromRequest(r, h.db, "credential.allowed_hosts", "CREDENTIAL", credID, map[string]interface{}{
+			"previous": nonNilHosts(prev), "allowed_hosts": nonNilHosts(hosts),
+		})
+		// A tightened list must not leave the value in running containers.
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		h.reconcileHostBoundCredential(rctx, credID, workspaceID)
+	}
 	if hosts == nil {
 		hosts = []string{}
 	}
@@ -179,4 +221,23 @@ func noticesFromWithholds(w map[string]credhostgate.Withhold) map[string]deliver
 		}
 	}
 	return out
+}
+
+func nonNilHosts(h []string) []string {
+	if h == nil {
+		return []string{}
+	}
+	return h
+}
+
+func equalHostLists(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

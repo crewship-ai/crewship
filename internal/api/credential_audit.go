@@ -114,6 +114,12 @@ const (
 	// AuditEventMoved: the credential was filed in, moved between or taken out
 	// of a Vault folder. Metadata carries the two folder ids; never the value.
 	AuditEventMoved CredentialAuditEvent = "MOVED"
+
+	// AuditEventAllowedHosts (#5045): a person set, changed or cleared the
+	// credential's approved hosts. Metadata carries the action
+	// (set|changed|cleared), the previous and new lists and the actor; never
+	// the value.
+	AuditEventAllowedHosts CredentialAuditEvent = "ALLOWED_HOSTS_CHANGED"
 )
 
 var validAuditEvents = map[CredentialAuditEvent]struct{}{
@@ -131,6 +137,8 @@ var validAuditEvents = map[CredentialAuditEvent]struct{}{
 
 	AuditEventReattributed: {},
 	AuditEventMoved:        {},
+
+	AuditEventAllowedHosts: {},
 }
 
 // credentialAuditDropped counts audit events that a best-effort call

@@ -43,13 +43,22 @@ func TestVaultCredentialResolver_HostBound(t *testing.T) {
 				}
 			}
 			ctx := context.Background()
+			var target *credentialTarget
 			if tc.target != "" {
-				ctx, _ = withCredentialTarget(ctx, tc.target)
+				ctx, target = withCredentialTarget(ctx, tc.target)
 			}
 			got, err := NewVaultCredentialResolver(db)(ctx, RunScope{WorkspaceID: "ws_test"}, "API_KEY")
 			if tc.release {
 				if err != nil || got != "tok" {
 					t.Fatalf("got (%q, %v), want released", got, err)
+				}
+				// The resolver must tell the http step the value is host-bound and
+				// which hosts are approved: the redirect check reads exactly this.
+				if wantBound := tc.hosts != "" && tc.hosts != "[]"; target != nil && target.bound != wantBound {
+					t.Fatalf("target.bound = %v, want %v", target.bound, wantBound)
+				}
+				if tc.hosts == `["api.partner.com"]` && (target == nil || len(target.hosts) != 1 || target.hosts[0] != "api.partner.com") {
+					t.Fatalf("target.hosts = %+v, want [api.partner.com]", target)
 				}
 				return
 			}

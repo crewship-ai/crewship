@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/codexauth"
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"github.com/crewship-ai/crewship/internal/credname"
 	"github.com/crewship-ai/crewship/internal/geminiauth"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -211,6 +212,24 @@ func (h *CredentialHandler) reconcileRevokedCredential(ctx context.Context, cred
 // just like an operator delete). workspaceID may be empty (the internal
 // caller doesn't always send it); it is then resolved from the credential row.
 func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *slog.Logger, ctr provider.ContainerProvider, credentialID, workspaceID string) {
+	reconcileCredentialFiles(ctx, db, logger, ctr, credentialID, workspaceID, nil)
+}
+
+// reconcileHostBoundCredential applies a changed approved-hosts list to running
+// containers (#5045): the credential's /secrets files are removed from every
+// crew the credential is no longer deliverable to, and left in place for crews
+// whose boundary still satisfies the list. A check that cannot be answered
+// removes the file (fail closed). Best-effort, like revocation.
+func (h *CredentialHandler) reconcileHostBoundCredential(ctx context.Context, credentialID, workspaceID string) {
+	reconcileCredentialFiles(ctx, h.db, h.logger, h.container, credentialID, workspaceID, func(crewID string) bool {
+		w, err := credhostgate.WithholdsForCrew(ctx, h.db, crewID, []string{credentialID})
+		return err == nil && len(w) == 0
+	})
+}
+
+// reconcileCredentialFiles is the shared core. keepCrew, when non-nil, names
+// crews whose copy must stay (nil removes from every crew, as revocation does).
+func reconcileCredentialFiles(ctx context.Context, db *sql.DB, logger *slog.Logger, ctr provider.ContainerProvider, credentialID, workspaceID string, keepCrew func(crewID string) bool) {
 	if ctr == nil {
 		return
 	}
@@ -318,6 +337,9 @@ func reconcileRevokedCredentialFiles(ctx context.Context, db *sql.DB, logger *sl
 	}
 
 	for _, t := range targets {
+		if keepCrew != nil && keepCrew(t.crewID) {
+			continue
+		}
 		// The stored env_var_name is normalised the SAME way the delivery path
 		// normalises it (credential_slot_delivery.go), because the file on disk
 		// carries the delivered name, not the stored one. Rows written before
