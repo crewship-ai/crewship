@@ -294,7 +294,9 @@ While a skill is locked:
   content. Each refuses with an error naming the lock (HTTP `423`) and writes
   a `skill.write_blocked` journal entry. Unlock the skill first to change it.
 - The lifecycle sweep never moves it to `stale` or `archived`, the same way an
-  assigned skill is held. A person can still archive it by hand.
+  assigned skill is held. A person who can manage skills can still
+  archive or restore it by hand, on purpose: the lock guards against autonomous
+  rewrites, not against an owner's own housekeeping.
 
 Only a signed-in person with the `OWNER` or `ADMIN` role can lock or unlock;
 run tokens, sidecar tokens and agent identities are refused with `403`.
