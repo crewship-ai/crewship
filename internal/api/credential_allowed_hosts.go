@@ -143,10 +143,11 @@ func (h *CredentialHandler) SetAllowedHosts(w http.ResponseWriter, r *http.Reque
 		replyInternalError(w, h.logger, "allowed hosts: load", err)
 		return
 	}
-	prev, _ := parseStoredHosts(prevRaw)
+	prev, prevErr := parseStoredHosts(prevRaw)
 
 	enc, _ := json.Marshal(hosts)
-	changed := !equalHostLists(prev, hosts)
+	// An unreadable list was fail-closed, so replacing it is always a change.
+	changed := prevErr != nil || !equalHostLists(prev, hosts)
 	// The write and its audit row commit together: a change a person made is
 	// never missing from the timeline, and an unrecordable change is refused.
 	tx, err := h.db.BeginTx(ctx, nil)

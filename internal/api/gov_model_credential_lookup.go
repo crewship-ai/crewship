@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 )
 
 // govModelCredentialLookup implements governance.CredentialLookup (the seam
@@ -46,16 +48,22 @@ func (l *govModelCredentialLookup) LookupCredential(ctx context.Context, workspa
 		return "", "", fmt.Errorf("gov-model credential lookup: empty workspace or credential id")
 	}
 
-	var encrypted, credType, credProvider string
+	var encrypted, credType, credProvider, allowedHosts string
 	err := l.db.QueryRowContext(ctx, `
-		SELECT encrypted_value, type, COALESCE(provider, '') FROM credentials
+		SELECT encrypted_value, type, COALESCE(provider, ''), COALESCE(allowed_hosts, '[]') FROM credentials
 		WHERE id = ? AND workspace_id = ? AND status = 'ACTIVE' AND deleted_at IS NULL`,
-		credentialID, workspaceID).Scan(&encrypted, &credType, &credProvider)
+		credentialID, workspaceID).Scan(&encrypted, &credType, &credProvider, &allowedHosts)
 	if err == sql.ErrNoRows {
 		return "", "", fmt.Errorf("gov-model credential %q not found, inactive, or revoked in workspace %q", credentialID, workspaceID)
 	}
 	if err != nil {
 		return "", "", fmt.Errorf("gov-model credential lookup: %w", err)
+	}
+
+	// The Keeper reaches this on an agent's request and the destination is not
+	// known here, so a host-bound credential cannot serve as the governance model.
+	if _, bound, _ := credhostgate.Bound(allowedHosts); bound {
+		return "", "", fmt.Errorf("gov-model credential %q is bound to approved hosts and is withheld", credentialID)
 	}
 
 	dec, err := decryptCredential(encrypted)
