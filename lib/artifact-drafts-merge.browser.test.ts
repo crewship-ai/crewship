@@ -12,7 +12,7 @@ import { expect, it } from "vitest"
 
 const executable = chromium.executablePath()
 type Api = typeof import("./artifact-drafts") & Pick<typeof import("./local-draft-seal"), "beginLocalDraftIdentity" | "finishLocalDraftIdentity">
-type W = Window & { artifactDrafts: Api; pending?: Promise<string>; release?: () => void }
+type W = Window & { artifactDrafts: Api; pending?: Promise<string>; release?: () => void; capture?: () => Promise<string> }
 
 async function tab(page: Page, human: () => string) {
   await installLocalDraftKeyFixture(page, { human })
@@ -261,5 +261,34 @@ it.skipIf(!existsSync(executable))("G4 r6: a bundle recovery waiting on decrypt 
     expect(owner.sort()).toEqual(["A", "B (stopped)", "C (newer, tab B)", "D (committed, tab B)"].sort())
     // The other identity still gets nothing.
     expect(await a.evaluate(async key => (window as unknown as W).artifactDrafts.readArtifactDraft(key), key)).toBe("")
+  } finally { await browser.close() }
+}, 60000)
+
+it.skipIf(!existsSync(executable))("#5017: an admitted capture after an identity change keeps another tab's newer row and adds its own part", async () => {
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const context = await browser.newContext()
+    await context.route("http://localhost/**", route => route.fulfill({ body: "<!doctype html><title>Drafts</title>", contentType: "text/html" }))
+    let humanA = "alice"
+    const a = await context.newPage(), b = await context.newPage()
+    await tab(a, () => humanA)
+    await tab(b, () => "alice")
+    const key = JSON.stringify(["alice", "design-canvas", "w", "page_1"])
+    const union = (parts: string[]) => JSON.stringify(parts.flatMap(part => JSON.parse(part) as string[]))
+    await a.evaluate(async ({ key, union }) => {
+      const w = window as unknown as W
+      await w.artifactDrafts.loadArtifactDraft(key)
+      w.capture = w.artifactDrafts.admittedArtifactDraftMerge(key, existing => JSON.stringify([...(existing ? JSON.parse(existing) as string[] : []), "from A"]), new Function("parts", `return (${union})(parts)`) as (parts: string[]) => string)
+    }, { key, union: union.toString() })
+    await b.evaluate(async key => { await (window as unknown as W).artifactDrafts.mergeArtifactDraft(key, () => JSON.stringify(["from B"])) }, key)
+    humanA = "bob"
+    expect(await a.evaluate(async () => {
+      const w = window as unknown as W
+      w.artifactDrafts.beginLocalDraftIdentity("bob")
+      void w.artifactDrafts.suspendOtherArtifactDrafts("bob")
+      try { return await w.capture!() } catch (error) { return `rejected: ${String(error)}` }
+    })).toBe("")
+    const owner = JSON.parse(await b.evaluate(async ({ key, union }) => (window as unknown as W).artifactDrafts.loadArtifactDraft(key, new Function("parts", `return (${union})(parts)`) as (parts: string[]) => string), { key, union: union.toString() })) as string[]
+    expect(owner.sort()).toEqual(["from A", "from B"])
   } finally { await browser.close() }
 }, 60000)

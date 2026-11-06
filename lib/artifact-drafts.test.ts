@@ -466,29 +466,26 @@ it("a verified read revocation still removes a fallback copy whose superseded re
   expect(local.has("artifact-comment:alice:w:page")).toBe(false)
 })
 
-it("keeps the merge lock through an asynchronous merge and stores its result", async () => {
+it("retires an admitted capture when the draft is loaded again: a store or clear must not load", async () => {
  const store = durableStore()
  const drafts = await load()
  drafts.setArtifactDraftStore(store as never)
  const key = drafts.artifactDraftKey("design-canvas", "alice", "w", "page")!
- let open = () => {}
- const held = new Promise<void>(resolve => { open = resolve })
- const first = drafts.mergeArtifactDraft(key, async existing => { await held; return `${existing}A` })
- const second = drafts.mergeArtifactDraft(key, existing => `${existing}B`)
- await Promise.resolve()
- open()
- await expect(first).resolves.toBe("A")
- await expect(second).resolves.toBe("AB")
+ await drafts.loadArtifactDraft(key)
+ const capture = drafts.admittedArtifactDraftMerge(key, () => "captured", parts => parts.join(""))
+ await expect(capture()).resolves.toBe("captured")
+ await drafts.loadArtifactDraft(key)
+ await expect(capture()).rejects.toThrow("no longer signed in")
 })
 
-it("retires an admitted capture when the draft is loaded again: a coverage check must not load", async () => {
+it("merges an admitted capture into what the row holds", async () => {
  const store = durableStore()
  const drafts = await load()
  drafts.setArtifactDraftStore(store as never)
  const key = drafts.artifactDraftKey("design-canvas", "alice", "w", "page")!
+ await drafts.writeArtifactDraft(key, "other tab")
  await drafts.loadArtifactDraft(key)
- const capture = drafts.admittedArtifactDraftCapture(key)
- await expect(capture("first")).resolves.toBeUndefined()
- await drafts.loadArtifactDraft(key)
- await expect(capture("second")).rejects.toThrow("no longer signed in")
+ const capture = drafts.admittedArtifactDraftMerge(key, existing => `${existing}+mine`, parts => parts.join("|"))
+ await expect(capture()).resolves.toBe("other tab+mine")
+ await expect(drafts.loadArtifactDraft(key)).resolves.toBe("other tab+mine")
 })

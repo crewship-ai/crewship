@@ -388,13 +388,15 @@ async function readInLane(key: string, row: Row, combine?: (parts: string[]) => 
  * The read runs at execution time under a cross-tab Web Lock, so a late
  * result never overwrites a newer draft. Resolves with the stored text ("" for
  * a caller retired by an identity change); rejects when nothing durable was
- * stored. An asynchronous merge keeps this draft's lock while it runs, so it may
- * take the lock of a draft that is only ever taken inside this one, never the reverse.
+ * stored.
  */
-export function mergeArtifactDraft(key: string, merge: (existing: string) => string | Promise<string>, combine?: (parts: string[]) => string): Promise<string> {
+export function mergeArtifactDraft(key: string, merge: (existing: string) => string, combine?: (parts: string[]) => string): Promise<string> {
   const row = parse(key)
   if (!row) return Promise.reject(new Error("Invalid artifact draft key."))
   if (retired(row)) return Promise.reject(retiredError())
+  return runMerge(key, row, merge, combine)
+}
+function runMerge(key: string, row: Row, merge: (existing: string) => string, combine?: (parts: string[]) => string): Promise<string> {
   // A merge is not coalesced: its write number is fixed here, at admission.
   const seq = (writes.get(key) ?? 0) + 1
   writes.set(key, seq)
@@ -411,14 +413,14 @@ export function mergeArtifactDraft(key: string, merge: (existing: string) => str
       // result as one more part under the original owner's scope. Nothing
       // stored is opened or replaced; the owner's next load combines them.
       if (existing.append.length >= MAX_PARTS) throw new Error("Artifact draft storage is unavailable.")
-      const sealed = await (await cipherFor(key, row)).seal(await merge(""), row[1])
+      const sealed = await (await cipherFor(key, row)).seal(merge(""), row[1])
       await durable()!.put(row, JSON.stringify({ format: BUNDLE, parts: [...existing.append, sealed] }), crypto.randomUUID())
       successfulWrites.delete(key)
       stored(key, seq)
       current.failed = false
       return ""
     }
-    const text = await merge(existing.text)
+    const text = merge(existing.text)
     await persist(row, text, seq)
     // The merge is now the lane's latest durable value: an older failed write
     // must not be retried over it when the lane retires. A write queued after
@@ -439,14 +441,13 @@ export function mergeArtifactDraft(key: string, merge: (existing: string) => str
 
 export function writeArtifactDraft(key: string, text: string): Promise<void> { return queueArtifactDraft(key, text) }
 /** Captured only after a successful draft load. This capability may finish
- * local persistence during retirement; it never obtains new authority. */
-export function admittedArtifactDraftCapture(key: string): (text: string) => Promise<void> {
-  const cell = cipherCells.get(key)
-  if (!cell) throw new Error("Private draft was not admitted.")
-  return text => {
-    if (cipherCells.get(key) !== cell) return Promise.reject(retiredError())
-    return queueArtifactDraft(key, text, true)
-  }
+ * local persistence during retirement; it never obtains new authority. It is a
+ * merge, not a replacement, because other tabs share the draft: what it cannot
+ * open after an identity change it keeps, adding a sealed part. */
+export function admittedArtifactDraftMerge(key: string, merge: (existing: string) => string, combine: (parts: string[]) => string): () => Promise<string> {
+  const cell = cipherCells.get(key), row = parse(key)
+  if (!cell || !row) throw new Error("Private draft was not admitted.")
+  return () => cipherCells.get(key) === cell ? runMerge(key, row, merge, combine) : Promise.reject(retiredError())
 }
 /**
  * Reads the draft ("" when there is none), moving an older localStorage copy

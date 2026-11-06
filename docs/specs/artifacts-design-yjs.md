@@ -167,14 +167,19 @@ standard `y-protocols` sync and awareness messages in binary frames.
 The browser opens a fresh socket every five minutes after rechecking its
 permissions, keeping the local document and any unsent changes.
 
-Each tab holds its own document, so the local canvas draft is one row every tab
-merges into under the cross-tab draft lock. It is never overwritten by one tab's
-view. Before each store, still under that lock, a tab records any text the merge
-would hide, as a durable conflict notice, and refreshes its pending mark. If the
-notice cannot be stored the canvas row stays as it was. A mark therefore never
-lags what its tab stored, and a confirmed document that covers a mark covers
-that tab's stored work. A mark ahead of the draft still gives the comparison
-base on reopening if the draft holds that base.
+Each tab holds its own document, so the local canvas draft is one sealed row
+with one entry per tab: that tab's full document state and the confirmed canvas
+it was made from. An entry and its base are one write, and a tab replaces only
+its own entry, under the cross-tab draft lock. After an identity change a tab
+that cannot open the row adds a sealed part, and the owner's next load combines
+the parts. Rows and marks written by older builds are still read: a bare state
+counts as one entry, and a mark supplies its base.
+
+Reopening merges every entry in a fixed order and turns what the merge hides into
+a conflict notice, so a notice exists only for texts that were really stored. An
+entry goes when a confirmed document holds it, whichever tab wrote it, and only
+after the notices made from it are stored. Until then a reopen repeats the same
+work.
 
 A version save has five seconds from the call, on the monotonic clock, to get a
 sync request through the client's copy of the server's bucket and receive the
