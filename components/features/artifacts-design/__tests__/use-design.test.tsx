@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import * as Y from "yjs"
 import { tryRefresh } from "@/lib/api-fetch"
 import { useDesign } from "../use-design"
-import { designNodes, upsertDesignNode } from "../design-document"
+import { designNodes, removeDesignNode, upsertDesignNode } from "../design-document"
 vi.mock("@/lib/artifact-drafts", () => ({
  artifactDraftKey: (kind: string, human: string, workspace: string, page: string) => page ? `${kind === "design-canvas" ? "crewship-design:v2" : kind}:${human}:${workspace}:${page}` : null,
  loadArtifactDraft: async (key: string) => { await store.reads.get(key); if (store.failRead === key) throw new Error("storage"); return drafts.get(key) ?? "" },
@@ -195,6 +195,123 @@ describe("Design unsynced work", () => {
   await mounted()
   await act(async () => server.providers[0].tracking!.pending!(null))
   expect(store.merges).not.toContain(pendingKey)
+ })
+})
+const layer = (id: string, text = id) => ({ id, type: "text" as const, text, x: 0, y: 0, width: 200, height: 40 })
+const ids = (doc: Y.Doc) => designNodes(doc).map(node => node.id).sort()
+const stateOf = (encodedState: string) => { const doc = new Y.Doc(); Y.applyUpdate(doc, Uint8Array.from(atob(encodedState), char => char.charCodeAt(0))); return doc }
+const edit = async (view: Awaited<ReturnType<typeof mounted>>, node: ReturnType<typeof layer>) => {
+ act(() => upsertDesignNode(view.result.current.doc!, node))
+ await act(async () => { await Promise.resolve() })
+}
+const baseOf = (doc: Y.Doc) => Y.encodeStateAsUpdate(doc)
+describe("Design canvas draft and pending marks stay on one generation (#5017)", () => {
+ it("keeps the work of two tabs in the stored canvas when one of them is killed", async () => {
+  const first = await mounted(), second = await mounted()
+  await edit(first, layer("from-first"))
+  await act(async () => server.providers[0].tracking!.pending!(baseOf(new Y.Doc())))
+  await edit(second, layer("from-second"))
+  await act(async () => server.providers[1].tracking!.pending!(baseOf(new Y.Doc())))
+  first.unmount(); second.unmount()
+  const reopened = await mounted()
+  expect(ids(reopened.result.current.doc!)).toEqual(["from-first", "from-second"])
+ })
+ it("keeps a deletion from one tab when the other tab stores the canvas", async () => {
+  const shared = new Y.Doc(); upsertDesignNode(shared, layer("gone")); upsertDesignNode(shared, layer("stays"))
+  drafts.set(canvasKey, encoded(shared))
+  const first = await mounted(), second = await mounted()
+  act(() => removeDesignNode(first.result.current.doc!, "gone"))
+  await act(async () => { await Promise.resolve() })
+  await edit(second, layer("added"))
+  first.unmount(); second.unmount()
+  expect(ids(stateOf(drafts.get(canvasKey)!))).toEqual(["added", "stays"])
+ })
+ it("stores the newest canvas once while earlier stores are still waiting", async () => {
+  const view = await mounted()
+  let open = () => {}
+  store.mergeGate = new Promise<void>(resolve => { open = resolve })
+  for (let edits = 0; edits < 20; edits++) act(() => upsertDesignNode(view.result.current.doc!, layer("typing", `Key ${edits}`)))
+  expect(store.merges.filter(key => key === canvasKey)).toHaveLength(1)
+  await act(async () => { open(); await Promise.resolve() })
+  await waitFor(() => expect(designNodes(stateOf(drafts.get(canvasKey)!))[0].text).toBe("Key 19"))
+ })
+ it("reports a canvas that could not be stored and stores the next edit", async () => {
+  const view = await mounted()
+  store.failMerges = true
+  await edit(view, layer("refused"))
+  await waitFor(() => expect(view.result.current.draftError).toBe(true))
+  store.failMerges = false
+  await edit(view, layer("next"))
+  await waitFor(() => expect(ids(stateOf(drafts.get(canvasKey)!))).toEqual(["next", "refused"]))
+ })
+ it("reopens a killed tab with its unsent work, its mark and its baseline", async () => {
+  const before = new Y.Doc(); upsertDesignNode(before, layer("confirmed"))
+  drafts.set(canvasKey, encoded(before))
+  const view = await mounted()
+  await edit(view, layer("unsent"))
+  await act(async () => server.providers[0].tracking!.pending!(baseOf(before)))
+  await waitFor(() => expect(drafts.get(pendingKey)).toBeTruthy())
+  view.unmount()
+  const reopened = await mounted()
+  expect(ids(reopened.result.current.doc!)).toEqual(["confirmed", "unsent"])
+  expect(server.providers[1].tracking).toMatchObject({ unconfirmed: true, baseline: baseOf(before) })
+  expect(reopened.result.current.unsynced).toBe(true)
+ })
+ it("keeps a lagging mark while the stored canvas holds work the confirmed document lacks", async () => {
+  const base = new Y.Doc(); upsertDesignNode(base, layer("confirmed"))
+  drafts.set(canvasKey, encoded(base))
+  const writer = await mounted(), other = await mounted()
+  await edit(writer, layer("reached-the-server"))
+  await act(async () => server.providers[0].tracking!.pending!(baseOf(base)))
+  await waitFor(() => expect(drafts.get(pendingKey)).toBeTruthy())
+  // The other tab receives that much from the server and marks work of its own.
+  act(() => Y.applyUpdate(other.result.current.doc!, Y.encodeStateAsUpdate(writer.result.current.doc!), "design-server"))
+  await act(async () => server.providers[1].tracking!.pending!(baseOf(base)))
+  // Newer work lands in the canvas; the mark refreshes only on the barrier pace.
+  await edit(writer, layer("unsent"))
+  await waitFor(() => expect(ids(stateOf(drafts.get(canvasKey)!))).toContain("unsent"))
+  await act(async () => server.providers[1].tracking!.pending!(null))
+  await waitFor(() => expect(store.merges.filter(key => key === pendingKey).length).toBeGreaterThanOrEqual(3))
+  await act(async () => { await Promise.resolve() })
+  expect(Object.keys(JSON.parse(drafts.get(pendingKey) ?? "{}"))).toHaveLength(1)
+  writer.unmount(); other.unmount()
+  await mounted()
+  expect(server.providers[2].tracking?.baseline).toEqual(baseOf(base))
+ })
+ it("keeps every other mark when the stored canvas cannot be read for the coverage check", async () => {
+  const stored = new Y.Doc(); upsertDesignNode(stored, layer("stored"))
+  drafts.set(canvasKey, encoded(stored))
+  drafts.set(pendingKey, JSON.stringify({ "other-tab": mark(stored) }))
+  const view = await mounted()
+  store.failRead = canvasKey
+  await act(async () => server.providers[0].tracking!.pending!(null))
+  await waitFor(() => expect(view.result.current.draftError).toBe(true))
+  expect(Object.keys(JSON.parse(drafts.get(pendingKey)!))).toEqual(["other-tab"])
+ })
+ it("clears the last mark once the confirmed document holds the stored canvas too", async () => {
+  const stored = new Y.Doc(); upsertDesignNode(stored, layer("stored"))
+  drafts.set(canvasKey, encoded(stored))
+  drafts.set(pendingKey, JSON.stringify({ "closed-tab": mark(stored) }))
+  await mounted()
+  await act(async () => server.providers[0].tracking!.pending!(null))
+  await waitFor(() => expect(drafts.has(pendingKey)).toBe(false))
+ })
+ it("keeps the recovery baseline when the stored canvas is older than the mark", async () => {
+  const base = new Y.Doc(); upsertDesignNode(base, layer("confirmed"))
+  const older = new Y.Doc(); Y.applyUpdate(older, baseOf(base)); upsertDesignNode(older, layer("stored-unsent"))
+  const newer = new Y.Doc(); Y.applyUpdate(newer, baseOf(older)); upsertDesignNode(newer, layer("never-stored"))
+  drafts.set(canvasKey, encoded(older))
+  drafts.set(pendingKey, JSON.stringify({ "killed-tab": { ...mark(newer), baseline: btoa(String.fromCharCode(...baseOf(base))) } }))
+  await mounted()
+  expect(server.providers[0].tracking?.baseline).toEqual(baseOf(base))
+ })
+ it("does not compare from a baseline the stored canvas does not hold", async () => {
+  const stored = new Y.Doc(); upsertDesignNode(stored, layer("stored"))
+  const foreign = new Y.Doc(); upsertDesignNode(foreign, layer("foreign"))
+  drafts.set(canvasKey, encoded(stored))
+  drafts.set(pendingKey, JSON.stringify({ "other-tab": { ...mark(foreign), baseline: btoa(String.fromCharCode(...baseOf(foreign))) } }))
+  await mounted()
+  expect(server.providers[0].tracking?.baseline).toBeUndefined()
  })
 })
 describe("Design conflict record", () => {
@@ -411,7 +528,7 @@ describe("Design local draft identity", () => {
   const old = mount()
   await waitFor(() => expect(old.result.current.doc).not.toBeNull())
   act(() => upsertDesignNode(old.result.current.doc!, { id: "confidential", type: "text", text: "Private old canvas", x: 0, y: 0, width: 200, height: 40, fill: "#111111" }))
-  expect(drafts.size).toBe(1)
+  await waitFor(() => expect(drafts.size).toBe(1))
   old.unmount()
   const legacyKey = "crewship-design:same-user:same-workspace:reused-slug"
   const legacyDraft = [...drafts.values()][0]
@@ -430,7 +547,7 @@ describe("Design local drafts after access loss", () => {
   await waitFor(() => expect(view.result.current.doc).not.toBeNull())
   act(() => upsertDesignNode(view.result.current.doc!, { id: "confidential", type: "text", text: "Private canvas", x: 0, y: 0, width: 200, height: 40, fill: "#111111" }))
   drafts.set("design-comment:v2:same-user:same-workspace:old-private-page", "Unsent comment")
-  expect(drafts.has("crewship-design:v2:same-user:same-workspace:old-private-page")).toBe(true)
+  await waitFor(() => expect(drafts.has("crewship-design:v2:same-user:same-workspace:old-private-page")).toBe(true))
   server.status = 404
   await act(async () => { await clients[0].invalidateQueries({ queryKey: ["artifact-design"] }) })
   await waitFor(() => expect(view.result.current.query.isError).toBe(true))

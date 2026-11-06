@@ -150,6 +150,15 @@ export function designWorkCovered(document: Y.Snapshot, work: Uint8Array): boole
  } catch { return false }
 }
 
+/** Whether the document holds everything in a full-state update. An unreadable update is not held. */
+export function designStateCovered(document: Y.Snapshot, state: Uint8Array): boolean {
+ const stored = new Y.Doc()
+ try {
+  Y.applyUpdate(stored, state)
+  return designWorkCovered(document, Y.encodeSnapshot(Y.snapshot(stored)))
+ } catch { return false } finally { stored.destroy() }
+}
+
 export function removeDesignNode(doc: Y.Doc, id: string) {
  doc.transact(() => {
   const nodes = doc.getMap<Y.Map<unknown>>("nodes")

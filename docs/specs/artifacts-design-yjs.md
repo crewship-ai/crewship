@@ -167,6 +167,19 @@ standard `y-protocols` sync and awareness messages in binary frames.
 The browser opens a fresh socket every five minutes after rechecking its
 permissions, keeping the local document and any unsent changes.
 
+Each tab holds its own document, so the local canvas draft is one row every tab
+merges into under the cross-tab draft lock. It is never overwritten by one tab's
+view. A pending mark records a tab's unconfirmed work and its comparison base,
+and lags the draft by up to one barrier interval. A tab that confirms its work
+removes another tab's mark only when the confirmed document holds both that mark
+and the whole stored draft. On reopening, a mark ahead of the draft still gives
+the comparison base if the draft holds that base.
+
+A version save has five seconds on the monotonic clock to get a sync request
+through the client's copy of the server's bucket and receive the reply. Closing
+the socket, closing the editor or the caller's `AbortSignal` ends it at once, and
+the work stays unconfirmed in the browser.
+
 ## Who can do what
 
 Live-read/Edit authority means the effective authority of this request, not

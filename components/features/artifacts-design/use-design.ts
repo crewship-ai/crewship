@@ -6,13 +6,13 @@ import * as Y from "yjs"
 import type { ArtifactOrigin } from "@/hooks/use-artifact-agent-dispatch"
 import type { ArtifactComment } from "@/hooks/use-artifact-project"
 import { useSessionSafe } from "@/hooks/use-auth"
-import { artifactDraftKey, loadArtifactDraft, mergeArtifactDraft, writeArtifactDraft, admittedArtifactDraftCapture, purgeLocalDraftPage, captureLocalDraftPage } from "@/lib/artifact-drafts"
+import { artifactDraftKey, loadArtifactDraft, mergeArtifactDraft, admittedArtifactDraftCapture, purgeLocalDraftPage, captureLocalDraftPage } from "@/lib/artifact-drafts"
 import { createLocalDraftCipher, LocalDraftReadRevoked } from "@/lib/local-draft-seal"
 import { registerDocumentDraftWriter } from "@/lib/document-queue"
 import { apiFetch, tryRefresh } from "@/lib/api-fetch"
 import { getAuthMode, resolveWsBase } from "@/lib/server-base"
 import { DesignProvider, type DesignConnection, type DesignPeer } from "./design-provider"
-import { designConflictIdentity, designNodes, designWorkCovered, mergeDesignConflictRecord, parseDesignConflictRecord, type DesignConflict, type DesignNode } from "./design-document"
+import { designConflictIdentity, designNodes, designStateCovered, designWorkCovered, mergeDesignConflictRecord, parseDesignConflictRecord, type DesignConflict, type DesignNode } from "./design-document"
 
 interface DesignState {
  page_id: string
@@ -39,7 +39,7 @@ function encodeDraft(bytes: Uint8Array) {
  return btoa(value)
 }
 const decodeDraft = (value: string) => Uint8Array.from(atob(value), char => char.charCodeAt(0))
-/** Unconfirmed work per tab: only a marker and a comparison base, never the work itself (that is the canvas draft). */
+/** Unconfirmed work per tab: only a marker and a comparison base, never the work itself (that is the canvas draft, which every tab merges into). */
 interface PendingMark { baseline: string; work: string }
 function readPendingRecord(text: string): Record<string, PendingMark> {
  try {
@@ -135,16 +135,25 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const storeConflictsRef = useRef(storeConflicts)
  useEffect(() => { storeConflictsRef.current = storeConflicts }, [storeConflicts])
  const pendingWriter = useRef("")
- // Marks this tab's work generation, or clears every generation the confirmed
- // document holds. Decided against the record as stored at that moment: a mark
- // for work this document never contained stays with its own tab's draft.
- const storePending = useCallback((target: string, change: PendingMark | Y.Snapshot) => mergeArtifactDraft(target, existing => {
+ // Marks this tab's work generation.
+ const markPending = useCallback((target: string, mark: PendingMark) => mergeArtifactDraft(target, existing => {
   pendingWriter.current ||= crypto.randomUUID()
-  const record = readPendingRecord(existing)
-  if ("work" in change) record[pendingWriter.current] = change
-  else for (const [writer, mark] of Object.entries(record)) if (designWorkCovered(change, decodeDraft(mark.work))) delete record[writer]
-  return Object.keys(record).length ? JSON.stringify(record) : ""
+  return JSON.stringify({ ...readPendingRecord(existing), [pendingWriter.current]: mark })
  }), [])
+ // Clears this tab's mark and every other generation the confirmed document
+ // holds, decided against the record as stored at that moment. A mark refreshes
+ // on the barrier pace and lags the canvas, so another tab's mark also stays
+ // while the stored canvas holds work the confirmed document does not: it is
+ // the last record of that unsent work and of its comparison base.
+ const clearPending = useCallback(async (target: string, canvasKey: string, confirmed: Y.Snapshot) => {
+  const canvas = await loadArtifactDraft(canvasKey)
+  const held = !canvas || designStateCovered(confirmed, decodeDraft(canvas))
+  await mergeArtifactDraft(target, existing => {
+   const record = readPendingRecord(existing)
+   for (const [writer, mark] of Object.entries(record)) if ((held || writer === pendingWriter.current) && designWorkCovered(confirmed, decodeDraft(mark.work))) delete record[writer]
+   return Object.keys(record).length ? JSON.stringify(record) : ""
+  })
+ }, [])
  const conflicts = designConflictView(conflictKey && ledger?.key === conflictKey && readRevokedPage !== pageId ? ledger : undefined)
  const editable = Boolean(readRevokedPage !== pageId && draftReady && authorityRevision !== null && query.data?.can_edit && !query.isError && !selectedVersion && connection !== "denied" && connection !== "rejected")
  const editableRef = useRef(editable)
@@ -189,7 +198,10 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
   let adopted = Object.keys(marked)
   // Compare only from a baseline whose work this document holds.
   const loaded = Y.snapshot(document)
-  const stored = [marked[pendingWriter.current], ...Object.values(marked)].find(mark => mark && designWorkCovered(loaded, decodeDraft(mark.work)))
+  const marks = [marked[pendingWriter.current], ...Object.values(marked)].filter(Boolean)
+  // Failing that, a mark ahead of the canvas still says what the server held
+  // before this canvas's work; without a base no lost text can be found.
+  const stored = marks.find(mark => designWorkCovered(loaded, decodeDraft(mark.work))) ?? marks.find(mark => designStateCovered(loaded, decodeDraft(mark.baseline)))
   const unconfirmed = initialCanEdit && Boolean(draft || adopted.length)
   // A stored draft is unconfirmed until this socket's barrier says otherwise.
   if (draft || adopted.length) setUnsyncedPage(pageId)
@@ -198,14 +210,25 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
   const capture = initialCanEdit ? admittedArtifactDraftCapture(storageKey) : undefined
   let localDirty = false
   const snapshot = () => encodeDraft(Y.encodeStateAsUpdate(document))
+  // Tabs do not hold each other's offline work: a plain write would take it
+  // from the draft, the only copy once that tab is gone. Set from admission to
+  // the merge reading the document, which then carries every edit made since.
+  let canvasQueued = false
+  const storeCanvas = () => {
+   if (canvasQueued) return
+   canvasQueued = true
+   void mergeArtifactDraft(storageKey, existing => {
+    canvasQueued = false
+    return existing ? encodeDraft(Y.mergeUpdates([decodeDraft(existing), Y.encodeStateAsUpdate(document)])) : snapshot()
+   }).catch(() => { canvasQueued = false; setDraftError(true) })
+  }
   setDoc(document)
   setNodes(designNodes(document))
   const update = (_update: Uint8Array, origin: unknown) => {
    setNodes(designNodes(document))
    if (origin === "editor" && initialCanEdit && userId !== "anonymous") {
     localDirty = true
-    try { void writeArtifactDraft(storageKey, snapshot()).catch(() => setDraftError(true)) }
-    catch { setDraftError(true) }
+    storeCanvas()
    }
   }
   document.on("update", update)
@@ -242,7 +265,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
     if (!baseline && !wroteMark && !adopted.length) return
     wroteMark = baseline !== null
     // Taken now: the document may move on before the merge runs.
-    try { void storePending(markerKey, baseline ? { baseline: encodeDraft(baseline), work: encodeDraft(Y.encodeSnapshot(Y.snapshot(document))) } : Y.snapshot(document)).catch(() => setDraftError(true)) }
+    try { void (baseline ? markPending(markerKey, { baseline: encodeDraft(baseline), work: encodeDraft(Y.encodeSnapshot(Y.snapshot(document))) }) : clearPending(markerKey, storageKey, Y.snapshot(document))).catch(() => setDraftError(true)) }
     catch { setDraftError(true) }
     if (!baseline) adopted = []
    },
@@ -275,7 +298,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
    cleanup()
    setDoc(null); setNodes([]); setPeers([]); setDraftReady(false)
   }
- }, [canConnect, endpoint, workspaceId, slug, userId, pageId, authorityRevision, actorName, admittedActor, initialCanEdit, client, request, storePending])
+ }, [canConnect, endpoint, workspaceId, slug, userId, pageId, authorityRevision, actorName, admittedActor, initialCanEdit, client, request, markPending, clearPending])
  const invalidate = () => { void client.invalidateQueries({ queryKey: key }) }
  const save = useMutation({ mutationFn: async (message: string) => {
   if(provider.current?.storageFull)throw Object.assign(new Error("Workspace storage is full. Your private draft is retained."),{status:413})

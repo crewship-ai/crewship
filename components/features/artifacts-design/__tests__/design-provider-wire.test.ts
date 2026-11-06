@@ -22,8 +22,8 @@ class Room {
   if (decoding.readVarUint(decoder) !== 0) return
   const sub = decoding.readVarUint(decoder)
   if (sub === sync.messageYjsSyncStep1) {
-   client.tokens = Math.min(5, client.tokens + (Date.now() - client.checked) / 1000)
-   client.checked = Date.now()
+   client.tokens = Math.min(5, client.tokens + (performance.now() - client.checked) / 1000)
+   client.checked = performance.now()
    if (client.tokens < 1) { client.close(1008); return }
    client.tokens--
    const encoder = encoding.createEncoder()
@@ -48,7 +48,7 @@ class Wire {
  readyState = 0
  binaryType = ""
  tokens = 5
- checked = Date.now()
+ checked = performance.now()
  onopen: (() => void) | null = null
  onmessage: ((event: { data: ArrayBuffer }) => void) | null = null
  onerror: (() => void) | null = null
@@ -199,5 +199,84 @@ describe("Design providers against the room's frame order", () => {
   expect(room.current.clients.size).toBe(1)
   expect(anna.confirmed()).toBe(true)
   expect(text(room.current.doc)).toBe("Key 599")
+ })
+})
+
+describe("A save waiting on the sync budget (#5017)", () => {
+ const drained = () => {
+  const anna = person("anna")
+  settle()
+  ;(anna.provider as unknown as { tokens: number }).tokens = -100
+  return anna
+ }
+ const outcome = (saving: Promise<void>) => {
+  const state = { error: "", done: false }
+  void saving.then(() => { state.done = true }, (error: Error) => { state.done = true; state.error = error.message })
+  return state
+ }
+ it("is not held for an hour by the wall clock jumping back", async () => {
+  const anna = person("anna")
+  settle()
+  vi.setSystemTime(Date.now() - 60 * 60 * 1000)
+  upsertDesignNode(anna.doc, { id: "label", text: "After the jump" })
+  const state = outcome(anna.provider.synchronize())
+  await vi.advanceTimersByTimeAsync(6000)
+  expect(state).toEqual({ error: "", done: true })
+  expect(text(room.current.doc)).toBe("After the jump")
+ })
+ it("stays inside the room's budget when the wall clock jumps forward", async () => {
+  const anna = person("anna")
+  settle()
+  const admitted = [...room.current.clients][0]
+  for (let save = 0; save < 12; save++) {
+   vi.setSystemTime(Date.now() + 60 * 60 * 1000)
+   upsertDesignNode(anna.doc, { id: "label", text: `Save ${save}` })
+   void anna.provider.synchronize().catch(() => {})
+   await vi.advanceTimersByTimeAsync(100)
+  }
+  await vi.advanceTimersByTimeAsync(20_000)
+  expect([...room.current.clients]).toEqual([admitted])
+  expect(text(room.current.doc)).toBe("Save 11")
+ })
+ it("gives up at a deadline and leaves the work unconfirmed", async () => {
+  const anna = drained()
+  upsertDesignNode(anna.doc, { id: "label", text: "Waiting" })
+  const state = outcome(anna.provider.synchronize())
+  await vi.advanceTimersByTimeAsync(6000)
+  expect(state).toEqual({ error: "The canvas is still reconnecting. Your changes remain in this browser.", done: true })
+  expect(anna.confirmed()).toBe(false)
+ })
+ it("stops at once when its caller aborts, before asking the room", async () => {
+  const anna = drained()
+  const frames = vi.spyOn([...room.current.clients][0], "send")
+  const stop = new AbortController()
+  const state = outcome(anna.provider.synchronize(stop.signal))
+  await vi.advanceTimersByTimeAsync(10)
+  stop.abort(new Error("Save cancelled."))
+  await vi.advanceTimersByTimeAsync(0)
+  expect(state).toEqual({ error: "Save cancelled.", done: true })
+  await vi.advanceTimersByTimeAsync(200_000)
+  expect(frames).not.toHaveBeenCalled()
+ })
+ it("does not start when its caller already aborted", async () => {
+  const anna = person("anna")
+  settle()
+  const stop = new AbortController()
+  stop.abort(new Error("Save cancelled."))
+  await expect(anna.provider.synchronize(stop.signal)).rejects.toThrow("Save cancelled.")
+ })
+ it("stops at once when the socket closes or the provider goes", async () => {
+  const anna = drained()
+  const closed = outcome(anna.provider.synchronize())
+  await vi.advanceTimersByTimeAsync(10)
+  ;[...room.current.clients][0].close(1006)
+  await vi.advanceTimersByTimeAsync(0)
+  expect(closed).toEqual({ error: "Canvas reconnected before the version was saved. Save again after reconnecting.", done: true })
+  const bert = drained()
+  const gone = outcome(bert.provider.synchronize())
+  await vi.advanceTimersByTimeAsync(10)
+  bert.provider.destroy()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(gone).toEqual({ error: "Canvas closed before the version was saved.", done: true })
  })
 })
