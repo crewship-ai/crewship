@@ -96,7 +96,7 @@ func (h *PageHandler) LocalDraftKey(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 400, "local draft scope mismatch")
 			return
 		}
-	case "check-native":
+	case "check":
 		if input.Key != "" || input.Envelope != "" {
 			replyError(w, 400, "invalid local draft key request")
 			return
@@ -119,9 +119,6 @@ func (h *PageHandler) LocalDraftKey(w http.ResponseWriter, r *http.Request) {
 	authorize := func() error {
 		if err := validateContentHumanCredential(r.WithContext(ctx), tx, "pages:read"); err != nil {
 			return err
-		}
-		if input.Operation == "check-native" {
-			return h.localNativeDraftRead(ctx, r, key, tx)
 		}
 		return h.localDraftRead(ctx, r, key, tx)
 	}
@@ -146,7 +143,7 @@ func (h *PageHandler) LocalDraftKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var response any
-	if input.Operation == "check-native" {
+	if input.Operation == "check" {
 		response = map[string]bool{"readable": true}
 	} else if input.Operation == "wrap" {
 		raw, _ := json.Marshal(payload)
@@ -168,45 +165,6 @@ func (h *PageHandler) LocalDraftKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, response)
-}
-
-// localNativeDraftRead is the native answer to the same question. Native
-// admission refuses Comment visibility that canonical Page read accepts, so a
-// browser that missed the stream's purge needs this check to learn of that loss.
-// A Page without a native document stays with canonical read.
-func (h *PageHandler) localNativeDraftRead(ctx context.Context, r *http.Request, key artifacts.VersionKey, tx *sql.Tx) error {
-	if err := h.localDraftRead(ctx, r, key, tx); err != nil {
-		return err
-	}
-	var native bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM craft_native_documents WHERE workspace_id=? AND page_id=?)`, key.WorkspaceID, key.PageID).Scan(&native); err != nil {
-		return err
-	}
-	if !native {
-		return nil
-	}
-	rec, err := h.loadPageForRead(ctx, key.WorkspaceID, "@"+key.PageID)
-	if err != nil {
-		return err
-	}
-	human := UserFromContext(ctx)
-	role, err := h.liveContentHumanRole(ctx, key.WorkspaceID, human.ID)
-	if err != nil {
-		return err
-	}
-	ctx = context.WithValue(ctx, ctxRole, role)
-	viewer, err := h.loadViewer(ctx, key.WorkspaceID, human.ID)
-	if err != nil {
-		return err
-	}
-	readable, err := h.nativeReadWithoutComment(ctx, key.WorkspaceID, rec, viewer)
-	if err != nil {
-		return err
-	}
-	if !readable {
-		return errLocalDraftReadDenied
-	}
-	return nil
 }
 
 func (h *PageHandler) localDraftRead(ctx context.Context, r *http.Request, key artifacts.VersionKey, tx *sql.Tx) error {

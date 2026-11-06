@@ -190,8 +190,10 @@ import, mutation or save. Existing captured drafts are not erased on a generic
 timeout or disconnection; only proven read loss authorizes their purge. Proof is
 a `session_retired` event with `draft: "purge"`, sent only while the credential
 is current, or `403 draft_read_revoked` from `draft-key` with
-`operation: "check-native"`, which the host requests after a refused admission and
-each entry requests whenever it does not open the editor. An ended credential retires the stream with
+`operation: "check"`, which the host requests after a refused admission and each
+entry requests whenever it does not open the editor. Losing Edit is not read loss,
+down to Comment: Comment keeps the shared version, so a refused admission alone
+erases nothing. An ended credential retires the stream with
 `draft: "retain"`. Stages and bounds: [Private browser draft
 recovery](pages.md#when-a-draft-is-erased-native-and-project).
 

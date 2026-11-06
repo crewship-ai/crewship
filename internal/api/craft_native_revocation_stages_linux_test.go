@@ -50,6 +50,7 @@ func TestCraftNativeRetirementPurgesOnlyOnProvenReadLoss(t *testing.T) {
 		{name: "workspace membership removed", revoke: `DELETE FROM workspace_members WHERE user_id='native-scope-writer'`, wantReason: "authority_changed", wantDraft: "purge"},
 		{name: "page deleted", revoke: `DELETE FROM pages WHERE id='native-page'`, wantReason: "authority_changed", wantDraft: "purge"},
 		{name: "write only removed", revoke: `UPDATE page_grants SET level='read' WHERE page_id='native-page' AND subject_id='native-scope-writer'`, wantReason: "write_revoked", wantDraft: "retain"},
+		{name: "edit reduced to comment", revoke: `UPDATE page_grants SET level='comment' WHERE page_id='native-page' AND subject_id='native-scope-writer'`, wantReason: "write_revoked", wantDraft: "retain"},
 		{name: "session revoked elsewhere", revoke: `UPDATE user_sessions SET revoked_at='2026-11-06T00:00:00Z' WHERE user_id='native-scope-writer'`, wantReason: "authority_changed", wantDraft: "retain"},
 		{name: "session row removed", revoke: `DELETE FROM user_sessions WHERE user_id='native-scope-writer'`, wantReason: "authority_changed", wantDraft: "retain"},
 		{name: "authority revision moved elsewhere", revoke: `UPDATE users SET authority_revision=authority_revision+1 WHERE id='native-scope-writer'`, wantReason: "authority_changed", wantDraft: "retain"},
@@ -99,9 +100,8 @@ func TestCraftNativeReadLossDeliveryWithinOneEventInterval(t *testing.T) {
 	}
 }
 
-// A person who reads through a folder ACL and holds a Comment grant passes
-// canSeePage through the grant, so the ACL is first read by the native read
-// check. A fault there says nothing about the person: the draft stays.
+// A person who reaches the Page only through a folder ACL depends on that lookup.
+// A fault there says nothing about the person: the draft stays.
 func TestCraftNativeRetirementKeepsTheDraftOnAnACLLookupFault(t *testing.T) {
 	f, m, _ := craftNativeHTTPFixture(t)
 	clock, err := mooring.NewBootOwnerClock()
@@ -114,7 +114,7 @@ func TestCraftNativeRetirementKeepsTheDraftOnAnACLLookupFault(t *testing.T) {
 	mustExec(t, f.db, `INSERT INTO page_folders(id,workspace_id,slug,name,owner_crew_id,created_at,updated_at) VALUES('native-folder',?,'native-folder','Folder','native-crew',datetime('now'),datetime('now'))`, f.wsID)
 	mustExec(t, f.db, `INSERT INTO page_folder_acl(folder_id,subject_type,subject_id,can_read,can_write,set_at) VALUES('native-folder','user','native-scope-writer',1,0,datetime('now'))`)
 	mustExec(t, f.db, `UPDATE pages SET folder_id='native-folder' WHERE id='native-page'`)
-	mustExec(t, f.db, `UPDATE page_grants SET level='comment' WHERE page_id='native-page' AND subject_id='native-scope-writer'`)
+	mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='native-page' AND subject_id='native-scope-writer'`)
 	ctx = craftNativeFreshContext(t, f, ctx, time.Hour)
 	token, _ := craftNativeIssued(t, m, ctx)
 	next := craftNativeOpenStream(t, f, m, ctx, token)

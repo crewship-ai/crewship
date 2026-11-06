@@ -61,9 +61,7 @@ function scriptedServer(){
   if(s.stall.has(name))return new Promise<Response>((_,reject)=>init.signal?.addEventListener('abort',()=>reject(init.signal!.reason),{once:true}))
   if(name==='draft-key'){
    if(s.proofDelay)await new Promise(resolve=>setTimeout(resolve,s.proofDelay))
-   // The real route: wrap asks canonical Page read, which Comment passes; check-native asks native read.
-   const operation=JSON.parse(String(init.body)).operation
-   if(state==='comment-only'&&operation==='check-native')return json({error:'current Page read access is required',code:'draft_read_revoked'},403)
+   // The real route: draft-key asks canonical Page read, which Comment passes.
    if(state==='comment-only')return json({envelope:'v1:unit'})
    if(state==='signed-out')return json({error:'fresh human authentication required'},401)
    if(state==='read-lost')return json({error:'current Page read access is required',code:'draft_read_revoked'},403)
@@ -225,7 +223,7 @@ describe('offline',()=>{
  })
 })
 describe('proof',()=>{
- it('an Edit to Comment downgrade missed while offline is proven on reconnect although canonical Page read still passes',async()=>{
+ it('an Edit to Comment downgrade missed while offline keeps the draft hidden: admission refuses but read of the Page is not lost',async()=>{
   await opened()
   await editWhileOffline()
   server.state='comment-only'
@@ -233,7 +231,7 @@ describe('proof',()=>{
   server.reachable=true
   await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
   expect(server.count('document')).toBe(0);expect(offered()).toBe(false)
-  expect(m.purge).toHaveBeenCalledOnce()
+  expect(m.purge).not.toHaveBeenCalled()
  })
  it('a positive proof arriving after the reauthorization deadline still erases the captured revisions',async()=>{
   await opened()

@@ -15,11 +15,13 @@ import (
 const craftNativeEventInterval = 5 * time.Second
 
 // retirementFinding says why a stream ends and whether the browser may erase its
-// draft. Erasing needs proof that this still signed-in person lost Page read: an
-// ended, revoked or missing credential says nothing about the Page, and the
-// browser keeps its draft through it (docs/specs/pages.md, Private browser draft
-// recovery). A moved user revision alone is no proof either, it also moves for
-// other workspaces, so the Page is judged on the person's current revision.
+// draft. Erasing needs proof that this still signed-in person lost read of the
+// Page, which is every level from Comment up. Losing Edit alone is no such proof,
+// even down to Comment: it takes latest away, and Read and Comment keep the same
+// shared version. An ended, revoked or missing credential says nothing about the
+// Page either, and the browser keeps its draft through it (docs/specs/pages.md,
+// Private browser draft recovery). A moved user revision alone is no proof, it
+// also moves for other workspaces, so the Page is judged on the current revision.
 func (m *craftNativeHTTP) retirementFinding(ctx context.Context, entry *craftNativeSession) (draft, reason string) {
 	draft, reason = "retain", "authority_changed"
 	tx, err := m.pages.db.BeginTx(ctx, nil)
@@ -36,7 +38,7 @@ func (m *craftNativeHTTP) retirementFinding(ctx context.Context, entry *craftNat
 		return draft, reason
 	}
 	source.UserAuthorityRevision = current.reference.UserAuthorityRevision
-	_, err = m.pageAuthority(ctx, tx, source, entry.scope, false)
+	_, err = m.pageAuthorityForView(ctx, tx, source, entry.scope, false, true)
 	if errors.Is(err, errCraftNativeAccess) || errors.Is(err, sql.ErrNoRows) {
 		return "purge", reason
 	}

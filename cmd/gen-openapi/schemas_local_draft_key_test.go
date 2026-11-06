@@ -22,8 +22,8 @@ func TestLocalDraftKeyContractIsConcrete(t *testing.T) {
 		{"LocalDraftKeyRequest", `{"human":"alice","operation":"wrap","key":"a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s="}`, `{"human":"alice","operation":"wrap","key":"short"}`},
 		{"LocalDraftKeyRequest", `{"human":"alice","operation":"unwrap","envelope":"v1:value"}`, `{"operation":"unwrap","envelope":"v1:value"}`},
 		{"LocalDraftKeyRequest", `{"human":"alice","operation":"unwrap","envelope":"v1:value","key":""}`, `{"human":"alice","operation":"unwrap","envelope":"v1:value","key":"nonempty"}`},
-		{"LocalDraftKeyRequest", `{"human":"alice","operation":"check-native"}`, `{"human":"alice","operation":"check-native","key":"a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s="}`},
-		{"LocalDraftKeyRequest", `{"human":"alice","operation":"check-native","key":"","envelope":""}`, `{"operation":"check-native"}`},
+		{"LocalDraftKeyRequest", `{"human":"alice","operation":"check"}`, `{"human":"alice","operation":"check","key":"a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s="}`},
+		{"LocalDraftKeyRequest", `{"human":"alice","operation":"check","key":"","envelope":""}`, `{"operation":"check"}`},
 		{"LocalDraftKeyResponse", `{"readable":true}`, `{"readable":false}`},
 		{"LocalDraftKeyResponse", `{"envelope":"v1:value"}`, `{"envelope":"v1:value","key":"also leaked"}`},
 	} {

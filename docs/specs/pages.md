@@ -1445,39 +1445,54 @@ compares the captured revision, preserving a later replacement.
 
 #### When a draft is erased: Native and Project
 
-A local draft is erased only on explicit sign-out and on proven loss of Page
-read. It survives an expired sign-in. This rule covers two scopes: native Word
-and Sheet drafts (the journal in `lib/mooring/native-draft.ts`) and Project
-source and comment drafts (`lib/artifact-drafts.ts`). Text documents and Design
-have their own paths and are not part of this table.
+A local draft is erased only on explicit sign-out and on proven loss of read of
+the Page. It survives an expired sign-in. This rule covers two scopes: native Word
+and Sheet drafts (the journal in `lib/mooring/native-draft.ts`) and Project source
+and comment drafts (`lib/artifact-drafts.ts`). Text documents and Design have their
+own paths and are not part of this table.
+
+Three things can be read, and they are lost separately:
+
+- **Latest content**: the current native document or Project source, its history
+  and proposals. It needs Edit, or the administrator read rule.
+- **The shared version**: the pinned version. Read and Comment reach only this, and
+  only when a version is pinned.
+- **The Page**: Read, Comment, Edit or a folder ACL entry reaches it, with or without
+  a pin. A private Page is reached only by its private audience.
+
+Only losing the Page erases a draft. Losing Edit takes latest content away, at any
+level down to Comment: the person keeps the same shared version, or the same
+absence of one, and the draft stays. Native admission refuses Comment, but a refused
+admission is not proof.
 
 "Proven" means a `403 draft_read_revoked` from `draft-key` or, on an open native
-editor, a `session_retired` event with `draft: "purge"`. The event says `purge`
-only while the person's credential is still current and the Page refuses them.
-Native asks `draft-key` with `operation: "check-native"`, which also refuses
-Comment-only access, as native admission does; Project asks `wrap`, which accepts
-it. A native draft is asked about after a refused or unavailable admission and on
-any entry short of the editor (preview, read-only, refused or failed availability,
-or a workspace gone from the directory). A proof that arrives late still erases
-the revisions captured when it was asked, unless read was confirmed after it was
-asked. A later confirmation (fresh read, admission, reauthorization or stream
-event, in this tab) supersedes it for good: it closes no key and revokes no
-journal.
+editor, a `session_retired` event with `draft: "purge"`. The event says `purge` only
+while the person's credential is still current and the Page refuses them. Native
+asks `draft-key` with `operation: "check"`; Project asks `wrap`. Both ask the same
+read question, canonical Page visibility. A native draft is asked about after a
+refused or unavailable admission and on any entry short of the editor (preview,
+read-only, refused or failed availability, or a workspace gone from the directory).
+A proof that arrives late still erases the revisions captured when it was asked,
+unless read was confirmed after it was asked. A later confirmation (fresh read,
+admission, reauthorization or stream event, in this tab) supersedes it for good: it
+closes no key and revokes no journal.
 
-| Event | Native (Word, Sheet) | Project |
-|---|---|---|
-| Explicit sign-out, confirmed | Captured revisions erased | Captured revisions erased |
-| Sign-out cancelled or not acknowledged by the server | Kept | Kept |
-| Sign-in expired, or session ended elsewhere | Kept, sealed; content hidden | Kept, sealed |
-| 401 | Kept | Kept |
-| Generic 403, 404, 5xx, network failure | Kept; content hidden, nothing offered until a fresh admission | Kept; a 403 or 404 asks `draft-key` for proof |
-| Read removed (`draft_read_revoked`) | Erased | Erased |
-| Write removed, read kept | Kept and offered for compare or copy | Kept |
-| Edit reduced to Comment | Erased: Comment is not native read | Kept: Comment still reads the Project |
-| Workspace membership removed | Erased, as read removed | Erased, as read removed |
-| Page deleted | Erased, as read removed | Erased, as read removed |
-| Another person signs in, same browser | Sealed rows kept, unreadable to them; recovery needs the original person | Same |
-| Offline | Kept; see below | Kept; see below |
+| Event | Latest content | Shared version | Native (Word, Sheet) | Project |
+|---|---|---|---|---|
+| Explicit sign-out, confirmed | Unchanged | Unchanged | Captured revisions erased | Captured revisions erased |
+| Sign-out cancelled or not acknowledged by the server | Unchanged | Unchanged | Kept | Kept |
+| Sign-in expired, or session ended elsewhere | Unchanged | Unchanged | Kept, sealed; content hidden | Kept, sealed |
+| 401 | Unchanged | Unchanged | Kept | Kept |
+| Generic 403, 404, 5xx, network failure | Unknown | Unknown | Kept; content hidden, nothing offered until a fresh admission | Kept; a 403 or 404 asks `draft-key` for proof |
+| Edit to Read | Lost | Readable if pinned | Kept and offered for compare or copy | Kept |
+| Edit to Comment, or Read to Comment | Lost | Readable if pinned | Kept, sealed; admission is refused, so the editor offers nothing and points to the shared version | Kept |
+| Folder ACL loses write, keeps read | Lost | Readable if pinned | As Edit to Read | Kept |
+| Comment, Read or Edit removed, no other reach | Lost | Lost | Erased | Erased |
+| Private audience excludes the person | Lost | Lost | Erased | Erased |
+| Workspace membership removed | Lost | Lost | Erased | Erased |
+| Page deleted | Lost | Lost | Erased | Erased |
+| Another person signs in, same browser | Not theirs | Not theirs | Sealed rows kept, unreadable to them; recovery needs the original person | Same |
+| Offline | Unknown | Unknown | Kept; see below | Kept; see below |
 
 Unsealed legacy plaintext copies are the exception to surviving expiry: they do
 not qualify for retention and are removed at any identity change.
@@ -1678,9 +1693,8 @@ All responses use `Cache-Control: no-store`. A stale client identity is refused
 before creating a key envelope; an account switch cannot rebind the draft.
 Slugs cannot alias an old draft.
 
-`{"human":"<expected-human-id>","operation":"check-native"}` returns
-`{"readable":true}` or the same refusal, judged by native read when the Page has
-a native document and by canonical Page read otherwise. It handles no key.
+`{"human":"<expected-human-id>","operation":"check"}` returns `{"readable":true}`
+or the same refusal, judged by the same canonical Page read. It handles no key.
 
 A 403 with `code: "draft_read_revoked"` is positive evidence for deleting that
 Page's local draft. `draft_identity_mismatch`, generic 403, 400 (unavailable or

@@ -42,13 +42,13 @@ func TestPageDraftKeyChecksNativeReadThroughTheSameEndpoint(t *testing.T) {
 	route := "/api/v1/pages/@c1234567890123456789012345/draft-key"
 	stub.OnPost(route, func(r *http.Request, raw []byte) (int, []byte, string) {
 		var body map[string]string
-		if json.Unmarshal(raw, &body) != nil || body["operation"] != "check-native" || body["human"] != "alice" || len(body) != 2 {
+		if json.Unmarshal(raw, &body) != nil || body["operation"] != "check" || body["human"] != "alice" || len(body) != 2 {
 			t.Errorf("wrong payload: %s", raw)
 		}
 		return 200, []byte(`{"readable":true}`), "application/json"
 	})
 	command.PersistentPreRun = rootCmd.PersistentPreRun
-	command.SetIn(strings.NewReader(`{"human":"alice","operation":"check-native"}`))
+	command.SetIn(strings.NewReader(`{"human":"alice","operation":"check"}`))
 	command.SetOut(&bytes.Buffer{})
 	command.SetArgs([]string{"@c1234567890123456789012345", "--file", "-"})
 	stdout, err := captureStdout(t, command.Execute)
@@ -68,8 +68,8 @@ func TestPageDraftKeyRejectsAgentsAndInvalidInputBeforeNetwork(t *testing.T) {
 		{"duplicate field", "", "@page", `{"human":"alice","human":"bob","operation":"unwrap","envelope":"v1:x"}`},
 		{"unknown field", "", "@page", `{"human":"alice","operation":"unwrap","envelope":"v1:x","workspace":"other"}`},
 		{"invalid key", "", "@page", `{"human":"alice","operation":"wrap","key":"secret"}`},
-		{"check with a key", "", "@page", `{"human":"alice","operation":"check-native","key":"a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s="}`},
-		{"check with an envelope", "", "@page", `{"human":"alice","operation":"check-native","envelope":"v1:x"}`},
+		{"check with a key", "", "@page", `{"human":"alice","operation":"check","key":"a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s="}`},
+		{"check with an envelope", "", "@page", `{"human":"alice","operation":"check","envelope":"v1:x"}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("CREWSHIP_AGENT_TOKEN", tc.agent)
