@@ -112762,15 +112762,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -112780,15 +112807,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -112798,15 +112852,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -112817,12 +112898,24 @@
               "application/json": {
                 "schema": {
                   "properties": {
-                    "error": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "error"
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
                   ],
                   "type": "object"
                 }
@@ -113435,15 +113528,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -113453,15 +113573,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -113471,15 +113618,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -113490,12 +113664,24 @@
               "application/json": {
                 "schema": {
                   "properties": {
-                    "error": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "error"
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
                   ],
                   "type": "object"
                 }
@@ -113811,15 +113997,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -113829,15 +114042,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -113847,15 +114087,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -113866,12 +114133,24 @@
               "application/json": {
                 "schema": {
                   "properties": {
-                    "error": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "error"
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
                   ],
                   "type": "object"
                 }
@@ -114134,15 +114413,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -114152,15 +114458,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -114170,15 +114503,42 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "error": {
-                      "type": "string"
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "error"
-                  ],
-                  "type": "object"
+                  ]
                 }
               }
             },
@@ -114189,12 +114549,24 @@
               "application/json": {
                 "schema": {
                   "properties": {
-                    "error": {
+                    "detail": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "integer"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "type": {
                       "type": "string"
                     }
                   },
                   "required": [
-                    "error"
+                    "type",
+                    "title",
+                    "status",
+                    "detail"
                   ],
                   "type": "object"
                 }
