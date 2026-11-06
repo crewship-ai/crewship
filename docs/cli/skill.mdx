@@ -302,7 +302,8 @@ While a skill is locked:
 A lock belongs to the workspace that placed it. A workspace can lock a skill
 only when its own agents alone hold it, so bundled, unassigned and shared skills
 are refused with `403`. Only the placing workspace can unlock, even if another
-workspace assigns the skill later.
+workspace assigns the skill later. If it is deleted or no longer holds the
+skill, the lock passes to the workspace that alone holds it.
 
 Only a signed-in person with the `OWNER` or `ADMIN` role can lock or unlock;
 run tokens, sidecar tokens and agent identities are refused with `403`.

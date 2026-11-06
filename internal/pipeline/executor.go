@@ -1752,6 +1752,14 @@ func renderAgentPrompt(step Step, ctxRender RenderContext, triggeredVia Triggere
 	if triggeredVia == TriggeredViaWebhook {
 		fenced.UntrustedInputs = WebhookUntrustedInputKeys
 	}
+	if dsl != nil && dsl.untrustedItemInput != "" {
+		// Copied: WebhookUntrustedInputKeys is shared by every run.
+		keys := map[string]struct{}{dsl.untrustedItemInput: {}}
+		for k := range fenced.UntrustedInputs {
+			keys[k] = struct{}{}
+		}
+		fenced.UntrustedInputs = keys
+	}
 	fenced.UntrustedSteps = signalWaitStepIDs(dsl)
 	return Render(step.Prompt, fenced)
 }

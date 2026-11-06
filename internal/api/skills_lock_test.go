@@ -325,25 +325,31 @@ func TestSkillLockUnlock_SharedCatalogOwnership(t *testing.T) {
 }
 
 // The workspace that placed a lock is the only one that can lift it, even if
-// another workspace later assigns the skill. A deleted holder leaves the lock to
-// the sole remaining holder rather than stranding it.
+// another workspace later assigns the skill. A holder that no longer exists or
+// no longer holds the skill leaves the lock to the sole remaining assignee, so
+// assigning, locking and unassigning cannot strand it.
 func TestSkillLock_HolderWorkspaceOwnsTheLock(t *testing.T) {
 	tests := []struct {
 		name     string
-		holder   string // locked_workspace_id: "a", "b" or "gone"
-		agents   string // assigned to: "a", "b", "both"
+		holder   string // locked_workspace_id: "a", "b", "gone" or "soft"
+		agents   string // assigned to: "a", "b", "both", or "a-b-deleted" (b's agent soft-deleted)
 		action   string
 		wantCode int
 		wantHeld bool
 	}{
 		{"holder unlocks", "a", "a", "unlock", http.StatusOK, false},
 		{"holder unlocks a skill now shared", "a", "both", "unlock", http.StatusOK, false},
-		{"foreign workspace cannot unlock", "b", "both", "unlock", http.StatusForbidden, true},
-		{"former holder's lock survives a foreign sole assignee", "b", "a", "unlock", http.StatusForbidden, true},
-		{"foreign workspace cannot relock", "b", "a", "lock", http.StatusForbidden, true},
+		{"holder unlocks after unassigning", "a", "b", "unlock", http.StatusOK, false},
+		{"foreign workspace cannot unlock a holder's lock", "b", "both", "unlock", http.StatusForbidden, true},
+		{"foreign workspace cannot relock a holder's lock", "b", "both", "lock", http.StatusForbidden, true},
 		{"holder relock is idempotent", "a", "both", "lock", http.StatusOK, true},
-		{"deleted holder, sole assignee unlocks", "gone", "a", "unlock", http.StatusOK, false},
-		{"deleted holder, shared skill stays locked", "gone", "both", "unlock", http.StatusForbidden, true},
+		{"holder gave the skill up, sole assignee unlocks", "b", "a", "unlock", http.StatusOK, false},
+		{"holder gave the skill up, sole assignee takes the lock", "b", "a", "lock", http.StatusOK, true},
+		{"missing holder, sole assignee unlocks", "gone", "a", "unlock", http.StatusOK, false},
+		{"soft-deleted holder, sole assignee unlocks", "soft", "a", "unlock", http.StatusOK, false},
+		{"missing holder, shared skill stays locked", "gone", "both", "unlock", http.StatusForbidden, true},
+		{"deleted agent does not hold for its workspace", "b", "a-b-deleted", "unlock", http.StatusOK, false},
+		{"soft-deleted holder with a leftover agent has no claim", "soft", "a-soft", "unlock", http.StatusOK, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -357,13 +363,22 @@ func TestSkillLock_HolderWorkspaceOwnsTheLock(t *testing.T) {
 			agA := seedAgentRow(t, db, "agent-a", wsA, "crew-a", "Ava", "ava", "AGENT")
 			agB := seedAgentRow(t, db, "agent-b", wsB, "crew-b", "Ben", "ben", "AGENT")
 			seedSkillForTest(t, db, "sk-l", "lockme", "CODING")
+			execOrFatal(t, db, `INSERT INTO workspaces (id, name, slug, deleted_at) VALUES ('ws-soft', 'Soft', 'soft-lock', '2026-11-01T00:00:00Z')`)
 			execOrFatal(t, db, `UPDATE skills SET source = 'CUSTOM', locked = 1, locked_workspace_id = ? WHERE id = 'sk-l'`,
-				map[string]string{"a": wsA, "b": wsB, "gone": "ws-deleted"}[tc.holder])
+				map[string]string{"a": wsA, "b": wsB, "gone": "ws-missing", "soft": "ws-soft"}[tc.holder])
 			if tc.agents != "b" {
 				execOrFatal(t, db, `INSERT INTO agent_skills (id, agent_id, skill_id, enabled) VALUES ('as-a', ?, 'sk-l', 1)`, agA)
 			}
-			if tc.agents != "a" {
+			if tc.agents == "a-soft" {
+				seedCrewRow(t, db, "crew-s", "ws-soft", "Crew S", "crew-s")
+				agS := seedAgentRow(t, db, "agent-s", "ws-soft", "crew-s", "Sam", "sam", "AGENT")
+				execOrFatal(t, db, `INSERT INTO agent_skills (id, agent_id, skill_id, enabled) VALUES ('as-s', ?, 'sk-l', 1)`, agS)
+				execOrFatal(t, db, `DELETE FROM agent_skills WHERE id = 'as-b'`)
+			} else if tc.agents != "a" {
 				execOrFatal(t, db, `INSERT INTO agent_skills (id, agent_id, skill_id, enabled) VALUES ('as-b', ?, 'sk-l', 1)`, agB)
+			}
+			if tc.agents == "a-b-deleted" {
+				execOrFatal(t, db, `UPDATE agents SET deleted_at = '2026-11-01T00:00:00Z' WHERE id = ?`, agB)
 			}
 			h := NewSkillHandler(db, newTestLogger())
 			h.SetJournal(&recordingEmitter{})
@@ -383,6 +398,13 @@ func TestSkillLock_HolderWorkspaceOwnsTheLock(t *testing.T) {
 			_ = db.QueryRow(`SELECT locked FROM skills WHERE id = 'sk-l'`).Scan(&locked)
 			if (locked == 1) != tc.wantHeld {
 				t.Fatalf("locked = %d, want %v", locked, tc.wantHeld)
+			}
+			if tc.name == "holder gave the skill up, sole assignee takes the lock" {
+				var got string
+				_ = db.QueryRow(`SELECT locked_workspace_id FROM skills WHERE id = 'sk-l'`).Scan(&got)
+				if got != wsA {
+					t.Fatalf("locked_workspace_id = %q, want the new holder %q", got, wsA)
+				}
 			}
 		})
 	}

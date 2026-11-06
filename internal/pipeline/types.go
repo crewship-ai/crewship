@@ -142,6 +142,9 @@ type DSL struct {
 	// inheritedSignalSteps names the parent's wait:event steps for a foreach
 	// body. Runtime only, never serialized.
 	inheritedSignalSteps map[string]struct{}
+	// untrustedItemInput is the foreach loop variable when its items come
+	// from a signal wait. Runtime only, never serialized.
+	untrustedItemInput string
 }
 
 // EvalConfig groups eval-time configuration. Currently scoped to
