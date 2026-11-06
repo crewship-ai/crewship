@@ -497,6 +497,7 @@ PUT /api/v1/agents/{agentId}/restricted-execution roleInline
 PUT /api/v1/conversations/{conversationId}/activity roleSelf
 PUT /api/v1/credentials/reveal-policy roleInline
 PUT /api/v1/credentials/{credentialId} roleCreate
+PUT /api/v1/credentials/{credentialId}/allowed-hosts roleManage
 PUT /api/v1/credentials/{credentialId}/fields/{fieldKey} roleCreate
 PUT /api/v1/credentials/{credentialId}/sensitivity roleInline
 PUT /api/v1/crew-connections/{connectionId}/file-access roleCreate

@@ -388,7 +388,8 @@ func (h *QueryHandler) CreateEscalation(w http.ResponseWriter, r *http.Request) 
 		if credentialRequested {
 			// An ASK: the card needs an input, not an Approve. Hosts and purpose
 			// are agent-authored review metadata — redacted like every other
-			// agent field on this projection, and never enforced.
+			// agent field on this projection, and never enforced. Only hosts a person
+			// approves on the credential itself (allowed_hosts) have any effect.
 			inboxPayload["needs_credential_value"] = true
 			if len(credentialHosts) > 0 {
 				inboxPayload["credential_hosts"] = credentialHosts

@@ -2969,7 +2969,7 @@ func TestResolveOAuthAccessTokens(t *testing.T) {
 	creds := []mcpCredEntry{
 		{ID: "cr-oauth", EnvVar: "GOOGLE_CLIENT_ID", Type: "OAUTH2"},
 	}
-	out := h.resolveOAuthAccessTokens(req, creds)
+	out := h.resolveOAuthAccessTokens(req, "agent-x", creds)
 	if len(out) != 2 {
 		t.Errorf("expected 2 (orig + access token), got %d", len(out))
 	}
@@ -2978,7 +2978,7 @@ func TestResolveOAuthAccessTokens(t *testing.T) {
 	creds2 := []mcpCredEntry{
 		{ID: "cr-oauth", EnvVar: "GOOGLE_TOKEN", Value: "x", Type: "OAUTH2"},
 	}
-	out2 := h.resolveOAuthAccessTokens(req, creds2)
+	out2 := h.resolveOAuthAccessTokens(req, "agent-x", creds2)
 	if len(out2) != 1 {
 		t.Errorf("expected 1 (no append), got %d", len(out2))
 	}

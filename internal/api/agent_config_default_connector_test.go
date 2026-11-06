@@ -196,3 +196,35 @@ func TestDefaultConnector_FlagOn_NoDefaultConfigured(t *testing.T) {
 		t.Errorf("legacy server should remain (no default configured → no gating)")
 	}
 }
+
+// #5045: the shared managed key travels to the sidecar as CredToken, so it
+// follows the host-bound rule like any other credential value.
+func TestDefaultConnector_ManagedKeyHonoursHostGate(t *testing.T) {
+	for _, tc := range hostBoundCases {
+		t.Run(tc.name, func(t *testing.T) {
+			setTestEncryptionKey(t)
+			db := setupTestDB(t)
+			h := covCfgHandler(db)
+			h.SetComposioDefaultConnector(true, "https://base.example.com")
+			userID := seedTestUser(t, db)
+			wsID := seedTestWorkspace(t, db, userID)
+			execOrFatal(t, db, `INSERT INTO crews (id, workspace_id, name, slug, network_mode, allowed_domains) VALUES ('c1', ?, 'C', 'c1', ?, ?)`,
+				wsID, tc.mode, tc.domains)
+			agentID := seedAgentRow(t, db, "agB", wsID, "c1", "B", "b", "AGENT")
+			dcSeedDefaults(t, db, wsID, "user-d", "mcp_srv_d")
+			covCfgEncCred(t, db, wsID, userID, "mkc", composioManagedKeyName, "API_KEY", "", "ak_live")
+			if tc.hosts != "" {
+				execOrFatal(t, db, `UPDATE credentials SET allowed_hosts = ? WHERE id = 'mkc'`, tc.hosts)
+			}
+			req := httptest.NewRequest("GET", "/", nil)
+			d, _ := h.loadAgentData(req, agentID)
+			def, ok := dcByName(h.resolveAgentMCPServers(req, d, agentID))["composio-default"]
+			if ok != tc.deliver {
+				t.Fatalf("composio-default present = %v, want %v", ok, tc.deliver)
+			}
+			if !tc.deliver && def.CredToken != "" {
+				t.Fatalf("managed key leaked: %q", def.CredToken)
+			}
+		})
+	}
+}

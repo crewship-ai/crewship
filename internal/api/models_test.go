@@ -342,3 +342,41 @@ func TestSupportedModelProviders_CoversEveryRegisteredCodec(t *testing.T) {
 		}
 	}
 }
+
+// #5045: listing sends the key to the provider's fixed host, so a host-bound key
+// is used only when it approves that host. Anything else degrades to curated.
+func TestModelsList_HostBoundCredential(t *testing.T) {
+	ensureEncryptionKey(t)
+	for _, tc := range []struct {
+		name, provider, hosts string
+		wantLive              bool
+	}{
+		{"unbound", "ANTHROPIC", `[]`, true},
+		{"approves the provider host", "ANTHROPIC", `["api.anthropic.com"]`, true},
+		{"openai host", "OPENAI", `["api.openai.com"]`, true},
+		{"other host", "ANTHROPIC", `["api.openai.com"]`, false},
+		{"unreadable list", "OPENAI", `not-json`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dialled := false
+			h, wsID, userID := newModelsHandler(t, func(string, string, string) (llm.ModelLister, bool) {
+				dialled = true
+				return nil, false
+			})
+			enc, err := encryption.Encrypt("sk-test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := h.db.Exec(`INSERT INTO credentials
+				(id, workspace_id, name, encrypted_value, type, provider, scope, status, created_by, created_at, updated_at, allowed_hosts)
+				VALUES ('cred-b', ?, 'b', ?, 'API_KEY', ?, 'WORKSPACE', 'ACTIVE', ?, datetime('now'), datetime('now'), ?)`,
+				wsID, enc, tc.provider, userID, tc.hosts); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			doModelsList(t, h, wsID, "?provider="+tc.provider)
+			if dialled != tc.wantLive {
+				t.Fatalf("key used = %v, want %v", dialled, tc.wantLive)
+			}
+		})
+	}
+}

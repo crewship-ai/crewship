@@ -186,7 +186,7 @@ func TestResolveLocalModelEndpoint_CarriesAuth(t *testing.T) {
 		VALUES ('cr-auth', ?, 'ollama-auth', ?, 'ENDPOINT_URL', 'OLLAMA', 'ACTIVE', 'u1')`,
 		wsID, enc)
 
-	got := resolveLocalModelEndpoint(context.Background(), db, logger, wsID, nil)
+	got := resolveLocalModelEndpoint(context.Background(), db, logger, "", wsID, nil)
 	if got.BaseURL != "https://llm.example.com/v1" {
 		t.Errorf("BaseURL = %q", got.BaseURL)
 	}

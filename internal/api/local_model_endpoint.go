@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 )
 
 // localModelEndpoint is the resolved local-model target: the OpenAI-compatible
@@ -42,7 +44,7 @@ type localModelEndpoint struct {
 // the deprecated server-env fallback (CREWSHIP_LOCAL_MODEL_BASE_URL). The
 // stored value is re-validated through the same gate as create so a value that
 // was somehow stored malformed can't reach OpenCode's config.
-func resolveLocalModelEndpoint(ctx context.Context, db *sql.DB, logger *slog.Logger, workspaceID string, assigned []mcpCredEntry) localModelEndpoint {
+func resolveLocalModelEndpoint(ctx context.Context, db *sql.DB, logger *slog.Logger, agentID, workspaceID string, assigned []mcpCredEntry) localModelEndpoint {
 	// 1. Per-agent override: an assigned ENDPOINT_URL credential. `assigned`
 	//    is already ACTIVE-filtered and sentinel-filtered by
 	//    resolveAgentCredentials, and ordered by priority ASC — take the
@@ -88,9 +90,9 @@ func resolveLocalModelEndpoint(ctx context.Context, db *sql.DB, logger *slog.Log
 	//    cannot tell a link to this agent's crew from a link to another one.
 	//    Narrowing that needs the crew id threaded in — see the follow-up note
 	//    in credential_grantees.go's header.
-	var encValue string
+	var credID, encValue string
 	err := db.QueryRowContext(ctx, `
-		SELECT c.encrypted_value FROM credentials c
+		SELECT c.id, c.encrypted_value FROM credentials c
 		WHERE c.workspace_id = ? AND c.type = ? AND c.status = 'ACTIVE' AND c.deleted_at IS NULL
 		  AND NOT EXISTS (
 		      SELECT 1 FROM agent_credentials ac WHERE ac.credential_id = c.id
@@ -101,10 +103,19 @@ func resolveLocalModelEndpoint(ctx context.Context, db *sql.DB, logger *slog.Log
 		  )
 		ORDER BY c.created_at DESC, c.id ASC
 		LIMIT 1
-	`, workspaceID, CredTypeEndpointURL).Scan(&encValue)
+	`, workspaceID, CredTypeEndpointURL).Scan(&credID, &encValue)
 	if err != nil {
 		if err != sql.ErrNoRows && logger != nil {
 			logger.Warn("resolve workspace local-model endpoint", "error", err)
+		}
+		return localModelEndpoint{}
+	}
+	// #5045: this branch reads the vault directly, bypassing the gated
+	// credential list, so the approved-hosts precondition is asked here. A
+	// withheld endpoint reaches the run neither as base URL nor as key.
+	if ok, why := credhostgate.Deliverable(ctx, db, agentID, credID); !ok {
+		if logger != nil {
+			logger.Warn("host-bound workspace endpoint withheld", "credential_id", credID, "reason", why)
 		}
 		return localModelEndpoint{}
 	}

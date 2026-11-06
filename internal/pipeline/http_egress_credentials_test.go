@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS credentials (
 	provider TEXT NOT NULL DEFAULT 'NONE',
 	status TEXT NOT NULL DEFAULT 'ACTIVE',
 	deleted_at TEXT,
+	allowed_hosts TEXT,
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE credential_crews (credential_id TEXT NOT NULL, crew_id TEXT NOT NULL, PRIMARY KEY (credential_id, crew_id));`); err != nil {

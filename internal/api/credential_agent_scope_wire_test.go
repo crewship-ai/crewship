@@ -163,7 +163,7 @@ func TestAgentScope_ProxiedEndpointInheritsItsSourceScope(t *testing.T) {
 			"this test would prove nothing", assigned[0].AgentIDs)
 	}
 
-	ep := resolveLocalModelEndpoint(context.Background(), db, newTestLogger(), wsID, assigned)
+	ep := resolveLocalModelEndpoint(context.Background(), db, newTestLogger(), "", wsID, assigned)
 	if ep.BaseURL != "https://a-gateway.example/v1" {
 		t.Fatalf("resolved endpoint = %q, want A's gateway", ep.BaseURL)
 	}
@@ -255,7 +255,7 @@ func TestAgentScope_WorkspaceEndpointFallbackSkipsAPeersGrant(t *testing.T) {
 			tt.seed()
 			// `assigned` is empty: A holds no endpoint credential, which is what
 			// sends resolveLocalModelEndpoint down the workspace-default branch.
-			ep := resolveLocalModelEndpoint(context.Background(), db, newTestLogger(), wsID, nil)
+			ep := resolveLocalModelEndpoint(context.Background(), db, newTestLogger(), "", wsID, nil)
 			if ep.BaseURL != tt.wantURL {
 				t.Errorf("resolved endpoint = %q, want %q: an agent with no endpoint of its "+
 					"own was handed one granted to a peer, and it is delivered crew-wide",
