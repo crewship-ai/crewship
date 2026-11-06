@@ -159,17 +159,17 @@ func TestCraftNativeProposalRoutesRespectPageRights(t *testing.T) {
 		}
 	})
 
-	t.Run("read-only reviews but cannot decide", func(t *testing.T) {
+	t.Run("read-only can neither review nor decide", func(t *testing.T) {
 		ctx := reader
 		token, id, code := craftNativeProposalAdmit(t, h, ctx)
 		if code != 201 {
 			t.Fatal("reader admission", code)
 		}
 		list := craftNativeProposalRoute(d, ctx, token, "GET", "", "", "")
-		if list.Code != 200 || !strings.Contains(list.Body.String(), "ncp_open_a") {
+		if list.Code != 403 || strings.Contains(list.Body.String(), "ncp_open_a") {
 			t.Fatal("reader list", list.Code, list.Body)
 		}
-		if doc := craftNativeProposalRoute(d, ctx, token, "GET", "/ncp_open_a", "ncp_open_a", ""); doc.Code != 200 {
+		if doc := craftNativeProposalRoute(d, ctx, token, "GET", "/ncp_open_a", "ncp_open_a", ""); doc.Code != 403 || strings.Contains(doc.Body.String(), "bytes") {
 			t.Fatal("reader candidate", doc.Code, doc.Body)
 		}
 		if got := craftNativeProposalRoute(d, ctx, token, "POST", "/ncp_open_a/reject", "ncp_open_a", `{}`); got.Code != 403 {

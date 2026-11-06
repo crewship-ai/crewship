@@ -122,7 +122,7 @@ test.describe("craft proposal", () => {
           "A.lock",
           "While a person holds the editor, another writer's acquire gets 409 and the lease names the human holder (Word and Sheet)",
         ),
-        prdRequirement("A.craft.proposal.reader-403", "A reader can list proposals but cannot accept or reject them (403); the document is unchanged"),
+        prdRequirement("A.craft.proposal.reader-403", "A reader can neither list, read, accept nor reject proposals (403); the document is unchanged"),
       ],
     },
     async ({ prd, request }) => {
@@ -168,7 +168,7 @@ test.describe("craft proposal", () => {
 
           const asReader = new NativePage(readerApi, ws.id, owner.pageId)
           const readerSession = await asReader.admit()
-          expect(readerSession.status, `${app}: a reader may open the document`).toBe(201)
+          expect(readerSession.status, `${app}: a reader may open an admission for lease status`).toBe(201)
           const r = readerSession.admission!
           const readerList = await asReader.proposals(r)
           const readerAccept = await asReader.accept(r, UNKNOWN_PROPOSAL, "1")
@@ -218,7 +218,7 @@ test.describe("craft proposal", () => {
           expect(memberAcquire.status, `${app}: co-editor acquire while a person holds the editor`).toBe(409)
           expect(memberView.body.holder?.kind, `${app}: the co-editor sees a human holder`).toBe("human")
           expect(memberView.body.mine).toBe(false)
-          expect(readerList.status, `${app}: reader lists proposals`).toBe(200)
+          expect(readerList.status, `${app}: reader lists no proposals`).toBe(403)
           expect(readerAccept.status, `${app}: reader accept`).toBe(403)
           expect(readerReject.status, `${app}: reader reject`).toBe(403)
           expect(readerAcquire.status, `${app}: reader acquire`).not.toBe(200)

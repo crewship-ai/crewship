@@ -32,7 +32,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean, can_edit: boolean, preview_enabled: boolean, agents_enabled: boolean}`, 200. |
 | POST | `/api/v1/pages/{slug}/craft/sessions` | `{}`. | `session_token`, public `session_id`, `application_id`, `page_id`, 201. |
 | POST | `/api/v1/pages/{slug}/craft/sessions/reauthorize` | Separately refreshed original authentication; no body consumed. | `{renewed: boolean}`, 200. |
-| GET | `/api/v1/pages/{slug}/craft/lease` | Craft admission header. | Lease status described below, 200. |
+| GET | `/api/v1/pages/{slug}/craft/lease` | Craft admission header; Page read or Edit. | Lease status described below, 200. |
 | POST | `/api/v1/pages/{slug}/craft/lease` | `{}`; acquire when free. | Lease status, 200. |
 | POST | `/api/v1/pages/{slug}/craft/lease/acquire` | `{}`; explicit acquisition alias. | Lease status, 200. |
 | POST | `/api/v1/pages/{slug}/craft/lease/renew` | `{generation: "1"}`. | Lease status, 200. |
@@ -41,13 +41,13 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | POST | `/api/v1/pages/{slug}/craft/lease/handoff` | `{generation: "1", request_id: "public-request-id"}`. | New holder's lease status, 200. |
 | GET | `/api/v1/pages/{slug}/craft/events` | Craft admission header; keep the connection open. | `text/event-stream`: `lease` status or `session_retired` metadata; 200. |
 | POST | `/api/v1/pages/{slug}/craft/initialize` | Existing empty personal Page owner, original human `pages:write`; Qualified Word or Grid native bytes. | Atomic native profile, lease and version1, with private admission, 201. |
-| GET | `/api/v1/pages/{slug}/craft/document` | Craft admission header. | Complete base64 native bytes, version and pinned editor/engine metadata, 200. |
+| GET | `/api/v1/pages/{slug}/craft/document` | Craft admission header; private read (see Shared previews). | Complete base64 native bytes, version and pinned editor/engine metadata, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/save` | Bound whole snapshot described below. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Same whole snapshot contract; existing explicit native Page only. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Exact original snapshot binding and hash, plus the attempt's `attemptId`; no blind retry. Current write rights and the original admission; the original lease may have expired or moved. | Original pinned commit receipt,200; never an arbitrary latest head. 410 when base+1 is not this attempt: the attempt is retired and can never commit. |
 | POST | `/api/v1/pages/{slug}/craft/document/restore` | Current binding and targetVersion. | New committed version and node durability, 200. |
-| GET | `/api/v1/pages/{slug}/craft/proposals` | Craft admission header; Page read. | `{proposals: [...]}` open and decided agent proposals, 200. |
-| GET | `/api/v1/pages/{slug}/craft/proposals/{proposalID}` | Craft admission header; `ncp_` id. | `{proposal, bytes, content_hash, engine_pin}` candidate, 200; 404 when absent. |
+| GET | `/api/v1/pages/{slug}/craft/proposals` | Craft admission header; private read. | `{proposals: [...]}` open and decided agent proposals, 200. |
+| GET | `/api/v1/pages/{slug}/craft/proposals/{proposalID}` | Craft admission header; private read; `ncp_` id. | `{proposal, bytes, content_hash, engine_pin}` candidate, 200; 404 when absent. |
 | POST | `/api/v1/pages/{slug}/craft/proposals/{proposalID}/accept` | `{generation: "1"}` of this admission's lease; Page write. | `{proposal, receipt}` with the new committed version, 200; 409 `stale` when the content changed after base. |
 | POST | `/api/v1/pages/{slug}/craft/proposals/{proposalID}/reject` | `{}`; Page write, no lease. | Rejected proposal, 200; 409 when already decided. |
 
@@ -194,15 +194,36 @@ are checked in the same protected transaction as the shared pin. No private
 latest version, history, quota, admission or custody metadata is returned. A
 missing shared pin returns 404, denied access 403 and disabled/unqualified
 profiles 503; there is no fallback to the latest bytes. `preview_enabled` in
-availability advertises this separately from the existing native observer path.
+availability advertises this separately from observer admission.
 The default editor entry requires both `enabled === true` and `can_edit === true`
 before mounting the editor host. `can_edit` checks current original-credential
 and Page write authority in the same transaction as the other availability
 fields. Read and Comment instead mount the shared preview only when
 `preview_enabled === true`, without opening a Craft session; missing or truthy
-nonboolean edit capabilities grant no host access. The legacy explicit Read
-observer API remains compatible, while Comment alone never opens an editor
-admission or receives private latest native bytes.
+nonboolean edit capabilities grant no host access.
+
+### Read and Comment reach only the shared version
+
+The shared preview is the only native content a Read or Comment grantee reaches.
+Everything else needs **private read**: current Edit authority, or the workspace
+OWNER/ADMIN read rule, which on a private Page is wider than Edit and stays
+audited. That covers `GET .../craft/document`, `GET .../craft/document/versions`,
+`GET .../craft/document/versions/{version}` (the shared version included: its
+route is the preview), `GET .../craft/proposals` and
+`GET .../craft/proposals/{id}`. Private read is checked in the read's own
+protected transaction, so an admission that lost Edit stops reading at once. A
+refusal is 403, the status the preview uses for denied access, and it comes
+before the `craft_version_history` flag answers. The `pages:write` token scope is
+not required: a read-only token of a person with Edit keeps private read.
+
+Explicit Read still opens an observer admission, and Comment alone does not. That
+admission carries custody status only: `GET .../craft/lease`,
+`GET .../craft/events` and `POST .../craft/sessions/reauthorize`. Lease status
+names the holder and states the generation, expiry and the reader's own
+`can_edit` and `can_write`, both false; it carries no version, history or bytes.
+Handoff requests are only listed for the holder. `availability.enabled` keeps
+meaning "may open an admission", which is why the default editor entry also
+requires `can_edit`.
 
 ### Revocation of a shared preview (push)
 
@@ -284,13 +305,26 @@ reconcile, share, lease mutations, proposal acceptance) refuses it, and a later
 re-grant does not revive it. On `write_revoked` the browser retires local
 writing exactly as on lease loss (input frozen, the unsaved buffer captured to
 the private journal, never sent), closes the old client and requests one fresh
-admission, which the server grants only after a fresh read check. That
-admission reads the current version when capture is confirmed, shows the same
-read-only editor a non-holder sees and offers the captured draft for compare or
-copy. With unconfirmed capture it only verifies and monitors reading of the
-same frozen buffer; it never imports over it or revives its writer. A refused
-fresh admission hides content without purging confirmed rows. An uncaptured
-buffer may use an explicit bounded read recheck, not a background retry loop. A later read loss on the fresh admission stops delivery
+admission, which the server grants only after a fresh read check. With a
+confirmed capture, a person who keeps private read (an administrator on a
+private Page) reads the current version, sees the same read-only editor a
+non-holder sees and is offered the captured draft for compare or copy. A Read
+grantee is refused the private read (403 on an otherwise valid admission): the
+frame is removed and the draft stays offered for copy, while that admission
+keeps the event stream open for lease status only. Server comparisons and
+proposals leave the page and its state as soon as write is retired, a request
+still pending then is discarded, and a comparison needs private read again
+before it asks the server. If the admission retires or the stream drops without
+a read-loss event, the host opens a fresh one, so a later read loss still
+reaches it; a reload opens the shared preview. With unconfirmed capture the
+admission only verifies and monitors reading of the same frozen buffer; it never
+imports over it or revives its writer, and a refused read keeps that buffer
+hidden. An uncaptured buffer may use an explicit bounded read recheck, not a
+background retry loop. Any other refused fresh admission hides content without
+purging confirmed rows and is not retried; a privacy retirement (sign-out,
+another person) still erases the draft and the recovery and comparison
+material.
+A later read loss on the fresh admission stops delivery
 like any other (`draft: "purge"`). That purge also erases the draft row the
 retired write journal persisted, even though that journal is already closed:
 a closed handle still refuses a Page-wide purge (it must never erase a fresh
@@ -615,8 +649,9 @@ A proposal is a successful task outcome: the work item and run succeed with
 own session counts. A different run may reuse a client `request_id`; it records
 its own proposal instead of adopting an earlier run's candidate.
 
-A person with an admitted session reviews them (`GET .../craft/proposals`,
-candidate bytes at `GET .../craft/proposals/{id}`) and decides once. Accept is
+A person with an admitted session and private read reviews them
+(`GET .../craft/proposals`, candidate bytes at `GET .../craft/proposals/{id}`)
+and decides once. Accept is
 the person's own fenced save: Page write rights, the immutable profile, this
 admission's lease generation, base == latest and the open state are checked and
 the version and decision commit in one transaction. The editor saves the

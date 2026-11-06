@@ -54,17 +54,17 @@ type craftNativeVersionsResponse struct {
 	Truncated      bool                         `json:"truncated"`
 }
 
-// listVersions is read-only. It binds the same private native admission and
-// live Page Read authority as the whole document read, so a person gets exactly
-// the refusal that read returns; only then does the workspace flag apply.
-// Restoring stays the fenced POST document/restore; there is no second write path.
+// listVersions is read-only. History is private: it needs the same authority as
+// the whole document read, so a person gets exactly the refusal that read
+// returns; only then does the workspace flag apply. Restoring stays the fenced
+// POST document/restore; there is no second write path.
 func (d *craftNativeDocumentsHTTP) listVersions(w http.ResponseWriter, r *http.Request) {
 	r, entry, s, _, err := d.bind(r)
 	if err != nil {
 		craftNativeDocumentError(w, err)
 		return
 	}
-	if !craftVersionHistoryEnabled(w, r, d, entry) {
+	if !d.craftVersionHistoryReadable(w, r, entry) {
 		return
 	}
 	versions, truncated, err := s.Versions(r.Context(), entry.scope, craftNativeVersionsLimit)
@@ -99,6 +99,26 @@ func (d *craftNativeDocumentsHTTP) listVersions(w http.ResponseWriter, r *http.R
 	writeJSON(w, 200, out)
 }
 
+// craftVersionHistoryReadable refuses a person without private read authority
+// before the flag answers. The store repeats the check in its read transaction.
+func (d *craftNativeDocumentsHTTP) craftVersionHistoryReadable(w http.ResponseWriter, r *http.Request, entry *craftNativeSession) bool {
+	tx, err := d.human.pages.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		craftNativeDocumentError(w, err)
+		return false
+	}
+	proof, err := d.human.checkEntry(r.Context(), tx, entry, false)
+	_ = tx.Rollback()
+	if err == nil && !proof.privateRead {
+		err = errCraftNativeAccess
+	}
+	if err != nil {
+		craftNativeDocumentError(w, err)
+		return false
+	}
+	return craftVersionHistoryEnabled(w, r, d, entry)
+}
+
 func craftVersionHistoryEnabled(w http.ResponseWriter, r *http.Request, d *craftNativeDocumentsHTTP, entry *craftNativeSession) bool {
 	enabled, err := featureflags.IsEnabled(r.Context(), d.human.pages.db, entry.scope.WorkspaceID, CraftVersionHistoryFlag)
 	if err != nil {
@@ -114,9 +134,9 @@ func craftVersionHistoryEnabled(w http.ResponseWriter, r *http.Request, d *craft
 
 // readVersion returns the bytes of one saved native version. It is the
 // authorized read-only diagnostic and the preview/compare source: the same
-// admission, live Read authority, immutable profile check and administrator
-// audit as the whole document read, behind the same workspace flag as the
-// listing. It never acquires a lease, never writes and never moves the shared
+// admission, live private read authority, immutable profile check and
+// administrator audit as the whole document read, behind the same workspace
+// flag as the listing. It never acquires a lease, never writes and never moves the shared
 // pin; restoring stays the fenced POST document/restore.
 func (d *craftNativeDocumentsHTTP) readVersion(w http.ResponseWriter, r *http.Request) {
 	r, entry, s, profile, err := d.bind(r)
@@ -124,7 +144,7 @@ func (d *craftNativeDocumentsHTTP) readVersion(w http.ResponseWriter, r *http.Re
 		craftNativeDocumentError(w, err)
 		return
 	}
-	if !craftVersionHistoryEnabled(w, r, d, entry) {
+	if !d.craftVersionHistoryReadable(w, r, entry) {
 		return
 	}
 	version, err := craftNativeVersion(r.PathValue("version"))

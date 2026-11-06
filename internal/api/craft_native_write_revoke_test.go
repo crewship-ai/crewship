@@ -65,10 +65,10 @@ func craftNativeOpenStream(t *testing.T, f *pagesTransferRig, m *craftNativeHTTP
 }
 
 // #4348: removing only write permission retires the open writer admission and
-// its lease generation. The same person reaches a read-only view only through a
-// FRESH read admission; nothing of the old write authority carries over, and a
-// later re-grant does not revive the old generation. Removing read refuses all
-// content and a fresh admission.
+// its lease generation. A FRESH read admission then carries lease status only,
+// the private document stays refused and nothing of the old write authority
+// carries over; a later re-grant does not revive the old generation. Removing
+// read refuses all content and a fresh admission.
 func TestCraftNativeWriteRevokeKeepsOnlyAFreshReadAdmission(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -168,7 +168,7 @@ func TestCraftNativeWriteRevokeKeepsOnlyAFreshReadAdmission(t *testing.T) {
 			if err := json.Unmarshal(fresh.Body.Bytes(), &admitted); err != nil {
 				t.Fatal(err)
 			}
-			if read := craftNativeDocumentCall(t, d, ctx, admitted.Token, "read", nil); read.Code != 200 {
+			if read := craftNativeDocumentCall(t, d, ctx, admitted.Token, "read", nil); read.Code != 403 {
 				t.Fatalf("fresh reader read: %d %s", read.Code, read.Body)
 			}
 			view := craftNativeLeaseCall(m, ctx, admitted.Token, "native-page", "read", "")

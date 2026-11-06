@@ -18,6 +18,9 @@ type craftNativeProof struct {
 	expiry                   time.Time
 	record                   *pageRecord
 	application              string
+	// privateRead is current authority over everything but the shared pin:
+	// latest bytes, history and proposals. Read and Comment never carry it.
+	privateRead bool
 }
 
 // Canonical Page policy, evaluated in the caller's protected SQL transaction.
@@ -82,6 +85,7 @@ func (m *craftNativeHTTP) pageAuthorityForView(ctx context.Context, tx *sql.Tx, 
 	}
 	result.record = rec
 	result.expiry = expiry
+	result.privateRead = write || m.pages.mayReadNativePrivate(ctx, scope.WorkspaceID, source.UserID, role, rec)
 	return result, nil
 }
 

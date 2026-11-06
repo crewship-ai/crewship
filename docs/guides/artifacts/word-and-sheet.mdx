@@ -236,7 +236,8 @@ An admitted agent task saves confirmed versions directly.
 
 ## Publish a shared version
 
-Readers see only the version you publish.
+People with Read or Comment access see only the version you publish, through
+every route: not the latest save, not older versions and not agent proposals.
 
 1. While you hold the lease, choose **Publikovat náhled** (Publish preview).
 2. The editor saves your last change, then shows
@@ -262,9 +263,10 @@ switch above is still required.
 ### See the versions
 
 1. Open the native Word document or Sheet in **Artifacts** (`/artifacts/<id>`).
-2. Choose **Historie verzí (N)** (Version history) above the editor. People
-   who read the document without the editor find it above the shared preview
-   or the read-only detail.
+2. Choose **Historie verzí (N)** (Version history) above the editor. A
+   workspace owner or admin who reads the document without the editor finds it
+   above the shared preview or the read-only detail. People with only Read or
+   Comment access don't get the history: they see the shared version alone.
 3. Each row shows **Verze N** (Version N), when it was saved and who saved it:
    a person by name, an agent as *name* **(agent)**. The version the editor
    opens is marked **aktuální** (current). A restored version adds
@@ -296,7 +298,7 @@ You need edit rights **and** the lease in this editor.
 1. Choose **Převzít úpravy** (Take over editing) if you don't hold the lease
    yet. Until then, **Obnovit** (Restore) is disabled and the panel says
    *Pro obnovení verze převezměte úpravy.* ("Take over editing to restore a
-   version."). Readers always see it disabled.
+   version."). It stays disabled for anyone who reads without edit rights.
 2. In **Historie verzí**, choose **Obnovit** next to the version you want.
 3. Confirm with **Obnovit jako novou verzi** (Restore as a new version), or
    **Zrušit** (Cancel).

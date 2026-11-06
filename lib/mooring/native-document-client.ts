@@ -280,6 +280,8 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    ready()
    const response=await send(`${base}document?${query}`,{method:"GET",cache:"no-store",signal,headers:{"X-Craft-Session":token!}})
    ready()
+   // The admission stays valid: 403 here means no private read, not read loss.
+   if(response.status===403)throw new Error("native_private_read_refused")
    if(!response.ok)throw new Error("native_document_unavailable")
    const value:unknown=await response.json();ready()
    if(!value||typeof value!=="object")throw new Error("invalid_native_document")
