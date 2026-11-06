@@ -57,14 +57,10 @@ func (h *SkillHandler) setLock(w http.ResponseWriter, r *http.Request, lock bool
 	}
 	skillID := r.PathValue("skillId")
 	wsID := WorkspaceIDFromContext(r.Context())
-	var slug, source, holder, stored string
+	var slug, source, stored string
 	var was int
-	// The join drops a holder workspace that was deleted; workspace deletion
-	// is soft, so the id alone would keep its lock forever.
-	err := h.db.QueryRowContext(r.Context(), `
-		SELECT s.slug, s.locked, s.source, COALESCE(w.id, ''), COALESCE(s.locked_workspace_id, '')
-		FROM skills s LEFT JOIN workspaces w ON w.id = s.locked_workspace_id AND w.deleted_at IS NULL
-		WHERE s.id = ?`, skillID).Scan(&slug, &was, &source, &holder, &stored)
+	err := h.db.QueryRowContext(r.Context(),
+		"SELECT slug, locked, source, COALESCE(locked_workspace_id, '') FROM skills WHERE id = ?", skillID).Scan(&slug, &was, &source, &stored)
 	if errors.Is(err, sql.ErrNoRows) {
 		problem(http.StatusNotFound, "skill not found")
 		return
@@ -85,14 +81,18 @@ func (h *SkillHandler) setLock(w http.ResponseWriter, r *http.Request, lock bool
 	if err := h.db.QueryRowContext(r.Context(), `
 		SELECT COALESCE(SUM(a.workspace_id = ?), 0), COALESCE(SUM(a.workspace_id != ?), 0),
 			COALESCE(SUM(a.workspace_id = ?), 0)
-		FROM agent_skills as2 JOIN agents a ON a.id = as2.agent_id
-		WHERE as2.skill_id = ? AND a.deleted_at IS NULL`,
-		wsID, wsID, holder, skillID).Scan(&ownHeld, &otherHeld, &holderHeld); err != nil {
+		FROM agent_skills as2
+		JOIN agents a ON a.id = as2.agent_id AND a.deleted_at IS NULL
+		JOIN workspaces w ON w.id = a.workspace_id AND w.deleted_at IS NULL
+		WHERE as2.skill_id = ?`,
+		wsID, wsID, stored, skillID).Scan(&ownHeld, &otherHeld, &holderHeld); err != nil {
 		replyInternalError(w, h.logger, "skill lock ownership", err)
 		return
 	}
-	// A workspace that gave the skill up has no claim left, otherwise assign,
-	// lock and unassign would strand the skill for whoever holds it next.
+	// A workspace that was deleted or gave the skill up has no claim left,
+	// otherwise assign, lock and unassign would strand the skill for whoever
+	// holds it next. Deletion is soft, so only live rows count as holding.
+	holder := stored
 	if holder != wsID && holderHeld == 0 {
 		holder = ""
 	}
