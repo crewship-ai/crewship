@@ -134,7 +134,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   let admissionEpoch=0,initializing=true,admissionDeadline:ReturnType<typeof setTimeout>|undefined
   let dead=false,networkRetired=false,nativeFailed=false,sessionId='',current:Runtime|undefined,transition=false,viewNow=vacant,readerRefresh:{client:typeof client,done:Promise<void>}|undefined
   let privacyJournal:NativeDraftJournal|undefined,privacyRetirement:Promise<void>|undefined,readLossCheck:Promise<boolean>|undefined
-  let reauthorize:ReturnType<typeof setInterval>|undefined,leaseWatch:ReturnType<typeof setInterval>|undefined,proposalWatch:ReturnType<typeof setInterval>|undefined
+  let reauthorize:ReturnType<typeof setInterval>|undefined,leaseWatch:ReturnType<typeof setInterval>|undefined,proposalWatch:ReturnType<typeof setInterval>|undefined,keptDraftWatch:ReturnType<typeof setInterval>|undefined
   // Every server confirmation of read, however it arrives, supersedes earlier proofs.
   const draftScope={human:humanId,workspace:workspaceId,page:pageId},readConfirmed=()=>confirmNativeRead(draftScope)
   function readAccess(value:boolean){if(value)readConfirmed();readable=value;setReadVerified(value)}
@@ -218,6 +218,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    setLabel('Zachycení posledních změn nebylo potvrzeno');setError(message)
   }
   function retirePrivacy():Promise<void>{
+   clearInterval(keptDraftWatch)
    if(privacyRetirement)return privacyRetirement
    // Only unmounting ends this duty: drafts outlive a stopped connection.
    if(closed)return Promise.resolve()
@@ -243,6 +244,12 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   }
   // A monitor failure or refused admission says nothing about the draft by itself.
   // This asks for the one proof that does; anything short of it keeps the draft.
+  // Native admission refuses Comment, so nothing else speaks once it has: no
+  // stream, no reauthorization. A kept draft still follows read of the Page.
+  function watchKeptDraft(){
+   if(keptDraftWatch||!(metadataOnly||draftOffered||current?.capture||current?.blocked||current?.phase?.dirty))return
+   keptDraftWatch=setInterval(proveReadLoss,NATIVE_REAUTHORIZE_INTERVAL_MS)
+  }
   function proveReadLoss(){
    if(readLossCheck||privacyRetirement||authSuspended)return
    const check=verifyNativeReadLoss(draftScope,retirePrivacy).catch(()=>false)
@@ -424,7 +431,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    return retiring
   }
   async function suspendForAuth(){
-   authSuspended=true;setAuthEnded(true);readAccess(false);endDraftHold()
+   authSuspended=true;clearInterval(keptDraftWatch);setAuthEnded(true);readAccess(false);endDraftHold()
    const r=current
    if(r){freezeInput(r);r.frame.style.visibility='hidden'}
    // Another retirement may already be capturing the only native buffer.
@@ -538,7 +545,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
       if(!valid())return
       // After a lost stream this refusal may be read loss whose purge never
       // arrives, so nothing is offered; only a write downgrade holds the draft.
-      if(connectionLost){endDraftHold();connectionLost=false;stop(READ_ONLY_REFUSED);proveReadLoss();return}
+      if(connectionLost){watchKeptDraft();endDraftHold();connectionLost=false;stop(READ_ONLY_REFUSED);proveReadLoss();return}
       await holdMetadata(admission,operation.signal);if(!valid())return
       metadataDelay=METADATA_RETRY_MS;networkRetired=false;readOpening=false;finishAdmission(startup);return
      }
@@ -550,7 +557,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     setError(retained?'Zachycení posledních změn nebylo potvrzeno. Původní editor je uzamčený; po ověření čtení můžete stáhnout místní kopii.':connectionLost?'Spojení se obnovilo. Dokument je jen pro čtení, neuložené změny najdete v konceptu.':message)
     if(connectionLost)draftOffered=true
     connectionLost=false;metadataDelay=METADATA_RETRY_MS
-   }catch{if(client===admission&&admissionEpoch===startup&&!dead){proveReadLoss();if(metadataOnly)retryMetadata();else stop(READ_ONLY_REFUSED)}}
+   }catch{if(client===admission&&admissionEpoch===startup&&!dead){proveReadLoss();if(metadataOnly)retryMetadata();else{watchKeptDraft();stop(READ_ONLY_REFUSED)}}}
    finally{
     lifetime.signal.removeEventListener('abort',abort)
     if(readOpeningAbort===operation){readOpeningAbort=undefined;readOpening=false}
@@ -802,7 +809,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     readConfirmed();void observeLease(value,true).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Aktuální přístup nelze potvrdit.').catch(()=>stop('Přístup editoru se nepotvrdil.'))})
    }).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Spojení přerušeno. Zápis není potvrzen.').catch(()=>stop('Přístup editoru se nepotvrdil.'))})
   }
-  return()=>{closed=true;clearTimeout(metadataRetry);unregisterPrivacy();window.removeEventListener('message',windowMessage);window.removeEventListener('online',backOnline);control.current=()=>{};retryRead.current=()=>{};copyRecovery.current=()=>{};publishPreview.current=()=>{};history.current={load:async()=>null,loadVersion:async()=>{throw Error('native_editor_closed')},restore:()=>{}};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};stop('Editor uzavřen',true)}
+  return()=>{closed=true;clearTimeout(metadataRetry);clearInterval(keptDraftWatch);unregisterPrivacy();window.removeEventListener('message',windowMessage);window.removeEventListener('online',backOnline);control.current=()=>{};retryRead.current=()=>{};copyRecovery.current=()=>{};publishPreview.current=()=>{};history.current={load:async()=>null,loadVersion:async()=>{throw Error('native_editor_closed')},restore:()=>{}};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};stop('Editor uzavřen',true)}
  },[enabled,humanId,workspaceId,pageId,scopeKey])
  function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`${draft.applicationId}-recovery.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
  if(stateScope!==scopeKey)return <p role="status" className="p-6">Připojuji…</p>

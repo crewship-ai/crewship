@@ -2,7 +2,7 @@ import {webcrypto} from 'node:crypto'
 import {render,screen,waitFor,act} from '@testing-library/react'
 import {afterEach,beforeEach,expect,it,vi} from 'vitest'
 import {NativeCraftPreview} from '../native-craft-preview'
-const m=vi.hoisted(()=>({read:vi.fn(),port:vi.fn(),privacy:vi.fn(),unregister:vi.fn(),handlers:new Map<string,Array<(event:{type:string;payload:Record<string,unknown>})=>void>>()}))
+const m=vi.hoisted(()=>({confirmed:vi.fn(),read:vi.fn(),port:vi.fn(),privacy:vi.fn(),unregister:vi.fn(),handlers:new Map<string,Array<(event:{type:string;payload:Record<string,unknown>})=>void>>()}))
 vi.mock('@/hooks/use-realtime',()=>({useRealtimeEventSafe:(type:string,cb:(event:{type:string;payload:Record<string,unknown>})=>void)=>{const React=require('react');React.useEffect(()=>{const list=m.handlers.get(type)??[];list.push(cb);m.handlers.set(type,list);return()=>{m.handlers.set(type,(m.handlers.get(type)??[]).filter(h=>h!==cb))}})}}))
 const push=(type:string,payload:Record<string,unknown>)=>act(async()=>{for(const h of [...(m.handlers.get(type)??[])])h({type,payload})})
 vi.mock('@/lib/mooring/native-preview-client',()=>({readNativePreview:m.read,NativePreviewError:class extends Error {status=403}}))
@@ -14,6 +14,7 @@ vi.mock('../workbook-editor-host',()=>({editorFrameSupported:()=>true,createEdit
 vi.mock('@/lib/mooring/native-editor-port',()=>({createNativeEditorPort:m.port}))
 vi.mock('@/lib/document-queue',()=>({registerDocumentDraftWriter:m.privacy}))
 vi.mock('../native-craft-editor-host',()=>({nativeCraftFrameURL:()=> 'about:blank'}))
+vi.mock('@/lib/mooring/native-read-loss',()=>({confirmNativeRead:m.confirmed}))
 const snapshot=()=>({version:'2',bytes:new Uint8Array([1,2]),applicationId:'wordcraft',enginePin:'a'.repeat(64),editorBundle:'b'.repeat(64),editorURL:'unused'})
 let port:{bootstrap:ReturnType<typeof vi.fn>;setReadOnly:ReturnType<typeof vi.fn>;loaded:ReturnType<typeof vi.fn>;handleWindowMessage:ReturnType<typeof vi.fn>;close:ReturnType<typeof vi.fn>}
 beforeEach(()=>{m.handlers.clear();vi.stubGlobal('crypto',webcrypto);m.read.mockReset().mockResolvedValue(snapshot());m.privacy.mockReset().mockReturnValue(m.unregister);m.port.mockReset();port={bootstrap:vi.fn().mockResolvedValue({}),setReadOnly:vi.fn().mockResolvedValue(true),loaded:vi.fn(),handleWindowMessage:vi.fn(),close:vi.fn()};m.port.mockImplementation(options=>{queueMicrotask(()=>options.onReady?.('qualified'));return port})})
@@ -25,6 +26,15 @@ it('bootstraps the shared pin readonly without custody or drafts',async()=>{
  expect(port.bootstrap).toHaveBeenCalledWith(new Uint8Array([1,2]),expect.any(AbortSignal))
  expect(port.setReadOnly).toHaveBeenCalledWith(true,expect.any(AbortSignal))
  expect(screen.queryByRole('button')).toBeNull()
+})
+it('a delivered shared version confirms read of this Page, a refused one does not',async()=>{
+ m.confirmed.mockClear()
+ render(<NativeCraftPreview humanId="h" workspaceId="w" pageId="p"/>)
+ await screen.findByText('Sdílený náhled · verze 2')
+ expect(m.confirmed).toHaveBeenCalledWith({human:'h',workspace:'w',page:'p'})
+ m.confirmed.mockClear();m.read.mockRejectedValueOnce(Error('refused'))
+ await push('page.access_recheck',{page_id:'p'})
+ expect(m.confirmed).not.toHaveBeenCalled()
 })
 it('removes the frame and rejects delayed delivery after an identity change',async()=>{
  let resolve!:(value:unknown)=>void;m.read.mockReturnValueOnce(new Promise(done=>{resolve=done}))

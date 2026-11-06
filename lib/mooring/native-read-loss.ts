@@ -1,5 +1,5 @@
 import {captureLocalDraftPage,purgeLocalDraftPage} from "../artifact-drafts"
-import {forgetLocalDraftPage,nativeDraftReadRevoked,type LocalDraftScope} from "../local-draft-seal"
+import {forgetLocalDraftPage,nativeDraftRead,type LocalDraftScope} from "../local-draft-seal"
 
 const confirmations=new Map<string,number>()
 const key=(scope:LocalDraftScope)=>JSON.stringify([scope.human,scope.workspace,scope.page])
@@ -18,7 +18,9 @@ export async function verifyNativeReadLoss(scope:LocalDraftScope,retire?:()=>Pro
  const asked=confirmations.get(key(scope))??0
  const captured=await captureLocalDraftPage(scope)
  if(!captured.local.length&&!captured.artifacts.length&&!captured.documents.length&&!retire)return false
- if(!await nativeDraftReadRevoked(scope).catch(()=>false))return false
+ const answer=await nativeDraftRead(scope).catch(()=>"unknown" as const)
+ if(answer==="readable")confirmNativeRead(scope)
+ if(answer!=="revoked")return false
  if((confirmations.get(key(scope))??0)!==asked)return false
  forgetLocalDraftPage(scope)
  await retire?.()

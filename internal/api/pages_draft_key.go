@@ -120,7 +120,7 @@ func (h *PageHandler) LocalDraftKey(w http.ResponseWriter, r *http.Request) {
 		if err := validateContentHumanCredential(r.WithContext(ctx), tx, "pages:read"); err != nil {
 			return err
 		}
-		return h.localDraftRead(ctx, r, key, tx)
+		return h.localDraftRead(ctx, key, tx)
 	}
 	fail := func(err error) {
 		switch {
@@ -167,7 +167,7 @@ func (h *PageHandler) LocalDraftKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, response)
 }
 
-func (h *PageHandler) localDraftRead(ctx context.Context, r *http.Request, key artifacts.VersionKey, tx *sql.Tx) error {
+func (h *PageHandler) localDraftRead(ctx context.Context, key artifacts.VersionKey, tx *sql.Tx) error {
 	var family string
 	err := tx.QueryRowContext(ctx, `SELECT content_type FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, key.WorkspaceID, key.PageID).Scan(&family)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {

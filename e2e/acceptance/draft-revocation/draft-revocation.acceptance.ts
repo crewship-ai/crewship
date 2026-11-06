@@ -178,6 +178,20 @@ test.describe("native draft on access change", () => {
     })
   }
 
+  test("Comment removed after admission stopped erases without a reload", { annotation: prdRequirement("A.craft.draft.comment-to-none", "Word: a draft kept after Edit became Comment is erased when Comment is removed too, with no reload") }, async ({ prd, request }) => {
+    const f = await holding(prd, request, cleanup, ["comment", "write"], browser)
+    await f.doc.revoke(request, f.peer.userId, "write")
+    await until("delivery", async () => (await retired(f.page)).length > 0, BOUND.deliveryMs + 5_000)
+    await until("the editor says Edit is gone", async () => (await f.page.getByRole("alert").filter({ hasText: REFUSED }).count()) > 0, 30_000)
+    await pause(15_000)
+    const kept = await draftRows(f.page, f.doc.pageId)
+    await f.doc.revoke(request, f.peer.userId, "comment")
+    const t0 = Date.now()
+    const erased = await until("the kept draft is erased", async () => (await draftRows(f.page, f.doc.pageId)) === 0, BOUND.reconnectMs + 5_000)
+    await prd.evidence("timing.json", { kept, erasedMs: erased - t0, frames: (await retired(f.page)).length })
+    expect(kept, "Comment alone kept the draft").toBeGreaterThan(0)
+  })
+
   test("read lost while offline is learned on reconnect", { annotation: prdRequirement("A.craft.draft.offline-reconnect", "Word: an offline browser keeps the draft until it returns, and then erases it") }, async ({ prd, request }) => {
     const control = process.env.REVOCATION_PROXY_CONTROL, direct = process.env.REVOCATION_DIRECT
     test.skip(!control || !direct, "needs revocation-proxy.mjs in front of the server")

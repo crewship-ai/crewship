@@ -16,7 +16,7 @@ import { serverFetch } from "@/lib/server-base"
 import { purgeOtherE2Recovery } from "@/lib/chat-e2-recovery"
 import { isKnownAppPath } from "@/lib/app-routes"
 import { SIGNED_OUT_URL, rememberSignedOut, signedOutKind } from "@/lib/signed-out"
-import { suspendOtherDocumentDrafts, captureDocumentDrafts, removeCapturedDocumentDrafts } from "@/lib/document-queue"
+import { suspendOtherDocumentDrafts, captureDocumentDrafts, removeCapturedDocumentDrafts, suspendedDocumentDraftRevisions } from "@/lib/document-queue"
 import { suspendOtherArtifactDrafts, finishArtifactDraftIdentity, captureArtifactDrafts, removeCapturedArtifactDrafts, captureLegacyLocalDrafts, removeCapturedLegacyLocalDrafts } from "@/lib/artifact-drafts"
 
 import { beginLocalDraftIdentity, finishLocalDraftIdentity } from "@/lib/local-draft-seal"
@@ -507,9 +507,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (discardDrafts) {
           // Suspending a native editor freezes it and stores its last snapshot as a
           // new revision of a row the person agreed to discard: nothing new arrived.
-          // Any other changed or new row is a change arriving during sign-out and stays.
-          const confirmed = new Set(capturedDocuments.map(row => JSON.stringify(row.key)))
-          const suspended = (await captureDocumentDrafts(signingOutHuman!)).filter(row => row.key[1].includes('"native:') && confirmed.has(JSON.stringify(row.key)))
+          // Any other changed or new row, including another tab's, stays.
+          const suspended = suspendedDocumentDraftRevisions(capturedDocuments).filter(row => row.key[1].includes('"native:'))
           await Promise.all([removeCapturedDocumentDrafts([...capturedDocuments, ...suspended]), removeCapturedArtifactDrafts(capturedArtifacts)])
           removeCapturedLegacyLocalDrafts(capturedLegacy)
         }

@@ -3,6 +3,7 @@
 package api
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -97,6 +98,49 @@ func TestCraftNativeReadLossDeliveryWithinOneEventInterval(t *testing.T) {
 			t.Fatalf("delivery took %s, bound %s", delivered, limit)
 		}
 		return
+	}
+}
+
+// The whole path a kept draft takes. Edit to Comment retires the stream and keeps
+// the draft, a fresh native admission is refused, so no stream will ever speak
+// again. What stays is draft-key: it must still say readable, and say revoked
+// once Comment goes.
+func TestCraftNativeCommentToNoneAfterAdmissionStopped(t *testing.T) {
+	f, m, _ := craftNativeHTTPFixture(t)
+	clock, err := mooring.NewBootOwnerClock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m = newCraftNativeHTTP(m.pages, true, clock)
+	ctx := craftNativeGrantedWriter(t, f)
+	token, _ := craftNativeIssued(t, m, ctx)
+	if w := craftNativeLeaseCall(m, ctx, token, "native-page", "acquire", `{}`); w.Code != 200 {
+		t.Fatalf("acquire: %d %s", w.Code, w.Body)
+	}
+	next := craftNativeOpenStream(t, f, m, ctx, token)
+	if event, _ := next(); event != "lease" {
+		t.Fatalf("calibration stream: %s", event)
+	}
+	mustExec(t, f.db, `UPDATE page_grants SET level='comment' WHERE page_id='native-page' AND subject_id='native-scope-writer'`)
+	for {
+		event, value := next()
+		if event == "lease" {
+			continue
+		}
+		if event != "session_retired" || value["draft"] != "retain" || value["reason"] != "write_revoked" {
+			t.Fatalf("retirement %s %v", event, value)
+		}
+		break
+	}
+	if w := craftNativeSessionCall(m, ctx); w.Code != 403 {
+		t.Fatalf("fresh admission for Comment: %d %s, want 403", w.Code, w.Body)
+	}
+	if w := craftNativeDraftCheck(m, ctx, "native-scope-writer", "native-page"); w.Code != 200 || !strings.Contains(w.Body.String(), `"readable":true`) {
+		t.Fatalf("Comment keeps Page read: %d %s", w.Code, w.Body)
+	}
+	mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='native-page' AND subject_id='native-scope-writer'`)
+	if w := craftNativeDraftCheck(m, ctx, "native-scope-writer", "native-page"); w.Code != 403 || !strings.Contains(w.Body.String(), "draft_read_revoked") {
+		t.Fatalf("Comment removed: %d %s", w.Code, w.Body)
 	}
 }
 

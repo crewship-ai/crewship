@@ -62,10 +62,10 @@ function scriptedServer(){
   if(name==='draft-key'){
    if(s.proofDelay)await new Promise(resolve=>setTimeout(resolve,s.proofDelay))
    // The real route: draft-key asks canonical Page read, which Comment passes.
-   if(state==='comment-only')return json({envelope:'v1:unit'})
+   if(state==='comment-only')return json({readable:true})
    if(state==='signed-out')return json({error:'fresh human authentication required'},401)
    if(state==='read-lost')return json({error:'current Page read access is required',code:'draft_read_revoked'},403)
-   return json({envelope:'v1:unit'})
+   return json({readable:true})
   }
   if(s.state==='signed-out')return json({error:'authentication required'},401)
   if(s.state==='read-lost'||s.state==='comment-only')return json({error:'native Craft access denied'},403)
@@ -241,6 +241,36 @@ describe('proof',()=>{
   expect(contentVisible()).toBe(false)
   await advance(NATIVE_REAUTHORIZE_DEADLINE_MS+2_000)
   expect(m.purge).toHaveBeenCalledWith({human:'human',workspace:'w',page:'p'},expect.anything())
+ })
+})
+describe('a draft kept after write loss',()=>{
+ it('Edit to Comment stops admission, and removing Comment is still found without a reload',async()=>{
+  await opened()
+  act(()=>options.at(-1)!.onChanged('typed','doc'))
+  await advance(3_000)
+  server.state='comment-only'
+  server.push('session_retired',{delivery:'stopped',reason:'write_revoked',draft:'retain'})
+  await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
+  // Comment keeps the Page: admission refuses, the proof says readable, the draft stays.
+  expect(server.count('draft-key')).toBeGreaterThan(0);expect(m.purge).not.toHaveBeenCalled()
+  server.state='read-lost'
+  await advance(NATIVE_DETECTION_BOUND_MS)
+  expect(m.purge).toHaveBeenCalledWith({human:'human',workspace:'w',page:'p'},expect.anything())
+  expect(screen.getByRole('status')).toHaveTextContent('Přístup ke čtení byl odebrán')
+  server.calls.length=0
+  await advance(5*60_000)
+  expect(server.count('draft-key')).toBe(0)
+ })
+ it('the watch ends with the editor',async()=>{
+  await opened()
+  act(()=>options.at(-1)!.onChanged('typed','doc'))
+  await advance(3_000)
+  server.state='comment-only'
+  server.push('session_retired',{delivery:'stopped',reason:'write_revoked',draft:'retain'})
+  await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
+  cleanup();server.calls.length=0
+  await advance(5*60_000)
+  expect(server.count('draft-key')).toBe(0)
  })
 })
 describe('a stale proof',()=>{

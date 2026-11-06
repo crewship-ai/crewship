@@ -1468,7 +1468,14 @@ admission is not proof.
 
 "Proven" means a `403 draft_read_revoked` from `draft-key` or, on an open native
 editor, a `session_retired` event with `draft: "purge"`. The event says `purge` only
-while the person's credential is still current and the Page refuses them. Native
+while the person's credential is still current and the same read `draft-key` asks
+refuses them, so native admission or application eligibility never erases, and a
+restricted private custodian keeps the draft. A `readable: true` answer or a
+delivered shared version supersedes every older proof still on the wire for that
+Page in that tab. Once native admission refuses a person holding a kept draft, the
+editor asks `draft-key` every 30 seconds until it unmounts, signs out or erases, so
+Comment to none is found without a reload.
+Native
 asks `draft-key` with `operation: "check"`; Project asks `wrap`. Both ask the same
 read question, canonical Page visibility. A native draft is asked about after a
 refused or unavailable admission and on any entry short of the editor (preview,
@@ -1530,7 +1537,9 @@ Before an authentication transition unmounts an editor, admitted local writes
 must drain. Failed capture, unavailable storage, and an over-limit Design draft
 keep the live model mounted behind recovery UI and block navigation. Explicit
 sign-out warns before deleting persistent recovery copies and deletes only the
-revisions covered by that confirmation. Later writes remain for recovery.
+revisions covered by that confirmation, plus the exact revision this tab's own
+suspended native editor made from one of them. Later writes remain for recovery,
+including another tab's.
 Recovery does not replay native snapshot saves, custody operations or agent
 dispatch. Design resumes standard CRDT synchronization only after fresh
 same-person Edit admission; read-only viewers do not restore a writer canvas.

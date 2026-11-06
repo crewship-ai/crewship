@@ -202,3 +202,39 @@ func TestProjectDraftFateFollowsTheContentThatLostRead(t *testing.T) {
 		})
 	}
 }
+
+// Native admission and application eligibility are not read of the Page. The
+// stream must answer what draft-key answers, so a person draft-key still lets
+// recover the draft never hears "purge".
+func TestNativeDraftFateIgnoresNativeAdmissionPolicy(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		change func(t *testing.T, db *sql.DB, user string)
+	}{
+		{name: "restricted private custodian", change: func(t *testing.T, db *sql.DB, user string) {
+			mustExec(t, db, `UPDATE pages SET private_audience=1,owner_user_id=? WHERE id='native-page'`, user)
+			mustExec(t, db, `UPDATE workspace_members SET access_mode='restricted' WHERE user_id=?`, user)
+		}},
+		// The profile row is immutable; without it the Page is simply no longer a
+		// native document, and the Page itself stays readable.
+		{name: "no native application for the Page", change: func(t *testing.T, db *sql.DB, _ string) {
+			mustExec(t, db, `DELETE FROM craft_native_documents WHERE page_id='native-page'`)
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f, m, _, _, _, _, _ := craftNativeDocumentsFixture(t)
+			before := craftNativePreviewPeer(t, f, "write")
+			user := UserFromContext(before).ID
+			before = craftNativeFreshContext(t, f, before, 3600e9)
+			test.change(t, f.db, user)
+			entry := &craftNativeSession{source: *auth.OriginalCredentialFromContext(before), scope: mooring.EditLeaseScope{WorkspaceID: f.wsID, ArtifactID: "native-page"}}
+			after := craftNativeFreshContext(t, f, before, 3600e9)
+			if got, _ := m.retirementFinding(after, entry); got != "retain" {
+				t.Errorf("stream finding %s, want retain", got)
+			}
+			if proof := craftNativeDraftCheck(m, after, user, "native-page"); proof.Code != 200 {
+				t.Errorf("draft-key %d %s, want 200", proof.Code, proof.Body)
+			}
+		})
+	}
+}

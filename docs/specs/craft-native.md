@@ -357,7 +357,8 @@ mount's draft), so it deletes exactly its own row by its full key
 (`eraseOwnRow`). Work still in flight from the replaced admission, such as a
 pending document read, is ignored when it completes and never stops the
 fresh read-only view. Comment-only access is not native read
-access, so an Edit to Comment downgrade follows the read-loss path.
+access, so an Edit to Comment downgrade gets no fresh admission, but it is not
+read loss: the draft stays and the editor keeps asking `draft-key` about the Page.
 
 Original expired or revoked credentials never regain an old admission. Explicit
 reauthorization accepts only a separately authenticated newer expiry for the same

@@ -140,7 +140,11 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
       const serialized = JSON.stringify(draft)
       if (serialized.length > maxDraftBytes || (options?.maxDraftBytes !== undefined && new TextEncoder().encode(serialized).byteLength > maxDraftBytes)) throw new DocumentStorageError(message)
       const key: [string,string] = [owner,JSON.stringify([draft.schema,draft.epoch,draft.id])]
-      await transaction("readwrite", store => store.put({ key, draft, revision: crypto.randomUUID() }))
+      await transaction("readwrite", store => {
+        const revision = crypto.randomUUID()
+        if (suspensions) { const previous = store.get(key); previous.onsuccess = () => noteSuspendedRevision(key, previous.result?.revision ?? null, revision) }
+        return store.put({ key, draft, revision })
+      })
       keys.set(draft.id,key)
     },
     async remove(id) {
@@ -238,11 +242,30 @@ export function purgeOtherDocumentDrafts(userId: string | null): Promise<void> {
   return identityPurge
 }
 
+// What this tab's own editors stored while suspended, row by row. A revision
+// written by another tab never passes through here. Suspension only saves what
+// the editor already held, so a row confirmed for deletion stays confirmed through
+// these exact revisions, and through nothing else.
+let suspensions = 0
+const suspendedRevisions = new Map<string, { from: string | null; to: string }>()
+function noteSuspendedRevision(key: [string, string], from: string | null, to: string) {
+  const row = JSON.stringify(key), last = suspendedRevisions.get(row)
+  suspendedRevisions.set(row, { from: last?.to === from ? last.from : from, to })
+}
+/** The revisions this tab's suspension made out of exactly these captured ones. */
+export function suspendedDocumentDraftRevisions(rows: CapturedDocumentDraft[]): CapturedDocumentDraft[] {
+  return rows.flatMap(row => {
+    const written = suspendedRevisions.get(JSON.stringify(row.key))
+    return written && written.from === row.revision ? [{ key: row.key, revision: written.to }] : []
+  })
+}
+
 /** Preserve rows on expiry/account replacement. Editors capture before journals close. */
 let suspensionInFlight: Promise<void> | undefined
 export function suspendOtherDocumentDrafts(userId: string | null): Promise<void> {
   const previous = journalHuman
   journalHuman = userId
+  suspensions++
   const perform = () => {
     const retiring: Array<[symbol, DraftWriter]> = []
     for (const [key, writer] of draftWriters) {
@@ -283,7 +306,8 @@ export function suspendOtherDocumentDrafts(userId: string | null): Promise<void>
   // after it settles, so they cannot overlook a reinserted failed writer.
   const work = suspensionInFlight ? suspensionInFlight.catch(() => {}).then(perform) : perform()
   suspensionInFlight = identityPurge = work
-  void work.then(() => { if (suspensionInFlight === work) suspensionInFlight = undefined }, () => { if (suspensionInFlight === work) suspensionInFlight = undefined })
+  const settled = () => { suspensions--; if (suspensionInFlight === work) suspensionInFlight = undefined }
+  void work.then(settled, settled)
   return work
 }
 export interface CapturedDocumentDraft { key: [string, string]; revision: string | null; draft?: string }
