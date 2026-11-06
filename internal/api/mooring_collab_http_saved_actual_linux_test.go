@@ -40,7 +40,81 @@ func TestMooringHTTPActualSDKWholeGroupSavedAndPeer(t *testing.T) {
 func TestMooringHTTPActualSDKUnobservedPeerDeletePreservesOriginal(t *testing.T) {
 	runMooringHTTPActualSDK(t, true)
 }
+
+// #5019. The native lease is anchored at the renewal REQUEST, the SQL gate at the
+// host's REPLY, so a renewal delayed past 5s leaves the row renewed while the
+// child has closed that recipient for good: it stops asking, and holds Saved
+// frames for a new gate. Both recipients here stay quiet, so nothing but the
+// host can ask for that gate. Same receive loop and assertions as the whole-group
+// test; only the renewal timing differs.
+func TestMooringHTTPActualLateRenewalReopensQuietRecipients(t *testing.T) {
+	runMooringHTTPActualSDK(t, false, "late-renewal")
+}
+
+// #5019. A rotation can overtake a Pending still queued for the old gate, so its
+// receipt arrives on the new gate while the Pending's token is held. That one
+// output must not read as a reused ID, which would end the session for everyone.
+func TestMooringHTTPActualRotationKeepsQueuedPendingAndItsReceipt(t *testing.T) {
+	runMooringHTTPActualSDK(t, false, "late-renewal-queued-pending")
+}
+
+// mooringActualNativeLease is session_control::DELIVERY_LEASE_MS.
+const mooringActualNativeLease = 5 * time.Second
+
+// mooringActualFrameDeadline bounds one quiet read. A recipient whose native lease
+// was lost is reopened only once its SQL gate lapses, up to one lease after that
+// gate's last renewal, plus one watch tick. The rest is scheduling margin for a
+// loaded runner; this is a limit on delivery, not an allowance for losing a frame.
+const mooringActualFrameDeadline = mooringActualNativeLease + collaborationGateWatchInterval + 9*time.Second
+
+// mooringLateRenewal holds the serial renewal path and the commit until every
+// native lease has certainly lapsed, as the slow writer did in run 42147570666.
+type mooringLateRenewal struct {
+	armed   atomic.Bool
+	release chan struct{}
+	// Only with queued Pending: commit after both rotations, and hold the first
+	// Pending until both commits have returned and their receipts have left.
+	rotated, committed chan struct{}
+	commits            atomic.Int32
+}
+
+// mooringActualReceiptSettle lets the child's receipts reach the host reader. A
+// slow runner can only make the queued-Pending test pass without the overlap.
+const mooringActualReceiptSettle = 500 * time.Millisecond
+
+func (l *mooringLateRenewal) wait(ctx context.Context) {
+	if !l.armed.Load() {
+		return
+	}
+	select {
+	case <-l.release:
+	case <-ctx.Done():
+	}
+}
+
+// arm returns once the leases can no longer be live. Any renewal the child sent
+// before arming was anchored no later than now, and every later one is held. The
+// direct row update stands in for a renewal that reached SQL on time and came
+// back to the child too late, which is the only window that leaves no trigger:
+// a held renewal that finds the row already expired rotates the gate by itself.
+func (l *mooringLateRenewal) arm(t *testing.T, db *sql.DB) func() {
+	t.Helper()
+	l.armed.Store(true)
+	armedAt := time.Now()
+	return func() {
+		t.Helper()
+		time.Sleep(time.Until(armedAt.Add(mooringActualNativeLease + 250*time.Millisecond)))
+		mustExec(t, db, `UPDATE mooring_delivery_gates SET expires_ns=expires_ns+?`, int64(2*time.Second))
+		close(l.release)
+	}
+}
+
 func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...string) {
+	lateRenewal := len(grantChange) != 0 && strings.HasPrefix(grantChange[0], "late-renewal")
+	queuedPending := lateRenewal && grantChange[0] == "late-renewal-queued-pending"
+	if lateRenewal {
+		grantChange = nil
+	}
 	started := time.Now()
 	phase := func(name string) { t.Logf("phase %s elapsed=%s", name, time.Since(started)) }
 	copy := testutil.MigratedDB(t)
@@ -201,6 +275,63 @@ func runMooringHTTPActualSDK(t *testing.T, peerDelete bool, grantChange ...strin
 	r.mooringHTTP.mu.Unlock()
 	if document == nil || document.activation.RequireHumanNativePrepare() != nil {
 		t.Fatal("actual human capability not activated")
+	}
+	late := &mooringLateRenewal{release: make(chan struct{})}
+	if lateRenewal {
+		// Same barrier as the late-ticket fixture below: installed before any Open.
+		document.mu.Lock()
+		originalDelivery, originalSubmit := document.pump.handlers.DeliveryControl, document.pump.handlers.Submit
+		document.pump.handlers.DeliveryControl = func(ctx context.Context, token mooring.SessionControl, q protocol.DeliveryRenew) error {
+			late.wait(ctx)
+			return originalDelivery(ctx, token, q)
+		}
+		document.pump.handlers.Submit = func(ctx context.Context, q protocol.SessionSubmitBatch) (protocol.SessionCommitResult, error) {
+			late.wait(ctx)
+			if !queuedPending {
+				return originalSubmit(ctx, q)
+			}
+			select {
+			case <-late.rotated:
+			case <-ctx.Done():
+			}
+			result, err := originalSubmit(ctx, q)
+			if late.commits.Add(1) == 2 {
+				close(late.committed)
+			}
+			return result, err
+		}
+		if queuedPending {
+			late.rotated, late.committed = make(chan struct{}), make(chan struct{})
+			originalOutput := document.pump.handlers.OutputControl
+			var held atomic.Bool
+			document.pump.handlers.OutputControl = func(ctx context.Context, token mooring.SessionControl, q protocol.SessionParticipantOutput) error {
+				var header struct {
+					Type string `json:"type"`
+				}
+				_ = json.Unmarshal(q.Message, &header)
+				if late.armed.Load() && header.Type == "changes_received" && held.CompareAndSwap(false, true) {
+					select {
+					case <-late.committed:
+						time.Sleep(mooringActualReceiptSettle)
+					case <-ctx.Done():
+					}
+				}
+				return originalOutput(ctx, token, q)
+			}
+			go func() {
+				// The only writers are the two rotations; closing unblocks the commits.
+				for t.Context().Err() == nil {
+					var gates int
+					if rig.db.QueryRow(`SELECT COUNT(*) FROM mooring_delivery_gates`).Scan(&gates) == nil && gates >= 4 {
+						close(late.rotated)
+						return
+					}
+					time.Sleep(50 * time.Millisecond)
+				}
+			}()
+		}
+		_ = document.cell.runtime.Err()
+		document.mu.Unlock()
 	}
 	var beforeTicket atomic.Pointer[func(protocol.TicketValidationRequest)]
 	lateMutation := make(chan error, 1)
@@ -492,6 +623,11 @@ process.stdout.write(JSON.stringify(changes));`
 			}
 		}
 		send(a, first, "original-own-request", own)
+	} else if lateRenewal {
+		leasesLapsed := late.arm(t, rig.db)
+		send(a, first, "original-own-request", own)
+		send(b, second, "original-peer-request", peer)
+		leasesLapsed()
 	} else {
 		send(a, first, "original-own-request", own)
 		send(b, second, "original-peer-request", peer)
@@ -505,7 +641,7 @@ process.stdout.write(JSON.stringify(changes));`
 	}{{a, "original-own-request", 2, first.Ref}, {b, "original-peer-request", 1, second.Ref}} {
 		receivedReceipt, updates := recipient.ref == second.Ref && peerAlreadySaved, len(framesByRef[recipient.ref])
 		for !receivedReceipt || updates < 3 {
-			_ = recipient.ws.SetReadDeadline(time.Now().Add(15 * time.Second))
+			_ = recipient.ws.SetReadDeadline(time.Now().Add(mooringActualFrameDeadline))
 			var raw []byte
 			if err := websocket.Message.Receive(recipient.ws, &raw); err != nil {
 				phase("receive-failed")
@@ -531,7 +667,8 @@ process.stdout.write(JSON.stringify(changes));`
 				}
 				document.originals.mu.Unlock()
 
-				t.Fatalf("actual receipt/peer %s updates=%d queued=%d: %v", recipient.id, updates, document.pump.queuedMutations.Load(), err)
+				// The counter only ever grows: it is submits accepted, not frames unsent.
+				t.Fatalf("actual receipt/peer %s updates=%d submitsAccepted=%d: %v", recipient.id, updates, document.pump.queuedMutations.Load(), err)
 			}
 			var header struct {
 				Type string `json:"type"`

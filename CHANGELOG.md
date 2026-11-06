@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Live edits reach a quiet collaborator after a slow delivery renewal (#5019).** A delivery renewal delayed past 5 seconds could stop live updates reaching someone who was not sending anything. The server now reopens that delivery by itself within seconds, and a queued edit status no longer ends the session for everyone during that reopen. Saved edits were never lost.
 - ⚠️ **Behaviour change: only OWNER or ADMIN can change the governance model credential (#5024).** PATCH, rotate, escalation answers, OAuth completion and internal token writes refuse a bound credential for narrower roles, and `credential.rotate` no longer reaches it. Binding now needs an active credential.
 - **A delayed sign-out no longer removes unsent chat proposals (#5026).** If a tab learns of a sign-out after its person signed back in, it now keeps their chat recovery. A real sign-out still removes it, even when saving drafts fails.
 

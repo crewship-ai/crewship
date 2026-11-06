@@ -187,6 +187,17 @@ reopened reader when no later write arrives. Missing cuts fail closed; replay
 never creates a snapshot, intent, source identity, author consent or authority.
 An initial reader without a physically observed basis receives no invented cut.
 
+The native lease runs from the renewal request and the SQL gate from the host's
+reply, so a renewal delayed past 5s renews the row after the runtime has closed
+that recipient, and the runtime stops asking. The host watches each socket's gate
+and rotates it once the row has plainly expired, so a quiet recipient gets its
+held frames within one lease and one second of the last renewal, without having
+to send anything. Saved edits are not lost either way. The expiry is proved again
+in the writer transaction, and the reopen requires the original admission. A
+rotation can overtake a Pending still queued for the old gate; its receipt on the
+new gate shares that one output's ID only along a rotation chain the runtime
+recorded, and only the gate may differ.
+
 
 ## Recorded edit metadata
 
