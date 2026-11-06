@@ -482,7 +482,8 @@ jobs:
                 jq -e --arg spec "$(basename "$1")" " any(.suites[]; .file == \$spec) and .stats.expected > 0 and .stats.skipped == 0 and .stats.unexpected == 0 and .stats.flaky == 0 " \
                   playwright-nightly-report.json >/dev/null || status=1
                 mkdir -p "test-results/throwaway-$2"
-                cp playwright-nightly-report.json "test-results/throwaway-$2/report.json"
+                # A crash leaves no report; keep the real exit status for that case.
+                cp playwright-nightly-report.json "test-results/throwaway-$2/report.json" || true
                 exit "$status"
               ' bash "$spec" "$index"
           done

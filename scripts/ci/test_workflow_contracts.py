@@ -33,7 +33,7 @@ class WorkflowContracts(unittest.TestCase):
     def test_every_workflow_seed_names_its_server(self):
         # The CLI refuses a seed without --server, so a bare call fails every
         # attempt: the throwaway chat specs did not run for weeks (#2768).
-        seed = re.compile(r'(?:\./|/)crewship seed\b')
+        seed = re.compile(r'/crewship"? seed\b')
         for workflow in sorted((ROOT / '.github/workflows').glob('*.yml')):
             # Join shell continuations: flags often sit on the following lines.
             for line in workflow.read_text().replace('\\\n', ' ').splitlines():
