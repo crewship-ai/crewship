@@ -198,12 +198,13 @@ describe("Design provider work the server has not confirmed", () => {
  const label = { id: "label", type: "text" as const, name: "Title", text: "Base", x: 0, y: 0, width: 200, height: 40, fill: "#111111" }
  /** Connected and fully synced with the server's doc: Hello answered, first reply in. */
  function live() {
+  // Before the socket opens: the sync budget reads the same clock from then on.
+  vi.useFakeTimers()
   const ctx = setup(true)
   const server = new Y.Doc()
   upsertDesignNode(server, label)
   ctx.socket.receive(server, 1)
   ctx.socket.receive(server, 2)
-  vi.useFakeTimers()
   return { ...ctx, server }
  }
  function offline() {
@@ -331,10 +332,10 @@ describe("Design provider work the server has not confirmed", () => {
   expect(pending).toHaveBeenLastCalledWith(null)
  })
  it("does not count the reply to a step 1 sent before the edit", () => {
+  vi.useFakeTimers()
   const ctx = setup(true)
   const server = new Y.Doc()
   ctx.socket.receive(server, 1)
-  vi.useFakeTimers()
   upsertDesignNode(ctx.doc, label)
   vi.advanceTimersByTime(100)
   ctx.socket.receive(server, 2)
@@ -405,8 +406,8 @@ describe("Design provider work the server has not confirmed", () => {
   const baseline = Y.encodeStateAsUpdate(server)
   const doc = new Y.Doc(); Y.applyUpdate(doc, baseline)
   upsertDesignNode(doc, { id: "label", text: "Mine" })
-  const { socket, pending, conflicts } = setup(true, undefined, { doc, baseline, unconfirmed: true })
   vi.useFakeTimers()
+  const { socket, pending, conflicts } = setup(true, undefined, { doc, baseline, unconfirmed: true })
   upsertDesignNode(server, { id: "label", text: "Theirs" })
   socket.receive(server, 1)
   socket.receive(server, 2)

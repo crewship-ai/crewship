@@ -149,6 +149,9 @@ func splitPromptResponse(messages []map[string]any) (prompt, response string) {
 	gotUser := false
 	var resp []byte
 	for _, m := range messages {
+		if isNativeCraftInstruction(m) {
+			continue
+		}
 		role, _ := m["role"].(string)
 		content, _ := m["content"].(string)
 		if !gotUser && (role == "user" || role == "human" || role == "Human") {

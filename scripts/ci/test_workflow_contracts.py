@@ -30,6 +30,25 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('await chromium.launch(', tests)
         self.assertIn('frontend-test-shards', self.job(ci, 'frontend-test'))
 
+    def test_every_workflow_seed_names_its_server(self):
+        # The CLI refuses a seed without --server, so a bare call fails every
+        # attempt: the throwaway chat specs did not run for weeks (#2768).
+        seed = re.compile(r'/crewship"? seed\b')
+        for workflow in sorted((ROOT / '.github/workflows').glob('*.yml')):
+            # Join shell continuations: flags often sit on the following lines.
+            for line in workflow.read_text().replace('\\\n', ' ').splitlines():
+                if seed.search(line) and not line.lstrip().startswith('#'):
+                    self.assertIn('--server', line, f'{workflow.name}: {line.strip()}')
+
+    def test_throwaway_chat_specs_prove_the_named_spec_executed(self):
+        step = (ROOT / '.github/workflows/nightly-e2e.yml').read_text()
+        block = step[step.index('Run isolated chat specs'):step.index('Upload Playwright artifacts')]
+        # A report left by the previous spec must never count for this one.
+        self.assertIn('rm -f playwright-nightly-report.json', block)
+        for required in ('.stats.expected > 0', '.stats.skipped == 0', '.stats.unexpected == 0',
+                         '.stats.flaky == 0', '--arg spec', 'any(.suites[]; .file == \\$spec)'):
+            self.assertIn(required, block)
+
     def test_go_package_partitions_keep_the_measured_budget_and_daylight(self):
         # internal/api is one ~900 s binary (#4740). Both partitioned suites run
         # it, so neither may drop back under 20m, and Go's own timeout must

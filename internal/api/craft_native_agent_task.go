@@ -70,8 +70,11 @@ func (m *craftNativeAgentManager) produceTask(ctx context.Context, slug string, 
 	if err != nil || original == nil || original.WorkspaceID != ws || original.OriginalCredential() != source {
 		return zero, errCraftNativeAgentDenied
 	}
+	// Only a recorded instruction in the author's private chat: an ordinary
+	// turn has already reached agent logs and the journal, and a group chat
+	// shows the instruction to people without Page access (#5009).
 	var crew, instruction string
-	err = tx.QueryRowContext(ctx, `SELECT a.crew_id,m.content FROM agents a JOIN crews c ON c.id=a.crew_id AND c.workspace_id=a.workspace_id AND c.deleted_at IS NULL JOIN conversation_messages m ON m.agent_id=a.id AND m.id=? AND m.session_id=? AND m.author_user_id=? AND m.role='user' WHERE a.id=? AND a.workspace_id=? AND a.deleted_at IS NULL AND a.expired_at IS NULL AND length(CAST(m.content AS BLOB))<=?`, input.MessageID, input.ChatID, source.UserID, original.AgentID, ws, mooring.MaxRPCFrame).Scan(&crew, &instruction)
+	err = tx.QueryRowContext(ctx, `SELECT a.crew_id,m.content FROM agents a JOIN crews c ON c.id=a.crew_id AND c.workspace_id=a.workspace_id AND c.deleted_at IS NULL JOIN conversation_messages m ON m.agent_id=a.id AND m.id=? AND m.session_id=? AND m.author_user_id=? AND m.role='user' AND m.native_craft_instruction=1 JOIN chats ch ON ch.id=m.session_id AND ch.visibility='private' AND ch.created_by=m.author_user_id WHERE a.id=? AND a.workspace_id=? AND a.deleted_at IS NULL AND a.expired_at IS NULL AND length(CAST(m.content AS BLOB))<=?`, input.MessageID, input.ChatID, source.UserID, original.AgentID, ws, mooring.MaxRPCFrame).Scan(&crew, &instruction)
 	if err != nil || !mooring.ValidWireIdentifier(crew) || !utf8.ValidString(instruction) || strings.TrimSpace(instruction) == "" {
 		return zero, errCraftNativeAgentDenied
 	}

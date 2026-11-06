@@ -5,7 +5,8 @@ import "errors"
 // NativeCraftInstructionMetadataKey marks a send that only records the human's
 // instruction for an explicit native Craft task. No agent turn follows, so the
 // private document instruction reaches no ordinary run, chat log or agent
-// diagnostics. The task itself runs under strict content privacy.
+// diagnostics. The task itself runs under strict content privacy. The saved
+// message records this, so task admission can refuse any other message.
 const NativeCraftInstructionMetadataKey = "native_craft_instruction"
 
 var errNativeCraftInstruction = errors.New("native Craft instruction is invalid")

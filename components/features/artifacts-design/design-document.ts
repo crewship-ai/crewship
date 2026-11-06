@@ -150,6 +150,65 @@ export function designWorkCovered(document: Y.Snapshot, work: Uint8Array): boole
  } catch { return false }
 }
 
+/**
+ * The stored canvas: one entry per tab, each a full document state with the
+ * confirmed canvas it was made from. One row, so an entry and its base are one
+ * write, and a tab replaces only its own entry. Older builds read another row
+ * kind, a bare state, which is only ever read here: a rollback finds no draft
+ * rather than a format it cannot open.
+ */
+export interface DesignDraftEntry { state: string; baseline: string | null }
+export type DesignDraftRecord = Record<string, DesignDraftEntry>
+const DRAFT_FORMAT = "crewship-design-draft-v2"
+export function parseDesignDraft(text: string): DesignDraftRecord {
+ if (!text) return {}
+ const saved = JSON.parse(text) as { format?: unknown; tabs?: DesignDraftRecord }
+ if (saved.format !== DRAFT_FORMAT || !saved.tabs) throw new Error("Not a Design draft record.")
+ return saved.tabs
+}
+export function serializeDesignDraft(tabs: DesignDraftRecord): string {
+ return Object.keys(tabs).length ? JSON.stringify({ format: DRAFT_FORMAT, tabs }) : ""
+}
+/** Parts a tab added after an identity change. A later part holds that tab's newer entry. */
+export function combineDesignDrafts(parts: string[]): string {
+ return serializeDesignDraft(Object.assign({}, ...parts.map(parseDesignDraft)))
+}
+
+/** Whether the document holds everything in a full-state update. An unreadable update is not held. */
+export function designStateCovered(document: Y.Snapshot, state: Uint8Array): boolean {
+ const stored = new Y.Doc()
+ try {
+  Y.applyUpdate(stored, state)
+  return designWorkCovered(document, Y.encodeSnapshot(Y.snapshot(stored)))
+ } catch { return false } finally { stored.destroy() }
+}
+
+/**
+ * What a merge of this tab's canvas into the stored one would drop. Tabs share
+ * no history until the server relays it, so a merge keeps one of two concurrent
+ * texts by client order, or none when the layer was deleted. A text the other
+ * side has already seen was replaced knowingly and does not count.
+ */
+export function designDraftConflicts(mine: Y.Doc, stored: Uint8Array): DesignConflict[] {
+ const other = new Y.Doc(), merged = new Y.Doc()
+ try {
+  Y.applyUpdate(other, stored)
+  Y.applyUpdate(merged, stored)
+  Y.applyUpdate(merged, Y.encodeStateAsUpdate(mine))
+  const [local, theirs, now] = [mine, other, merged].map(doc => new Map(designNodes(doc).map(node => [node.id, node])))
+  const unseen = (from: Y.Doc, by: Y.Doc, id: string) => {
+   // The map entry behind the value: only it says who wrote that text.
+   const item = from.getMap<Y.Map<unknown>>("nodes").get(id)?._map.get("text")
+   return Boolean(item && item.id.clock >= Y.getState(by.store, item.id.client))
+  }
+  return [...new Set([...local.keys(), ...theirs.keys()])].flatMap(id => {
+   const my = local.get(id), their = theirs.get(id), left = now.get(id)?.text
+   const lost = (node: DesignNode | undefined, from: Y.Doc, by: Y.Doc) => node?.type === "text" && node.text !== undefined && node.text !== left && unseen(from, by, id)
+   return ([[their, other, mine, "mine"], [my, mine, other, "theirs"]] as const).flatMap(([node, from, by, kept]) => lost(node, from, by) ? [{ id, name: my?.name || their?.name || "Text", mine: my?.text ?? "", theirs: their?.text ?? "", kept, left, restore: node! }] : [])
+  })
+ } finally { other.destroy(); merged.destroy() }
+}
+
 export function removeDesignNode(doc: Y.Doc, id: string) {
  doc.transact(() => {
   const nodes = doc.getMap<Y.Map<unknown>>("nodes")

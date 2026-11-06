@@ -61,7 +61,10 @@
       "path": "internal/api/mooring_collab_http_saved_actual_linux_test.go",
       "tests": [
         "TestMooringHTTPActualSDKWholeGroupSavedAndPeer",
-        "TestMooringHTTPActualSDKUnobservedPeerDeletePreservesOriginal"
+        "TestMooringHTTPActualSDKUnobservedPeerDeletePreservesOriginal",
+        "TestMooringHTTPActualLateRenewalReopensQuietRecipients",
+        "TestMooringHTTPActualRotationKeepsQueuedPendingAndItsReceipt",
+        "TestMooringHTTPActualDisconnectDuringReopenKeepsOtherRecipients"
       ]
     },
     {

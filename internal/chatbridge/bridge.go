@@ -696,13 +696,14 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// persistence; its UI suppresses the duplicate optimistic turn.
 	persistUserMsg := func() error {
 		message := conversation.Message{
-			ID:           triggerMessageID,
-			AgentID:      info.AgentID,
-			Role:         conversation.RoleUser,
-			Content:      content,
-			Metadata:     userMsgMetadata,
-			AuthorUserID: userID,
-			Timestamp:    time.Now().UTC(),
+			ID:                     triggerMessageID,
+			AgentID:                info.AgentID,
+			Role:                   conversation.RoleUser,
+			Content:                content,
+			Metadata:               userMsgMetadata,
+			AuthorUserID:           userID,
+			Timestamp:              time.Now().UTC(),
+			NativeCraftInstruction: instructionOnly,
 		}
 		if documentCreation != nil {
 			return b.convStore.AppendDocumentCreation(ctx, chatID, message, *documentCreation, info.HumanAuthority)
@@ -723,6 +724,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	broadcastUserMsg := func() {
 		metadata := map[string]any{"author_user_id": userID, "message_id": triggerMessageID}
+		if instructionOnly {
+			metadata[NativeCraftInstructionMetadataKey] = true
+		}
 		if askEnvelope != nil {
 			metadata["ask_submission_id"] = askEnvelope.SubmissionID
 		}

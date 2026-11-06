@@ -45,6 +45,7 @@ crewship retry r_abc --no-stream
 - **`run <id> not found in last 100 runs`** — run is older than the recent window; pass a `--new-prompt` and use a different command.
 - **`run <id> has no chat_id; pass --new-prompt to retry`** — the original run never produced a chat (rare; e.g. pre-chat trace runs).
 - **`could not recover original prompt for run <id>; pass --new-prompt`** — the chat exists but no user-role message was found.
+- **`the first message of run <id>'s chat is a saved native Craft instruction...`** — the recovered message runs only through `crewship craft task start`, so retry stops, in both modes, and does not fall back to a later message. Pass `--new-prompt` to send your own text.
 - **`--continue requires the original run to have a chat_id`** — combine `--continue` with `--new-prompt` against a runnable chat instead.
 
 ## See also

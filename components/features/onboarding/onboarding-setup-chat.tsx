@@ -9,6 +9,7 @@ import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { useChat, type ChatMessage, type ChatTurn, type HistoryPart } from "@/hooks/use-chat"
 import { RealtimeProvider } from "@/hooks/use-realtime"
 import { apiFetch } from "@/lib/api-fetch"
+import { historyMetadata } from "@/lib/native-craft-instruction"
 import { resolveWsBase } from "@/lib/server-base"
 import { copyToClipboard } from "@/lib/clipboard"
 import { TurnRenderer } from "@/components/features/chat/turn-renderer"
@@ -438,9 +439,10 @@ function ConnectedSetupChat({
           content: typeof row.content === "string" ? row.content : "",
           parts: Array.isArray(row.parts) ? (row.parts as HistoryPart[]) : undefined,
           timestamp: new Date(typeof row.ts === "string" ? row.ts : Date.now()),
-          metadata: row.metadata && typeof row.metadata === "object"
-            ? (row.metadata as Record<string, unknown>)
-            : undefined,
+          metadata: historyMetadata({
+            metadata: row.metadata && typeof row.metadata === "object" ? (row.metadata as Record<string, unknown>) : undefined,
+            native_craft_instruction: row.native_craft_instruction,
+          }),
         }))
         if (cancelled) return
         loadHistory(history)

@@ -15,6 +15,8 @@ const REMOTE = "design-server"
 const BARRIER_MS = 1500
 const REQUEST_BURST = 4
 const REQUEST_REFILL_MS = 1000
+// A save waits for the budget and for the reply within this time.
+const SAVE_DEADLINE_MS = 5000
 
 /** How a provider reports work the server has not confirmed, and takes it over from a replaced one. */
 export interface DesignTracking {
@@ -27,7 +29,7 @@ export interface DesignTracking {
  /** Texts a merge dropped. */
  conflicts?: (found: DesignConflict[]) => void
 }
-type Waiter = { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
+type Waiter = { resolve: () => void; reject: (error: Error) => void }
 
 /** Carries the standard y-websocket sync and awareness envelopes through Crewship auth. */
 export class DesignProvider {
@@ -148,7 +150,8 @@ export class DesignProvider {
  }
  /** Milliseconds until the server's bucket can take another sync request. */
  private requestDelay() {
-  const now = Date.now()
+  // Monotonic like the server's bucket: a wall clock jump must not move the budget.
+  const now = performance.now()
   this.tokens = Math.min(REQUEST_BURST, this.tokens + (now - this.refilled) / REQUEST_REFILL_MS)
   this.refilled = now
   return this.tokens >= 1 ? 0 : Math.ceil((1 - this.tokens) * REQUEST_REFILL_MS)
@@ -200,23 +203,41 @@ export class DesignProvider {
   if (found.length) this.tracking.conflicts?.(found)
   this.reportPending()
  }
- synchronize(): Promise<void> {
-  const next = this.syncQueue.then(() => this.synchronizeNow())
-  this.syncQueue = next.catch(() => {})
-  return next
+ /** Confirms everything local. Ends at the deadline, counted from this call, or at the socket's close, `destroy` or `cancel`, with the work kept. */
+ synchronize(cancel?: AbortSignal): Promise<void> {
+  const deadline = new AbortController()
+  const timer = setTimeout(() => deadline.abort(new Error("The canvas is still reconnecting. Your changes remain in this browser.")), SAVE_DEADLINE_MS)
+  const stop = () => deadline.abort(cancel?.reason)
+  if (cancel?.aborted) stop()
+  else cancel?.addEventListener("abort", stop, { once: true })
+  const turn = this.syncQueue.then(() => this.synchronizeNow(deadline.signal))
+  this.syncQueue = turn.catch(() => {})
+  // A save behind others ends without waiting for its turn.
+  const ended = new Promise<never>((_, reject) => {
+   if (deadline.signal.aborted) reject(deadline.signal.reason)
+   else deadline.signal.addEventListener("abort", () => reject(deadline.signal.reason), { once: true })
+  })
+  return Promise.race([turn, ended]).finally(() => { clearTimeout(timer); cancel?.removeEventListener("abort", stop) })
  }
- private async synchronizeNow(): Promise<void> {
-  if (!this.ready) throw new Error("Reconnect before saving a version.")
-  // A save shares the bucket with background barriers and waits its turn.
-  for (let wait = this.requestDelay(); wait; wait = this.requestDelay()) {
-   await new Promise(resolve => setTimeout(resolve, wait))
-   if (this.stopped || !this.ready) throw new Error("Reconnect before saving a version.")
-  }
-  this.flushUpdates()
+ private synchronizeNow(deadline: AbortSignal): Promise<void> {
+  if (deadline.aborted) return Promise.reject(deadline.reason)
+  if (!this.ready) return Promise.reject(new Error("Reconnect before saving a version."))
   return new Promise<void>((resolve, reject) => {
-   const waiter: Waiter = { resolve, reject, timer: setTimeout(() => { this.waiters.delete(waiter); reject(new Error("The canvas is still reconnecting. Your changes remain in this browser.")) }, 5000) }
+   const abort = () => { this.waiters.delete(waiter); waiter.reject(deadline.reason) }
+   const settled = () => { clearTimeout(turn); deadline.removeEventListener("abort", abort) }
+   let turn: ReturnType<typeof setTimeout> | undefined
+   const waiter: Waiter = { resolve: () => { settled(); resolve() }, reject: error => { settled(); reject(error) } }
+   deadline.addEventListener("abort", abort, { once: true })
+   // In the set from the start: a closing socket or `destroy` ends the wait too.
    this.waiters.add(waiter)
-   this.request(waiter)
+   // A save shares the bucket with background barriers and waits its turn.
+   const take = () => {
+    const wait = this.requestDelay()
+    if (wait) { turn = setTimeout(take, wait); return }
+    this.flushUpdates()
+    this.request(waiter)
+   }
+   take()
   })
  }
  setEditable(editable: boolean) {
@@ -259,7 +280,7 @@ export class DesignProvider {
    this.answered = false
    this.requests = []
    this.tokens = REQUEST_BURST
-   this.refilled = Date.now()
+   this.refilled = performance.now()
    this.request()
    const awareness = encoding.createEncoder()
    encoding.writeVarUint(awareness, 1)
@@ -291,7 +312,7 @@ export class DesignProvider {
       if (subtype === sync.messageYjsSyncStep2) {
        const reply = this.requests.shift()
        if (reply) this.confirmThrough(reply.seq)
-       if (reply?.waiter) { clearTimeout(reply.waiter.timer); this.waiters.delete(reply.waiter); reply.waiter.resolve() }
+       if (reply?.waiter) { this.waiters.delete(reply.waiter); reply.waiter.resolve() }
       }
      }
     } else if (type === 1) applyAwarenessUpdate(this.awareness, decoding.readVarUint8Array(decoder), REMOTE)
@@ -330,7 +351,7 @@ export class DesignProvider {
   }
  }
  private rejectWaiters(message: string, status?:number) {
-  for (const waiter of this.waiters) { clearTimeout(waiter.timer); waiter.reject(Object.assign(new Error(message),{status})) }
+  for (const waiter of this.waiters) waiter.reject(Object.assign(new Error(message),{status}))
   this.waiters.clear()
  }
  private rotate() {
@@ -350,7 +371,7 @@ export class DesignProvider {
   ++this.generation
   clearTimeout(this.renewal)
   clearTimeout(this.cursorTimer)
-  for (const waiter of this.waiters) { clearTimeout(waiter.timer); waiter.reject(new Error("Canvas closed before the version was saved.")) }
+  for (const waiter of this.waiters) waiter.reject(new Error("Canvas closed before the version was saved."))
   this.waiters.clear()
   clearTimeout(this.retry)
   clearTimeout(this.barrierTimer)

@@ -9,6 +9,7 @@ import { checkChatMessageSize } from "@/components/features/chat/hooks/use-messa
 import { requireApiPathSegment } from "@/lib/api-path-segment"
 import { apiFetch, AUTH_EVENT } from "@/lib/api-fetch"
 import { projectInputVersionIds } from "@/components/features/chat/files/project-input-metadata"
+import { isNativeCraftInstruction, NATIVE_CRAFT_INSTRUCTION_REFUSAL } from "@/lib/native-craft-instruction"
 import { AskSubmissionError, askSubmissionError } from "@/lib/ask-submission-error"
 import { ASK_SUBMISSION_METADATA_KEY } from "@/components/features/chat/asks/ask-envelope"
 import { ARTIFACT_CREW_NOT_ALLOWED } from "@/lib/artifact-refusal"
@@ -729,6 +730,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
         isStreaming: false,
         timestamp: new Date(),
         authorUserId,
+        ...(metadata?.native_craft_instruction === true ? { metadata: { native_craft_instruction: true } } : {}),
       }
       setTurns((prev) => {
         // If the assistant is mid-turn, insert the teammate's message BEFORE the
@@ -1839,6 +1841,10 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     // Find the last user turn
     const lastUserIdx = turns.map((t) => t.role).lastIndexOf("user")
     if (lastUserIdx === -1) return
+    if (isNativeCraftInstruction(turns[lastUserIdx])) {
+      toast.error(NATIVE_CRAFT_INSTRUCTION_REFUSAL)
+      return
+    }
     const lastUserContent = turns[lastUserIdx].parts.find((p) => p.type === "text")?.content
     if (!lastUserContent) return
     if ((getExecutionProfile?.() ?? executionProfile) === "restricted") {sendMessage(lastUserContent); return}
@@ -1910,6 +1916,10 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
       if (!canSend || !isCurrentAuthority() || isStreaming || !newContent.trim()) return
       const turnIdx = turns.findIndex((t) => t.id === turnId)
       if (turnIdx === -1 || turns[turnIdx].role !== "user") return
+      if (isNativeCraftInstruction(turns[turnIdx])) {
+        toast.error(NATIVE_CRAFT_INSTRUCTION_REFUSAL)
+        return
+      }
 
       const trimmed = newContent.trim()
       if ((getExecutionProfile?.() ?? executionProfile) === "restricted") {

@@ -2,6 +2,7 @@
 import base64
 from copy import deepcopy
 import hashlib
+import http.client
 import importlib.util
 import io
 import json
@@ -12,7 +13,8 @@ import sys
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+import urllib.error
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('guard', ROOT / 'scripts/ci/inventory-guard.py')
@@ -278,7 +280,7 @@ class GuardTests(unittest.TestCase):
     def test_head_change_before_publication_never_posts_success(self):
         self.advance = True
         with self.assertRaises(m.Rejected): m.execute(self.event, self.env, self.api, self.root)
-        self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending'])
+        self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending', 'failure'])
 
     def test_same_head_invalid_control_retry_invalidates_previous_success(self):
         import os
@@ -289,9 +291,101 @@ class GuardTests(unittest.TestCase):
             self.calls.clear()
             self.changes['.github/workflows/ci.yml'] = b'jobs:\n'
             with self.assertRaises(m.Rejected): m.execute(self.event, self.env, self.api, self.root)
-            self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending'])
+            self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending', 'failure'])
             self.assertFalse((self.root / '.ci-results/ci-inventory-report.json').exists())
         finally: os.chdir(previous)
+
+    def test_api_failure_after_pending_ends_in_terminal_failure_on_the_exact_head(self):
+        for setup in (lambda: None, self.merge_group):
+            with self.subTest(setup=setup):
+                setup(); self.calls.clear(); real = self.api
+                def failing(endpoint, payload=None):
+                    if '/git/trees/' in endpoint:
+                        raise m.Rejected('GitHub API request failed or returned invalid data')
+                    return real(endpoint, payload)
+                with self.assertRaises(m.Rejected):
+                    m.execute(self.event, self.env, failing, self.root)
+                writes = [(endpoint, payload) for endpoint, payload in self.calls if payload is not None]
+                self.assertEqual([payload['state'] for _, payload in writes], ['pending', 'failure'])
+                self.assertTrue(writes[1][0].endswith('/statuses/' + self.head))
+                self.assertEqual(writes[1][1]['context'], m.CONTEXT)
+                # The reason is fixed text: nothing from the failure reaches the status.
+                self.assertNotIn('GitHub API', writes[1][1]['description'])
+
+    def test_unexpected_error_after_pending_also_ends_terminally(self):
+        real = self.api
+        def failing(endpoint, payload=None):
+            if '/git/trees/' in endpoint:
+                raise RuntimeError('unexpected')
+            return real(endpoint, payload)
+        with self.assertRaises(RuntimeError):
+            m.execute(self.event, self.env, failing, self.root)
+        self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending', 'failure'])
+
+    def test_interrupted_run_also_ends_terminally(self):
+        real = self.api
+        def failing(endpoint, payload=None):
+            if '/git/trees/' in endpoint:
+                raise KeyboardInterrupt
+            return real(endpoint, payload)
+        with self.assertRaises(KeyboardInterrupt):
+            m.execute(self.event, self.env, failing, self.root)
+        self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending', 'failure'])
+
+    def test_failure_status_error_never_masks_the_original_rejection(self):
+        real = self.api
+        def failing(endpoint, payload=None):
+            if '/git/trees/' in endpoint:
+                raise m.Rejected('original')
+            if payload is not None and payload['state'] == 'failure':
+                raise m.Rejected('status write failed')
+            return real(endpoint, payload)
+        with self.assertRaisesRegex(m.Rejected, 'original'):
+            m.execute(self.event, self.env, failing, self.root)
+
+    def test_failed_final_status_keeps_the_report_with_an_unknown_outcome(self):
+        import os
+        real = self.api
+        def failing(endpoint, payload=None):
+            if payload is not None and payload['state'] == 'success':
+                raise m.Rejected('status write failed')
+            return real(endpoint, payload)
+        previous = os.getcwd()
+        try:
+            os.chdir(self.root)
+            with self.assertRaises(m.Rejected):
+                m.execute(self.event, self.env, failing, self.root)
+            report = json.loads((self.root / '.ci-results/ci-inventory-report.json').read_text())
+            self.assertEqual(report['status_publication'], 'unknown')
+            self.assertEqual(self.calls[-1][1]['state'], 'failure')
+        finally: os.chdir(previous)
+
+    def test_published_status_is_confirmed_in_the_report(self):
+        import os
+        previous = os.getcwd()
+        try:
+            os.chdir(self.root)
+            m.execute(self.event, self.env, self.api, self.root)
+            report = json.loads((self.root / '.ci-results/ci-inventory-report.json').read_text())
+            self.assertEqual(report['status_publication'], 'confirmed')
+        finally: os.chdir(previous)
+
+    def test_failure_before_publication_leaves_no_report(self):
+        import os
+        previous = os.getcwd()
+        try:
+            os.chdir(self.root)
+            self.advance = True
+            with self.assertRaises(m.Rejected):
+                m.execute(self.event, self.env, self.api, self.root)
+            self.assertFalse((self.root / '.ci-results/ci-inventory-report.json').exists())
+        finally: os.chdir(previous)
+
+    def test_failure_before_pending_posts_nothing(self):
+        self.event['pull_request']['head']['sha'] = 'not-a-sha'
+        with self.assertRaises(m.Rejected):
+            m.execute(self.event, self.env, self.api, self.root)
+        self.assertFalse(any(payload is not None for _, payload in self.calls))
 
     def test_valid_target_pending_precedes_refused_dispatch_authorization(self):
         self.dispatch(); self.permission = 'write'
@@ -411,7 +505,7 @@ class GuardTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaises(m.Rejected): self.inspect()
         self.event = original; self.advance = True; self.queue_reads = 0
         with self.assertRaises(m.Rejected): m.execute(self.event, self.env, self.api, self.root)
-        self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending'])
+        self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending', 'failure'])
 
     def test_queue_rejects_unrelated_or_malformed_ancestry(self):
         self.merge_group(); self.event['merge_group']['base_sha'] = 'c' * 40
@@ -455,8 +549,8 @@ class GuardTests(unittest.TestCase):
         self.merge_group(); self.event['merge_group']['base_sha'] = 'c' * 40
         self.advance_main = True
         with self.assertRaises(m.Rejected): m.execute(self.event, self.env, self.api, self.root)
-        self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending'])
-        self.assertTrue(self.calls[-1][0].endswith('/git/ref/heads/main'))
+        self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending', 'failure'])
+        self.assertTrue(self.calls[-2][0].endswith('/git/ref/heads/main'))
         self.assertLessEqual(len(self.calls), 32)
 
     def test_workflow_privilege_boundary_never_checks_out_pr_or_installs_dependencies(self):
@@ -471,6 +565,79 @@ class GuardTests(unittest.TestCase):
         for forbidden in ('head.sha', 'refs/pull/', 'pip install', 'pnpm', 'secrets.', 'checks: write', 'contents: write'):
             self.assertNotIn(forbidden, workflow)
         self.assertIn('statuses: write', workflow)
+
+
+
+class Response(io.BytesIO):
+    def __enter__(self): return self
+    def __exit__(self, *args): return False
+
+
+class ApiRetryTests(unittest.TestCase):
+    def client(self, *outcomes):
+        pending = list(outcomes); self.requests = []; self.slept = []
+        def opener(*_):
+            def open_request(request, timeout=None):
+                self.requests.append(request)
+                outcome = pending.pop(0)
+                if isinstance(outcome, Exception): raise outcome
+                return Response(outcome)
+            return Mock(open=open_request)
+        patcher = patch.object(m.urllib.request, 'build_opener', opener)
+        patcher.start(); self.addCleanup(patcher.stop)
+        return m.API('token', sleep=self.slept.append)
+
+    @staticmethod
+    def status(code):
+        return urllib.error.HTTPError('https://api.github.com/x', code, 'error', {}, None)
+
+    def test_transient_errors_are_retried_and_never_turn_into_success(self):
+        for error in (self.status(502), self.status(503), self.status(429), urllib.error.URLError('down'),
+                      TimeoutError(), http.client.IncompleteRead(b'')):
+            with self.subTest(error=error):
+                api = self.client(error, b'{"ok": true}')
+                self.assertEqual(api('repos/x'), {'ok': True})
+                self.assertEqual(len(self.requests), 2)
+                self.assertEqual(len(self.slept), 1)
+                api = self.client(*[error] * m.API.RETRIES, error)
+                with self.assertRaises(m.Rejected): api('repos/x')
+                self.assertEqual(len(self.requests), m.API.RETRIES + 1)
+
+    def test_permanent_errors_are_not_retried(self):
+        for error in (self.status(404), self.status(403), self.status(422)):
+            with self.subTest(error=error):
+                api = self.client(error)
+                with self.assertRaises(m.Rejected): api('repos/x')
+                self.assertEqual(len(self.requests), 1)
+
+    def test_invalid_json_is_not_retried(self):
+        api = self.client(b'not json')
+        with self.assertRaises(m.Rejected): api('repos/x')
+        self.assertEqual(len(self.requests), 1)
+
+    def test_retries_are_bounded_across_the_whole_run(self):
+        error = self.status(503)
+        api = self.client(*[error] * (m.API.RETRIES + 1), error)
+        with self.assertRaises(m.Rejected): api('repos/x')
+        with self.assertRaises(m.Rejected): api('repos/y')
+        self.assertEqual(len(self.requests), m.API.RETRIES + 2)
+
+    def test_elapsed_time_is_bounded_but_a_status_can_still_be_written(self):
+        now = [0.0]
+        api = self.client(b'{}', b'{}')
+        api.clock = lambda: now[0]
+        api.deadline = m.API.TIME_BUDGET
+        self.assertEqual(api('repos/x'), {})
+        now[0] = m.API.TIME_BUDGET + 1
+        with self.assertRaises(m.Rejected): api('repos/x')
+        self.assertEqual(len(self.requests), 1)
+        self.assertEqual(api('repos/x/statuses/abc', {'state': 'failure'}), {})
+
+    def test_terminal_status_survives_a_spent_read_budget(self):
+        api = self.client(*[b'{}'] * 40)
+        for _ in range(32): api('repos/x')
+        with self.assertRaises(m.Rejected): api('repos/x')
+        self.assertEqual(api('repos/x/statuses/abc', {'state': 'failure'}), {})
 
 
 if __name__ == '__main__': unittest.main()

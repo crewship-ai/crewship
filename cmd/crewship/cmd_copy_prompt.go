@@ -61,7 +61,10 @@ contract, same spirit as 'crewship wait' owning its own stderr framing.`,
 		if runMeta.ChatID == "" {
 			return fmt.Errorf("run %s has no chat_id", runID)
 		}
-		prompt := fetchFirstUserPrompt(client, runMeta.ChatID)
+		prompt, instruction := recoverFirstUserPrompt(client, runMeta.ChatID)
+		if instruction {
+			return fmt.Errorf("the first message of run %s's chat is a saved native Craft instruction, which runs only through `crewship craft task start`", runID)
+		}
 		if prompt == "" {
 			return fmt.Errorf("could not recover prompt for run %s", runID)
 		}

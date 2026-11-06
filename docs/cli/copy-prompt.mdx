@@ -8,7 +8,7 @@ tag: Experimental
 
 # Copy Prompt
 
-`cmd/crewship/cmd_copy_prompt.go` recovers the first user prompt from a previous run and writes it to stdout or the system clipboard. The "I want to tweak this and rerun" workflow that doesn't end with a network round-trip.
+`cmd/crewship/cmd_copy_prompt.go` recovers the first user prompt from a previous run and writes it to stdout or the system clipboard. The "I want to tweak this and rerun" workflow that doesn't end with a network round-trip. A saved native Craft instruction is refused: it runs only through `crewship craft task start`.
 
 Why a top-level command rather than a flag on retry: copy-prompt is local; users routinely want to grab a past prompt, edit it in `$EDITOR`, and re-issue. Keeping it separate keeps [`crewship retry`](/cli/retry)'s mental model ("rerun this exactly") clean.
 

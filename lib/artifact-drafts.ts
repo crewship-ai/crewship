@@ -18,8 +18,8 @@ import { captureDocumentDrafts, removeCapturedDocumentDrafts, type CapturedDocum
  * persistent revisions; newer writes survive an older sign-out acknowledgement.
  */
 
-export type ArtifactDraftKind = "artifact-source" | "artifact-comment" | "artifact-viewer-comment" | "design-canvas" | "design-comment" | "design-conflict" | "design-pending" | "wordcraft-pending"
-const KINDS: readonly ArtifactDraftKind[] = ["artifact-source", "artifact-comment", "artifact-viewer-comment", "design-canvas", "design-comment", "design-conflict", "design-pending", "wordcraft-pending"]
+export type ArtifactDraftKind = "artifact-source" | "artifact-comment" | "artifact-viewer-comment" | "design-canvas" | "design-tabs" | "design-comment" | "design-conflict" | "design-pending" | "wordcraft-pending"
+const KINDS: readonly ArtifactDraftKind[] = ["artifact-source", "artifact-comment", "artifact-viewer-comment", "design-canvas", "design-tabs", "design-comment", "design-conflict", "design-pending", "wordcraft-pending"]
 export type ArtifactDraftRow = [human: string, kind: ArtifactDraftKind, workspace: string, target: string]
 type Row = ArtifactDraftRow
 export interface CapturedArtifactDraft { row: Row; revision: string | null; text?: string }
@@ -394,6 +394,9 @@ export function mergeArtifactDraft(key: string, merge: (existing: string) => str
   const row = parse(key)
   if (!row) return Promise.reject(new Error("Invalid artifact draft key."))
   if (retired(row)) return Promise.reject(retiredError())
+  return runMerge(key, row, merge, combine)
+}
+function runMerge(key: string, row: Row, merge: (existing: string) => string, combine?: (parts: string[]) => string): Promise<string> {
   // A merge is not coalesced: its write number is fixed here, at admission.
   const seq = (writes.get(key) ?? 0) + 1
   writes.set(key, seq)
@@ -438,14 +441,13 @@ export function mergeArtifactDraft(key: string, merge: (existing: string) => str
 
 export function writeArtifactDraft(key: string, text: string): Promise<void> { return queueArtifactDraft(key, text) }
 /** Captured only after a successful draft load. This capability may finish
- * local persistence during retirement; it never obtains new authority. */
-export function admittedArtifactDraftCapture(key: string): (text: string) => Promise<void> {
-  const cell = cipherCells.get(key)
-  if (!cell) throw new Error("Private draft was not admitted.")
-  return text => {
-    if (cipherCells.get(key) !== cell) return Promise.reject(retiredError())
-    return queueArtifactDraft(key, text, true)
-  }
+ * local persistence during retirement; it never obtains new authority. It is a
+ * merge, not a replacement, because other tabs share the draft: what it cannot
+ * open after an identity change it keeps, adding a sealed part. */
+export function admittedArtifactDraftMerge(key: string, merge: (existing: string) => string, combine: (parts: string[]) => string): () => Promise<string> {
+  const cell = cipherCells.get(key), row = parse(key)
+  if (!cell || !row) throw new Error("Private draft was not admitted.")
+  return () => cipherCells.get(key) === cell ? runMerge(key, row, merge, combine) : Promise.reject(retiredError())
 }
 /**
  * Reads the draft ("" when there is none), moving an older localStorage copy
