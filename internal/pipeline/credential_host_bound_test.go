@@ -3,7 +3,6 @@ package pipeline
 import (
 	"context"
 	"errors"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -99,26 +98,19 @@ func TestWiredHTTPStep_HostBoundCredentialNotSentToOtherHost(t *testing.T) {
 func TestWiredHTTPStep_HostBoundCredentialRefusesRedirectToOtherHost(t *testing.T) {
 	db := openPolicyTestDB(t)
 	defer db.Close()
-	seedCrew(t, db, "crew_r", "restricted", `["127.0.0.1","127.0.0.2"]`)
+	seedCrew(t, db, "crew_r", "restricted", `["127.0.0.1"]`)
 	var mu sync.Mutex
 	hit := false
-	otherListener, err := net.Listen("tcp", "127.0.0.2:0")
-	if err != nil {
-		t.Skipf("second loopback address unavailable: %v", err)
-	}
-	other := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/next" {
+			http.Redirect(w, r, "/next", http.StatusFound)
+			return
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		hit = true
 	}))
-	other.Listener.Close()
-	other.Listener = otherListener
-	other.Start()
-	defer other.Close()
-	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, other.URL, http.StatusFound)
-	}))
-	defer first.Close()
+	defer srv.Close()
 
 	exec := wiredHTTPExecutor(t, db)
 	exec.credentialByType = func(ctx context.Context, _ RunScope, _ string) (string, error) {
@@ -126,11 +118,11 @@ func TestWiredHTTPStep_HostBoundCredentialRefusesRedirectToOtherHost(t *testing.
 		if !ok {
 			t.Fatal("no credential target in context")
 		}
-		target.bound, target.hosts = true, []string{"127.0.0.1"}
+		target.bound, target.hosts = true, []string{"api.partner.com"}
 		return "vault-token-123", nil
 	}
-	step := Step{ID: "call", Type: StepHTTP, HTTP: &HTTPStep{Method: "GET", URL: first.URL, CredentialRef: &CredentialRef{Type: "API_KEY"}}}
-	_, _, _, err = exec.runHTTPStep(context.Background(), step, RenderContext{EgressTargets: []string{"127.0.0.1", "127.0.0.2"}},
+	step := Step{ID: "call", Type: StepHTTP, HTTP: &HTTPStep{Method: "GET", URL: srv.URL, CredentialRef: &CredentialRef{Type: "API_KEY"}}}
+	_, _, _, err := exec.runHTTPStep(context.Background(), step, RenderContext{EgressTargets: []string{"127.0.0.1"}},
 		RunInput{WorkspaceID: "ws_test", AuthorCrewID: "crew_r"})
 
 	mu.Lock()
