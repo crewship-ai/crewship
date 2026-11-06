@@ -3,6 +3,7 @@ package mooring
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func nativeHeadAtTwo(t *testing.T, s *NativeStore, scope EditLeaseScope, acting 
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := s.SaveSnapshot(t.Context(), l, 1, "r1", nativeReceiptHash(second), second)
+	first, err := s.SaveAttempt(t.Context(), l, 1, "r1", nativeReceiptHash(second), second, "attempt-first")
 	if err != nil || first.Version != "2" {
 		t.Fatalf("seed save: %+v %v", first, err)
 	}
@@ -91,7 +92,7 @@ func TestNativeSaveRepeatOfACommittedAttemptReturnsItsReceipt(t *testing.T) {
 		s, _, _, scope, acting, _ := nativeProposalFixture(t)
 		l, first := nativeHeadAtTwo(t, s, scope, *acting, second)
 		before := measureNativeSaves(t, s, scope)
-		got, err := s.SaveAttempt(t.Context(), l, 1, "r1", hash, second, "attempt-repeat")
+		got, err := s.SaveAttempt(t.Context(), l, 1, "r1", hash, second, "attempt-first")
 		if err != nil || got != first {
 			t.Fatalf("repeat: %+v %v, want %+v", got, err, first)
 		}
@@ -107,7 +108,7 @@ func TestNativeSaveRepeatOfACommittedAttemptReturnsItsReceipt(t *testing.T) {
 			t.Fatal(err)
 		}
 		before := measureNativeSaves(t, s, scope)
-		got, err := s.SaveAttempt(t.Context(), l, 1, "r1", hash, second, "attempt-repeat")
+		got, err := s.SaveAttempt(t.Context(), l, 1, "r1", hash, second, "attempt-first")
 		if err != nil || got != first {
 			t.Fatalf("repeat: %+v %v, want %+v", got, err, first)
 		}
@@ -136,6 +137,7 @@ func TestNativeSaveStillDecidesWhatIsNotARepeat(t *testing.T) {
 		{name: "another attempt with the head's bytes at an older base conflicts", base: 1, revision: "other", bytes: second, wantErr: artifacts.ErrVersionConflict},
 		{name: "another session's revision does not prove the attempt", base: 1, revision: "r1 ", bytes: second, wantErr: artifacts.ErrVersionConflict},
 		{name: "the attempt's revision with other bytes conflicts", base: 1, revision: "r1", bytes: third, wantErr: artifacts.ErrVersionConflict},
+		{name: "another attempt with the same revision and bytes conflicts", base: 1, revision: "r1", bytes: second, wantErr: artifacts.ErrVersionConflict},
 		{name: "a future base conflicts", base: 9, revision: "r2", bytes: second, wantErr: artifacts.ErrVersionConflict},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -162,6 +164,67 @@ func TestNativeSaveStillDecidesWhatIsNotARepeat(t *testing.T) {
 				t.Fatalf("versions %d, want %d", after.versions, want)
 			}
 		})
+	}
+}
+
+// A version committed without an attempt id (an older binary, the agent tool)
+// proves nothing about a named attempt's repeat, but its reconcile still finds
+// it: a reply lost across an upgrade must not turn into a false "did not commit".
+func TestNativeVersionWithoutAttemptIDStaysProvable(t *testing.T) {
+	s, _, _, scope, acting, _ := nativeProposalFixture(t)
+	l, _, err := s.Initialize(t.Context(), scope, *acting, []byte(`{"v":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := []byte(`{"v":2}`)
+	hash := nativeReceiptHash(second)
+	first, err := s.SaveSnapshot(t.Context(), l, 1, "r1", hash, second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := s.Read(t.Context(), scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := s.snapshotMessage(l, 1, "r1", hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Manifest.Message != legacy || strings.Contains(legacy, "AttemptID") {
+		t.Fatalf("the encoding of a version without an attempt changed: %s", state.Manifest.Message)
+	}
+	if got, err := s.SaveAttempt(t.Context(), l, 1, "r1", hash, second, "attempt-named"); !errors.Is(err, artifacts.ErrVersionConflict) || got.Version != "" {
+		t.Fatalf("a named repeat claimed an anonymous version: %+v %v", got, err)
+	}
+	if got, err := s.SaveSnapshot(t.Context(), l, 1, "r1", hash, second); err != nil || got != first {
+		t.Fatalf("anonymous repeat: %+v %v", got, err)
+	}
+	if got, err := s.ReconcileAttempt(t.Context(), l, 1, "r1", hash, "attempt-named"); err != nil || got != first {
+		t.Fatalf("reconcile across the upgrade: %+v %v", got, err)
+	}
+}
+
+// #5071 and revocation: a named attempt stays provable by its own reconcile once
+// the head moved on, and after its lease lapsed, which is what revokeWrite's
+// final lookup relies on. So does a caller that names no attempt.
+func TestNativeNamedAttemptStaysProvableByReconcile(t *testing.T) {
+	s, _, clock, scope, acting, _ := nativeProposalFixture(t)
+	second := []byte(`{"v":2}`)
+	hash := nativeReceiptHash(second)
+	l, first := nativeHeadAtTwo(t, s, scope, *acting, second)
+	third := []byte(`{"v":3}`)
+	if _, err := s.SaveSnapshot(t.Context(), l, 2, "r2", nativeReceiptHash(third), third); err != nil {
+		t.Fatal(err)
+	}
+	clock.advance(time.Minute)
+	if got, err := s.ReconcileAttempt(t.Context(), l, 1, "r1", hash, "attempt-first"); err != nil || got != first {
+		t.Fatalf("own attempt after the lease lapsed: %+v %v", got, err)
+	}
+	if got, err := s.ReconcileSnapshot(t.Context(), l, 1, "r1", hash); err != nil || got != first {
+		t.Fatalf("no attempt named: %+v %v", got, err)
+	}
+	if got, err := s.ReconcileAttempt(t.Context(), l, 1, "r1", hash, "attempt-other"); !errors.Is(err, ErrNativeUnconfirmed) {
+		t.Fatalf("another attempt under a lapsed lease: %+v %v", got, err)
 	}
 }
 

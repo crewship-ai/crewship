@@ -78,16 +78,40 @@ func (s *NativeStore) EnginePin() string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{c.Application, c.EngineRevision, c.EngineSHA256, c.EditorBundle}, "\x00")))
 	return hex.EncodeToString(sum[:])
 }
+
+// nativeSnapshotIdentity is immutable audit DATA in the existing version, never
+// an admission capability or a second receipt ledger. Generic saves cannot forge
+// this path. AttemptID names the identified attempt that committed: retirement
+// rows are pruned, so only this copy outlives them. Without one the encoding is
+// the one versions have always had.
+type nativeSnapshotIdentity struct {
+	Kind, Application, EnginePin, SessionID, Generation, BaseVersion, EditorRevision, ContentHash string
+	AttemptID                                                                                     string `json:",omitempty"`
+}
+
 func (s *NativeStore) snapshotMessage(l EditLease, base int64, revision, hash string) (string, error) {
+	return s.attemptMessage(l, base, revision, hash, "")
+}
+func (s *NativeStore) attemptMessage(l EditLease, base int64, revision, hash, attemptID string) (string, error) {
 	if base < 1 || base == math.MaxInt64 || l.Generation < 1 || len(revision) == 0 || len(revision) > 256 || strings.ContainsRune(revision, 0) || !utf8.ValidString(revision) || !strings.HasPrefix(hash, "sha256:") || !nativeHex(strings.TrimPrefix(hash, "sha256:"), 64) {
 		return "", ErrInvalid
 	}
-	// This is immutable audit DATA in the existing version, never an admission
-	// capability or a second receipt ledger. Generic saves cannot forge this path.
-	b, err := json.Marshal(struct {
-		Kind, Application, EnginePin, SessionID, Generation, BaseVersion, EditorRevision, ContentHash string
-	}{"craft-native-save-v1", s.config.Application, s.EnginePin(), l.Holder.SessionID, strconv.FormatInt(l.Generation, 10), strconv.FormatInt(base, 10), revision, hash})
+	b, err := json.Marshal(nativeSnapshotIdentity{"craft-native-save-v1", s.config.Application, s.EnginePin(), l.Holder.SessionID, strconv.FormatInt(l.Generation, 10), strconv.FormatInt(base, 10), revision, hash, attemptID})
 	return string(b), err
+}
+
+// withoutAttempt is a stored identity as it reads with its attempt removed.
+func withoutAttempt(stored string) string {
+	var identity nativeSnapshotIdentity
+	if json.Unmarshal([]byte(stored), &identity) != nil {
+		return ""
+	}
+	identity.AttemptID = ""
+	b, err := json.Marshal(identity)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 func (s *NativeStore) snapshotReceipt(l EditLease, base int64, revision, hash string, version int64) NativeSaveReceipt {
 	return NativeSaveReceipt{WorkspaceID: l.Scope.WorkspaceID, PageID: l.Scope.ArtifactID, ApplicationID: s.config.Application, EnginePin: s.EnginePin(), BaseVersion: strconv.FormatInt(base, 10), Generation: strconv.FormatInt(l.Generation, 10), SessionID: l.Holder.SessionID, EditorRevision: revision, ContentHash: hash, CandidateHash: hash, Version: strconv.FormatInt(version, 10), Durability: "node", IssuedBy: "crewship", Phase: "committed"}
@@ -108,7 +132,7 @@ func (s *NativeStore) SaveAttempt(ctx context.Context, l EditLease, base int64, 
 	if attemptID != "" && !validNativeAttemptID(attemptID) {
 		return NativeSaveReceipt{}, ErrInvalid
 	}
-	message, err := s.snapshotMessage(l, base, editorRevision, contentHash)
+	message, err := s.attemptMessage(l, base, editorRevision, contentHash, attemptID)
 	if err != nil {
 		return NativeSaveReceipt{}, err
 	}
@@ -145,10 +169,13 @@ func (s *NativeStore) SaveAttempt(ctx context.Context, l EditLease, base int64, 
 	request.Message = message
 	receipt, unchanged, err := s.versions.ApplyChanged(ctx, nativeVersionKey(l.Scope), request, a)
 	if errors.Is(err, artifacts.ErrVersionConflict) {
-		// Attempt idempotence: the exact request already committed. The write
-		// authority above just passed; this adds the exact proof and writes nothing.
+		// Attempt idempotence: this same identified attempt already committed.
+		// Another attempt with the same revision and bytes is not a repeat, and
+		// its receipt must never answer a retired attempt whose row was pruned.
+		// The write authority above just passed; this writes nothing.
 		var repeat NativeSaveReceipt
-		repeatErr := s.readAttempt(ctx, l, base, editorRevision, contentHash, message, func(*sql.Tx) error { return ErrNativeUnconfirmed }, &repeat)
+		same := func(stored string) bool { return stored == message }
+		repeatErr := s.readAttempt(ctx, l, base, editorRevision, contentHash, same, func(*sql.Tx) error { return ErrNativeUnconfirmed }, &repeat)
 		if repeatErr == nil {
 			return repeat, nil
 		}
@@ -187,13 +214,26 @@ func (s *NativeStore) ReconcileAttempt(ctx context.Context, l EditLease, base in
 	if attemptID != "" && !validNativeAttemptID(attemptID) {
 		return NativeSaveReceipt{}, ErrInvalid
 	}
-	message, err := s.snapshotMessage(l, base, editorRevision, contentHash)
+	anonymous, err := s.snapshotMessage(l, base, editorRevision, contentHash)
 	if err != nil {
 		return NativeSaveReceipt{}, err
 	}
+	message, err := s.attemptMessage(l, base, editorRevision, contentHash, attemptID)
+	if err != nil {
+		return NativeSaveReceipt{}, err
+	}
+	// A version without an attempt id predates identification or was saved
+	// without one, so its revision and hash stay the proof. A caller that names
+	// no attempt asks only about the snapshot. Another named attempt is not this one.
+	proven := func(stored string) bool {
+		if attemptID == "" {
+			return withoutAttempt(stored) == anonymous
+		}
+		return stored == message || stored == anonymous
+	}
 	absent := false
 	var receipt NativeSaveReceipt
-	err = s.readAttempt(ctx, l, base, editorRevision, contentHash, message, func(tx *sql.Tx) error {
+	err = s.readAttempt(ctx, l, base, editorRevision, contentHash, proven, func(tx *sql.Tx) error {
 		if attemptID == "" {
 			return ErrNativeUnconfirmed
 		}
@@ -208,15 +248,15 @@ func (s *NativeStore) ReconcileAttempt(ctx context.Context, l EditLease, base in
 	return receipt, nil
 }
 
-// readAttempt fills receipt when version base+1 is exactly this attempt, under
+// readAttempt fills receipt when version base+1 is proven to be this attempt, under
 // current write rights and the original admission. Otherwise it runs notProven
 // in the same fenced transaction. It never writes a version.
-func (s *NativeStore) readAttempt(ctx context.Context, l EditLease, base int64, editorRevision, contentHash, message string, notProven func(*sql.Tx) error, receipt *NativeSaveReceipt) error {
+func (s *NativeStore) readAttempt(ctx context.Context, l EditLease, base int64, editorRevision, contentHash string, proven func(string) bool, notProven func(*sql.Tx) error, receipt *NativeSaveReceipt) error {
 	return s.versions.ReadVersionFenced(ctx, nativeVersionKey(l.Scope), base+1, s.holderAuthority(l, "write"), func(tx *sql.Tx, m artifacts.VersionManifest, readErr error) error {
 		if readErr == nil {
 			file, ok := m.Files["document.json"]
 			hash := sha256.Sum256(file.Content)
-			if m.Message == message && m.Actor == l.Holder.ActorID && m.EntryPoint == "document.json" && len(m.Files) == 1 && ok && file.MediaType == "application/json" && "sha256:"+hex.EncodeToString(hash[:]) == contentHash {
+			if proven(m.Message) && m.Actor == l.Holder.ActorID && m.EntryPoint == "document.json" && len(m.Files) == 1 && ok && file.MediaType == "application/json" && "sha256:"+hex.EncodeToString(hash[:]) == contentHash {
 				*receipt = s.snapshotReceipt(l, base, editorRevision, contentHash, m.Version)
 				return nil
 			}

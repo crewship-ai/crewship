@@ -460,9 +460,14 @@ does not authorize replaying a save.
 
 A repeat never writes (#5075). These are two separate checks on the server:
 
-- **Attempt idempotence.** A save whose base+1 is already exactly this request
-  (same message, actor and bytes, the proof reconcile uses) gets that original
-  receipt back, even when the head has moved on.
+- **Attempt idempotence.** A save whose base+1 is already this same identified
+  attempt (its `attemptId`, revision, actor and bytes) gets that original receipt
+  back, even when the head has moved on. The snapshot message of the committed
+  version stores the `attemptId`, because retirement rows are pruned. Another
+  attempt with the same revision and bytes is not a repeat: it gets the 409, and
+  its reconcile answers 410 or stays unconfirmed. A version without a stored id
+  (older than this rule, or saved without one) is still found by reconcile from
+  its revision and hash, and never answers a named attempt's repeat.
 - **Content equality.** A fresh attempt whose base is the head and whose bytes
   equal the head creates no version and charges no quota. The receipt has
   `unchanged: true` and `version` equal to `baseVersion`; lease, write rights,

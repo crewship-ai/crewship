@@ -281,6 +281,19 @@ for (const app of ["wordcraft", "gridcraft"] as const) describe(app, () => {
     } finally { await r.controller.close() }
   })
 
+  it("revocation during a save looks up that same attempt id, never a new one", async () => {
+    const r = fixture(app)
+    try {
+      r.script.push("hold")
+      r.edit(2)
+      await vi.waitFor(() => expect(r.requests).toHaveLength(1))
+      await r.controller.revokeWrite()
+      expect(r.lookups).toHaveLength(1)
+      expect(r.lookups[0].attemptId).toBe(r.requests[0].attemptId)
+      expect(r.requests).toHaveLength(1)
+    } finally { r.release(); await r.controller.close() }
+  })
+
   it("a press cannot reach the transport after writing was revoked during its lookup", async () => {
     const r = fixture(app)
     try {

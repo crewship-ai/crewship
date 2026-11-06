@@ -289,8 +289,7 @@ func TestNativeRetirementRecoversRepeatedOutagesWithTheSameLease(t *testing.T) {
 		if _, err := s.SaveAttempt(t.Context(), l, base, "r", nativeReceiptHash(raw), raw, attempt); !errors.Is(err, ErrNativeAttemptRetired) {
 			t.Fatalf("retired current-base attempt %d published: %v", i, err)
 		}
-		// A fresh capture is a new snapshot, so its revision differs from the retired one's.
-		receipt, err := s.SaveAttempt(t.Context(), l, base, "r-fresh", nativeReceiptHash(raw), raw, fmt.Sprintf("fresh-attempt-%04d", i))
+		receipt, err := s.SaveAttempt(t.Context(), l, base, "r", nativeReceiptHash(raw), raw, fmt.Sprintf("fresh-attempt-%04d", i))
 		if err != nil {
 			t.Fatalf("fresh capture %d: %v", i, err)
 		}
@@ -307,7 +306,50 @@ func TestNativeRetirementRecoversRepeatedOutagesWithTheSameLease(t *testing.T) {
 		t.Fatalf("pruned stale-base attempt was not fenced: %v", err)
 	}
 	// Pruning changes only runtime fences, never the exact historical receipt.
-	if receipt, err := s.ReconcileAttempt(t.Context(), l, 1, "r-fresh", nativeReceiptHash(old), "fresh-attempt-0000"); err != nil || receipt != firstReceipt {
+	if receipt, err := s.ReconcileAttempt(t.Context(), l, 1, "r", nativeReceiptHash(old), "fresh-attempt-0000"); err != nil || receipt != firstReceipt {
 		t.Fatalf("historical committed receipt changed after pruning: %+v %v", receipt, err)
+	}
+}
+
+// Review of #5075: a retired attempt whose row was pruned must not get the
+// receipt of another attempt that shares its revision and bytes. Pruning lifts
+// the runtime fence, so the identity has to be durable in the committed version.
+func TestNativeDelayedRetiredAttemptGetsNoReceiptOfASameRevisionAttempt(t *testing.T) {
+	s, _, db, _, scope, p := nativeStoreFixture(t)
+	l, _, err := s.Initialize(t.Context(), scope, p, []byte(`{"v":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{"v":2}`)
+	hash := nativeReceiptHash(raw)
+	if _, err = s.ReconcileAttempt(t.Context(), l, 1, "r", hash, "attempt-a-0001"); !errors.Is(err, ErrNativeAttemptAbsent) {
+		t.Fatal(err)
+	}
+	committed, err := s.SaveAttempt(t.Context(), l, 1, "r", hash, raw, "attempt-b-0001")
+	if err != nil || committed.Version != "2" {
+		t.Fatalf("fresh attempt: %+v %v", committed, err)
+	}
+	// Retiring anything at the new head prunes A's row, whose base is now below it.
+	next := []byte(`{"v":3}`)
+	if _, err = s.ReconcileAttempt(t.Context(), l, 2, "r2", nativeReceiptHash(next), "attempt-c-0001"); !errors.Is(err, ErrNativeAttemptAbsent) {
+		t.Fatal(err)
+	}
+	var kept int
+	if err = db.QueryRowContext(t.Context(), `SELECT count(*) FROM craft_native_retired_attempts WHERE attempt_id='attempt-a-0001'`).Scan(&kept); err != nil || kept != 0 {
+		t.Fatalf("A's row was not pruned: %d %v", kept, err)
+	}
+	if got, err := s.SaveAttempt(t.Context(), l, 1, "r", hash, raw, "attempt-a-0001"); !errors.Is(err, artifacts.ErrVersionConflict) || got.Version != "" {
+		t.Fatalf("delayed retired attempt answered: %+v %v", got, err)
+	}
+	// Its reconcile reports the same thing: it did not commit.
+	if got, err := s.ReconcileAttempt(t.Context(), l, 1, "r", hash, "attempt-a-0001"); !errors.Is(err, ErrNativeAttemptAbsent) {
+		t.Fatalf("reconcile of the retired attempt: %+v %v", got, err)
+	}
+	// B keeps both proofs.
+	if got, err := s.SaveAttempt(t.Context(), l, 1, "r", hash, raw, "attempt-b-0001"); err != nil || got != committed {
+		t.Fatalf("repeat of B: %+v %v", got, err)
+	}
+	if got, err := s.ReconcileAttempt(t.Context(), l, 1, "r", hash, "attempt-b-0001"); err != nil || got != committed {
+		t.Fatalf("reconcile of B: %+v %v", got, err)
 	}
 }
