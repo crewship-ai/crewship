@@ -224,3 +224,32 @@ func TestDeliverWebhookSignal_EarlyDeliveryDoesNotBurnBody(t *testing.T) {
 		t.Fatalf("replay after delivery = %+v err=%v, want terminal duplicate", dup, err)
 	}
 }
+
+// The replay boundary runs from the delivery that was actually processed, so a
+// body parked for most of the retention window still gets the full window.
+func TestDeliverWebhookSignal_ParkedBodyGetsFullReplayWindow(t *testing.T) {
+	ctx := context.Background()
+	db := openSignalWaitTestDB(t)
+	s := NewSQLSignalWaitStore(db)
+	wh := signalTestWebhook()
+	body := []byte(`{"order":{"id":"A-1"}}`)
+
+	if early, err := DeliverWebhookSignal(ctx, db, wh, "d1", body); err != nil || !early.Retry {
+		t.Fatalf("early = %+v err=%v, want a retryable delivery", early, err)
+	}
+	old := tsformat.Format(time.Now().Add(-29 * 24 * time.Hour))
+	if _, err := db.ExecContext(ctx, `UPDATE pipeline_signal_deliveries SET received_at = ?`, old); err != nil {
+		t.Fatal(err)
+	}
+	seedSignalRuns(t, s, "r1")
+	if got, err := DeliverWebhookSignal(ctx, db, wh, "d1", body); err != nil || got.Outcome != "delivered" {
+		t.Fatalf("retry = %+v err=%v, want delivered", got, err)
+	}
+	var at string
+	if err := db.QueryRowContext(ctx, `SELECT received_at FROM pipeline_signal_deliveries`).Scan(&at); err != nil {
+		t.Fatal(err)
+	}
+	if at == old {
+		t.Fatalf("received_at stayed at the parked delivery (%s), so the replay window is one day", at)
+	}
+}

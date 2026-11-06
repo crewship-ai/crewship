@@ -181,8 +181,8 @@ func deliverSignalTx(ctx context.Context, tx *sql.Tx, wh *Webhook, deliveryID, b
 		res.Retry = true
 	}
 	if resuming {
-		_, err = tx.ExecContext(ctx, `UPDATE pipeline_signal_deliveries SET outcome = ?, reason = ?, run_ids = ?, complete = ? WHERE webhook_id = ? AND body_sha256 = ?`,
-			res.Outcome, res.Reason, string(runsOut), done, wh.ID, bodySHA)
+		_, err = tx.ExecContext(ctx, `UPDATE pipeline_signal_deliveries SET outcome = ?, reason = ?, run_ids = ?, complete = ?, received_at = ? WHERE webhook_id = ? AND body_sha256 = ?`,
+			res.Outcome, res.Reason, string(runsOut), done, tsformat.Format(now), wh.ID, bodySHA)
 	} else {
 		_, err = tx.ExecContext(ctx, `INSERT INTO pipeline_signal_deliveries (webhook_id, delivery_id, workspace_id, outcome, reason, run_ids, received_at, body_sha256, complete)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, wh.ID, deliveryID, wh.WorkspaceID, res.Outcome, res.Reason, string(runsOut), tsformat.Format(now), bodySHA, done)

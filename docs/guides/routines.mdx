@@ -998,7 +998,7 @@ In this mode a delivery to the webhook's public URL **never starts a run**. Afte
 | Response (`200`) | Meaning |
 |---|---|
 | `{"status":"DELIVERED","delivered":N,"run_ids":[...]}` | N waits were woken. |
-| `503` `{"status":"IGNORED","reason":"no_matching_wait","retry":true}` with `Retry-After` | Nothing was parked for that key yet (or its filter rejected the body). The body is **not** consumed and no run starts: redeliver it after the wait arms and it wakes the wait. Senders that retry on `5xx` do this by themselves. |
+| `503` `{"status":"IGNORED","reason":"no_matching_wait","retry":true}` with `Retry-After` | Nothing was parked for that key yet, or its `event_filter` rejected the body. A body the filter rejects cannot pass that wait on retry, so senders retry until their own policy stops. The body is **not** consumed and no run starts: redeliver it after the wait arms and it wakes the wait. Senders that retry on `5xx` do this by themselves. |
 | `{"status":"IGNORED","reason":"no_correlation_value"}` | The body had no scalar at the path (or it was empty). Final: do not retry. |
 | same body plus `"duplicate":true` | The same signed body was already processed; nothing is signalled again, whatever `Idempotency-Key` or `X-Crewship-Event-ID` it carries. |
 | `409 delivery_conflict` | The `Idempotency-Key` / `X-Crewship-Event-ID` was already used for a different body. The original record is kept and nothing is signalled. |

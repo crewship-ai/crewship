@@ -138,6 +138,10 @@ type DSL struct {
 	Parallelism string `json:"parallelism,omitempty"`
 
 	Steps []Step `json:"steps"`
+
+	// inheritedSignalSteps names the parent's wait:event steps for a foreach
+	// body. Runtime only, never serialized.
+	inheritedSignalSteps map[string]struct{}
 }
 
 // EvalConfig groups eval-time configuration. Currently scoped to

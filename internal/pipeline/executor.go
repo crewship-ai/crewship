@@ -1762,7 +1762,7 @@ func signalWaitStepIDs(dsl *DSL) map[string]struct{} {
 	if dsl == nil {
 		return nil
 	}
-	var ids map[string]struct{}
+	ids := dsl.inheritedSignalSteps
 	for i := range dsl.Steps {
 		st := &dsl.Steps[i]
 		if st.Type == StepWait && st.Wait != nil && st.Wait.Kind == "event" {
