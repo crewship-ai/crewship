@@ -78,9 +78,11 @@ async function body(res: { text(): Promise<string> }): Promise<string> {
 }
 
 /**
- * Projects sit behind the per-workspace "artifact_projects" flag. A fresh QA
- * workspace inherits the instance default (off on a new server), so the
- * scenario turns it on for its own workspace, as a workspace manager would.
+ * Projects sit behind the per-workspace "artifact_projects" flag, on by
+ * default since #4994 (project-default.acceptance.ts proves that without this
+ * helper). An instance whose administrator turned the default off still needs
+ * it, so the other scenarios turn it on for their own workspace, as a
+ * workspace manager would; on a default instance this is a no-op.
  */
 export async function enableProjects(api: APIRequestContext, workspaceId: string): Promise<"already" | "enabled"> {
   const available = async () => {

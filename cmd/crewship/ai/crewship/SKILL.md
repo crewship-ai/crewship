@@ -97,11 +97,12 @@ operations through `crewship_search` (for example `artifact versions`). The
 bundled workspace skill `crewship-artifacts` has the authoring rules for
 Project manifests, Dashboard bindings and the Slides profile.
 
-Every kind is off by default. Check before you plan the work:
+Project is on by default unless an admin turned it off; every other kind is
+off by default. Check before you plan the work:
 
 | Kind | Must be enabled | CLI | Tools in a live agent run |
 |---|---|---|---|
-| Project | workspace flag `artifact_projects` | `page artifact` | `artifact_create`, `artifact_versions`, `artifact_publish`, `artifact_restore`, `artifact_comments`, `artifact_reply` |
+| Project | workspace flag `artifact_projects` (on by default) | `page artifact` | `artifact_create`, `artifact_versions`, `artifact_publish`, `artifact_restore`, `artifact_comments`, `artifact_reply` |
 | Dashboard | `artifact_projects` and `artifact_dashboard_data` | `page artifact data` | `artifact_data_collections`, `artifact_data_read`, `artifact_data_batch` |
 | Slides | `artifact_projects` and `artifact_slides` | `page artifact slides`, `export-pdf` | `artifact_slides_read`, `artifact_export_pdf` |
 | Design | workspace flag `artifacts_design` | `page design` | `design_get`, `design_apply`, `design_snapshot`, `design_versions`, `design_restore` |

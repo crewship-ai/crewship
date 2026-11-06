@@ -2535,8 +2535,11 @@ The private-chat document composer shows the target personal space and its audie
 
 ## Artifact project creation
 
-The `artifact_projects` workspace feature is disabled by default. Setting
-`CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` on the server enables it for every
+The `artifact_projects` workspace feature is enabled by default. A workspace
+override (`crewship feature-flag disable artifact_projects`) or the instance
+default (`PATCH /api/v1/feature-flags/artifact_projects`) can turn it off; the
+routes then answer 404 and availability reports `{"enabled": false}`. Setting
+`CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` on the server forces it on for every
 workspace. Page creation authority and existing workspace policy apply when it
 is enabled.
 
@@ -2565,8 +2568,14 @@ content is valid. A new project uses `base_version: 0` when supplied. Paths must
 be unique, relative and safe. Authored HTML can use stable `artifact-`-prefixed
 element IDs for later precise selection; files are preserved as authored.
 **Response:** HTTP 201 JSON `{ "page_id": "...", "slug": "demo", "version": 1,
-"url": "/pages/demo?artifact=1&workspace_id=..." }`. The Page is private and the
-complete version commits atomically. A failure does not acknowledge a version.
+"url": "/artifacts/<page_id>?workspace_id=..." }`. Publish and restore return
+the same `url` form; share returns `/artifacts/<page_id>?version=N&workspace_id=...`,
+which opens that shared version. Older `/pages/<slug>?artifact=1[&version=N]`
+links still open: with the Artifacts library in the web build they redirect to
+`/artifacts/<page_id>` with the same workspace and version, otherwise they open
+the Pages project viewer. In a build without the library,
+`/artifacts/<page_id>[?version=N]` goes to `/pages/@<page_id>?artifact=1[&version=N]`.
+The Page is private and the complete version commits atomically. A failure does not acknowledge a version.
 **Statuses:** 201 created, 400 invalid manifest or request, 401 invalid
 authentication, 403 missing current authority, 404 disabled feature, 409 occupied
 address (`code: "artifact_slug_taken"`), 413 request/history limit or a workspace

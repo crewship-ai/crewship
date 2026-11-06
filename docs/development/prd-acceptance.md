@@ -226,6 +226,25 @@ release and report, and the RC gate does not count them.
   requires it gone from the screen and from IndexedDB and localStorage, and
   absent after the right returns.
 
+## Projects without a flag change
+
+`project-default.acceptance.ts` (`B.project.default-on`,
+`B.project.artifacts-links`, #4994/#4995) is the one project scenario that
+never calls `enableProjects()`: its fresh QA workspace must have no
+`artifact_projects` override and Projects must already be available. Through
+the API it creates v1, publishes v2, gets `409` for a save from the stale base,
+shares v2 and restores v1 as v3; in the browser it opens the links those calls
+returned. Every returned `url` must be `/artifacts/<page_id>` with the QA
+workspace, and the share link must carry `version=2`; the owner and a
+provisioned `VIEWER` opening it see v2, not Latest, and an old
+`/pages/<slug>?artifact=1&version=2` link lands on the same address. The reader
+lists only v2, cannot read v1 or v3 and cannot publish, restore or share. Last,
+the workspace override is set off: availability is false, the project routes
+answer `404` and the Artifacts detail shows no project preview. On an instance
+whose administrator turned the `artifact_projects` default off the row fails by
+design. The other project scenarios keep calling `enableProjects()`, which is a
+no-op on a default instance.
+
 ## Cleanup
 
 Tests delete what they create: pages, Designs and Projects are registered

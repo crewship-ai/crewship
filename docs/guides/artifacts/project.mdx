@@ -13,11 +13,11 @@ publishes a new version and answers your comment. Every save is a numbered
 version; nothing in the history is deleted automatically.
 
 <Note>
-Projects are off by default. Each surface on this page needs these switches:
+Projects are on by default. Each surface on this page needs these switches:
 
 | Surface | Needs |
 | --- | --- |
-| Projects at all (create, view, comment, agent tools) | Workspace flag `artifact_projects`: `crewship feature-flag enable artifact_projects`. An operator can turn it on for every workspace with `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true`. |
+| Projects at all (create, view, comment, agent tools) | Workspace flag `artifact_projects`, on by default. A workspace manager can turn it off with `crewship feature-flag disable artifact_projects`; `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` forces it on for every workspace. |
 | **New artifact** › **Project** and the Project preview in **Artifacts** | Build-time `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true`. The default production build sets `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=false`. |
 | Project cards and the side viewer in chat | Build-time `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true` |
 | **Create artifact project** in a chat | Workspace flag `artifact_projects` only |
@@ -34,7 +34,7 @@ for one message.
 
 ### Before you start
 
-- The workspace flag `artifact_projects` is on (see the note above).
+- The workspace flag `artifact_projects` is on (the default; see the note above).
 - You have an agent that can run: it has a model set. Its chat shows "Model not
   set" otherwise, and nothing is created.
 - The workspace artifact policy is on and lists that agent's crew. A workspace
@@ -71,7 +71,7 @@ You can also skip the dialog: in any private chat with an agent, turn on
 People with permission to create pages can also create a Project from the
 command line, without an agent, by supplying all files in one manifest:
 `crewship page artifact create <slug> --name "<name>" --file manifest.json`.
-See [Artifact projects in the CLI reference](/cli/page#artifact-projects-disabled-by-default).
+See [Artifact projects in the CLI reference](/cli/page#artifact-projects-enabled-by-default).
 A Project created this way has no source chat, so its comments are saved but
 cannot be sent to an agent.
 

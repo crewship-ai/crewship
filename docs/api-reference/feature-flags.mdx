@@ -48,7 +48,7 @@ created and toggled, but nothing in the server reacts to them.
 | `issue_agent_sessions` | on | Resolving or creating an issue agent session when an `@mention` dispatches work | none |
 | `issue_deliveries` | on | Delivery claim and `issue.delivery.acked` bookkeeping on `@mention` dispatch | none |
 | `gridcraft_editor` | off | Live workbook editor sessions, cell edits and the commits feed | The server must also run GridCraft with its workbook editor (`CREWSHIP_GRIDCRAFT_ENABLED` and `CREWSHIP_GRIDCRAFT_EDITOR_ENABLED`); without both the flag has no effect |
-| `artifact_projects` | off | Multi-screen HTML artifact projects | `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` turns it on for every workspace regardless of the flag |
+| `artifact_projects` | on | Multi-screen HTML artifact projects | Seeded off, then turned on by `20261105094324_artifact_projects_default_on` unless an administrator had changed it. `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` turns it on for every workspace regardless of the flag |
 | `artifact_dashboard_data` | off | Dashboard collection data API and its run tools | Requires `artifact_projects`; `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED=true` replaces the flag |
 | `artifact_slides` | off | Slides projections and vector PDF export | Requires `artifact_projects`; `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true` replaces the flag |
 | `artifacts_design` | off | Collaborative Design artifacts over Yjs | `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true` turns it on for every workspace regardless of the flag |
