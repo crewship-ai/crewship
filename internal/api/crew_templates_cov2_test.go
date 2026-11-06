@@ -236,3 +236,24 @@ func TestDeployReusesSlugOfDeletedCrew(t *testing.T) {
 		t.Fatalf("deleted crew slug = %q, %v", slug, err)
 	}
 }
+
+// A redeploy after a real delete also meets the agents of the first deploy,
+// whose tombstones hold the crew-suffixed agent slugs.
+func TestDeployReusesAgentSlugsOfDeletedCrew(t *testing.T) {
+	h, userID, wsID := covCT2Fixture(t)
+	covCT2SeedTemplate(t, h, wsID, "covct2-again", "covct2-again",
+		`[{"name":"A","slug":"a","agent_role":"AGENT"}]`)
+	if rr := covCT2Deploy(h, userID, wsID, "covct2-again", "Crew Three"); rr.Code != http.StatusCreated {
+		t.Fatalf("first deploy = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	execOrFatal(t, h.db, `UPDATE crews SET deleted_at='2026-11-06T00:00:00Z' WHERE workspace_id=? AND slug='crew-three'`, wsID)
+	execOrFatal(t, h.db, `UPDATE agents SET deleted_at='2026-11-06T00:00:00Z' WHERE workspace_id=? AND slug='a-crew-three'`, wsID)
+	rr := covCT2Deploy(h, userID, wsID, "covct2-again", "Crew Three")
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("redeploy = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	var live int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM agents WHERE workspace_id=? AND slug='a-crew-three' AND deleted_at IS NULL`, wsID).Scan(&live); err != nil || live != 1 {
+		t.Fatalf("live agents on the slug = %d, %v", live, err)
+	}
+}

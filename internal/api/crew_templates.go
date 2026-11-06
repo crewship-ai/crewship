@@ -193,6 +193,9 @@ func deployCrewTemplate(ctx context.Context, db *sql.DB, logger *slog.Logger, j 
 		}
 		webhookSecret := storedSecret
 		agentSlug := a.Slug + "-" + crewSlug
+		if err = freeDeletedAgentSlugTx(ctx, tx, wsID, agentSlug); err != nil {
+			return nil, err
+		}
 
 		if _, err = tx.ExecContext(ctx, `
 			INSERT INTO agents (id, workspace_id, crew_id, name, slug, role_title, agent_role,
