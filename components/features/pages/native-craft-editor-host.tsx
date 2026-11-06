@@ -325,8 +325,10 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    // The sandbox gives the editor an opaque origin; delegate writes explicitly while
    // editororigin's response policy continues to deny clipboard reads.
    frame.setAttribute('allow','clipboard-write *')
-   // Imported content stays hidden and noninteractive until live authority is checked.
-   frame.style.visibility='hidden';frame.setAttribute('inert','')
+   // Imported content stays unseen and noninteractive until live authority is checked.
+   // Not visibility:hidden: full Chromium stops animation frames there and the engine
+   // never answers bootstrap (#5060).
+   frame.style.opacity='0';frame.setAttribute('inert','')
    mount.current?.append(frame)
    if(!frame.contentWindow){frame.remove();throw Error('isolated_editor_unavailable')}
    frame.title=snapshot.applicationId==='gridcraft'?'GridCraft editor':'WordCraft editor';setApplicationId(snapshot.applicationId);setQuota(snapshot.quota)
@@ -370,7 +372,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
      await currentLease(admission,abort.signal)
      if(!r||!liveMount())throw Error('native_startup_canceled')
      r.mountedState=mounted?.nativeState;r.ready=true;setHistoryKey(n=>n+1)
-     frame.style.visibility='';frame.removeAttribute('inert');readAccess(true);setRetainedBuffer(false);display(r);resolve(r)
+     frame.style.opacity='';frame.style.visibility='';frame.removeAttribute('inert');readAccess(true);setRetainedBuffer(false);display(r);resolve(r)
     })().catch(()=>{reject(Error('native_bootstrap_failed'));if(liveMount())stop('Dokument nelze bezpečně otevřít.')})},
    })}catch(cause){finish();frame.remove();throw cause}
    r={enginePin:snapshot.enginePin,sessionId:admittedSession,port,frame,abort,version:snapshot.version,generation,ready:false,writable:false,nativeReadOnly:true,edit:0,blocked:false};current=r
@@ -578,7 +580,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
      if(!valid()||current!==r)return
      await currentLease(admission,operation.signal);if(!valid()||current!==r)return
      // Keep input inert even if native read-only could not be confirmed.
-     r!.frame.style.visibility='';readAccess(true);setRetainedBuffer(true)
+     r!.frame.style.opacity='';r!.frame.style.visibility='';readAccess(true);setRetainedBuffer(true)
     }else{
      let snapshot:NativeDocumentSnapshot
      try{snapshot=await admission.read(operation.signal)}

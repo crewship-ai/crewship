@@ -197,6 +197,15 @@ describe('native Word host authority and persistence',()=>{
   finally{client.lease.mockResolvedValue(ownedLease);await act(async()=>action.resolve(ownedLease))}
   await screen.findByText('Připraveno k úpravám');expect(journal.revokeRead).not.toHaveBeenCalled()
  })
+ it('keeps a starting editor rendering but unseen, and shows it once admitted',async()=>{
+  const inserted:{visibility:string,opacity:string,inert:boolean}[]=[]
+  const watch=new MutationObserver(()=>{const f=document.querySelector('iframe');if(f&&!inserted.length)inserted.push({visibility:f.style.visibility,opacity:f.style.opacity,inert:f.hasAttribute('inert')})})
+  watch.observe(document.body,{childList:true,subtree:true})
+  mount();await ready();await acquire();await screen.findByText('Připraveno k úpravám');watch.disconnect()
+  expect(inserted).toEqual([{visibility:'',opacity:'0',inert:true}])
+  const frame=document.querySelector('iframe')!
+  expect(frame).not.toHaveAttribute('inert');expect(frame.style.opacity).toBe('');expect(frame.style.visibility).toBe('')
+ })
  it.each([['captured','stream'],['failed-capture','stream'],['captured','invalid-lease'],['failed-capture','invalid-lease']] as const)('monitor terminal failure hides immediately and preserves %s custody while capture settles (%s)',async(outcome,failure)=>{
   const monitor=deferred<void>();client.events.mockImplementation((_signal,callback)=>{stream=callback;return monitor.promise})
   mount();await ready();await acquire();await screen.findByText('Připraveno k úpravám')
