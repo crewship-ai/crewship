@@ -11,13 +11,15 @@ export type RestartOutcome =
   /** The control refused and nothing proves a new process. Environment, not product. */
   | { kind: "refused"; reason: string }
   /** Wait: the control accepted, or the server does not answer and proves nothing yet. */
+  /** No uptime from before the restart: nothing can prove a new process, so the row proves no restart. */
+  | { kind: "inconclusive" }
   | { kind: "waiting" }
 
 export function restartOutcome(answer: string, uptimeBefore: number | null, uptimeNow: number | null): RestartOutcome {
   const accepted = answer.trim().startsWith("ok")
   const complaint = answer.trim().slice(0, 400)
+  if (uptimeBefore === null) return { kind: "inconclusive" }
   if (uptimeNow === null) return { kind: "waiting" }
-  if (uptimeBefore === null) return accepted ? { kind: "restarted" } : { kind: "refused", reason: complaint }
   if (uptimeNow < uptimeBefore) return accepted ? { kind: "restarted" } : { kind: "restarted", refusedBy: complaint }
   return accepted ? { kind: "waiting" } : { kind: "refused", reason: complaint }
 }

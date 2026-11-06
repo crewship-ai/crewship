@@ -62,7 +62,13 @@ export async function restartServer(origin: string, reason: string): Promise<Res
   const command = process.env.PRD_RESTART_COMMAND?.trim().split(/\s+/)
   const handshake = process.env.PRD_RESTART_HANDSHAKE?.trim()
   if (!command?.length && !handshake) throw new Error("PRD_RESTART_COMMAND or PRD_RESTART_HANDSHAKE is not set: the restart rows need a way to restart the server under test (for example PRD_RESTART_COMMAND='crew restart dev3')")
-  const uptimeBefore = await uptimeSeconds(origin)
+  // Taken before the command: without it no later measurement proves a new process.
+  let uptimeBefore: number | null = null
+  for (let i = 0; i < 6 && uptimeBefore === null; i++) {
+    if (i) await pause(5_000)
+    uptimeBefore = await uptimeSeconds(origin)
+  }
+  if (uptimeBefore === null) throw new Error("environment: no /healthz uptime before the restart, so no restart was attempted and it proves nothing")
   const label = command?.length ? command.join(" ") : `handshake ${handshake}`
   const note = process.env.PRD_RESTART_NOTE_FILE?.trim()
   if (note) fs.appendFileSync(note, `- ${new Date().toISOString()} restart (${label}): ${reason}\n`)

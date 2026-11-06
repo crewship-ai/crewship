@@ -14,12 +14,10 @@ test("a refusal with the old process still up is a refused restart, not a produc
 test("a refusal with the server down keeps waiting: health says nothing about the old process", () => {
   assert.equal(restartOutcome(refused, 1800, null).kind, "waiting")
 })
-test("a refusal without a baseline is not proof of a restart, however young the server looks", () => {
-  assert.deepEqual(restartOutcome(refused, null, 3), { kind: "refused", reason: refused })
-  assert.deepEqual(restartOutcome(refused, null, 1800), { kind: "refused", reason: refused })
-})
-test("an accepted restart without a baseline still counts once the server answers", () => {
-  assert.deepEqual(restartOutcome("ok", null, 3), { kind: "restarted" })
+test("no baseline proves nothing, whatever the control answered and however young the server looks", () => {
+  for (const answer of [refused, "ok"]) {
+    for (const uptime of [3, 1800, null]) assert.equal(restartOutcome(answer, null, uptime).kind, "inconclusive")
+  }
 })
 test("an accepted restart waits for the new process", () => {
   assert.deepEqual(restartOutcome("ok", 1800, 1801), { kind: "waiting" })
