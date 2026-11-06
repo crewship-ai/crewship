@@ -2742,7 +2742,9 @@ body; optional positive `version` selects a retained snapshot. Editors may read
 history; shared-only readers may select only the shared pin. Without `version`,
 Edit authority or the separately audited administrative read path exposes the
 live canvas; shared-only readers still receive the shared snapshot. **Response:** `{page_id,nodes,order,can_edit,
-can_comment,version,latest_version,shared_version,authority_revision,actor,origin}`.
+can_share,can_comment,version,latest_version,shared_version,authority_revision,actor,origin}`.
+`can_share` is true only for the Page's owner with write rights, the same rule
+the share endpoint enforces; Edit and workspace roles do not qualify.
 `authority_revision` is an opaque string; a fresh authorized read establishes
 a new connection after rights change. `origin` is null unless available to
 the authorized editor. When `version` is supplied, the current

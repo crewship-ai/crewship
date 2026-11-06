@@ -7775,6 +7775,10 @@
           "can_edit": {
             "type": "boolean"
           },
+          "can_share": {
+            "description": "This caller may share a version: the Page's owner with write rights. Edit and workspace roles do not qualify.",
+            "type": "boolean"
+          },
           "latest_version": {
             "format": "int64",
             "minimum": 1,
@@ -7826,6 +7830,7 @@
           "authority_revision",
           "origin",
           "can_edit",
+          "can_share",
           "can_comment",
           "nodes",
           "order",

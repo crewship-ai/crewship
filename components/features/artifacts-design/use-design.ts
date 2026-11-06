@@ -23,6 +23,8 @@ interface DesignState {
  nodes: DesignNode[]
  order: string[]
  can_edit: boolean
+ /** Only the Page owner shares a version; Edit alone never offers it. */
+ can_share?: boolean
  version: number
  latest_version: number
  shared_version: number

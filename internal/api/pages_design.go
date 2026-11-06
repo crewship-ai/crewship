@@ -503,6 +503,7 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 	var result design.Result
 	var version, shared int64
 	canEdit := false
+	canShare := false
 	canComment := false
 	actor := ""
 	displayName := ""
@@ -534,8 +535,14 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 		if e := tx.QueryRowContext(ctx, `SELECT latest_version,shared_version FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&version, &shared); e != nil {
 			return e
 		}
-		_, e := h.designAuthority(r, k, true)(ctx, tx)
+		writer, e := h.designAuthority(r, k, true)(ctx, tx)
 		canEdit = e == nil
+		// The same rule as ShareDesign: the write actor is the Page's owner.
+		var owner string
+		if e := tx.QueryRowContext(ctx, `SELECT coalesce(owner_user_id,'') FROM pages WHERE id=? AND workspace_id=?`, k.PageID, k.WorkspaceID).Scan(&owner); e != nil {
+			return e
+		}
+		canShare = canEdit && owner != "" && writer == owner
 		_, commentErr := h.designCommentAuthority(r, k)(ctx, tx)
 		canComment = commentErr == nil
 		readLive := canEdit
@@ -587,7 +594,7 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 		designError(w, err)
 		return
 	}
-	writeJSON(w, 200, designSnapshotResponse{AuthorityRevision: authorityRevision, PageID: k.PageID, Origin: origin, CanComment: canComment, Nodes: result.Nodes, Order: result.Order, CanEdit: canEdit, Version: version, LatestVersion: version, SharedVersion: shared, Actor: designActorResponse{ID: actor, Name: displayName}})
+	writeJSON(w, 200, designSnapshotResponse{AuthorityRevision: authorityRevision, PageID: k.PageID, Origin: origin, CanComment: canComment, Nodes: result.Nodes, Order: result.Order, CanEdit: canEdit, CanShare: canShare, Version: version, LatestVersion: version, SharedVersion: shared, Actor: designActorResponse{ID: actor, Name: displayName}})
 }
 
 // A reader synchronizes only the immutable shared snapshot. Live authority

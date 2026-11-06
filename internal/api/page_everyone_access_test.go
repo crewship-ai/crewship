@@ -150,13 +150,19 @@ func TestEveryoneEditReachesLatestButNeverSharing(t *testing.T) {
 	}
 }
 
-// A private document (agent output, a Sheet) refuses the grant outright, and the
-// owner's version share does not open the audience as it does on a Project.
+// Current behaviour, pinned on purpose: a private document (agent output, a
+// Sheet) has no route to readers. The grant is refused, a folder does not reach
+// it, and the owner's version share moves the pin but keeps the private audience,
+// unlike a Project. Lifting that is the owner's decision.
 func TestEveryoneGrantIsRefusedOnPrivateNative(t *testing.T) {
 	s := craftNativeSharedOnlyFixture(t)
 	craftNativeFreeLease(t, s)
 	c := everyoneNativeCast(t, s)
 	mustExec(t, s.f.db, `UPDATE pages SET private_audience=1 WHERE id='native-page'`)
+	mustExec(t, s.f.db, `INSERT INTO crews(id,workspace_id,name,slug,network_mode) VALUES('private-crew',?,'Private','private','free')`, s.f.wsID)
+	mustExec(t, s.f.db, `INSERT INTO page_folders(id,workspace_id,slug,name,owner_crew_id,created_at,updated_at) VALUES('private-folder',?,'private-folder','Folder','private-crew',datetime('now'),datetime('now'))`, s.f.wsID)
+	mustExec(t, s.f.db, `UPDATE pages SET folder_id='private-folder' WHERE id='native-page'`)
+	mustExec(t, s.f.db, `INSERT INTO page_folder_acl(folder_id,subject_type,subject_id,can_read,can_write,set_at) VALUES('private-folder','workspace','',1,0,datetime('now'))`)
 	token, share := craftNativeHolder(t, s, s.owner)
 	if w := everyoneGrantCall(s.h.pages, s.owner, http.MethodPut, "read"); w.Code != 409 || !strings.Contains(w.Body.String(), "private artifact") {
 		t.Fatalf("grant on a private document: %d %s", w.Code, w.Body)
@@ -172,6 +178,11 @@ func TestEveryoneGrantIsRefusedOnPrivateNative(t *testing.T) {
 	if err := s.f.db.QueryRow(`SELECT count(*) FROM page_grants WHERE page_id='native-page'`).Scan(&rows); err != nil || rows != 0 {
 		t.Fatalf("grant rows %d: %v", rows, err)
 	}
+	var pin int
+	if err := s.f.db.QueryRow(`SELECT shared_version FROM artifact_version_heads WHERE page_id='native-page'`).Scan(&pin); err != nil || pin != 3 {
+		t.Fatalf("the owner's share still moves the pin: %d %v", pin, err)
+	}
+	// Neither the folder shared with everyone nor the version share opens it.
 	everyoneNativeRefused(t, s, "private", "member", c.member)
 }
 
@@ -347,7 +358,25 @@ func TestDesignShareIsRefusedToEveryoneButThePageOwner(t *testing.T) {
 		}
 		return n
 	}
+	canShare := func(user string) bool {
+		t.Helper()
+		got := f.call(t, user, "get", "")
+		var view struct {
+			CanEdit  bool  `json:"can_edit"`
+			CanShare *bool `json:"can_share"`
+		}
+		if got.Code != 200 || json.Unmarshal(got.Body.Bytes(), &view) != nil || !view.CanEdit || view.CanShare == nil {
+			t.Fatalf("%s snapshot must carry can_edit and can_share: %d %s", user, got.Code, got.Body)
+		}
+		return *view.CanShare
+	}
+	if !canShare(f.owner) {
+		t.Fatal("the owner's snapshot must offer share")
+	}
 	for _, user := range []string{"design-edit", "design-admin", "design-wsowner"} {
+		if canShare(user) {
+			t.Errorf("%s snapshot offers share", user)
+		}
 		if w := f.call(t, user, "share", `{"version":2}`); w.Code != 403 {
 			t.Errorf("%s shared a Design version: %d %s", user, w.Code, w.Body)
 		}

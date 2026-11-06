@@ -86,7 +86,7 @@ func TestDesignSchemasValidateNodePatchesAndExactReceipts(t *testing.T) {
 		{"DesignVersionReceipt", `{"version":2,"actor":"user"}`, `{"Version":2,"Actor":"user"}`},
 		{"DesignCreateRequest", `{"slug":"checkout","name":"Checkout","created_by_test":true}`, `{"slug":"checkout","name":"Checkout","actor":"forged"}`},
 		{"DesignCreateRequest", `{"slug":"continued","name":"Continued","source_page_id":"page","expected_human":"alice","initial_state":"AAA="}`, `{"slug":"continued","name":"Continued","source_page_id":17,"expected_human":"alice","initial_state":"AAA="}`},
-		{"DesignSnapshot", `{"page_id":"page","authority_revision":"9007199254740993","origin":null,"can_edit":false,"can_comment":false,"nodes":[],"order":[],"version":1,"latest_version":1,"shared_version":0,"actor":{"id":"user","name":"Reader"}}`, `{"page_id":"page","nodes":[]}`},
+		{"DesignSnapshot", `{"page_id":"page","authority_revision":"9007199254740993","origin":null,"can_edit":false,"can_share":false,"can_comment":false,"nodes":[],"order":[],"version":1,"latest_version":1,"shared_version":0,"actor":{"id":"user","name":"Reader"}}`, `{"page_id":"page","nodes":[]}`},
 	}
 	for _, fixture := range fixtures {
 		t.Run(fixture.schema, func(t *testing.T) {
@@ -115,7 +115,7 @@ func TestDesignAuthorityRevisionIsRequiredOpaqueString(t *testing.T) {
 	}
 	schema := compileOAS30At(t, raw, "/components/schemas/DesignSnapshot")
 	var body map[string]any
-	err = json.Unmarshal([]byte(`{"page_id":"page","authority_revision":"9007199254740993","origin":null,"can_edit":true,"can_comment":true,"nodes":[],"order":[],"version":1,"latest_version":1,"shared_version":0,"actor":{"id":"user","name":"Owner"}}`), &body)
+	err = json.Unmarshal([]byte(`{"page_id":"page","authority_revision":"9007199254740993","origin":null,"can_edit":true,"can_share":true,"can_comment":true,"nodes":[],"order":[],"version":1,"latest_version":1,"shared_version":0,"actor":{"id":"user","name":"Owner"}}`), &body)
 	if err != nil {
 		t.Fatal(err)
 	}
