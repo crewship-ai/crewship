@@ -98,4 +98,3 @@ func TestCraftNativeReadLossDeliveryWithinOneEventInterval(t *testing.T) {
 		return
 	}
 }
-
