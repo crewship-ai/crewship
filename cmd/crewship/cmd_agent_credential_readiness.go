@@ -40,6 +40,16 @@ type agentCredentialReadinessOut struct {
 	Adapter         string                  `json:"adapter" yaml:"adapter"`
 	ModelCredential agentModelCredentialOut `json:"model_credential" yaml:"model_credential"`
 	Notes           []string                `json:"notes" yaml:"notes"`
+	// HostBoundWithheld are credentials with human-approved hosts that were
+	// not delivered because the crew's egress allowlist cannot satisfy them.
+	HostBoundWithheld []hostBoundWithheldOut `json:"host_bound_withheld" yaml:"host_bound_withheld"`
+}
+
+type hostBoundWithheldOut struct {
+	CredentialID   string   `json:"credential_id" yaml:"credential_id"`
+	CredentialName string   `json:"credential_name,omitempty" yaml:"credential_name,omitempty"`
+	AllowedHosts   []string `json:"allowed_hosts" yaml:"allowed_hosts"`
+	Reason         string   `json:"reason" yaml:"reason"`
 }
 
 var agentCredentialReadinessCmd = &cobra.Command{
@@ -117,6 +127,17 @@ This command only reports. Granting a credential is a separate step:
 			}
 			if len(out.Notes) > 0 {
 				fmt.Printf("\n%s\n", strings.Join(out.Notes, "\n"))
+			}
+			if len(out.HostBoundWithheld) > 0 {
+				fmt.Printf("\nWithheld from delivery (approved hosts not satisfied by the crew's egress allowlist):\n")
+				for _, w := range out.HostBoundWithheld {
+					name := w.CredentialName
+					if name == "" {
+						name = w.CredentialID
+					}
+					fmt.Printf("  %s  hosts: %s\n    %s\n", name, strings.Join(w.AllowedHosts, ", "), w.Reason)
+				}
+				fmt.Printf("Fix the crew's allowed domains or the credential's hosts: crewship credential hosts <credential>\n")
 			}
 			if mc.State == "missing" {
 				// Point at the fix without performing it.

@@ -246,6 +246,11 @@ type deliveredSlotNotice struct {
 	Requested               string
 	Delivered               string
 	Reason                  string
+	// HostBound marks a credential withheld because its human-approved host
+	// list is not satisfied by the crew's egress boundary
+	// (credential_allowed_hosts.go); Hosts is that list. Never a value.
+	HostBound bool
+	Hosts     []string
 }
 
 // logHandleOnlyWithheld is the one line every delivery path writes when it
@@ -369,6 +374,32 @@ func loadDeliveredCredentialSnapshot(ctx context.Context, db sqlQuerier, agentID
 	// open read cursor, and holding one across a second query is how a delivery
 	// path acquires a deadlock nobody can reproduce.
 	rows.Close()
+
+	// Host-bound credentials whose approved hosts the crew's egress boundary
+	// cannot satisfy are dropped here, before their parts, grace values or
+	// grantees are loaded, so no later stage can resurrect them.
+	if len(out) > 0 {
+		ids := make([]string, len(out))
+		for i := range out {
+			ids[i] = out[i].ID
+		}
+		withheld, err := hostBoundWithholds(ctx, db, agentID, ids)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(withheld) > 0 {
+			kept := out[:0:0]
+			for _, d := range out {
+				if n, drop := withheld[d.ID]; drop {
+					n.Requested = d.EnvVar
+					notices = append(notices, n)
+					continue
+				}
+				kept = append(kept, d)
+			}
+			out = kept
+		}
+	}
 
 	if err := attachDeliveredCredentialFields(ctx, db, out); err != nil {
 		return nil, nil, err

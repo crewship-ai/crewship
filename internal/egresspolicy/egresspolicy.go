@@ -163,3 +163,56 @@ func checkInternal(ctx context.Context, db *sql.DB, crewID, host string, opts ht
 		return fmt.Errorf("crew %q has unknown network_mode %q (failing closed)", crewID, mode)
 	}
 }
+
+// Querier is the read side of *sql.DB and *sql.Tx.
+type Querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// Effective is a crew's resolved egress boundary.
+type Effective struct {
+	// Restricted is false for a crew in 'free' mode: there is no allowlist and
+	// Allow is nil. Nothing about such a crew limits where a token can go.
+	Restricted bool
+	Allow      *egressallow.DomainAllowlist
+}
+
+// ResolveEffective returns the boundary the container proxy enforces for the
+// crew: defaults plus the crew's allowed_domains when restricted. Any
+// unreadable, unknown or missing state is an error, so callers can fail closed.
+func ResolveEffective(ctx context.Context, q Querier, crewID string) (Effective, error) {
+	rows, err := q.QueryContext(ctx,
+		`SELECT COALESCE(network_mode, 'free'), allowed_domains
+		   FROM crews WHERE id = ? AND deleted_at IS NULL`, crewID)
+	if err != nil {
+		return Effective{}, fmt.Errorf("crew network policy lookup for crew %q failed: %w", crewID, err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return Effective{}, err
+		}
+		return Effective{}, fmt.Errorf("crew %q not found", crewID)
+	}
+	var mode string
+	var domainsJSON sql.NullString
+	if err := rows.Scan(&mode, &domainsJSON); err != nil {
+		return Effective{}, err
+	}
+	switch mode {
+	case "", "free":
+		return Effective{}, nil
+	case "restricted":
+		domains := append([]string{}, egressallow.DefaultAllowedDomains...)
+		if domainsJSON.Valid && domainsJSON.String != "" {
+			var crewDomains []string
+			if err := json.Unmarshal([]byte(domainsJSON.String), &crewDomains); err != nil {
+				return Effective{}, fmt.Errorf("crew %q has malformed allowed_domains: %w", crewID, err)
+			}
+			domains = append(domains, crewDomains...)
+		}
+		return Effective{Restricted: true, Allow: egressallow.NewDomainAllowlist(domains)}, nil
+	default:
+		return Effective{}, fmt.Errorf("crew %q has unknown network_mode %q", crewID, mode)
+	}
+}
