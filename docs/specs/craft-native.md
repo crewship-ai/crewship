@@ -506,8 +506,9 @@ message the person writes there starts a normal turn, whose history leaves the
 instruction out so the agent cannot repeat it into its logs. The instruction is
 also left out of the Keeper judge's prompt, the operator model, conversation
 search and shared chats. The transcript alone keeps it, for the chat's audience. Whatever copies a
-transcript into a new send keeps the classification and stops: `chat retry`, the browser's Regenerate and Edit
-and resend refuse a marked message, and `recap` and the "from this conversation" action forms leave it out.
+transcript into a new send keeps the classification and stops: `chat retry`, `retry`, `copy-prompt`, the browser's
+Regenerate and Edit and resend refuse a marked message, and `recap`, the `history --prompts` preview, the `export`
+bundle's `prompt.md` and the "from this conversation" action forms leave it out.
 Offset and limit on the default read count only the messages it returns. A person who retypes the text sends an
 ordinary turn.
 The outcome appears in the task status panel, and `craft_task_id` is added to the

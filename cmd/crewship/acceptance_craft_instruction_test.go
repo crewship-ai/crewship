@@ -40,6 +40,12 @@ func craftInstructionServer(t *testing.T, busy bool) (*httptest.Server, func() [
 	mux.HandleFunc("GET /api/v1/chats/chat-new/messages", func(w http.ResponseWriter, _ *http.Request) {
 		reply(w, 200, `{"messages":[{"id":"saved-instruction","role":"user","content":"Rewrite the summary","author_user_id":"user-1","agent_id":"agent-src","native_craft_instruction":true}]}`)
 	})
+	mux.HandleFunc("GET /api/v1/runs", func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, 200, `{"data":[{"id":"msg_ordinary","agent_id":"agent-src","agent_slug":"viktor","chat_id":"chat-mixed"}]}`)
+	})
+	mux.HandleFunc("GET /api/v1/chats/chat-mixed/messages", func(w http.ResponseWriter, _ *http.Request) {
+		reply(w, 200, `{"messages":[{"id":"saved-instruction","role":"user","content":"Rewrite the summary","native_craft_instruction":true},{"id":"m2","role":"user","content":"ordinary question"},{"id":"m3","role":"assistant","content":"ordinary answer"}]}`)
+	})
 	mux.HandleFunc("/api/v1/auth/cli-token/validate", func(w http.ResponseWriter, _ *http.Request) {
 		reply(w, 200, `{"user_id":"user-1"}`)
 	})
@@ -140,6 +146,25 @@ func TestAcceptance_SavedInstructionIsNotResentOrRecapped(t *testing.T) {
 	}
 	if out, code := runArtifactBinary(t, srv, "recap", "chat-new", "--agent", "viktor"); code == 0 || !strings.Contains(out, "has no messages") {
 		t.Fatalf("recap exit %d: %s", code, out)
+	}
+	if sends := sent(); len(sends) != 0 {
+		t.Fatalf("the instruction was sent again: %q", sends)
+	}
+}
+
+// #5009: retry and copy-prompt recover a run's first user message. In a chat
+// that opens with a saved instruction they stop instead of resending it.
+func TestAcceptance_RunRetryRefusesSavedInstruction(t *testing.T) {
+	srv, sent := craftInstructionServer(t, false)
+	for _, args := range [][]string{
+		{"retry", "msg_ordinary", "--no-stream"},
+		{"retry", "msg_ordinary", "--continue", "--no-stream"},
+		{"copy-prompt", "msg_ordinary"},
+	} {
+		out, code := runArtifactBinary(t, srv, args...)
+		if code == 0 || !strings.Contains(out, "native Craft instruction") || strings.Contains(out, "Rewrite the summary") {
+			t.Fatalf("%v exit %d: %s", args, code, out)
+		}
 	}
 	if sends := sent(); len(sends) != 0 {
 		t.Fatalf("the instruction was sent again: %q", sends)
