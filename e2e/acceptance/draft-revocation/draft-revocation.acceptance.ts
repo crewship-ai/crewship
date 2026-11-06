@@ -223,6 +223,8 @@ test.describe("native draft on access change", () => {
     test.skip(!db, "needs REVOCATION_DB: a throwaway server's database")
     const f = await holding(prd, request, cleanup, ["write"], browser)
     const rows = await draftRows(f.page, f.doc.pageId)
+    const takeOver: string[] = []
+    f.page.on("console", (message) => { if (message.text().startsWith("native_acquire_failed")) takeOver.push(message.text()) })
     execFileSync("sqlite3", [db!, `UPDATE user_sessions SET expires_at='2000-01-01T00:00:00Z' WHERE user_id='${f.peer.userId.replace(/[^a-zA-Z0-9_-]/g, "")}'`])
     const t0 = Date.now()
     const ended = await until("the editor stopped", async () => (await retired(f.page)).length > 0 || /\/login/.test(f.page.url()), 90_000)
@@ -236,7 +238,7 @@ test.describe("native draft on access change", () => {
     // The journal opens with the editor, so a kept draft comes back on taking it.
     await takeButton(f.page).click({ timeout: 90_000 })
     const offered = await recoveryRows(f.page).first().waitFor({ timeout: 60_000 }).then(() => Date.now(), () => 0)
-    await prd.evidence("timing.json", { rows, after, frame, endedMs: ended - t0, url: f.page.url().replace(/\?.*/, ""), offeredAfterLogin: offered > 0 })
+    await prd.evidence("timing.json", { rows, after, frame, endedMs: ended - t0, url: f.page.url().replace(/\?.*/, ""), offeredAfterLogin: offered > 0, takeOver })
     expect(frame?.draft ?? "retain", "the stream never says purge").toBe("retain")
     expect(after, "the draft survives expiry").toBeGreaterThan(0)
     expect(offered, "the same person gets it back").toBeGreaterThan(0)
@@ -269,6 +271,28 @@ test.describe("native draft on access change", () => {
       if (other) expect(otherStopped, "the other tab").toBeGreaterThanOrEqual(0)
     })
   }
+
+  test("sign-out erases when the holder never hears of it", { annotation: prdRequirement("A.craft.draft.sign-out-no-broadcast", "Word: a holder that leaves on the ended session, without any sign-out message, leaves no draft") }, async ({ prd, request }) => {
+    const f = await holding(prd, request, cleanup, ["write"], browser)
+    const other = await open(f.context, f.doc, f.workspace)
+    await pause(2_000)
+    const rows = await draftRows(other, f.doc.pageId)
+    // The durable intent has to do this alone.
+    await other.evaluate(() => { BroadcastChannel.prototype.postMessage = () => {} })
+    await other.bringToFront()
+    await other.getByRole("button", { name: "User menu" }).first().click()
+    await other.getByRole("menuitem", { name: /Log out/ }).or(other.getByRole("button", { name: /Log out/ })).first().click()
+    const confirm = other.getByRole("button", { name: "Sign out", exact: true })
+    await confirm.waitFor({ timeout: 5_000 })
+    await confirm.click()
+    await expect.poll(() => other.url(), { timeout: 30_000 }).toMatch(/\/login/)
+    // One stream interval for the holder to learn and retire on its own.
+    await pause(15_000)
+    const left = await draftRows(other, f.doc.pageId)
+    await prd.evidence("timing.json", { rows, left, holderUrl: f.page.url().replace(/\?.*/, "") })
+    expect(rows, "there was a draft").toBeGreaterThan(0)
+    expect(left, "no row survives a confirmed sign-out").toBe(0)
+  })
 
   for (const holder of ["open", "closed"] as const) {
     test(`sign-out from the other tab erases with the holder tab ${holder}`, { annotation: prdRequirement(`A.craft.draft.sign-out-holder-${holder}`, `Word: sign-out confirmed in a tab without the draft erases it, holder tab ${holder}`) }, async ({ prd, request }) => {

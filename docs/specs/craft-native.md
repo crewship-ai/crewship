@@ -335,8 +335,9 @@ confirmed capture, a person who keeps private read (an administrator on a
 private Page) reads the current version, sees the same read-only editor a
 non-holder sees and is offered the captured draft for compare or copy. A Read
 grantee is refused the private read (403 on an otherwise valid admission): the
-frame is removed and the draft stays offered for copy, while that admission
-keeps the event stream open for lease status only. Server comparisons and
+frame is removed and the draft stays sealed and offered to nobody, because a
+shared version gives no right to unpublished content; that admission keeps the
+event stream open for lease status only. It returns only if private read does. Server comparisons and
 proposals leave the page and its state as soon as write is retired, a request
 still pending then is discarded, and a comparison needs private read again
 before it asks the server. If the admission retires or the stream drops without

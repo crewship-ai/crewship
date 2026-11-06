@@ -16,7 +16,8 @@ import { serverFetch } from "@/lib/server-base"
 import { purgeOtherE2Recovery } from "@/lib/chat-e2-recovery"
 import { isKnownAppPath } from "@/lib/app-routes"
 import { SIGNED_OUT_URL, rememberSignedOut, signedOutKind } from "@/lib/signed-out"
-import { suspendOtherDocumentDrafts, captureDocumentDrafts, removeCapturedDocumentDrafts, suspendedDocumentDraftRevisions, documentSuspensionSettled, type CapturedDocumentDraft } from "@/lib/document-queue"
+import { suspendOtherDocumentDrafts, captureDocumentDrafts, removeCapturedDocumentDrafts } from "@/lib/document-queue"
+import { recordSignOut, sweepSignOuts } from "@/lib/document-draft-sign-out"
 import { suspendOtherArtifactDrafts, finishArtifactDraftIdentity, captureArtifactDrafts, removeCapturedArtifactDrafts, captureLegacyLocalDrafts, removeCapturedLegacyLocalDrafts } from "@/lib/artifact-drafts"
 
 import { beginLocalDraftIdentity, finishLocalDraftIdentity } from "@/lib/local-draft-seal"
@@ -41,22 +42,6 @@ async function preserveDraftsForIdentity(human: string | null) {
   finishArtifactDraftIdentity(human)
   finishLocalDraftIdentity(human, generation)
   return generation
-}
-
-/** Revisions confirmed for deletion, as another tab named them. Only this person's
- * native rows pass: a message on the channel authorizes nothing else. */
-function confirmedNativeDrafts(human: string | undefined, documents: unknown): CapturedDocumentDraft[] {
-  if (!human || !Array.isArray(documents)) return []
-  return documents.filter((row): row is CapturedDocumentDraft => {
-    if (!Array.isArray(row?.key) || row.key.length !== 2 || row.key.some((part: unknown) => typeof part !== "string") || typeof row.revision !== "string") return false
-    try { return JSON.parse(row.key[0])[0] === human && row.key[1].includes('"native:') } catch { return false }
-  })
-}
-/** A native editor suspended by a confirmed sign-out stores its last snapshot:
- * nothing new arrived, and the confirmation covers it. Any other revision stays. */
-async function removeSuspendedNativeDrafts(confirmed: CapturedDocumentDraft[]) {
-  const successors = confirmed.length ? (await suspendedDocumentDraftRevisions(confirmed)).filter(row => row.key[1].includes('"native:')) : []
-  if (successors.length) await removeCapturedDocumentDrafts(successors)
 }
 
 const sessionSchema = z.object({
@@ -207,6 +192,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const statusRef = useRef<AuthStatus>("loading")
   const unreachableTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => { sessionRef.current = session }, [session])
+  // Runs without a server: a tab that died mid sign-out is answered here.
+  useEffect(() => { void sweepSignOuts(null).catch(() => {}) }, [])
   useEffect(() => { statusRef.current = status }, [status])
 
   // Monotonic generation guard: a newer refresh() (e.g. one fired by signIn)
@@ -214,7 +201,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
   // clobber fresh session state.
   const refreshGen = useRef(0)
   const signingOut = useRef(false)
-  const signOutErase = useRef<Promise<void>>(Promise.resolve())
 
   const settle = useCallback(async (next: AuthSession | null, gen: number) => {
     if (gen !== refreshGen.current) return
@@ -224,6 +210,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     let admission: number
     try { admission = await preserveDraftsForIdentity(next?.user.id ?? null) }
     catch { if (gen === refreshGen.current) setDraftRecovery({ retry: () => retryDraftTransition.current() }); return }
+    await sweepSignOuts(next?.user.id ?? null).catch(() => {})
     if (gen !== refreshGen.current) return
     // The cold load and signed-out pages hold nothing of a person, so admitting
     // one there keeps the tree (and anything typed meanwhile) mounted.
@@ -346,8 +333,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       // Superseded by a newer refresh: this tab stays and, the generation
       // having moved, still follows a later sign-out or expiry (#4705).
       if (gen !== refreshGen.current) return
-      // The ended session may be another tab's confirmed sign-out, heard meanwhile.
-      await signOutErase.current
+      // The ended session may be another tab's confirmed sign-out.
+      await sweepSignOuts(null).catch(() => {})
       const { pathname, search } = window.location
       const currentPath = pathname + search
       // no_credentials: the browser never had a session (or its cookies
@@ -368,15 +355,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
       window.location.replace(`/login?${params.toString()}`)
     }
-    const goLoginSignedOutElsewhere = async (human?: string, documents?: unknown) => {
+    const goLoginSignedOutElsewhere = async (human?: string) => {
+      if (signingOut.current || redirectingGen === refreshGen.current) return
       const currentHuman = sessionRef.current?.user.id
-      const confirmed = confirmedNativeDrafts(human && human === currentHuman ? human : undefined, documents)
-      if (signingOut.current) return
-      if (redirectingGen === refreshGen.current) {
-        // Already leaving through the ended session, which this message explains.
-        signOutErase.current = documentSuspensionSettled().then(() => removeSuspendedNativeDrafts(confirmed)).catch(() => {})
-        return
-      }
       if (human && currentHuman && human !== currentHuman) return
       const gen = ++refreshGen.current
       redirectingGen = gen
@@ -388,16 +369,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
       catch { preserved = false }
       if (gen !== refreshGen.current) return
       // The sender deletes only its captured revisions with CAS. A delayed
-      // message never authorizes deleting this tab's newer recovery rows: only
-      // what its own suspension made of them, once the session is known to be gone.
+      // message never authorizes deleting this tab's newer recovery rows; only the
+      // sign-out intent stored with them does.
       const latest = await fetchSession()
       if (gen !== refreshGen.current) return
       // Still signed in: the tab stays and keeps listening (#4705). The settle
       // keeps this generation, so leaving is disarmed explicitly.
       if (latest.kind === "settled" && latest.session) { redirectingGen = -1; await settle(latest.session, gen); return }
       purgeOtherE2Recovery(null)
-      if (!preserved) { setDraftRecovery({ retry: async () => { if (redirectingGen === gen) redirectingGen = -1; await goLoginSignedOutElsewhere(human, documents) } }); return }
-      await removeSuspendedNativeDrafts(confirmed).catch(() => {})
+      if (!preserved) { setDraftRecovery({ retry: async () => { if (redirectingGen === gen) redirectingGen = -1; await goLoginSignedOutElsewhere(human) } }); return }
+      await sweepSignOuts(null).catch(() => {})
       window.location.replace(SIGNED_OUT_URL)
     }
 
@@ -410,7 +391,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         channel = new BroadcastChannel(AUTH_CHANNEL)
         channel.onmessage = (ev) => {
           if (ev.data?.type === "session-expired") void goLoginExpired(ev.data?.reason)
-          else if (ev.data?.type === "signout") void goLoginSignedOutElsewhere(typeof ev.data.human === "string" ? ev.data.human : undefined, ev.data.documents)
+          else if (ev.data?.type === "signout") void goLoginSignedOutElsewhere(typeof ev.data.human === "string" ? ev.data.human : undefined)
         }
       } catch {
         channel = null
@@ -529,17 +510,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const finalize = async (): Promise<boolean> => {
       signingOut.current = true
       try {
-        const admission = await preserveDraftsForIdentity(null)
+        // Before anything is cleaned up: a tab still retiring reads this, however
+        // this tab ends. The broadcast below only makes others look sooner.
+        // A capture landing first is swept below; IndexedDB may hold this behind
+        // a write in flight, which suspension itself has to finish.
+        const intent = discardDrafts && capturedDocuments.length ? recordSignOut(signingOutHuman!, capturedDocuments.map(row => row.root ?? row.revision).filter((root): root is string => Boolean(root))) : Promise.resolve()
+        const [admission] = await Promise.all([preserveDraftsForIdentity(null), intent])
         if (gen !== refreshGen.current) return false
         if (discardDrafts) {
-          await Promise.all([removeCapturedDocumentDrafts(capturedDocuments), removeSuspendedNativeDrafts(capturedDocuments), removeCapturedArtifactDrafts(capturedArtifacts)])
+          await Promise.all([removeCapturedDocumentDrafts(capturedDocuments), sweepSignOuts(null), removeCapturedArtifactDrafts(capturedArtifacts)])
           removeCapturedLegacyLocalDrafts(capturedLegacy)
         }
         if (gen !== refreshGen.current) return false
         sessionRef.current = null; statusRef.current = "unauthenticated"
         admitted.current = { generation: admission, human: null }
         setSession(null); setStatus("unauthenticated"); setDraftAdmission(admission); setDraftRecovery(null)
-        broadcastSignOut(signingOutHuman, discardDrafts ? capturedDocuments : undefined)
+        broadcastSignOut(signingOutHuman)
         return true
       } catch {
         setDraftRecovery({ retry: async () => { if (await finalize()) window.location.replace(SIGNED_OUT_URL) } })

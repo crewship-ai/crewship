@@ -72,7 +72,7 @@ f.edit=()=>documentSchema.textNode(f.editor.doc,'paragraph').insert(0,'private d
 f.rows=()=>new Promise((resolve,reject)=>{
  const request=indexedDB.open('crewship-document-drafts',1);
  request.onerror=()=>reject(new Error('fixture read'));
- request.onsuccess=()=>{const db=request.result;const tx=db.transaction('drafts','readonly');const rows=tx.objectStore('drafts').getAll();tx.oncomplete=()=>{db.close();resolve(rows.result.map(row=>JSON.parse(row.key[0])[0]));};};
+ request.onsuccess=()=>{const db=request.result;const tx=db.transaction('drafts','readonly');const rows=tx.objectStore('drafts').getAll();tx.oncomplete=()=>{db.close();resolve(rows.result.filter(row=>row.draft).map(row=>JSON.parse(row.key[0])[0]));};};
 });
 `
 

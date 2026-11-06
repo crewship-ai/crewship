@@ -1493,7 +1493,7 @@ closes no key and revokes no journal.
 | Sign-in expired, or session ended elsewhere | Unchanged | Unchanged | Kept, sealed; content hidden | Kept, sealed |
 | 401 | Unchanged | Unchanged | Kept | Kept |
 | Generic 403, 404, 5xx, network failure | Unknown | Unknown | Kept; content hidden, nothing offered until a fresh admission | Kept; a 403 or 404 asks `draft-key` for proof |
-| Edit to Read | Lost | Readable if pinned | Kept and offered for compare or copy | Kept |
+| Edit to Read | Lost | Readable if pinned | Kept, sealed; nothing offered, because read of the shared version gives no right to unpublished content | Kept |
 | Edit to Comment, or Read to Comment | Lost | Readable if pinned | Kept, sealed; admission is refused, so the editor offers nothing and points to the shared version | Kept |
 | Folder ACL loses write, keeps read | Lost | Readable if pinned | As Edit to Read | Kept |
 | Comment, Read or Edit removed, no other reach | Lost | Lost | Erased | Erased |
@@ -1524,7 +1524,11 @@ own bound:
    a missed deadline content is hidden and the offer withdrawn at once. A refusal
    alone erases nothing; the editor then asks `draft-key` for proof.
 3. **Reconnect.** Nothing is read or offered before a fresh admission. A refused
-   admission triggers the same proof request and offers nothing.
+   admission triggers the same proof request and offers nothing. Back online, an
+   existing offer is withdrawn first and returns only with a fresh read of the
+   latest content. A tab returning from hidden or frozen (`visibilitychange`,
+   `pageshow`) does the same at once, without waiting for a timer. The 60-second
+   bound is detection, not an access condition.
 
 An offline browser cannot learn of a revocation, so delivery has not happened
 and no bound applies. It keeps the draft, and on reconnect it follows stage 3.
@@ -1540,10 +1544,15 @@ keep the live model mounted behind recovery UI and block navigation. Explicit
 sign-out warns before deleting persistent recovery copies and deletes only the
 revisions covered by that confirmation, plus the exact revision this tab's own
 suspended native editor made from one of them. Later writes remain for recovery,
-including another tab's. A retiring editor's last capture records on its row which
-revision it replaced, and the sign-out message names the confirmed revisions, so
-whichever tab finishes last erases that one capture once the session is gone. An
-unsaved edit the editor never stored before retiring is part of that capture.
+including another tab's. A retiring editor's capture keeps the root revision of its
+chain, and a real edit starts a new chain, so confirming any revision confirms the
+root. After the server acknowledges sign-out and before any cleanup, the browser
+stores those roots beside the rows. A final capture reads them in its own transaction
+and stores nothing for a confirmed root, and every provider mount erases what such a
+tab left behind. Signing in clears that person's intent; a signed-out mount does not,
+since another tab may still be retiring. The sign-out broadcast only makes tabs look
+sooner. An unsaved edit the editor never stored before retiring is part of its
+capture, and goes with it.
 Recovery does not replay native snapshot saves, custody operations or agent
 dispatch. Design resumes standard CRDT synchronization only after fresh
 same-person Edit admission; read-only viewers do not restore a writer canvas.

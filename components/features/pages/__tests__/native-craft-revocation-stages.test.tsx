@@ -44,7 +44,7 @@ function route(url:string):Route{
 function scriptedServer(){
  const s={
   reachable:true,
-  state:'readable' as 'readable'|'read-lost'|'comment-only'|'signed-out',
+  state:'readable' as 'readable'|'read-lost'|'comment-only'|'signed-out'|'reader',
   proofDelay:0,
   stall:new Set<Route>(),
   calls:[] as Route[],
@@ -72,6 +72,8 @@ function scriptedServer(){
   }
   if(s.state==='signed-out')return json({error:'authentication required'},401)
   if(s.state==='read-lost'||s.state==='comment-only')return json({error:'native Craft access denied'},403)
+  // Read: admitted, and refused the latest content. The shared version is elsewhere.
+  if(s.state==='reader'&&name==='document')return json({error:'latest content refused'},403)
   switch(name){
    case 'sessions':return json({session_token:'a'.repeat(64),session_id:'private-session',application_id:'wordcraft',page_id:'p'},201)
    case 'reauthorize':return json({renewed:false})
@@ -334,6 +336,66 @@ describe('a draft kept after write loss',()=>{
   cleanup();server.calls.length=0
   await advance(5*60_000)
   expect(server.count('draft-key')).toBe(0)
+ })
+})
+describe('keeping a draft is not offering it',()=>{
+ const rows=()=>screen.queryAllByText(/^Místní koncept/).length
+ const recoveredOffer=()=>offered()||rows()>0
+ const setVisibility=(state:'hidden'|'visible')=>Object.defineProperty(document,'visibilityState',{configurable:true,get:()=>state})
+ afterEach(()=>{Reflect.deleteProperty(document,'visibilityState')})
+ it('Read on a shared version keeps the draft and offers nothing',async()=>{
+  await opened()
+  act(()=>options.at(-1)!.onChanged('typed','doc'))
+  await advance(3_000)
+  server.state='reader'
+  server.push('session_retired',{delivery:'stopped',reason:'write_revoked',draft:'retain'})
+  await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
+  expect(recoveredOffer()).toBe(false);expect(contentVisible()).toBe(false)
+  expect(m.purge).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()
+ })
+ it('Comment on a shared version keeps the draft and offers nothing',async()=>{
+  await opened()
+  act(()=>options.at(-1)!.onChanged('typed','doc'))
+  await advance(3_000)
+  server.state='comment-only'
+  server.push('session_retired',{delivery:'stopped',reason:'write_revoked',draft:'retain'})
+  await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
+  expect(recoveredOffer()).toBe(false);expect(m.purge).not.toHaveBeenCalled()
+ })
+ it('on reconnect the offer leaves first and returns only with the answer',async()=>{
+  await opened()
+  server.stall.add('document');server.calls.length=0
+  await act(async()=>{window.dispatchEvent(new Event('online'))})
+  expect(offered()).toBe(false)
+  await advance(1_000)
+  expect(server.count('document')).toBe(1);expect(offered()).toBe(false)
+  server.stall.delete('document')
+  await act(async()=>{window.dispatchEvent(new Event('online'))})
+  await settle(()=>offered())
+  expect(offered()).toBe(true)
+ })
+ it('on reconnect a refused answer never shows the offer again',async()=>{
+  await opened()
+  server.state='reader'
+  await act(async()=>{window.dispatchEvent(new Event('online'))})
+  expect(offered()).toBe(false)
+  await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
+  expect(offered()).toBe(false);expect(m.purge).not.toHaveBeenCalled()
+ })
+ it.each([['visibilitychange',()=>{setVisibility('visible');document.dispatchEvent(new Event('visibilitychange'))}],['pageshow',()=>{window.dispatchEvent(new Event('pageshow'))}]])('an emulated return by %s asks at once, with no timer',async(_,back)=>{
+  await opened()
+  act(()=>options.at(-1)!.onChanged('typed','doc'))
+  await advance(3_000)
+  server.calls.length=0
+  await act(async()=>{back()})
+  await act(async()=>{await Promise.resolve()})
+  expect(server.count('reauthorize')).toBe(1);expect(server.calls).toContain('draft-key');expect(server.count('document')).toBe(1)
+ })
+ it('going hidden asks nothing',async()=>{
+  await opened()
+  server.calls.length=0;setVisibility('hidden')
+  await act(async()=>{document.dispatchEvent(new Event('visibilitychange'))})
+  expect(server.calls).toEqual([])
  })
 })
 describe('a stale proof',()=>{
