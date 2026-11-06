@@ -981,6 +981,18 @@ describe('write access removed while read access remains (#4348)',()=>{
    await waitFor(()=>expect(third.read).toHaveBeenCalledOnce(),{timeout:7000})
    await waitFor(()=>expect(screen.getByRole('button',{name:'Kopie konceptu'})).toBeInTheDocument())
   },16000)
+  it('checks read again after a lost stream and offers the confirmed draft without a reload',async()=>{
+   const monitor=deferred<void>();client.events.mockImplementation((_signal,callback)=>{stream=callback;return monitor.promise})
+   mount();await ready();await acquire()
+   act(()=>portOptions.at(-1)!.onChanged('unsaved-before-drop','doc'))
+   const second=clientRig();second.lease.mockResolvedValue(readerLease);m.createClient.mockReturnValueOnce(second)
+   await act(async()=>{monitor.reject(Error('stream lost'));await Promise.resolve()})
+   await waitFor(()=>expect(document.querySelectorAll('iframe')).toHaveLength(0))
+   expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
+   await waitFor(()=>expect(second.read).toHaveBeenCalledOnce(),{timeout:7000})
+   expect(await screen.findByRole('button',{name:'Kopie konceptu'})).toBeInTheDocument()
+   expect(screen.getByRole('alert')).toHaveTextContent('Spojení se obnovilo')
+  },10000)
   it('sign-out still purges after a generic failure ended content delivery',async()=>{
    mount();await ready();await acquire()
    const second=clientRig();second.open.mockRejectedValue(Error('native_session_unavailable'));m.createClient.mockReturnValueOnce(second)

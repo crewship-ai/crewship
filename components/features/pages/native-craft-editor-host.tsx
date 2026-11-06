@@ -111,7 +111,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   let sessionApplication:NativeDocumentSnapshot['applicationId']|undefined
   // metadataOnly: the frame is gone after a refused private read, and the lease
   // admission stays open only so an explicit read loss can still purge the draft.
-  let closed=false,metadataOnly=false,metadataRetry:ReturnType<typeof setTimeout>|undefined
+  let closed=false,metadataOnly=false,connectionLost=false,metadataRetry:ReturnType<typeof setTimeout>|undefined
   // Bumped whenever private access stops being confirmed: a server comparison or
   // proposal list started before that may no longer reach the page.
   let privateEpoch=0
@@ -427,6 +427,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(!dead&&current?.blocked)throw Error('native_auth_draft_capture_unconfirmed')
   }
   async function retireConnection(message:string){
+   const hadDraft=()=>Boolean(current?.capture&&!current.blocked)
    // A failed native port retired writing, not the independent read monitor.
    // Its terminal failure must still hide the retained buffer and copy UI.
    if(dead||networkRetired&&!readOpening&&!nativeFailed)return
@@ -441,7 +442,14 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     if(!await retireWrite(r)){stop(message);return}
    }
    client.close()
-   if(!dead)stop(message)
+   if(dead)return
+   // A confirmed draft waits for read to be confirmed again, not for a reload.
+   if(hadDraft()&&!authSuspended){
+    const r=current!;detach(r);void r.coordinator?.close();if(!r.coordinator)void r.journal?.close();current=undefined
+    metadataOnly=true;connectionLost=true;setOwnsEditor(false);setUncertain(false);setSavedVersion(undefined);setBusy(false);setLabel('Editor odpojen · zachycená místní kopie zůstává')
+    retryMetadata();return
+   }
+   stop(message)
   }
   // #4348: the server retired this admission because Page write was removed
   // while read remains. Retire local writing exactly as on lease loss (capture
@@ -508,7 +516,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
      await mountEditor(snapshot,viewNow.generation??'1');if(!valid())return
     }
     metadataOnly=false;setDraftHeld(false);networkRetired=false;readOpening=false;setConnectionRetired(false);finishAdmission(startup);setBusy(false)
-    setError(retained?'Zachycení posledních změn nebylo potvrzeno. Původní editor je uzamčený; po ověření čtení můžete stáhnout místní kopii.':message)
+    setError(retained?'Zachycení posledních změn nebylo potvrzeno. Původní editor je uzamčený; po ověření čtení můžete stáhnout místní kopii.':connectionLost?'Spojení se obnovilo. Dokument je jen pro čtení, neuložené změny najdete v konceptu.':message)
+    connectionLost=false
    }catch{if(client===admission&&admissionEpoch===startup&&!dead){if(metadataOnly)retryMetadata();else stop(READ_ONLY_REFUSED)}}
    finally{
     lifetime.signal.removeEventListener('abort',abort)
