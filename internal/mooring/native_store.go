@@ -223,7 +223,7 @@ func (s *NativeStore) Read(ctx context.Context, k EditLeaseScope) (artifacts.Ver
 }
 
 // Versions lists at most limit saved native versions, newest first, under
-// exactly the live Read authority and immutable profile check of Read. The
+// exactly the host's "read" authority and immutable profile check of Read. The
 // bound is applied in SQL. It is metadata only: no document bytes, and never a
 // write or lease side effect.
 func (s *NativeStore) Versions(ctx context.Context, k EditLeaseScope, limit int) ([]artifacts.VersionInfo, bool, error) {
@@ -234,7 +234,7 @@ func (s *NativeStore) Versions(ctx context.Context, k EditLeaseScope, limit int)
 }
 
 // ReadVersion returns the bytes of one saved native version and the current
-// head, under exactly the live Read authority and immutable profile check of
+// head, under exactly the host's "read" authority and immutable profile check of
 // Read. It is read-only: no lease, no write, no change to the shared pin.
 func (s *NativeStore) ReadVersion(ctx context.Context, k EditLeaseScope, version int64) (artifacts.VersionManifest, int64, error) {
 	if err := s.ready(); err != nil {

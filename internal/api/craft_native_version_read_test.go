@@ -75,7 +75,8 @@ func craftNativeHistoryState(t *testing.T, db *sql.DB) string {
 
 // One historical version's bytes are readable by exactly the people who may
 // read the current document, with the same status, and the read changes
-// nothing: no version, head, shared pin or lease moves.
+// nothing: no version, head, shared pin or lease moves. A Read grantee is not
+// one of them; the shared preview is their only content.
 func TestCraftNativeVersionReadAuthorityMatchesDocumentRead(t *testing.T) {
 	f, h, d, owner, ownerToken, _, body := craftNativeDocumentsFixture(t)
 	craftNativeEnableVersionHistory(t, f.db, true)
@@ -108,7 +109,7 @@ func TestCraftNativeVersionReadAuthorityMatchesDocumentRead(t *testing.T) {
 	}{
 		{"owner", owner, ownerToken, 200},
 		{"editor", editor, issued(editor), 200},
-		{"reader", reader, issued(reader), 200},
+		{"reader", reader, issued(reader), 403},
 		{"comment only", commenter, issued(commenter), 403},
 		{"non-member", outsider, issued(outsider), 403},
 		{"non-member replaying the owner's admission", outsider, ownerToken, 403},
@@ -152,15 +153,15 @@ func TestCraftNativeVersionReadAuthorityMatchesDocumentRead(t *testing.T) {
 	if after := craftNativeHistoryState(t, f.db); after != before {
 		t.Fatalf("a version read changed history or lease:\n%s\n%s", before, after)
 	}
-	// A reader whose grant is revoked loses the version on the same admission.
-	readerToken := issued(reader)
-	if w := craftNativeVersionReadCall(d, reader, readerToken, "1"); w.Code != 200 {
-		t.Fatalf("reader before revoke %d %s", w.Code, w.Body)
+	// An editor whose grant is revoked loses the version on the same admission.
+	editorToken := issued(editor)
+	if w := craftNativeVersionReadCall(d, editor, editorToken, "1"); w.Code != 200 {
+		t.Fatalf("editor before revoke %d %s", w.Code, w.Body)
 	}
-	mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='native-page' AND subject_id='native-version-reader'`)
-	read := craftNativeDocumentCall(t, d, reader, readerToken, "read", nil)
-	if w := craftNativeVersionReadCall(d, reader, readerToken, "1"); w.Code == 200 || w.Code != read.Code || strings.Contains(w.Body.String(), "bytes") {
-		t.Fatalf("revoked reader read a version: %d %s (document read %d)", w.Code, w.Body, read.Code)
+	mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='native-page' AND subject_id='native-version-editor'`)
+	read := craftNativeDocumentCall(t, d, editor, editorToken, "read", nil)
+	if w := craftNativeVersionReadCall(d, editor, editorToken, "1"); w.Code == 200 || w.Code != read.Code || strings.Contains(w.Body.String(), "bytes") {
+		t.Fatalf("revoked editor read a version: %d %s (document read %d)", w.Code, w.Body, read.Code)
 	}
 }
 

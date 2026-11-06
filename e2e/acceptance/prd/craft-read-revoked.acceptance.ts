@@ -40,10 +40,15 @@ for (const { application, label } of APPLICATIONS) {
           await doc.grant(request, peer.userId, "read")
           const log: Record<string, unknown> = { application, mode: prd.mode, appSha: prd.appSha, workspaceId: ws.id, pageId: doc.pageId }
 
-          // The reader has the document open: admitted, content readable, read-only.
+          // The reader has the document open: admitted for lease status, the
+          // shared version readable, read-only. The private document stays refused.
+          await doc.publishPreview(request)
           const admission = await doc.session(readerApi)
-          const open = await doc.document(readerApi, admission)
-          expect(open.bytes.length, "the reader receives the document while allowed").toBeGreaterThan(0)
+          const preview = await doc.previewRaw(readerApi)
+          expect(preview.status(), "the reader receives the shared version while allowed").toBe(200)
+          const open = (await preview.json()) as { bytes: string }
+          expect(open.bytes.length, "the reader receives the shared version while allowed").toBeGreaterThan(0)
+          expect((await doc.documentRaw(readerApi, admission)).status(), "the private document is refused to a reader").toBe(403)
           const lease = await doc.lease(readerApi, admission)
           expect(lease.can_write, "a reader cannot write").toBe(false)
           const probe = open.bytes.slice(0, 64)
@@ -73,6 +78,9 @@ for (const { application, label } of APPLICATIONS) {
           log.stream = { status: ended.res.status(), stoppedAfterMs, events: events.map((e) => e.event), last: last?.data }
 
           // Nothing more is delivered to the old admission, a new one or a new stream.
+          const deniedPreview = await doc.previewRaw(readerApi)
+          expect(deniedPreview.status(), "shared version after the revocation").toBe(403)
+          expect(await deniedPreview.text()).not.toContain(probe)
           const later = await doc.documentRaw(readerApi, admission)
           const laterBody = await later.text()
           expect(later.status(), "document read with the old admission").toBeGreaterThanOrEqual(400)

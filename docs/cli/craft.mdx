@@ -68,6 +68,12 @@ refusal bodies can describe a private runtime, but exit with the same codes.
 | `share` | `POST /api/v1/pages/{slug}/craft/document/share` |
 | `proposals` | `GET /api/v1/pages/{slug}/craft/proposals` |
 | `proposal` | `GET /api/v1/pages/{slug}/craft/proposals/{proposal_id}` |
+
+A Read grantee can open `connect`, but only `status`, `watch` and `reauthorize`
+answer: they report who holds the lease, never content. `read`, `versions`,
+`proposals` and `proposal` need edit rights or the workspace owner or admin read
+rule and otherwise answer `403` (exit code `4`). Comment alone cannot open
+`connect`. Read the shared version with `crewship craft preview <page>`.
 | `accept-proposal` | `POST /api/v1/pages/{slug}/craft/proposals/{proposal_id}/accept` |
 | `reject-proposal` | `POST /api/v1/pages/{slug}/craft/proposals/{proposal_id}/reject` |
 
@@ -90,10 +96,12 @@ acquires the lease and never writes; the private session token is not printed.
 Inside `connect`, the `versions` action reads the same listing on the open
 connection.
 
-The listing needs the same rights as `read`: a reader may list, a comment-only
-person or a non-member gets the same refusal as `read` (`403`, exit code `4`).
-While the workspace feature flag `craft_version_history` is off (the default),
-the route answers `404` (exit code `3`).
+The listing needs the same rights as `read`: edit rights, or the workspace
+owner or admin read rule. A Read or Comment grantee or a non-member gets the same
+refusal as `read` (`403`, exit code `4`); `crewship craft preview <page>` is how a
+Read or Comment grantee reads the document. While the workspace feature flag
+`craft_version_history` is off (the default), the route answers `404` (exit code
+`3`) to anyone who has those rights.
 
 ```bash
 crewship craft versions @PAGE_ID --format json
@@ -146,9 +154,10 @@ crewship craft version @PAGE_ID 2 --output v2.json --format json
 ```
 
 It needs the same rights as `read` and the same `craft_version_history` flag
-as the listing. A comment-only person or a non-member gets `403` (exit code
-`4`); a missing version, or the flag off, gets `404` (exit code `3`), and only
-someone who may read learns that a version does not exist. A workspace owner
+as the listing. A Read or Comment grantee or a non-member gets `403` (exit code
+`4`) for every version, the shared one included; a missing version, or the flag
+off, gets `404` (exit code `3`), and only someone who may read learns that a
+version does not exist. A workspace owner
 or admin reading another member's document is audited exactly like `read`
 (`artifact.private_owner_accessed` or `artifact.workspace_admin_accessed`); if
 the audit entry cannot be written, nothing is returned. The listing is audited

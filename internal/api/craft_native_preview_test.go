@@ -199,7 +199,7 @@ func TestCraftNativePreviewRejectsEpochChangeAtWriterFence(t *testing.T) {
 func TestCraftNativeReadAndCommentObserversCannotMutate(t *testing.T) {
 	f, h, d, _, _, _, body := craftNativeDocumentsFixture(t)
 	ctx := craftNativePreviewPeer(t, f, "comment")
-	// Existing Read plus Comment permits legacy observer admission; neither grant
+	// Read plus Comment permits the lease-status observer admission; neither grant
 	// is Edit, so even a valid observer token must fail every mutation boundary.
 	mustExec(t, f.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('native-page','user',?,'read',?)`, UserFromContext(ctx).ID, f.userID)
 	token, id := craftNativeIssued(t, h, ctx)

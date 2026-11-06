@@ -10,7 +10,9 @@ import { NativeCraftVersionHistory } from "./native-craft-version-history"
 
 /**
  * The history for a person who reads the document without the editor (the
- * Artifacts preview or read-only detail). It checks the workspace flag first,
+ * Artifacts preview or read-only detail): the workspace OWNER/ADMIN read rule.
+ * A Read or Comment grantee is refused, and retires it without showing anything.
+ * It checks the workspace flag first,
  * and only then opens its own native admission, read-only: it never acquires
  * the lease and offers no restore. Preview and comparison of a saved version
  * are read-only reads under that same admission.
@@ -48,8 +50,8 @@ function ReaderHistorySession({ humanId, workspaceId, pageId }: { humanId: strin
       if (!list && !signal.aborted) retire()
       return list
     } catch (cause) {
-      // No Read right (comment-only, revoked, outside the workspace) or no
-      // confirmation: nothing private stays on screen.
+      // No private read right (Read or Comment only, revoked, outside the
+      // workspace) or no confirmation: nothing private stays on screen.
       if (!signal.aborted) retire()
       throw cause
     }
