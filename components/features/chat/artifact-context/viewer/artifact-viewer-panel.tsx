@@ -665,7 +665,7 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
   const waitingCount = data.comments.filter(c => c.status === "pending").length
   const tabCount = (n: number) => n > 0 && <span aria-hidden className="ml-1.5 font-mono text-micro text-muted-foreground">{n}</span>
 
-  if(draftReadError?.key===draftKey&&draftReadError.revoked)return shell(header,<p role="alert" className="p-6">Page read access was removed.</p>)
+  if(draftReadError?.key===draftKey&&draftReadError.revoked)return shell(header,<p role="alert" className="p-6">Page read access was removed. The local draft has been deleted where this browser could reach it.</p>)
   return shell(header, <>
     {draftReadError?.key===draftKey&&<p role="alert" className="p-3">Private draft could not be opened. Reconnect and reopen; the stored copy is retained.</p>}
     {library && <div role="tablist" aria-label="Artifact detail" className="flex gap-1 border-b px-3 py-2" onKeyDown={event => {

@@ -172,6 +172,11 @@ applied or deleted automatically. **Use old source draft here** (or **Use old
 comment here**) stores it encrypted under this Page and only then removes the
 old copy; **Discard** removes it. Only the account that typed it sees it.
 
+A draft follows the read right. If the Page read right goes, the server stops
+unwrapping the draft key and the browser deletes the draft, and the page says
+so. It does not come back with a later grant, so copy unsaved work from the
+**Source recovery draft** field if you lose only the write right.
+
 ## Give the agent its playbook
 
 The server installs Crewship's artifact playbooks into the skill catalog when
