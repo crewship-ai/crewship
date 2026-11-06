@@ -113,3 +113,10 @@ it("stays on Pages when the build has no project viewer to land on", () => {
   expect(state.replace).not.toHaveBeenCalled()
   expect(screen.getByTestId("legacy").dataset).toMatchObject({ page: "brief", pin: "1" })
 })
+
+it("keeps the source editor reachable from the Edit source address", () => {
+  state.query = "artifact=1&edit=1&workspace_id=ws1"
+  render(<PageDetailClient />)
+  expect(state.replace).not.toHaveBeenCalled()
+  expect(screen.getByTestId("legacy")).toBeInTheDocument()
+})
