@@ -55,8 +55,12 @@ test.describe("phone", () => {
     // #3783: Retry now is offered only once the ~2 min of fast retries are
     // spent, so the page clock is run past them.
     await page.clock.install()
-    await page.routeWebSocket(/\/ws/, (ws) => { ws.close() })
+    let sockets = 0
+    await page.routeWebSocket(/\/ws/, (ws) => { sockets += 1; ws.close() })
     await page.goto("/issues")
+    // Only move the clock once the shell has settled: the first socket follows
+    // the session and local draft checks, whose timers must run on normal time.
+    await expect.poll(() => sockets, { timeout: 15_000 }).toBeGreaterThan(0)
     const banner = page.locator('[data-testid="realtime-banner"]')
     for (let i = 0; i < 12; i++) {
       await page.clock.fastForward(31_000)
