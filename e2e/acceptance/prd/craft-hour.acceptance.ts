@@ -16,7 +16,7 @@
 // debugging) does the same work and then fails on purpose: it is not evidence.
 import { readHeadText, sheetSession, wordSession, type Checkpoint, type CycleChain, type SessionKind } from "./craft-session/hour-steps"
 import type { CraftCall } from "./craft-lease/helpers"
-import { pageStalls, type VerifyPress } from "./craft-session/confirm"
+import { hourInterruptions, pageStalls, type VerifyPress } from "./craft-session/confirm"
 import { restartServer, type RestartRecord } from "./craft-session/restart"
 import { expect, prdRequirement, test } from "./fixtures"
 import { disposeActors, isolatedActor } from "./outage-lostack/actor"
@@ -80,7 +80,9 @@ for (const { app, label } of KINDS) {
       } finally {
         // The evidence chain on disk however the row ends (a thrown session, a failed
         // assertion below, a pass), written after the run so late replies are in it.
-        await prd.evidence("chain.json", { workspaceId: ws.id, pageId: ref.pageId, ...evidence, pageStalls: pageStalls(trail) }).catch(() => {})
+        const interruptions = hourInterruptions(evidence.verifications, pageStalls(trail))
+        prd.note(interruptions.note)
+        await prd.evidence("chain.json", { workspaceId: ws.id, pageId: ref.pageId, ...evidence, pageStalls: pageStalls(trail), interruptions }).catch(() => {})
       }
       const head = await readHeadText(api, ref)
       await prd.evidence("result.json", { ...result, finalVersion: head.version, finalHash: head.hash, verifications: evidence.verifications, pageStalls: pageStalls(trail) })

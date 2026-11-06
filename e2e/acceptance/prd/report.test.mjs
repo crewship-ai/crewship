@@ -4,7 +4,7 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { test } from "node:test"
-import { parseOriginMap, evaluateRequired, formatGate, loadRequired, manualToRows, formatTable, parseArgs, readRows, resultOf, summarize, writeSummary } from "./report.mjs"
+import { parseOriginMap, evaluateRequired, formatGate, loadRequired, manualToRows, formatNotes, formatTable, parseArgs, readRows, resultOf, summarize, writeSummary } from "./report.mjs"
 import { idCoverageProblems, scanEmittedIds } from "./emitted-ids.mjs"
 // The Craft rows' lost-line checker, the hour rows' cycle confirmation and the API session renewal have their
 // own tests; loading them here runs them in the CI step of this file ("PRD acceptance runner tests").
@@ -69,6 +69,12 @@ test("formatTable escapes backslashes so a trailing backslash cannot swallow the
   // Unescaped separators: every remaining "|" not preceded by an odd run of "\\".
   const separators = line.match(/(?<!\\)(?:\\\\)*\|/g) ?? []
   assert.equal(separators.length, 6)
+})
+
+test("formatNotes gives a row's notes a line of their own and stays away when there are none", () => {
+  assert.deepEqual(formatNotes([row()]), [])
+  const lines = formatNotes([row({ requirement: "A.hour", test: "Word", notes: ["Ověřit výsledek pressed 3 times."] })])
+  assert.deepEqual(lines, ["## Row notes", "", "- A.hour › Word: Ověřit výsledek pressed 3 times.", ""])
 })
 
 test("readRows + writeSummary round-trip", () => {

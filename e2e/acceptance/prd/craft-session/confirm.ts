@@ -79,6 +79,36 @@ export function cellInTable(raw: string, cell: string): boolean {
   return false
 }
 
+/**
+ * What a passed hour row must not hide: the row keeps going by pressing "Ověřit
+ * výsledek", so a pass alone reads as if saving recovered by itself. Intervals are
+ * the page stalls and the unconfirmed spells up to each press, merged so that an
+ * overlap is not counted twice. The longest one is the longest stall.
+ */
+export function hourInterruptions(verifications: readonly VerifyPress[], stalls: readonly PageStall[]): { presses: number; interruptedMs: number; longestStallMs: number; note: string } {
+  const spans = [
+    ...stalls.map((s) => [Date.parse(s.from), Date.parse(s.to)]),
+    ...verifications.map((v) => [Date.parse(v.firstSeenAt), Date.parse(v.pressedAt)]),
+  ].sort((a, b) => a[0] - b[0])
+  let interruptedMs = 0, longestStallMs = 0, from = NaN, to = NaN
+  const close = () => {
+    if (Number.isNaN(from)) return
+    interruptedMs += to - from
+    longestStallMs = Math.max(longestStallMs, to - from)
+  }
+  for (const [a, b] of spans) {
+    if (a > to) { close(); from = a; to = b }
+    else if (Number.isNaN(from)) { from = a; to = b }
+    else to = Math.max(to, b)
+  }
+  close()
+  const seconds = (ms: number) => `${Math.round(ms / 1000)} s`
+  const presses = verifications.length
+  const note = `Ověřit výsledek pressed ${presses} times, interrupted ${seconds(interruptedMs)} in total, longest stall ${seconds(longestStallMs)}.` +
+    (presses ? " Saving did not recover by itself." : "")
+  return { presses, interruptedMs, longestStallMs, note }
+}
+
 // ---------------------------------------------------------------------------
 // The Word table step and the markers already saved (RC-4 rerun, #4877).
 //

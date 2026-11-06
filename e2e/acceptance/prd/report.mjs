@@ -75,6 +75,12 @@ export function formatTable(rows) {
   return lines.join("\n")
 }
 
+/** What a pass or a failure leaves out of the table, one line per row. @param {PrdRow[]} rows */
+export function formatNotes(rows) {
+  const lines = sortRows(rows).flatMap((r) => (r.notes ?? []).map((n) => `- ${r.requirement} › ${r.test}: ${n}`))
+  return lines.length ? ["## Row notes", "", ...lines, ""] : []
+}
+
 /** Writes summary.json and summary.md next to rows/. @param {string} outputDir @param {PrdRow[]} rows @param {any} run */
 export function writeSummary(outputDir, rows, run) {
   const summary = summarize(rows)
@@ -86,6 +92,7 @@ export function writeSummary(outputDir, rows, run) {
     "",
     formatTable(rows),
     "",
+    ...formatNotes(rows),
   ].join("\n")
   fs.writeFileSync(path.join(outputDir, "summary.md"), md)
   return summary

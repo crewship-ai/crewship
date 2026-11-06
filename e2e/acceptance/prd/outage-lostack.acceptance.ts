@@ -273,6 +273,7 @@ test.describe("outage and lost acknowledgement", () => {
           const resavedLost = afterLoss.filter((o) => o.kind === "save" && o.contentHash === lost[0]?.serverHash)
           const firstNext = afterLoss.find((o) => o.kind === "save" && o.status === 200 && o.contentHash !== lost[0]?.serverHash)
           const identicalRepeats = repeatedSaves(ops)
+          prd.note(`Extra versions of identical bytes: ${identicalRepeats.length}.`)
           await prd.evidence("result.json", {
             appSha: prd.appSha,
             app,
@@ -301,6 +302,9 @@ test.describe("outage and lost acknowledgement", () => {
           const successor = String(BigInt(lost[0].serverVersion!) + 1n)
           expect.soft(resavedLost.map((o) => ({ base: o.baseVersion, status: o.status, version: o.version })), "the reconciled save is not saved again as a duplicate version").toEqual([])
           expect.soft(firstNext && { base: firstNext.baseVersion, version: firstNext.version }, "the next save builds on the reconciled version (no duplicate)").toEqual({ base: lost[0].serverVersion, version: successor })
+          // Autosave then Ctrl+S on the same bytes writes one more version. Whether that
+          // is allowed is undecided, so the row fails until the contract says otherwise.
+          expect.soft(identicalRepeats, "no extra version of identical bytes").toEqual([])
           expect.soft(next, "the editor confirms the last committed save").toBe(lastCommittedSave(ops))
           expect.soft(fin.version, "the head is the last committed save").toBe(lastCommittedSave(ops))
           expect(fin.text.includes(M.M1) && fin.text.includes(M.M2) && fin.text.includes(M.M4), "no data loss").toBe(true)
@@ -415,6 +419,8 @@ test.describe("outage and lost acknowledgement", () => {
             identicalRepeats: repeatedSaves(ops),
             ops,
           })
+          prd.note(`Extra versions of identical bytes: ${repeatedSaves(ops).length}.`)
+          expect.soft(repeatedSaves(ops), "no extra version of identical bytes").toEqual([])
 
           expect(lost[0]?.serverStatus, "the cut-off save committed on the server").toBe(200)
           expect(headAfterOutage.text.includes(M.M1) && headAfterOutage.text.includes(M.M2), "no data loss").toBe(true)
