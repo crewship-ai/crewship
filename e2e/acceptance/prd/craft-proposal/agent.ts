@@ -161,3 +161,26 @@ export function sheetInstruction(cell: string, marker: string): string {
     `Nastav buňku ${cell} na text "${marker}" přesně tímto balíkem příkazů: ${JSON.stringify([{ command: "cell.set", params: { cell, input: marker } }])}. Nic jiného neměň.`
   )
 }
+
+export interface BarSeen {
+  at: number
+  text: string
+}
+
+/** Records every text the lease bar shows, with timestamps, inside the page. */
+export async function watchBar(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const w = window as unknown as { __bar: Array<{ at: number; text: string }> }
+    w.__bar = []
+    const bar = document.querySelector('[role="toolbar"][aria-label="Úpravy dokumentu"]')
+    if (!bar) throw new Error("lease bar not found")
+    const note = () => {
+      const text = (bar.textContent ?? "").trim()
+      if (w.__bar.at(-1)?.text !== text) w.__bar.push({ at: Date.now(), text })
+    }
+    note()
+    new MutationObserver(note).observe(bar, { subtree: true, childList: true, characterData: true })
+  })
+}
+
+export const barSeen = (page: Page) => page.evaluate(() => (window as unknown as { __bar: BarSeen[] }).__bar)
