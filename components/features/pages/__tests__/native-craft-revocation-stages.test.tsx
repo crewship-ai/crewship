@@ -99,14 +99,24 @@ async function editWhileOffline(){
  server.dropStream()
 }
 async function advance(ms:number){let left=ms;while(left>0){const step=Math.min(250,left);await act(async()=>{await vi.advanceTimersByTimeAsync(step)});left-=step}}
+// Hashing runs on real crypto threads, so waiting for it takes real time too.
+const realTimeout=globalThis.setTimeout
+async function settle(ready:()=>boolean){for(let i=0;i<300&&!ready();i++){await advance(20);await new Promise(resolve=>realTimeout(resolve,5))}}
 async function opened(){
  render(<NativeCraftEditorHost workspaceId="w" pageId="p" humanId="human" enabled/>)
  await advance(50)
  server.push('lease',lease());await advance(50)
  fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}))
- for(let i=0;i<40&&!(contentVisible()&&offered());i++)await advance(50)
+ await settle(()=>contentVisible()&&offered())
  expect(contentVisible()).toBe(true)
  expect(offered()).toBe(true)
+ server.calls.length=0
+}
+/** Starts T0 right after a confirmed reauthorization, the worst case for a silent
+ * stream. opened() spends a varying part of the first interval on real hashing. */
+async function justConfirmed(){
+ for(let i=0;i<1300&&!server.count('reauthorize');i++)await advance(25)
+ expect(server.count('reauthorize')).toBe(1)
  server.calls.length=0
 }
 beforeEach(()=>{
@@ -154,6 +164,7 @@ describe('healthy stream',()=>{
 describe('silent stream',()=>{
  it('reauthorization delivers a refusal within one interval; content hides then, and only the draft-key proof erases',async()=>{
   await opened()
+  await justConfirmed()
   server.state='read-lost' // T0, right after the previous confirmation.
   await advance(NATIVE_REAUTHORIZE_INTERVAL_MS-300)
   expect(server.count('reauthorize')).toBe(0);expect(contentVisible()).toBe(true);expect(offered()).toBe(true)
@@ -167,6 +178,7 @@ describe('silent stream',()=>{
  })
  it('both monitors stalled: content and draft leave at the detection bound, not later',async()=>{
   await opened()
+  await justConfirmed()
   server.stall=new Set<Route>(['reauthorize','draft-key','sessions'])
   server.state='read-lost'
   await advance(NATIVE_DETECTION_BOUND_MS-500)
@@ -223,6 +235,7 @@ describe('proof',()=>{
  })
  it('a positive proof arriving after the reauthorization deadline still erases the captured revisions',async()=>{
   await opened()
+  await justConfirmed()
   server.state='read-lost';server.proofDelay=NATIVE_REAUTHORIZE_DEADLINE_MS+1_000
   await advance(NATIVE_REAUTHORIZE_INTERVAL_MS+300)
   expect(contentVisible()).toBe(false)
@@ -237,8 +250,7 @@ describe('lease handoff',()=>{
   server.stall=new Set<Route>(['action'])
   act(()=>options.at(-1)!.onChanged('final','doc'))
   fireEvent.click(screen.getByRole('button',{name:/Předat/}))
-  // The final save hashes on real crypto threads; the deadline starts after it.
-  for(let i=0;i<100&&!server.count('action');i++)await advance(20)
+  await settle(()=>server.count('action')>0)
   expect(server.count('action')).toBe(1)
   await advance(NATIVE_ADMISSION_DEADLINE_MS-2_000)
   expect(screen.queryByRole('alert')).toBeNull()
