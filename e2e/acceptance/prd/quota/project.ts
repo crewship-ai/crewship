@@ -167,7 +167,7 @@ export async function fillHistory(api: APIRequestContext, workspaceId: string, p
   return { log, overhead, fillMs: Date.now() - t0, final, remaining: final.limit - final.used }
 }
 
-export const projectURL = (slug: string, workspaceId: string) => `/pages/${encodeURIComponent(slug)}?artifact=1&${ws(workspaceId)}`
+export const projectURL = (slug: string, workspaceId: string) => `/pages/${encodeURIComponent(slug)}?artifact=1&edit=1&${ws(workspaceId)}`
 
 export async function openProject(page: Page, slug: string, workspaceId: string): Promise<void> {
   await page.goto(projectURL(slug, workspaceId), { waitUntil: "domcontentloaded" })

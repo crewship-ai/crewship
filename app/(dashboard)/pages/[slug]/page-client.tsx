@@ -49,7 +49,8 @@ export function PageDetailClient() {
     const viewer = <ArtifactProject key={`${workspaceId}:${slug}:${initialVersion ?? "latest"}`} workspaceId={workspaceId} slug={slug} initialVersion={initialVersion} />
     // An old project link (#4995) moves to its Artifacts detail with the same
     // page, workspace and pinned version; without the library it opens here.
-    return artifactsLibrary() ? <ProjectLinkToArtifacts key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} version={initialVersion}>{viewer}</ProjectLinkToArtifacts> : viewer
+    // Edit source (edit=1) stays here: the source editor has no Artifacts home.
+    return artifactsLibrary() && !search.has("edit") ? <ProjectLinkToArtifacts key={`${workspaceId}:${slug}`} workspaceId={workspaceId} slug={slug} version={initialVersion}>{viewer}</ProjectLinkToArtifacts> : viewer
   }
   const layout = <PagesLayout workspaceId={workspaceId} slug={slug} {...(initialVersion === undefined ? {} : { initialArtifactVersion: initialVersion })} />
   // Behind its switch one page opens in the Artifacts library too. A reference
