@@ -116,7 +116,7 @@ the exit code for other commands' argument validation.
 | Command | Needs |
 |---|---|
 | `create` | A human login with `pages:write` and a workspace role that may create artifacts. Agent runs cannot create a Design. |
-| `get`, `versions`, `comments`, `watch` | `pages:read` and visibility of the artifact. Without edit rights, `get --version` accepts only the shared version, `comments` lists only comments on the shared version and `watch` sends the shared version and never the live canvas; with no shared version it closes with exit `1`. |
+| `get`, `versions`, `comments`, `watch` | A read-capable credential (`pages:read`, `pages:*`, `*`, or an unscoped full-role token) and visibility of the artifact. Shared-only callers (ordinary Read/Comment, or non-admin owners/Edit grantees with only read scope) are limited to the shared pin/comments and its initial sync snapshot when a pin exists. Live/history reads need current Edit permission plus both `pages:read` and `pages:write` (or `pages:*`, `*`, or an unscoped full-role token), or separately authorized OWNER/ADMIN read access with audit for foreign Designs. Read scope never grants writes. With no shared version, `watch` closes with exit `1`. |
 | `apply`, `snapshot`, `restore` | `pages:write` and edit rights on the artifact. |
 | `share` | Edit rights **and** ownership of the artifact. An Edit grant does not allow changing the shared version. |
 | `comment` | Edit rights, or `pages:write` with a Comment grant. `--send-to-agent` additionally needs edit rights. |
@@ -166,8 +166,10 @@ crewship page design apply launch-hero --file hero.json -f json
 }
 ```
 
-`apply` changes the live canvas that open browsers see immediately, and works
-even when no browser has it open. Every successful `apply`
+`apply` changes the live canvas seen by browsers authorized for live reads,
+and works even when no browser has it open. Shared-only readers keep seeing
+their shared snapshot. Changing the shared pin does not push replacement
+document state to an already-open shared-only socket; read again or reopen. Every successful `apply`
 records a new version. Re-applying the same file is not a no-op: upserting the
 same nodes again still updates the canvas state and records another version.
 Use `--file -` to read stdin. An
@@ -196,9 +198,16 @@ crewship page design get launch-hero --version 1 -f json
 }
 ```
 
-`--version 0` (the default) reads the live canvas. With `--version N`, the
-`version` and `latest_version` fields both report `N`; use
-`page design versions` for the real latest version.
+`--version 0` (the default) reads the latest canvas for callers with current
+Edit permission plus both CLI `pages:read` and `pages:write` scopes
+(or `pages:*`, `*`, or an unscoped full-role token), and separately authorized workspace OWNER/ADMIN readers. Ordinary
+Read grantees receive only the shared version, and 404 until one is shared. A positive `--version N` is
+limited to that shared pin for shared-only readers. Non-admin Page owners
+and Edit grantees narrowed to `pages:read` credentials are shared-only too. Foreign
+administrator access is audited; a read-scoped administrator credential can read the latest
+canvas and history but cannot write. With a selected retained version, the
+`version` and `latest_version` fields both report that version; use
+`page design versions` for the latest version visible to the caller.
 
 ### Save and list versions
 
@@ -319,7 +328,7 @@ The chat must be private, created by you and attached to an agent. Any other
 chat ID returns `403 current Design edit permission required`. `get` then
 reports the same `origin` to the owner.
 
-### Watch live changes
+### Watch the permitted view
 
 ```sh
 crewship page design watch launch-hero --count 2
@@ -331,7 +340,15 @@ crewship page design watch launch-hero --count 2
 ```
 
 Each line is one binary Yjs sync or awareness frame, base64-encoded. `--count 0`
-(the default) watches until interrupted. A live agent run reads Design through
+(the default) watches until interrupted. Current Edit permission plus both CLI
+`pages:read` and `pages:write` scopes (or `pages:*`, `*`, or an unscoped full-role token), and separately authorized
+workspace OWNER/ADMIN access permit live document updates. Foreign administrator
+access is audited. Non-admin Page owners/Edit grantees narrowed to `pages:read` are
+shared-only: the shared snapshot and presence, without live document updates.
+Before a shared pin exists, the socket can upgrade and deliver presence, but
+its initial sync closes with 1008 `Design permissions changed`; `watch` reports
+that close as an error if it reaches it; `--count` can finish on presence frames
+before observing the close. A live agent run reads Design through
 the `design_get` tool instead; with `CREWSHIP_AGENT_TOKEN` set, `watch` is
 refused.
 

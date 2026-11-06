@@ -1,24 +1,23 @@
 ---
 title: "Login, Logout, Whoami"
-description: "Authenticate the CLI against a Crewship server — interactive credentials, API token, Google OAuth, or device-code pairing — then check who you are."
+description: "Authenticate the CLI against a Crewship server — interactive credentials, API token, or device-code pairing — then check who you are."
 icon: "log-in"
 stability: experimental
 tag: Experimental
 ---
 
-{/* docs-inventory: ignore-api /api/v1/auth/google/redirect reason=historical-removed-route */}
 # Login, Logout, Whoami
 
 Three commands defined in `cmd/crewship/cmd_login.go` cover every way the CLI authenticates against a Crewship server. The token lands in `~/.crewship/cli-config.yaml` (or the selected profile); subsequent commands pick it up from there. Login and the other top-level commands respect the global `--server` and `--profile` flags. `--workspace` is a global context flag for workspace-scoped commands; login does not select a workspace.
 
 ## `crewship login`
 
-Four mutually exclusive modes — pick one. Interactive is the default when no mode flag is set.
+Three supported modes — interactive credentials, token, or device-code pairing. Interactive is the default when no mode flag is set. The legacy `--google` flag is unavailable and exits locally with an error.
 
 | Flag | Type | Default | Effect |
 |---|---|---|---|
 | `--token <api-token>` | string | (unset) | Non-interactive: validates the token via `GET /api/v1/auth/cli-token/validate` and saves it. Use this in CI. |
-| `--google` | bool | `false` | Browser-based Google OAuth. Opens `/api/v1/auth/google/redirect`; after sign-in, you mint a CLI token from **Settings → CLI tokens** and paste it. Requires `GOOGLE_CLIENT_ID` on the server. |
+| `--google` | bool | `false` | Unavailable compatibility flag. Returns a local error without contacting the server, opening a browser, prompting for credentials, or changing the CLI profile. |
 | `--pair` | bool | `false` | Device-code pairing — use with `--code XXXX-XXXX` from the browser's onboarding wizard or **user menu → Connect CLI…**. The code's TTL is 10 minutes. |
 | `--code <code>` | string | (unset) | Pairing code from the browser. Required when `--pair` is set. |
 | `--adapter <name>` | string | (unset) | Optional telemetry hint, one of `CLAUDE_CODE`, `GEMINI_CLI`, `CODEX_CLI`, `OPENCODE`, `CURSOR_CLI`, `FACTORY_DROID`. Server never routes on this — it's adapter-blind. |
@@ -50,18 +49,13 @@ crewship login --token crewship_cli_abc123…
 
 Useful for CI: provision the token once in the web UI under **Settings → CLI tokens**, drop it into your CI secret store, point env at it.
 
-### Google OAuth
+### Google sign-in is unavailable
 
-```bash
-crewship login --google
-# Opening browser to complete Google sign-in:
-#   https://crewship.example.com/api/v1/auth/google/redirect
-# After sign-in completes, mint a CLI token at:
-#   https://crewship.example.com/settings#cli-tokens
-# Paste CLI token (or Ctrl-C to abort):
-```
-
-The flow is intentionally hybrid: Google's redirect-URI flow lands the session cookie on the browser, not on the CLI, so the CLI doesn't try to fake a loopback redirect that would need a new server endpoint. You sign in in the browser, mint a CLI token from settings, paste it back into the terminal — the CLI validates and stores it.
+Google OAuth redirect and callback routes are deliberately disabled in the
+Crewship server, even when Google client credentials remain configured.
+`crewship login --google` therefore fails locally. Use the email/password,
+token, or pairing modes documented here instead; this flag does not open a
+browser or exchange credentials.
 
 ### Device-code pairing
 
@@ -136,7 +130,7 @@ clears the active profile's token and leaves sibling profiles signed in.
 ### Common errors
 
 - **`pair: the pair code didn't work — codes expire after 10 minutes`** — codes have a 10-min TTL. The server intentionally folds *wrong code / expired / already consumed* into one message to avoid being an enumeration oracle; the most likely cause is the TTL.
-- **`Google sign-in is not configured on <server>`** — the server returned `enabled=false` from `/api/v1/auth/google/status`. The operator hasn't set `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET`.
+- **`Google sign-in is unavailable`** — Google sign-in is disabled. Use email/password, `--token`, or `--pair`; setting Google client credentials does not enable the removed flow.
 - **`refusing to overwrite a malformed file — fix or remove ~/.crewship/cli-config.yaml and retry`** — the config file exists but isn't valid YAML. Surfaced explicitly so the CLI doesn't silently wipe your saved server/workspace.
 - **`--password-stdin and CREWSHIP_PASSWORD are mutually exclusive`** — both non-interactive password sources were set; drop one.
 - **`--password-stdin: no password on stdin`** — `--password-stdin` was passed but stdin had no content (or only whitespace).

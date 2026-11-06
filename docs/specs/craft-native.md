@@ -108,6 +108,82 @@ Competing acquisition and stale generations return 409. A handoff advances the
 server generation; a late renew or write from the old connection is rejected.
 Neither a display name nor a public request ID establishes write authority.
 
+## Native editor startup authority and deadlines
+
+A fresh admission starts its authority/lease metadata stream before document
+fetch and iframe import. While a frame bootstraps, lease events update its
+advisory view without starting concurrent reader refreshes; one catch-up refresh
+runs afterwards if needed. A delayed lease HTTP response cannot replace a
+newer streamed lease observation, although successful current-admission proof
+is still mandatory. If an in-flight lease read overlaps a metadata observation,
+write custody must be confirmed by both; neither source's grant overrides the
+other's denial. For the same confirmed custody, the fresh HTTP expiry is used
+rather than an already expired queued event. Await continuations do not
+republish an older proof over subsequent metadata. Read retirement removes the frame and revokes the held
+private journal. An open journal purges its scope; a closed journal may erase
+only its own persisted row, and a pure viewer has no private journal to purge.
+A terminal monitor failure, including invalid lease metadata, is uncertainty,
+not an authoritative Read purge.
+It hides content and recovery controls before awaiting capture, retaining the
+exact uncaptured frame/journal if capture fails. Engine failure does not exempt
+the remaining admission monitor from this retirement. Explicit Read retirement
+still revokes the held journal. Temporary metadata transport retries remain
+bounded, admission-specific and mutation-free; they are not Read revocations.
+Write or other
+admission retirement during bootstrap ends that attempt without automatically
+reopening or acquiring another session.
+
+The frame is hidden and inert until the native snapshot/open/snapshot identity
+barrier completes and a fresh lease read verifies the original admission's
+current credential, Page rights and authority epoch. Cancellation, a replaced
+admission or changed person/Page/workspace cannot reveal an old completion. Reader
+refresh results (including failures) also belong to their original runtime:
+a pending old read cannot stop a successor writer, acquisition or capture,
+even when the admission client has not changed.
+When a retired writer opens a fresh read admission, its previous frame and
+recovery/comparison controls stay hidden until that admission is verified; a
+refused admission retains confirmed rows without exposing them or reviving
+callbacks from the old session.
+If capturing a retired writer fails, its exact native frame and journal remain
+held, hidden and inert while reading is unconfirmed. A fresh monitored read
+admission may reveal that same frozen buffer and enable a local download; it
+never imports a new document, acquires custody or revives the old writer.
+Failure hides it again and offers an explicit bounded read recheck. Auth
+suspension is terminal for this mount, including during capture or read reopen;
+only a new authorized mount can proceed. Explicit read retirement still removes
+the frame and revokes the held journal. No copy is downloaded after its read
+authority or scope has changed.
+
+| Transition | Required authority and effect |
+| --- | --- |
+| New scope → starting | Fresh admission; monitor before document delivery; hidden inert frame. |
+| Starting → readable | Snapshot/open/snapshot identity barrier and successful original-admission proof; current scope/client/session; no cancellation. |
+| Readable → writable | Current lease generation, fresh proof, draft custody and confirmed native access change; never from a retained buffer. |
+| Writer → retiring | Input frozen; finish capture/reconciliation before transfer; no premature Saved. |
+| Retired writer → fresh reader | Old writer stays retired; hide content during fresh monitored admission and proof. |
+| Failed capture → retained buffer | Keep exact inert frame/journal; reveal/copy only with fresh monitored read proof; no import or write. |
+| Monitor failure → disconnected | Cancel opening; remove captured reader or hide uncaptured buffer; retain confirmed rows without claiming latest changes captured. |
+| Any live state → read retired | Hide/remove immediately; revoke held journal; no late response or download may reveal content. |
+| Any live state → auth suspended / scope closed | Hide immediately; fence old callbacks; suspension waits for capture and rejects if unconfirmed; no successor admission in this mount. |
+
+Acquiring write still requires the separate current lease/generation checks,
+confirmed native access change and draft custody; startup never acknowledges a
+save. A disconnected status claims a retained draft only after a confirmed
+local capture, not merely because bootstrap once completed.
+
+Fresh admission/document loading and acquisition have a 60-second overall
+deadline. Handoff applies that deadline only after the previous writer
+confirmed its final save/capture and retired; it never times out a live
+writer's uncaptured buffer. Each new
+frame has a 50-second overall deadline, including its final authority read;
+inside it, the frame has 20 seconds for verified read-only ready and each of the
+at most three import RPCs keeps its 10-second deadline, including snapshot
+hashing. The connection deadline ends at ready instead of overlapping the
+finite import sequence. Neither metadata events nor progress reset these caps.
+A timeout advises explicit reload for a fresh attempt, without replaying an
+import, mutation or save. Existing captured drafts are not erased on a generic
+timeout or disconnection; only explicit read retirement authorizes their purge.
+
 ## Shared previews and edit capability
 
 `can_edit` is current original-credential and Page edit authority, independent of
@@ -216,10 +292,12 @@ re-grant does not revive it. On `write_revoked` the browser retires local
 writing exactly as on lease loss (input frozen, the unsaved buffer captured to
 the private journal, never sent), closes the old client and requests one fresh
 admission, which the server grants only after a fresh read check. That
-admission reads the current version, shows the same read-only editor a
-non-holder sees and offers the captured draft for compare or copy. A refused
-fresh admission ends in the ordinary disconnected state with the draft kept;
-it is not retried. A later read loss on the fresh admission stops delivery
+admission reads the current version when capture is confirmed, shows the same
+read-only editor a non-holder sees and offers the captured draft for compare or
+copy. With unconfirmed capture it only verifies and monitors reading of the
+same frozen buffer; it never imports over it or revives its writer. A refused
+fresh admission hides content without purging confirmed rows. An uncaptured
+buffer may use an explicit bounded read recheck, not a background retry loop. A later read loss on the fresh admission stops delivery
 like any other (`draft: "purge"`). That purge also erases the draft row the
 retired write journal persisted, even though that journal is already closed:
 a closed handle still refuses a Page-wide purge (it must never erase a fresh
@@ -364,6 +442,30 @@ crewship craft task stop @PAGE --workspace WORKSPACE
 by default. These human commands do not use the native editor session or agent
 credentials. Stop reports the actual cancellation/termination fields, rather
 than assuming the process has stopped. Mutations are not replayed on failure.
+
+The native editor offers the same start in the browser ("Upravit agentem")
+without any further endpoint. It appears only when `/craft/availability` answers
+a literal true for `agents_enabled` and `can_edit`, and never while the host is
+read-only, retired, blocked on an uncaptured draft or retiring its write. The
+person picks an agent, writes the instruction and ticks "Agent smí upravit celý
+dokument"; nothing is created before that deliberate action and consent is never
+remembered for a later start. Starting opens a new private chat with that agent
+(`POST /api/v1/agents/{agentId}/chats`) and sends the instruction with the normal
+chat client, marked `metadata.native_craft_instruction: true`. That literal flag
+persists and echoes the message but starts no chat turn, so the instruction
+reaches no ordinary run, agent log or other member's diagnostics; the flag cannot
+be combined with Page context, an ask form or a document intent. Once the echo
+has named the persisted `message_id` and the send has settled with `done`, the
+editor sends the task request above exactly once. An end of the attempt
+invalidates it synchronously, so a host that retires in the same render neither
+sends nor posts. Any refusal or lost reply is reported and not repeated, because
+a message can launch only one task. The chat itself stays ordinary: a later
+message the person writes there starts a normal turn.
+The outcome appears in the task status panel, and `craft_task_id` is added to the
+URL. A document a person holds is started the same way: admission does not
+consult the lease, the run's `craft_acquire` gets 409 and it records a proposal,
+which the status names. The control refuses to start while an agent holds the
+lease, because that run's refusal has no defined proposal route.
 
 The accepted response is `{work_id, status: "queued"}`, HTTP 202. It is not proof
 of execution or a save. The same original human can inspect

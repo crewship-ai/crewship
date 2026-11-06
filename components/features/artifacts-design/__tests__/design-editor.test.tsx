@@ -4,7 +4,7 @@ vi.mock("@/lib/local-draft-seal", () => ({
  forgetLocalDraftPage() {}, isSealedLocalDraft: () => true, LocalDraftReadRevoked: class extends Error {},
 }))
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import * as Y from "yjs"
 import { DesignEditor } from "../design-editor"
 import { designNodes, upsertDesignNode } from "../design-document"
@@ -16,13 +16,13 @@ vi.mock("@/lib/api-fetch",async()=>{
 const state = vi.hoisted(() => ({ editable: true, doc: null as Y.Doc | null, pageId: "old-private-page", user: false, peerColor: "#2563eb", saveError: null as (Error & { status?: number }) | null, restoreError: null as (Error & { status?: number }) | null }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => state.user ? { data: { user: { id: "same-user" } } } : null }))
 vi.mock("@/hooks/use-artifact-agent-dispatch", () => ({ useArtifactAgentDispatch: () => ({ ready: false, dispatch: vi.fn() }) }))
-vi.mock("../use-design", () => ({ useDesign: () => {
+vi.mock("../use-design", () => ({ useDesign: (_workspaceId: string, _slug: string, selectedVersion?: number) => {
  const mutation = { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, error: null }
  return {
   query: { data: { page_id: state.pageId, can_edit: state.editable, can_comment: state.editable, latest_version: 1, comments: [] }, isError: false },
   comments: { data: { comments: [] }, isError: false },
   versions: { data: { versions: [{ version: 1 }], shared_version: 1 }, isError: false },
-  doc: state.doc, nodes: designNodes(state.doc!), peers: [{ clientId: 2, name: "Marie", color: state.peerColor, cursor: { x: 12, y: 24 } }], connection: "connected", editable: state.editable, dirty: false, draftError: false,
+  doc: state.doc, nodes: designNodes(state.doc!), peers: [{ clientId: 2, name: "Marie", color: state.peerColor, cursor: { x: 12, y: 24 } }], connection: "connected", editable: state.editable && !selectedVersion, dirty: false, draftError: false,
   save: { ...mutation, error: state.saveError }, restore: { ...mutation, error: state.restoreError }, share: mutation, comment: mutation, connectAgent: mutation, setCursor: vi.fn(),
  }
 } }))
@@ -50,13 +50,39 @@ describe("Design editor controls", () => {
   expect(screen.getByTitle("Marie")).toHaveStyle({ backgroundColor: "#047857" })
   expect(screen.getByLabelText("Marie cursor").querySelector("rect")).toHaveAttribute("fill", "#047857")
  })
- it("does not offer edit or save controls to readers", async () => {
+ it.each([false, true])("labels the current History view according to edit authority (%s)", canEdit => {
+  state.editable = canEdit
+  render(<DesignEditor workspaceId="workspace" slug="shop" />)
+  fireEvent.click(screen.getByRole("button", { name: /History/ }))
+  const history = screen.getByLabelText("Version history")
+  expect(within(history).getByRole("button", { name: canEdit ? "Live canvas" : "Current view" })).toBeEnabled()
+  if (!canEdit) expect(within(history).queryByRole("button", { name: "Live canvas" })).not.toBeInTheDocument()
+ })
+ it("offers the live canvas to an editor while inspecting a historical snapshot", () => {
+  render(<DesignEditor workspaceId="workspace" slug="shop" initialVersion={1} />)
+  fireEvent.click(screen.getByRole("button", { name: /History ·/ }))
+  expect(within(screen.getByLabelText("Version history")).getByRole("button", { name: "Live canvas" })).toBeEnabled()
+ })
+ it("keeps the reader canvas and presence usable without edit controls or a live-update promise", () => {
   state.editable = false
+  upsertDesignNode(state.doc!, { id: "shared-text", type: "text", text: "Shared snapshot content", x: 10, y: 20, width: 200, height: 40 })
+  const original = designNodes(state.doc!)
   render(<DesignEditor workspaceId="workspace" slug="shop" />)
   expect(screen.getByText("Read only")).toBeInTheDocument()
   expect(screen.queryByRole("button", { name: "Screen" })).not.toBeInTheDocument()
   expect(screen.queryByRole("button", { name: "Save version" })).not.toBeInTheDocument()
   expect(screen.getByLabelText("Marie cursor")).toBeInTheDocument()
+  const canvas = screen.getByRole("img", { name: "Design canvas" })
+  expect(within(canvas).getByText("Shared snapshot content")).toBeInTheDocument()
+  expect(screen.getByRole("status")).toHaveTextContent("Connected · read only")
+  expect(within(screen.getByLabelText("Design tools")).getByText("View canvas")).toBeInTheDocument()
+  expect(screen.queryByText("Follow changes live")).not.toBeInTheDocument()
+  // Read-only selection/pointer interaction must not mutate the displayed model.
+  const node = canvas.querySelector('[data-design-node="shared-text"]')!
+  fireEvent.pointerDown(node, { clientX: 10, clientY: 20, pointerId: 1 })
+  fireEvent.pointerMove(canvas, { clientX: 110, clientY: 120, pointerId: 1 })
+  fireEvent.pointerUp(canvas, { pointerId: 1 })
+  expect(designNodes(state.doc!)).toEqual(original)
  })
 })
 

@@ -252,7 +252,7 @@ export async function grantPage(api: APIRequestContext, workspaceId: string, pag
   return res.status()
 }
 
-export const projectURL = (slug: string, ws: string) => `/pages/${encodeURIComponent(slug)}?artifact=1&workspace_id=${encodeURIComponent(ws)}`
+export const projectURL = (slug: string, ws: string) => `/pages/${encodeURIComponent(slug)}?artifact=1&edit=1&workspace_id=${encodeURIComponent(ws)}`
 export const viewerURL = (slug: string, ws: string) => `/artifacts?item=${encodeURIComponent(slug)}&workspace_id=${encodeURIComponent(ws)}`
 
 export async function openProject(page: Page, slug: string, ws: string): Promise<void> {

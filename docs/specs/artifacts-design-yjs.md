@@ -71,10 +71,11 @@ transactions:
    increased. If `revision` changed in the meantime, the request answers `409`
    and nothing is written.
 
-In both paths the server then sends the resulting Yjs update to every connected
-browser. A change that fails validation, permission or revision checks is not
-written and not broadcast. Connected browsers only ever receive committed
-state.
+In both paths the server sends the committed Yjs update only to connections
+with live-read authority: editors and the separately audited administrative
+read path. Shared-only readers synchronize the shared snapshot and receive
+presence, without receiving later live document updates. A change that fails
+validation, permission or revision checks is not written or broadcast.
 
 ## Operations and snapshots
 
@@ -107,8 +108,13 @@ version without changing it.
 
 **Restore** (`POST .../design/restore` with `version`) changes the live document
 to match an earlier version and publishes that as a new version. The restore is
-applied as a Yjs update to the existing document, so connected browsers stay
-connected and see the result. History is never deleted.
+applied as a Yjs update to the existing document. Connected browsers authorized
+for live reads receive the result; shared-only readers keep their shared
+snapshot and presence. Changing the shared pin does not push replacement
+document state to an already-open shared-only socket; read again or reopen. Separately authorized
+workspace OWNER/ADMIN live reads remain audited for foreign Designs, including
+with a read-scoped credential, which grants no write authority. History is
+never deleted.
 
 **Share** (`POST .../design/share` with `version`) pins a version for readers.
 Only the Page owner can share; an Edit grant does not allow it.
@@ -163,6 +169,21 @@ permissions, keeping the local document and any unsent changes.
 
 ## Who can do what
 
+Live-read/Edit authority means the effective authority of this request, not
+only the Page ownership or grant label. Human CLI reads need a read-capable
+credential: `pages:read`, `pages:*`, `*`, or an unscoped full-role token;
+write scope alone does not imply read scope. Live/history reads need both
+`pages:read` and `pages:write` (or `pages:*`, `*`, or an unscoped full-role token) plus current Edit permission, or
+current Edit permission through a browser session. Ordinary Read/Comment
+callers and non-admin Page owners/Edit grantees using only `pages:read` are
+shared-only. Separately authorized workspace OWNER/ADMIN readers can read
+latest/history even with read scope, with audit for foreign Designs; that
+credential still cannot write. Agent tools retain their separate exact-run
+mandate, original human credential and live authority checks; these human CLI
+scope examples do not replace agent credential validation. Every credential
+form still requires live membership and current Page permission; a wildcard
+or unscoped full-role token does not confer Edit by itself.
+
 | Action | Required |
 |---|---|
 | Create | A human with Page creation permission. Agents cannot create a Design. |
@@ -175,8 +196,9 @@ Shared-only Read and Comment grantees receive the immutable shared snapshot
 and presence, not unsaved live canvas updates. Their version list and comments
 are limited to the shared version, and they can open only that version by
 number. Workspace administrators using the separately audited read path can
-still read live state; a read-only token does not gain write permission. Tokens
-need `pages:read` for reads and `pages:write` for changes.
+still read live state; a read-only token does not gain write permission. Narrowed
+tokens are checked for `pages:read` on reads and `pages:write` on changes;
+matching wildcards and unscoped full-role alternatives apply as described above.
 
 Snapshot access and presence do not establish live editing or a collaboration
 acceptance result. Live multiuser behavior must be qualified separately on the
@@ -187,8 +209,9 @@ enabled deployment and its supported clients.
 Agents use the MCP tools `design_get`, `design_apply`, `design_snapshot`,
 `design_versions` and `design_restore`. They reach the same server path as
 people, under the exact Page chosen by the human who started the run. An agent
-applying operations does not need an open browser; people who have the canvas
-open see the change immediately. When the run was started from a comment, its
+applying operations does not need an open browser; connections with live-read
+authority receive the committed update. Shared-only readers keep the shared
+snapshot until the owner shares a different version. When the run was started from a comment, its
 first successful operations request answers that comment.
 
 The CLI equivalents are the `crewship page design` commands; see the

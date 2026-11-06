@@ -151,8 +151,8 @@ auth:
   nextjs_url: ""                # Auto-derived from port if unset
   internal_token: ""            # Auto-generated if empty
   allow_signup: false           # Allow new user registration
-  google_client_id: ""          # Google OAuth (both must be set to mount /auth/google/*)
-  google_client_secret: ""
+  google_client_id: ""          # Retained compatibility field; does not enable Google sign-in
+  google_client_secret: ""      # Redirect/callback stay disabled even when both fields are set
   bootstrap_window: 0s          # First-run /bootstrap window; 0 = open until first admin exists
   public_page_passwords:
     max_concurrent: 0           # Automatic: max(1, min(4, GOMAXPROCS / 2))

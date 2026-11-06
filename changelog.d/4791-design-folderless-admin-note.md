@@ -1,0 +1,1 @@
+- **The Design guide no longer says an unshared Design is visible only to its creator (#4791).** Workspace owners and admins can read and edit every Design, and their access to a Design they do not own is audited.

@@ -28,10 +28,10 @@ crewship workspace artifact-policy show|set [flags]
 
 ## Before you start
 
-Artifacts are off by default. Each group of commands needs a workspace
-feature flag, which an OWNER or ADMIN turns on with
-[`crewship feature-flag enable`](/cli/feature-flag), or an instance switch
-set to `true` in the server environment:
+Each group of commands needs a workspace feature flag, which an OWNER or
+ADMIN turns on with [`crewship feature-flag enable`](/cli/feature-flag), or an
+instance switch set to `true` in the server environment. `artifact_projects`
+is on by default; `artifact_dashboard_data` and `artifact_slides` are off:
 
 | Commands | Workspace flag | Instance switch |
 |---|---|---|
@@ -45,18 +45,21 @@ The `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED` and
 need `artifact_projects` (or `CREWSHIP_ARTIFACT_PROJECTS_ENABLED`) to be on.
 
 ```bash
-crewship feature-flag enable artifact_projects
 crewship feature-flag enable artifact_dashboard_data
 crewship feature-flag enable artifact_slides
+crewship feature-flag disable artifact_projects   # turn Projects off for this workspace
 ```
 
-When `artifact_projects` and its bypass are off, `availability` returns
+When `artifact_projects` is off and its bypass is not set, `availability` returns
 `{"enabled": false}`. It does not report the Dashboard or Slides sub-flags:
 it can still return true when those are off. A command whose required flag
 is off fails with `404` (`artifact projects are not enabled` or
 `dashboard data is disabled`). The CLI itself needs no web build-time
-variable; the `url` that commands return opens the artifact view in the web
-app.
+variable; the `url` that commands return, `/artifacts/<page-id>?workspace_id=<workspace-id>`,
+opens the artifact in the web app. Older `/pages/<slug>?artifact=1` links
+still work: with the Artifacts library in the build they redirect to
+`/artifacts/<page-id>` with the same workspace and version; without it they
+open the Pages project viewer.
 
 Credentials and roles:
 
@@ -203,7 +206,7 @@ crewship page artifact create quarterly-review --name "Quarterly review" --file 
 {
   "page_id": "<page-id>",
   "slug": "quarterly-review",
-  "url": "/pages/quarterly-review?artifact=1&workspace_id=<workspace-id>",
+  "url": "/artifacts/<page-id>?workspace_id=<workspace-id>",
   "version": 1
 }
 ```
@@ -229,7 +232,7 @@ crewship page artifact publish quarterly-review --base-version 1 --file manifest
   "actor": "<user-id>",
   "page_id": "<page-id>",
   "slug": "quarterly-review",
-  "url": "/pages/quarterly-review?artifact=1&workspace_id=<workspace-id>",
+  "url": "/artifacts/<page-id>?workspace_id=<workspace-id>",
   "version": 2
 }
 ```
@@ -356,9 +359,12 @@ crewship page artifact share quarterly-review --base-version 3 --version 2
 ```json
 {
   "shared_version": 2,
-  "url": "/pages/quarterly-review?artifact=1&version=2&workspace_id=<workspace-id>"
+  "url": "/artifacts/<page-id>?version=2&workspace_id=<workspace-id>"
 }
 ```
+
+The share `url` opens the shared version: a reader of that link sees version 2,
+never the latest one.
 
 A stale `--base-version` returns `409 artifact_version_conflict`.
 
