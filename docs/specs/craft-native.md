@@ -82,8 +82,10 @@ editor sends nothing and may ask again later. After a 410 the editor resumes wit
 capture at the same base and always sends it: it never treats bytes equal to
 its old baseline as already saved, because that baseline is no longer proof of
 the head. The server's base fence then decides between a new version and a
-visible conflict with the draft kept. The host runs the same reconcile when the
-browser reports it is back online, as "Ověřit výsledek" does.
+visible conflict with the draft kept. The editor runs the same reconcile by
+itself after 2, 10 and 30 seconds and then every minute until the outcome is
+known, when the browser reports it is back online, and on "Ověřit výsledek",
+which also returns the keyboard to the document. A reconcile resends nothing.
 
 Restore answers 404 to the lease holder when the target does not exist.
 

@@ -53,8 +53,12 @@ export interface SingleEditorSaveOptions {
   onReceipt?(receipt: NativeSaveReceipt): void | Promise<unknown>
   idleMs?: number
   timeoutMs?: number
+  /** Waits before asking the server about an unconfirmed save; the last one repeats. */
+  reconcileBackoffMs?: number[]
 }
 interface Prepared { draft: NativeSaveRequest; epoch: number; sequence: number; nativeState?: string }
+
+const RECONCILE_BACKOFF_MS = [2_000, 10_000, 30_000, 60_000]
 
 /** One immutable editor/lease lifecycle. A new generation needs a new editor
  * loaded from its confirmed version, never an automatic replay of recovery. */
@@ -68,6 +72,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   let confirmed: { nativeState: string | undefined; contentHash: string; version: string; seeded?: boolean; mountedState?: string } | undefined
   let pending: { attempt: Prepared; abort: AbortController; done: Promise<void> } | undefined
   let timer: ReturnType<typeof setTimeout> | undefined
+  let reconcileTimer: ReturnType<typeof setTimeout> | undefined, reconcileAsks = 0
   let preparations = Promise.resolve(), draftWrites = Promise.resolve()
   let lastPersistedSequence = 0, manualCount = 0
   // Sequences whose journal write has not settled, including ones past the deadline.
@@ -98,7 +103,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   }
   const stop = () => {
     if (!active) return
-    active = false; clearTimeout(timer); lifetime.abort(); pending?.abort.abort()
+    active = false; clearTimeout(timer); clearTimeout(reconcileTimer); lifetime.abort(); pending?.abort.abort()
     latest = undefined; unconfirmed = undefined; confirmed = undefined; owedReceipt = undefined
     emit("stopped")
   }
@@ -201,6 +206,19 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       return await Promise.race([Promise.resolve().then(() => { if (abort.signal.aborted) throw new Error("save_retired"); return callback(abort.signal) }), aborted])
     } finally { clearTimeout(deadline); abort.signal.removeEventListener("abort", onAbort) }
   }
+  // A page frozen past the deadline loses a save it may well have made, and a
+  // query cannot hurt: ask until the outcome is known. Nothing is resent here.
+  function scheduleReconcile() {
+    if (!unconfirmed) { clearTimeout(reconcileTimer); reconcileTimer = undefined; reconcileAsks = 0; return }
+    if (reconcileTimer !== undefined || !active || !writable || !options.transport.reconcile) return
+    const backoff = options.reconcileBackoffMs ?? RECONCILE_BACKOFF_MS
+    reconcileTimer = setTimeout(() => {
+      reconcileTimer = undefined
+      reconcileAsks++
+      if (active && writable && unconfirmed && !pending) void transmit(unconfirmed, true)
+      else scheduleReconcile()
+    }, backoff[Math.min(reconcileAsks, backoff.length - 1)])
+  }
   async function transmit(attempt: Prepared, reconcile: boolean) {
     if (!active || !writable || pending) return
     if (!reconcile) attempt = { ...attempt, draft: { ...attempt.draft, attemptId: attemptNonce() } }
@@ -237,6 +255,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     } finally {
       if (pending === operation) pending = undefined
       complete()
+      scheduleReconcile()
       scheduleIfNeeded()
       notifyStateWaiters()
     }
@@ -408,7 +427,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     // A save already sent may have committed; its reply is abandoned here, so
     // keep it as the unconfirmed attempt for proveLost to reconcile.
     if (pending && !unconfirmed) unconfirmed = pending.attempt
-    writable = false; blocked = "write_revoked"; clearTimeout(timer); pending?.abort.abort()
+    writable = false; blocked = "write_revoked"; clearTimeout(timer); clearTimeout(reconcileTimer); pending?.abort.abort()
     const sequence = nextPreparation + 1
     writeRetirement = new Promise<boolean>(resolve => {
       let finished = false

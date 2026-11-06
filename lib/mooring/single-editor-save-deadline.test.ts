@@ -33,7 +33,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 const receipt = (r: NativeSaveRequest) => ({ ...r, bytes: undefined, version: String(BigInt(r.baseVersion) + 1n), durability: "node", issuedBy: "crewship", phase: "committed", candidateHash: r.contentHash })
 const never = () => new Promise<never>(() => {})
 
-async function rig(options: { journal?: NativeDraftJournal; timeoutMs?: number; idleMs?: number } = {}) {
+async function rig(options: { journal?: NativeDraftJournal; timeoutMs?: number; idleMs?: number; reconcile?: (r: NativeSaveRequest) => Promise<unknown>; reconcileBackoffMs?: number[] } = {}) {
   const journal = options.journal ?? await openNativeDraftJournal({ human: "alice", workspace: "w", page: "p", applicationId: "gridcraft" })
   let value = 1, captures = 0
   const requests: NativeSaveRequest[] = [], states: NativeSaveState[] = []
@@ -41,9 +41,9 @@ async function rig(options: { journal?: NativeDraftJournal; timeoutMs?: number; 
   const send = vi.fn(async (r: NativeSaveRequest): Promise<unknown> => receipt(r))
   const snapshot = vi.fn(async (_signal: AbortSignal, id?: string) => { captures++; return { bytes: new Uint8Array([value]), editorRevision: id ?? `grid:${captures}` } })
   const controller = createSingleEditorSave({ workspaceId: "w", pageId: "p", applicationId: "gridcraft", enginePin: "engine", baseVersion: "1", generation: "1", sessionId: "session",
-    idleMs: options.idleMs ?? 5, timeoutMs: options.timeoutMs ?? 200, journal,
+    idleMs: options.idleMs ?? 5, timeoutMs: options.timeoutMs ?? 200, reconcileBackoffMs: options.reconcileBackoffMs, journal,
     engine: { snapshot, async validate() {} },
-    transport: { async save(r) { requests.push(r); return send(r) } },
+    transport: { async save(r) { requests.push(r); return send(r) }, ...(options.reconcile ? { reconcile: (r: NativeSaveRequest) => options.reconcile!(r) } : {}) },
     onState(state) { states.push(state) }, onReceipt,
   })
   return { controller, journal, requests, states, onReceipt, send, snapshot, edit(next: number) { value = next; controller.edited() } }
@@ -321,4 +321,45 @@ it("an older manual ticket never writes behind a newer local write that has not 
     landC!()
     await settle(() => rows.size === 1 && [...rows.values()][0].snapshot === rowC?.snapshot)
   } finally { landC?.(); vi.useRealTimers(); await r.controller.close() }
+})
+
+// A frozen page outlives the save deadline even when the reply is on its way
+// (hour run: 14.4 s, reply already sent). Asking the server is a query, so the
+// editor does it by itself and nobody has to find a button.
+it("asks the server by itself after a save outlived its deadline, and resends nothing", async () => {
+  const reconcile = vi.fn(async (r: NativeSaveRequest): Promise<unknown> => receipt(r))
+  const r = await rig({ timeoutMs: 20, reconcile, reconcileBackoffMs: [10] })
+  r.send.mockImplementationOnce(never)
+  try {
+    r.edit(2)
+    await vi.waitFor(() => expect(last(r)?.phase).toBe("saved"), { timeout: 2_000 })
+    expect(reconcile).toHaveBeenCalledOnce()
+    expect(reconcile.mock.calls[0][0].attemptId).toBe(r.requests[0].attemptId)
+    expect(r.requests).toHaveLength(1)
+  } finally { await r.controller.close() }
+})
+
+it("keeps asking at the backoff while the outcome stays unknown, always about the same attempt", async () => {
+  const reconcile = vi.fn(async (r: NativeSaveRequest): Promise<unknown> => receipt(r))
+  reconcile.mockRejectedValueOnce(new TypeError("Failed to fetch")).mockRejectedValueOnce(new TypeError("Failed to fetch"))
+  const r = await rig({ timeoutMs: 20, reconcile, reconcileBackoffMs: [5, 10] })
+  r.send.mockImplementationOnce(never)
+  try {
+    r.edit(2)
+    await vi.waitFor(() => expect(last(r)?.phase).toBe("saved"), { timeout: 2_000 })
+    expect(reconcile).toHaveBeenCalledTimes(3)
+    expect(new Set(reconcile.mock.calls.map(c => c[0].attemptId)).size).toBe(1)
+    expect(r.requests).toHaveLength(1)
+  } finally { await r.controller.close() }
+})
+
+it("stops asking once the editor is closed", async () => {
+  const reconcile = vi.fn(never as (r: NativeSaveRequest) => Promise<unknown>)
+  const r = await rig({ timeoutMs: 20, reconcile, reconcileBackoffMs: [60] })
+  r.send.mockImplementationOnce(never)
+  r.edit(2)
+  await vi.waitFor(() => expect(last(r)?.phase).toBe("uncertain"), { timeout: 2_000 })
+  await r.controller.close()
+  await new Promise(resolve => setTimeout(resolve, 120))
+  expect(reconcile).not.toHaveBeenCalled()
 })
