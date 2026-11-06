@@ -81,7 +81,7 @@ interface Runtime {enginePin:string;sessionId:string;port:NativeEditorPort;frame
 
 /** One authenticated client/session owns both lease controls and the isolated full Craft editor. */
 const READ_ONLY_REFUSED='Právo upravovat bylo odebráno. Neuložené změny zůstaly jako místní koncept. Sdílenou verzi zobrazíte obnovením stránky.'
-const METADATA_RETRY_MS=5000
+const METADATA_RETRY_MS=5000,METADATA_RETRY_MAX_MS=60000
 export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}:Props){
  const scopeKey=JSON.stringify([humanId,workspaceId,pageId])
  const [stateScope,setStateScope]=React.useState(scopeKey)
@@ -111,7 +111,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   let sessionApplication:NativeDocumentSnapshot['applicationId']|undefined
   // metadataOnly: the frame is gone after a refused private read, and the lease
   // admission stays open only so an explicit read loss can still purge the draft.
-  let closed=false,metadataOnly=false,connectionLost=false,metadataRetry:ReturnType<typeof setTimeout>|undefined
+  let closed=false,metadataOnly=false,connectionLost=false,draftOffered=false,metadataDelay=METADATA_RETRY_MS,metadataRetry:ReturnType<typeof setTimeout>|undefined
   // Bumped whenever private access stops being confirmed: a server comparison or
   // proposal list started before that may no longer reach the page.
   let privateEpoch=0
@@ -427,7 +427,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(!dead&&current?.blocked)throw Error('native_auth_draft_capture_unconfirmed')
   }
   async function retireConnection(message:string){
-   const hadDraft=()=>Boolean(current?.capture&&!current.blocked)
+   const hadDraft=()=>Boolean((current?.capture||draftOffered)&&!current?.blocked)
    // A failed native port retired writing, not the independent read monitor.
    // Its terminal failure must still hide the retained buffer and copy UI.
    if(dead||networkRetired&&!readOpening&&!nativeFailed)return
@@ -445,7 +445,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(dead)return
    // A confirmed draft waits for read to be confirmed again, not for a reload.
    if(hadDraft()&&!authSuspended){
-    const r=current!;detach(r);void r.coordinator?.close();if(!r.coordinator)void r.journal?.close();current=undefined
+    const r=current;if(r){detach(r);void r.coordinator?.close();if(!r.coordinator)void r.journal?.close();current=undefined}
     metadataOnly=true;connectionLost=true;setOwnsEditor(false);setUncertain(false);setSavedVersion(undefined);setBusy(false);setLabel('Editor odpojen · zachycená místní kopie zůstává')
     retryMetadata();return
    }
@@ -508,8 +508,11 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
      catch(cause){
       if(!(cause instanceof Error)||cause.message!=='native_private_read_refused')throw cause
       if(!valid())return
+      // After a lost stream this refusal may be read loss whose purge never
+      // arrives, so nothing is offered; only a write downgrade holds the draft.
+      if(connectionLost){endDraftHold();connectionLost=false;stop(READ_ONLY_REFUSED);return}
       await holdMetadata(admission,operation.signal);if(!valid())return
-      networkRetired=false;readOpening=false;finishAdmission(startup);return
+      metadataDelay=METADATA_RETRY_MS;networkRetired=false;readOpening=false;finishAdmission(startup);return
      }
      if(!valid())return
      await currentLease(admission,operation.signal);if(!valid())return
@@ -517,7 +520,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     }
     metadataOnly=false;setDraftHeld(false);networkRetired=false;readOpening=false;setConnectionRetired(false);finishAdmission(startup);setBusy(false)
     setError(retained?'Zachycení posledních změn nebylo potvrzeno. Původní editor je uzamčený; po ověření čtení můžete stáhnout místní kopii.':connectionLost?'Spojení se obnovilo. Dokument je jen pro čtení, neuložené změny najdete v konceptu.':message)
-    connectionLost=false
+    if(connectionLost)draftOffered=true
+    connectionLost=false;metadataDelay=METADATA_RETRY_MS
    }catch{if(client===admission&&admissionEpoch===startup&&!dead){if(metadataOnly)retryMetadata();else stop(READ_ONLY_REFUSED)}}
    finally{
     lifetime.signal.removeEventListener('abort',abort)
@@ -540,7 +544,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    // Retire the failed admission first, or its stalled read would hold the slot.
    admissionEpoch++;initializing=false;readOpening=false;readOpeningAbort?.abort();readOpeningAbort=undefined;clearTimeout(admissionDeadline)
    networkRetired=true;clearInterval(reauthorize);clearInterval(leaseWatch);client.close();clearTimeout(metadataRetry)
-   metadataRetry=setTimeout(()=>{networkRetired=false;void reopenReadOnly().catch(retryMetadata)},METADATA_RETRY_MS)
+   metadataRetry=setTimeout(()=>{networkRetired=false;void reopenReadOnly().catch(retryMetadata)},metadataDelay)
+   metadataDelay=Math.min(metadataDelay*2,METADATA_RETRY_MAX_MS)
   }
   retryRead.current=()=>{void reopenReadOnly(true).catch(()=>stop('Přístup k místní kopii se nepotvrdil.'))}
   function catchUpReader(){
