@@ -157,7 +157,7 @@ draft is kept and offered (also after a reload once the right returns).
 
 `craft-agent-free-edit.acceptance.ts` (`A.craft.agent.free-edit-word`, `-sheet`)
 lets the seeded agent edit a free document while a person watches it in the
-browser: the person sees "Upravuje <agent>", then the new version.
+browser: the person sees `Upravuje <agent>`, then the new version.
 
 ### Manual walkthrough: `A.craft.session.hour-word`
 
