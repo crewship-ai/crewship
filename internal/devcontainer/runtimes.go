@@ -67,7 +67,7 @@ func FilterRuntimes(entries []RuntimeCatalogEntry, query string) []RuntimeCatalo
 		return out
 	}
 	q := strings.ToLower(strings.TrimSpace(query))
-	var results []RuntimeCatalogEntry
+	results := []RuntimeCatalogEntry{}
 	for _, e := range entries {
 		if strings.Contains(strings.ToLower(e.Name), q) ||
 			strings.Contains(strings.ToLower(e.Tool), q) ||

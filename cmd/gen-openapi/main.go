@@ -491,7 +491,7 @@ func buildDocument(routes []route) map[string]any {
 				continue
 			}
 			if status[0] != '2' && status != "304" {
-				response.(map[string]any)["content"] = errorContentForRoute(rt, info)
+				response.(map[string]any)["content"] = errorContentForRoute(rt, info, status)
 			}
 			if status[0] == '2' {
 				if headers := routeSchemaCatalog()[rt.method+" "+rt.path].SuccessHeaders; headers != nil {
@@ -989,6 +989,13 @@ func nullable(typ string) map[string]any {
 	return map[string]any{"type": typ, "nullable": true}
 }
 
+// nullableObject marks a component that may be null wherever it is referenced.
+// OpenAPI 3.0 ignores nullable beside a $ref and needs a type next to it.
+func nullableObject(schema map[string]any) map[string]any {
+	schema["nullable"] = true
+	return schema
+}
+
 func array(items map[string]any) map[string]any {
 	return map[string]any{"type": "array", "items": items}
 }
@@ -1119,7 +1126,7 @@ func responseComponents() map[string]any {
 	schemas := map[string]any{
 		"Workspace": workspace, "WorkspaceList": array(ref("Workspace")), "WorkspaceCounts": object(map[string]any{"crews": scalar("integer"), "agents": scalar("integer"), "members": scalar("integer")}),
 		"Crew": crew, "CrewList": array(ref("Crew")), "CrewCounts": object(map[string]any{"agents": scalar("integer"), "members": scalar("integer")}),
-		"Agent": agent, "AgentList": array(ref("Agent")), "AgentCrew": object(map[string]any{"name": scalar("string"), "slug": scalar("string"), "color": nullable("string"), "avatar_style": nullable("string")}), "AgentCounts": object(map[string]any{"skills": scalar("integer"), "credentials": scalar("integer"), "chats": scalar("integer")}),
+		"Agent": agent, "AgentList": array(ref("Agent")), "AgentCrew": nullableObject(object(map[string]any{"name": scalar("string"), "slug": scalar("string"), "color": nullable("string"), "avatar_style": nullable("string")})), "AgentCounts": object(map[string]any{"skills": scalar("integer"), "credentials": scalar("integer"), "chats": scalar("integer")}),
 		"ProjectListItem": project, "ProjectList": array(ref("ProjectListItem")), "Issue": issue, "IssueList": array(ref("Issue")),
 		"Label":        object(map[string]any{"id": scalar("string"), "name": scalar("string"), "color": scalar("string"), "label_group": nullable("string")}),
 		"IssueCreator": object(map[string]any{"type": scalar("string"), "id": scalar("string"), "name": scalar("string")}),
@@ -1140,9 +1147,14 @@ func responseComponents() map[string]any {
 // statuses: the envelope the handler's helper writes, as application/json,
 // unless the route's catalog entry says its errors are written some other
 // way (DomainSchema.ErrorMedia).
-func errorContentForRoute(rt route, info handlerInfo) map[string]any {
+func errorContentForRoute(rt route, info handlerInfo, status string) map[string]any {
 	schema := routeSchemaCatalog()[rt.method+" "+rt.path]
 	if schema.ErrorMedia == nil {
+		// The middleware ahead of a handler answers these with {"error"}, whatever
+		// envelope the handler itself uses.
+		if status == "400" || status == "401" || status == "403" {
+			info.repliesError = true
+		}
 		return map[string]any{"application/json": map[string]any{"schema": errorBodySchema(info)}}
 	}
 	body := schema.ErrorResponse
@@ -1878,7 +1890,12 @@ func absorbHandlerBody(info *handlerInfo, signature, body string) {
 	if strings.Contains(body, "replyError(") {
 		info.repliesError = true
 	}
-	if strings.Contains(body, "writeProblem(") || strings.Contains(body, "internalError(") {
+	if strings.Contains(body, "replyInternalError(") {
+		info.repliesError = true
+	}
+	// Some handlers build the RFC 7807 body in place instead of calling a helper.
+	if strings.Contains(body, "writeProblem(") || strings.Contains(body, "internalError(") ||
+		strings.Contains(body, `"about:blank"`) {
 		info.repliesProblem = true
 	}
 	if internalErrorPattern.MatchString(body) {

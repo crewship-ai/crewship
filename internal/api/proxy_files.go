@@ -374,7 +374,7 @@ func (h *ProxyHandler) CrewFiles(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 	var data map[string]interface{}
 	if json.NewDecoder(resp.Body).Decode(&data) == nil {
-		if files, ok := data["files"]; ok {
+		if files, ok := data["files"]; ok && files != nil {
 			writeJSON(w, http.StatusOK, files)
 			return
 		}
