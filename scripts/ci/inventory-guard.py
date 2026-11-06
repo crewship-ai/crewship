@@ -2,11 +2,13 @@
 """Trusted-main CI control review. PR contents are bounded data, never executed."""
 import base64
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -115,14 +117,39 @@ def candidate_manifest_errors(raw, snapshot):
 
 
 class API:
-    def __init__(self, token):
+    # Shared by the whole run: the job has a five-minute limit.
+    RETRIES = 3
+    TRANSIENT = (429, 500, 502, 503, 504)
+
+    def __init__(self, token, sleep=time.sleep):
         self.token = token
         self.calls = 0
+        self.retries = 0
+        self.sleep = sleep
 
     def __call__(self, endpoint, payload=None):
         self.calls += 1
-        if self.calls > 32 or not endpoint.startswith('repos/'):
+        # Reads spend the budget; statuses are bounded by execute() and must
+        # still be able to end a run that used the budget up.
+        if not endpoint.startswith('repos/') or (self.calls > 32 and '/statuses/' not in endpoint):
             raise Rejected('API request budget or endpoint rejected')
+        while True:
+            try:
+                return self.request(endpoint, payload)
+            except Rejected:
+                raise
+            except urllib.error.HTTPError as error:
+                if error.code not in self.TRANSIENT or self.retries >= self.RETRIES:
+                    raise Rejected('GitHub API request failed or returned invalid data') from None
+            except (urllib.error.URLError, OSError, http.client.HTTPException):
+                if self.retries >= self.RETRIES:
+                    raise Rejected('GitHub API request failed or returned invalid data') from None
+            except ValueError:
+                raise Rejected('GitHub API request failed or returned invalid data') from None
+            self.retries += 1
+            self.sleep(self.retries * 2)
+
+    def request(self, endpoint, payload):
         body = json.dumps(payload).encode() if payload is not None else None
         request = urllib.request.Request('https://api.github.com/' + endpoint, data=body,
             headers={'Authorization': 'Bearer ' + self.token, 'Accept': 'application/vnd.github+json',
@@ -132,15 +159,12 @@ class API:
         class NoRedirect(urllib.request.HTTPRedirectHandler):
             def redirect_request(self, *args):
                 return None
-        try:
-            with urllib.request.build_opener(NoRedirect).open(request, timeout=20) as response:
-                response_limit = TREE_LIMIT if '/git/trees/' in endpoint else LIMIT * 2
-                raw = response.read(response_limit + 1)
-                if len(raw) > response_limit:
-                    raise Rejected('API response exceeds limit')
-                return json.loads(raw)
-        except (urllib.error.URLError, ValueError) as error:
-            raise Rejected('GitHub API request failed or returned invalid data') from None
+        with urllib.request.build_opener(NoRedirect).open(request, timeout=20) as response:
+            response_limit = TREE_LIMIT if '/git/trees/' in endpoint else LIMIT * 2
+            raw = response.read(response_limit + 1)
+            if len(raw) > response_limit:
+                raise Rejected('API response exceeds limit')
+            return json.loads(raw)
 
 
 def candidate_tree(api, repo, sha, paths, namespace=None):
@@ -388,25 +412,43 @@ def inspect(event, env, api, root=ROOT, on_target=None):
 def execute(event, env, api, root=ROOT):
     output = Path('.ci-results/ci-inventory-report.json')
     output.unlink(missing_ok=True)  # A failed local retry must not reuse old success evidence.
+    target = []
     def pending(repo, head):
+        target[:] = [repo, head]
         api('repos/' + repo + '/statuses/' + head, {
             'state': 'pending', 'context': CONTEXT,
             'description': 'Trusted control inspection in progress; prior result invalidated',
             'target_url': 'https://github.com/' + repo + '/actions/runs/' + env['GITHUB_RUN_ID']})
-    report = inspect(event, env, api, root, on_target=pending)
-    # Recheck live candidate identity immediately before status publication.
-    if report['queue_ref']:
-        verify_queue(api, report['repository'], report['queue_ref'], report['head_sha'], report['trusted_sha'], report['queue_base_sha'])
-    else:
-        latest = api('repos/' + report['repository'] + '/pulls/' + str(report['pr_number']))
-        verify_pr(latest, report['repository'], report['pr_number'], report['head_sha'])
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(report, indent=2) + '\n')
-    api('repos/' + report['repository'] + '/statuses/' + report['head_sha'], {
-        'state': report['state'], 'context': CONTEXT,
-        'description': report['decision'][:140],
-        'target_url': 'https://github.com/' + report['repository'] + '/actions/runs/' + env['GITHUB_RUN_ID']})
-    return report
+    try:
+        report = inspect(event, env, api, root, on_target=pending)
+        # Recheck live candidate identity immediately before status publication.
+        if report['queue_ref']:
+            verify_queue(api, report['repository'], report['queue_ref'], report['head_sha'], report['trusted_sha'], report['queue_base_sha'])
+        else:
+            latest = api('repos/' + report['repository'] + '/pulls/' + str(report['pr_number']))
+            verify_pr(latest, report['repository'], report['pr_number'], report['head_sha'])
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(report, indent=2) + '\n')
+        api('repos/' + report['repository'] + '/statuses/' + report['head_sha'], {
+            'state': report['state'], 'context': CONTEXT,
+            'description': report['decision'][:140],
+            'target_url': 'https://github.com/' + report['repository'] + '/actions/runs/' + env['GITHUB_RUN_ID']})
+        return report
+    except Exception:
+        output.unlink(missing_ok=True)
+        # A pending status nobody replaces holds a merge group until the queue
+        # times out (#5035). The head is not rechecked first: that needs the API
+        # that may have just failed, and failure on a stale head is harmless.
+        # Dispatches stay pending: an actor refused here must not eject a group.
+        if target and env.get('GITHUB_EVENT_NAME') != 'workflow_dispatch':
+            try:
+                api('repos/' + target[0] + '/statuses/' + target[1], {
+                    'state': 'failure', 'context': CONTEXT,
+                    'description': 'Trusted control inspection failed; rerun the CI Inventory run',
+                    'target_url': 'https://github.com/' + target[0] + '/actions/runs/' + env['GITHUB_RUN_ID']})
+            except Exception:
+                print('CI inventory guard could not post its failure status', file=sys.stderr)
+        raise
 
 
 if __name__ == '__main__':
